@@ -226,10 +226,10 @@ describe("decodeFrockBotManifest", () => {
     });
 
     expect(decoded.contributions).toEqual({
-      agent: undefined,
+      runtime: undefined,
+      client: undefined,
       desktop: undefined,
-      mobile: "./mobile",
-      web: undefined,
+      mobile: { entry: "./mobile" },
     });
     expect(declaredContributionKinds(decoded)).toEqual(["mobile"]);
   });
@@ -246,7 +246,7 @@ describe("decodeFrockBotManifest", () => {
     ).toThrow('manifest contribution "mobile" must be a relative export path');
   });
 
-  test("orders declared contribution kinds agent, desktop, mobile, web", () => {
+  test("orders normalized contribution kinds", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 1,
       id: "every-kind",
@@ -261,10 +261,10 @@ describe("decodeFrockBotManifest", () => {
     });
 
     expect(declaredContributionKinds(decoded)).toEqual([
-      "agent",
+      "runtime",
+      "client",
       "desktop",
       "mobile",
-      "web",
     ]);
   });
 });

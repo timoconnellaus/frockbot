@@ -5,6 +5,7 @@ import {
   type PackageCatalogConfig,
 } from "./index.ts";
 
+// Runtime hosts accept only canonical run-scoped contributions.
 export const runtimePackageCatalogConfig: PackageCatalogConfig = {
   kinds: ["runtime"],
 };

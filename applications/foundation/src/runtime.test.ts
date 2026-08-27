@@ -20,6 +20,8 @@ describe("foundation application", () => {
       "fly-sprite",
       "identity",
       "memory",
+      "mobile-clipboard",
+      "mobile-notifications",
       "provider-foundation",
       "shell",
     ]);

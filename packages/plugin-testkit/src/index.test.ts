@@ -101,11 +101,13 @@ describe("verifyPluginPackage", () => {
           ...fixtureManifest,
           contributions: {
             ...fixtureManifest.contributions,
-            mobile: "./mobile",
+            mobile: { entry: "./mobile" },
           },
         },
       }),
-    ).toMatchObject({ contributionKinds: ["agent", "desktop", "mobile"] });
+    ).toMatchObject({
+      contributionKinds: ["runtime", "desktop", "mobile"],
+    });
   });
 
   test("reports a missing mobile contribution export", () => {
@@ -117,7 +119,7 @@ describe("verifyPluginPackage", () => {
           ...fixtureManifest,
           contributions: {
             ...fixtureManifest.contributions,
-            mobile: "./mobile",
+            mobile: { entry: "./mobile" },
           },
         },
       });

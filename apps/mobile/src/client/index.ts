@@ -28,10 +28,17 @@ import "./mobile.css";
 import MobileAuthGate from "./MobileAuthGate.vue";
 import { requestTurn, toolsFrom } from "./transport.ts";
 
+const browserFetch = globalThis.fetch.bind(globalThis);
+
 const auth = createAuthSession({
   store: createDevicePreferenceStore(),
-  // pi-lens-ignore: ts-ssrf
-  fetch: (input, init) => fetch(input, init),
+  fetch: (input, init) => {
+    const url = new URL(input);
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      throw new Error("gateway requests require an http(s) URL");
+    }
+    return browserFetch(url, init);
+  },
   defaultGatewayUrl: defaultGatewayUrl || undefined,
 });
 
