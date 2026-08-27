@@ -4,6 +4,7 @@ import type {
   BotStateBinding,
   GatewayAuth,
   LoadedWorker,
+  MemoryBindings,
   StoredRun,
   WorkerCode,
   WorkerLoader,
@@ -74,6 +75,28 @@ const unauthenticatedAuth: GatewayAuth = {
   getSession: () => Promise.resolve(null),
 };
 
+function testMemoryBindings(): MemoryBindings {
+  return {
+    MEMORY_FILES: {
+      get: () => Promise.resolve(null),
+      put: () => Promise.resolve(),
+      delete: () => Promise.resolve(),
+      list: () => Promise.resolve({ objects: [], truncated: false }),
+    },
+    MEMORY_INDEX: {
+      upsert: () => Promise.resolve(),
+      query: () => Promise.resolve({ matches: [] }),
+      deleteByIds: () => Promise.resolve(),
+    },
+    AI: {
+      run: (_model, input) =>
+        Promise.resolve({
+          data: input.text.map(() => Array.from({ length: 768 }, () => 0)),
+        }),
+    },
+  };
+}
+
 function createTestGateway(
   applicationHashFor: (userId: string) => Promise<string> = () =>
     Promise.resolve("foundation-v1"),
@@ -92,6 +115,7 @@ function createTestGateway(
       states.set(userId, state);
       return state;
     },
+    memory: testMemoryBindings(),
     allowDevelopmentIdentity,
   });
   return { gateway, loader, states };

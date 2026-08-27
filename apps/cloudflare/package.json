@@ -18,6 +18,7 @@
     "@frockbot/agent-core": "workspace:*",
     "@frockbot/agent-runtime": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
+    "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/webui-shell": "workspace:*",
     "better-auth": "1.7.2",
     "cordis": "4.0.0-rc.8",

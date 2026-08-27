@@ -13,6 +13,10 @@
     {
       "binding": "APPLICATION_ARTIFACTS",
       "bucket_name": "frockbot-application-artifacts"
+    },
+    {
+      "binding": "MEMORY_FILES",
+      "bucket_name": "frockbot-memory-files"
     }
   ],
   "d1_databases": [
@@ -23,6 +27,15 @@
       "migrations_dir": "migrations"
     }
   ],
+  "vectorize": [
+    {
+      "binding": "MEMORY_INDEX",
+      "index_name": "frockbot-memory"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
   "durable_objects": {
     "bindings": [
       {

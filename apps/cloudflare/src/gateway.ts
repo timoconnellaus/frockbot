@@ -100,6 +100,7 @@ export function createGateway(dependencies: GatewayDependencies) {
         modules: { "index.js": { js: source } },
         globalOutbound: null,
         env: {
+          ...dependencies.memory,
           BOT_STATE: dependencies.botStateFor(userId),
           DEPLOYMENT: identity,
         },

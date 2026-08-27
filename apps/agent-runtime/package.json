@@ -16,6 +16,7 @@
     "@frockbot/agent-loop": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
+    "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "@frockbot/provider-openai-compatible": "workspace:*",
     "cordis": "4.0.0-rc.8"

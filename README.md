@@ -77,6 +77,7 @@ packages/
   agent-loop/       Concrete event-sourced custom agent-loop plugin
   plugin-catalog/   Manifest decoding, scoped activation, and rollback
   plugin-clock/     Reference package with agent, host, and WebUI contributions
+  plugin-memory/    R2/Vectorize-backed agent and global durable memory
   protocol/         Commands and events shared across process seams
   provider-openai-compatible/  Streaming production model adapter
   webui-shell/      FrockBot Cordis WebUI/Vue client plugin
@@ -138,6 +139,16 @@ http://127.0.0.1:8787/api/auth/callback/google
 For production, replace the placeholder `AUTH_DB` database ID in [`apps/cloudflare/wrangler.jsonc`](apps/cloudflare/wrangler.jsonc), set `BETTER_AUTH_URL` to the public HTTPS origin, leave `ALLOW_DEVELOPMENT_AUTH` unset, and provision `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` as Worker secrets. Register `https://<your-host>/api/auth/callback/google` with Google. Never commit those values.
 
 The desktop host must receive both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. If `FROCKBOT_APPLICATION_URL` is absent, the desktop loads its local host; if `FROCKBOT_AUTH_BASE_URL` is absent, it does not initialize hosted authentication.
+
+The memory plugin stores Markdown source documents and incremental index metadata in R2, with 768-dimensional cosine embeddings in Vectorize using `@cf/baai/bge-base-en-v1.5`. Provision the configured resources before remote deployment:
+
+```bash
+cd apps/cloudflare
+bunx wrangler r2 bucket create frockbot-memory-files
+bunx wrangler vectorize create frockbot-memory --dimensions=768 --metric=cosine
+```
+
+Memory has two user-private tiers: **agent** memory belongs to one bot, while **global** memory is shared by all of that user's bots. Reads and recall check both by default; when the same path exists in both tiers, the agent copy wins. Writes default to the safer agent tier.
 
 ## Security model
 

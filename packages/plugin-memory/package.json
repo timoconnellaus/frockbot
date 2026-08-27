@@ -1,0 +1,29 @@
+{
+  "name": "@frockbot/plugin-memory",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
+    "./manifest": "./src/manifest.ts",
+    "./frockbot.json": "./frockbot.json",
+    "./package.json": "./package.json"
+  },
+  "frockbot": {
+    "manifest": "./frockbot.json"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/agent-core": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  },
+  "devDependencies": {
+    "@frockbot/plugin-testkit": "workspace:*",
+    "@types/bun": "1.3.6",
+    "typescript": "^7.0.2"
+  }
+}
