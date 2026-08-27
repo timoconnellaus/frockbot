@@ -56,8 +56,7 @@ export async function indexDocument(
       id: chunkIds[index] ?? "",
     }))
     .filter(
-      ({ chunk, key }) =>
-        documentChanged || oldMeta.hashes[key] !== chunk.hash,
+      ({ chunk, key }) => documentChanged || oldMeta.hashes[key] !== chunk.hash,
     );
 
   if (changed.length > 0) {

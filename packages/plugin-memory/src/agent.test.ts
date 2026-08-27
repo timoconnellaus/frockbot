@@ -464,7 +464,10 @@ describe("memory plugin", () => {
         key.endsWith("/files/race.md"),
       );
       if (!contentKey) throw new Error("memory content was not persisted");
-      bucket.objects.set(contentKey, "The concurrent canonical value is violet.");
+      bucket.objects.set(
+        contentKey,
+        "The concurrent canonical value is violet.",
+      );
     });
     const harness = await createPluginHarness([
       SystemPromptRegistry,
