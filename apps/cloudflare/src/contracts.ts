@@ -59,10 +59,23 @@ export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;
 }
 
+export interface AuthSession {
+  user: {
+    id: string;
+  };
+}
+
+export interface GatewayAuth {
+  handler(request: Request): Promise<Response>;
+  getSession(headers: Headers): Promise<AuthSession | null>;
+}
+
 export interface GatewayDependencies {
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
+  auth: GatewayAuth;
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): BotStateBinding;
+  allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;
 }

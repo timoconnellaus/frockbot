@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { gatewayAuth } from "./auth.js";
 import { BotState } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
@@ -14,7 +15,13 @@ interface Env {
   USER_APPLICATIONS: WorkerLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
   BOT_STATES: DurableObjectNamespace<BotState>;
+  AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;
+  BETTER_AUTH_SECRET?: string;
+  BETTER_AUTH_URL?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  ALLOW_DEVELOPMENT_AUTH?: string;
 }
 
 interface UserBotStateProps {
@@ -84,9 +91,11 @@ export default {
     const gateway = createGateway({
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
+      auth: gatewayAuth(env),
       applicationHashFor: () => Promise.resolve(env.DEFAULT_APPLICATION_HASH),
       botStateFor: (userId): BotStateBinding =>
         runtimeExports.UserBotState({ props: { userId } }),
+      allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });
     return gateway(request);
   },

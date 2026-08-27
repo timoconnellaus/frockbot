@@ -4,7 +4,6 @@ import {
   clockWebDataKey,
   type ClockWebData,
 } from "@frockbot/plugin-clock/shared";
-import FrockBotApp from "@frockbot/webui-shell/client/FrockBotApp.vue";
 import "@frockbot/webui-shell/client/styles.css";
 import {
   frockBotWebDataKey,
@@ -14,6 +13,8 @@ import {
   type WebToolActivity,
 } from "@frockbot/webui-shell/shared";
 import { createApp, defineComponent, h, ref, type Ref } from "vue";
+import AuthGate from "./AuthGate.vue";
+import "./auth.css";
 
 interface TurnEvent {
   type: string;
@@ -70,12 +71,28 @@ function replaceMessage(runId: string, replacement: WebChatMessage): void {
 
 async function requestTurn(text: string): Promise<TurnResponse> {
   activeRequest = new AbortController();
-  const response = await fetch(`/api/bots/${encodeURIComponent(botId)}/turns`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
-    signal: activeRequest.signal,
-  });
+  const path = `/api/bots/${encodeURIComponent(botId)}/turns`;
+  const requestBody = JSON.stringify({ text });
+  const response = window.frockbotDesktop
+    ? await window.frockbotDesktop.request({
+        path,
+        method: "POST",
+        body: requestBody,
+      }).then(
+        (result) =>
+          new Response(result.body, {
+            status: result.status,
+            headers: result.contentType
+              ? { "content-type": result.contentType }
+              : undefined,
+          }),
+      )
+    : await fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: requestBody,
+        signal: activeRequest.signal,
+      });
   const body = (await response.json()) as TurnResponse & { error?: string };
   if (!response.ok) throw new Error(body.error ?? "Agent request failed");
   return body;
@@ -172,7 +189,7 @@ const ContributionSlot = defineComponent({
   },
 });
 
-const app = createApp(FrockBotApp);
+const app = createApp(AuthGate);
 app.provide(frockBotWebDataKey, web);
 app.provide(clockWebDataKey, clock);
 app.component("k-slot", ContributionSlot);

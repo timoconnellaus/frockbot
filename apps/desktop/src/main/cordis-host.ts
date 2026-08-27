@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import Server from "@cordisjs/plugin-server";
 import WebUI from "@cordisjs/plugin-webui";
 import {
@@ -49,6 +50,7 @@ class DesktopWindowService extends Service {
       show: false,
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
       webPreferences: {
+        preload: fileURLToPath(new URL("../preload/index.mjs", import.meta.url)),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
