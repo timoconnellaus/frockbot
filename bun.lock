@@ -13,6 +13,7 @@
         "@frockbot/agent-loop": "workspace:*",
         "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-clock": "workspace:*",
+        "@frockbot/plugin-fly-sprite": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "@frockbot/provider-openai-compatible": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -75,6 +76,7 @@
         "@cordisjs/plugin-webui": "0.8.2",
         "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-clock": "workspace:*",
+        "@frockbot/plugin-fly-sprite": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "@frockbot/webui-shell": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -202,6 +204,27 @@
         "@frockbot/plugin-testkit": "workspace:*",
         "@types/bun": "1.3.6",
         "typescript": "^7.0.2",
+      },
+    },
+    "packages/plugin-fly-sprite": {
+      "name": "@frockbot/plugin-fly-sprite",
+      "version": "0.0.1",
+      "dependencies": {
+        "@cordisjs/client": "0.8.2",
+        "@cordisjs/plugin-webui": "0.8.2",
+        "@fly/sprites": "0.1.0",
+        "@frockbot/agent-core": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+        "vue": "3.5.33",
+      },
+      "devDependencies": {
+        "@frockbot/plugin-testkit": "workspace:*",
+        "@types/bun": "1.3.6",
+        "@types/node": "22.19.3",
+        "@vitejs/plugin-vue": "6.0.6",
+        "typescript": "5.9.3",
+        "vite": "7.3.2",
+        "vue-tsc": "3.2.5",
       },
     },
     "packages/plugin-identity": {
@@ -420,6 +443,8 @@
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
 
+    "@fly/sprites": ["@fly/sprites@0.1.0", "", {}, "sha512-08jnuPEFmImqy3/iwL+jQJ6IwrHuZlmR3w9dRSSUiZ3N4uMSqWMi5FLyL1UKiL/vtcAb9Cayj8gHsEtckDDfkQ=="],
+
     "@frockbot/agent-core": ["@frockbot/agent-core@workspace:packages/agent-core"],
 
     "@frockbot/agent-loop": ["@frockbot/agent-loop@workspace:packages/agent-loop"],
@@ -445,6 +470,8 @@
     "@frockbot/plugin-desktop-notifications": ["@frockbot/plugin-desktop-notifications@workspace:packages/plugin-desktop-notifications"],
 
     "@frockbot/plugin-echo": ["@frockbot/plugin-echo@workspace:packages/plugin-echo"],
+
+    "@frockbot/plugin-fly-sprite": ["@frockbot/plugin-fly-sprite@workspace:packages/plugin-fly-sprite"],
 
     "@frockbot/plugin-identity": ["@frockbot/plugin-identity@workspace:packages/plugin-identity"],
 
@@ -1135,6 +1162,8 @@
     "@frockbot/desktop/@types/node": ["@types/node@22.20.1", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q=="],
 
     "@frockbot/plugin-clock/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "@frockbot/plugin-fly-sprite/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/protocol/@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 

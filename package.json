@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build:cordis-agent": "bun run --filter @frockbot/agent-runtime build",
-    "build:webui": "bun run --filter @frockbot/webui-shell build && bun run --filter @frockbot/plugin-clock build",
+    "build:webui": "bun run --filter @frockbot/webui-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
     "build:agents": "bun run build:cordis-agent",
     "build:cloudflare": "bun run --filter @frockbot/cloudflare build",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",

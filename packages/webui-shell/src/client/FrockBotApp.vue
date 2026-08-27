@@ -169,14 +169,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
       </main>
 
       <aside v-if="rightPanelOpen" class="right-panel">
-        <section>
-          <div class="panel-heading"><strong>Computer</strong><span>Local</span></div>
-          <div class="computer-screen">
-            <div class="screen-grid" />
-            <span>No computer attached</span>
-          </div>
-          <p class="screen-label">Barebones computer</p>
-        </section>
+        <k-slot name="frockbot.computer" />
         <section class="routines-section">
           <div class="panel-heading"><strong>Routines</strong><button aria-label="Add routine">+</button></div>
           <div class="routine-empty">

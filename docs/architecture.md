@@ -260,6 +260,8 @@ configuration schema
 
 One package may contribute to several processes, but Cordis does not make that activation atomic. The package catalog coordinates prepare, mount, commit, and rollback across roots. Disabling a package first blocks new work, then drains and disposes contributions in reverse dependency order.
 
+`@frockbot/plugin-fly-sprite` is the first built-in Computer package. Its agent contribution exposes guarded shell and accessibility-driven Chromium tools, its desktop contribution owns Sprite lifecycle and the human-control lease, and its trusted WebUI contribution embeds the noVNC viewer in `frockbot.computer`. The Sprites token remains process-local. Human takeover blocks new agent or competing desktop provisioning and agent computer calls through an owner-scoped, heartbeated lease stored in the Sprite filesystem. Heartbeat loss re-shields the viewer, and expired leases can be atomically reclaimed after a crash; the lease remains a coordination mechanism rather than a security boundary for work already in flight.
+
 ## Trust model
 
 | Trust tier | Desktop contribution | Agent contribution | WebUI contribution |

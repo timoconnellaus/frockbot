@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { flySpriteRuntimePackage } from "./fly-sprite-package.js";
 import type { FoundationRuntime } from "./runtime.js";
 import { createFoundationRuntime } from "./runtime.js";
 
 const runtimes: FoundationRuntime[] = [];
 
 async function createRuntime(): Promise<FoundationRuntime> {
-  const runtime = await createFoundationRuntime();
+  const runtime = await createFoundationRuntime(undefined, {
+    agentPackages: [flySpriteRuntimePackage],
+  });
   runtimes.push(runtime);
   return runtime;
 }
@@ -69,6 +72,14 @@ describe("foundation Cordis runtime", () => {
     expect(
       finalMessage?.role === "assistant" ? finalMessage.content : "",
     ).toStartWith("current_time: ");
+  });
+
+  test("loads the Fly Sprite computer tools without requiring a token at startup", async () => {
+    const runtime = await createRuntime();
+
+    expect(runtime.root.tools.schemas().map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(["computer_exec", "computer_browser"]),
+    );
   });
 
   test("selects the configured OpenAI-compatible provider", async () => {

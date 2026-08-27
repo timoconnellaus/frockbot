@@ -108,10 +108,18 @@ export interface FoundationRuntime {
   dispose(): Promise<void>;
 }
 
+export interface FoundationAgentPackage {
+  specifier: string;
+  contributionSpecifier: string;
+  manifest: unknown;
+  plugin: Plugin;
+}
+
 export interface FoundationRuntimeOptions {
   sessionId?: string;
   sessionEvents?: readonly SessionEvent[];
   resolveContribution?: ContributionResolver;
+  agentPackages?: readonly FoundationAgentPackage[];
 }
 
 export async function createFoundationRuntime(
@@ -162,18 +170,32 @@ export async function createFoundationRuntime(
     );
   }
   await root.plugin(toolPlugin);
+  const resolveContribution: ContributionResolver = (specifier) => {
+    const additional = options.agentPackages?.find(
+      (pkg) => pkg.contributionSpecifier === specifier,
+    );
+    if (additional) return Promise.resolve({ default: additional.plugin });
+    return (options.resolveContribution ?? resolveBuiltInContribution)(
+      specifier,
+    );
+  };
   root.packages.registerHost(
-    new LocalCordisContributionHost(
-      "agent",
-      root,
-      options.resolveContribution ?? resolveBuiltInContribution,
-    ),
+    new LocalCordisContributionHost("agent", root, resolveContribution),
   );
   root.packages.install({
     specifier: "@frockbot/plugin-clock",
     manifest: clockManifest,
   });
+  const additionalPackages = (options.agentPackages ?? []).map((pkg) =>
+    root.packages.install({
+      specifier: pkg.specifier,
+      manifest: pkg.manifest,
+    }),
+  );
   await root.packages.enable("clock");
+  for (const pkg of additionalPackages) {
+    await root.packages.enable(pkg.manifest.id);
+  }
   await root.plugin(AgentLoop, { maxSteps: 8 });
 
   const agent = await root.agents.create({

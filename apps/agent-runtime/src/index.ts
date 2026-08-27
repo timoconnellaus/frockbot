@@ -4,6 +4,7 @@ import {
   type AgentEvent,
 } from "@frockbot/protocol";
 import type { Plugin } from "cordis";
+import { flySpriteRuntimePackage } from "./fly-sprite-package.js";
 import {
   createFoundationRuntime,
   type FoundationRuntime,
@@ -53,7 +54,9 @@ function modelConfigFromEnvironment(): RuntimeModelConfig | undefined {
 async function start(): Promise<void> {
   let runtime: FoundationRuntime;
   try {
-    runtime = await createFoundationRuntime(modelConfigFromEnvironment());
+    runtime = await createFoundationRuntime(modelConfigFromEnvironment(), {
+      agentPackages: [flySpriteRuntimePackage],
+    });
   } catch (error) {
     post({ type: "error", phase: "startup", message: errorMessage(error) });
     return;

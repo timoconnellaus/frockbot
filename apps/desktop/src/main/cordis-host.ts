@@ -9,6 +9,7 @@ import {
   PassiveContributionHost,
 } from "@frockbot/plugin-catalog";
 import { clockManifest } from "@frockbot/plugin-clock";
+import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
 import {
   type Context,
   Context as CordisContext,
@@ -95,8 +96,11 @@ class DesktopWindowService extends Service {
       new Promise((resolve, reject) => {
         const deadline = Date.now() + 15000;
         const check = () => {
+          const shell = document.querySelector('.app-shell');
           const composer = document.querySelector('.composer textarea');
-          if (document.querySelector('.app-shell') && composer instanceof HTMLTextAreaElement && !composer.disabled) return resolve(true);
+          const computer = document.querySelector('.sprite-computer');
+          const styled = shell instanceof HTMLElement && getComputedStyle(shell).display === 'grid';
+          if (styled && computer && composer instanceof HTMLTextAreaElement && !composer.disabled) return resolve(true);
           if (Date.now() > deadline) return reject(new Error('FrockBot WebUI did not become ready'));
           setTimeout(check, 25);
         };
@@ -156,7 +160,7 @@ function createAdmissionPlugin(
     const httpAdmission = ctx.server.use(async (request, response, next) => {
       response.headers.set(
         "content-security-policy",
-        "default-src 'self'; script-src 'self' 'sha256-Vy96PtZRI7fYqJ2gNVKETLELTSMNWTVyT22r0v1TlLQ='; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; img-src 'self' data:",
+        "default-src 'self'; script-src 'self' 'sha256-Vy96PtZRI7fYqJ2gNVKETLELTSMNWTVyT22r0v1TlLQ='; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; img-src 'self' data:; frame-src https://*.sprites.app",
       );
       const origin = request.headers.get("origin");
       if (origin && origin !== baseUrl) {
@@ -218,9 +222,16 @@ export async function createCordisDesktopHost(): Promise<Context> {
     ),
   );
   root.packages.registerHost(new PassiveContributionHost("web"));
-  const clockPackage = "@frockbot/plugin-clock";
-  root.packages.install({ specifier: clockPackage, manifest: clockManifest });
+  root.packages.install({
+    specifier: "@frockbot/plugin-clock",
+    manifest: clockManifest,
+  });
+  root.packages.install({
+    specifier: "@frockbot/plugin-fly-sprite",
+    manifest: flySpriteManifest,
+  });
   await root.packages.enable("clock");
+  await root.packages.enable("fly-sprite");
   await root.plugin(webChatPlugin);
   await root.plugin(DesktopWindowService, { baseUrl, credential });
   await root.desktopWindows.create();
