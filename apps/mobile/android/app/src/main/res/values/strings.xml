@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FrockBot</string>
+    <string name="title_activity_main">FrockBot</string>
+    <string name="package_name">com.frockbot.mobile</string>
+    <string name="custom_url_scheme">com.frockbot.mobile</string>
+</resources>

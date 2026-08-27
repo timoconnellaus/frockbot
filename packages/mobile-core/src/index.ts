@@ -47,7 +47,7 @@ export class MobileCommandRegistry extends Service {
     }
     const registered: RegisteredMobileCommand = {
       source: command,
-      decode: command.decode,
+      decode: (input) => command.decode(input),
       execute: (input, context) => command.execute(input as Input, context),
     };
     this.commands.set(id, registered);

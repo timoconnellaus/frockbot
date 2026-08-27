@@ -20,7 +20,7 @@ export function createAuth(environment: AuthEnvironment) {
     trustedOrigins: [
       "com.frockbot.desktop:/",
       "capacitor://localhost",
-      "https://localhost",
+      "frockbot://localhost",
     ],
     socialProviders: {
       google: {

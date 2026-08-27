@@ -76,8 +76,8 @@ function preflightResponse(origin: string): Response {
 
 function withClientOrigin(response: Response, origin: string): Response {
   const shared = new Response(response.body, response);
-  shared.headers.append("access-control-allow-origin", origin);
-  shared.headers.append("access-control-expose-headers", "set-auth-token");
+  shared.headers.set("access-control-allow-origin", origin);
+  shared.headers.set("access-control-expose-headers", "set-auth-token");
   shared.headers.append("vary", "origin");
   return shared;
 }

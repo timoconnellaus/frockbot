@@ -1,0 +1,230 @@
+:root {
+  --mobile-safe-top: env(safe-area-inset-top, 0px);
+  --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --mobile-safe-left: env(safe-area-inset-left, 0px);
+  --mobile-safe-right: env(safe-area-inset-right, 0px);
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: #050505;
+  color: #ededed;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overscroll-behavior: none;
+}
+
+#app {
+  height: 100dvh;
+}
+
+.mobile-root {
+  display: grid;
+  height: 100dvh;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  padding:
+    var(--mobile-safe-top) var(--mobile-safe-right) var(--mobile-safe-bottom)
+    var(--mobile-safe-left);
+}
+
+.mobile-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid #222;
+  font-size: 15px;
+}
+
+.mobile-icon {
+  min-width: 40px;
+  min-height: 40px;
+  border: 1px solid #2c2c2c;
+  border-radius: 10px;
+  color: #ededed;
+  background: #161616;
+  font-size: 17px;
+}
+
+.mobile-settings {
+  display: grid;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #222;
+  background: #0d0d0d;
+}
+
+.mobile-settings-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.mobile-surface {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mobile-surface .frockbot-root,
+.mobile-surface .app-shell {
+  height: 100%;
+}
+
+.mobile-surface .sidebar,
+.mobile-surface .right-panel,
+.mobile-surface .window-controls {
+  display: none;
+}
+
+.mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid #222;
+}
+
+.mobile-status {
+  color: #9a9a9a;
+  font-size: 12px;
+}
+
+.mobile-auth {
+  display: grid;
+  height: 100dvh;
+  place-items: center;
+  padding:
+    calc(var(--mobile-safe-top) + 24px) calc(var(--mobile-safe-right) + 20px)
+    calc(var(--mobile-safe-bottom) + 24px) calc(var(--mobile-safe-left) + 20px);
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 50% 18%, rgb(41 135 239 / 14%), transparent 38%),
+    #050505;
+}
+
+.mobile-auth-card {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid #262626;
+  border-radius: 18px;
+  background: #111;
+  text-align: left;
+}
+
+.mobile-auth-mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 12px;
+  color: #0b1827;
+  background: #2987ef;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.mobile-auth-eyebrow {
+  margin: 0;
+  color: #7eaff0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.mobile-auth-card h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 620;
+}
+
+.mobile-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #9a9a9a;
+}
+
+.mobile-field input {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #333;
+  border-radius: 10px;
+  color: #ededed;
+  background: #191919;
+  font-size: 16px;
+}
+
+.mobile-primary,
+.mobile-secondary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  color: #ededed;
+  background: #232323;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mobile-primary {
+  border-color: #2987ef;
+  background: #12365d;
+}
+
+.mobile-primary:disabled,
+.mobile-secondary:disabled {
+  color: #7c7c7c;
+  opacity: 0.7;
+}
+
+.mobile-google {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  color: #4285f4;
+  background: #fff;
+  font-family: Arial, sans-serif;
+  font-weight: 700;
+}
+
+.mobile-details {
+  border: 1px solid #262626;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.mobile-details summary {
+  color: #9a9a9a;
+  font-size: 13px;
+}
+
+.mobile-details .mobile-field,
+.mobile-details .mobile-secondary {
+  margin-top: 10px;
+}
+
+.mobile-hint,
+.mobile-notice,
+.mobile-auth-loading {
+  margin: 8px 0 0;
+  color: #9a9a9a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mobile-error {
+  margin: 0;
+  color: #ff7580;
+  font-size: 13px;
+}

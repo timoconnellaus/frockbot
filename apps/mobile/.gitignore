@@ -1,0 +1,8 @@
+android/build/
+android/.gradle/
+android/app/build/
+android/app/src/main/assets/public/
+android/local.properties
+ios/App/App/public/
+ios/App/build/
+ios/DerivedData/
