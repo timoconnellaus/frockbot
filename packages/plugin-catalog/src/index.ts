@@ -271,12 +271,12 @@ function unwrapPlugin(module: unknown): Plugin | undefined {
 }
 
 export class LocalCordisContributionHost implements ContributionHost {
-  readonly kind: "agent" | "desktop";
+  readonly kind: "agent" | "desktop" | "mobile";
   private readonly ctx: Context;
   private readonly resolve: ContributionResolver;
 
   constructor(
-    kind: "agent" | "desktop",
+    kind: "agent" | "desktop" | "mobile",
     ctx: Context,
     resolve: ContributionResolver,
   ) {

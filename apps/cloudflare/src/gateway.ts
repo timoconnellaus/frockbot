@@ -52,17 +52,40 @@ function developmentIdentity(request: Request): DevelopmentIdentity {
   };
 }
 
+function allowedClientOrigin(
+  request: Request,
+  allowedOrigins: string[] | undefined,
+): string | null {
+  const origin = request.headers.get("origin");
+  if (!origin || !allowedOrigins?.includes(origin)) return null;
+  return origin;
+}
+
+function preflightResponse(origin: string): Response {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "access-control-allow-origin": origin,
+      "access-control-allow-methods": "GET, POST, OPTIONS",
+      "access-control-allow-headers": "authorization, content-type",
+      "access-control-max-age": "600",
+      vary: "origin",
+    },
+  });
+}
+
+function withClientOrigin(response: Response, origin: string): Response {
+  const shared = new Response(response.body, response);
+  shared.headers.append("access-control-allow-origin", origin);
+  shared.headers.append("access-control-expose-headers", "set-auth-token");
+  shared.headers.append("vary", "origin");
+  return shared;
+}
+
 export function createGateway(dependencies: GatewayDependencies) {
   const compatibilityDate = dependencies.compatibilityDate ?? "2026-08-27";
 
-  return async (request: Request): Promise<Response> => {
-    let url: URL;
-    try {
-      url = new URL(request.url);
-    } catch {
-      return jsonError(400, "invalid request URL");
-    }
-
+  const route = async (request: Request, url: URL): Promise<Response> => {
     if (url.pathname.startsWith("/api/auth/")) {
       return dependencies.auth.handler(request);
     }
@@ -122,5 +145,23 @@ export function createGateway(dependencies: GatewayDependencies) {
       `frockbot_dev_user=${userId}; Path=/; HttpOnly; SameSite=Strict`,
     );
     return persisted;
+  };
+
+  return async (request: Request): Promise<Response> => {
+    let url: URL;
+    try {
+      url = new URL(request.url);
+    } catch {
+      return jsonError(400, "invalid request URL");
+    }
+
+    const origin = allowedClientOrigin(
+      request,
+      dependencies.allowedClientOrigins,
+    );
+    const isApiPath = url.pathname.startsWith("/api/");
+    if (!origin || !isApiPath) return route(request, url);
+    if (request.method === "OPTIONS") return preflightResponse(origin);
+    return withClientOrigin(await route(request, url), origin);
   };
 }

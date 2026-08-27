@@ -81,6 +81,47 @@ describe("verifyPluginPackage", () => {
     expect(message).toContain("./manifest");
     expect(message).toContain("must not contain duplicates");
   });
+
+  test("verifies the mobile contribution export", () => {
+    expect(
+      verifyPluginPackage({
+        packageJson: {
+          ...fixturePackage,
+          exports: { ...fixturePackage.exports, "./mobile": "./src/mobile.ts" },
+        },
+        manifest: {
+          ...fixtureManifest,
+          contributions: {
+            ...fixtureManifest.contributions,
+            mobile: "./mobile",
+          },
+        },
+      }),
+    ).toMatchObject({ contributionKinds: ["agent", "desktop", "mobile"] });
+  });
+
+  test("reports a missing mobile contribution export", () => {
+    let failure: unknown;
+    try {
+      verifyPluginPackage({
+        packageJson: fixturePackage,
+        manifest: {
+          ...fixtureManifest,
+          contributions: {
+            ...fixtureManifest.contributions,
+            mobile: "./mobile",
+          },
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure instanceof Error ? failure.message : "").toContain(
+      'package exports must include "./mobile"',
+    );
+  });
 });
 
 describe("PluginHarness", () => {

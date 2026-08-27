@@ -88,6 +88,7 @@ export interface GatewayDependencies {
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): BotStateBinding;
   memory: MemoryBindings;
+  allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;
 }
