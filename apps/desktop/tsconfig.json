@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["bun", "node", "electron", "vite/client"]
+  },
+  "include": ["build-preload.ts", "electron.vite.config.ts", "src/**/*.ts", "src/**/*.tsx"]
+}

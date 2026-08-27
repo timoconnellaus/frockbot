@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/protocol" },
+    { "path": "./apps/agent-worker" },
+    { "path": "./apps/desktop" }
+  ]
+}

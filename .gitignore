@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+apps/desktop/resources/agent-worker/
+apps/desktop/resources/preload/
+artifacts/
+.pi/
