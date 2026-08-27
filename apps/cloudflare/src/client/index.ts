@@ -1,3 +1,5 @@
+/// <reference path="./env.d.ts" />
+
 import { foundationClientPlugins } from "@frockbot/application-foundation/client";
 import {
   ClientApplication,
@@ -19,7 +21,7 @@ const application = new ClientApplication({
     const body = JSON.stringify({ text });
     const response = window.frockbotDesktop
       ? await window.frockbotDesktop.request({ path, method: "POST", body }).then(
-          (result) =>
+          (result: DesktopApiResponse) =>
             new Response(result.body, {
               status: result.status,
               headers: result.contentType

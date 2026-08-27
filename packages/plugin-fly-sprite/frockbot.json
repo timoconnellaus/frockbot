@@ -7,7 +7,7 @@
     "agent": "./agent",
     "desktop": "./host",
     "web": {
-      "entry": "./src/client/index.ts",
+      "entry": "./client",
       "manifest": "./dist/manifest.json",
       "slots": ["frockbot.computer"]
     }

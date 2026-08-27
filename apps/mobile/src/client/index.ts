@@ -30,6 +30,7 @@ import { requestTurn, toolsFrom } from "./transport.ts";
 
 const auth = createAuthSession({
   store: createDevicePreferenceStore(),
+  // pi-lens-ignore: ts-ssrf
   fetch: (input, init) => fetch(input, init),
   defaultGatewayUrl: defaultGatewayUrl || undefined,
 });

@@ -10,6 +10,19 @@ describe("foundation application", () => {
     const second = await compileFoundationApplication();
 
     expect(first.applicationHash).toBe(second.applicationHash);
+    expect(first.packages.map((pkg) => pkg.id)).toEqual([
+      "auth",
+      "clock",
+      "desktop-clipboard",
+      "desktop-directory-picker",
+      "desktop-notifications",
+      "echo",
+      "fly-sprite",
+      "identity",
+      "memory",
+      "provider-foundation",
+      "shell",
+    ]);
     expect(first.contributions).toEqual({
       runtime: [
         "clock",
@@ -34,11 +47,10 @@ describe("foundation application", () => {
   test("exposes only compiled runtime packages to the runtime host", async () => {
     const application = await createFoundationRuntimeApplication();
 
-    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(6);
+    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(5);
     expect(application.packages.map((pkg) => pkg.specifier)).toEqual([
       "@frockbot/plugin-clock",
       "@frockbot/plugin-echo",
-      "@frockbot/plugin-fly-sprite",
       "@frockbot/plugin-identity",
       "@frockbot/plugin-memory",
       "@frockbot/plugin-provider-foundation",

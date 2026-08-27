@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { flySpriteRuntimePackage } from "../../../applications/foundation/src/desktop-runtime.js";
 import type {
   MemoryBucketObject,
   MemoryPluginConfig,
@@ -10,7 +11,9 @@ import { createFoundationRuntime } from "./runtime.js";
 const runtimes: FoundationRuntime[] = [];
 
 async function createRuntime(): Promise<FoundationRuntime> {
-  const runtime = await createFoundationRuntime();
+  const runtime = await createFoundationRuntime(undefined, {
+    agentPackages: [flySpriteRuntimePackage],
+  });
   runtimes.push(runtime);
   return runtime;
 }

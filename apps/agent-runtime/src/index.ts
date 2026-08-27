@@ -1,3 +1,6 @@
+import { flySpriteRuntimePackage } from "../../../applications/foundation/src/desktop-runtime.js";
+
+// Desktop-only runtime authority is added outside the Worker-safe application.
 import {
   isAgentCommand,
   type AgentCommand,
@@ -53,7 +56,9 @@ function modelConfigFromEnvironment(): RuntimeModelConfig | undefined {
 async function start(): Promise<void> {
   let runtime: FoundationRuntime;
   try {
-    runtime = await createFoundationRuntime(modelConfigFromEnvironment());
+    runtime = await createFoundationRuntime(modelConfigFromEnvironment(), {
+      agentPackages: [flySpriteRuntimePackage],
+    });
   } catch (error) {
     post({ type: "error", phase: "startup", message: errorMessage(error) });
     return;

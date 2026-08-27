@@ -7,7 +7,7 @@ import type {
   ContributionResolver,
   PackageSource,
 } from "@frockbot/plugin-catalog";
-import { authManifest } from "@frockbot/plugin-auth";
+import authManifest from "@frockbot/plugin-auth/manifest";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
@@ -17,16 +17,13 @@ import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/m
 import notificationsManifest from "@frockbot/plugin-desktop-notifications/manifest";
 // Runtime implementations are statically bound by the immutable application.
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
-import {
-  flySpriteAgentPlugin as flySpriteRuntimePlugin,
-  flySpriteManifest,
-} from "@frockbot/plugin-fly-sprite";
+import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
 import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
-import { memoryManifest } from "@frockbot/plugin-memory";
-import { mobileClipboardManifest } from "@frockbot/plugin-mobile-clipboard";
-import { mobileNotificationsManifest } from "@frockbot/plugin-mobile-notifications";
+import memoryManifest from "@frockbot/plugin-memory/manifest";
+import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
+import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
 import foundationProviderManifest from "@frockbot/plugin-provider-foundation/manifest";
 import foundationProviderPlugin, {
   FOUNDATION_MODEL,
@@ -59,7 +56,6 @@ const runtimeContributions = new Map([
   ["@frockbot/plugin-identity/agent", identityRuntimePlugin],
   ["@frockbot/plugin-provider-foundation/runtime", foundationProviderPlugin],
   ["@frockbot/plugin-echo/agent", echoRuntimePlugin],
-  ["@frockbot/plugin-fly-sprite/agent", flySpriteRuntimePlugin],
   ["@frockbot/plugin-clock/agent", clockRuntimePlugin],
 ]);
 
@@ -90,6 +86,8 @@ export async function compileFoundationApplication(): Promise<ApplicationPlan> {
 export async function createFoundationRuntimeApplication(): Promise<FoundationRuntimeApplication> {
   const plan = await compileFoundationApplication();
   const runtimeIds = new Set(plan.contributions.runtime);
+  // Fly Sprite requires Node authority and is added only by the desktop runtime.
+  runtimeIds.delete("fly-sprite");
   return {
     plan,
     packages: plan.packages

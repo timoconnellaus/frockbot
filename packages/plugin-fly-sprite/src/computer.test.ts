@@ -274,7 +274,7 @@ describe("Fly Sprite computer", () => {
   test("satisfies plugin package conventions", () => {
     expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
       name: "@frockbot/plugin-fly-sprite",
-      contributionKinds: ["agent", "desktop", "web"],
+      contributionKinds: ["runtime", "client", "desktop"],
     });
   });
 });

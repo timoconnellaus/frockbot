@@ -580,7 +580,7 @@ describe("memory plugin", () => {
   test("disposes tools and satisfies package conventions", async () => {
     expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
       name: "@frockbot/plugin-memory",
-      contributionKinds: ["agent"],
+      contributionKinds: ["runtime"],
     });
     const harness = await createPluginHarness([
       SystemPromptRegistry,

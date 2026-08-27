@@ -6,8 +6,22 @@ interface DesktopAuthUser {
   email: string;
 }
 
+interface DesktopApiRequest {
+  path: string;
+  method: "GET" | "POST";
+  body?: string;
+}
+
+interface DesktopApiResponse {
+  status: number;
+  contentType: string | null;
+  body: string;
+}
+
 interface Window {
-  frockbotDesktop?: unknown;
+  frockbotDesktop?: {
+    request(request: DesktopApiRequest): Promise<DesktopApiResponse>;
+  };
   getUser(): Promise<DesktopAuthUser | null>;
   requestAuth(options?: { provider?: string }): Promise<void>;
   onAuthenticated(callback: (user: DesktopAuthUser) => unknown): () => void;
