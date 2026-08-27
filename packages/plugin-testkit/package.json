@@ -1,0 +1,21 @@
+{
+  "name": "@frockbot/plugin-testkit",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/plugin-catalog": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.6",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "desktop-directory-picker",
+  "displayName": "Desktop Directory Picker",
+  "version": "0.0.1",
+  "contributions": {
+    "desktop": "./desktop"
+  },
+  "permissions": ["desktop:directory-picker"]
+}

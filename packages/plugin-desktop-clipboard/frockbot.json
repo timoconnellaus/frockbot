@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "desktop-clipboard",
+  "displayName": "Desktop Clipboard",
+  "version": "0.0.1",
+  "contributions": {
+    "desktop": "./desktop"
+  },
+  "permissions": ["desktop:clipboard:read", "desktop:clipboard:write"]
+}
