@@ -43,7 +43,7 @@ jobs:
         run: bun run build
 
       - name: Run Cordis proof
-        run: bun run proof:cordis
+        run: xvfb-run --auto-servernum bun run proof:cordis
 
   deploy-marketing:
     name: Deploy marketing site
