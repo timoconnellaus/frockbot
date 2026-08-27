@@ -46,6 +46,11 @@ jobs:
         run: bun run build
 
       - name: Run Cordis proof
+        # The smoke test launches a real Electron app; the hosted runner is
+        # headless and its Chromium SUID sandbox helper is not setuid-root, so
+        # run under a virtual display with the sandbox disabled.
+        env:
+          ELECTRON_DISABLE_SANDBOX: "1"
         run: xvfb-run --auto-servernum bun run proof:cordis
 
   deploy-marketing:
