@@ -50,7 +50,9 @@ class DesktopWindowService extends Service {
       show: false,
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
       webPreferences: {
-        preload: fileURLToPath(new URL("../preload/index.mjs", import.meta.url)),
+        preload: fileURLToPath(
+          new URL("../preload/index.mjs", import.meta.url),
+        ),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,

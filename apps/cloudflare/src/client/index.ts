@@ -74,19 +74,21 @@ async function requestTurn(text: string): Promise<TurnResponse> {
   const path = `/api/bots/${encodeURIComponent(botId)}/turns`;
   const requestBody = JSON.stringify({ text });
   const response = window.frockbotDesktop
-    ? await window.frockbotDesktop.request({
-        path,
-        method: "POST",
-        body: requestBody,
-      }).then(
-        (result) =>
-          new Response(result.body, {
-            status: result.status,
-            headers: result.contentType
-              ? { "content-type": result.contentType }
-              : undefined,
-          }),
-      )
+    ? await window.frockbotDesktop
+        .request({
+          path,
+          method: "POST",
+          body: requestBody,
+        })
+        .then(
+          (result) =>
+            new Response(result.body, {
+              status: result.status,
+              headers: result.contentType
+                ? { "content-type": result.contentType }
+                : undefined,
+            }),
+        )
     : await fetch(path, {
         method: "POST",
         headers: { "content-type": "application/json" },

@@ -28,9 +28,7 @@ interface Window {
   onUserUpdated(
     callback: (user: DesktopAuthUser | null) => unknown,
   ): () => void;
-  onAuthError(
-    callback: (context: { message?: string }) => unknown,
-  ): () => void;
+  onAuthError(callback: (context: { message?: string }) => unknown): () => void;
   signOut(): Promise<void>;
 }
 
