@@ -156,6 +156,13 @@ export function createUserApplication() {
     const runtime = await createFoundationRuntime(undefined, {
       sessionId,
       sessionEvents,
+      memory: {
+        ownerId: env.DEPLOYMENT.userId,
+        agentId: botId,
+        bucket: env.MEMORY_FILES,
+        vectorize: env.MEMORY_INDEX,
+        ai: env.AI,
+      },
     });
 
     try {

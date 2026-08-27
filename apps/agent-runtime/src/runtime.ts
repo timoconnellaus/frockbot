@@ -18,6 +18,10 @@ import {
 import clockAgentPlugin from "@frockbot/plugin-clock/agent";
 import clockManifest from "@frockbot/plugin-clock/manifest";
 import {
+  createMemoryPlugin,
+  type MemoryPluginConfig,
+} from "@frockbot/plugin-memory";
+import {
   createOpenAICompatiblePlugin,
   type FetchLike,
 } from "@frockbot/provider-openai-compatible";
@@ -120,6 +124,7 @@ export interface FoundationRuntimeOptions {
   sessionEvents?: readonly SessionEvent[];
   resolveContribution?: ContributionResolver;
   agentPackages?: readonly FoundationAgentPackage[];
+  memory?: MemoryPluginConfig;
 }
 
 export async function createFoundationRuntime(
@@ -170,6 +175,7 @@ export async function createFoundationRuntime(
     );
   }
   await root.plugin(toolPlugin);
+  if (options.memory) await root.plugin(createMemoryPlugin(options.memory));
   const resolveContribution: ContributionResolver = (specifier) => {
     const additional = options.agentPackages?.find(
       (pkg) => pkg.contributionSpecifier === specifier,

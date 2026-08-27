@@ -14,10 +14,13 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && vue-tsc --noEmit -p tsconfig.client.json"
   },
   "dependencies": {
+    "@better-auth/electron": "1.7.2",
     "@frockbot/agent-core": "workspace:*",
     "@frockbot/agent-runtime": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
+    "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/webui-shell": "workspace:*",
+    "better-auth": "1.7.2",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.33"
   },

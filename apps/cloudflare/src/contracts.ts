@@ -1,4 +1,9 @@
 import type { SessionEvent } from "@frockbot/agent-core";
+import type {
+  MemoryAiBinding,
+  MemoryBucket,
+  MemoryVectorIndex,
+} from "@frockbot/plugin-memory";
 
 export interface UserApplicationIdentity {
   userId: string;
@@ -26,7 +31,13 @@ export interface BotStateBinding {
   listRuns(botId: string): Promise<StoredRun[]>;
 }
 
-export interface UserApplicationEnv {
+export interface MemoryBindings {
+  MEMORY_FILES: MemoryBucket;
+  MEMORY_INDEX: MemoryVectorIndex;
+  AI: MemoryAiBinding;
+}
+
+export interface UserApplicationEnv extends MemoryBindings {
   BOT_STATE: BotStateBinding;
   DEPLOYMENT: UserApplicationIdentity;
 }
@@ -59,10 +70,24 @@ export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;
 }
 
+export interface AuthSession {
+  user: {
+    id: string;
+  };
+}
+
+export interface GatewayAuth {
+  handler(request: Request): Promise<Response>;
+  getSession(headers: Headers): Promise<AuthSession | null>;
+}
+
 export interface GatewayDependencies {
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
+  auth: GatewayAuth;
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): BotStateBinding;
+  memory: MemoryBindings;
+  allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;
 }

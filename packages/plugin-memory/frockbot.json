@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "memory",
+  "displayName": "Memory",
+  "version": "0.0.1",
+  "contributions": {
+    "agent": "./agent"
+  },
+  "permissions": ["memory:read", "memory:write"]
+}

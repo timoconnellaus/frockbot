@@ -1,8 +1,10 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { gatewayAuth } from "./auth.js";
 import { BotState } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
   BotStateBinding,
+  MemoryBindings,
   StoredRun,
   WorkerLoader,
 } from "./contracts.js";
@@ -13,8 +15,17 @@ export { BotState };
 interface Env {
   USER_APPLICATIONS: WorkerLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
+  MEMORY_FILES: R2Bucket;
+  MEMORY_INDEX: VectorizeIndex;
+  AI: Ai;
   BOT_STATES: DurableObjectNamespace<BotState>;
+  AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;
+  BETTER_AUTH_SECRET?: string;
+  BETTER_AUTH_URL?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  ALLOW_DEVELOPMENT_AUTH?: string;
 }
 
 interface UserBotStateProps {
@@ -25,6 +36,18 @@ interface BotStateRpc {
   acceptRun(run: Omit<StoredRun, "events">): Promise<StoredRun["events"]>;
   completeRun(runId: string, events: StoredRun["events"]): Promise<void>;
   listRuns(): Promise<StoredRun[]>;
+}
+
+function memoryBindings(env: Env): MemoryBindings {
+  // SAFETY: Cloudflare's generated binding interfaces implement the same
+  // methods but are wider than the capability contracts passed to the child.
+  const bindings = {
+    MEMORY_FILES: env.MEMORY_FILES,
+    MEMORY_INDEX: env.MEMORY_INDEX,
+    AI: env.AI,
+  };
+  // SAFETY: The child contract uses a structural subset of these bindings.
+  return bindings as unknown as MemoryBindings;
 }
 
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
@@ -84,9 +107,12 @@ export default {
     const gateway = createGateway({
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
+      auth: gatewayAuth(env),
       applicationHashFor: () => Promise.resolve(env.DEFAULT_APPLICATION_HASH),
       botStateFor: (userId): BotStateBinding =>
         runtimeExports.UserBotState({ props: { userId } }),
+      memory: memoryBindings(env),
+      allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });
     return gateway(request);
   },

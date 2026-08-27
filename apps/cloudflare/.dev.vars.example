@@ -1,0 +1,6 @@
+# Copy to .dev.vars and replace every value before testing Google sign-in.
+BETTER_AUTH_URL=http://127.0.0.1:8787
+BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
+GOOGLE_CLIENT_ID=replace-with-google-web-client-id
+GOOGLE_CLIENT_SECRET=replace-with-google-web-client-secret
+ALLOW_DEVELOPMENT_AUTH=true

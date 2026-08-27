@@ -6,6 +6,8 @@ import type {
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const HASH_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/;
+const PUBLIC_APPLICATION_USER_ID = "anonymous";
+const PUBLIC_ASSET_PATHS = new Set(["/", "/app.js", "/app.css"]);
 
 export function applicationDeploymentId(
   identity: UserApplicationIdentity,
@@ -54,11 +56,28 @@ export function createGateway(dependencies: GatewayDependencies) {
   const compatibilityDate = dependencies.compatibilityDate ?? "2026-08-27";
 
   return async (request: Request): Promise<Response> => {
-    // Development identity seam. Production auth must replace the header/query/
-    // cookie mechanism at the gateway before this handler is exposed publicly.
-    const development = developmentIdentity(request);
-    const userId = development.userId;
-    if (!userId) return jsonError(401, "missing development user identity");
+    let url: URL;
+    try {
+      url = new URL(request.url);
+    } catch {
+      return jsonError(400, "invalid request URL");
+    }
+
+    if (url.pathname.startsWith("/api/auth/")) {
+      return dependencies.auth.handler(request);
+    }
+
+    const development = dependencies.allowDevelopmentIdentity
+      ? developmentIdentity(request)
+      : { persist: false };
+    const session = development.userId
+      ? null
+      : await dependencies.auth.getSession(request.headers);
+    let userId = development.userId ?? session?.user.id;
+    const isPublicAsset =
+      request.method === "GET" && PUBLIC_ASSET_PATHS.has(url.pathname);
+    if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
+    if (!userId) return jsonError(401, "authentication required");
 
     let applicationHash: string;
     let workerId: string;
@@ -81,6 +100,7 @@ export function createGateway(dependencies: GatewayDependencies) {
         modules: { "index.js": { js: source } },
         globalOutbound: null,
         env: {
+          ...dependencies.memory,
           BOT_STATE: dependencies.botStateFor(userId),
           DEPLOYMENT: identity,
         },

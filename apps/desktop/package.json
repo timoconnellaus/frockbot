@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@better-auth/electron": "1.7.2",
     "@cordisjs/client": "0.8.2",
     "@cordisjs/plugin-loader": "1.0.0-rc.5",
     "@cordisjs/plugin-server": "1.7.0",
@@ -21,6 +22,8 @@
     "@frockbot/plugin-fly-sprite": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "@frockbot/webui-shell": "workspace:*",
+    "better-auth": "1.7.2",
+    "conf": "15.0.2",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {

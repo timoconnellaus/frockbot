@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type {
+  MemoryBucketObject,
+  MemoryPluginConfig,
+  MemoryVector,
+} from "@frockbot/plugin-memory";
 import { flySpriteRuntimePackage } from "./fly-sprite-package.js";
 import type { FoundationRuntime } from "./runtime.js";
 import { createFoundationRuntime } from "./runtime.js";
@@ -80,6 +85,95 @@ describe("foundation Cordis runtime", () => {
     expect(runtime.root.tools.schemas().map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["computer_exec", "computer_browser"]),
     );
+  });
+
+  test("journals automatically recalled tiered memory in the model request", async () => {
+    const objects = new Map<string, string>();
+    const vectors = new Map<string, MemoryVector>();
+    const memory: MemoryPluginConfig = {
+      ownerId: "alice",
+      agentId: "primary",
+      bucket: {
+        get: (key) => {
+          const body = objects.get(key);
+          return Promise.resolve<MemoryBucketObject | null>(
+            body === undefined
+              ? null
+              : {
+                  text: () => Promise.resolve(body),
+                  json: <T>() => Promise.resolve(JSON.parse(body) as T),
+                },
+          );
+        },
+        put: (key, body) => {
+          objects.set(key, body);
+          return Promise.resolve();
+        },
+        delete: (key) => {
+          objects.delete(key);
+          return Promise.resolve();
+        },
+        list: ({ prefix }) =>
+          Promise.resolve({
+            objects: [...objects.keys()]
+              .filter((key) => key.startsWith(prefix))
+              .map((key) => ({ key })),
+            truncated: false,
+          }),
+      },
+      vectorize: {
+        upsert: (entries) => {
+          for (const entry of entries) vectors.set(entry.id, entry);
+          return Promise.resolve();
+        },
+        query: (_query, options) =>
+          Promise.resolve({
+            matches: [...vectors.values()]
+              .filter((vector) => vector.namespace === options.namespace)
+              .map((vector) => ({
+                id: vector.id,
+                score: 1,
+                metadata: vector.metadata,
+              })),
+          }),
+        deleteByIds: (ids) => {
+          for (const id of ids) vectors.delete(id);
+          return Promise.resolve();
+        },
+      },
+      embed: (texts) => Promise.resolve(texts.map(() => [1, 0])),
+    };
+    const runtime = await createFoundationRuntime(undefined, {
+      sessionId: "alice:primary",
+      memory,
+    });
+    runtimes.push(runtime);
+    const call = {
+      id: "remember",
+      name: "memory_write",
+      input: {
+        path: "pets.md",
+        content: "The user's dog is named Rex.",
+      },
+    };
+    const context = {
+      sessionId: "alice:primary",
+      signal: new AbortController().signal,
+    };
+    const preparation = await runtime.root.tools.prepare(call, context);
+    if (preparation.kind !== "ready") throw new Error("memory tool was denied");
+    await runtime.root.tools.executePrepared(preparation, context);
+
+    runtime.agent.agent.send("What is my dog's name?");
+    await runtime.agent.agent.whenIdle();
+
+    const request = runtime.agent.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    expect(request).toMatchObject({
+      type: "model/request",
+      request: { system: expect.stringContaining("dog is named Rex") },
+    });
   });
 
   test("selects the configured OpenAI-compatible provider", async () => {

@@ -3,6 +3,7 @@
   "name": "frockbot-cloudflare",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
   "worker_loaders": [
     {
       "binding": "USER_APPLICATIONS"
@@ -12,8 +13,29 @@
     {
       "binding": "APPLICATION_ARTIFACTS",
       "bucket_name": "frockbot-application-artifacts"
+    },
+    {
+      "binding": "MEMORY_FILES",
+      "bucket_name": "frockbot-memory-files"
     }
   ],
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "frockbot-auth",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vectorize": [
+    {
+      "binding": "MEMORY_INDEX",
+      "index_name": "frockbot-memory"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
   "durable_objects": {
     "bindings": [
       {

@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
 import type {
   BotStateBinding,
+  GatewayAuth,
   LoadedWorker,
+  MemoryBindings,
   StoredRun,
   WorkerCode,
   WorkerLoader,
@@ -68,21 +70,53 @@ class DirectWorkerLoader implements WorkerLoader {
   }
 }
 
+const unauthenticatedAuth: GatewayAuth = {
+  handler: () => Promise.resolve(new Response("auth handler")),
+  getSession: () => Promise.resolve(null),
+};
+
+function testMemoryBindings(): MemoryBindings {
+  return {
+    MEMORY_FILES: {
+      get: () => Promise.resolve(null),
+      put: () => Promise.resolve(),
+      delete: () => Promise.resolve(),
+      list: () => Promise.resolve({ objects: [], truncated: false }),
+    },
+    MEMORY_INDEX: {
+      upsert: () => Promise.resolve(),
+      query: () => Promise.resolve({ matches: [] }),
+      deleteByIds: () => Promise.resolve(),
+    },
+    AI: {
+      run: (_model, input) =>
+        Promise.resolve({
+          data: input.text.map(() => Array.from({ length: 768 }, () => 0)),
+        }),
+    },
+  };
+}
+
 function createTestGateway(
   applicationHashFor: (userId: string) => Promise<string> = () =>
     Promise.resolve("foundation-v1"),
+  auth: GatewayAuth = unauthenticatedAuth,
+  allowDevelopmentIdentity = true,
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
   const gateway = createGateway({
     loader,
     artifacts: { load: () => Promise.resolve("export default {}") },
+    auth,
     applicationHashFor,
     botStateFor: (userId) => {
       const state = states.get(userId) ?? new MemoryBotState();
       states.set(userId, state);
       return state;
     },
+    memory: testMemoryBindings(),
+    allowDevelopmentIdentity,
   });
   return { gateway, loader, states };
 }
@@ -261,9 +295,45 @@ describe("Cloudflare user application gateway", () => {
     expect(script.status).toBe(200);
   });
 
-  test("rejects requests without the explicit development identity seam", async () => {
+  test("serves the public shell but rejects unauthenticated application APIs", async () => {
     const { gateway } = createTestGateway();
-    const response = await gateway(new Request("https://frockbot.test/"));
+    const page = await gateway(new Request("https://frockbot.test/"));
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('data-frockbot-user-id="anonymous"');
+
+    const response = await gateway(
+      new Request("https://frockbot.test/api/bots/default/turns"),
+    );
     expect(response.status).toBe(401);
+  });
+
+  test("ignores development identity headers unless explicitly enabled", async () => {
+    const { gateway } = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      false,
+    );
+    const response = await gateway(request("/api/bots/default/turns", "alice"));
+    expect(response.status).toBe(401);
+  });
+
+  test("mounts Better Auth routes before application routing", async () => {
+    const { gateway, loader } = createTestGateway();
+    const response = await gateway(
+      new Request("https://frockbot.test/api/auth/get-session"),
+    );
+    expect(await response.text()).toBe("auth handler");
+    expect(loader.ids).toEqual([]);
+  });
+
+  test("derives the application identity from the Better Auth session", async () => {
+    const auth: GatewayAuth = {
+      handler: unauthenticatedAuth.handler,
+      getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
+    };
+    const { gateway, loader } = createTestGateway(undefined, auth);
+    const response = await gateway(new Request("https://frockbot.test/"));
+    expect(response.status).toBe(200);
+    expect(loader.ids).toEqual(["signed-in-user:foundation-v1"]);
   });
 });

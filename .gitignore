@@ -3,6 +3,7 @@ node_modules/
 dist/
 out/
 *.log
+.dev.vars
 .DS_Store
 apps/desktop/resources/cordis-agent/
 artifacts/
