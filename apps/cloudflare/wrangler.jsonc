@@ -5,6 +5,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "bot.frockbot.com",
+      "custom_domain": true
+    }
+  ],
   "worker_loaders": [
     {
       "binding": "USER_APPLICATIONS"
@@ -24,7 +30,7 @@
     {
       "binding": "AUTH_DB",
       "database_name": "frockbot-auth",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "f83c21a4-e5a0-4cc2-b0e1-636027b8c65e",
       "migrations_dir": "migrations"
     }
   ],

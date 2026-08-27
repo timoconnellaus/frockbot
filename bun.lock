@@ -122,6 +122,16 @@
         "vite": "7.3.2",
       },
     },
+    "apps/marketing": {
+      "name": "@frockbot/marketing",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@cloudflare/workers-types": "latest",
+        "@types/bun": "1.3.6",
+        "typescript": "5.9.3",
+        "wrangler": "latest",
+      },
+    },
     "apps/mobile": {
       "name": "@frockbot/mobile",
       "version": "0.0.1",
@@ -670,6 +680,8 @@
     "@frockbot/desktop": ["@frockbot/desktop@workspace:apps/desktop"],
 
     "@frockbot/desktop-core": ["@frockbot/desktop-core@workspace:packages/desktop-core"],
+
+    "@frockbot/marketing": ["@frockbot/marketing@workspace:apps/marketing"],
 
     "@frockbot/mobile": ["@frockbot/mobile@workspace:apps/mobile"],
 
@@ -1602,6 +1614,8 @@
     "@frockbot/desktop/@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
     "@frockbot/desktop/@types/node": ["@types/node@22.20.1", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q=="],
+
+    "@frockbot/marketing/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/mobile/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

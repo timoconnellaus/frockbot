@@ -69,9 +69,14 @@ For the first publication, add a granular npm automation token with access to th
 
 ## Production deployment
 
-After CI succeeds on a push to `main`, the deploy job in `ci.yml` applies remote D1 migrations, uploads the immutable application artifact to R2, and deploys the Cloudflare Worker. It uses the GitHub `production` environment so deployment approvals can be enabled in repository settings.
+After CI succeeds on a push to `main`, `ci.yml` deploys two Cloudflare Workers through the GitHub `production` environment:
 
-Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first deployment:
+- `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
+- `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
+
+The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2, and then deploys the Worker. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
+
+Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first app deployment:
 
 - D1 database `frockbot-auth`;
 - R2 buckets `frockbot-application-artifacts` and `frockbot-memory-files`;
@@ -84,12 +89,14 @@ Configure these GitHub `production` environment values:
 | Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
 | Secret | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account containing the production resources |
 | Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth` |
-| Variable | `BETTER_AUTH_URL` | Public HTTPS origin of the deployed Worker |
+| Variable | `BETTER_AUTH_URL` | Set to `https://bot.frockbot.com` |
 | Secret | `BETTER_AUTH_SECRET` | Better Auth secret with at least 32 random characters |
 | Secret | `GOOGLE_CLIENT_ID` | Google Web application OAuth client ID |
 | Secret | `GOOGLE_CLIENT_SECRET` | Google Web application OAuth client secret |
 
-Register `${BETTER_AUTH_URL}/api/auth/callback/google` as an authorized Google redirect URI. Production deployment intentionally does not create or delete Cloudflare resources.
+Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
+
+Register `https://bot.frockbot.com/api/auth/callback/google` as an authorized Google redirect URI. The deploy token must include Workers Scripts and Workers Routes edit access, and the `frockbot.com` zone must be active in the same Cloudflare account. Production deployment intentionally does not create or delete D1, R2, or Vectorize resources.
 
 The desktop smoke path can capture the connected UI without a model call:
 
@@ -113,6 +120,7 @@ apps/
   desktop/          Electron Cordis host, WebUI server, and window plugins
   agent-runtime/    Transport-neutral Cordis agent composition plus Electron bridge
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
+  marketing/        Public frockbot.com site and static-assets Worker
   cordis-poc/       Executable pinned Cordis/Electron/WebUI foundation proof
 packages/
   agent-core/       Session, LLM, prompt, tool, and agent Cordis services
@@ -181,7 +189,7 @@ Create a Google **Web application** OAuth client and register this local redirec
 http://127.0.0.1:8787/api/auth/callback/google
 ```
 
-For production, replace the placeholder `AUTH_DB` database ID in [`apps/cloudflare/wrangler.jsonc`](apps/cloudflare/wrangler.jsonc), set `BETTER_AUTH_URL` to the public HTTPS origin, leave `ALLOW_DEVELOPMENT_AUTH` unset, and provision `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` as Worker secrets. Register `https://<your-host>/api/auth/callback/google` with Google. Never commit those values.
+For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, or `GOOGLE_CLIENT_SECRET`.
 
 The desktop host must receive both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. If `FROCKBOT_APPLICATION_URL` is absent, the desktop loads its local host; if `FROCKBOT_AUTH_BASE_URL` is absent, it does not initialize hosted authentication.
 
