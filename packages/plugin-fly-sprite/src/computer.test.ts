@@ -281,17 +281,24 @@ describe("Fly Sprite computer", () => {
       client,
       spriteName: "frockbot-test",
     });
+    const generalAgent = agentComputer.agent("general");
     await expect(
-      agentComputer.agent("general").run("echo tool-output", signal()),
+      generalAgent.run("echo tool-output", signal()),
     ).rejects.toThrow("user is controlling");
+    await expect(generalAgent.readStandingMemory()).rejects.toThrow(
+      "user is controlling",
+    );
+    await expect(generalAgent.writeTranscript([])).rejects.toThrow(
+      "user is controlling",
+    );
     expect(
       await agentComputer.agent("health").run("echo tool-output", signal()),
     ).toContain("tool-output");
 
     await generalHost.releaseControl();
-    expect(
-      await agentComputer.agent("general").run("echo tool-output", signal()),
-    ).toContain("tool-output");
+    expect(await generalAgent.run("echo tool-output", signal())).toContain(
+      "tool-output",
+    );
   });
 
   test("atomically grants an expired lease to one concurrent replacement", async () => {

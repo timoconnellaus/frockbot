@@ -240,7 +240,7 @@ class LoopAgent implements Agent {
     signal: AbortSignal,
   ): Promise<ModelResponse> {
     const assembly = await this.#ctx.systemPrompt.assemble({
-      sessionId: this.id,
+      sessionId: this.session.id,
       provider: this.#options.provider,
       model: this.#options.model,
     });

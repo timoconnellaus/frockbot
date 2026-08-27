@@ -73,6 +73,7 @@ describe("AgentLoop", () => {
     const requests: string[] = [];
     let toolWasJournaled = false;
     let turnStoppingSawCompletedJournal = false;
+    let observedPromptSessionId: string | undefined;
     let observedToolIdentity:
       | { agentId: string; sessionId: string }
       | undefined;
@@ -130,6 +131,13 @@ describe("AgentLoop", () => {
     };
 
     root = await mountRuntime(provider, tool);
+    root.systemPrompt.register({
+      id: "session-observer",
+      render: (context) => {
+        observedPromptSessionId = context.sessionId;
+        return "";
+      },
+    });
     root.on("agent/turn-stopping", (agent) => {
       turnStoppingSawCompletedJournal =
         agent.session.events.at(-1)?.type === "turn/end";
@@ -151,6 +159,7 @@ describe("AgentLoop", () => {
     expect(turnStoppingSawCompletedJournal).toBe(true);
     expect(handle.agent.id).toBe("general");
     expect(handle.agent.session.id).toBe("owner:general:conversation-1");
+    expect(observedPromptSessionId).toBe("owner:general:conversation-1");
     expect(observedToolIdentity).toEqual({
       agentId: "general",
       sessionId: "owner:general:conversation-1",

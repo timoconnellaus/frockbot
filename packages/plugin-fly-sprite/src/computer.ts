@@ -577,7 +577,7 @@ export class FlySpriteComputer {
     signal?: AbortSignal,
   ): Promise<string> {
     const sprite = await this.readySprite(layout, signal);
-    const command = `printf '%s\\n' '## Agent standing memory'; cat ${layout.dataDir}/memory/profile.md; printf '%s\\n' '## Shared user memory'; cat ${DATA_ROOT}/user-memory/profile.md`;
+    const command = `${this.agentControlGuard(layout)}\nprintf '%s\\n' '## Agent standing memory'; cat ${layout.dataDir}/memory/profile.md; printf '%s\\n' '## Shared user memory'; cat ${DATA_ROOT}/user-memory/profile.md`;
     const result = await sprite.execFileHTTP("bash", ["-lc", command], {
       signal,
       timeout: 15_000,
@@ -594,7 +594,7 @@ export class FlySpriteComputer {
     const sprite = await this.readySprite(layout, signal);
     const encoded = base64(`${JSON.stringify(events, null, 2)}\n`);
     const target = `${layout.transcriptDir}/latest.json`;
-    const command = `set -eu; TMP=$(mktemp ${shellQuote(`${target}.XXXXXX`)}); printf %s ${shellQuote(encoded)} | base64 -d > "$TMP"; chmod 600 "$TMP"; mv "$TMP" ${shellQuote(target)}`;
+    const command = `${this.agentControlGuard(layout)}\nset -eu; TMP=$(mktemp ${shellQuote(`${target}.XXXXXX`)}); printf %s ${shellQuote(encoded)} | base64 -d > "$TMP"; chmod 600 "$TMP"; mv "$TMP" ${shellQuote(target)}`;
     await sprite.execFileHTTP("bash", ["-lc", command], {
       signal,
       timeout: 15_000,
