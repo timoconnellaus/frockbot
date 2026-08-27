@@ -74,7 +74,15 @@ try {
   );
 
   const worker = spawn(
-    ["bunx", "wrangler", "dev", "--port", "8787"],
+    [
+      "bunx",
+      "wrangler",
+      "dev",
+      "--port",
+      "8787",
+      "--var",
+      "ALLOW_DEVELOPMENT_AUTH:true",
+    ],
     cloudflareRoot,
   );
   const renderer = spawn(
@@ -89,6 +97,7 @@ try {
   ]);
   const electron = spawn(["bunx", "electron-vite", "dev"], desktopRoot, {
     FROCKBOT_APPLICATION_URL: `${rendererUrl}/`,
+    FROCKBOT_AUTH_BASE_URL: workerUrl,
   });
 
   const exitCode = await Promise.race([

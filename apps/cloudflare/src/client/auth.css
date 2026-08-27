@@ -1,0 +1,121 @@
+.auth-screen {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 32px;
+  background:
+    radial-gradient(circle at 50% 24%, rgb(41 135 239 / 12%), transparent 34%),
+    #050505;
+}
+
+.auth-card {
+  width: min(100%, 390px);
+  padding: 42px;
+  border: 1px solid #2a2a2a;
+  border-radius: 18px;
+  background: #111;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+  text-align: center;
+}
+
+.auth-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  margin: 0 auto 20px;
+  border-radius: 13px;
+  color: #0b1827;
+  background: #2987ef;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.auth-eyebrow {
+  margin: 0 0 8px;
+  color: #7eaff0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.auth-card h1 {
+  margin: 0;
+  color: #eee;
+  font-size: 28px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+
+.auth-copy {
+  margin: 12px 0 28px;
+  color: #979797;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.google-button {
+  display: flex;
+  width: 100%;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  border: 1px solid #3a3a3a;
+  border-radius: 9px;
+  color: #ededed;
+  background: #232323;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.google-button:hover:not(:disabled) {
+  border-color: #4b4b4b;
+  background: #2a2a2a;
+}
+
+.google-button:focus-visible {
+  outline: 2px solid #2987ef;
+  outline-offset: 3px;
+}
+
+.google-button:disabled {
+  color: #929292;
+  cursor: wait;
+}
+
+.google-g {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 50%;
+  color: #4285f4;
+  background: #fff;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.auth-loading,
+.auth-hint,
+.auth-error {
+  color: #939393;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.auth-loading {
+  min-height: 46px;
+}
+
+.auth-hint,
+.auth-error {
+  margin: 16px 0 0;
+}
+
+.auth-error {
+  color: #ff7580;
+}
