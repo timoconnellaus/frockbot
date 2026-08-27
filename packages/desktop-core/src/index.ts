@@ -119,11 +119,22 @@ export abstract class DesktopDirectoryPickerCapability extends Service {
   ): Promise<DesktopDirectoryPickerResult>;
 }
 
+export abstract class DesktopClipboardCapability extends Service {
+  constructor(ctx: Context) {
+    super(ctx, "desktopClipboard");
+  }
+
+  abstract readText(signal: AbortSignal): Promise<string>;
+
+  abstract writeText(text: string, signal: AbortSignal): Promise<void>;
+}
+
 // Cordis context services exposed to desktop contribution plugins.
 declare module "cordis" {
   interface Context {
     desktopCommands: DesktopCommandRegistry;
     desktopNotifications: DesktopNotificationCapability;
     desktopDirectoryPicker: DesktopDirectoryPickerCapability;
+    desktopClipboard: DesktopClipboardCapability;
   }
 }

@@ -133,6 +133,19 @@
         "vue-tsc": "3.2.5",
       },
     },
+    "packages/plugin-desktop-clipboard": {
+      "name": "@frockbot/plugin-desktop-clipboard",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/desktop-core": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@frockbot/plugin-testkit": "workspace:*",
+        "@types/bun": "1.3.6",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-desktop-directory-picker": {
       "name": "@frockbot/plugin-desktop-directory-picker",
       "version": "0.0.1",
@@ -150,6 +163,44 @@
       "version": "0.0.1",
       "dependencies": {
         "@frockbot/desktop-core": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.6",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/plugin-echo": {
+      "name": "@frockbot/plugin-echo",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/agent-core": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@frockbot/plugin-testkit": "workspace:*",
+        "@types/bun": "1.3.6",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/plugin-identity": {
+      "name": "@frockbot/plugin-identity",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/agent-core": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@frockbot/plugin-testkit": "workspace:*",
+        "@types/bun": "1.3.6",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/plugin-testkit": {
+      "name": "@frockbot/plugin-testkit",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/plugin-catalog": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -346,9 +397,17 @@
 
     "@frockbot/plugin-clock": ["@frockbot/plugin-clock@workspace:packages/plugin-clock"],
 
+    "@frockbot/plugin-desktop-clipboard": ["@frockbot/plugin-desktop-clipboard@workspace:packages/plugin-desktop-clipboard"],
+
     "@frockbot/plugin-desktop-directory-picker": ["@frockbot/plugin-desktop-directory-picker@workspace:packages/plugin-desktop-directory-picker"],
 
     "@frockbot/plugin-desktop-notifications": ["@frockbot/plugin-desktop-notifications@workspace:packages/plugin-desktop-notifications"],
+
+    "@frockbot/plugin-echo": ["@frockbot/plugin-echo@workspace:packages/plugin-echo"],
+
+    "@frockbot/plugin-identity": ["@frockbot/plugin-identity@workspace:packages/plugin-identity"],
+
+    "@frockbot/plugin-testkit": ["@frockbot/plugin-testkit@workspace:packages/plugin-testkit"],
 
     "@frockbot/protocol": ["@frockbot/protocol@workspace:packages/protocol"],
 
