@@ -1,15 +1,40 @@
 <script setup lang="ts">
 import FrockBotApp from "@frockbot/webui-shell/client/FrockBotApp.vue";
+import { electronProxyClient } from "@better-auth/electron/proxy";
 import { createAuthClient } from "better-auth/client";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
-const authClient = createAuthClient();
+const authClient = createAuthClient({
+  plugins: [
+    electronProxyClient({
+      clientID: "frockbot-desktop",
+      protocol: { scheme: "com.frockbot.desktop" },
+    }),
+  ],
+});
 const loading = ref(true);
 const signingIn = ref(false);
 const user = ref<{ id: string; name: string; email: string } | null>(null);
 const error = ref<string>();
 const isDesktop = computed(() => Boolean(window.frockbotDesktop));
 const unsubscribers: Array<() => void> = [];
+let electronRedirectTimer: ReturnType<
+  typeof authClient.ensureElectronRedirect
+> | null = null;
+
+function electronAuthQuery(): Record<string, string> | null {
+  const params = new URLSearchParams(window.location.search);
+  const clientId = params.get("client_id");
+  const state = params.get("state");
+  const codeChallenge = params.get("code_challenge");
+  return clientId && state && codeChallenge
+    ? {
+        client_id: clientId,
+        state,
+        code_challenge: codeChallenge,
+      }
+    : null;
+}
 
 function embeddedUserId(): string | undefined {
   const value = document.body.dataset.frockbotUserId;
@@ -25,8 +50,9 @@ async function loadUser(): Promise<void> {
     return;
   }
 
+  const query = electronAuthQuery();
   const embedded = embeddedUserId();
-  if (embedded || import.meta.env.DEV) {
+  if (!query && embedded) {
     user.value = {
       id: embedded ?? "development",
       name: "FrockBot user",
@@ -36,6 +62,14 @@ async function loadUser(): Promise<void> {
   }
 
   const session = await authClient.getSession();
+  if (query && session.data?.user) {
+    signingIn.value = true;
+    const transfer = await authClient.electron.transferUser({
+      fetchOptions: { query },
+    });
+    if (transfer.error) throw new Error(transfer.error.message);
+    return;
+  }
   user.value = session.data?.user
     ? {
         id: session.data.user.id,
@@ -50,12 +84,14 @@ async function signIn(): Promise<void> {
   error.value = undefined;
   try {
     if (isDesktop.value) {
-      await window.requestAuth({ provider: "google" });
+      await window.requestAuth();
       return;
     }
+    const query = electronAuthQuery();
     const result = await authClient.signIn.social({
       provider: "google",
       callbackURL: new URL("/", window.location.origin).toString(),
+      fetchOptions: query ? { query } : undefined,
     });
     if (result.error) throw new Error(result.error.message);
   } catch (cause) {
@@ -91,6 +127,8 @@ onMounted(async () => {
           signingIn.value = false;
         }),
       );
+    } else if (electronAuthQuery()) {
+      electronRedirectTimer = authClient.ensureElectronRedirect();
     }
     await loadUser();
   } catch (cause) {
@@ -103,6 +141,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   for (const unsubscribe of unsubscribers) unsubscribe();
+  if (electronRedirectTimer) clearTimeout(electronRedirectTimer);
 });
 </script>
 

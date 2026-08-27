@@ -16,7 +16,7 @@ Research date: 2026-08-27
 - Electron main process: official `electronClient()`, `setupMain()` before `app.ready`, system-browser sign-in URL, persistent main-process storage, and custom protocol scheme `com.frockbot.desktop`.
 - Electron preload: call `setupRenderer()` while retaining `contextIsolation: true`, `nodeIntegration: false`, and Chromium sandboxing.
 - Web sign-in page: official proxy client, preserve Electron PKCE/state query parameters when calling `signIn.social`, and call `ensureElectronRedirect()`.
-- Google console redirect URIs: `http://localhost:8787/api/auth/callback/google` for local development and `https://<production-host>/api/auth/callback/google` in production.
+- Google console redirect URIs: `http://127.0.0.1:8787/api/auth/callback/google` for local development and `https://<production-host>/api/auth/callback/google` in production.
 
 ## Sources
 
