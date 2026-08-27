@@ -59,6 +59,38 @@ bun run build
 bun run proof:cordis
 ```
 
+GitHub Actions runs these checks on pushes to `main` and on pull requests. Dependabot checks Bun/npm dependencies and GitHub Actions weekly.
+
+## Releases
+
+Pushing a semantic-version tag such as `v0.1.0` validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, and creates a GitHub release with generated notes. Application workspaces remain private.
+
+For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
+
+## Production deployment
+
+After CI succeeds on a push to `main`, the deploy job in `ci.yml` applies remote D1 migrations, uploads the immutable application artifact to R2, and deploys the Cloudflare Worker. It uses the GitHub `production` environment so deployment approvals can be enabled in repository settings.
+
+Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first deployment:
+
+- D1 database `frockbot-auth`;
+- R2 buckets `frockbot-application-artifacts` and `frockbot-memory-files`;
+- Vectorize index `frockbot-memory` with 768 cosine dimensions.
+
+Configure these GitHub `production` environment values:
+
+| Type | Name | Purpose |
+| --- | --- | --- |
+| Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
+| Secret | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account containing the production resources |
+| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth` |
+| Variable | `BETTER_AUTH_URL` | Public HTTPS origin of the deployed Worker |
+| Secret | `BETTER_AUTH_SECRET` | Better Auth secret with at least 32 random characters |
+| Secret | `GOOGLE_CLIENT_ID` | Google Web application OAuth client ID |
+| Secret | `GOOGLE_CLIENT_SECRET` | Google Web application OAuth client secret |
+
+Register `${BETTER_AUTH_URL}/api/auth/callback/google` as an authorized Google redirect URI. Production deployment intentionally does not create or delete Cloudflare resources.
+
 The desktop smoke path can capture the connected UI without a model call:
 
 ```bash
