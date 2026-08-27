@@ -3,6 +3,7 @@ import {
   type AgentHandle,
   LlmRegistry,
   type LlmProvider,
+  type SessionEvent,
   SessionStore,
   SystemPromptRegistry,
   ToolRegistry,
@@ -10,10 +11,12 @@ import {
 } from "@frockbot/agent-core";
 import { AgentLoop } from "@frockbot/agent-loop";
 import {
+  type ContributionResolver,
   LocalCordisContributionHost,
   PackageCatalog,
 } from "@frockbot/plugin-catalog";
-import { clockManifest } from "@frockbot/plugin-clock";
+import clockAgentPlugin from "@frockbot/plugin-clock/agent";
+import clockManifest from "@frockbot/plugin-clock/manifest";
 import {
   createOpenAICompatiblePlugin,
   type FetchLike,
@@ -80,6 +83,15 @@ const echoTool: ToolDefinition = {
   }),
 };
 
+const resolveBuiltInContribution: ContributionResolver = (specifier) => {
+  if (specifier === "@frockbot/plugin-clock/agent") {
+    return Promise.resolve({ default: clockAgentPlugin });
+  }
+  return Promise.reject(
+    new Error(`unknown built-in contribution: ${specifier}`),
+  );
+};
+
 export interface RuntimeModelConfig {
   baseUrl: string;
   model: string;
@@ -96,11 +108,23 @@ export interface FoundationRuntime {
   dispose(): Promise<void>;
 }
 
+export interface FoundationRuntimeOptions {
+  sessionId?: string;
+  sessionEvents?: readonly SessionEvent[];
+  resolveContribution?: ContributionResolver;
+}
+
 export async function createFoundationRuntime(
   modelConfig?: RuntimeModelConfig,
+  options: FoundationRuntimeOptions = {},
 ): Promise<FoundationRuntime> {
+  const sessionId = options.sessionId?.trim() || "barebones";
   const root = new Context();
-  await root.plugin(SessionStore);
+  await root.plugin(SessionStore, {
+    initialSessions: options.sessionEvents
+      ? { [sessionId]: options.sessionEvents }
+      : undefined,
+  });
   await root.plugin(SystemPromptRegistry);
   await root.plugin(LlmRegistry);
   await root.plugin(ToolRegistry);
@@ -142,7 +166,7 @@ export async function createFoundationRuntime(
     new LocalCordisContributionHost(
       "agent",
       root,
-      (specifier: string) => import(specifier),
+      options.resolveContribution ?? resolveBuiltInContribution,
     ),
   );
   root.packages.install({
@@ -153,7 +177,7 @@ export async function createFoundationRuntime(
   await root.plugin(AgentLoop, { maxSteps: 8 });
 
   const agent = await root.agents.create({
-    sessionId: "barebones",
+    sessionId,
     provider,
     model,
   });

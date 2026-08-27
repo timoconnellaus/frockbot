@@ -7,6 +7,8 @@
     ".": "./src/index.ts",
     "./host": "./src/host.ts",
     "./shared": "./src/shared.ts",
+    "./client/FrockBotApp.vue": "./src/client/FrockBotApp.vue",
+    "./client/styles.css": "./src/client/styles.css",
     "./package.json": "./package.json"
   },
   "scripts": {

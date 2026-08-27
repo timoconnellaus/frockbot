@@ -9,6 +9,8 @@
     "./host": "./src/host.ts",
     "./manifest": "./src/manifest.ts",
     "./shared": "./src/shared.ts",
+    "./client/ClockCard.vue": "./src/client/ClockCard.vue",
+    "./client/styles.css": "./src/client/styles.css",
     "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"
   },

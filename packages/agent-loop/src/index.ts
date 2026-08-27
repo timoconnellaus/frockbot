@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   Agent,
   AgentFactory,
@@ -66,7 +65,7 @@ class LoopAgent implements Agent {
       throw new Error(`agent "${this.id}" is disposing`);
     const normalized = text.trim();
     if (!normalized) throw new Error("agent input is empty");
-    const input = { messageId: randomUUID(), text: normalized };
+    const input = { messageId: crypto.randomUUID(), text: normalized };
     this.session.append({ type: "input/queued", ...input });
     this.#inbox.push(input);
     this.#ctx.emit("agent/inbox/inserted", this, input);
@@ -245,7 +244,7 @@ class LoopAgent implements Agent {
 
     while (true) {
       const proposed: NormalizedModelRequest = {
-        requestId: randomUUID(),
+        requestId: crypto.randomUUID(),
         provider: this.#options.provider,
         model: this.#options.model,
         system: assembly.text,

@@ -4,8 +4,12 @@ FrockBot is a desktop environment for creating and operating persistent conversa
 
 ## Language
 
+**User**:
+A person who owns bots and one shared set of enabled, configured packages inherited by all of those bots.
+_Avoid_: Account, tenant
+
 **Bot**:
-A persistent, configured conversational actor with its own identity, enabled packages, sessions, routines, and optional computer.
+A persistent, configured conversational actor with its own identity, sessions, routines, and optional computer. Its extensible behavior comes from its user's shared package setup.
 _Avoid_: Agent, assistant instance
 
 **Agent**:

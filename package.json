@@ -14,8 +14,11 @@
     "build:cordis-agent": "bun run --filter @frockbot/agent-runtime build",
     "build:webui": "bun run --filter @frockbot/webui-shell build && bun run --filter @frockbot/plugin-clock build",
     "build:agents": "bun run build:cordis-agent",
+    "build:cloudflare": "bun run --filter @frockbot/cloudflare build",
+    "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
+    "dev:cloudflare:electron": "bun run --filter @frockbot/cloudflare dev:electron",
     "dev": "bun run build:webui && bun run build:agents && bun run --filter @frockbot/desktop dev",
-    "build": "bun run build:webui && bun run build:agents && bun run --filter @frockbot/desktop build",
+    "build": "bun run build:webui && bun run build:agents && bun run --filter @frockbot/desktop build && bun run build:cloudflare",
     "proof:cordis": "bun run --filter @frockbot/cordis-poc typecheck && bun run --filter @frockbot/cordis-poc test && bun run --filter @frockbot/agent-runtime build && bun run --filter @frockbot/cordis-poc smoke",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun test"

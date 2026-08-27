@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { useRpc } from "@cordisjs/client";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import type { FrockBotWebData, WebToolActivity } from "../shared.js";
+import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  frockBotWebDataKey,
+  type FrockBotWebData,
+  type WebToolActivity,
+} from "../shared.js";
 
-const web = useRpc<FrockBotWebData>();
+const web = inject(frockBotWebDataKey) ?? useRpc<FrockBotWebData>();
 const draft = ref("");
 const contextMenuOpen = ref(false);
 const rightPanelOpen = ref(true);

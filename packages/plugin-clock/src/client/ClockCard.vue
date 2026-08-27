@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { useRpc } from "@cordisjs/client";
-import { ref } from "vue";
-import type { ClockWebData } from "../shared.ts";
+import { inject, ref } from "vue";
+import { clockWebDataKey, type ClockWebData } from "../shared.ts";
 
-const clock = useRpc<ClockWebData>();
+const clock = inject(clockWebDataKey) ?? useRpc<ClockWebData>();
 const refreshing = ref(false);
 
 async function refresh(): Promise<void> {

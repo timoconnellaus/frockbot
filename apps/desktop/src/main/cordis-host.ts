@@ -20,7 +20,7 @@ import { webChatPlugin } from "./web-chat.js";
 
 interface DesktopWindowConfig {
   baseUrl: string;
-  credential: string;
+  credential?: string;
 }
 
 declare module "cordis" {
@@ -60,18 +60,21 @@ class DesktopWindowService extends Service {
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event, url) => {
       try {
-        if (new URL(url).origin !== this.config.baseUrl) event.preventDefault();
+        const allowedOrigin = new URL(this.config.baseUrl).origin;
+        if (new URL(url).origin !== allowedOrigin) event.preventDefault();
       } catch {
         event.preventDefault();
       }
     });
-    await window.webContents.session.cookies.set({
-      url: this.config.baseUrl,
-      name: "frockbot_session",
-      value: this.config.credential,
-      httpOnly: true,
-      sameSite: "strict",
-    });
+    if (this.config.credential) {
+      await window.webContents.session.cookies.set({
+        url: this.config.baseUrl,
+        name: "frockbot_session",
+        value: this.config.credential,
+        httpOnly: true,
+        sameSite: "strict",
+      });
+    }
     await window.loadURL(this.config.baseUrl);
     if (process.env.FROCKBOT_SMOKE_SCREENSHOT) void this.captureSmoke(window);
     return window;
@@ -92,7 +95,8 @@ class DesktopWindowService extends Service {
       new Promise((resolve, reject) => {
         const deadline = Date.now() + 15000;
         const check = () => {
-          if (document.querySelector('.app-shell') && document.querySelector('.connection-ready')) return resolve(true);
+          const composer = document.querySelector('.composer textarea');
+          if (document.querySelector('.app-shell') && composer instanceof HTMLTextAreaElement && !composer.disabled) return resolve(true);
           if (Date.now() > deadline) return reject(new Error('FrockBot WebUI did not become ready'));
           setTimeout(check, 25);
         };
@@ -178,6 +182,22 @@ function createAdmissionPlugin(
 
 export async function createCordisDesktopHost(): Promise<Context> {
   const root = new CordisContext();
+  const applicationUrl = process.env.FROCKBOT_APPLICATION_URL?.trim();
+  if (applicationUrl) {
+    let protocol: string;
+    try {
+      protocol = new URL(applicationUrl).protocol;
+    } catch {
+      throw new Error("FROCKBOT_APPLICATION_URL must be a valid URL");
+    }
+    if (protocol !== "http:" && protocol !== "https:") {
+      throw new Error("FROCKBOT_APPLICATION_URL must use HTTP or HTTPS");
+    }
+    await root.plugin(DesktopWindowService, { baseUrl: applicationUrl });
+    await root.desktopWindows.create();
+    return root;
+  }
+
   await root.plugin(Server, { host: "127.0.0.1", port: 0, maxPort: 0 });
   const baseUrl = root.server.baseUrl;
   const credential = randomUUID();

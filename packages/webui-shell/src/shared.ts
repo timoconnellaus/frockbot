@@ -1,3 +1,5 @@
+import type { InjectionKey, Ref } from "vue";
+
 export type WebConnection = "starting" | "ready" | "disconnected" | "error";
 
 export interface WebToolActivity {
@@ -32,3 +34,6 @@ export interface FrockBotWebData {
   abort(): Promise<void>;
   restart(): Promise<void>;
 }
+
+export const frockBotWebDataKey: InjectionKey<Ref<FrockBotWebData>> =
+  Symbol("frockbot-web-data");

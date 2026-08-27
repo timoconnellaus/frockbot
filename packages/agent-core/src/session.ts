@@ -22,13 +22,26 @@ export class Session {
   #disposed = false;
   #emit: (envelope: SessionEventEnvelope) => void;
 
-  constructor(id: string, emit: (envelope: SessionEventEnvelope) => void) {
+  constructor(
+    id: string,
+    emit: (envelope: SessionEventEnvelope) => void,
+    initialEvents: readonly SessionEvent[] = [],
+  ) {
     this.id = id;
     this.#emit = emit;
-    this.append({
-      type: "session/created",
-      createdAt: new Date().toISOString(),
-    });
+    if (initialEvents.length > 0) {
+      for (const [index, event] of initialEvents.entries()) {
+        if (event.seq !== index) {
+          throw new Error(`session "${id}" has a non-contiguous event log`);
+        }
+      }
+      this.#events = structuredClone([...initialEvents]);
+    } else {
+      this.append({
+        type: "session/created",
+        createdAt: new Date().toISOString(),
+      });
+    }
   }
 
   get events(): readonly SessionEvent[] {
@@ -149,20 +162,30 @@ export class Session {
   }
 }
 
+export interface SessionStoreConfig {
+  initialSessions?: Readonly<Record<string, readonly SessionEvent[]>>;
+}
+
 export class SessionStore extends Service {
   private sessions = new Map<string, Session>();
+  private initialSessions: Readonly<Record<string, readonly SessionEvent[]>>;
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, config: SessionStoreConfig = {}) {
     super(ctx, "sessions");
+    this.initialSessions = config.initialSessions ?? {};
   }
 
   create(sessionId: string): Session {
     if (this.sessions.has(sessionId)) {
       throw new Error(`session "${sessionId}" already exists`);
     }
-    const session = new Session(sessionId, (envelope) => {
-      this.ctx.emit("session/event", envelope);
-    });
+    const session = new Session(
+      sessionId,
+      (envelope) => {
+        this.ctx.emit("session/event", envelope);
+      },
+      this.initialSessions[sessionId],
+    );
     this.sessions.set(sessionId, session);
     return session;
   }

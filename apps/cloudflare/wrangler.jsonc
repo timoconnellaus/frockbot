@@ -1,0 +1,37 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "frockbot-cloudflare",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "worker_loaders": [
+    {
+      "binding": "USER_APPLICATIONS"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "APPLICATION_ARTIFACTS",
+      "bucket_name": "frockbot-application-artifacts"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BOT_STATES",
+        "class_name": "BotState"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BotState"]
+    }
+  ],
+  "vars": {
+    "DEFAULT_APPLICATION_HASH": "foundation-v1"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Context } from "cordis";
 import { SessionStore } from "./session.js";
-import type { NormalizedModelRequest } from "./types.js";
+import type { NormalizedModelRequest, SessionEvent } from "./types.js";
 
 const roots: Context[] = [];
 
-async function createStore(): Promise<Context> {
+async function createStore(
+  initialSessions?: Readonly<Record<string, readonly SessionEvent[]>>,
+): Promise<Context> {
   const root = new Context();
   roots.push(root);
-  await root.plugin(SessionStore);
+  await root.plugin(SessionStore, { initialSessions });
   return root;
 }
 
@@ -65,6 +67,38 @@ describe("SessionStore", () => {
     ]);
     expect(session.events.map((event) => event.seq)).toEqual(
       session.events.map((_, index) => index),
+    );
+  });
+
+  test("rehydrates a session and continues its sequence", async () => {
+    const firstRoot = await createStore();
+    const first = firstRoot.sessions.create("durable-session");
+    first.appendBatch([
+      { type: "turn/start", turn: 1 },
+      { type: "turn/end", turn: 1, outcome: "completed" },
+    ]);
+    const stored = structuredClone([...first.events]);
+
+    const secondRoot = await createStore({ "durable-session": stored });
+    const rehydrated = secondRoot.sessions.create("durable-session");
+    expect(rehydrated.events).toEqual(stored);
+    expect(rehydrated.nextTurn()).toBe(2);
+    expect(rehydrated.append({ type: "turn/start", turn: 2 }).seq).toBe(3);
+  });
+
+  test("rejects a non-contiguous durable event log", async () => {
+    const root = await createStore({
+      broken: [
+        {
+          type: "session/created",
+          createdAt: "2026-08-27T00:00:00.000Z",
+          seq: 1,
+          timestamp: "2026-08-27T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(() => root.sessions.create("broken")).toThrow(
+      "non-contiguous event log",
     );
   });
 

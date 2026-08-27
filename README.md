@@ -69,7 +69,8 @@ FROCKBOT_SMOKE_PROMPT='/echo FrockBot is ready.' \
 ```text
 apps/
   desktop/          Electron Cordis host, WebUI server, and window plugins
-  agent-runtime/    Custom Cordis utility-process runtime
+  agent-runtime/    Transport-neutral Cordis agent composition plus Electron bridge
+  cloudflare/       User application loader, Dynamic Worker artifact, and bot state
   cordis-poc/       Executable pinned Cordis/Electron/WebUI foundation proof
 packages/
   agent-core/       Session, LLM, prompt, tool, and agent Cordis services
@@ -84,6 +85,35 @@ docs/
   adr/              Architectural decisions
   research/         Primary-source compatibility research
 ```
+
+## Cloudflare vertical slice
+
+The Cloudflare application builds one immutable Dynamic Worker artifact containing both the user-facing UI and Cordis agent runtime. The gateway loads it as `userId:applicationHash`; bot run state is stored through a user-scoped capability backed by one Durable Object per bot.
+
+```bash
+bun run --filter @frockbot/cloudflare test
+bun run --filter @frockbot/cloudflare typecheck
+bun run --filter @frockbot/cloudflare build
+```
+
+Run the real Electron renderer against the local Worker backend with Wrangler, Vite renderer HMR, and Electron main-process HMR:
+
+```bash
+bun run dev:cloudflare:electron
+```
+
+The command builds and seeds the Dynamic Worker artifact, then starts Wrangler on port 8787, the renderer development server on port 5173, and Electron pointed at that renderer. For Worker-only development, place the artifact in local R2 before starting Wrangler:
+
+```bash
+cd apps/cloudflare
+bun run artifact:build
+bunx wrangler r2 object put \
+  frockbot-application-artifacts/applications/foundation-v1.mjs \
+  --file dist/artifacts/foundation-v1.mjs --local
+bunx wrangler dev
+```
+
+Then open `http://localhost:8787/?as_user=alice`. CLI requests may instead send `x-frockbot-user-id: alice`. These query/header/cookie seams are deliberately development-only and are not presented as production authentication.
 
 ## Security model
 

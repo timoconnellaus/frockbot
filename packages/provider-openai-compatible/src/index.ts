@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   LlmMessage,
   LlmProvider,
@@ -219,7 +218,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
       yield {
         type: "tool-call",
         call: {
-          id: tool.id || randomUUID(),
+          id: tool.id || crypto.randomUUID(),
           name: tool.name,
           input: parseToolInput(tool.arguments),
         },

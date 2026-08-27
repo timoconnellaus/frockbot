@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   LlmStreamEvent,
   NormalizedModelRequest,
@@ -28,7 +27,7 @@ async function* requestClockTool(
   signal.throwIfAborted();
   yield {
     type: "tool-call",
-    call: { id: randomUUID(), name: "current_time", input: {} },
+    call: { id: crypto.randomUUID(), name: "current_time", input: {} },
   };
   yield { type: "finish", reason: "tool-calls" };
 }

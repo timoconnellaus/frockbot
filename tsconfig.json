@@ -2,7 +2,8 @@
   "files": [],
   "references": [
     { "path": "./packages/protocol" },
-    { "path": "./apps/agent-worker" },
+    { "path": "./apps/agent-runtime" },
+    { "path": "./apps/cloudflare" },
     { "path": "./apps/desktop" }
   ]
 }
