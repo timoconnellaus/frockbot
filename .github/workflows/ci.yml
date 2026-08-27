@@ -151,12 +151,16 @@ jobs:
         env:
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
         run: |
-          # shellcheck disable=SC2016
-          bun -e '
-          import config from "./wrangler.jsonc";
-          config.d1_databases[0].database_id = process.env.CLOUDFLARE_D1_DATABASE_ID;
-          await Bun.write("wrangler.jsonc", `${JSON.stringify(config, null, 2)}\n`);
-          '
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'wrangler.jsonc';
+          const placeholder = '00000000-0000-0000-0000-000000000000';
+          const source = fs.readFileSync(file, 'utf8');
+          if (!source.includes(placeholder)) {
+            throw new Error(`${file} no longer contains the placeholder database_id ${placeholder}`);
+          }
+          fs.writeFileSync(file, source.replaceAll(placeholder, process.env.CLOUDFLARE_D1_DATABASE_ID));
+          NODE
 
       - name: Build application artifact
         working-directory: apps/cloudflare
