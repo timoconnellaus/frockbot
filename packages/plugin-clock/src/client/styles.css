@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .clock-heading button {
@@ -27,13 +27,13 @@
 }
 
 .clock-card time {
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
 .clock-card small {
   color: #777;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .clock-card code {
@@ -43,5 +43,5 @@
   border-radius: 5px;
   color: #72d7a3;
   background: #101010;
-  font-size: 9px;
+  font-size: 12px;
 }

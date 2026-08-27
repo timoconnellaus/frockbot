@@ -38,8 +38,8 @@ button {
 }
 
 .app-shell {
-  --sidebar-width: 185px;
-  --panel-width: 215px;
+  --sidebar-width: 278px;
+  --panel-width: 320px;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   width: 100%;
@@ -57,41 +57,20 @@ button {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  padding: 8px 7px;
+  padding: 12px;
   border-right: 1px solid #282828;
   background: #121212;
 }
 
 .window-controls {
-  display: flex;
-  height: 18px;
-  align-items: center;
-  gap: 7px;
-  padding-left: 3px;
+  height: 20px;
   -webkit-app-region: drag;
-}
-
-.window-controls i {
-  display: block;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-}
-
-.window-controls i:nth-child(1) {
-  background: #ff5f57;
-}
-.window-controls i:nth-child(2) {
-  background: #febc2e;
-}
-.window-controls i:nth-child(3) {
-  background: #28c840;
 }
 
 .new-bot {
   position: absolute;
-  top: 5px;
-  right: 9px;
+  top: 8px;
+  right: 16px;
   padding: 0 4px;
   color: #8c8c8c;
   background: transparent;
@@ -102,14 +81,19 @@ button {
 
 .search {
   display: flex;
-  height: 24px;
+  height: 32px;
   align-items: center;
-  gap: 5px;
-  margin: 5px 0 11px;
-  padding: 0 7px;
+  gap: 7px;
+  margin: 16px 0 18px;
+  padding: 0 10px;
   border-radius: 5px;
   color: #a0a0a0;
   background: #292929;
+}
+
+.search > span {
+  font-size: 20px;
+  line-height: 1;
 }
 
 .search input {
@@ -119,7 +103,7 @@ button {
   outline: 0;
   color: #c6c6c6;
   background: transparent;
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .bot-list {
@@ -130,12 +114,12 @@ button {
 .bot-row {
   display: grid;
   width: 100%;
-  height: 48px;
-  grid-template-columns: 23px minmax(0, 1fr) auto;
+  height: 54px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
-  padding: 5px 7px;
+  gap: 10px;
+  margin-bottom: 3px;
+  padding: 6px 9px;
   border-radius: 6px;
   text-align: left;
   background: transparent;
@@ -148,10 +132,10 @@ button {
 
 .bot-icon {
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 9px;
   color: #111;
   background: #2987ef;
   font-size: 12px;
@@ -172,22 +156,22 @@ button {
 
 .bot-copy strong {
   color: #e3e3e3;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .bot-copy small {
   margin-top: 2px;
   color: #969696;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .bot-row time {
   align-self: start;
   margin-top: 2px;
   color: #858585;
-  font-size: 8px;
-  font-style: italic;
+  font-size: 12px;
+  font-style: normal;
 }
 
 .sidebar-bottom {
@@ -198,36 +182,36 @@ button {
 .profile {
   display: flex;
   width: 100%;
-  height: 35px;
+  height: 42px;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 8px;
   color: #d8d8d8;
   background: transparent;
-  font-size: 10px;
+  font-size: 14px;
   text-align: left;
 }
 
 .plugins {
-  gap: 7px;
+  gap: 10px;
   border-top: 1px solid #272727;
 }
 
 .plugins span {
   display: grid;
-  width: 18px;
-  height: 18px;
+  width: 26px;
+  height: 26px;
   place-items: center;
   border-radius: 50%;
   background: #292929;
 }
 
 .profile {
-  gap: 7px;
+  gap: 10px;
 }
 
 .profile-face {
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: linear-gradient(135deg, #f8d7c6, #4a3131);
 }
@@ -235,9 +219,9 @@ button {
 .context-menu {
   position: absolute;
   z-index: 20;
-  top: 88px;
-  left: 176px;
-  width: 194px;
+  top: 112px;
+  left: 269px;
+  width: 214px;
   padding: 7px 12px;
   border: 1px solid #2b2b2b;
   border-radius: 13px;
@@ -255,7 +239,7 @@ button {
   padding: 0;
   color: #e4e4e4;
   background: transparent;
-  font-size: 12px;
+  font-size: 14px;
   text-align: left;
 }
 
@@ -289,10 +273,10 @@ button {
 
 .topbar {
   display: flex;
-  height: 40px;
+  height: 44px;
   align-items: center;
-  gap: 8px;
-  padding: 0 11px;
+  gap: 9px;
+  padding: 0 16px;
   border-bottom: 1px solid #292929;
   -webkit-app-region: drag;
 }
@@ -316,7 +300,7 @@ button {
 
 .workspace-title strong {
   color: #dedede;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -325,40 +309,9 @@ button {
   max-width: 250px;
   margin-top: 1px;
   color: #858585;
-  font-size: 8px;
+  font-size: 11px;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.connection {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-  color: #8e8e8e;
-  font-size: 9px;
-}
-
-.connection i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #777;
-}
-
-.connection-ready {
-  color: #82bd90;
-}
-.connection-ready i {
-  background: #53b26c;
-}
-.connection-error,
-.connection-disconnected {
-  color: #df737b;
-}
-.connection-error i,
-.connection-disconnected i {
-  background: #e95461;
 }
 
 .icon-button,
@@ -370,6 +323,12 @@ button {
   -webkit-app-region: no-drag;
 }
 
+.icon-button {
+  margin-left: auto;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .panel-toggle {
   font-size: 21px;
   font-weight: 200;
@@ -377,9 +336,9 @@ button {
 
 .thread {
   position: absolute;
-  inset: 40px 0 58px;
+  inset: 44px 0 72px;
   overflow-y: auto;
-  padding: 6px 12px 30px;
+  padding: 8px 16px 32px;
   scrollbar-color: #333 transparent;
   scrollbar-width: thin;
 }
@@ -409,7 +368,7 @@ button {
 .empty-thread h1 {
   margin: 0;
   color: #d8d8d8;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 550;
 }
 
@@ -417,7 +376,7 @@ button {
   max-width: 320px;
   margin: 6px 0 0;
   color: #858585;
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -435,19 +394,19 @@ button {
 
 .message-bubble {
   width: max-content;
-  max-width: min(560px, 78%);
-  padding: 7px 10px;
-  border-radius: 13px;
+  max-width: min(640px, 84%);
+  padding: 8px 12px;
+  border-radius: 16px;
   color: #e2e2e2;
   background: #292929;
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .message-user .message-bubble {
-  max-width: min(430px, 68%);
+  max-width: min(640px, 84%);
   background: #3b3b3b;
 }
 
@@ -497,7 +456,7 @@ button {
   border: 1px solid #303030;
   border-radius: 8px;
   background: #171717;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .tool-row summary {
@@ -529,7 +488,7 @@ button {
   border-top: 1px solid #303030;
   color: #bdbdbd;
   font:
-    9px / 1.45 ui-monospace,
+    12px / 1.45 ui-monospace,
     SFMono-Regular,
     Menlo,
     monospace;
@@ -552,7 +511,7 @@ button {
   border-radius: 9px;
   color: #f1a9af;
   background: #28171a;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .error-banner button {
@@ -566,25 +525,25 @@ button {
 
 .composer {
   position: absolute;
-  right: 11px;
-  bottom: 9px;
-  left: 11px;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
   display: flex;
-  min-height: 36px;
+  min-height: 44px;
   align-items: flex-end;
-  gap: 7px;
-  padding: 6px;
+  gap: 8px;
+  padding: 7px;
   border: 1px solid #3c3c3c;
-  border-radius: 18px;
+  border-radius: 22px;
   background: #282828;
 }
 
 .add-button,
 .send-button {
   display: grid;
-  width: 23px;
-  height: 23px;
-  flex: 0 0 23px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   place-items: center;
   border-radius: 50%;
   cursor: pointer;
@@ -607,7 +566,7 @@ button {
   padding: 5px 0 3px;
   color: #e5e5e5;
   background: transparent;
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.35;
 }
 
@@ -633,13 +592,13 @@ button {
   border-radius: 12px;
   color: #f3b2b7;
   background: #5b292e;
-  font-size: 9px;
+  font-size: 12px;
   cursor: pointer;
 }
 
 .right-panel {
   min-width: 0;
-  padding: 42px 11px 12px;
+  padding: 46px 16px 16px;
   background: #090909;
 }
 
@@ -648,7 +607,7 @@ button {
   height: 22px;
   align-items: center;
   color: #aaa;
-  font-size: 9px;
+  font-size: 14px;
 }
 
 .panel-heading strong {
@@ -663,7 +622,7 @@ button {
 
 .panel-heading > span {
   color: #666;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .panel-heading > button {
@@ -679,13 +638,13 @@ button {
   position: relative;
   display: grid;
   overflow: hidden;
-  height: 122px;
+  height: 180px;
   place-items: center;
   border: 1px solid #292929;
   border-radius: 4px;
   color: #707070;
   background: #171717;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .screen-grid {
@@ -706,10 +665,14 @@ button {
 }
 
 .screen-label {
-  margin: 5px 0 13px;
+  margin: 8px 0 18px;
   color: #777;
-  font-size: 8px;
+  font-size: 12px;
   text-align: center;
+}
+
+.right-panel > section:first-child > .panel-heading {
+  display: none;
 }
 
 .routines-section {
@@ -734,14 +697,14 @@ button {
 .routine-empty strong {
   display: block;
   color: #bdbdbd;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .routine-empty p {
   margin: 3px 0 0;
   color: #747474;
-  font-size: 8px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -753,7 +716,7 @@ button {
   .right-panel {
     position: absolute;
     z-index: 15;
-    top: 40px;
+    top: 44px;
     right: 0;
     bottom: 0;
     width: var(--panel-width);
@@ -765,16 +728,13 @@ button {
 @media (max-width: 700px) {
   .app-shell,
   .app-shell.panel-open {
-    grid-template-columns: 150px minmax(0, 1fr);
+    grid-template-columns: 190px minmax(0, 1fr);
   }
 
   .sidebar {
-    width: 150px;
+    width: 190px;
   }
   .context-menu {
-    left: 142px;
-  }
-  .connection {
-    display: none;
+    left: 182px;
   }
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useRpc } from "@cordisjs/client";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import type { FrockBotWebData, WebConnection, WebToolActivity } from "../shared.js";
+import type { FrockBotWebData, WebToolActivity } from "../shared.js";
 
 const web = useRpc<FrockBotWebData>();
 const draft = ref("");
@@ -15,13 +15,6 @@ const canSend = computed(
     !isRunning.value &&
     draft.value.trim().length > 0,
 );
-
-function connectionLabel(connection: WebConnection): string {
-  if (connection === "ready") return "Cordis agent connected";
-  if (connection === "starting") return "Starting Cordis agent";
-  if (connection === "disconnected") return "Cordis agent stopped";
-  return "Cordis agent needs attention";
-}
 
 function toolSymbol(tool: WebToolActivity): string {
   if (tool.status === "running") return "···";
@@ -55,7 +48,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
   <div class="frockbot-root">
     <div class="app-shell" :class="{ 'panel-open': rightPanelOpen }">
       <aside class="sidebar">
-        <div class="window-controls" aria-hidden="true"><i /><i /><i /></div>
+        <div class="window-controls" aria-hidden="true" />
         <button class="new-bot" title="New bot" aria-label="New bot">+</button>
         <label class="search"><span>⌕</span><input aria-label="Search bots" placeholder="Search" /></label>
 
@@ -64,14 +57,14 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
             class="bot-row active"
             @contextmenu.prevent="contextMenuOpen = true"
           >
-            <span class="bot-avatar">⌁</span>
+            <span class="bot-icon">⌁</span>
             <span class="bot-copy">
               <strong>Barebones</strong>
               <small>A plain bot, ready to grow.</small>
             </span>
-            <em>Now</em>
+            <time>Now</time>
           </button>
-          <div v-if="contextMenuOpen" class="bot-menu" @pointerdown.stop>
+          <div v-if="contextMenuOpen" class="context-menu" @pointerdown.stop>
             <button>Rename</button>
             <button>Duplicate</button>
             <button>Choose outfit</button>
@@ -81,7 +74,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
 
         <div class="sidebar-bottom">
           <button class="plugins"><span>⊙</span>Plugins</button>
-          <button class="profile"><span class="profile-avatar" />FrockBot user</button>
+          <button class="profile"><span class="profile-face" />FrockBot user</button>
         </div>
       </aside>
 
@@ -91,9 +84,6 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
           <div class="workspace-title">
             <strong>Barebones</strong>
             <small>{{ state.modelLabel }}</small>
-          </div>
-          <div class="connection" :class="`connection-${state.connection}`">
-            <i />{{ connectionLabel(state.connection) }}
           </div>
           <button class="icon-button" title="Bot settings" aria-label="Bot settings">⚙</button>
           <button

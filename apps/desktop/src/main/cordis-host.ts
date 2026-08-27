@@ -41,10 +41,10 @@ class DesktopWindowService extends Service {
   async create(): Promise<BrowserWindow> {
     const window = new BrowserWindow({
       title: "FrockBot",
-      width: 1180,
-      height: 760,
-      minWidth: 860,
-      minHeight: 560,
+      width: 1351,
+      height: 859,
+      minWidth: 980,
+      minHeight: 620,
       backgroundColor: "#050505",
       show: false,
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
