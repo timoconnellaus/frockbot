@@ -88,9 +88,18 @@ async function signIn(): Promise<void> {
       return;
     }
     const query = electronAuthQuery();
+    const callbackURL = new URL("/", window.location.origin);
+    if (query) {
+      for (const [key, value] of Object.entries(query)) {
+        callbackURL.searchParams.set(key, value);
+      }
+    }
+    const callback = callbackURL.toString();
     const result = await authClient.signIn.social({
       provider: "google",
-      callbackURL: new URL("/", window.location.origin).toString(),
+      callbackURL: callback,
+      newUserCallbackURL: callback,
+      errorCallbackURL: callback,
       fetchOptions: query ? { query } : undefined,
     });
     if (result.error) throw new Error(result.error.message);
