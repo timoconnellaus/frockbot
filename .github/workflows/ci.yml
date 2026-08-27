@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   validate:
@@ -148,13 +148,11 @@ jobs:
         env:
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
         run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const file = 'wrangler.jsonc';
-          const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+          bun -e '
+          import config from "./wrangler.jsonc";
           config.d1_databases[0].database_id = process.env.CLOUDFLARE_D1_DATABASE_ID;
-          fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
-          NODE
+          await Bun.write("wrangler.jsonc", `${JSON.stringify(config, null, 2)}\n`);
+          '
 
       - name: Build application artifact
         working-directory: apps/cloudflare
