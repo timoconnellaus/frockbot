@@ -83,12 +83,12 @@ describe("PackageCatalog", () => {
     });
 
     expect(installed.manifest).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: "clock",
       contributions: {
-        agent: "./agent",
-        desktop: "./host",
-        web: { slots: ["frockbot.right-panel"] },
+        runtime: { entry: "./agent" },
+        desktop: { entry: "./host", execution: "trusted-main-legacy" },
+        client: { mounts: [{ slot: "frockbot.right-panel" }] },
       },
       permissions: ["time:read"],
     });
@@ -97,9 +97,9 @@ describe("PackageCatalog", () => {
   test("commits and disables contributions in dependency-safe order", async () => {
     const root = await createCatalog();
     const log: string[] = [];
-    root.packages.registerHost(new FakeHost("agent", log));
+    root.packages.registerHost(new FakeHost("runtime", log));
+    root.packages.registerHost(new FakeHost("client", log));
     root.packages.registerHost(new FakeHost("desktop", log));
-    root.packages.registerHost(new FakeHost("web", log));
     root.packages.install({ specifier: "fixture", manifest: manifest() });
 
     await root.packages.enable("fixture");
@@ -107,15 +107,15 @@ describe("PackageCatalog", () => {
     await root.packages.disable("fixture");
 
     expect(log).toEqual([
-      "prepare:agent:fixture",
+      "prepare:runtime:fixture",
+      "prepare:client:fixture",
       "prepare:desktop:fixture",
-      "prepare:web:fixture",
-      "commit:agent",
+      "commit:runtime",
+      "commit:client",
       "commit:desktop",
-      "commit:web",
-      "dispose:web",
       "dispose:desktop",
-      "dispose:agent",
+      "dispose:client",
+      "dispose:runtime",
     ]);
     expect(root.packages.get("fixture")?.status).toBe("installed");
   });
@@ -123,9 +123,9 @@ describe("PackageCatalog", () => {
   test("rolls back prepared and committed contributions after failure", async () => {
     const root = await createCatalog();
     const log: string[] = [];
-    root.packages.registerHost(new FakeHost("agent", log));
+    root.packages.registerHost(new FakeHost("runtime", log));
+    root.packages.registerHost(new FakeHost("client", log));
     root.packages.registerHost(new FakeHost("desktop", log, true));
-    root.packages.registerHost(new FakeHost("web", log));
     root.packages.install({ specifier: "fixture", manifest: manifest() });
 
     let failure: unknown;
@@ -139,8 +139,8 @@ describe("PackageCatalog", () => {
       "desktop commit failed",
     );
     expect(log.slice(-3)).toEqual([
-      "dispose:agent",
-      "rollback:web",
+      "dispose:client",
+      "dispose:runtime",
       "rollback:desktop",
     ]);
     expect(root.packages.get("fixture")).toMatchObject({
@@ -192,7 +192,7 @@ describe("PackageCatalog", () => {
       };
     };
     root.packages.registerHost(
-      new LocalCordisContributionHost("agent", root, () =>
+      new LocalCordisContributionHost("runtime", root, () =>
         Promise.resolve({ default: plugin }),
       ),
     );

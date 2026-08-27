@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "id": "provider-foundation",
+  "displayName": "Foundation Provider",
+  "version": "0.0.1",
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
+  "contributions": {
+    "runtime": {
+      "entry": "./runtime"
+    }
+  },
+  "permissions": []
+}

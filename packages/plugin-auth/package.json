@@ -1,0 +1,29 @@
+{
+  "name": "@frockbot/plugin-auth",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client/index.ts",
+    "./manifest": "./src/manifest.ts",
+    "./frockbot.json": "./frockbot.json",
+    "./package.json": "./package.json"
+  },
+  "frockbot": { "manifest": "./frockbot.json" },
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@better-auth/electron": "1.7.2",
+    "@frockbot/client-core": "workspace:*",
+    "better-auth": "1.7.2",
+    "vue": "3.5.33"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.2",
+    "vue-tsc": "3.2.5"
+  }
+}

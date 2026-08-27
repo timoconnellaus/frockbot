@@ -1,4 +1,4 @@
-import type { WebToolActivity } from "@frockbot/webui-shell/shared";
+import type { WebToolActivity } from "@frockbot/plugin-shell/shared";
 
 export interface TurnEvent {
   type: string;

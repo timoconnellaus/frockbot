@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "id": "shell",
+  "displayName": "FrockBot Shell",
+  "version": "0.0.1",
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
+  "contributions": {
+    "client": {
+      "entry": "./client",
+      "mounts": [
+        {
+          "slot": "authenticated-root",
+          "order": 10000
+        }
+      ],
+      "outlets": ["frockbot.right-panel", "frockbot.computer"]
+    }
+  },
+  "permissions": ["agent:turn"]
+}

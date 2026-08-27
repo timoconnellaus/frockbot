@@ -22,7 +22,7 @@
     "@frockbot/plugin-clock": "workspace:*",
     "@frockbot/plugin-mobile-clipboard": "workspace:*",
     "@frockbot/plugin-mobile-notifications": "workspace:*",
-    "@frockbot/webui-shell": "workspace:*",
+    "@frockbot/plugin-shell": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.33"
   },

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "id": "auth",
+  "displayName": "Authentication",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "contributions": {
+    "client": {
+      "entry": "./client",
+      "mounts": [{ "slot": "root", "order": 20000 }],
+      "outlets": ["authenticated-root"]
+    }
+  },
+  "permissions": ["identity:authenticate"]
+}

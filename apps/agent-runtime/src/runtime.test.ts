@@ -4,16 +4,13 @@ import type {
   MemoryPluginConfig,
   MemoryVector,
 } from "@frockbot/plugin-memory";
-import { flySpriteRuntimePackage } from "./fly-sprite-package.js";
 import type { FoundationRuntime } from "./runtime.js";
 import { createFoundationRuntime } from "./runtime.js";
 
 const runtimes: FoundationRuntime[] = [];
 
 async function createRuntime(): Promise<FoundationRuntime> {
-  const runtime = await createFoundationRuntime(undefined, {
-    agentPackages: [flySpriteRuntimePackage],
-  });
+  const runtime = await createFoundationRuntime();
   runtimes.push(runtime);
   return runtime;
 }

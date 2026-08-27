@@ -60,7 +60,7 @@ describe("identity plugin", () => {
   test("satisfies plugin package conventions", () => {
     expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
       name: "@frockbot/plugin-identity",
-      contributionKinds: ["agent"],
+      contributionKinds: ["runtime"],
     });
   });
 });

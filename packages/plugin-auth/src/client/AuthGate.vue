@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import FrockBotApp from "@frockbot/webui-shell/client/FrockBotApp.vue";
 import { electronProxyClient } from "@better-auth/electron/proxy";
 import { createAuthClient } from "better-auth/client";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
@@ -155,7 +154,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <FrockBotApp v-if="user" />
+  <k-slot v-if="user" name="authenticated-root" />
   <main v-else class="auth-screen">
     <section class="auth-card" aria-labelledby="auth-title">
       <div class="auth-mark" aria-hidden="true">⌁</div>

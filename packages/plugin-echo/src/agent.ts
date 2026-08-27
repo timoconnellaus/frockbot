@@ -34,7 +34,7 @@ export const echoTool: ToolDefinition = {
   execute: async (input: unknown) => {
     const decoded = decodeEchoInput(input);
     if (!decoded) return { content: "Echo text is required", isError: true };
-    return { content: `Echo: ${decoded.text}`, isError: false };
+    return { content: decoded.text, isError: false };
   },
 };
 

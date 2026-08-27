@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
+    "./client": "./src/client/application.ts",
     "./host": "./src/host.ts",
     "./manifest": "./src/manifest.ts",
     "./shared": "./src/shared.ts",
@@ -26,6 +27,7 @@
     "@cordisjs/plugin-webui": "0.8.2",
     "@fly/sprites": "0.1.0",
     "@frockbot/agent-core": "workspace:*",
+    "@frockbot/client-core": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.33"
   },

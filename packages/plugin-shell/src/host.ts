@@ -6,10 +6,10 @@ export function addFrockBotWebEntry(
   ctx: Context,
   data: FrockBotWebData,
 ): Entry<FrockBotWebData> {
-  const packageUrl = import.meta.resolve("@frockbot/webui-shell/package.json");
+  const packageUrl = import.meta.resolve("@frockbot/plugin-shell/package.json");
   return ctx.webui.addEntry<FrockBotWebData>(
     {
-      modulePath: "@frockbot/webui-shell",
+      modulePath: "@frockbot/plugin-shell",
       baseUrl: packageUrl,
       source: "./src/client/index.ts",
       manifest: "./dist/manifest.json",

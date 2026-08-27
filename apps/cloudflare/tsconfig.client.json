@@ -6,7 +6,7 @@
     "allowImportingTsExtensions": true,
     "baseUrl": "..",
     "paths": {
-      "@cordisjs/client": ["../packages/webui-shell/src/client/cordis-client-shim.d.ts"]
+      "@cordisjs/client": ["../packages/plugin-shell/src/client/cordis-client-shim.d.ts"]
     },
     "strict": true,
     "noEmit": true,

@@ -3,13 +3,13 @@ import {
   clockWebDataKey,
   type ClockWebData,
 } from "@frockbot/plugin-clock/shared";
-import "@frockbot/webui-shell/client/styles.css";
+import "@frockbot/plugin-shell/client/styles.css";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
   type SendPromptResult,
   type WebChatMessage,
-} from "@frockbot/webui-shell/shared";
+} from "@frockbot/plugin-shell/shared";
 import { createApp, ref, type Ref } from "vue";
 import { createMobileHost, type MobileHost } from "../host/index.ts";
 import { createCapacitorAdapters } from "../host/capacitor-adapters.ts";

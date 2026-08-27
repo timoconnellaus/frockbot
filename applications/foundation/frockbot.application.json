@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "specifier": "@frockbot/plugin-auth",
+      "version": "0.0.1",
+      "grants": ["identity:authenticate"]
+    },
+    {
+      "specifier": "@frockbot/plugin-identity",
+      "version": "0.0.1",
+      "grants": []
+    },
+    {
+      "specifier": "@frockbot/plugin-provider-foundation",
+      "version": "0.0.1",
+      "grants": []
+    },
+    {
+      "specifier": "@frockbot/plugin-echo",
+      "version": "0.0.1",
+      "grants": []
+    },
+    {
+      "specifier": "@frockbot/plugin-shell",
+      "version": "0.0.1",
+      "grants": ["agent:turn"]
+    },
+    {
+      "specifier": "@frockbot/plugin-clock",
+      "version": "0.0.1",
+      "grants": ["time:read"]
+    },
+    {
+      "specifier": "@frockbot/plugin-memory",
+      "version": "0.0.1",
+      "grants": ["memory:read", "memory:write"]
+    },
+    {
+      "specifier": "@frockbot/plugin-fly-sprite",
+      "version": "0.0.1",
+      "grants": [
+        "computer:execute",
+        "computer:browser",
+        "network:sprites",
+        "webui:remote-frame"
+      ]
+    },
+    {
+      "specifier": "@frockbot/plugin-desktop-notifications",
+      "version": "0.0.1",
+      "grants": ["desktop:notifications"]
+    },
+    {
+      "specifier": "@frockbot/plugin-desktop-directory-picker",
+      "version": "0.0.1",
+      "grants": ["desktop:directory-picker"]
+    },
+    {
+      "specifier": "@frockbot/plugin-desktop-clipboard",
+      "version": "0.0.1",
+      "grants": ["desktop:clipboard:read", "desktop:clipboard:write"]
+    },
+    {
+      "specifier": "@frockbot/plugin-mobile-notifications",
+      "version": "0.0.1",
+      "grants": ["mobile:notifications"]
+    },
+    {
+      "specifier": "@frockbot/plugin-mobile-clipboard",
+      "version": "0.0.1",
+      "grants": ["mobile:clipboard:read", "mobile:clipboard:write"]
+    }
+  ]
+}

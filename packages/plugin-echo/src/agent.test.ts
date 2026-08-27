@@ -67,7 +67,7 @@ describe("echo plugin", () => {
         sessionId: "session",
         signal: controller.signal,
       }),
-    ).toEqual({ content: "Echo: hello plugins", isError: false });
+    ).toEqual({ content: "hello plugins", isError: false });
 
     await fiber.dispose();
     expect(harness.root.tools.schemas()).toEqual([]);
@@ -77,7 +77,7 @@ describe("echo plugin", () => {
   test("satisfies plugin package conventions", () => {
     expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
       name: "@frockbot/plugin-echo",
-      contributionKinds: ["agent"],
+      contributionKinds: ["runtime"],
     });
   });
 });

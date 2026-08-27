@@ -6,7 +6,7 @@ import {
   type SendPromptResult,
   type WebChatMessage,
   type WebToolActivity,
-} from "@frockbot/webui-shell";
+} from "@frockbot/plugin-shell";
 import type { AgentEvent } from "@frockbot/protocol";
 import type { Context, Plugin } from "cordis";
 import { AgentProcess } from "./agent-process.js";

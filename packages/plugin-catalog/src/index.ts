@@ -3,7 +3,7 @@ import {
   type ContributionKind,
   decodeFrockBotManifest,
   declaredContributionKinds,
-  type FrockBotManifestV1,
+  type FrockBotManifest,
 } from "./manifest.ts";
 
 export * from "./manifest.ts";
@@ -23,7 +23,7 @@ export interface PackageSource {
 
 export interface PackageDescriptor {
   specifier: string;
-  manifest: FrockBotManifestV1;
+  manifest: FrockBotManifest;
 }
 
 export interface ActiveContribution {
@@ -271,12 +271,12 @@ function unwrapPlugin(module: unknown): Plugin | undefined {
 }
 
 export class LocalCordisContributionHost implements ContributionHost {
-  readonly kind: "agent" | "desktop" | "mobile";
+  readonly kind: "runtime" | "desktop" | "mobile";
   private readonly ctx: Context;
   private readonly resolve: ContributionResolver;
 
   constructor(
-    kind: "agent" | "desktop" | "mobile",
+    kind: "runtime" | "desktop" | "mobile",
     ctx: Context,
     resolve: ContributionResolver,
   ) {
@@ -288,9 +288,11 @@ export class LocalCordisContributionHost implements ContributionHost {
   async prepare(
     pkg: PackageDescriptor,
   ): Promise<PreparedContribution | undefined> {
-    const path = pkg.manifest.contributions[this.kind];
-    if (!path) return undefined;
-    const module = await this.resolve(`${pkg.specifier}${path.slice(1)}`);
+    const contribution = pkg.manifest.contributions[this.kind];
+    if (!contribution) return undefined;
+    const module = await this.resolve(
+      `${pkg.specifier}${contribution.entry.slice(1)}`,
+    );
     const plugin = unwrapPlugin(module);
     if (!plugin || !this.ctx.registry.resolve(plugin)) {
       throw new Error(

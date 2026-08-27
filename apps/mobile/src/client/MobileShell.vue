@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import FrockBotApp from "@frockbot/webui-shell/client/FrockBotApp.vue";
-import { frockBotWebDataKey } from "@frockbot/webui-shell/shared";
+import FrockBotApp from "@frockbot/plugin-shell/client/FrockBotApp.vue";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, ref } from "vue";
 import {
   authSessionKey,

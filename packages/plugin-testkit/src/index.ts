@@ -2,7 +2,7 @@ import {
   type ContributionKind,
   decodeFrockBotManifest,
   declaredContributionKinds,
-  type FrockBotManifestV1,
+  type FrockBotManifest,
 } from "@frockbot/plugin-catalog";
 import { Context, type Plugin } from "cordis";
 
@@ -13,7 +13,7 @@ export interface PluginPackageFixture {
 
 export interface VerifiedPluginPackage {
   name: string;
-  manifest: FrockBotManifestV1;
+  manifest: FrockBotManifest;
   contributionKinds: ContributionKind[];
 }
 
@@ -68,14 +68,13 @@ export function verifyPluginPackage(
   requireExport(exports, "./manifest", issues);
   requireExport(exports, "./frockbot.json", issues);
   requireExport(exports, "./package.json", issues);
-  if (manifest.contributions.agent) {
-    requireExport(exports, manifest.contributions.agent, issues);
-  }
-  if (manifest.contributions.desktop) {
-    requireExport(exports, manifest.contributions.desktop, issues);
-  }
-  if (manifest.contributions.mobile) {
-    requireExport(exports, manifest.contributions.mobile, issues);
+  for (const contribution of [
+    manifest.contributions.runtime,
+    manifest.contributions.client,
+    manifest.contributions.desktop,
+    manifest.contributions.mobile,
+  ]) {
+    if (contribution) requireExport(exports, contribution.entry, issues);
   }
   if (new Set(manifest.permissions).size !== manifest.permissions.length) {
     issues.push("manifest permissions must not contain duplicates");

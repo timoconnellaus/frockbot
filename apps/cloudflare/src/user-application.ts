@@ -1,4 +1,5 @@
 import { createFoundationRuntime } from "@frockbot/agent-runtime/runtime";
+import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 import type { UserApplicationEnv } from "./contracts.js";
 import { appendedSessionEvents } from "./durable-session.js";
@@ -104,6 +105,7 @@ async function readPrompt(request: Request): Promise<string> {
 }
 
 export function createUserApplication() {
+  const application = createFoundationRuntimeApplication();
   return async (
     request: Request,
     env: UserApplicationEnv,
@@ -146,10 +148,20 @@ export function createUserApplication() {
       );
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {
+      const compiled = await application;
       return Response.json({
         schemaVersion: 1,
         deployment: env.DEPLOYMENT,
-        contributions: ["frockbot.shell", "clock.agent"],
+        applicationHash: compiled.plan.applicationHash,
+        packages: compiled.plan.packages.map((pkg) => ({
+          id: pkg.id,
+          version: pkg.version,
+          contributions: [
+            ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
+            ...(pkg.manifest.contributions.client ? ["client"] : []),
+            ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
+          ],
+        })),
       });
     }
 
@@ -190,6 +202,7 @@ export function createUserApplication() {
     const runtime = await createFoundationRuntime(undefined, {
       sessionId,
       sessionEvents,
+      application: await application,
       memory: memoryPluginConfig(env, botId),
     });
 

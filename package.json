@@ -3,16 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "packageManager": "bun@1.3.6",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "trustedDependencies": [
-    "electron"
-  ],
+  "workspaces": ["applications/*", "apps/*", "packages/*"],
+  "trustedDependencies": ["electron"],
   "scripts": {
     "build:cordis-agent": "bun run --filter @frockbot/agent-runtime build",
-    "build:webui": "bun run --filter @frockbot/webui-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
+    "build:webui": "bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
     "build:agents": "bun run build:cordis-agent",
     "build:cloudflare": "bun run --filter @frockbot/cloudflare build",
     "build:mobile": "bun run build:webui && bun run --filter @frockbot/mobile build",

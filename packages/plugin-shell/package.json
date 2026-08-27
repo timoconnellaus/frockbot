@@ -1,23 +1,29 @@
 {
-  "name": "@frockbot/webui-shell",
+  "name": "@frockbot/plugin-shell",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./host": "./src/host.ts",
+    "./client": "./src/client/index.ts",
+    "./manifest": "./src/manifest.ts",
     "./shared": "./src/shared.ts",
     "./client/FrockBotApp.vue": "./src/client/FrockBotApp.vue",
     "./client/styles.css": "./src/client/styles.css",
+    "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"
+  },
+  "frockbot": {
+    "manifest": "./frockbot.json"
   },
   "scripts": {
     "build": "vite build",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@cordisjs/client": "0.8.2",
     "@cordisjs/plugin-webui": "0.8.2",
+    "@frockbot/client-core": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.33"
   },

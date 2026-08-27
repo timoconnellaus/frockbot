@@ -15,11 +15,19 @@ declare module "cordis" {
 }
 
 const fixtureManifest = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "fixture",
   displayName: "Fixture",
   version: "1.2.3",
-  contributions: { agent: "./agent", desktop: "./desktop" },
+  compatibility: { frockbot: ">=0.0.1" },
+  contributions: {
+    runtime: { entry: "./agent" },
+    desktop: {
+      entry: "./desktop",
+      execution: "sandboxed-renderer",
+      commands: ["fixture.read"],
+    },
+  },
   permissions: ["fixture:read"],
 };
 
@@ -47,7 +55,7 @@ describe("verifyPluginPackage", () => {
       }),
     ).toMatchObject({
       name: "@frockbot/plugin-fixture",
-      contributionKinds: ["agent", "desktop"],
+      contributionKinds: ["runtime", "desktop"],
       manifest: { id: "fixture", version: "1.2.3" },
     });
   });

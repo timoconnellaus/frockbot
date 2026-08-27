@@ -4,13 +4,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Server from "@cordisjs/plugin-server";
 import WebUI from "@cordisjs/plugin-webui";
-import {
-  LocalCordisContributionHost,
-  PackageCatalog,
-  PassiveContributionHost,
-} from "@frockbot/plugin-catalog";
-import { clockManifest } from "@frockbot/plugin-clock";
-import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
+import { foundationTrustedDesktopPlugins } from "@frockbot/application-foundation/desktop";
+import { DesktopCommandRegistry } from "@frockbot/desktop-core";
+
+// Electron main mounts only statically bundled application contributions.
 import {
   type Context,
   Context as CordisContext,
@@ -18,6 +15,7 @@ import {
   Service,
 } from "cordis";
 import { app, BrowserWindow } from "electron";
+import { installDesktopCapabilities } from "./desktop-capabilities.js";
 import { webChatPlugin } from "./web-chat.js";
 
 interface DesktopWindowConfig {
@@ -241,25 +239,12 @@ export async function createCordisDesktopHost(): Promise<Context> {
     devMode: false,
     open: false,
   });
-  await root.plugin(PackageCatalog, { kinds: ["desktop", "web"] });
-  root.packages.registerHost(
-    new LocalCordisContributionHost(
-      "desktop",
-      root,
-      (specifier: string) => import(specifier),
-    ),
-  );
-  root.packages.registerHost(new PassiveContributionHost("web"));
-  root.packages.install({
-    specifier: "@frockbot/plugin-clock",
-    manifest: clockManifest,
-  });
-  root.packages.install({
-    specifier: "@frockbot/plugin-fly-sprite",
-    manifest: flySpriteManifest,
-  });
-  await root.packages.enable("clock");
-  await root.packages.enable("fly-sprite");
+  await root.plugin(DesktopCommandRegistry);
+  // Capability adapters mount before contributions that request them.
+  await installDesktopCapabilities(root);
+  for (const plugin of foundationTrustedDesktopPlugins) {
+    await root.plugin(plugin);
+  }
   await root.plugin(webChatPlugin);
   await root.plugin(DesktopWindowService, { baseUrl, credential });
   await root.desktopWindows.create();

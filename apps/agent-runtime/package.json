@@ -3,9 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "exports": {
-    "./runtime": "./src/runtime.ts"
-  },
+  "exports": { "./runtime": "./src/runtime.ts" },
   "scripts": {
     "build": "bun run build.ts",
     "test": "bun test src",
@@ -14,9 +12,8 @@
   "dependencies": {
     "@frockbot/agent-core": "workspace:*",
     "@frockbot/agent-loop": "workspace:*",
+    "@frockbot/application-foundation": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
-    "@frockbot/plugin-clock": "workspace:*",
-    "@frockbot/plugin-fly-sprite": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "@frockbot/provider-openai-compatible": "workspace:*",

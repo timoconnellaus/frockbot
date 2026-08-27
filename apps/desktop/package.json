@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "build:webui": "bun run --filter @frockbot/webui-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
+    "build:webui": "bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
     "dev": "bun run build:webui && electron-vite dev",
     "build": "bun run build:webui && electron-vite build",
     "start": "bun run build:webui && electron-vite preview",
@@ -17,11 +17,10 @@
     "@cordisjs/plugin-loader": "1.0.0-rc.5",
     "@cordisjs/plugin-server": "1.7.0",
     "@cordisjs/plugin-webui": "0.8.2",
-    "@frockbot/plugin-catalog": "workspace:*",
-    "@frockbot/plugin-clock": "workspace:*",
-    "@frockbot/plugin-fly-sprite": "workspace:*",
+    "@frockbot/application-foundation": "workspace:*",
+    "@frockbot/desktop-core": "workspace:*",
+    "@frockbot/plugin-shell": "workspace:*",
     "@frockbot/protocol": "workspace:*",
-    "@frockbot/webui-shell": "workspace:*",
     "better-auth": "1.7.2",
     "conf": "15.0.2",
     "cordis": "4.0.0-rc.8"

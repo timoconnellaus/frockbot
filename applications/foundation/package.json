@@ -1,0 +1,41 @@
+{
+  "name": "@frockbot/application-foundation",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./desktop": "./src/desktop.ts",
+    "./runtime": "./src/runtime.ts",
+    "./frockbot.application.json": "./frockbot.application.json",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/application-compiler": "workspace:*",
+    "@frockbot/client-core": "workspace:*",
+    "@frockbot/plugin-auth": "workspace:*",
+    "@frockbot/plugin-catalog": "workspace:*",
+    "@frockbot/plugin-clock": "workspace:*",
+    "@frockbot/plugin-desktop-clipboard": "workspace:*",
+    "@frockbot/plugin-desktop-directory-picker": "workspace:*",
+    "@frockbot/plugin-desktop-notifications": "workspace:*",
+    "@frockbot/plugin-echo": "workspace:*",
+    "@frockbot/plugin-fly-sprite": "workspace:*",
+    "@frockbot/plugin-identity": "workspace:*",
+    "@frockbot/plugin-memory": "workspace:*",
+    "@frockbot/plugin-mobile-clipboard": "workspace:*",
+    "@frockbot/plugin-mobile-notifications": "workspace:*",
+    "@frockbot/plugin-provider-foundation": "workspace:*",
+    "@frockbot/plugin-shell": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.6",
+    "typescript": "^7.0.2"
+  }
+}

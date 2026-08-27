@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useRpc } from "@cordisjs/client";
 import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   frockBotWebDataKey,
@@ -7,7 +6,9 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 
-const web = inject(frockBotWebDataKey) ?? useRpc<FrockBotWebData>();
+const injectedWeb = inject(frockBotWebDataKey);
+if (!injectedWeb) throw new Error("shell client data was not provided");
+const web = injectedWeb;
 const draft = ref("");
 const contextMenuOpen = ref(false);
 const rightPanelOpen = ref(true);
