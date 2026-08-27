@@ -56,7 +56,13 @@
   line-height: 1.55;
 }
 
-.google-button {
+.auth-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.google-button,
+.dev-button {
   display: flex;
   width: 100%;
   min-height: 46px;
@@ -71,17 +77,30 @@
   cursor: pointer;
 }
 
+.dev-button {
+  border-color: #296fbd;
+  color: #fff;
+  background: #1769c2;
+}
+
 .google-button:hover:not(:disabled) {
   border-color: #4b4b4b;
   background: #2a2a2a;
 }
 
-.google-button:focus-visible {
+.dev-button:hover:not(:disabled) {
+  border-color: #3988df;
+  background: #2178d7;
+}
+
+.google-button:focus-visible,
+.dev-button:focus-visible {
   outline: 2px solid #2987ef;
   outline-offset: 3px;
 }
 
-.google-button:disabled {
+.google-button:disabled,
+.dev-button:disabled {
   color: #929292;
   cursor: wait;
 }

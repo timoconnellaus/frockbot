@@ -8,6 +8,19 @@ const API_PATH_PATTERN = /^\/api\/bots\/[a-zA-Z0-9._-]+\/turns$/;
 const MAX_BODY_BYTES = 64 * 1024;
 const authBaseURL = process.env.FROCKBOT_AUTH_BASE_URL?.trim();
 const applicationURL = process.env.FROCKBOT_APPLICATION_URL?.trim();
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+function isLoopbackUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    return LOOPBACK_HOSTS.has(new URL(value).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+const useDevelopmentIdentity =
+  isLoopbackUrl(authBaseURL) && isLoopbackUrl(applicationURL);
 
 export interface DesktopApiRequest {
   path: string;
@@ -72,6 +85,9 @@ export function setupDesktopAuth(): void {
     if (!validApiRequest(request)) throw new Error("invalid API request");
 
     const headers = new Headers({ cookie: authClient.getCookie() });
+    if (useDevelopmentIdentity) {
+      headers.set("x-frockbot-user-id", "development");
+    }
     if (request.body !== undefined) {
       headers.set("content-type", "application/json");
     }

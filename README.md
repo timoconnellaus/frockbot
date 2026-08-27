@@ -114,7 +114,9 @@ Run the real Electron renderer against the local Worker backend with Wrangler, V
 bun run dev:cloudflare:electron
 ```
 
-The command builds and seeds the Dynamic Worker artifact, then starts Wrangler on port 8787, the renderer development server on port 5173, and Electron pointed at that renderer. For Worker-only development, place the artifact in local R2 before starting Wrangler:
+The command builds and seeds the Dynamic Worker artifact, then starts Wrangler on port 8787, the renderer development server on port 5173, and Electron pointed at that renderer. On `localhost`, `127.0.0.1`, or `::1`, the sign-in screen includes **Continue as local developer**; it uses the fixed `development` identity and does not require Google credentials. The identity is accepted by the backend only when local development authentication is enabled.
+
+For Worker-only development, place the artifact in local R2 before starting Wrangler:
 
 ```bash
 cd apps/cloudflare

@@ -2,6 +2,11 @@
 import { electronProxyClient } from "@better-auth/electron/proxy";
 import { createAuthClient } from "better-auth/client";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  developmentLoginUrl,
+  developmentUserFromUrl,
+  isLoopbackHost,
+} from "./development-login";
 
 const authClient = createAuthClient({
   plugins: [
@@ -16,6 +21,9 @@ const signingIn = ref(false);
 const user = ref<{ id: string; name: string; email: string } | null>(null);
 const error = ref<string>();
 const isDesktop = computed(() => Boolean(window.frockbotDesktop));
+const isLocalDevelopment = computed(() =>
+  isLoopbackHost(window.location.hostname),
+);
 const unsubscribers: Array<() => void> = [];
 let electronRedirectTimer: ReturnType<
   typeof authClient.ensureElectronRedirect
@@ -41,6 +49,18 @@ function embeddedUserId(): string | undefined {
 }
 
 async function loadUser(): Promise<void> {
+  const developmentUser = developmentUserFromUrl(
+    new URL(window.location.href),
+  );
+  if (developmentUser) {
+    user.value = {
+      id: developmentUser,
+      name: "Local developer",
+      email: "dev@localhost",
+    };
+    return;
+  }
+
   if (isDesktop.value) {
     const current = await window.getUser();
     user.value = current
@@ -76,6 +96,10 @@ async function loadUser(): Promise<void> {
         email: session.data.user.email,
       }
     : null;
+}
+
+function signInForDevelopment(): void {
+  window.location.assign(developmentLoginUrl(new URL(window.location.href)));
 }
 
 async function signIn(): Promise<void> {
@@ -166,16 +190,26 @@ onBeforeUnmount(() => {
       <div v-if="loading" class="auth-loading" aria-live="polite">
         Checking your session…
       </div>
-      <button
-        v-else
-        class="google-button"
-        type="button"
-        :disabled="signingIn"
-        @click="signIn"
-      >
-        <span class="google-g" aria-hidden="true">G</span>
-        {{ signingIn ? "Waiting for browser…" : "Continue with Google" }}
-      </button>
+      <div v-else class="auth-actions">
+        <button
+          v-if="isLocalDevelopment"
+          class="dev-button"
+          type="button"
+          :disabled="signingIn"
+          @click="signInForDevelopment"
+        >
+          Continue as local developer
+        </button>
+        <button
+          class="google-button"
+          type="button"
+          :disabled="signingIn"
+          @click="signIn"
+        >
+          <span class="google-g" aria-hidden="true">G</span>
+          {{ signingIn ? "Waiting for browser…" : "Continue with Google" }}
+        </button>
+      </div>
       <p v-if="error" class="auth-error" role="alert">{{ error }}</p>
       <p v-if="isDesktop && signingIn" class="auth-hint">
         Finish signing in in the browser. You can safely return to FrockBot when it closes.
