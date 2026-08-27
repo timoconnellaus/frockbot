@@ -51,7 +51,10 @@ class LoopAgent implements Agent {
   ) {
     this.#ctx = ctx;
     this.session = session;
-    this.id = options.sessionId;
+    const explicitAgentId = (
+      options as AgentOptions & { agentId?: string }
+    ).agentId?.trim();
+    this.id = explicitAgentId || options.sessionId;
     this.#options = options;
     this.#maxSteps = maxSteps;
   }
@@ -195,7 +198,6 @@ class LoopAgent implements Agent {
             outcome: "completed",
           });
           openStep = undefined;
-          await this.#ctx.serial("agent/turn-stopping", this, turn);
           turnOutcome = "completed";
           return;
         }
@@ -228,6 +230,7 @@ class LoopAgent implements Agent {
         });
       }
       this.session.append({ type: "turn/end", turn, outcome: turnOutcome });
+      await this.#ctx.serial("agent/turn-stopping", this, turn);
     }
   }
 
@@ -330,7 +333,11 @@ class LoopAgent implements Agent {
   ): Promise<void> {
     for (const call of calls) {
       signal.throwIfAborted();
-      const context = { sessionId: this.id, signal };
+      const context = {
+        agentId: this.id,
+        sessionId: this.session.id,
+        signal,
+      };
       const preparation = await this.#ctx.tools.prepare(call, context);
       this.session.append({ type: "tool/call", turn, step, call });
       let result: ToolExecutionResult;

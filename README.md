@@ -34,7 +34,7 @@ FROCKBOT_LLM_API_KEY="..." \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-To attach the built-in Fly Sprite computer package, provide a Sprites token. The first start provisions Chromium and noVNC in a persistent Sprite; `FROCKBOT_SPRITE_NAME` optionally selects its stable name.
+To attach the built-in Fly Sprite computer package, provide a Sprites token. The first start provisions a shared persistent Linux computer with bot-scoped Chromium/noVNC desktop sessions; `FROCKBOT_SPRITE_NAME` optionally selects the shared Sprite and `FROCKBOT_AGENT_ID`/`FROCKBOT_AGENT_NAME` bind the desktop host to a bot.
 
 ```bash
 SPRITES_TOKEN="..." \
@@ -42,7 +42,7 @@ FROCKBOT_SPRITE_NAME="frockbot-barebones" \
   bun run dev
 ```
 
-The computer panel shows the live browser. **Take control** creates a lease that blocks new agent computer actions while you enter credentials; **Release control** returns it to the bot. The noVNC service uses a high-entropy password but is exposed through the Sprite's public HTTPS URL so Electron can embed it. See [`docs/research/fly-sprites-computer.md`](docs/research/fly-sprites-computer.md) for security constraints and primary sources.
+The computer panel shows the selected bot's live browser. **Take control** creates a bot-scoped lease that blocks new computer actions for that bot while leaving other bot desktops available; **Release control** returns it to the bot. One token-routed noVNC gateway serves the bot-scoped displays through the Sprite's public HTTPS URL. Shells start in shared `/workspace` with `HOME=/home/box`; durable profiles, standing memory, transcript mirrors, skills, and automation storage live under `/home/box/agent-data`. Automation files are not executed until a separate automation runtime is installed. See [`docs/research/fly-sprites-computer.md`](docs/research/fly-sprites-computer.md) for security constraints and primary sources.
 
 Electron's installer script is explicitly allowed through the root `trustedDependencies` setting. If Electron was installed before that setting existed, rebuild its binary once:
 
@@ -175,6 +175,8 @@ Cordis contexts provide composition and lifecycle ownership, not security isolat
 - model configuration currently uses environment variables rather than onboarding UI;
 - sessions are currently in memory;
 - Fly Sprite live provisioning requires a valid Sprites token and has not been exercised by repository CI;
-- the routines panel is presentational;
+- bot-scoped directories and desktop processes share one Unix account and are namespaces, not strong security isolation;
+- transcript files in the Sprite are derived mirrors, while cloud memory remains canonical in R2/Vectorize;
+- automation folders and the routines panel are presentational until an automation runtime is implemented;
 - the manifest-driven package catalog works for built-in packages, but external package discovery and download are not implemented;
 - application packaging and code signing are not configured.

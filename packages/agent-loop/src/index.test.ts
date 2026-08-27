@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   AgentRegistry,
+  type AgentOptions,
   LlmRegistry,
   type LlmProvider,
   SessionStore,
@@ -71,6 +72,10 @@ describe("AgentLoop", () => {
   test("streams, journals a tool before execution, and repeats the model step", async () => {
     const requests: string[] = [];
     let toolWasJournaled = false;
+    let turnStoppingSawCompletedJournal = false;
+    let observedToolIdentity:
+      | { agentId: string; sessionId: string }
+      | undefined;
     let root: Context;
     const provider: LlmProvider = {
       id: "scripted",
@@ -107,9 +112,16 @@ describe("AgentLoop", () => {
         typeof input === "object" &&
         input !== null &&
         typeof (input as { value?: unknown }).value === "string",
-      async execute(input) {
-        const session = root.agents.get("agent-1")?.session;
+      async execute(input, context) {
+        const session = root.agents.get("general")?.session;
         toolWasJournaled = session?.events.at(-1)?.type === "tool/call";
+        const identifiedContext = context as typeof context & {
+          agentId: string;
+        };
+        observedToolIdentity = {
+          agentId: identifiedContext.agentId,
+          sessionId: context.sessionId,
+        };
         return {
           content: (input as { value: string }).value,
           isError: false,
@@ -118,17 +130,31 @@ describe("AgentLoop", () => {
     };
 
     root = await mountRuntime(provider, tool);
-    const handle = await root.agents.create({
-      sessionId: "agent-1",
+    root.on("agent/turn-stopping", (agent) => {
+      turnStoppingSawCompletedJournal =
+        agent.session.events.at(-1)?.type === "turn/end";
+      return Promise.resolve();
+    });
+    const agentOptions: AgentOptions & { agentId: string } = {
+      agentId: "general",
+      sessionId: "owner:general:conversation-1",
       provider: "scripted",
       model: "test-model",
-    });
+    };
+    const handle = await root.agents.create(agentOptions);
     handle.agent.send("Use the echo tool.");
     await handle.agent.whenIdle();
 
     const events = handle.agent.session.events;
     expect(requests).toHaveLength(2);
     expect(toolWasJournaled).toBe(true);
+    expect(turnStoppingSawCompletedJournal).toBe(true);
+    expect(handle.agent.id).toBe("general");
+    expect(handle.agent.session.id).toBe("owner:general:conversation-1");
+    expect(observedToolIdentity).toEqual({
+      agentId: "general",
+      sessionId: "owner:general:conversation-1",
+    });
     expect(events.filter((event) => event.type === "step/start")).toHaveLength(
       2,
     );

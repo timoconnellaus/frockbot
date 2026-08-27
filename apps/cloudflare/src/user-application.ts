@@ -55,6 +55,14 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
+function parseStoredJson<T>(body: string): Promise<T> {
+  try {
+    return Promise.resolve(JSON.parse(body) as T);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
 function memoryPluginConfig(
   env: UserApplicationEnv,
   agentId: string,
@@ -69,7 +77,7 @@ function memoryPluginConfig(
           ? null
           : {
               text: () => Promise.resolve(body),
-              json: <T>() => Promise.resolve(JSON.parse(body) as T),
+              json: <T>() => parseStoredJson<T>(body),
             };
       },
       put: (key, value, options) =>
@@ -200,6 +208,7 @@ export function createUserApplication() {
     });
 
     const runtime = await createFoundationRuntime(undefined, {
+      agentId: botId,
       sessionId,
       sessionEvents,
       application: await application,

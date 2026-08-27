@@ -161,6 +161,7 @@ async function executeTool(
 ): Promise<Record<string, unknown>> {
   const call = { id: crypto.randomUUID(), name, input };
   const context = {
+    agentId: "alpha",
     sessionId: "owner:alpha",
     signal: new AbortController().signal,
   };

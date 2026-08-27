@@ -5,6 +5,7 @@ import type { NormalizedModelRequest } from "./types.js";
 export type AgentStatus = "idle" | "running" | "disposed";
 
 export interface AgentOptions {
+  agentId?: string;
   sessionId: string;
   provider: string;
   model: string;

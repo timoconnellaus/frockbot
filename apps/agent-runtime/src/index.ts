@@ -57,6 +57,8 @@ async function start(): Promise<void> {
   let runtime: FoundationRuntime;
   try {
     runtime = await createFoundationRuntime(modelConfigFromEnvironment(), {
+      agentId: process.env.FROCKBOT_AGENT_ID?.trim() || "barebones",
+      sessionId: process.env.FROCKBOT_SESSION_ID?.trim() || "barebones",
       agentPackages: [flySpriteRuntimePackage],
     });
   } catch (error) {

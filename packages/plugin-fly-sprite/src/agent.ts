@@ -105,7 +105,9 @@ export function createFlySpriteAgentPlugin(
           return { content: "A command is required", isError: true };
         try {
           return {
-            content: await computer.run(decoded.command, context.signal),
+            content: await computer
+              .agent(context.agentId)
+              .run(decoded.command, context.signal),
             isError: false,
           };
         } catch (error) {
@@ -145,7 +147,9 @@ export function createFlySpriteAgentPlugin(
         }
         try {
           return {
-            content: await computer.browser(decoded, context.signal),
+            content: await computer
+              .agent(context.agentId)
+              .browser(decoded, context.signal),
             isError: false,
           };
         } catch (error) {
@@ -154,9 +158,59 @@ export function createFlySpriteAgentPlugin(
       },
     };
 
-    return [ctx.tools.register(execTool), ctx.tools.register(browserTool)];
+    const disposers = [
+      ctx.tools.register(execTool),
+      ctx.tools.register(browserTool),
+      ctx.systemPrompt.register({
+        id: "persistent-computer",
+        order: 80,
+        render: () =>
+          [
+            "## Persistent computer",
+            "You have a persistent Linux computer shared with the user's other bots.",
+            "Your shell starts in /workspace with HOME=/home/box. Durable application data is under /home/box/agent-data.",
+            "Your bot has its own desktop, Chromium profile, memory folder, automations folder, skills folder, and transcript mirror.",
+            "Other bots share the filesystem but use separate desktop and browser sessions.",
+            "Use computer_exec to inspect the filesystem before claiming that a path or file exists. Never invent a directory listing.",
+            "The automations folder is storage only until an automation runtime is installed; do not claim stored files are scheduled or running.",
+          ].join("\n"),
+      }),
+    ];
+    if (computer.configured) {
+      disposers.push(
+        ctx.on("agent/request", async (agent, _request, signal, next) => {
+          const resolved = await next();
+          try {
+            const memory = await computer
+              .agent(agent.id)
+              .readStandingMemory(signal);
+            if (!memory.trim()) return resolved;
+            return {
+              ...resolved,
+              system: [resolved.system.trim(), memory]
+                .filter(Boolean)
+                .join("\n\n"),
+            };
+          } catch {
+            return resolved;
+          }
+        }),
+      );
+      disposers.push(
+        ctx.on("agent/turn-stopping", async (agent) => {
+          try {
+            await computer
+              .agent(agent.id)
+              .writeTranscript(agent.session.events);
+          } catch {
+            // The canonical in-process session must still settle when a mirror fails.
+          }
+        }),
+      );
+    }
+    return disposers;
   };
-  plugin.inject = ["tools"];
+  plugin.inject = ["tools", "systemPrompt"];
   return plugin;
 }
 

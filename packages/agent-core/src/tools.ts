@@ -2,6 +2,7 @@ import { type Context, Service } from "cordis";
 import type { ToolCall, ToolSchema } from "./types.js";
 
 export interface ToolExecutionContext {
+  agentId: string;
   sessionId: string;
   signal: AbortSignal;
 }

@@ -157,6 +157,7 @@ describe("foundation Cordis runtime", () => {
       },
     };
     const context = {
+      agentId: "primary",
       sessionId: "alice:primary",
       signal: new AbortController().signal,
     };

@@ -11,6 +11,7 @@ export type FlySpriteComputerPhase =
 
 export interface FlySpriteComputerState {
   phase: FlySpriteComputerPhase;
+  agentId: string;
   spriteName: string;
   message: string;
   viewerUrl?: string;

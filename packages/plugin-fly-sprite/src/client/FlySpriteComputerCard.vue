@@ -63,7 +63,7 @@ onBeforeUnmount(() =>
     <header class="sprite-heading">
       <div>
         <strong>Computer</strong>
-        <small>Fly Sprite · {{ state.spriteName }}</small>
+        <small>{{ state.agentId }} · {{ state.spriteName }}</small>
       </div>
       <span class="sprite-status" :class="`status-${state.phase}`">
         {{ statusLabel }}
@@ -145,7 +145,7 @@ onBeforeUnmount(() =>
       <header class="sprite-overlay-toolbar">
         <div class="sprite-overlay-identity">
           <strong>Computer</strong>
-          <small>Fly Sprite · {{ state.spriteName }}</small>
+          <small>{{ state.agentId }} · {{ state.spriteName }}</small>
         </div>
         <div class="sprite-overlay-actions">
           <span class="sprite-status" :class="`status-${state.phase}`">

@@ -16,6 +16,7 @@ export const flySpriteClientPlugin: ClientPlugin = (ctx) => {
     );
   const computer = ref<FlySpriteComputerState>({
     phase: "missing-token",
+    agentId: "unconfigured",
     spriteName: "unconfigured",
     message: "Fly Sprite is not configured for this application host",
     takingControl: false,

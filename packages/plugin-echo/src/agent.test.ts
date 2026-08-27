@@ -58,12 +58,14 @@ describe("echo plugin", () => {
     const first = events[0];
     if (first?.type !== "tool-call") throw new Error("expected a tool call");
     const preparation = await harness.root.tools.prepare(first.call, {
+      agentId: "echo-agent",
       sessionId: "session",
       signal: controller.signal,
     });
     if (preparation.kind !== "ready") throw new Error("echo tool was denied");
     expect(
       await harness.root.tools.executePrepared(preparation, {
+        agentId: "echo-agent",
         sessionId: "session",
         signal: controller.signal,
       }),

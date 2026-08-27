@@ -3,10 +3,11 @@ import {
   type FoundationRuntimeApplication,
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
-} from "@frockbot/application-foundation";
+} from "@frockbot/application-foundation/runtime";
 import {
   AgentRegistry,
   type AgentHandle,
+  type AgentOptions,
   LlmRegistry,
   type SessionEvent,
   SessionStore,
@@ -17,6 +18,7 @@ import { AgentLoop } from "@frockbot/agent-loop";
 import {
   type ContributionResolver,
   PackageCatalog,
+  type PackageSource,
 } from "@frockbot/plugin-catalog";
 import {
   createRuntimeContributionHost,
@@ -58,6 +60,7 @@ export interface FoundationAgentPackage {
 }
 
 export interface FoundationRuntimeOptions {
+  agentId?: string;
   sessionId?: string;
   sessionEvents?: readonly SessionEvent[];
   application?: FoundationRuntimeApplication;
@@ -117,15 +120,21 @@ export async function createFoundationRuntime(
   );
 
   const packageIds = application.packages.map(
-    (source) => root.packages.install(source).manifest.id,
+    (source: PackageSource) => root.packages.install(source).manifest.id,
   );
   const additionalIds = (options.agentPackages ?? []).flatMap((pkg) => {
-    if (root.packages.list().some((installed) => installed.specifier === pkg.specifier)) {
+    if (
+      root.packages
+        .list()
+        .some((installed) => installed.specifier === pkg.specifier)
+    ) {
       return [];
     }
     return [
-      root.packages.install({ specifier: pkg.specifier, manifest: pkg.manifest })
-        .manifest.id,
+      root.packages.install({
+        specifier: pkg.specifier,
+        manifest: pkg.manifest,
+      }).manifest.id,
     ];
   });
   for (const packageId of [...packageIds, ...additionalIds]) {
@@ -134,7 +143,13 @@ export async function createFoundationRuntime(
   }
   await root.plugin(AgentLoop, { maxSteps: 8 });
 
-  const agent = await root.agents.create({ sessionId, provider, model });
+  const agentOptions: AgentOptions & { agentId?: string } = {
+    agentId: options.agentId,
+    sessionId,
+    provider,
+    model,
+  };
+  const agent = await root.agents.create(agentOptions);
   return {
     root,
     agent,

@@ -1,19 +1,30 @@
 import type { Entry } from "@cordisjs/plugin-webui";
 import type { Context, Plugin } from "cordis";
-import { FlySpriteComputer } from "./computer.ts";
+import {
+  type ComputerAgentIdentity,
+  type FlySpriteAgentComputer,
+  FlySpriteComputer,
+} from "./computer.ts";
 import type { FlySpriteComputerState } from "./shared.ts";
 
 class FlySpriteHostController {
-  private readonly computer: FlySpriteComputer;
+  private readonly computer: FlySpriteAgentComputer;
+  private readonly configured: boolean;
   private readonly entry: Entry<FlySpriteComputerState>;
   private readonly data: FlySpriteComputerState;
   private heartbeat?: ReturnType<typeof setInterval>;
   private takingControl = false;
 
-  constructor(ctx: Context, computer: FlySpriteComputer) {
-    this.computer = computer;
+  constructor(
+    ctx: Context,
+    computer: FlySpriteComputer,
+    identity: ComputerAgentIdentity,
+  ) {
+    this.computer = computer.agent(identity);
+    this.configured = computer.configured;
     const data: FlySpriteComputerState = {
       phase: computer.configured ? "idle" : "missing-token",
+      agentId: this.computer.agentId,
       spriteName: computer.spriteName,
       message: computer.configured
         ? "Persistent Fly Sprite computer"
@@ -51,7 +62,7 @@ class FlySpriteHostController {
   }
 
   private async connect(): Promise<void> {
-    if (!this.computer.configured) return;
+    if (!this.configured) return;
     this.mutate({
       phase: "provisioning",
       message: "Waking and preparing the Sprite computer…",
@@ -70,7 +81,7 @@ class FlySpriteHostController {
   }
 
   private async takeOver(): Promise<void> {
-    if (!this.computer.configured || this.takingControl) return;
+    if (!this.configured || this.takingControl) return;
     if (!this.current().viewerUrl) await this.connect();
     if (!this.current().viewerUrl) return;
     this.mutate({
@@ -159,9 +170,13 @@ class FlySpriteHostController {
 
 export function createFlySpriteHostPlugin(
   computer: FlySpriteComputer,
+  identity: ComputerAgentIdentity = {
+    id: process.env.FROCKBOT_AGENT_ID?.trim() || "barebones",
+    name: process.env.FROCKBOT_AGENT_NAME?.trim() || "Barebones",
+  },
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) => {
-    const controller = new FlySpriteHostController(ctx, computer);
+    const controller = new FlySpriteHostController(ctx, computer, identity);
     return () => controller.dispose();
   };
   plugin.inject = ["webui"];
