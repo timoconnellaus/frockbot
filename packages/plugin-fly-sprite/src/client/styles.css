@@ -73,6 +73,20 @@
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 2%);
 }
 
+.sprite-screen-thumbnail {
+  cursor: zoom-in;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.sprite-screen-thumbnail:hover,
+.sprite-screen-thumbnail:focus-visible {
+  border-color: #4a4a4a;
+  outline: none;
+  transform: translateY(-1px);
+}
+
 .sprite-screen iframe {
   width: 100%;
   height: 100%;
@@ -88,6 +102,10 @@
 
 .human-control .sprite-screen iframe {
   pointer-events: auto;
+}
+
+.sprite-screen-thumbnail iframe {
+  pointer-events: none;
 }
 
 .sprite-placeholder,
@@ -199,4 +217,175 @@
   border-color: #2f6699;
   color: #b8dcff;
   background: #17324b;
+}
+
+.sprite-computer-overlay {
+  position: fixed;
+  z-index: 5000;
+  inset: 0;
+  display: grid;
+  grid-template-rows: 64px minmax(0, 1fr);
+  color: #dedede;
+  background: rgb(3 3 3 / 94%);
+  backdrop-filter: blur(12px);
+}
+
+.sprite-overlay-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 22px 0 52px;
+  -webkit-app-region: drag;
+}
+
+.sprite-overlay-identity {
+  min-width: 0;
+}
+
+.sprite-overlay-identity strong,
+.sprite-overlay-identity small {
+  display: block;
+}
+
+.sprite-overlay-identity strong {
+  color: #e1e1e1;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sprite-overlay-identity small {
+  overflow: hidden;
+  max-width: 420px;
+  margin-top: 2px;
+  color: #727272;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sprite-overlay-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  -webkit-app-region: no-drag;
+}
+
+.sprite-overlay-actions button {
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sprite-overlay-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.sprite-overlay-control {
+  display: flex;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 1px solid #272727;
+  border-radius: 9px;
+  color: #ededed;
+  background: #141414;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 24%);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.sprite-overlay-control:hover {
+  border-color: #3d3d3d;
+  background: #1b1b1b;
+}
+
+.sprite-overlay-control.release-button {
+  border-color: #2f6699;
+  color: #b8dcff;
+  background: #17324b;
+}
+
+.sprite-overlay-close {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #a8a8a8;
+  background: transparent;
+  font-size: 24px;
+  font-weight: 200;
+  line-height: 1;
+}
+
+.sprite-overlay-close:hover {
+  color: #fff;
+  background: #171717;
+}
+
+.sprite-overlay-stage {
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 52px 52px;
+}
+
+.sprite-screen-expanded {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-color: #252525;
+  border-radius: 9px;
+  background: #0c0c0c;
+  box-shadow:
+    0 22px 80px rgb(0 0 0 / 42%),
+    inset 0 0 0 1px rgb(255 255 255 / 2%);
+}
+
+.sprite-screen-expanded .sprite-placeholder strong,
+.sprite-screen-expanded .control-shield strong {
+  font-size: 15px;
+}
+
+.sprite-screen-expanded .sprite-placeholder p,
+.sprite-screen-expanded .control-shield p {
+  max-width: 360px;
+  font-size: 12px;
+}
+
+.sprite-screen-expanded .sprite-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  font-size: 18px;
+}
+
+.sprite-screen-expanded .sprite-placeholder button,
+.sprite-screen-expanded .control-shield button {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .sprite-computer-overlay {
+    grid-template-rows: 58px minmax(0, 1fr);
+  }
+
+  .sprite-overlay-toolbar {
+    padding: 0 12px 0 18px;
+  }
+
+  .sprite-overlay-stage {
+    padding: 8px 14px 18px;
+  }
+
+  .sprite-overlay-identity,
+  .sprite-overlay-actions > .sprite-status {
+    display: none;
+  }
 }

@@ -96,6 +96,7 @@ class DesktopWindowService extends Service {
     const screenshotPath = process.env.FROCKBOT_SMOKE_SCREENSHOT;
     if (!screenshotPath) return;
     const prompt = process.env.FROCKBOT_SMOKE_PROMPT;
+    const expandComputer = process.env.FROCKBOT_SMOKE_EXPAND_COMPUTER === "1";
     await window.webContents.executeJavaScript(`
       new Promise((resolve, reject) => {
         const deadline = Date.now() + 15000;
@@ -135,8 +136,31 @@ class DesktopWindowService extends Service {
         })
       `);
     }
+    if (expandComputer) {
+      await window.webContents.executeJavaScript(`
+        (() => {
+          const computer = document.querySelector('.sprite-screen-thumbnail');
+          if (!(computer instanceof HTMLElement)) throw new Error('Computer preview not found');
+          computer.click();
+        })()
+      `);
+      await window.webContents.executeJavaScript(`
+        new Promise((resolve, reject) => {
+          const deadline = Date.now() + 5000;
+          const check = () => {
+            const overlay = document.querySelector('.sprite-computer-overlay');
+            const bounds = overlay instanceof HTMLElement ? overlay.getBoundingClientRect() : undefined;
+            const coversWindow = bounds && bounds.width >= innerWidth && bounds.height >= innerHeight;
+            if (overlay instanceof HTMLElement && getComputedStyle(overlay).position === 'fixed' && coversWindow) return resolve(true);
+            if (Date.now() > deadline) return reject(new Error('Computer overlay did not open'));
+            setTimeout(check, 25);
+          };
+          check();
+        })
+      `);
+    }
     await window.webContents.executeJavaScript(
-      "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+      "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 150))))",
     );
     const absolutePath = resolve(screenshotPath);
     await mkdir(dirname(absolutePath), { recursive: true });
