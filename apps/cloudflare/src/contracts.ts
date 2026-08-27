@@ -1,8 +1,7 @@
 import type { SessionEvent } from "@frockbot/agent-core";
 import type {
-  MemoryAiBinding,
-  MemoryBucket,
-  MemoryVectorIndex,
+  MemoryVector,
+  MemoryVectorMatch,
 } from "@frockbot/plugin-memory";
 
 export interface UserApplicationIdentity {
@@ -31,14 +30,30 @@ export interface BotStateBinding {
   listRuns(botId: string): Promise<StoredRun[]>;
 }
 
-export interface MemoryBindings {
-  MEMORY_FILES: MemoryBucket;
-  MEMORY_INDEX: MemoryVectorIndex;
-  AI: MemoryAiBinding;
+export interface MemoryBinding {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, contentType?: string): Promise<void>;
+  delete(key: string): Promise<void>;
+  list(
+    prefix: string,
+    cursor?: string,
+  ): Promise<{
+    objects: Array<{ key: string }>;
+    truncated: boolean;
+    cursor?: string;
+  }>;
+  vectorUpsert(vectors: MemoryVector[]): Promise<void>;
+  vectorQuery(
+    vector: number[],
+    options: { topK: number; namespace: string; returnMetadata: "all" },
+  ): Promise<{ matches: MemoryVectorMatch[] }>;
+  vectorDeleteByIds(ids: string[]): Promise<void>;
+  embed(model: string, texts: string[]): Promise<{ data: number[][] }>;
 }
 
-export interface UserApplicationEnv extends MemoryBindings {
+export interface UserApplicationEnv {
   BOT_STATE: BotStateBinding;
+  MEMORY: MemoryBinding;
   DEPLOYMENT: UserApplicationIdentity;
 }
 
@@ -87,7 +102,7 @@ export interface GatewayDependencies {
   auth: GatewayAuth;
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): BotStateBinding;
-  memory: MemoryBindings;
+  memoryFor(): MemoryBinding;
   allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;

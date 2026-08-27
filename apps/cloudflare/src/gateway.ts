@@ -123,8 +123,8 @@ export function createGateway(dependencies: GatewayDependencies) {
         modules: { "index.js": { js: source } },
         globalOutbound: null,
         env: {
-          ...dependencies.memory,
           BOT_STATE: dependencies.botStateFor(userId),
+          MEMORY: dependencies.memoryFor(),
           DEPLOYMENT: identity,
         },
         limits: { cpuMs: 30_000, subRequests: 1_000 },

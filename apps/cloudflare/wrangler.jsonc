@@ -1,6 +1,7 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "frockbot-cloudflare",
+  "account_id": "374784ce2915a597adcecf9bcb2c5ee6",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
@@ -55,6 +56,59 @@
     // Comma-separated webview origins allowed to call /api/* cross-origin,
     // e.g. "capacitor://localhost,frockbot://localhost". Empty disables CORS.
     "ALLOWED_CLIENT_ORIGINS": ""
+  },
+  "env": {
+    "development": {
+      "worker_loaders": [
+        {
+          "binding": "USER_APPLICATIONS"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "APPLICATION_ARTIFACTS",
+          "bucket_name": "frockbot-application-artifacts",
+          "remote": false
+        },
+        {
+          "binding": "MEMORY_FILES",
+          "bucket_name": "frockbot-memory-files-development",
+          "remote": true
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "AUTH_DB",
+          "database_name": "frockbot-auth-development",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+          "remote": false
+        }
+      ],
+      "vectorize": [
+        {
+          "binding": "MEMORY_INDEX",
+          "index_name": "frockbot-memory-development",
+          "remote": true
+        }
+      ],
+      "ai": {
+        "binding": "AI",
+        "remote": true
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "BOT_STATES",
+            "class_name": "BotState"
+          }
+        ]
+      },
+      "vars": {
+        "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        "ALLOWED_CLIENT_ORIGINS": ""
+      }
+    }
   },
   "observability": {
     "enabled": true

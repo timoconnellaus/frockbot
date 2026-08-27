@@ -119,10 +119,10 @@ The command builds and seeds the Dynamic Worker artifact, then starts Wrangler o
 ```bash
 cd apps/cloudflare
 bun run artifact:build
-bunx wrangler r2 object put \
+bunx wrangler --env development r2 object put \
   frockbot-application-artifacts/applications/foundation-v1.mjs \
   --file dist/artifacts/foundation-v1.mjs --local
-bunx wrangler dev
+bunx wrangler dev --env development --var ALLOW_DEVELOPMENT_AUTH:true
 ```
 
 Then open `http://localhost:8787/?as_user=alice`. CLI requests may instead send `x-frockbot-user-id: alice`. These query/header/cookie seams are enabled only by the local `ALLOW_DEVELOPMENT_AUTH` setting and must be disabled in production.
@@ -137,7 +137,7 @@ For local Google sign-in:
 cp apps/cloudflare/.dev.vars.example apps/cloudflare/.dev.vars
 # Replace every value in .dev.vars, then initialize the local D1 database.
 cd apps/cloudflare
-bunx wrangler d1 migrations apply AUTH_DB --local
+bunx wrangler d1 migrations apply AUTH_DB --env development --local
 bun run dev:electron
 ```
 
@@ -151,12 +151,15 @@ For production, replace the placeholder `AUTH_DB` database ID in [`apps/cloudfla
 
 The desktop host must receive both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. If `FROCKBOT_APPLICATION_URL` is absent, the desktop loads its local host; if `FROCKBOT_AUTH_BASE_URL` is absent, it does not initialize hosted authentication.
 
-The memory plugin stores Markdown source documents and incremental index metadata in R2, with 768-dimensional cosine embeddings in Vectorize using `@cf/baai/bge-base-en-v1.5`. Provision the configured resources before remote deployment:
+The memory plugin stores Markdown source documents and incremental index metadata in R2, with 768-dimensional cosine embeddings in Vectorize using `@cf/baai/bge-base-en-v1.5`. Local development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`. The development memory resources are separate from the production names below.
+
+Provision production resources before the first production deployment:
 
 ```bash
 cd apps/cloudflare
 bunx wrangler r2 bucket create frockbot-memory-files
-bunx wrangler vectorize create frockbot-memory --dimensions=768 --metric=cosine
+bunx wrangler vectorize create frockbot-memory \
+  --preset @cf/baai/bge-base-en-v1.5
 ```
 
 Memory has two user-private tiers: **agent** memory belongs to one bot, while **global** memory is shared by all of that user's bots. Reads and recall check both by default; when the same path exists in both tiers, the agent copy wins. Writes default to the safer agent tier.

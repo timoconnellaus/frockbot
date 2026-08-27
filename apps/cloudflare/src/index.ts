@@ -4,7 +4,7 @@ import { BotState } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
   BotStateBinding,
-  MemoryBindings,
+  MemoryBinding,
   StoredRun,
   WorkerLoader,
 } from "./contracts.js";
@@ -47,23 +47,72 @@ interface BotStateRpc {
   listRuns(): Promise<StoredRun[]>;
 }
 
-function memoryBindings(env: Env): MemoryBindings {
-  // SAFETY: Cloudflare's generated binding interfaces implement the same
-  // methods but are wider than the capability contracts passed to the child.
-  const bindings = {
-    MEMORY_FILES: env.MEMORY_FILES,
-    MEMORY_INDEX: env.MEMORY_INDEX,
-    AI: env.AI,
-  };
-  // SAFETY: The child contract uses a structural subset of these bindings.
-  return bindings as unknown as MemoryBindings;
-}
-
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   const id = env.BOT_STATES.idFromName(`${userId}:${botId}`);
   // SAFETY: Wrangler binds BOT_STATES to BotState, whose public RPC methods
   // exactly match BotStateRpc; workers-types cannot infer the generated stub.
   return env.BOT_STATES.get(id) as unknown as BotStateRpc;
+}
+
+export class UserMemory extends WorkerEntrypoint<Env> implements MemoryBinding {
+  async get(key: string): Promise<string | null> {
+    const object = await this.env.MEMORY_FILES.get(key);
+    return object ? object.text() : null;
+  }
+
+  async put(key: string, value: string, contentType?: string): Promise<void> {
+    await this.env.MEMORY_FILES.put(key, value, {
+      httpMetadata: contentType ? { contentType } : undefined,
+    });
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.env.MEMORY_FILES.delete(key);
+  }
+
+  async list(
+    prefix: string,
+    cursor?: string,
+  ): ReturnType<MemoryBinding["list"]> {
+    const page = await this.env.MEMORY_FILES.list({ prefix, cursor });
+    return {
+      objects: page.objects.map((object) => ({ key: object.key })),
+      truncated: page.truncated,
+      cursor: page.truncated ? page.cursor : undefined,
+    };
+  }
+
+  async vectorUpsert(
+    vectors: Parameters<MemoryBinding["vectorUpsert"]>[0],
+  ): Promise<void> {
+    await this.env.MEMORY_INDEX.upsert(vectors);
+  }
+
+  async vectorQuery(
+    vector: number[],
+    options: Parameters<MemoryBinding["vectorQuery"]>[1],
+  ): ReturnType<MemoryBinding["vectorQuery"]> {
+    const result = await this.env.MEMORY_INDEX.query(vector, options);
+    return {
+      matches: result.matches.map((match) => ({
+        id: match.id,
+        score: match.score,
+        metadata: match.metadata,
+      })),
+    };
+  }
+
+  async vectorDeleteByIds(ids: string[]): Promise<void> {
+    await this.env.MEMORY_INDEX.deleteByIds(ids);
+  }
+
+  async embed(model: string, texts: string[]): Promise<{ data: number[][] }> {
+    // SAFETY: The memory plugin only requests the configured Workers AI text
+    // embedding model, whose response contract is `{ data: number[][] }`.
+    return this.env.AI.run(model as keyof AiModels, {
+      text: texts,
+    }) as Promise<{ data: number[][] }>;
+  }
 }
 
 export class UserBotState extends WorkerEntrypoint<Env, UserBotStateProps> {
@@ -106,6 +155,7 @@ class R2ApplicationArtifacts implements ApplicationArtifactStore {
 
 interface RuntimeExports {
   UserBotState(options: { props: UserBotStateProps }): BotStateBinding;
+  UserMemory(options: Record<string, never>): MemoryBinding;
 }
 
 export default {
@@ -120,7 +170,7 @@ export default {
       applicationHashFor: () => Promise.resolve(env.DEFAULT_APPLICATION_HASH),
       botStateFor: (userId): BotStateBinding =>
         runtimeExports.UserBotState({ props: { userId } }),
-      memory: memoryBindings(env),
+      memoryFor: () => runtimeExports.UserMemory({}),
       allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });

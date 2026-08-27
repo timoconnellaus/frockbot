@@ -62,6 +62,8 @@ try {
     [
       "bunx",
       "wrangler",
+      "--env",
+      "development",
       "r2",
       "object",
       "put",
@@ -78,6 +80,8 @@ try {
       "bunx",
       "wrangler",
       "dev",
+      "--env",
+      "development",
       "--port",
       "8787",
       "--var",

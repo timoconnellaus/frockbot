@@ -4,7 +4,7 @@ import type {
   BotStateBinding,
   GatewayAuth,
   LoadedWorker,
-  MemoryBindings,
+  MemoryBinding,
   StoredRun,
   WorkerCode,
   WorkerLoader,
@@ -75,25 +75,19 @@ const unauthenticatedAuth: GatewayAuth = {
   getSession: () => Promise.resolve(null),
 };
 
-function testMemoryBindings(): MemoryBindings {
+function testMemoryBinding(): MemoryBinding {
   return {
-    MEMORY_FILES: {
-      get: () => Promise.resolve(null),
-      put: () => Promise.resolve(),
-      delete: () => Promise.resolve(),
-      list: () => Promise.resolve({ objects: [], truncated: false }),
-    },
-    MEMORY_INDEX: {
-      upsert: () => Promise.resolve(),
-      query: () => Promise.resolve({ matches: [] }),
-      deleteByIds: () => Promise.resolve(),
-    },
-    AI: {
-      run: (_model, input) =>
-        Promise.resolve({
-          data: input.text.map(() => Array.from({ length: 768 }, () => 0)),
-        }),
-    },
+    get: () => Promise.resolve(null),
+    put: () => Promise.resolve(),
+    delete: () => Promise.resolve(),
+    list: () => Promise.resolve({ objects: [], truncated: false }),
+    vectorUpsert: () => Promise.resolve(),
+    vectorQuery: () => Promise.resolve({ matches: [] }),
+    vectorDeleteByIds: () => Promise.resolve(),
+    embed: (_model, texts) =>
+      Promise.resolve({
+        data: texts.map(() => Array.from({ length: 768 }, () => 0)),
+      }),
   };
 }
 
@@ -116,7 +110,7 @@ function createTestGateway(
       states.set(userId, state);
       return state;
     },
-    memory: testMemoryBindings(),
+    memoryFor: testMemoryBinding,
     allowedClientOrigins,
     allowDevelopmentIdentity,
   });
@@ -177,6 +171,11 @@ describe("Cloudflare user application gateway", () => {
     expect(loader.codes.every((code) => code.globalOutbound === null)).toBe(
       true,
     );
+    expect(Object.keys(loader.codes[0]?.env ?? {}).sort()).toEqual([
+      "BOT_STATE",
+      "DEPLOYMENT",
+      "MEMORY",
+    ]);
   });
 
   test("shares the user deployment while isolating bot state", async () => {

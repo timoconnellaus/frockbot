@@ -1,4 +1,5 @@
 import { createFoundationRuntime } from "@frockbot/agent-runtime/runtime";
+import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 import type { UserApplicationEnv } from "./contracts.js";
 import { appendedSessionEvents } from "./durable-session.js";
 
@@ -51,6 +52,39 @@ function withSecurityHeaders(response: Response): Response {
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+function memoryPluginConfig(
+  env: UserApplicationEnv,
+  agentId: string,
+): MemoryPluginConfig {
+  return {
+    ownerId: env.DEPLOYMENT.userId,
+    agentId,
+    bucket: {
+      get: async (key) => {
+        const body = await env.MEMORY.get(key);
+        return body === null
+          ? null
+          : {
+              text: () => Promise.resolve(body),
+              json: <T>() => Promise.resolve(JSON.parse(body) as T),
+            };
+      },
+      put: (key, value, options) =>
+        env.MEMORY.put(key, value, options?.httpMetadata?.contentType),
+      delete: (key) => env.MEMORY.delete(key),
+      list: ({ prefix, cursor }) => env.MEMORY.list(prefix, cursor),
+    },
+    vectorize: {
+      upsert: (vectors) => env.MEMORY.vectorUpsert(vectors),
+      query: (vector, options) => env.MEMORY.vectorQuery(vector, options),
+      deleteByIds: (ids) => env.MEMORY.vectorDeleteByIds(ids),
+    },
+    ai: {
+      run: (model, input) => env.MEMORY.embed(model, input.text),
+    },
+  };
 }
 
 async function readPrompt(request: Request): Promise<string> {
@@ -156,13 +190,7 @@ export function createUserApplication() {
     const runtime = await createFoundationRuntime(undefined, {
       sessionId,
       sessionEvents,
-      memory: {
-        ownerId: env.DEPLOYMENT.userId,
-        agentId: botId,
-        bucket: env.MEMORY_FILES,
-        vectorize: env.MEMORY_INDEX,
-        ai: env.AI,
-      },
+      memory: memoryPluginConfig(env, botId),
     });
 
     try {
