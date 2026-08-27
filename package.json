@@ -15,6 +15,7 @@
     "build:webui": "bun run --filter @frockbot/webui-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
     "build:agents": "bun run build:cordis-agent",
     "build:cloudflare": "bun run --filter @frockbot/cloudflare build",
+    "build:mobile": "bun run build:webui && bun run --filter @frockbot/mobile build",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev:cloudflare:electron": "bun run --filter @frockbot/cloudflare dev:electron",
     "dev": "bun run build:webui && bun run build:agents && bun run --filter @frockbot/desktop dev",

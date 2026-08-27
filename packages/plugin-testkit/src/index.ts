@@ -74,6 +74,9 @@ export function verifyPluginPackage(
   if (manifest.contributions.desktop) {
     requireExport(exports, manifest.contributions.desktop, issues);
   }
+  if (manifest.contributions.mobile) {
+    requireExport(exports, manifest.contributions.mobile, issues);
+  }
   if (new Set(manifest.permissions).size !== manifest.permissions.length) {
     issues.push("manifest permissions must not contain duplicates");
   }

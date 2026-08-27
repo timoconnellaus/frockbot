@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "mobile-clipboard",
+  "displayName": "Mobile Clipboard",
+  "version": "0.0.1",
+  "contributions": {
+    "mobile": "./mobile"
+  },
+  "permissions": ["mobile:clipboard:read", "mobile:clipboard:write"]
+}

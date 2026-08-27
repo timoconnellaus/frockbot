@@ -1,5 +1,6 @@
 import { electron } from "@better-auth/electron";
 import { betterAuth } from "better-auth";
+import { bearer } from "better-auth/plugins";
 import type { GatewayAuth } from "./contracts.js";
 
 export interface AuthEnvironment {
@@ -16,7 +17,11 @@ export function createAuth(environment: AuthEnvironment) {
     baseURL: environment.BETTER_AUTH_URL,
     secret: environment.BETTER_AUTH_SECRET,
     database: environment.AUTH_DB,
-    trustedOrigins: ["com.frockbot.desktop:/"],
+    trustedOrigins: [
+      "com.frockbot.desktop:/",
+      "capacitor://localhost",
+      "frockbot://localhost",
+    ],
     socialProviders: {
       google: {
         clientId: environment.GOOGLE_CLIENT_ID,
@@ -27,7 +32,7 @@ export function createAuth(environment: AuthEnvironment) {
     account: {
       encryptOAuthTokens: true,
     },
-    plugins: [electron({ clientID: "frockbot-desktop" })],
+    plugins: [electron({ clientID: "frockbot-desktop" }), bearer()],
   });
 }
 

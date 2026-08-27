@@ -1,4 +1,4 @@
-export type ContributionKind = "agent" | "desktop" | "web";
+export type ContributionKind = "agent" | "desktop" | "mobile" | "web";
 
 export interface WebContribution {
   entry: string;
@@ -14,6 +14,7 @@ export interface FrockBotManifestV1 {
   contributions: {
     agent?: string;
     desktop?: string;
+    mobile?: string;
     web?: WebContribution;
   };
   permissions: string[];
@@ -58,6 +59,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifestV1 {
   }
   const agent = optionalEntry(value.contributions, "agent");
   const desktop = optionalEntry(value.contributions, "desktop");
+  const mobile = optionalEntry(value.contributions, "mobile");
   let web: WebContribution | undefined;
   if (value.contributions.web !== undefined) {
     if (!isRecord(value.contributions.web)) {
@@ -76,7 +78,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifestV1 {
       slots: [...slots],
     };
   }
-  if (!agent && !desktop && !web)
+  if (!agent && !desktop && !mobile && !web)
     throw new Error("manifest has no contributions");
   const permissions = value.permissions ?? [];
   if (
@@ -92,7 +94,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifestV1 {
     id,
     displayName: requiredString(value, "displayName"),
     version: requiredString(value, "version"),
-    contributions: { agent, desktop, web },
+    contributions: { agent, desktop, mobile, web },
     permissions: [...permissions],
   };
 }
@@ -103,6 +105,7 @@ export function declaredContributionKinds(
   const kinds: ContributionKind[] = [];
   if (manifest.contributions.agent) kinds.push("agent");
   if (manifest.contributions.desktop) kinds.push("desktop");
+  if (manifest.contributions.mobile) kinds.push("mobile");
   if (manifest.contributions.web) kinds.push("web");
   return kinds;
 }

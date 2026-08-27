@@ -4,6 +4,7 @@
     { "path": "./packages/protocol" },
     { "path": "./apps/agent-runtime" },
     { "path": "./apps/cloudflare" },
-    { "path": "./apps/desktop" }
+    { "path": "./apps/desktop" },
+    { "path": "./apps/mobile" }
   ]
 }

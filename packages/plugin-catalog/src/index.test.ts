@@ -4,6 +4,8 @@ import {
   type ActiveContribution,
   type ContributionHost,
   type ContributionKind,
+  decodeFrockBotManifest,
+  declaredContributionKinds,
   LocalCordisContributionHost,
   PackageCatalog,
   type PackageDescriptor,
@@ -147,6 +149,38 @@ describe("PackageCatalog", () => {
     });
   });
 
+  test("mounts a local mobile contribution behind the host interface", async () => {
+    const root = await createCatalog();
+    let setups = 0;
+    let cleanups = 0;
+    const plugin = () => {
+      setups += 1;
+      return () => {
+        cleanups += 1;
+      };
+    };
+    root.packages.registerHost(
+      new LocalCordisContributionHost("mobile", root, () =>
+        Promise.resolve({ default: plugin }),
+      ),
+    );
+    root.packages.install({
+      specifier: "fixture",
+      manifest: {
+        schemaVersion: 1,
+        id: "local-mobile",
+        displayName: "Local Mobile",
+        version: "1.0.0",
+        contributions: { mobile: "./mobile" },
+      },
+    });
+
+    await root.packages.enable("local-mobile");
+    expect(setups).toBe(1);
+    await root.packages.disable("local-mobile");
+    expect(cleanups).toBe(1);
+  });
+
   test("mounts a local Cordis contribution behind the host interface", async () => {
     const root = await createCatalog();
     let setups = 0;
@@ -177,5 +211,60 @@ describe("PackageCatalog", () => {
     expect(setups).toBe(1);
     await root.packages.disable("local");
     expect(cleanups).toBe(1);
+  });
+});
+
+describe("decodeFrockBotManifest", () => {
+  test("accepts a manifest that only contributes to mobile", () => {
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 1,
+      id: "mobile-only",
+      displayName: "Mobile Only",
+      version: "1.0.0",
+      contributions: { mobile: "./mobile" },
+      permissions: ["mobile:notifications"],
+    });
+
+    expect(decoded.contributions).toEqual({
+      agent: undefined,
+      desktop: undefined,
+      mobile: "./mobile",
+      web: undefined,
+    });
+    expect(declaredContributionKinds(decoded)).toEqual(["mobile"]);
+  });
+
+  test("rejects a mobile contribution that is not a relative export path", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 1,
+        id: "mobile-only",
+        displayName: "Mobile Only",
+        version: "1.0.0",
+        contributions: { mobile: "mobile" },
+      }),
+    ).toThrow('manifest contribution "mobile" must be a relative export path');
+  });
+
+  test("orders declared contribution kinds agent, desktop, mobile, web", () => {
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 1,
+      id: "every-kind",
+      displayName: "Every Kind",
+      version: "1.0.0",
+      contributions: {
+        web: { entry: "./client.ts", manifest: "./manifest.json", slots: [] },
+        mobile: "./mobile",
+        desktop: "./host",
+        agent: "./agent",
+      },
+    });
+
+    expect(declaredContributionKinds(decoded)).toEqual([
+      "agent",
+      "desktop",
+      "mobile",
+      "web",
+    ]);
   });
 });
