@@ -5,27 +5,29 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "build:preload": "bun run build-preload.ts",
-    "dev": "bun run build:preload && electron-vite dev",
-    "build": "bun run build:preload && electron-vite build",
-    "start": "bun run build:preload && electron-vite preview",
+    "build:webui": "bun run --filter @frockbot/webui-shell build && bun run --filter @frockbot/plugin-clock build",
+    "dev": "bun run build:webui && electron-vite dev",
+    "build": "bun run build:webui && electron-vite build",
+    "start": "bun run build:webui && electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.3",
+    "@cordisjs/client": "0.8.2",
+    "@cordisjs/plugin-loader": "1.0.0-rc.5",
+    "@cordisjs/plugin-server": "1.7.0",
+    "@cordisjs/plugin-webui": "0.8.2",
+    "@frockbot/plugin-catalog": "workspace:*",
+    "@frockbot/plugin-clock": "workspace:*",
     "@frockbot/protocol": "workspace:*",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "@frockbot/webui-shell": "workspace:*",
+    "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
     "@types/bun": "^1.3.6",
     "@types/node": "^22.19.3",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
-    "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.0.0",
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
-    "vite": "^7.3.6"
+    "vite": "7.3.2"
   }
 }

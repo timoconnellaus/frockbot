@@ -1,0 +1,36 @@
+{
+  "name": "@frockbot/plugin-clock",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
+    "./host": "./src/host.ts",
+    "./manifest": "./src/manifest.ts",
+    "./shared": "./src/shared.ts",
+    "./frockbot.json": "./frockbot.json",
+    "./package.json": "./package.json"
+  },
+  "frockbot": {
+    "manifest": "./frockbot.json"
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cordisjs/client": "0.8.2",
+    "@cordisjs/plugin-webui": "0.8.2",
+    "@frockbot/agent-core": "workspace:*",
+    "cordis": "4.0.0-rc.8",
+    "vue": "3.5.33"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.3",
+    "@vitejs/plugin-vue": "6.0.6",
+    "typescript": "5.9.3",
+    "vite": "7.3.2",
+    "vue-tsc": "3.2.5"
+  }
+}

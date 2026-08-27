@@ -24,7 +24,7 @@ export class AgentProcess {
     try {
       const child = utilityProcess.fork(this.#workerPath(), [], {
         env: { ...process.env },
-        serviceName: "FrockBot Pi agent",
+        serviceName: "FrockBot Cordis agent",
       });
       this.#child = child;
       child.on("message", (message) => {
@@ -50,7 +50,7 @@ export class AgentProcess {
 
   prompt(request: PromptRequest): PromptResponse {
     if (!this.#child || !this.#ready) {
-      return { accepted: false, error: "Pi is still starting" };
+      return { accepted: false, error: "The Cordis agent is still starting" };
     }
     if (this.#activeRunId) {
       return { accepted: false, error: "Another turn is already running" };
@@ -119,7 +119,7 @@ export class AgentProcess {
 
   #workerPath(): string {
     if (app.isPackaged)
-      return join(process.resourcesPath, "agent-worker", "index.js");
-    return join(app.getAppPath(), "resources", "agent-worker", "index.js");
+      return join(process.resourcesPath, "cordis-agent", "index.mjs");
+    return join(app.getAppPath(), "resources", "cordis-agent", "index.mjs");
   }
 }

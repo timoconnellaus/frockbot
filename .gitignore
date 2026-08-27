@@ -3,7 +3,6 @@ dist/
 out/
 *.log
 .DS_Store
-apps/desktop/resources/agent-worker/
-apps/desktop/resources/preload/
+apps/desktop/resources/cordis-agent/
 artifacts/
 .pi/

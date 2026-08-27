@@ -8,8 +8,8 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["bun", "node", "electron"]
+    "lib": ["ES2023", "DOM"],
+    "types": ["bun", "node"]
   },
-  "include": ["electron.vite.config.ts", "src/**/*.ts"]
+  "include": ["build.ts", "src/**/*.ts"]
 }

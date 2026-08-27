@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "clock",
+  "displayName": "Clock",
+  "version": "0.0.1",
+  "contributions": {
+    "agent": "./agent",
+    "desktop": "./host",
+    "web": {
+      "entry": "./src/client/index.ts",
+      "manifest": "./dist/manifest.json",
+      "slots": ["frockbot.right-panel"]
+    }
+  },
+  "permissions": ["time:read"]
+}

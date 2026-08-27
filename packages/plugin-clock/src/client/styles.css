@@ -1,0 +1,47 @@
+.clock-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 0;
+  border-top: 1px solid #282828;
+  color: #d8d8d8;
+}
+
+.clock-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.clock-heading button {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: #8f8f8f;
+  background: #171717;
+  cursor: pointer;
+}
+
+.clock-heading button:disabled {
+  opacity: 0.45;
+}
+
+.clock-card time {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.clock-card small {
+  color: #777;
+  font-size: 9px;
+}
+
+.clock-card code {
+  justify-self: start;
+  padding: 3px 6px;
+  border: 1px solid #2d2d2d;
+  border-radius: 5px;
+  color: #72d7a3;
+  background: #101010;
+  font-size: 9px;
+}

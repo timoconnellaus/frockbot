@@ -1,10 +1,3 @@
-export const IPC_CHANNELS = {
-  prompt: "agent:prompt",
-  abort: "agent:abort",
-  restart: "agent:restart",
-  event: "agent:event",
-} as const;
-
 export interface PromptRequest {
   runId: string;
   text: string;
@@ -46,14 +39,6 @@ export type AgentEvent =
 export interface PromptResponse {
   accepted: boolean;
   error?: string;
-}
-
-export interface FrockBotDesktopAPI {
-  sendPrompt(request: PromptRequest): Promise<PromptResponse>;
-  abort(runId: string): Promise<void>;
-  restart(): Promise<void>;
-  onAgentEvent(listener: (event: AgentEvent) => void): void;
-  clearAgentEventListeners(): void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
