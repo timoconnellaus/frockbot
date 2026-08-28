@@ -161,8 +161,7 @@
     flex: none;
   }
   .brand img {
-    border-radius: 50%;
-    object-fit: cover;
+    object-fit: contain;
   }
   .brand-name {
     font-family: "Archivo Black", "Arial Black", sans-serif;

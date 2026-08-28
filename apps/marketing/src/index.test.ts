@@ -104,6 +104,12 @@ describe("legal policy pages", () => {
     },
   );
 
+  test("brand artwork preserves the full app icon edges", async () => {
+    const styles = await publicFile("styles.css");
+    expect(styles).toContain(".brand img { object-fit: contain; }");
+    expect(styles).not.toContain(".brand img { border-radius: 50%");
+  });
+
   test("privacy policy covers the evidenced data flows and reciprocal navigation", async () => {
     const privacy = await publicFile("privacy/index.html");
     const normalizedPrivacy = privacy.replace(/\s+/g, " ");
