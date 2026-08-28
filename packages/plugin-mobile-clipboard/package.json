@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "@frockbot/plugin-testkit": "workspace:*",
-    "@types/bun": "1.3.6",
+    "@types/bun": "1.4.0",
     "typescript": "^7.0.2"
   }
 }

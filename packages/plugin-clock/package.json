@@ -27,14 +27,14 @@
     "@frockbot/agent-core": "workspace:*",
     "@frockbot/client-core": "workspace:*",
     "cordis": "4.0.0-rc.8",
-    "vue": "3.5.33"
+    "vue": "3.5.41"
   },
   "devDependencies": {
-    "@types/node": "22.19.3",
-    "@vitejs/plugin-vue": "6.0.6",
-    "typescript": "5.9.3",
-    "vite": "7.3.2",
-    "vue-tsc": "3.2.5"
+    "@types/node": "26.2.0",
+    "@vitejs/plugin-vue": "6.0.8",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vue-tsc": "3.3.10"
   },
   "publishConfig": {
     "access": "public"
