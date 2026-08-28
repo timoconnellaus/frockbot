@@ -1,69 +1,119 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import capacitorConfig from "../../capacitor.config.ts";
 
-declare const Bun: {
-  file(path: URL): { text(): Promise<string> };
+type Insets = { top: number; right: number; bottom: number; left: number };
+type Rect = Insets & { width: number; height: number };
+type Layout = {
+  viewport: { width: number; height: number };
+  auth: { root: Rect; probe: Rect };
+  authenticated: {
+    root: Rect;
+    topbar: Rect;
+    surface: Rect;
+    hostedRoot: Rect;
+    actions: Rect;
+  };
 };
 
-const stylesheetUrl = new URL("./mobile.css", import.meta.url);
+const browserInsets: Insets = { top: 11, right: 17, bottom: 23, left: 29 };
+const nativeInsets: Insets = { top: 13, right: 19, bottom: 27, left: 31 };
 
-type CssDeclarations = Map<string, Map<string, string>>;
-
-function parseCssDeclarations(stylesheet: string): CssDeclarations {
-  const rules: CssDeclarations = new Map();
-  for (const match of stylesheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const declarations = new Map<string, string>();
-    for (const declaration of match[2]?.split(";") ?? []) {
-      const separator = declaration.indexOf(":");
-      if (separator < 0) continue;
-      declarations.set(
-        declaration.slice(0, separator).trim(),
-        declaration
-          .slice(separator + 1)
-          .trim()
-          .replace(/\s+/g, ""),
-      );
-    }
-    for (const selector of match[1]?.split(",") ?? []) {
-      rules.set(selector.trim(), declarations);
-    }
+async function renderLayouts(): Promise<{
+  browser: Layout;
+  native: Layout;
+}> {
+  const mobileRoot = resolve(import.meta.dirname, "../..");
+  const electron = resolve(
+    mobileRoot,
+    `node_modules/.bin/electron${process.platform === "win32" ? ".cmd" : ""}`,
+  );
+  const fixture = resolve(import.meta.dirname, "mobile-layout.browser.mjs");
+  const electronCommand = [
+    electron,
+    ...(process.platform === "linux" && process.env.CI ? ["--no-sandbox"] : []),
+    fixture,
+  ];
+  const command =
+    process.platform === "linux"
+      ? ["xvfb-run", "--auto-servernum", ...electronCommand]
+      : electronCommand;
+  const child = Bun.spawn(command, {
+    cwd: mobileRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) {
+    throw new Error(`layout browser exited ${exitCode}: ${stderr}`);
   }
-  return rules;
+  return JSON.parse(stdout) as { browser: Layout; native: Layout };
 }
 
-async function mobileRules(): Promise<CssDeclarations> {
-  return parseCssDeclarations(await Bun.file(stylesheetUrl).text());
+function expectRect(rect: Rect, expected: Insets): void {
+  expect(rect.top).toBe(expected.top);
+  expect(rect.right).toBe(expected.right);
+  expect(rect.bottom).toBe(expected.bottom);
+  expect(rect.left).toBe(expected.left);
+}
+
+function expectLayout(layout: Layout, insets: Insets): void {
+  const safeBounds = {
+    top: insets.top,
+    right: layout.viewport.width - insets.right,
+    bottom: layout.viewport.height - insets.bottom,
+    left: insets.left,
+  };
+
+  expectRect(layout.auth.root, {
+    top: 0,
+    right: layout.viewport.width,
+    bottom: layout.viewport.height,
+    left: 0,
+  });
+  expectRect(layout.auth.probe, {
+    top: safeBounds.top + 24,
+    right: safeBounds.right - 20,
+    bottom: safeBounds.bottom - 24,
+    left: safeBounds.left + 20,
+  });
+
+  expectRect(layout.authenticated.root, {
+    top: 0,
+    right: layout.viewport.width,
+    bottom: layout.viewport.height,
+    left: 0,
+  });
+  expect(layout.authenticated.topbar.top).toBe(safeBounds.top);
+  expect(layout.authenticated.actions.bottom).toBe(safeBounds.bottom);
+  for (const rect of [
+    layout.authenticated.topbar,
+    layout.authenticated.surface,
+    layout.authenticated.actions,
+  ]) {
+    expect(rect.left).toBe(safeBounds.left);
+    expect(rect.right).toBe(safeBounds.right);
+    expect(rect.top).toBeGreaterThanOrEqual(safeBounds.top);
+    expect(rect.bottom).toBeLessThanOrEqual(safeBounds.bottom);
+  }
+  expect(layout.authenticated.hostedRoot).toEqual(layout.authenticated.surface);
 }
 
 describe("mobile safe-area layout", () => {
-  test("prefers native insets and falls back to browser safe areas", async () => {
-    const root = (await mobileRules()).get(":root");
-
+  test("enables Capacitor's Android CSS inset fallback", () => {
     expect(capacitorConfig.plugins?.SystemBars).toMatchObject({
       insetsHandling: "css",
     });
-    for (const edge of ["top", "right", "bottom", "left"]) {
-      expect(root?.get(`--mobile-safe-${edge}`)).toBe(
-        `var(--safe-area-inset-${edge},env(safe-area-inset-${edge},0px))`,
-      );
-    }
   });
 
-  test.each([".mobile-root", ".mobile-auth"])(
-    "%s keeps safe-area padding inside the visible viewport",
-    async (selector: string) => {
-      const declarations = (await mobileRules()).get(selector);
+  test("keeps both mobile layouts inside all safe-area edges", async () => {
+    const layouts = await renderLayouts();
 
-      expect(declarations?.get("height")).toBe("100dvh");
-      expect(declarations?.get("box-sizing")).toBe("border-box");
-      expect(declarations?.get("padding")).toContain("var(--mobile-safe-top)");
-      expect(declarations?.get("padding")).toContain(
-        "var(--mobile-safe-right)",
-      );
-      expect(declarations?.get("padding")).toContain(
-        "var(--mobile-safe-bottom)",
-      );
-      expect(declarations?.get("padding")).toContain("var(--mobile-safe-left)");
-    },
-  );
+    expectLayout(layouts.browser, browserInsets);
+    expectLayout(layouts.native, nativeInsets);
+  }, 20_000);
 });
