@@ -451,7 +451,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     async startConnection(
       packageId: string,
       connectionTypeId: string,
-    ): Promise<string> {
+    ): Promise<string | undefined> {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
       }
@@ -482,6 +482,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           writeConnectionOperations(connectionOperations);
         }
         throw error;
+      }
+      if (result.status === "ready") {
+        delete connectionOperations[operationKey];
+        writeConnectionOperations(connectionOperations);
+        return undefined;
       }
       const expiresAt = Date.parse(result.expiresAt);
       if (Number.isFinite(expiresAt)) operation.expiresAt = expiresAt;

@@ -202,17 +202,17 @@ function decodeConnectionStartReplayV1(
     value.schemaVersion !== 1 ||
     value.commandFingerprint !== commandFingerprint ||
     value.connectionId !== connection.connectionId ||
-    typeof value.redirectUrl !== "string" ||
-    typeof value.expiresAt !== "string" ||
+    value.status !== "ready" ||
+    value.redirectUrl !== undefined ||
+    value.expiresAt !== undefined ||
     (value.nativeReturnNonce !== undefined &&
       typeof value.nativeReturnNonce !== "string")
   ) {
     return undefined;
   }
   return {
+    status: "ready",
     connectionId: value.connectionId,
-    redirectUrl: value.redirectUrl,
-    expiresAt: value.expiresAt,
     ...(value.nativeReturnNonce
       ? { nativeReturnNonce: value.nativeReturnNonce }
       : {}),
@@ -221,6 +221,46 @@ function decodeConnectionStartReplayV1(
 
 export class ComposioConnectionCoordinator {
   constructor(private readonly config: ComposioConnectionCoordinatorConfig) {}
+
+  async replayStart(
+    userId: string,
+    input: {
+      commandId: string;
+      connectionTypeId: string;
+      alias?: string;
+      returnTarget?: "browser" | "desktop";
+    },
+  ): Promise<StartConnectionResult | undefined> {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.commandId)) {
+      throw new Error("Connection commandId is invalid");
+    }
+    const commandFingerprint = connectionStartCommandFingerprintV1(userId, {
+      connectionTypeId: input.connectionTypeId,
+      alias: input.alias?.trim() || undefined,
+      returnTarget: input.returnTarget ?? "browser",
+    });
+    const existing = await this.config.store.getConnection(
+      userId,
+      input.commandId,
+    );
+    if (!existing) return undefined;
+    if (
+      existing.safeMetadata.startCommandFingerprint !== commandFingerprint
+    ) {
+      throw new Error(
+        `Connection command idempotency key "${input.commandId}" was reused for a different command`,
+      );
+    }
+    if (existing.state !== "ready") return undefined;
+    const replay = decodeConnectionStartReplayV1(
+      existing,
+      commandFingerprint,
+    );
+    if (!replay) {
+      throw new Error("Connection command replay snapshot is invalid");
+    }
+    return replay;
+  }
 
   async start(
     userId: string,
@@ -235,6 +275,8 @@ export class ComposioConnectionCoordinator {
       nativeReturnNonce?: string;
     },
   ): Promise<StartConnectionResult> {
+    const terminalReplay = await this.replayStart(userId, input);
+    if (terminalReplay) return terminalReplay;
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.commandId)) {
       throw new Error("Connection commandId is invalid");
     }
@@ -248,24 +290,6 @@ export class ComposioConnectionCoordinator {
     });
     const authorizationStateExpiresAt =
       input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000;
-    const terminalCallbackUrl = new URL(
-      "/api/plugins/composio/callback",
-      this.config.callbackBaseUrl,
-    );
-    terminalCallbackUrl.searchParams.set(
-      "state",
-      input.callbackState ?? connectionId,
-    );
-    const connectionStartReplayContext = {
-      schemaVersion: 1,
-      commandFingerprint,
-      connectionId,
-      callbackUrl: terminalCallbackUrl.toString(),
-      expiresAt: new Date(authorizationStateExpiresAt).toISOString(),
-      ...(input.nativeReturnNonce
-        ? { nativeReturnNonce: input.nativeReturnNonce }
-        : {}),
-    };
     const stored = await this.config.store.getConnection(userId, connectionId);
     let type: ComposioConnectionTypeConfig | undefined;
     let claimed = false;
@@ -285,7 +309,6 @@ export class ComposioConnectionCoordinator {
           providerAlias: connectionId,
           returnTarget,
           startCommandFingerprint: commandFingerprint,
-          connectionStartReplayContext,
           authorizationStateId: input.authorizationStateId ?? connectionId,
           authorizationStateExpiresAt,
           ...(input.nativeReturnNonce
@@ -369,6 +392,7 @@ export class ComposioConnectionCoordinator {
         expiry > now
       ) {
         return {
+          status: "authorization-required",
           connectionId,
           redirectUrl,
           expiresAt,
@@ -498,11 +522,6 @@ export class ComposioConnectionCoordinator {
                 },
               },
             );
-          if (!finished) {
-            throw new Error(
-              "Connection authorization changed during reconciliation",
-            );
-          }
           const ready = await this.config.store.getConnection(
             userId,
             connectionId,
@@ -511,6 +530,11 @@ export class ComposioConnectionCoordinator {
             ? decodeConnectionStartReplayV1(ready, commandFingerprint)
             : undefined;
           if (!replay) {
+            if (!finished) {
+              throw new Error(
+                "Connection authorization changed during reconciliation",
+              );
+            }
             throw new Error("Connection command replay snapshot is invalid");
           }
           return replay;
@@ -543,7 +567,6 @@ export class ComposioConnectionCoordinator {
         returnTarget,
         providerAlias: connectionId,
         startCommandFingerprint: commandFingerprint,
-        connectionStartReplayContext,
         connectedAccountId: link.connectedAccountId,
         redirectUrl: link.redirectUrl,
         toolkitSlug: type.toolkitSlug,
@@ -569,6 +592,7 @@ export class ComposioConnectionCoordinator {
       throw new Error("Connection was revoked while creating its link");
     }
     return {
+      status: "authorization-required",
       connectionId,
       redirectUrl: link.redirectUrl,
       expiresAt: link.expiresAt,

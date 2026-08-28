@@ -287,7 +287,7 @@ const web: Ref<FrockBotWebData> = ref({
   async startConnection(
     packageId: string,
     connectionTypeId: string,
-  ): Promise<string> {
+  ): Promise<string | undefined> {
     const response = await auth.authorizedFetch(
       `/api/plugins/${encodeURIComponent(packageId)}/connections`,
       {
@@ -302,7 +302,8 @@ const web: Ref<FrockBotWebData> = ref({
     if (!response.ok) {
       throw new Error(responseError(value, "Could not start Connection"));
     }
-    return decodeStartConnectionResult(value).redirectUrl;
+    const result = decodeStartConnectionResult(value);
+    return result.status === "ready" ? undefined : result.redirectUrl;
   },
   async revokeConnection(
     packageId: string,

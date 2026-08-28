@@ -289,12 +289,20 @@ export function createComposioBackendContribution(
           ) {
             return jsonError(400, "nativeReturnNonce is invalid");
           }
-          const authorizationStateId = crypto.randomUUID();
-          const authorizationStateExpiresAt = Date.now() + 10 * 60_000;
           const nativeReturnNonce =
             context.client === "desktop"
               ? (value.nativeReturnNonce as string)
               : undefined;
+          const startInput = {
+            commandId: value.commandId,
+            connectionTypeId: value.connectionTypeId,
+            alias: value.alias as string | undefined,
+            returnTarget: context.client,
+          };
+          const replay = await connections.replayStart(user, startInput);
+          if (replay) return Response.json(replay);
+          const authorizationStateId = crypto.randomUUID();
+          const authorizationStateExpiresAt = Date.now() + 10 * 60_000;
           const callbackState = await encodeAuthorizationState(
             {
               schemaVersion: 1,
@@ -309,10 +317,7 @@ export function createComposioBackendContribution(
           );
           return Response.json(
             await connections.start(user, {
-              commandId: value.commandId,
-              connectionTypeId: value.connectionTypeId,
-              alias: value.alias as string | undefined,
-              returnTarget: context.client,
+              ...startInput,
               callbackState,
               authorizationStateId,
               authorizationStateExpiresAt,

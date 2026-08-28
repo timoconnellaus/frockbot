@@ -37,12 +37,19 @@ export interface ClientTurnResponse {
   notification?: ClientNotificationIntent;
 }
 
-export interface ClientStartConnectionResult {
-  connectionId: string;
-  redirectUrl: string;
-  expiresAt: string;
-  nativeReturnNonce?: string;
-}
+export type ClientStartConnectionResult =
+  | {
+      status?: "authorization-required";
+      connectionId: string;
+      redirectUrl: string;
+      expiresAt: string;
+      nativeReturnNonce?: string;
+    }
+  | {
+      status: "ready";
+      connectionId: string;
+      nativeReturnNonce?: string;
+    };
 
 export interface ClientRun {
   runId: string;
@@ -230,6 +237,11 @@ export function decodeStartConnectionResult(
   input: unknown,
 ): ClientStartConnectionResult {
   const value = responseRecord(input, "Connection result");
+  const connectionId = responseString(
+    value,
+    "connectionId",
+    "Connection result",
+  );
   const nativeReturnNonce = value.nativeReturnNonce;
   if (
     nativeReturnNonce !== undefined &&
@@ -237,8 +249,25 @@ export function decodeStartConnectionResult(
   ) {
     throw new Error("Connection result.nativeReturnNonce must be a string");
   }
+  if (value.status === "ready") {
+    if (value.redirectUrl !== undefined || value.expiresAt !== undefined) {
+      throw new Error("Ready Connection result must not include a redirect");
+    }
+    return {
+      status: "ready",
+      connectionId,
+      ...(nativeReturnNonce ? { nativeReturnNonce } : {}),
+    };
+  }
+  if (
+    value.status !== undefined &&
+    value.status !== "authorization-required"
+  ) {
+    throw new Error("Connection result.status is invalid");
+  }
   return {
-    connectionId: responseString(value, "connectionId", "Connection result"),
+    status: "authorization-required",
+    connectionId,
     redirectUrl: decodeExternalAuthorizationUrl(
       responseString(value, "redirectUrl", "Connection result"),
     ),

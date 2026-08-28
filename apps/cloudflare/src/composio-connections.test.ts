@@ -89,18 +89,16 @@ class MemoryConnectionStore implements ComposioConnectionStore {
   ): Promise<boolean> {
     const current = this.connections.get(connectionId);
     if (!current) return Promise.resolve(false);
+    const operation = current.safeMetadata.reconciliationOperation;
+    const canFinish =
+      current.safeMetadata.revocationRequested !== true &&
+      (current.state === "authorizing" ||
+        (current.state === "reconciliation-required" && operation === "link"));
+    if (!canFinish) return Promise.resolve(false);
     if (update.authorizationStateId !== undefined) {
       if (
         current.safeMetadata.authorizationStateId !==
           update.authorizationStateId ||
-        current.state === "ready" ||
-        current.state === "failed" ||
-        current.safeMetadata.revocationRequested === true ||
-        (current.state !== "authorizing" &&
-          !(
-            current.state === "reconciliation-required" &&
-            current.safeMetadata.reconciliationOperation === "link"
-          )) ||
         (current.safeMetadata.authorizationStateConsumed !== true &&
           typeof current.safeMetadata.authorizationStateExpiresAt ===
             "number" &&
@@ -108,17 +106,47 @@ class MemoryConnectionStore implements ComposioConnectionStore {
       ) {
         return Promise.resolve(false);
       }
+    }
+    const safeMetadata = update.safeMetadata ?? current.safeMetadata;
+    const commandFingerprint = current.safeMetadata.startCommandFingerprint;
+    if (update.state === "ready" && typeof commandFingerprint === "string") {
+      if (
+        typeof current.safeMetadata.authorizationStateExpiresAt !== "number" ||
+        current.safeMetadata.authorizationStateExpiresAt <= Date.now() ||
+        typeof safeMetadata.connectedAccountId !== "string"
+      ) {
+        return Promise.resolve(false);
+      }
       this.updateConnection(_userId, connectionId, {
         ...update,
         safeMetadata: {
-          ...(update.safeMetadata ?? current.safeMetadata),
+          ...safeMetadata,
           authorizationStateConsumed: true,
+          connectionStartReplay: {
+            schemaVersion: 1,
+            commandFingerprint,
+            connectionId,
+            status: "ready",
+            ...(typeof current.safeMetadata.nativeReturnNonce === "string"
+              ? {
+                  nativeReturnNonce:
+                    current.safeMetadata.nativeReturnNonce,
+                }
+              : {}),
+          },
         },
       });
       return Promise.resolve(true);
     }
-    if (current.state !== "authorizing") return Promise.resolve(false);
-    this.updateConnection(_userId, connectionId, update);
+    this.updateConnection(_userId, connectionId, {
+      ...update,
+      safeMetadata:
+        update.state === "ready"
+          ? { ...safeMetadata, authorizationStateConsumed: true }
+          : update.authorizationStateId !== undefined
+            ? { ...safeMetadata, authorizationStateConsumed: true }
+          : safeMetadata,
+    });
     return Promise.resolve(true);
   }
 
@@ -660,7 +688,10 @@ describe("ComposioConnectionCoordinator", () => {
     expect(createCalls).toBe(1);
     expect(reconciliationReads).toBe(2);
     expect(store.packagePolicyReads).toBe(1);
-    expect(reconciled.redirectUrl).toContain("connected_account_id=ca_123");
+    expect(reconciled).toEqual({
+      status: "ready",
+      connectionId: "connection-1",
+    });
     expect(store.connections.get("connection-1")?.safeMetadata).toMatchObject({
       connectedAccountId: "ca_123",
     });

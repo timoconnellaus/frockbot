@@ -55,31 +55,21 @@ function readyAuthorizationMetadata(
   if (typeof commandFingerprint !== "string") {
     return { ...safeMetadata, authorizationStateConsumed: true };
   }
-  const context = connection.safeMetadata.connectionStartReplayContext;
   const connectedAccountId = safeMetadata.connectedAccountId;
+  const admittedConnectedAccountId =
+    connection.safeMetadata.connectedAccountId;
+  const authorizationStateExpiresAt =
+    connection.safeMetadata.authorizationStateExpiresAt;
   if (
-    typeof context !== "object" ||
-    context === null ||
-    Array.isArray(context) ||
-    context.schemaVersion !== 1 ||
-    context.commandFingerprint !== commandFingerprint ||
-    context.connectionId !== connection.connectionId ||
-    typeof context.callbackUrl !== "string" ||
-    typeof context.expiresAt !== "string" ||
-    !Number.isFinite(Date.parse(context.expiresAt)) ||
+    typeof authorizationStateExpiresAt !== "number" ||
+    authorizationStateExpiresAt <= Date.now() ||
     typeof connectedAccountId !== "string" ||
-    (context.nativeReturnNonce !== undefined &&
-      typeof context.nativeReturnNonce !== "string")
+    (typeof admittedConnectedAccountId === "string" &&
+      admittedConnectedAccountId !== connectedAccountId)
   ) {
     return undefined;
   }
-  let redirectUrl: URL;
-  try {
-    redirectUrl = new URL(context.callbackUrl);
-  } catch {
-    return undefined;
-  }
-  redirectUrl.searchParams.set("connected_account_id", connectedAccountId);
+  const nativeReturnNonce = connection.safeMetadata.nativeReturnNonce;
   return {
     ...safeMetadata,
     authorizationStateConsumed: true,
@@ -87,10 +77,9 @@ function readyAuthorizationMetadata(
       schemaVersion: 1,
       commandFingerprint,
       connectionId: connection.connectionId,
-      redirectUrl: redirectUrl.toString(),
-      expiresAt: context.expiresAt,
-      ...(context.nativeReturnNonce
-        ? { nativeReturnNonce: context.nativeReturnNonce }
+      status: "ready",
+      ...(typeof nativeReturnNonce === "string"
+        ? { nativeReturnNonce }
         : {}),
     },
   };

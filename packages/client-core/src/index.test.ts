@@ -85,6 +85,15 @@ describe("hosted response decoders", () => {
       }).connectionId,
     ).toBe("connection-1");
     expect(
+      decodeStartConnectionResult({
+        status: "ready",
+        connectionId: "connection-1",
+      }),
+    ).toEqual({
+      status: "ready",
+      connectionId: "connection-1",
+    });
+    expect(
       decodeRunList({
         runs: [
           {
@@ -111,15 +120,25 @@ describe("hosted response decoders", () => {
     expect(() =>
       decodeStartConnectionResult({ connectionId: "connection-1" }),
     ).toThrow("Connection result.redirectUrl must be a string");
+    expect(() =>
+      decodeStartConnectionResult({
+        status: "ready",
+        connectionId: "connection-1",
+        redirectUrl: "https://connect.example/authorize",
+      }),
+    ).toThrow("Ready Connection result must not include a redirect");
   });
 
   test("allows only bounded absolute HTTPS Connection redirects", () => {
-    const decode = (redirectUrl: string) =>
-      decodeStartConnectionResult({
+    const decode = (redirectUrl: string) => {
+      const result = decodeStartConnectionResult({
         connectionId: "connection-1",
         redirectUrl,
         expiresAt: "2026-08-28T00:05:00.000Z",
-      }).redirectUrl;
+      });
+      if (result.status === "ready") throw new Error("unexpected ready result");
+      return result.redirectUrl;
+    };
 
     expect(decode("https://connect.example/authorize?account=primary")).toBe(
       "https://connect.example/authorize?account=primary",

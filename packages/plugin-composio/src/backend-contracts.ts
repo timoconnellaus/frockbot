@@ -1,9 +1,16 @@
-export interface StartConnectionResult {
-  connectionId: string;
-  redirectUrl: string;
-  expiresAt: string;
-  nativeReturnNonce?: string;
-}
+export type StartConnectionResult =
+  | {
+      status?: "authorization-required";
+      connectionId: string;
+      redirectUrl: string;
+      expiresAt: string;
+      nativeReturnNonce?: string;
+    }
+  | {
+      status: "ready";
+      connectionId: string;
+      nativeReturnNonce?: string;
+    };
 
 export interface RevokeConnectionResult {
   status: "revoked" | "reconciliation-required";

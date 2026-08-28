@@ -144,7 +144,7 @@ async function connectPlugin(
       packageId,
       connectionTypeId,
     );
-    await web.value.openConnectionAuthorization(redirectUrl);
+    if (redirectUrl) await web.value.openConnectionAuthorization(redirectUrl);
     await web.value.loadPluginCatalog();
   } catch (error) {
     web.value.settingsError =
