@@ -10,6 +10,8 @@ import type {
 } from "@frockbot/configuration-core";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 import type {
+  ClientRunLookupQueryV1,
+  ClientRunLookupV1,
   ClientRunListQueryV1,
   ClientRunListV1,
   ClientTurnV1,
@@ -102,6 +104,10 @@ export interface BotStateBinding {
     botId: string,
     query: ClientRunListQueryV1,
   ): Promise<ClientRunListV1>;
+  lookupRun(
+    botId: string,
+    query: ClientRunLookupQueryV1,
+  ): Promise<ClientRunLookupV1>;
   listNotifications(botId: string): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
   reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;

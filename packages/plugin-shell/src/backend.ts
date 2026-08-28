@@ -43,9 +43,12 @@ import {
   CLIENT_RUN_PAGE_LIMIT,
   clientRunListWireBytes,
   createClientRunListV1,
+  decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
+  projectClientRunLookupV1,
   projectClientRunV1,
   projectClientTurnV1,
+  type ClientRunLookupV1,
   type ClientRunListV1,
   type ClientRunV1,
   type ClientTurnV1,
@@ -1265,6 +1268,17 @@ export class ShellBotBackendContribution {
       throw new Error("required run projections exceed the wire byte limit");
     }
     return page;
+  }
+
+  async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
+    const query = decodeClientRunLookupQueryV1(input);
+    const run = await this.ctx.storage.get<StoredRun>(
+      `${RUN_PREFIX}${query.runId}`,
+    );
+    if (run && run.runId !== query.runId) {
+      throw new Error("stored run does not match its lookup key");
+    }
+    return projectClientRunLookupV1(run);
   }
 
   private initialBotSettings(

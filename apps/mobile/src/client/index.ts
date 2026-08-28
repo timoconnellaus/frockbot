@@ -48,8 +48,12 @@ import { mobileContributions } from "./contributions.ts";
 import { createContributionSlot } from "./ContributionSlot.ts";
 import "./mobile.css";
 import MobileAuthGate from "./MobileAuthGate.vue";
-import { requestTurn, toolsFrom } from "./transport.ts";
-import { admitMobileTurn } from "./turn-admission.ts";
+import { lookupRun, requestTurn, toolsFrom } from "./transport.ts";
+import {
+  admitMobileTurn,
+  projectMobileTurnAdmissionLookup,
+  reconcileMobileTurnAdmission,
+} from "./turn-admission.ts";
 
 const browserFetch = globalThis.fetch.bind(globalThis);
 
@@ -89,6 +93,26 @@ function responseError(value: unknown, fallback: string): string {
     typeof value.error === "string"
     ? value.error
     : fallback;
+}
+
+function waitForAdmissionLookup(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      resolve();
+    };
+    const visibilityChanged = () => {
+      if (!document.hidden) finish();
+    };
+    const timeout = setTimeout(finish, delayMs);
+    if (document.hidden) {
+      document.addEventListener("visibilitychange", visibilityChanged);
+    }
+  });
 }
 
 const web: Ref<FrockBotWebData> = ref({
@@ -273,7 +297,6 @@ const web: Ref<FrockBotWebData> = ref({
     );
     const request = new AbortController();
     activeRequest = request;
-    let retainPendingRun = false;
     try {
       const admission = await admitMobileTurn({
         commandId: pendingRunId,
@@ -288,13 +311,6 @@ const web: Ref<FrockBotWebData> = ref({
             text,
             pendingRunId,
             request.signal,
-          ),
-        reconcile: () =>
-          requestTurn(
-            auth.authorizedFetch,
-            projectionToken.botId,
-            text,
-            pendingRunId,
           ),
       });
       if (admission.status === "not-started") {
@@ -320,23 +336,6 @@ const web: Ref<FrockBotWebData> = ref({
         };
       }
       if (admission.status === "uncertain") {
-        retainPendingRun = botProjection.isCurrent(projectionToken);
-        void admission.reconciliation
-          .then(async () => {
-            const current = botProjection.currentToken();
-            if (current.botId === projectionToken.botId) {
-              await botProjection.refreshHistory(current);
-            }
-          })
-          .catch((error) => {
-            const current = botProjection.currentToken();
-            if (current.botId === projectionToken.botId) {
-              web.value.settingsError =
-                error instanceof Error
-                  ? error.message
-                  : "Turn admission reconciliation failed";
-            }
-          });
         if (botProjection.isCurrent(projectionToken)) {
           replaceMessage(pendingRunId, {
             id: crypto.randomUUID(),
@@ -347,10 +346,41 @@ const web: Ref<FrockBotWebData> = ref({
             tools: [],
           });
         }
+        const lookup = await reconcileMobileTurnAdmission({
+          lookup: () =>
+            lookupRun(
+              auth.authorizedFetch,
+              projectionToken.botId,
+              pendingRunId,
+            ),
+          observe: (observed) => {
+            const current = botProjection.currentToken();
+            if (current.botId !== projectionToken.botId) return;
+            web.value.settingsError = undefined;
+            projectMobileTurnAdmissionLookup(web.value, pendingRunId, observed);
+          },
+          transientFailure: (error) => {
+            const current = botProjection.currentToken();
+            if (current.botId === projectionToken.botId) {
+              web.value.settingsError = `${
+                error instanceof Error
+                  ? error.message
+                  : "Turn admission lookup failed"
+              } Retrying…`;
+            }
+          },
+          wait: waitForAdmissionLookup,
+        });
+        if (lookup.state === "not-admitted") {
+          return {
+            accepted: false,
+            runId: pendingRunId,
+            error: "Turn was not admitted",
+          };
+        }
         return {
-          accepted: false,
+          accepted: true,
           runId: pendingRunId,
-          error: "Turn admission is being reconciled",
         };
       }
 
@@ -381,7 +411,6 @@ const web: Ref<FrockBotWebData> = ref({
     } finally {
       if (activeRequest === request) activeRequest = undefined;
       if (
-        !retainPendingRun &&
         botProjection.isCurrent(projectionToken) &&
         web.value.activeRunId === pendingRunId &&
         web.value.activeRun?.runId !== pendingRunId

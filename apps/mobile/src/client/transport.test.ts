@@ -3,6 +3,7 @@ import {
   decodeRunList,
   decodeTurnResponse,
   listRuns,
+  lookupRun,
   requestTurn,
   toolsFrom,
 } from "./transport.ts";
@@ -239,5 +240,41 @@ describe("gateway requests", () => {
     );
     expect(runs).toHaveLength(1);
     expect(runs[0]?.runId).toBe("run-1");
+  });
+
+  test("looks up admission through a read-only run request", async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = [];
+    const result = await lookupRun(
+      (path, init) => {
+        calls.push({ path, init });
+        return Promise.resolve(
+          jsonResponse({
+            schemaVersion: 1,
+            state: "running",
+            run: {
+              schemaVersion: 1,
+              runId: "command-1",
+              admittedAt: "2026-08-29T00:00:00.000Z",
+              input: "continue",
+              status: "running",
+              events: [],
+            },
+          }),
+        );
+      },
+      "my bot",
+      "command-1",
+    );
+
+    expect(result).toMatchObject({
+      state: "running",
+      run: { runId: "command-1", status: "running" },
+    });
+    expect(calls).toEqual([
+      {
+        path: "/api/bots/my%20bot/turns/command-1",
+        init: { method: "GET", signal: undefined },
+      },
+    ]);
   });
 });

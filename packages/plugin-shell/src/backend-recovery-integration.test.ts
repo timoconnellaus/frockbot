@@ -730,6 +730,60 @@ describe("Bot recovery", () => {
     expect(storage.alarmAt).toBe(alarmBefore);
   });
 
+  test("looks up one durable command without replaying or scanning runs", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(
+      contribution.lookupRun({ schemaVersion: 1, runId: "command-1" }),
+    ).resolves.toEqual({ schemaVersion: 1, state: "not-admitted" });
+
+    const running = {
+      runId: "command-1",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-29T00:00:00.000Z",
+      input: "continue",
+      events: [],
+      status: "running",
+      phase: "executing",
+    } satisfies StoredRun;
+    await storage.put("run:command-1", running);
+    await expect(
+      contribution.lookupRun({ schemaVersion: 1, runId: "command-1" }),
+    ).resolves.toMatchObject({
+      schemaVersion: 1,
+      state: "running",
+      run: { runId: "command-1", status: "running" },
+    });
+
+    await storage.put("run:command-1", {
+      ...running,
+      status: "completed",
+      responseText: "done",
+    } satisfies StoredRun);
+    await expect(
+      contribution.lookupRun({ schemaVersion: 1, runId: "command-1" }),
+    ).resolves.toMatchObject({
+      schemaVersion: 1,
+      state: "terminal",
+      run: {
+        runId: "command-1",
+        status: "completed",
+        outcome: { type: "completed", text: "done" },
+      },
+    });
+    expect(storage.listRequests).toEqual([]);
+    expect(storage.gets).toEqual([
+      "run:command-1",
+      "run:command-1",
+      "run:command-1",
+    ]);
+  });
+
   test("pages large run history with bounded indexed reads and wire bytes", async () => {
     const storage = new MemoryStorage();
     const baseTime = Date.parse("2026-08-28T00:00:00.000Z");

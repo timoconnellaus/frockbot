@@ -4,8 +4,10 @@ import type {
   ClientTurnResponse,
 } from "@frockbot/client-core";
 import {
+  decodeClientRunLookupV1,
   decodeClientRunListV1,
   decodeClientTurnV1,
+  type ClientRunLookup,
 } from "@frockbot/plugin-shell/run-protocol";
 import type { WebToolActivity } from "@frockbot/plugin-shell/shared";
 
@@ -94,4 +96,21 @@ export async function listRuns(
 ): Promise<RunSummary[]> {
   const response = await fetcher(turnsPath(botId), { method: "GET", signal });
   return decodeRunList(await decodeBody(response));
+}
+
+export async function lookupRun(
+  fetcher: Fetcher,
+  botId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<ClientRunLookup> {
+  const response = await fetcher(
+    `${turnsPath(botId)}/${encodeURIComponent(commandId)}`,
+    { method: "GET", signal },
+  );
+  const lookup = decodeClientRunLookupV1(await decodeBody(response));
+  if (lookup.state !== "not-admitted" && lookup.run.runId !== commandId) {
+    throw new Error("run lookup response does not match the command id");
+  }
+  return lookup;
 }

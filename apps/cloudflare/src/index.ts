@@ -5,6 +5,8 @@ import {
   type FoundationConnectionStore,
 } from "@frockbot/application-foundation/runtime";
 import type {
+  ClientRunLookupQueryV1,
+  ClientRunLookupV1,
   ClientRunListQueryV1,
   ClientRunListV1,
 } from "@frockbot/plugin-shell/run-protocol";
@@ -62,6 +64,7 @@ interface UserScopedProps {
 interface BotStateRpc extends BotConfigurationBinding {
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
+  lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
   reconcileRun(
@@ -106,6 +109,15 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     query: ClientRunListQueryV1,
   ): Promise<ClientRunListV1> {
     return botStateStub(this.env, this.ctx.props.userId, botId).listRuns(query);
+  }
+
+  async lookupRun(
+    botId: string,
+    query: ClientRunLookupQueryV1,
+  ): Promise<ClientRunLookupV1> {
+    return botStateStub(this.env, this.ctx.props.userId, botId).lookupRun(
+      query,
+    );
   }
 
   async listNotifications(botId: string): Promise<BotNotificationIntent[]> {
@@ -153,31 +165,25 @@ interface RuntimeExports {
   UserBotState(options: { props: UserScopedProps }): BotStateBinding;
 }
 
-const createGatewayBackendContributions =
-  createImmutablePlanRequestFactory(
-    compileFoundationApplication,
-    (application, env: Env) =>
-      createFoundationBackendContributions(application, {
-        backendHost: "gateway",
-        callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
-        readSecret: (name) => {
-          const value = (env as unknown as Record<string, unknown>)[name];
-          return typeof value === "string" ? value : undefined;
-        },
-        storeFor: (userId) => userConfigurationStub(env, userId),
-        markConnectionUnavailable: (
-          userId,
-          botId,
+const createGatewayBackendContributions = createImmutablePlanRequestFactory(
+  compileFoundationApplication,
+  (application, env: Env) =>
+    createFoundationBackendContributions(application, {
+      backendHost: "gateway",
+      callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
+      readSecret: (name) => {
+        const value = (env as unknown as Record<string, unknown>)[name];
+        return typeof value === "string" ? value : undefined;
+      },
+      storeFor: (userId) => userConfigurationStub(env, userId),
+      markConnectionUnavailable: (userId, botId, connectionId, compensation) =>
+        botStateStub(env, userId, botId).markConnectionUnavailable(
+          { userId, botId },
           connectionId,
           compensation,
-        ) =>
-          botStateStub(env, userId, botId).markConnectionUnavailable(
-            { userId, botId },
-            connectionId,
-            compensation,
-          ),
-      }),
-  );
+        ),
+    }),
+);
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {

@@ -12,10 +12,14 @@ import type {
 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import {
+  decodeClientRunLookupV1,
   decodeClientRunListV1,
   decodeClientTurnV1,
+  projectClientRunLookupV1,
   projectClientRunListV1,
   projectClientTurnV1,
+  type ClientRunLookupQueryV1,
+  type ClientRunLookupV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
 } from "@frockbot/plugin-shell/run-protocol";
@@ -103,6 +107,19 @@ class MemoryBotState implements BotStateBinding {
   ): Promise<ClientRunListV1> {
     return Promise.resolve(
       projectClientRunListV1(structuredClone(this.runs.get(botId) ?? [])),
+    );
+  }
+
+  lookupRun(
+    botId: string,
+    query: ClientRunLookupQueryV1,
+  ): Promise<ClientRunLookupV1> {
+    return Promise.resolve(
+      projectClientRunLookupV1(
+        structuredClone(this.runs.get(botId) ?? []).find(
+          (run) => run.runId === query.runId,
+        ),
+      ),
     );
   }
 
@@ -769,6 +786,32 @@ describe("Cloudflare user application gateway", () => {
     expect(alphaRuns[0]?.input).toBe("hello alpha");
     expect(betaRuns[0]?.input).toBe("hello beta");
     expect(new Set(loader.ids)).toEqual(new Set(["alice:foundation-v1"]));
+  });
+
+  test("reads one admitted Turn without issuing another command", async () => {
+    const { gateway, states } = createTestGateway();
+    const admitted = await gateway(
+      request("/api/bots/primary/turns", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text: "hello",
+          commandId: "lookup-turn-1",
+        }),
+      }),
+    );
+    expect(admitted.status).toBe(200);
+
+    const response = await gateway(
+      request("/api/bots/primary/turns/lookup-turn-1", "alice"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(decodeClientRunLookupV1(await response.json())).toMatchObject({
+      state: "terminal",
+      run: { runId: "lookup-turn-1", status: "completed" },
+    });
+    expect(states.get("alice")?.storedRuns("primary")).toHaveLength(1);
   });
 
   test("returns only the versioned client run wire contract", async () => {

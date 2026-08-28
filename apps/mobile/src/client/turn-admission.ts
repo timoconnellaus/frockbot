@@ -1,3 +1,6 @@
+import { projectDurableRuns } from "@frockbot/plugin-shell/client";
+import type { ClientRunLookup } from "@frockbot/plugin-shell/run-protocol";
+import type { MobileBotProjectionState } from "./bot-projection.ts";
 import type { TurnResponse } from "./transport.ts";
 
 export type MobileTurnAdmission =
@@ -15,7 +18,6 @@ export type MobileTurnAdmission =
       status: "uncertain";
       commandId: string;
       error: unknown;
-      reconciliation: Promise<TurnResponse>;
     };
 
 export interface MobileTurnAdmissionOptions {
@@ -23,7 +25,6 @@ export interface MobileTurnAdmissionOptions {
   prepare(): Promise<void>;
   isCurrent(): boolean;
   request(): Promise<TurnResponse>;
-  reconcile(): Promise<TurnResponse>;
 }
 
 export async function admitMobileTurn(
@@ -49,7 +50,63 @@ export async function admitMobileTurn(
       status: "uncertain",
       commandId: options.commandId,
       error,
-      reconciliation: options.reconcile(),
     };
   }
+}
+
+export interface MobileTurnAdmissionReconciliationOptions {
+  lookup(): Promise<ClientRunLookup>;
+  observe(lookup: ClientRunLookup): void;
+  transientFailure(error: unknown): void;
+  wait(delayMs: number): Promise<void>;
+  initialDelayMs?: number;
+  maximumDelayMs?: number;
+  notAdmittedConfirmations?: number;
+}
+
+export async function reconcileMobileTurnAdmission(
+  options: MobileTurnAdmissionReconciliationOptions,
+): Promise<ClientRunLookup> {
+  const initialDelay = options.initialDelayMs ?? 250;
+  const maximumDelay = options.maximumDelayMs ?? 5_000;
+  const requiredNotAdmitted = options.notAdmittedConfirmations ?? 3;
+  let delay = initialDelay;
+  let notAdmitted = 0;
+  while (true) {
+    try {
+      const lookup = await options.lookup();
+      if (lookup.state === "not-admitted") {
+        notAdmitted += 1;
+        if (notAdmitted >= requiredNotAdmitted) {
+          options.observe(lookup);
+          return lookup;
+        }
+      } else {
+        notAdmitted = 0;
+        options.observe(lookup);
+        if (lookup.state !== "running") return lookup;
+      }
+    } catch (error) {
+      notAdmitted = 0;
+      options.transientFailure(error);
+    }
+    await options.wait(delay);
+    delay = Math.min(delay * 2, maximumDelay);
+  }
+}
+
+export function projectMobileTurnAdmissionLookup(
+  state: MobileBotProjectionState,
+  commandId: string,
+  lookup: ClientRunLookup,
+): void {
+  if (lookup.state === "not-admitted") {
+    state.messages = state.messages.filter(
+      (message) => message.runId !== commandId,
+    );
+    if (state.activeRunId === commandId) state.activeRunId = undefined;
+    if (state.activeRun?.runId === commandId) state.activeRun = undefined;
+    return;
+  }
+  projectDurableRuns(state, [], [lookup.run]);
 }

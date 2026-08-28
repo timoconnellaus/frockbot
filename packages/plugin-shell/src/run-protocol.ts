@@ -88,6 +88,29 @@ export interface ClientRunListQueryV1 {
   before?: string;
 }
 
+export interface ClientRunLookupQueryV1 {
+  schemaVersion: 1;
+  runId: string;
+}
+
+export type ClientRunLookupStateV1 =
+  "not-admitted" | "running" | "reconciliation-required" | "terminal";
+
+export type ClientRunLookupV1 =
+  | { schemaVersion: 1; state: "not-admitted" }
+  | {
+      schemaVersion: 1;
+      state: Exclude<ClientRunLookupStateV1, "not-admitted">;
+      run: ClientRunV1;
+    };
+
+export type ClientRunLookup =
+  | { state: "not-admitted" }
+  | {
+      state: Exclude<ClientRunLookupStateV1, "not-admitted">;
+      run: ClientRun;
+    };
+
 export interface ClientNotificationIntentV1 {
   notificationId: string;
   runId: string;
@@ -301,6 +324,28 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     events: visibleEvents(run.events, status),
     ...(outcome ? { outcome } : {}),
     ...(recovery ? { recovery } : {}),
+  };
+}
+
+function lookupState(
+  status: ClientRunStatusV1,
+): Exclude<ClientRunLookupStateV1, "not-admitted"> {
+  if (status === "completed" || status === "failed") return "terminal";
+  if (status === "reconciliation-required") {
+    return "reconciliation-required";
+  }
+  return "running";
+}
+
+export function projectClientRunLookupV1(
+  run: StoredRun | undefined,
+): ClientRunLookupV1 {
+  if (!run) return { schemaVersion: 1, state: "not-admitted" };
+  const projected = projectClientRunV1(run);
+  return {
+    schemaVersion: 1,
+    state: lookupState(projected.status),
+    run: projected,
   };
 }
 
@@ -712,6 +757,53 @@ export function decodeClientRunListQueryV1(
     throw new Error("run list query.before must not be empty");
   }
   return { schemaVersion: 1, ...(before ? { before } : {}) };
+}
+
+export function decodeClientRunLookupQueryV1(
+  input: unknown,
+): ClientRunLookupQueryV1 {
+  const query = record(input, "run lookup query");
+  exactKeys(query, ["schemaVersion", "runId"], "run lookup query");
+  if (query.schemaVersion !== 1) {
+    throw new Error("run lookup query.schemaVersion is invalid");
+  }
+  const runId = string(query, "runId", MAX_RUN_ID_LENGTH, "run lookup query");
+  if (!RUN_ID_PATTERN.test(runId)) {
+    throw new Error("run lookup query.runId is invalid");
+  }
+  return { schemaVersion: 1, runId };
+}
+
+export function decodeClientRunLookupV1(input: unknown): ClientRunLookup {
+  const lookup = record(input, "run lookup");
+  exactKeys(lookup, ["schemaVersion", "state", "run"], "run lookup");
+  if (lookup.schemaVersion !== 1) {
+    throw new Error("run lookup.schemaVersion is invalid");
+  }
+  if (wireBytes(input) > CLIENT_RUN_LIST_MAX_BYTES) {
+    throw new Error("run lookup exceeds the wire byte limit");
+  }
+  if (lookup.state === "not-admitted") {
+    if (lookup.run !== undefined) {
+      throw new Error("not-admitted run lookup must not include a run");
+    }
+    return { state: "not-admitted" };
+  }
+  if (
+    lookup.state !== "running" &&
+    lookup.state !== "reconciliation-required" &&
+    lookup.state !== "terminal"
+  ) {
+    throw new Error("run lookup.state is invalid");
+  }
+  if (lookup.run === undefined) {
+    throw new Error("admitted run lookup requires a run");
+  }
+  const run = decodeRun(lookup.run);
+  if (lookupState(run.status) !== lookup.state) {
+    throw new Error("run lookup.state does not match run.status");
+  }
+  return { state: lookup.state, run };
 }
 
 export function decodeClientRunPageV1(input: unknown): {

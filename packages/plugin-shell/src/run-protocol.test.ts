@@ -3,10 +3,13 @@ import type { SessionEvent } from "@frockbot/agent-core";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
 import {
+  decodeClientRunLookupQueryV1,
+  decodeClientRunLookupV1,
   decodeClientTurnV1,
   decodeClientRunPageV1,
   decodeClientRunListV1,
   decodeClientRunListQueryV1,
+  projectClientRunLookupV1,
   projectClientRunListV1,
   projectClientTurnV1,
 } from "./run-protocol.js";
@@ -62,6 +65,70 @@ function storedRun(
 }
 
 describe("client run protocol v1", () => {
+  test("projects and strictly decodes command-specific admission state", () => {
+    expect(
+      decodeClientRunLookupV1(projectClientRunLookupV1(undefined)),
+    ).toEqual({ state: "not-admitted" });
+
+    const running = projectClientRunLookupV1(storedRun([], "running"));
+    expect(decodeClientRunLookupV1(structuredClone(running))).toMatchObject({
+      state: "running",
+      run: { runId: "run-events", status: "running" },
+    });
+
+    const terminal = projectClientRunLookupV1(storedRun([], "completed"));
+    if (terminal.state === "not-admitted") {
+      throw new Error("expected an admitted run");
+    }
+    expect(decodeClientRunLookupV1(structuredClone(terminal))).toMatchObject({
+      state: "terminal",
+      run: { runId: "run-events", status: "completed" },
+    });
+
+    expect(() =>
+      decodeClientRunLookupV1({
+        ...terminal,
+        state: "running",
+      }),
+    ).toThrow("run lookup.state does not match run.status");
+    expect(() =>
+      decodeClientRunLookupV1({
+        schemaVersion: 1,
+        state: "not-admitted",
+        run: terminal.run,
+      }),
+    ).toThrow("not-admitted run lookup must not include a run");
+    expect(() =>
+      decodeClientRunLookupV1({
+        schemaVersion: 1,
+        state: "not-admitted",
+        commandFingerprint: "private",
+      }),
+    ).toThrow("run lookup.commandFingerprint is not allowed");
+  });
+
+  test("strictly decodes run lookup queries", () => {
+    expect(
+      decodeClientRunLookupQueryV1({
+        schemaVersion: 1,
+        runId: "command-1",
+      }),
+    ).toEqual({ schemaVersion: 1, runId: "command-1" });
+    expect(() =>
+      decodeClientRunLookupQueryV1({
+        schemaVersion: 1,
+        runId: "command/1",
+      }),
+    ).toThrow("run lookup query.runId is invalid");
+    expect(() =>
+      decodeClientRunLookupQueryV1({
+        schemaVersion: 1,
+        runId: "command-1",
+        extra: true,
+      }),
+    ).toThrow("run lookup query.extra is not allowed");
+  });
+
   test("projects bounded Turn responses without internal events", () => {
     const providerCallId = "provider-call-private";
     const projected = projectClientTurnV1({

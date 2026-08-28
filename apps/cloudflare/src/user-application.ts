@@ -1,5 +1,9 @@
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
-import { decodeClientRunListQueryV1 } from "@frockbot/plugin-shell/run-protocol";
+import {
+  decodeClientRunLookupQueryV1,
+  decodeClientRunListQueryV1,
+  type ClientRunLookupQueryV1,
+} from "@frockbot/plugin-shell/run-protocol";
 import type { UserApplicationEnv } from "./contracts.js";
 
 const BOT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
@@ -183,13 +187,20 @@ export function createUserApplication() {
     }
 
     const turnMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/turns$/);
+    const lookupMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)$/,
+    );
     const reconcileMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/reconcile$/,
     );
-    if (!turnMatch && !reconcileMatch) return jsonError(404, "not found");
+    if (!turnMatch && !lookupMatch && !reconcileMatch) {
+      return jsonError(404, "not found");
+    }
     let botId: string;
     try {
-      botId = decodeURIComponent((turnMatch ?? reconcileMatch)![1]);
+      botId = decodeURIComponent(
+        (turnMatch ?? lookupMatch ?? reconcileMatch)![1],
+      );
     } catch {
       return jsonError(400, "invalid bot id");
     }
@@ -220,6 +231,35 @@ export function createUserApplication() {
         return jsonError(
           409,
           error instanceof Error ? error.message : "Reconciliation failed",
+        );
+      }
+    }
+
+    if (lookupMatch) {
+      if (request.method !== "GET") {
+        return jsonError(405, "method not allowed");
+      }
+      let query: ClientRunLookupQueryV1;
+      try {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new Error("run lookup query does not accept URL parameters");
+        }
+        query = decodeClientRunLookupQueryV1({
+          schemaVersion: 1,
+          runId: decodeURIComponent(lookupMatch[2]),
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid run lookup",
+        );
+      }
+      try {
+        return Response.json(await env.BOT_STATE.lookupRun(botId, query));
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "run lookup failed",
         );
       }
     }

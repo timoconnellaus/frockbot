@@ -61,6 +61,8 @@ describe("user application Bot seam", () => {
           runs: [],
           page: { truncated: false },
         }),
+      lookupRun: () =>
+        Promise.resolve({ schemaVersion: 1, state: "not-admitted" }),
       listNotifications: () => Promise.resolve([]),
       acknowledgeNotification: () => Promise.resolve(),
       reconcileRun: () => Promise.resolve(result),
@@ -106,5 +108,49 @@ describe("user application Bot seam", () => {
       );
       expect(response.status).toBe(400);
     }
+  });
+
+  test("delegates a strict read-only command lookup", async () => {
+    const calls: Array<{ botId: string; runId: string }> = [];
+    const botState = {
+      lookupRun: (
+        botId: string,
+        query: { schemaVersion: 1; runId: string },
+      ) => {
+        calls.push({ botId, runId: query.runId });
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          state: "not-admitted" as const,
+        });
+      },
+    } as unknown as BotStateBinding;
+    const env: UserApplicationEnv = {
+      BOT_STATE: botState,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const fetchUserApplication = createUserApplication();
+
+    const response = await fetchUserApplication(
+      new Request("https://frockbot.test/api/bots/primary/turns/command-1"),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      state: "not-admitted",
+    });
+    expect(calls).toEqual([{ botId: "primary", runId: "command-1" }]);
+
+    for (const suffix of ["?extra=true", "%2Fbad", "%"]) {
+      const invalid = await fetchUserApplication(
+        new Request(
+          `https://frockbot.test/api/bots/primary/turns/command-1${suffix}`,
+        ),
+        env,
+      );
+      expect(invalid.status).toBe(400);
+    }
+    expect(calls).toHaveLength(1);
   });
 });
