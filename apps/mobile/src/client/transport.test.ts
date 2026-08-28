@@ -22,7 +22,12 @@ describe("decodeTurnResponse", () => {
         text: "hello",
         events: [
           { type: "tool/call", call: { id: "call-1", name: "echo" } },
-          { type: "tool/result", callId: "call-1", content: "hi", isError: false },
+          {
+            type: "tool/result",
+            callId: "call-1",
+            content: "hi",
+            isError: false,
+          },
         ],
       }),
     ).toEqual({
@@ -49,9 +54,9 @@ describe("decodeTurnResponse", () => {
     expect(() => decodeTurnResponse(null)).toThrow(
       "turn response must be an object",
     );
-    expect(() => decodeTurnResponse({ runId: 1, text: "x", events: [] })).toThrow(
-      'turn response field "runId" must be a string',
-    );
+    expect(() =>
+      decodeTurnResponse({ runId: 1, text: "x", events: [] }),
+    ).toThrow('turn response field "runId" must be a string');
     expect(() => decodeTurnResponse({ runId: "r", text: "x" })).toThrow(
       'turn response field "events" must be an array',
     );

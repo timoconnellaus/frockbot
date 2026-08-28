@@ -3,9 +3,7 @@ import { Context, type Plugin } from "cordis";
 type ParentCommand = { type: "ping"; value: string } | { type: "shutdown" };
 
 type ParentEvent =
-  | { type: "ready" }
-  | { type: "pong"; value: string }
-  | { type: "disposed" };
+  { type: "ready" } | { type: "pong"; value: string } | { type: "disposed" };
 
 interface UtilityParentPort {
   on(

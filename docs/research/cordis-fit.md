@@ -58,17 +58,17 @@ For host integration, Pi offers JSONL RPC over stdin/stdout and recommends `Agen
 
 ### Comparison
 
-| Dimension | Cordis | Pi |
-| --- | --- | --- |
-| Unit of extension | Arbitrary service/plugin in a context tree | Agent extension factory plus skills/prompts/themes |
-| Primary goal | Compose an entire changing application | Extend a specific coding-agent runtime |
-| Dependency model | Named injected services; pending/reactivation | API passed to factory; agent lifecycle events |
-| Teardown | First-class owned reversible effects/fibers | Reload/unload through Pi’s extension loader and event registrations |
-| Configuration | Declarative loader rows, includes, groups, patches, HMR | Discovery locations, settings, package manifests, CLI flags |
-| Service replacement | Native context isolation/provider replacement | Register/override documented agent surfaces/providers |
-| Distribution | npm modules plus Cordis loader/config conventions | npm/git/local Pi packages, pinning and filters |
-| Security boundary | None | None; project trust delays local loading |
-| UI integration | Generic Vue WebUI plugin ecosystem | TUI API; RPC exposes portable dialogs/events to another UI |
+| Dimension           | Cordis                                                  | Pi                                                                  |
+| ------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
+| Unit of extension   | Arbitrary service/plugin in a context tree              | Agent extension factory plus skills/prompts/themes                  |
+| Primary goal        | Compose an entire changing application                  | Extend a specific coding-agent runtime                              |
+| Dependency model    | Named injected services; pending/reactivation           | API passed to factory; agent lifecycle events                       |
+| Teardown            | First-class owned reversible effects/fibers             | Reload/unload through Pi’s extension loader and event registrations |
+| Configuration       | Declarative loader rows, includes, groups, patches, HMR | Discovery locations, settings, package manifests, CLI flags         |
+| Service replacement | Native context isolation/provider replacement           | Register/override documented agent surfaces/providers               |
+| Distribution        | npm modules plus Cordis loader/config conventions       | npm/git/local Pi packages, pinning and filters                      |
+| Security boundary   | None                                                    | None; project trust delays local loading                            |
+| UI integration      | Generic Vue WebUI plugin ecosystem                      | TUI API; RPC exposes portable dialogs/events to another UI          |
 
 ### Inference
 
@@ -136,15 +136,15 @@ Cordis shows active engineering and serious lifecycle testing, but its explicit 
 
 ## Concrete findings and risks
 
-| Severity | Finding | Relevant source path | Consequence |
-| --- | --- | --- | --- |
-| **High** | Cordis “isolation” is name/service isolation, not code confinement. | `cordiverse/cordis/packages/core/src/context.ts` | Chat-generated plugins can access the host unless separately sandboxed. |
-| **High** | Pi extensions also execute with full system access. | `badlogic/pi-mono/packages/coding-agent/docs/extensions.md`, `docs/packages.md` | Chat installation requires quarantine, review, explicit consent, and process/OS enforcement. |
-| **High** | Cordis and DSH publicly warn of breaking changes; DSH carries extensive Cordis patches. | `cordiverse/cordis/README.md`, `deepseek-harness/README.md`, `deepseek-harness/vendor/README.md` | Pin/vendor and maintain compatibility tests; avoid making MVP depend on loader internals. |
-| **Medium** | Pi and Cordis overlap in events, plugins, hot reload, configuration, and packages. | Pi extension/package docs; Cordis core/loader | Wrapping Pi plugins in Cordis risks duplicated state and unclear lifecycle ownership. |
-| **Medium** | Cordis WebUI is a generic Vue/Koishi-console-derived ecosystem, not a desktop shell. | `cordiverse/webui/packages/client/package.json` | Product-specific chat/computer UI and secure desktop IPC still need implementation. |
-| **Medium** | A loopback HTTP/WebSocket UI expands the local attack surface. | `cordiverse/server/packages/core/package.json`; DSH web docs | Require authentication, origin checks, random ports/tokens, and minimal APIs. |
-| **Low** | Cordis effects provide unusually clean teardown and replacement semantics. | `cordiverse/cordis/packages/core/src/fiber.ts` | Useful for long-lived host connectors/schedulers if carefully bounded. |
+| Severity   | Finding                                                                                 | Relevant source path                                                                             | Consequence                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| **High**   | Cordis “isolation” is name/service isolation, not code confinement.                     | `cordiverse/cordis/packages/core/src/context.ts`                                                 | Chat-generated plugins can access the host unless separately sandboxed.                      |
+| **High**   | Pi extensions also execute with full system access.                                     | `badlogic/pi-mono/packages/coding-agent/docs/extensions.md`, `docs/packages.md`                  | Chat installation requires quarantine, review, explicit consent, and process/OS enforcement. |
+| **High**   | Cordis and DSH publicly warn of breaking changes; DSH carries extensive Cordis patches. | `cordiverse/cordis/README.md`, `deepseek-harness/README.md`, `deepseek-harness/vendor/README.md` | Pin/vendor and maintain compatibility tests; avoid making MVP depend on loader internals.    |
+| **Medium** | Pi and Cordis overlap in events, plugins, hot reload, configuration, and packages.      | Pi extension/package docs; Cordis core/loader                                                    | Wrapping Pi plugins in Cordis risks duplicated state and unclear lifecycle ownership.        |
+| **Medium** | Cordis WebUI is a generic Vue/Koishi-console-derived ecosystem, not a desktop shell.    | `cordiverse/webui/packages/client/package.json`                                                  | Product-specific chat/computer UI and secure desktop IPC still need implementation.          |
+| **Medium** | A loopback HTTP/WebSocket UI expands the local attack surface.                          | `cordiverse/server/packages/core/package.json`; DSH web docs                                     | Require authentication, origin checks, random ports/tokens, and minimal APIs.                |
+| **Low**    | Cordis effects provide unusually clean teardown and replacement semantics.              | `cordiverse/cordis/packages/core/src/fiber.ts`                                                   | Useful for long-lived host connectors/schedulers if carefully bounded.                       |
 
 ## Recommendation and alternatives
 
@@ -170,13 +170,13 @@ For a small MVP, use plain typed interfaces plus `AbortController`/disposer stac
 
 Scores: 1 = poor, 3 = acceptable, 5 = strong. “Security” scores architectural containment, not merely permission prompts.
 
-| Option | Pi fit | Lifecycle/composition | Desktop integration | Safe generated-code path | Stability/ownership | MVP speed | Total / 30 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **Pi RPC + thin desktop host (recommended)** | 5 | 3 | 5 | 3 | 4 | 5 | **25** |
-| Pi RPC + Cordis for host-only services | 5 | 5 | 4 | 3 | 2 | 3 | **22** |
-| Fork/adopt DSH; adapt Pi behind a seam | 2 | 5 | 3 | 4 | 2 | 2 | **18** |
-| Stock Cordis as whole app foundation | 2 | 5 | 2 | 2 | 2 | 2 | **15** |
-| Same-process Pi `AgentSession` + custom host | 5 | 3 | 4 | 1 | 4 | 5 | **22** |
+| Option                                       | Pi fit | Lifecycle/composition | Desktop integration | Safe generated-code path | Stability/ownership | MVP speed | Total / 30 |
+| -------------------------------------------- | -----: | --------------------: | ------------------: | -----------------------: | ------------------: | --------: | ---------: |
+| **Pi RPC + thin desktop host (recommended)** |      5 |                     3 |                   5 |                        3 |                   4 |         5 |     **25** |
+| Pi RPC + Cordis for host-only services       |      5 |                     5 |                   4 |                        3 |                   2 |         3 |     **22** |
+| Fork/adopt DSH; adapt Pi behind a seam       |      2 |                     5 |                   3 |                        4 |                   2 |         2 |     **18** |
+| Stock Cordis as whole app foundation         |      2 |                     5 |                   2 |                        2 |                   2 |         2 |     **15** |
+| Same-process Pi `AgentSession` + custom host |      5 |                     3 |                   4 |                        1 |                   4 |         5 |     **22** |
 
 The same-process option is fast but scores poorly for generated-code containment. DSH’s higher security score reflects explicit sandbox/approval seams, not automatic safety from Cordis.
 

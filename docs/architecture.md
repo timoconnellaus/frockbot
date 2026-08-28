@@ -82,16 +82,16 @@ The boot kernel must not contain bot, session, model, tool, package, window-layo
 
 FrockBot pins:
 
-| Purpose | Package | Version |
-| --- | --- | --- |
-| Core | `cordis` | `4.0.0-rc.8` |
-| Dynamic loader | `@cordisjs/plugin-loader` | `1.0.0-rc.5` |
-| HTTP/WebSocket | `@cordisjs/plugin-server` | `1.7.0` |
-| WebUI host | `@cordisjs/plugin-webui` | `0.8.2` |
-| WebUI client | `@cordisjs/client` | `0.8.2` |
-| Vue | `vue` | `3.5.33` |
-| Vite | `vite` | `7.3.2` |
-| Vue Vite plugin | `@vitejs/plugin-vue` | `6.0.6` |
+| Purpose         | Package                   | Version      |
+| --------------- | ------------------------- | ------------ |
+| Core            | `cordis`                  | `4.0.0-rc.8` |
+| Dynamic loader  | `@cordisjs/plugin-loader` | `1.0.0-rc.5` |
+| HTTP/WebSocket  | `@cordisjs/plugin-server` | `1.7.0`      |
+| WebUI host      | `@cordisjs/plugin-webui`  | `0.8.2`      |
+| WebUI client    | `@cordisjs/client`        | `0.8.2`      |
+| Vue             | `vue`                     | `3.5.33`     |
+| Vite            | `vite`                    | `7.3.2`      |
+| Vue Vite plugin | `@vitejs/plugin-vue`      | `6.0.6`      |
 
 `@cordisjs/schema` is prohibited because it belongs to the Cordis 3 package topology. `schemastery` is added only where a FrockBot package directly authors a compatible schema.
 
@@ -268,11 +268,11 @@ Computer assignments are keyed by `botId`, not live `agentId`. A provider change
 
 ## Trust model
 
-| Trust tier | Desktop contribution | Agent contribution | WebUI contribution |
-| --- | --- | --- | --- |
-| Built-in | Electron main | Agent utility process | Direct WebUI client plugin |
-| Reviewed third-party | Separate host process where possible | Dedicated runtime/container according to permissions | Direct only when explicitly trusted; otherwise sandbox view |
-| Generated or unreviewed | Never | Quarantine process/container only | Sandbox view only |
+| Trust tier              | Desktop contribution                 | Agent contribution                                   | WebUI contribution                                          |
+| ----------------------- | ------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------- |
+| Built-in                | Electron main                        | Agent utility process                                | Direct WebUI client plugin                                  |
+| Reviewed third-party    | Separate host process where possible | Dedicated runtime/container according to permissions | Direct only when explicitly trusted; otherwise sandbox view |
+| Generated or unreviewed | Never                                | Quarantine process/container only                    | Sandbox view only                                           |
 
 A permission manifest improves review and routing but is not enforcement. Enforcement requires the selected process, container, operating-system, credential-broker, and frame policies to deny undeclared actions.
 

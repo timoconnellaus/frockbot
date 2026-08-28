@@ -93,13 +93,21 @@ describe("createMobileHost", () => {
     const platform = createFakePlatform();
     const host = await createMobileHost({ adapters: platform.adapters });
 
-    expect(await host.invoke<ReadClipboardTextResult>(READ_CLIPBOARD_TEXT_COMMAND, {})).toEqual({
+    expect(
+      await host.invoke<ReadClipboardTextResult>(
+        READ_CLIPBOARD_TEXT_COMMAND,
+        {},
+      ),
+    ).toEqual({
       text: "initial",
     });
     expect(
-      await host.invoke<WriteClipboardTextResult>(WRITE_CLIPBOARD_TEXT_COMMAND, {
-        text: "copied reply",
-      }),
+      await host.invoke<WriteClipboardTextResult>(
+        WRITE_CLIPBOARD_TEXT_COMMAND,
+        {
+          text: "copied reply",
+        },
+      ),
     ).toEqual({ written: true });
     expect(platform.clipboardText()).toBe("copied reply");
     await host.dispose();
@@ -202,7 +210,9 @@ describe("createMobileHost", () => {
       const resolved = await resolveBuiltInMobileContribution(
         `${pkg.specifier}/mobile`,
       );
-      expect(typeof (resolved as { default: unknown }).default).toBe("function");
+      expect(typeof (resolved as { default: unknown }).default).toBe(
+        "function",
+      );
     }
     await expectFailure(
       resolveBuiltInMobileContribution("@frockbot/plugin-clock/mobile"),

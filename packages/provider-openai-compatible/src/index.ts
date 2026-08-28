@@ -7,12 +7,7 @@ import type {
 import type { Plugin } from "cordis";
 
 export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export type FetchLike = (
   input: string | URL | Request,

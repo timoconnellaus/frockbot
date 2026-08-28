@@ -20,15 +20,17 @@ const application = new ClientApplication({
     const path = `/api/bots/${encodeURIComponent(botId)}/turns`;
     const body = JSON.stringify({ text });
     const response = window.frockbotDesktop
-      ? await window.frockbotDesktop.request({ path, method: "POST", body }).then(
-          (result: DesktopApiResponse) =>
-            new Response(result.body, {
-              status: result.status,
-              headers: result.contentType
-                ? { "content-type": result.contentType }
-                : undefined,
-            }),
-        )
+      ? await window.frockbotDesktop
+          .request({ path, method: "POST", body })
+          .then(
+            (result: DesktopApiResponse) =>
+              new Response(result.body, {
+                status: result.status,
+                headers: result.contentType
+                  ? { "content-type": result.contentType }
+                  : undefined,
+              }),
+          )
       : await fetch(path, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -46,4 +48,6 @@ const application = new ClientApplication({
 
 for (const plugin of foundationClientPlugins) await application.install(plugin);
 application.mount("#app");
-window.addEventListener("pagehide", () => application.dispose(), { once: true });
+window.addEventListener("pagehide", () => application.dispose(), {
+  once: true,
+});

@@ -1,16 +1,7 @@
 <script setup lang="ts">
 import { useRpc } from "@cordisjs/client";
-import {
-  computed,
-  inject,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-} from "vue";
-import {
-  computerKey,
-  type ComputerState,
-} from "../shared.ts";
+import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { computerKey, type ComputerState } from "../shared.ts";
 
 const computer = inject(computerKey) ?? useRpc<ComputerState>();
 const busy = ref(false);
@@ -87,8 +78,12 @@ onBeforeUnmount(() =>
       />
       <div v-else class="computer-placeholder">
         <span class="computer-mark">✦</span>
-        <strong v-if="state.phase === 'unconfigured'">Computer not configured</strong>
-        <strong v-else-if="state.phase === 'provisioning'">Preparing computer…</strong>
+        <strong v-if="state.phase === 'unconfigured'"
+          >Computer not configured</strong
+        >
+        <strong v-else-if="state.phase === 'provisioning'"
+          >Preparing computer…</strong
+        >
         <strong v-else>Persistent Computer</strong>
         <p>{{ state.message }}</p>
         <button
@@ -109,7 +104,11 @@ onBeforeUnmount(() =>
 
       <div v-if="hasViewer && !isHuman" class="control-shield">
         <div>
-          <strong>{{ state.phase === "taking-control" ? "Pausing agent…" : "Agent has control" }}</strong>
+          <strong>{{
+            state.phase === "taking-control"
+              ? "Pausing agent…"
+              : "Agent has control"
+          }}</strong>
           <p>Take control to enter credentials or handle private steps.</p>
           <button
             :disabled="busy || state.phase === 'taking-control'"
@@ -179,7 +178,10 @@ onBeforeUnmount(() =>
         </div>
       </header>
 
-      <main class="computer-overlay-stage" :class="{ 'human-control': isHuman }">
+      <main
+        class="computer-overlay-stage"
+        :class="{ 'human-control': isHuman }"
+      >
         <div class="computer-screen computer-screen-expanded">
           <iframe
             v-if="state.viewerUrl"
@@ -190,8 +192,12 @@ onBeforeUnmount(() =>
           />
           <div v-else class="computer-placeholder">
             <span class="computer-mark">✦</span>
-            <strong v-if="state.phase === 'unconfigured'">Computer not configured</strong>
-            <strong v-else-if="state.phase === 'provisioning'">Preparing computer…</strong>
+            <strong v-if="state.phase === 'unconfigured'"
+              >Computer not configured</strong
+            >
+            <strong v-else-if="state.phase === 'provisioning'"
+              >Preparing computer…</strong
+            >
             <strong v-else>Persistent Computer</strong>
             <p>{{ state.message }}</p>
             <button
@@ -212,7 +218,11 @@ onBeforeUnmount(() =>
 
           <div v-if="hasViewer && !isHuman" class="control-shield">
             <div>
-              <strong>{{ state.phase === "taking-control" ? "Pausing agent…" : "Agent has control" }}</strong>
+              <strong>{{
+                state.phase === "taking-control"
+                  ? "Pausing agent…"
+                  : "Agent has control"
+              }}</strong>
               <p>Take control to enter credentials or handle private steps.</p>
               <button
                 :disabled="busy || state.phase === 'taking-control'"

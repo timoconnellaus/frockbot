@@ -138,7 +138,9 @@ async function decodeBody(response: Response): Promise<unknown> {
   try {
     body = await response.json();
   } catch {
-    throw new Error(`gateway returned a malformed response (${response.status})`);
+    throw new Error(
+      `gateway returned a malformed response (${response.status})`,
+    );
   }
   if (!response.ok) {
     const error =
@@ -146,7 +148,9 @@ async function decodeBody(response: Response): Promise<unknown> {
         ? (body as { error?: unknown }).error
         : undefined;
     throw new Error(
-      typeof error === "string" ? error : `gateway request failed (${response.status})`,
+      typeof error === "string"
+        ? error
+        : `gateway request failed (${response.status})`,
     );
   }
   return body;

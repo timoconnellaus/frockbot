@@ -25,9 +25,8 @@ body {
   display: grid;
   height: 100dvh;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  padding:
-    var(--mobile-safe-top) var(--mobile-safe-right) var(--mobile-safe-bottom)
-    var(--mobile-safe-left);
+  padding: var(--mobile-safe-top) var(--mobile-safe-right)
+    var(--mobile-safe-bottom) var(--mobile-safe-left);
 }
 
 .mobile-topbar {
@@ -95,9 +94,9 @@ body {
   display: grid;
   height: 100dvh;
   place-items: center;
-  padding:
-    calc(var(--mobile-safe-top) + 24px) calc(var(--mobile-safe-right) + 20px)
-    calc(var(--mobile-safe-bottom) + 24px) calc(var(--mobile-safe-left) + 20px);
+  padding: calc(var(--mobile-safe-top) + 24px)
+    calc(var(--mobile-safe-right) + 20px) calc(var(--mobile-safe-bottom) + 24px)
+    calc(var(--mobile-safe-left) + 20px);
   overflow-y: auto;
   background:
     radial-gradient(circle at 50% 18%, rgb(41 135 239 / 14%), transparent 38%),

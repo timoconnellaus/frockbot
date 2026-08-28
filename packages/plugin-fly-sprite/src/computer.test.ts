@@ -252,15 +252,11 @@ describe("Fly Sprite computer", () => {
     ).toBeLessThanOrEqual(63);
     expect(
       flySpriteNameForTarget({ userId: "owner:a", botId: "health" }),
-    ).not.toBe(
-      flySpriteNameForTarget({ userId: "owner", botId: "a:health" }),
+    ).not.toBe(flySpriteNameForTarget({ userId: "owner", botId: "a:health" }));
+    expect(flySpriteNameForTarget({ userId: "user", botId: "owner" })).not.toBe(
+      flySpriteNameForUserStorage("owner"),
     );
-    expect(
-      flySpriteNameForTarget({ userId: "user", botId: "owner" }),
-    ).not.toBe(flySpriteNameForUserStorage("owner"));
-    expect(configuredFlyBotId({ FROCKBOT_BOT_ID: "  bot-7  " })).toBe(
-      "bot-7",
-    );
+    expect(configuredFlyBotId({ FROCKBOT_BOT_ID: "  bot-7  " })).toBe("bot-7");
     expect(configuredFlyBotId({})).toBe("barebones");
   });
 

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+out/
+coverage/
+.pi/
+.herdr/
+.bun/
+.husky/_/
+bun.lock
+**/gradlew
+*.png
+*.ico
+*.icns
+*.woff2

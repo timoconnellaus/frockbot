@@ -10,7 +10,9 @@
     "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"
   },
-  "frockbot": { "manifest": "./frockbot.json" },
+  "frockbot": {
+    "manifest": "./frockbot.json"
+  },
   "scripts": {
     "test": "bun test src",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"

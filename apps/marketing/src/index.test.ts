@@ -27,16 +27,13 @@ describe("marketing worker", () => {
   });
 
   test("serves static assets with browser security headers", async () => {
-    const response = await worker.fetch(
-      new Request("https://frockbot.com/"),
-      {
-        ASSETS: assets(
-          new Response("<!doctype html>", {
-            headers: { "content-type": "text/html" },
-          }),
-        ),
-      },
-    );
+    const response = await worker.fetch(new Request("https://frockbot.com/"), {
+      ASSETS: assets(
+        new Response("<!doctype html>", {
+          headers: { "content-type": "text/html" },
+        }),
+      ),
+    });
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("<!doctype html>");
@@ -100,6 +97,7 @@ describe("legal policy pages", () => {
 
   test("privacy policy covers the evidenced data flows and reciprocal navigation", async () => {
     const privacy = await publicFile("privacy/index.html");
+    const normalizedPrivacy = privacy.replace(/\s+/g, " ");
 
     for (const content of [
       "28 August 2026",
@@ -117,7 +115,7 @@ describe("legal policy pages", () => {
       "Fly.io Sprite",
       "Local desktop settings",
     ]) {
-      expect(privacy).toContain(content);
+      expect(normalizedPrivacy).toContain(content);
     }
     expect(privacy).toContain('href="/"');
     expect(privacy).toContain('href="/terms/"');

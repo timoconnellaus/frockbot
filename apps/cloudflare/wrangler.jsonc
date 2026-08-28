@@ -8,79 +8,79 @@
   "routes": [
     {
       "pattern": "bot.frockbot.com",
-      "custom_domain": true
-    }
+      "custom_domain": true,
+    },
   ],
   "worker_loaders": [
     {
-      "binding": "USER_APPLICATIONS"
-    }
+      "binding": "USER_APPLICATIONS",
+    },
   ],
   "r2_buckets": [
     {
       "binding": "APPLICATION_ARTIFACTS",
-      "bucket_name": "frockbot-application-artifacts"
+      "bucket_name": "frockbot-application-artifacts",
     },
     {
       "binding": "MEMORY_FILES",
-      "bucket_name": "frockbot-memory-files"
-    }
+      "bucket_name": "frockbot-memory-files",
+    },
   ],
   "d1_databases": [
     {
       "binding": "AUTH_DB",
       "database_name": "frockbot-auth",
       "database_id": "f83c21a4-e5a0-4cc2-b0e1-636027b8c65e",
-      "migrations_dir": "migrations"
-    }
+      "migrations_dir": "migrations",
+    },
   ],
   "vectorize": [
     {
       "binding": "MEMORY_INDEX",
-      "index_name": "frockbot-memory"
-    }
+      "index_name": "frockbot-memory",
+    },
   ],
   "ai": {
-    "binding": "AI"
+    "binding": "AI",
   },
   "durable_objects": {
     "bindings": [
       {
         "name": "BOT_STATES",
-        "class_name": "BotState"
-      }
-    ]
+        "class_name": "BotState",
+      },
+    ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["BotState"]
-    }
+      "new_sqlite_classes": ["BotState"],
+    },
   ],
   "vars": {
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
     // Comma-separated webview origins allowed to call /api/* cross-origin,
     // e.g. "capacitor://localhost,frockbot://localhost". Empty disables CORS.
-    "ALLOWED_CLIENT_ORIGINS": ""
+    "ALLOWED_CLIENT_ORIGINS": "",
   },
   "env": {
     "development": {
       "worker_loaders": [
         {
-          "binding": "USER_APPLICATIONS"
-        }
+          "binding": "USER_APPLICATIONS",
+        },
       ],
       "r2_buckets": [
         {
           "binding": "APPLICATION_ARTIFACTS",
           "bucket_name": "frockbot-application-artifacts",
-          "remote": false
+          "remote": false,
         },
         {
           "binding": "MEMORY_FILES",
           "bucket_name": "frockbot-memory-files-development",
-          "remote": true
-        }
+          "remote": true,
+        },
       ],
       "d1_databases": [
         {
@@ -88,35 +88,35 @@
           "database_name": "frockbot-auth-development",
           "database_id": "00000000-0000-0000-0000-000000000000",
           "migrations_dir": "migrations",
-          "remote": false
-        }
+          "remote": false,
+        },
       ],
       "vectorize": [
         {
           "binding": "MEMORY_INDEX",
           "index_name": "frockbot-memory-development",
-          "remote": true
-        }
+          "remote": true,
+        },
       ],
       "ai": {
         "binding": "AI",
-        "remote": true
+        "remote": true,
       },
       "durable_objects": {
         "bindings": [
           {
             "name": "BOT_STATES",
-            "class_name": "BotState"
-          }
-        ]
+            "class_name": "BotState",
+          },
+        ],
       },
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
-        "ALLOWED_CLIENT_ORIGINS": ""
-      }
-    }
+        "ALLOWED_CLIENT_ORIGINS": "",
+      },
+    },
   },
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }

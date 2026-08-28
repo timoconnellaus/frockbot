@@ -441,12 +441,9 @@ describe("Cross-origin access for mobile clients", () => {
   });
 
   test("shares rejections so the mobile client can read the status", async () => {
-    const { gateway } = createTestGateway(
-      undefined,
-      bearerAuth,
-      false,
-      [MOBILE_ORIGIN],
-    );
+    const { gateway } = createTestGateway(undefined, bearerAuth, false, [
+      MOBILE_ORIGIN,
+    ]);
     const response = await gateway(mobileRequest("/api/bots/primary/turns"));
     expect(response.status).toBe(401);
     expect(response.headers.get("access-control-allow-origin")).toBe(
@@ -456,12 +453,9 @@ describe("Cross-origin access for mobile clients", () => {
   });
 
   test("exposes the sign-in token header from Better Auth routes", async () => {
-    const { gateway } = createTestGateway(
-      undefined,
-      bearerAuth,
-      false,
-      [MOBILE_ORIGIN],
-    );
+    const { gateway } = createTestGateway(undefined, bearerAuth, false, [
+      MOBILE_ORIGIN,
+    ]);
     const response = await gateway(
       mobileRequest("/api/auth/sign-in/social", { method: "POST" }),
     );
@@ -475,12 +469,9 @@ describe("Cross-origin access for mobile clients", () => {
   });
 
   test("leaves same-origin and asset requests unchanged", async () => {
-    const { gateway } = createTestGateway(
-      undefined,
-      bearerAuth,
-      false,
-      [MOBILE_ORIGIN],
-    );
+    const { gateway } = createTestGateway(undefined, bearerAuth, false, [
+      MOBILE_ORIGIN,
+    ]);
     const page = await gateway(new Request("https://frockbot.test/"));
     expect(page.status).toBe(200);
     expect(page.headers.get("access-control-allow-origin")).toBeNull();

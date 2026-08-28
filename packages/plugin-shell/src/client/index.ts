@@ -1,9 +1,6 @@
 /// <reference path="../env.d.ts" />
 
-import type {
-  ClientPlugin,
-  ClientTurnEvent,
-} from "@frockbot/client-core";
+import type { ClientPlugin, ClientTurnEvent } from "@frockbot/client-core";
 import { ref } from "vue";
 import {
   frockBotWebDataKey,

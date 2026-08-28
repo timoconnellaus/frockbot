@@ -10,11 +10,7 @@ export * from "./manifest.ts";
 
 // Runtime source imports stay explicit because Electron executes workspace TypeScript.
 export type PackageStatus =
-  | "installed"
-  | "activating"
-  | "active"
-  | "disabling"
-  | "failed";
+  "installed" | "activating" | "active" | "disabling" | "failed";
 
 export interface PackageSource {
   specifier: string;

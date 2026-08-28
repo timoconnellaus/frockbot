@@ -33,9 +33,7 @@ import foundationProviderPlugin, {
   FOUNDATION_PROVIDER,
 } from "@frockbot/plugin-provider-foundation/runtime";
 import shellManifest from "@frockbot/plugin-shell/manifest";
-import applicationJson from "../frockbot.application.json" with {
-  type: "json",
-};
+import applicationJson from "../frockbot.application.json" with { type: "json" };
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 

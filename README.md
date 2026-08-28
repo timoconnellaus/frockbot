@@ -27,8 +27,8 @@ The deterministic foundation provider runs without credentials. To use an OpenAI
 
 ```bash
 FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
-FROCKBOT_LLM_MODEL="model-id" \
-FROCKBOT_LLM_API_KEY="..." \
+  FROCKBOT_LLM_MODEL="model-id" \
+  FROCKBOT_LLM_API_KEY="..." \
   bun run dev
 ```
 
@@ -38,7 +38,7 @@ To attach the built-in Fly Sprites Computer provider Package, provide a Sprites 
 
 ```bash
 SPRITES_TOKEN="..." \
-FROCKBOT_SPRITE_NAME="frockbot-barebones" \
+  FROCKBOT_SPRITE_NAME="frockbot-barebones" \
   bun run dev
 ```
 
@@ -84,15 +84,15 @@ Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first 
 
 Configure these GitHub `production` environment values:
 
-| Type | Name | Purpose |
-| --- | --- | --- |
-| Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
-| Secret | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account containing the production resources |
-| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth` |
-| Variable | `BETTER_AUTH_URL` | Set to `https://bot.frockbot.com` |
-| Secret | `BETTER_AUTH_SECRET` | Better Auth secret with at least 32 random characters |
-| Secret | `GOOGLE_CLIENT_ID` | Google Web application OAuth client ID |
-| Secret | `GOOGLE_CLIENT_SECRET` | Google Web application OAuth client secret |
+| Type     | Name                        | Purpose                                                                       |
+| -------- | --------------------------- | ----------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                        |
+| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                               |
+| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                             |
+| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                         |
+| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
+| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
 
@@ -109,7 +109,7 @@ To exercise one streamed custom-loop turn and its WebUI projection:
 
 ```bash
 FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot-chat.png" \
-FROCKBOT_SMOKE_PROMPT='/echo FrockBot is ready.' \
+  FROCKBOT_SMOKE_PROMPT='/echo FrockBot is ready.' \
   bun run --filter @frockbot/desktop start
 ```
 

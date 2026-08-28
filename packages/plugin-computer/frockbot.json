@@ -11,9 +11,5 @@
       "slots": ["frockbot.computer"]
     }
   },
-  "permissions": [
-    "computer:execute",
-    "computer:browser",
-    "webui:remote-frame"
-  ]
+  "permissions": ["computer:execute", "computer:browser", "webui:remote-frame"]
 }

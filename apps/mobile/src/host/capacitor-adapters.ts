@@ -42,7 +42,8 @@ async function showWebNotification(
     throw new Error("notifications are unavailable in this environment");
   }
   let permission = Notification.permission;
-  if (permission === "default") permission = await Notification.requestPermission();
+  if (permission === "default")
+    permission = await Notification.requestPermission();
   if (permission !== "granted") {
     throw new Error("notification permission was denied");
   }

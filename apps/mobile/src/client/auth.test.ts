@@ -14,9 +14,10 @@ interface RecordedRequest {
   init?: RequestInit;
 }
 
-function createFetch(
-  responder: (request: RecordedRequest) => Response,
-): { fetch: (url: string, init?: RequestInit) => Promise<Response>; calls: RecordedRequest[] } {
+function createFetch(responder: (request: RecordedRequest) => Response): {
+  fetch: (url: string, init?: RequestInit) => Promise<Response>;
+  calls: RecordedRequest[];
+} {
   const calls: RecordedRequest[] = [];
   return {
     calls,
@@ -118,7 +119,9 @@ describe("authorizedFetch", () => {
     });
 
     const call = transport.calls[0];
-    expect(call?.url).toBe("https://gateway.example.com/api/bots/default/turns");
+    expect(call?.url).toBe(
+      "https://gateway.example.com/api/bots/default/turns",
+    );
     expect(call?.init?.credentials).toBe("omit");
     const headers = new Headers(call?.init?.headers);
     expect(headers.get("authorization")).toBe("Bearer token-1");
@@ -139,9 +142,9 @@ describe("authorizedFetch", () => {
     expect(transport.calls[0]?.url).toBe(
       "https://gateway.example.com/api/bots/default/turns?as_user=development",
     );
-    expect(new Headers(transport.calls[0]?.init?.headers).has("authorization")).toBe(
-      false,
-    );
+    expect(
+      new Headers(transport.calls[0]?.init?.headers).has("authorization"),
+    ).toBe(false);
   });
 
   test("persists a token issued through the set-auth-token header", async () => {
@@ -239,7 +242,9 @@ describe("probe", () => {
     const auth = createAuthSession({
       store: createMemoryPreferenceStore(),
       fetch: () =>
-        Promise.resolve(new Response(JSON.stringify({ runs: [] }), { status: 200 })),
+        Promise.resolve(
+          new Response(JSON.stringify({ runs: [] }), { status: 200 }),
+        ),
       defaultGatewayUrl: "https://gateway.example.com",
     });
     await auth.setToken("valid");
@@ -262,9 +267,9 @@ describe("startGoogleSignIn", () => {
       defaultGatewayUrl: "https://gateway.example.com",
     });
 
-    expect(
-      await auth.startGoogleSignIn("https://gateway.example.com/"),
-    ).toBe("https://accounts.google.com/x");
+    expect(await auth.startGoogleSignIn("https://gateway.example.com/")).toBe(
+      "https://accounts.google.com/x",
+    );
     expect(transport.calls[0]?.url).toBe(
       "https://gateway.example.com/api/auth/sign-in/social",
     );
@@ -277,8 +282,8 @@ describe("startGoogleSignIn", () => {
       defaultGatewayUrl: "https://gateway.example.com",
     });
 
-    expect(auth.startGoogleSignIn("https://gateway.example.com/")).rejects.toThrow(
-      "sign-in response did not carry a redirect URL",
-    );
+    expect(
+      auth.startGoogleSignIn("https://gateway.example.com/"),
+    ).rejects.toThrow("sign-in response did not carry a redirect URL");
   });
 });

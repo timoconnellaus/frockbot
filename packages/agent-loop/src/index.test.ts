@@ -75,8 +75,7 @@ describe("AgentLoop", () => {
     let turnStoppingSawCompletedJournal = false;
     let observedPromptSessionId: string | undefined;
     let observedToolIdentity:
-      | { botId: string; agentId: string; sessionId: string }
-      | undefined;
+      { botId: string; agentId: string; sessionId: string } | undefined;
     let root: Context;
     const provider: LlmProvider = {
       id: "scripted",

@@ -46,7 +46,9 @@ function closeContextMenu(): void {
 }
 
 onMounted(() => window.addEventListener("pointerdown", closeContextMenu));
-onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu));
+onBeforeUnmount(() =>
+  window.removeEventListener("pointerdown", closeContextMenu),
+);
 </script>
 
 <template>
@@ -55,7 +57,9 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
       <aside class="sidebar">
         <div class="window-controls" aria-hidden="true" />
         <button class="new-bot" title="New bot" aria-label="New bot">+</button>
-        <label class="search"><span>⌕</span><input aria-label="Search bots" placeholder="Search" /></label>
+        <label class="search"
+          ><span>⌕</span><input aria-label="Search bots" placeholder="Search"
+        /></label>
 
         <div class="bot-list">
           <button
@@ -79,7 +83,9 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
 
         <div class="sidebar-bottom">
           <button class="plugins"><span>⊙</span>Plugins</button>
-          <button class="profile"><span class="profile-face" />FrockBot user</button>
+          <button class="profile">
+            <span class="profile-face" />FrockBot user
+          </button>
         </div>
       </aside>
 
@@ -90,11 +96,21 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
             <strong>Barebones</strong>
             <small>{{ state.modelLabel }}</small>
           </div>
-          <button class="icon-button" title="Bot settings" aria-label="Bot settings">⚙</button>
+          <button
+            class="icon-button"
+            title="Bot settings"
+            aria-label="Bot settings"
+          >
+            ⚙
+          </button>
           <button
             class="panel-toggle"
-            :title="rightPanelOpen ? 'Hide computer panel' : 'Show computer panel'"
-            :aria-label="rightPanelOpen ? 'Hide computer panel' : 'Show computer panel'"
+            :title="
+              rightPanelOpen ? 'Hide computer panel' : 'Show computer panel'
+            "
+            :aria-label="
+              rightPanelOpen ? 'Hide computer panel' : 'Show computer panel'
+            "
             @click="rightPanelOpen = !rightPanelOpen"
           >
             {{ rightPanelOpen ? "»" : "«" }}
@@ -112,11 +128,15 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
             v-else
             :key="message.id"
             class="message"
-            :class="message.role === 'user' ? 'message-user' : 'message-assistant'"
+            :class="
+              message.role === 'user' ? 'message-user' : 'message-assistant'
+            "
           >
             <div class="message-bubble">
               <span v-if="message.text">{{ message.text }}</span>
-              <span v-else class="typing" aria-label="Thinking"><i /><i /><i /></span>
+              <span v-else class="typing" aria-label="Thinking"
+                ><i /><i /><i
+              /></span>
             </div>
             <div v-if="message.tools.length" class="tool-list">
               <details
@@ -137,14 +157,22 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
 
         <div v-if="state.error" class="error-banner" role="alert">
           <span>{{ state.error }}</span>
-          <button v-if="state.connection !== 'ready'" @click="web.restart()">Restart agent</button>
+          <button v-if="state.connection !== 'ready'" @click="web.restart()">
+            Restart agent
+          </button>
         </div>
 
         <form class="composer" @submit.prevent="sendMessage">
-          <button type="button" class="add-button" aria-label="Add attachment">+</button>
+          <button type="button" class="add-button" aria-label="Add attachment">
+            +
+          </button>
           <textarea
             v-model="draft"
-            :placeholder="state.connection === 'ready' ? 'Message Barebones' : 'Waiting for Cordis…'"
+            :placeholder="
+              state.connection === 'ready'
+                ? 'Message Barebones'
+                : 'Waiting for Cordis…'
+            "
             :disabled="state.connection !== 'ready'"
             rows="1"
             @keydown="handleComposerKeydown"
@@ -172,10 +200,15 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeContextMenu
       <aside v-if="rightPanelOpen" class="right-panel">
         <k-slot name="frockbot.computer" />
         <section class="routines-section">
-          <div class="panel-heading"><strong>Routines</strong><button aria-label="Add routine">+</button></div>
+          <div class="panel-heading">
+            <strong>Routines</strong><button aria-label="Add routine">+</button>
+          </div>
           <div class="routine-empty">
             <span>○</span>
-            <div><strong>No routines yet</strong><p>Ask Barebones to repeat something later.</p></div>
+            <div>
+              <strong>No routines yet</strong>
+              <p>Ask Barebones to repeat something later.</p>
+            </div>
           </div>
         </section>
         <k-slot name="frockbot.right-panel" />

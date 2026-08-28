@@ -1,9 +1,6 @@
 /// <reference path="../env.d.ts" />
 
-import type {
-  ClientPlugin,
-  ClientPluginContext,
-} from "@frockbot/client-core";
+import type { ClientPlugin, ClientPluginContext } from "@frockbot/client-core";
 import AuthGate from "./AuthGate.vue";
 import "./styles.css";
 

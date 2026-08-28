@@ -2,8 +2,9 @@ import { inject, type InjectionKey, type Ref } from "vue";
 import type { MobileHost } from "../host/index.ts";
 import type { AuthSession } from "./auth.ts";
 
-export const authSessionKey: InjectionKey<AuthSession> =
-  Symbol("frockbot-mobile-auth-session");
+export const authSessionKey: InjectionKey<AuthSession> = Symbol(
+  "frockbot-mobile-auth-session",
+);
 
 export const mobileHostKey: InjectionKey<MobileHost> = Symbol(
   "frockbot-mobile-host",

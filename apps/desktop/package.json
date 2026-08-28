@@ -46,7 +46,9 @@
       {
         "from": "resources/cordis-agent",
         "to": "cordis-agent",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {

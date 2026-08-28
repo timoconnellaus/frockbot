@@ -1,8 +1,5 @@
 import type { SessionEvent } from "@frockbot/agent-core";
-import type {
-  MemoryVector,
-  MemoryVectorMatch,
-} from "@frockbot/plugin-memory";
+import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 
 export interface UserApplicationIdentity {
   userId: string;

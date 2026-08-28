@@ -3,7 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "exports": { "./runtime": "./src/runtime.ts" },
+  "exports": {
+    "./runtime": "./src/runtime.ts"
+  },
   "scripts": {
     "build": "bun run build.ts",
     "test": "bun test src",

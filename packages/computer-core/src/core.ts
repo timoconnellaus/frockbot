@@ -251,7 +251,9 @@ function guardedHandle(
             guardedOperation(assertCurrent, () =>
               workspace
                 .openDirectory(request, options)
-                .then((directory) => guardedDirectory(directory, assertCurrent)),
+                .then((directory) =>
+                  guardedDirectory(directory, assertCurrent),
+                ),
             ),
         }
       : undefined,
@@ -399,6 +401,3 @@ declare module "cordis" {
     computers: ComputerRegistry;
   }
 }
-
-// Keep provider selection process-local; cross-process callers use DTOs.
-export {};

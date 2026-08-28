@@ -17,9 +17,7 @@ import WebSocket from "ws";
 app.on("window-all-closed", () => undefined);
 
 type WorkerEvent =
-  | { type: "ready" }
-  | { type: "pong"; value: string }
-  | { type: "disposed" };
+  { type: "ready" } | { type: "pong"; value: string } | { type: "disposed" };
 
 interface SmokeResult {
   hostLifecycle: { setups: number; cleanups: number };

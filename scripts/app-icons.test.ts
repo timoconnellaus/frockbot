@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 
 const root = new URL("../", import.meta.url);
 const file = (path: string) => Bun.file(new URL(path, root));
@@ -47,9 +46,9 @@ describe("generated app icons", () => {
     expect(icoSizes).toEqual([256, 128, 64, 48, 32, 16]);
 
     for (const size of [16, 32, 48, 64, 128, 256, 512, 1024]) {
-      expect(await pngInfo(`apps/desktop/resources/icons/${size}x${size}.png`)).toMatchObject(
-        { width: size, height: size },
-      );
+      expect(
+        await pngInfo(`apps/desktop/resources/icons/${size}x${size}.png`),
+      ).toMatchObject({ width: size, height: size });
     }
   });
 
@@ -68,11 +67,15 @@ describe("generated app icons", () => {
         width: legacy,
         height: legacy,
       });
-      expect(await pngInfo(`${directory}/ic_launcher_round.png`)).toMatchObject({
-        width: legacy,
-        height: legacy,
-      });
-      expect(await pngInfo(`${directory}/ic_launcher_foreground.png`)).toMatchObject({
+      expect(await pngInfo(`${directory}/ic_launcher_round.png`)).toMatchObject(
+        {
+          width: legacy,
+          height: legacy,
+        },
+      );
+      expect(
+        await pngInfo(`${directory}/ic_launcher_foreground.png`),
+      ).toMatchObject({
         width: foreground,
         height: foreground,
         colorType: 6,
@@ -90,7 +93,7 @@ describe("generated app icons", () => {
     ).text();
     expect(manifest).toContain('android:icon="@mipmap/ic_launcher"');
     expect(manifest).toContain('android:roundIcon="@mipmap/ic_launcher_round"');
-    expect(adaptive).toContain('@mipmap/ic_launcher_foreground');
+    expect(adaptive).toContain("@mipmap/ic_launcher_foreground");
     expect(background).toContain("#EC386B");
   });
 
@@ -120,7 +123,6 @@ describe("generated app icons", () => {
   test.skipIf(generatorTools.length > 0)(
     "the repeatable generator recreates the committed artifact tree from only the canonical marketing sheep icon",
     async () => {
-      const rootPath = fileURLToPath(root);
       const checkout = await mkdtemp(join(tmpdir(), "frockbot-icons-"));
       try {
         for (const path of [

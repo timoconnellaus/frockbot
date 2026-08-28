@@ -77,7 +77,9 @@ export async function createMobileHost(
   const root = new Context();
   try {
     await root.plugin(MobileCommandRegistry);
-    await root.plugin(createNotificationProvider(options.adapters.notifications));
+    await root.plugin(
+      createNotificationProvider(options.adapters.notifications),
+    );
     await root.plugin(createClipboardProvider(options.adapters.clipboard));
     await root.plugin(createShareProvider(options.adapters.share));
     await root.plugin(PackageCatalog, { kinds: ["mobile"] });

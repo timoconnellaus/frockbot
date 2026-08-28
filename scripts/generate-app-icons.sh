@@ -12,7 +12,10 @@ command -v magick >/dev/null 2>&1 || {
   printf 'ImageMagick 7 (magick) is required to generate app icons.\n' >&2
   exit 1
 }
-[[ -f "$SOURCE" ]] || { printf 'Missing canonical icon: %s\n' "$SOURCE" >&2; exit 1; }
+[[ -f "$SOURCE" ]] || {
+  printf 'Missing canonical icon: %s\n' "$SOURCE" >&2
+  exit 1
+}
 
 mkdir -p "$DESKTOP/icons" "$IOS"
 work=$(mktemp -d)
@@ -52,7 +55,7 @@ for spec in \
   "512 icon_256x256@2x.png" \
   "512 icon_512x512.png" \
   "1024 icon_512x512@2x.png"; do
-  read -r size name <<< "$spec"
+  read -r size name <<<"$spec"
   clean_png "$SOURCE" -resize "${size}x${size}" "$iconset/$name"
 done
 iconutil --convert icns --output "$DESKTOP/icon.icns" "$iconset"
@@ -67,7 +70,7 @@ for spec in \
   "xhdpi 96 216" \
   "xxhdpi 144 324" \
   "xxxhdpi 192 432"; do
-  read -r density legacy foreground <<< "$spec"
+  read -r density legacy foreground <<<"$spec"
   legacy_art=$((legacy * 88 / 100))
   safe_art=$foreground
   directory="$ANDROID/mipmap-$density"

@@ -39,11 +39,7 @@
     {
       "specifier": "@frockbot/plugin-computer",
       "version": "0.0.1",
-      "grants": [
-        "computer:execute",
-        "computer:browser",
-        "webui:remote-frame"
-      ]
+      "grants": ["computer:execute", "computer:browser", "webui:remote-frame"]
     },
     {
       "specifier": "@frockbot/plugin-fly-sprite",

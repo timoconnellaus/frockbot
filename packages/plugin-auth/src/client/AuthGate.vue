@@ -49,9 +49,7 @@ function embeddedUserId(): string | undefined {
 }
 
 async function loadUser(): Promise<void> {
-  const developmentUser = developmentUserFromUrl(
-    new URL(window.location.href),
-  );
+  const developmentUser = developmentUserFromUrl(new URL(window.location.href));
   if (developmentUser) {
     user.value = {
       id: developmentUser,
@@ -212,7 +210,8 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="error" class="auth-error" role="alert">{{ error }}</p>
       <p v-if="isDesktop && signingIn" class="auth-hint">
-        Finish signing in in the browser. You can safely return to FrockBot when it closes.
+        Finish signing in in the browser. You can safely return to FrockBot when
+        it closes.
       </p>
     </section>
   </main>

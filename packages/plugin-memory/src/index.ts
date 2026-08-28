@@ -5,6 +5,7 @@ export * from "./indexer.js";
 export { default as memoryManifest } from "./manifest.js";
 export * from "./scopes.js";
 export * from "./searcher.js";
+export { EphemeralIndexMetaStore } from "./storage.js";
 export * from "./storage.js";
 export * from "./types.js";
 export * from "./workspace-storage.js";

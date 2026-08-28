@@ -61,7 +61,9 @@ async function useDevelopmentUser(): Promise<void> {
   try {
     gatewayUrl.value = await saveGateway();
     await auth.setToken(undefined);
-    await auth.setDevelopmentUserId(developmentUserDraft.value || "development");
+    await auth.setDevelopmentUserId(
+      developmentUserDraft.value || "development",
+    );
     await connect();
   } catch (cause) {
     failure(cause, "Could not start a development session");

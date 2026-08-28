@@ -8,20 +8,20 @@
   "routes": [
     {
       "pattern": "frockbot.com",
-      "custom_domain": true
+      "custom_domain": true,
     },
     {
       "pattern": "www.frockbot.com",
-      "custom_domain": true
-    }
+      "custom_domain": true,
+    },
   ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
-    "run_worker_first": true
+    "run_worker_first": true,
   },
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }

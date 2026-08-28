@@ -18,8 +18,7 @@ export interface AgentInput {
 }
 
 export type PreStepDecision =
-  | { kind: "enter"; inputs: AgentInput[] }
-  | { kind: "reject"; reason: string };
+  { kind: "enter"; inputs: AgentInput[] } | { kind: "reject"; reason: string };
 
 export type RequestErrorAction = { kind: "retry" } | { kind: "fail" };
 

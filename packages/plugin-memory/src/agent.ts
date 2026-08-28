@@ -92,8 +92,8 @@ function validGetInput(value: unknown): boolean {
   const input = record(value);
   return Boolean(
     input &&
-      validPath(input.path) &&
-      (input.tier === undefined || validTier(input.tier)),
+    validPath(input.path) &&
+    (input.tier === undefined || validTier(input.tier)),
   );
 }
 
@@ -101,11 +101,11 @@ function validWriteInput(value: unknown): boolean {
   const input = record(value);
   return Boolean(
     input &&
-      validPath(input.path) &&
-      (input.tier === undefined || validTier(input.tier)) &&
-      typeof input.content === "string" &&
-      input.content.trim() &&
-      input.content.length <= MAX_CONTENT_LENGTH,
+    validPath(input.path) &&
+    (input.tier === undefined || validTier(input.tier)) &&
+    typeof input.content === "string" &&
+    input.content.trim() &&
+    input.content.length <= MAX_CONTENT_LENGTH,
   );
 }
 
@@ -113,8 +113,8 @@ function validDeleteInput(value: unknown): boolean {
   const input = record(value);
   return Boolean(
     input &&
-      validPath(input.path) &&
-      (input.tier === undefined || validTier(input.tier)),
+    validPath(input.path) &&
+    (input.tier === undefined || validTier(input.tier)),
   );
 }
 
