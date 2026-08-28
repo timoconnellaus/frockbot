@@ -12,6 +12,27 @@ export interface DesktopApiResponse {
   body: string;
 }
 
+export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid API response");
+  }
+  const response = value as Partial<DesktopApiResponse>;
+  if (
+    !Number.isInteger(response.status) ||
+    (response.status as number) < 100 ||
+    (response.status as number) > 599 ||
+    (response.contentType !== null && typeof response.contentType !== "string") ||
+    typeof response.body !== "string"
+  ) {
+    throw new Error("invalid API response");
+  }
+  return {
+    status: response.status as number,
+    contentType: response.contentType,
+    body: response.body,
+  };
+}
+
 const API_ROUTES: Array<{
   pattern: RegExp;
   methods: ReadonlySet<DesktopApiRequest["method"]>;
@@ -21,6 +42,11 @@ const API_ROUTES: Array<{
   {
     pattern: /^\/api\/bots\/[a-zA-Z0-9._-]+\/(turns|settings|notifications)$/,
     methods: new Set(["GET", "POST"]),
+  },
+  {
+    pattern:
+      /^\/api\/bots\/[a-zA-Z0-9._-]+\/turns\/[a-zA-Z0-9._-]+\/reconcile$/,
+    methods: new Set(["POST"]),
   },
   {
     pattern: /^\/api\/plugins\/[a-zA-Z0-9._-]+\/connections$/,

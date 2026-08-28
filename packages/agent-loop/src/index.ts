@@ -43,6 +43,7 @@ class LoopAgent implements Agent {
   #activity: Promise<void> = Promise.resolve();
   #controller: AbortController | undefined;
   #disposeRequested = false;
+  #resumeRequested = false;
 
   constructor(
     ctx: Context,
@@ -76,6 +77,15 @@ class LoopAgent implements Agent {
     this.#ctx.emit("agent/inbox/inserted", this, input);
     this.#wake();
     return input.messageId;
+  }
+
+  resume(): void {
+    if (this.#disposeRequested) throw new Error(`agent "${this.id}" is disposing`);
+    if (this.#status !== "idle" || this.#inbox.length > 0 || this.#resumeRequested) {
+      throw new Error(`agent "${this.id}" cannot resume while active`);
+    }
+    this.#resumeRequested = true;
+    this.#wake();
   }
 
   cancel(reason: "user" | "shutdown" = "user"): void {
@@ -120,7 +130,8 @@ class LoopAgent implements Agent {
     if (
       this.#disposeRequested ||
       this.#status !== "idle" ||
-      this.#inbox.length === 0
+      this.#inbox.length === 0 &&
+      !this.#resumeRequested
     ) {
       return;
     }
@@ -135,8 +146,87 @@ class LoopAgent implements Agent {
   }
 
   async #drive(signal: AbortSignal): Promise<void> {
+    if (this.#resumeRequested) {
+      this.#resumeRequested = false;
+      await this.#resumeTurn(signal);
+    }
     while (!signal.aborted && this.#inbox.length > 0) {
       await this.#runTurn(signal);
+    }
+  }
+
+  async #resumeTurn(signal: AbortSignal): Promise<void> {
+    let openTurn: number | undefined;
+    let latestStep = 0;
+    for (const event of this.session.events) {
+      if (event.type === "turn/start") openTurn = event.turn;
+      if (event.type === "turn/end" && event.turn === openTurn) openTurn = undefined;
+      if (event.type === "step/start" && event.turn === openTurn) {
+        latestStep = Math.max(latestStep, event.step);
+      }
+    }
+    if (openTurn === undefined) throw new Error("session has no resumable turn");
+    let openStep: number | undefined;
+    let turnOutcome: StepOutcome = "interrupted";
+    try {
+      for (
+        let step = latestStep + 1;
+        step <= this.#maxSteps;
+        step += 1
+      ) {
+        signal.throwIfAborted();
+        openStep = step;
+        this.session.append({ type: "step/start", turn: openTurn, step });
+        const response = await this.#requestModel(openTurn, step, signal);
+        this.session.append({
+          type: "assistant/message",
+          turn: openTurn,
+          step,
+          requestId: response.request.requestId,
+          text: response.text,
+          toolCalls: response.toolCalls,
+        });
+        await this.session.flush();
+        if (response.toolCalls.length === 0) {
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          turnOutcome = "completed";
+          return;
+        }
+        await this.#executeTools(openTurn, step, response.toolCalls, signal);
+        this.session.append({
+          type: "step/end",
+          turn: openTurn,
+          step,
+          outcome: "completed",
+        });
+        openStep = undefined;
+      }
+      throw new Error(`agent exceeded ${this.#maxSteps} steps`);
+    } catch (error) {
+      if (signal.aborted) {
+        turnOutcome = "cancelled";
+      } else {
+        turnOutcome = "model-error";
+        this.#ctx.emit("agent/error", this, error);
+      }
+    } finally {
+      if (openStep !== undefined) {
+        this.session.append({
+          type: "step/end",
+          turn: openTurn,
+          step: openStep,
+          outcome: turnOutcome,
+        });
+      }
+      this.session.append({ type: "turn/end", turn: openTurn, outcome: turnOutcome });
+      await this.session.flush();
+      await this.#ctx.serial("agent/turn-stopping", this, openTurn);
     }
   }
 
@@ -353,7 +443,16 @@ class LoopAgent implements Agent {
         result = preparation.result;
         this.#ctx.emit("tools/result", call, result);
       } else {
-        result = await this.#ctx.tools.executePrepared(preparation, context);
+        try {
+          result = await this.#ctx.tools.executePrepared(preparation, context);
+        } catch (error) {
+          result = {
+            content:
+              error instanceof Error ? error.message : "Tool execution failed",
+            isError: true,
+          };
+          this.#ctx.emit("tools/result", call, result);
+        }
       }
       this.session.append({
         type: "tool/result",

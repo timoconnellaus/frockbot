@@ -5,6 +5,7 @@ import {
   LlmRegistry,
   type LlmProvider,
   type PersistSessionEvents,
+  type SessionEvent,
   SessionStore,
   SystemPromptRegistry,
   ToolRegistry,
@@ -19,10 +20,11 @@ async function mountRuntime(
   provider: LlmProvider,
   tool?: ToolDefinition,
   persistEvents?: PersistSessionEvents,
+  initialSessions?: Record<string, SessionEvent[]>,
 ): Promise<Context> {
   const root = new Context();
   roots.push(root);
-  await root.plugin(SessionStore, { persistEvents });
+  await root.plugin(SessionStore, { persistEvents, initialSessions });
   await root.plugin(SystemPromptRegistry);
   await root.plugin(LlmRegistry);
   await root.plugin(ToolRegistry);
@@ -257,5 +259,128 @@ describe("AgentLoop", () => {
     expect(turnEnds).toHaveLength(1);
     expect(stepEnds[0]).toMatchObject({ outcome: "cancelled" });
     expect(turnEnds[0]).toMatchObject({ outcome: "cancelled" });
+  });
+
+  test("journals a failed prepared tool result before completing the turn", async () => {
+    let requests = 0;
+    const durableTypes: string[] = [];
+    const provider: LlmProvider = {
+      id: "tool-failure",
+      async *stream(request) {
+        requests += 1;
+        if (requests === 1) {
+          yield {
+            type: "tool-call",
+            call: { id: "call-failed", name: "fails", input: {} },
+          };
+          yield { type: "finish", reason: "tool-calls" };
+          return;
+        }
+        const result = request.messages.findLast(
+          (message) => message.role === "tool",
+        );
+        yield {
+          type: "text-delta",
+          text: result?.role === "tool" && result.isError ? "Recovered." : "Missing error.",
+        };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const tool: ToolDefinition = {
+      name: "fails",
+      description: "Always fails.",
+      inputSchema: { type: "object" },
+      validate: () => true,
+      execute: () => Promise.reject(new Error("provider revoked")),
+    };
+    const root = await mountRuntime(provider, tool, (_sessionId, events) => {
+      durableTypes.push(...events.map((event) => event.type));
+      return Promise.resolve();
+    });
+    const handle = await root.agents.create({
+      botId: "bot-failure",
+      sessionId: "agent-failure",
+      provider: "tool-failure",
+      model: "test-model",
+    });
+    handle.agent.send("Use the failing tool.");
+    await handle.agent.whenIdle();
+
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool/result",
+        callId: "call-failed",
+        content: "provider revoked",
+        isError: true,
+      }),
+    );
+    expect(durableTypes.indexOf("tool/result")).toBeLessThan(
+      durableTypes.lastIndexOf("turn/end"),
+    );
+    expect(handle.agent.session.deriveMessages().at(-1)).toMatchObject({
+      role: "assistant",
+      content: "Recovered.",
+    });
+  });
+
+  test("resumes an explicitly reconciled turn without admitting input twice", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "input/queued", messageId: "message-1", text: "Continue once." },
+      { type: "turn/start", turn: 1 },
+      { type: "input/admitted", messageId: "message-1", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "user/message",
+        turn: 1,
+        step: 1,
+        messageId: "message-1",
+        text: "Continue once.",
+      },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "uncertain-request",
+          provider: "resume-provider",
+          model: "test-model",
+          system: "",
+          messages: [{ role: "user", content: "Continue once." }],
+          tools: [],
+        },
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const provider: LlmProvider = {
+      id: "resume-provider",
+      async *stream() {
+        yield { type: "text-delta", text: "Resumed safely." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      "resume-session": initial,
+    });
+    const handle = await root.agents.create({
+      botId: "resume-bot",
+      sessionId: "resume-session",
+      provider: "resume-provider",
+      model: "test-model",
+    });
+    handle.agent.session.reconcileForResume();
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.filter((event) => event.type === "input/admitted"),
+    ).toHaveLength(1);
+    expect(
+      handle.agent.session.events.filter((event) => event.type === "model/request"),
+    ).toHaveLength(2);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
   });
 });

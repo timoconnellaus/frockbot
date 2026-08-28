@@ -57,6 +57,7 @@ describe("user application Bot seam", () => {
       listRuns: () => Promise.resolve([]),
       listNotifications: () => Promise.resolve([]),
       acknowledgeNotification: () => Promise.resolve(),
+      reconcileRun: () => Promise.resolve(result),
     };
     const env: UserApplicationEnv = {
       BOT_STATE: botState,

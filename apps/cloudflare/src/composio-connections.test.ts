@@ -64,6 +64,32 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     return Promise.resolve(true);
   }
 
+  consumeAuthorizationState(
+    _userId: string,
+    connectionId: string,
+    authorizationStateId: string,
+  ): Promise<"claimed" | "duplicate" | "invalid"> {
+    const current = this.connections.get(connectionId);
+    if (
+      !current ||
+      (current.safeMetadata.authorizationStateId !== undefined &&
+        current.safeMetadata.authorizationStateId !== authorizationStateId)
+    ) {
+      return Promise.resolve("invalid");
+    }
+    if (current.safeMetadata.authorizationStateConsumed === true) {
+      return Promise.resolve("duplicate");
+    }
+    this.connections.set(connectionId, {
+      ...current,
+      safeMetadata: {
+        ...current.safeMetadata,
+        authorizationStateConsumed: true,
+      },
+    });
+    return Promise.resolve("claimed");
+  }
+
   claimConnectionAssignment(
     _userId: string,
     connectionId: string,
@@ -170,6 +196,26 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     compensationId: string,
   ): Promise<boolean> {
     const current = this.connections.get(connectionId);
+    if (current && Array.isArray(current.safeMetadata.assignmentCompensations)) {
+      const remaining = current.safeMetadata.assignmentCompensations.filter(
+        (candidate) =>
+          !candidate ||
+          typeof candidate !== "object" ||
+          Array.isArray(candidate) ||
+          (candidate as Record<string, unknown>).id !== compensationId,
+      );
+      if (remaining.length === current.safeMetadata.assignmentCompensations.length) {
+        return Promise.resolve(false);
+      }
+      this.connections.set(connectionId, {
+        ...current,
+        safeMetadata: {
+          ...current.safeMetadata,
+          assignmentCompensations: remaining,
+        },
+      });
+      return Promise.resolve(true);
+    }
     if (
       !current ||
       current.safeMetadata.assignmentCompensationId !== compensationId
@@ -183,6 +229,10 @@ class MemoryConnectionStore implements ComposioConnectionStore {
       ...safeMetadata
     } = current.safeMetadata;
     this.connections.set(connectionId, { ...current, safeMetadata });
+    return Promise.resolve(true);
+  }
+
+  recordConnectionDependency(): Promise<boolean> {
     return Promise.resolve(true);
   }
 
@@ -993,5 +1043,41 @@ describe("ComposioConnectionCoordinator", () => {
     await expect(completion).rejects.toThrow("state changed");
     expect(store.connections.get("connection-1")?.state).toBe("revoked");
     expect(assignments).toBe(0);
+  });
+
+  test("invalidates every Bot that depends on a revoked Connection", async () => {
+    const store = new MemoryConnectionStore();
+    store.connections.set("connection-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+      state: "revoking",
+      safeMetadata: {
+        connectedAccountId: "ca_123",
+        revocationProviderCompleted: true,
+        assignmentCompensationPending: true,
+        assignmentCompensations: [
+          { botId: "bot-a", id: "comp-a", expectedGeneration: "gen-a" },
+          { botId: "bot-b", id: "comp-b", expectedGeneration: "gen-b" },
+        ],
+      },
+    });
+    const invalidated: string[] = [];
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({ apiKey: "secret" }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+      markBotUnavailable: (_userId, botId) => {
+        invalidated.push(botId);
+        return Promise.resolve("applied");
+      },
+    });
+
+    expect(await coordinator.revoke("user-1", "connection-1")).toEqual({
+      status: "revoked",
+    });
+    expect(invalidated).toEqual(["bot-a", "bot-b"]);
   });
 });

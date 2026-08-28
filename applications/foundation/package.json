@@ -19,6 +19,7 @@
   "dependencies": {
     "@frockbot/application-compiler": "workspace:*",
     "@frockbot/client-core": "workspace:*",
+    "@frockbot/configuration-core": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
@@ -34,7 +35,8 @@
     "@frockbot/plugin-mobile-clipboard": "workspace:*",
     "@frockbot/plugin-mobile-notifications": "workspace:*",
     "@frockbot/plugin-provider-foundation": "workspace:*",
-    "@frockbot/plugin-shell": "workspace:*"
+    "@frockbot/plugin-shell": "workspace:*",
+    "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

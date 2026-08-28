@@ -97,6 +97,20 @@ class MemoryBotState implements BotStateBinding {
     );
     return Promise.resolve();
   }
+
+  reconcileRun(botId: string, runId: string): Promise<BotTurnResult> {
+    const run = (this.runs.get(botId) ?? []).find(
+      (candidate) => candidate.runId === runId,
+    );
+    if (!run || run.status !== "completed") {
+      return Promise.reject(new Error("run does not require reconciliation"));
+    }
+    return Promise.resolve({
+      runId,
+      text: run.responseText ?? "",
+      events: structuredClone(run.events),
+    });
+  }
 }
 
 class MemoryConfiguration implements ConfigurationBinding {
@@ -228,16 +242,22 @@ class MemoryConnections implements ConnectionBinding {
   complete(input: {
     connectionId: string;
     connectedAccountId: string;
-  }): Promise<{ returnTarget: "browser" | "desktop" }> {
+  }): Promise<{
+    returnTarget: "browser" | "desktop";
+    status: "ready" | "pending";
+  }> {
     this.completed.push(input);
-    return Promise.resolve({ returnTarget: "browser" });
+    return Promise.resolve({ returnTarget: "browser", status: "ready" });
   }
 
   fail(
     _connectionId: string,
     _message: string,
-  ): Promise<{ returnTarget: "browser" | "desktop" }> {
-    return Promise.resolve({ returnTarget: "browser" });
+  ): Promise<{
+    returnTarget: "browser" | "desktop";
+    status: "ready" | "pending";
+  }> {
+    return Promise.resolve({ returnTarget: "browser", status: "ready" });
   }
 
   revoke(
@@ -427,6 +447,7 @@ describe("Cloudflare user application gateway", () => {
     states.get("alice")?.notifications.set("primary", [
       {
         notificationId: "notification-run-1",
+        runId: "run-1",
         createdAt: "2026-08-28T01:00:00.000Z",
         title: "Housework replied",
         body: "Done.",

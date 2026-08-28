@@ -2,6 +2,7 @@ export interface StartConnectionResult {
   connectionId: string;
   redirectUrl: string;
   expiresAt: string;
+  nativeReturnNonce?: string;
 }
 
 export interface RevokeConnectionResult {
@@ -10,4 +11,6 @@ export interface RevokeConnectionResult {
 
 export interface ConnectionCompletionResult {
   returnTarget: "browser" | "desktop";
+  status: "ready" | "pending";
+  nativeReturnNonce?: string;
 }

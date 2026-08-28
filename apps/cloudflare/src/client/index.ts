@@ -14,6 +14,7 @@ import {
   decodeClientTurnResponse,
   decodeNotificationList,
   decodeRevocationResult,
+  decodeRunList,
   decodeStartConnectionResult,
   type ClientTurnResponse,
 } from "@frockbot/client-core";
@@ -118,6 +119,11 @@ const application = new ClientApplication({
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/notifications`),
     );
   },
+  async listRuns() {
+    return decodeRunList(
+      await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
+    );
+  },
   async acknowledgeNotification(notificationId: string) {
     decodeAcknowledgement(
       await apiRequest(
@@ -140,6 +146,9 @@ const application = new ClientApplication({
     if (input.packageId !== "composio") {
       return Promise.reject(new Error("Connection Package is unavailable"));
     }
+    const nativeReturnNonce = window.frockbotDesktop
+      ? crypto.randomUUID()
+      : undefined;
     return apiRequest(
       "/api/plugins/composio/connections",
       "POST",
@@ -148,6 +157,7 @@ const application = new ClientApplication({
         connectionTypeId: input.connectionTypeId,
         botId: input.botId,
         alias: input.alias,
+        nativeReturnNonce,
       }),
     ).then(decodeStartConnectionResult);
   },
@@ -162,9 +172,15 @@ const application = new ClientApplication({
       ),
     );
   },
-  openExternalAuthorization(url: string): Promise<void> {
+  openExternalAuthorization(
+    url: string,
+    nativeReturnNonce?: string,
+  ): Promise<void> {
     if (window.frockbotDesktop) {
-      return window.frockbotDesktop.openExternalAuthorization(url);
+      return window.frockbotDesktop.openExternalAuthorization(
+        url,
+        nativeReturnNonce,
+      );
     }
     window.location.assign(url);
     return Promise.resolve();

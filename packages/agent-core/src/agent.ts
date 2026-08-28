@@ -28,6 +28,7 @@ export interface Agent {
   readonly session: Session;
   readonly status: AgentStatus;
   send(text: string): string;
+  resume(): void;
   cancel(reason?: "user" | "shutdown"): void;
   whenIdle(): Promise<void>;
 }

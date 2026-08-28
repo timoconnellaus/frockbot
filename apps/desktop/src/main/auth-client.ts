@@ -25,8 +25,9 @@ function isLoopbackUrl(value: string | undefined): boolean {
 const useDevelopmentIdentity =
   isLoopbackUrl(authBaseURL) && isLoopbackUrl(applicationURL);
 
-const pendingAuthorizationReturns = new Set<
-  (status: "ready" | "failed") => void
+const pendingAuthorizationReturns = new Map<
+  string,
+  (status: "ready" | "pending" | "failed") => void
 >();
 
 function acceptAuthorizationReturn(value: string): void {
@@ -37,15 +38,19 @@ function acceptAuthorizationReturn(value: string): void {
     return;
   }
   const status = url.searchParams.get("status");
+  const nonce = url.searchParams.get("nonce");
   if (
     url.protocol !== `${AUTH_PROTOCOL}:` ||
     url.pathname !== "/connections" ||
-    (status !== "ready" && status !== "failed")
+    (status !== "ready" && status !== "pending" && status !== "failed") ||
+    !nonce
   ) {
     return;
   }
-  for (const resolve of pendingAuthorizationReturns) resolve(status);
-  pendingAuthorizationReturns.clear();
+  const resolve = pendingAuthorizationReturns.get(nonce);
+  if (!resolve) return;
+  pendingAuthorizationReturns.delete(nonce);
+  resolve(status);
   const window = BrowserWindow.getAllWindows()[0];
   window?.show();
   window?.focus();
@@ -119,23 +124,41 @@ export function setupDesktopAuth(): void {
 
   ipcMain.handle(
     "frockbot:open-external-authorization",
-    async (event, url: unknown) => {
+    async (event, url: unknown, nativeReturnNonce: unknown) => {
       if (!event.senderFrame || !trustedRenderer(event.senderFrame.url)) {
         throw new Error("untrusted renderer");
       }
-      await shell.openExternal(decodeExternalAuthorizationUrl(url));
+      if (
+        typeof nativeReturnNonce !== "string" ||
+        !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(nativeReturnNonce)
+      ) {
+        throw new Error("invalid native authorization nonce");
+      }
+      const authorizationUrl = decodeExternalAuthorizationUrl(url);
       return new Promise<void>((resolve, reject) => {
-        const finish = (status: "ready" | "failed") => {
+        const finish = (status: "ready" | "pending" | "failed") => {
           clearTimeout(timeout);
-          pendingAuthorizationReturns.delete(finish);
+          pendingAuthorizationReturns.delete(nativeReturnNonce);
           if (status === "ready") resolve();
-          else reject(new Error("Connection authorization was not completed"));
+          else if (status === "pending") {
+            reject(new Error("Connection authorization is still completing"));
+          } else reject(new Error("Connection authorization was not completed"));
         };
         const timeout = setTimeout(() => {
-          pendingAuthorizationReturns.delete(finish);
+          pendingAuthorizationReturns.delete(nativeReturnNonce);
           reject(new Error("Connection authorization timed out"));
         }, 10 * 60_000);
-        pendingAuthorizationReturns.add(finish);
+        if (pendingAuthorizationReturns.has(nativeReturnNonce)) {
+          clearTimeout(timeout);
+          reject(new Error("Connection authorization is already pending"));
+          return;
+        }
+        pendingAuthorizationReturns.set(nativeReturnNonce, finish);
+        void shell.openExternal(authorizationUrl).catch((error) => {
+          clearTimeout(timeout);
+          pendingAuthorizationReturns.delete(nativeReturnNonce);
+          reject(error);
+        });
       });
     },
   );

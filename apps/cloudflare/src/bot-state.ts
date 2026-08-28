@@ -13,11 +13,7 @@ import {
   resolveBotExecutionPlanV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import {
-  createComposioRouterPlugin,
-  ComposioClient,
-} from "@frockbot/plugin-composio";
-import composioManifest from "@frockbot/plugin-composio/manifest";
+import { createFoundationAssignedRuntimePackages } from "@frockbot/application-foundation/runtime";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 import type { UserConfiguration } from "./user-configuration.js";
 import { BotTurnExecutionError, executeBotTurn } from "./bot-runner.js";
@@ -142,9 +138,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     if (command.botId !== identity.botId) {
       throw new Error("Bot command does not match its durable identity");
     }
-    await this.assertIdentity(identity);
     await this.ensureBotSettings(identity);
-    return this.ctx.storage.transaction(async (transaction) => {
+    const receipt = await this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
       const existing = await transaction.get<OperationReceiptV1>(receiptKey);
       if (existing) return existing;
@@ -203,6 +198,18 @@ export class BotState extends DurableObject<BotStateEnv> {
       }
       return receipt;
     });
+    if (
+      command.type === "bot/assign-capability" &&
+      command.assignment.connectionId
+    ) {
+      await this.userConfiguration(identity).recordConnectionDependency(
+        identity.userId,
+        command.assignment.connectionId,
+        identity.botId,
+        command.commandId,
+      );
+    }
+    return receipt;
   }
 
   async markConnectionUnavailable(
@@ -210,7 +217,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     connectionId: string,
     compensation?: { id: string; expectedGeneration: string },
   ): Promise<"applied" | "stale"> {
-    await this.assertIdentity(identity);
     await this.ensureBotSettings(identity);
     return this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = compensation
@@ -274,6 +280,43 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
+  async reconcileRun(
+    identity: BotIdentity,
+    runId: string,
+  ): Promise<BotTurnResult> {
+    await this.assertIdentity(identity);
+    const key = `${RUN_PREFIX}${runId}`;
+    const recovery = await this.ctx.storage.transaction(async (transaction) => {
+      const run = await transaction.get<StoredRun>(key);
+      const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
+      if (
+        !run ||
+        run.status !== "reconciliation-required" ||
+        activeRunId !== runId
+      ) {
+        throw new Error(`run "${runId}" does not require reconciliation`);
+      }
+      const latest =
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+      const settings =
+        run.configurationSnapshot ?? this.initialBotSettings(identity.botId);
+      await transaction.put(key, {
+        ...run,
+        status: "running",
+        phase: "executing",
+        failure: undefined,
+      } satisfies StoredRun);
+      await transaction.setAlarm(Date.now() + RECOVERY_ALARM_DELAY_MS);
+      return { run, latest, settings };
+    });
+    return this.executeResumedRun(
+      identity,
+      recovery.run,
+      recovery.latest,
+      recovery.settings,
+    );
+  }
+
   private async executeAcceptedRun(
     command: OwnedBotTurnCommand,
     previous: SessionEvent[],
@@ -293,7 +336,7 @@ export class BotState extends DurableObject<BotStateEnv> {
         } satisfies StoredRun);
         await transaction.setAlarm(Date.now() + RECOVERY_ALARM_DELAY_MS);
       });
-      const agentPackages = await this.composioAgentPackages(command, settings);
+      const agentPackages = await this.assignedAgentPackages(command, settings);
       const promptParts = [
         `You are ${settings.profile.name}.`,
         settings.profile.label,
@@ -330,42 +373,97 @@ export class BotState extends DurableObject<BotStateEnv> {
     }
   }
 
-  private async composioAgentPackages(
+  private async executeResumedRun(
+    identity: BotIdentity,
+    run: StoredRun,
+    latest: SessionEvent[],
+    settings: BotSettingsViewV1,
+  ): Promise<BotTurnResult> {
+    this.executingRunId = run.runId;
+    const previous = latest.slice(0, run.previousEventCount ?? 0);
+    try {
+      const agentPackages = await this.assignedAgentPackages(identity, settings);
+      const promptParts = [
+        `You are ${settings.profile.name}.`,
+        settings.profile.label,
+        settings.profile.description,
+      ].filter((part): part is string => Boolean(part?.trim()));
+      const result = await executeBotTurn({
+        botId: identity.botId,
+        command: {
+          runId: run.runId,
+          sessionId: run.sessionId,
+          acceptedAt: run.acceptedAt,
+          text: run.input,
+        },
+        previousEvents: latest,
+        memory: memoryPluginConfig(this.env, identity),
+        persistSessionEvents: (_sessionId, events) =>
+          this.persistRunEvents(run.runId, events),
+        agentPackages,
+        systemPromptSection: promptParts.join("\n\n"),
+        resume: true,
+      });
+      const durableRun = await this.ctx.storage.get<StoredRun>(
+        `${RUN_PREFIX}${run.runId}`,
+      );
+      if (!durableRun) throw new Error(`run "${run.runId}" was not accepted`);
+      const fullResult = {
+        ...result,
+        events: durableRun.events,
+      } satisfies BotTurnResult;
+      const completed = settings.notifications.enabled
+        ? {
+            ...fullResult,
+            notification: await this.recordNotification(settings, fullResult),
+          }
+        : fullResult;
+      await this.completeRun(run.runId, previous, completed);
+      return completed;
+    } catch (error) {
+      const durableRun = await this.ctx.storage.get<StoredRun>(
+        `${RUN_PREFIX}${run.runId}`,
+      );
+      const events = durableRun?.events ?? run.events;
+      const message = error instanceof Error ? error.message : "Bot turn failed";
+      await this.failRun(run.runId, previous, events, message);
+      throw new Error(message);
+    } finally {
+      if (this.executingRunId === run.runId) this.executingRunId = undefined;
+    }
+  }
+
+  private async assignedAgentPackages(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
   ): Promise<FoundationAgentPackage[]> {
-    const assignment = settings.assignments.find(
-      (candidate) =>
-        candidate.packageId === "composio" &&
-        candidate.capabilityId === "gmail-tools" &&
-        candidate.state === "enabled" &&
-        candidate.connectionId,
-    );
-    if (!assignment?.connectionId) return [];
-    const grant = await this.authorizeComposioEffect(identity, assignment);
-    if (!this.env.COMPOSIO_API_KEY) {
-      throw new Error("Assigned Composio Connection is misconfigured");
-    }
-    return [
-      {
-        specifier: "@frockbot/plugin-composio",
-        contributionSpecifier: "@frockbot/plugin-composio/agent",
-        manifest: composioManifest,
-        plugin: createComposioRouterPlugin({
-          client: new ComposioClient({ apiKey: this.env.COMPOSIO_API_KEY }),
-          userId: identity.userId,
-          toolkitSlug: grant.toolkitSlug,
-          authorizeEffect: () =>
-            this.authorizeComposioEffect(identity, assignment),
-        }),
+    const user = await this.userConfiguration(identity).read(identity.userId);
+    const application = await compileFoundationApplication();
+    const plan = resolveBotExecutionPlanV1({
+      bot: settings,
+      user,
+      packages: application.packages.map((pkg) => ({
+        packageId: pkg.id,
+        version: pkg.version,
+        capabilities: pkg.manifest.configuration?.capabilities ?? [],
+        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+      })),
+    });
+    return createFoundationAssignedRuntimePackages(application, settings, plan, {
+      userId: identity.userId,
+      readSecret: (name) => {
+        const value = (this.env as unknown as Record<string, unknown>)[name];
+        return typeof value === "string" ? value : undefined;
       },
-    ];
+      authorizeConnection: (assignment) =>
+        this.authorizeAssignedEffect(identity, assignment),
+    });
   }
 
-  private async authorizeComposioEffect(
+  private async authorizeAssignedEffect(
     identity: BotIdentity,
     admittedAssignment: BotSettingsViewV1["assignments"][number],
-  ): Promise<{ connectedAccountId: string; toolkitSlug: string }> {
+  ): Promise<ConnectionView> {
     const user = await this.userConfiguration(identity).read(identity.userId);
     const application = await compileFoundationApplication();
     const admittedBot = {
@@ -385,27 +483,19 @@ export class BotState extends DurableObject<BotStateEnv> {
     const assignment = plan.assignments.find(
       (candidate) =>
         candidate.assignmentId === admittedAssignment.assignmentId &&
-        candidate.packageId === "composio" &&
-        candidate.capabilityId === "gmail-tools" &&
+        candidate.packageId === admittedAssignment.packageId &&
+        candidate.capabilityId === admittedAssignment.capabilityId &&
         candidate.connectionId === admittedAssignment.connectionId &&
         candidate.state === "enabled",
     );
     const connection = user.connections.find(
       (candidate) =>
         candidate.connectionId === assignment?.connectionId &&
-        candidate.packageId === "composio" &&
-        candidate.connectionTypeId === "gmail" &&
+        candidate.packageId === admittedAssignment.packageId &&
         candidate.state === "ready",
     );
-    const connectedAccountId = connection?.safeMetadata.connectedAccountId;
-    const toolkitSlug = connection?.safeMetadata.toolkitSlug;
-    if (
-      typeof connectedAccountId !== "string" ||
-      typeof toolkitSlug !== "string"
-    ) {
-      throw new Error("Composio effect is no longer authorized");
-    }
-    return { connectedAccountId, toolkitSlug };
+    if (!connection) throw new Error("Assigned effect is no longer authorized");
+    return connection;
   }
 
   private async completedRunResult(
@@ -448,6 +538,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   ): Promise<BotNotificationIntent> {
     const notification: BotNotificationIntent = {
       notificationId: `notification-${result.runId}`,
+      runId: result.runId,
       createdAt: new Date().toISOString(),
       title: `${settings.profile.name} replied`,
       body: result.text.slice(0, 240),
@@ -492,6 +583,12 @@ export class BotState extends DurableObject<BotStateEnv> {
       userId: string,
       connectionId: string,
     ): Promise<ConnectionView | undefined>;
+    recordConnectionDependency(
+      userId: string,
+      connectionId: string,
+      botId: string,
+      generation: string,
+    ): Promise<boolean>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     return this.env.USER_CONFIGURATIONS.get(id) as unknown as {
@@ -500,21 +597,37 @@ export class BotState extends DurableObject<BotStateEnv> {
         userId: string,
         connectionId: string,
       ): Promise<ConnectionView | undefined>;
+      recordConnectionDependency(
+        userId: string,
+        connectionId: string,
+        botId: string,
+        generation: string,
+      ): Promise<boolean>;
     };
   }
 
   private async ensureBotSettings(
     identity: BotIdentity,
   ): Promise<BotSettingsViewV1> {
-    await this.assertIdentity(identity);
     const existing = await this.ctx.storage.get<BotSettingsViewV1>(
       BOT_CONFIGURATION_KEY,
     );
     if (existing) return existing;
+    const [durableIdentity, latestEvents, activeRun, legacyRuns] =
+      await Promise.all([
+        this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
+        this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY),
+        this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
+        this.ctx.storage.list<StoredRun>({ prefix: RUN_PREFIX, limit: 1 }),
+      ]);
+    const existedBeforeConfiguration = Boolean(
+      durableIdentity || latestEvents?.length || activeRun || legacyRuns.size,
+    );
+    await this.assertIdentity(identity);
     const user = await this.userConfiguration(identity).read(identity.userId);
     const initial = this.initialBotSettings(
       identity.botId,
-      user.newBotModelTemplate,
+      existedBeforeConfiguration ? undefined : user.newBotModelTemplate,
     );
     return this.ctx.storage.transaction(async (transaction) => {
       const concurrent = await transaction.get<BotSettingsViewV1>(
@@ -730,6 +843,10 @@ export class BotState extends DurableObject<BotStateEnv> {
       const current = await transaction.get<string>(ACTIVE_RUN_KEY);
       if (!current || current === this.executingRunId) return undefined;
       const run = await transaction.get<StoredRun>(key);
+      if (run?.status === "reconciliation-required") {
+        await transaction.setAlarm(Date.now() + RECOVERY_ALARM_DELAY_MS);
+        return undefined;
+      }
       if (!run || run.status !== "running") {
         await transaction.delete(ACTIVE_RUN_KEY);
         await transaction.deleteAlarm();
@@ -776,8 +893,7 @@ export class BotState extends DurableObject<BotStateEnv> {
         } satisfies StoredRun,
         [LATEST_EVENTS_KEY]: [...latest, ...plan.repairs],
       });
-      await transaction.delete(ACTIVE_RUN_KEY);
-      await transaction.deleteAlarm();
+      await transaction.setAlarm(Date.now() + RECOVERY_ALARM_DELAY_MS);
       return undefined;
     });
     if (!recovery) return;

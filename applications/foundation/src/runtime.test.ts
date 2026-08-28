@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   compileFoundationApplication,
+  createFoundationAssignedRuntimePackages,
+  createFoundationBackendContributions,
   createFoundationRuntimeApplication,
 } from "./runtime.js";
 
@@ -61,6 +63,71 @@ describe("foundation application", () => {
       "@frockbot/plugin-identity",
       "@frockbot/plugin-memory",
       "@frockbot/plugin-provider-foundation",
+    ]);
+  });
+
+  test("resolves declared backend and assigned runtime Contributions through host seams", async () => {
+    const plan = await compileFoundationApplication();
+    const secrets: Record<string, string> = {
+      COMPOSIO_API_KEY: "project-secret",
+      COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-auth",
+      FROCKBOT_AUTHORIZATION_STATE_SECRET: "state-secret",
+    };
+    const backend = createFoundationBackendContributions(plan, {
+      callbackBaseUrl: "https://bot.frockbot.com",
+      readSecret: (name) => secrets[name],
+      storeFor: () => {
+        throw new Error("not used while composing");
+      },
+      assignCapability: () => Promise.resolve(),
+      markConnectionUnavailable: () => Promise.resolve("applied"),
+    });
+    expect(backend.map((contribution) => contribution.packageId)).toEqual([
+      "composio",
+    ]);
+
+    const assignment = {
+      assignmentId: "gmail-primary",
+      packageId: "composio",
+      capabilityId: "gmail-tools",
+      connectionId: "connection-1",
+      state: "enabled" as const,
+    };
+    const runtime = await createFoundationAssignedRuntimePackages(
+      plan,
+      {
+        schemaVersion: 1,
+        botId: "primary",
+        revision: 1,
+        profile: { name: "Primary" },
+        notifications: { enabled: false },
+        assignments: [assignment],
+      },
+      {
+        schemaVersion: 1,
+        botId: "primary",
+        revision: 1,
+        assignments: [assignment],
+      },
+      {
+        userId: "user-1",
+        readSecret: (name) => secrets[name],
+        authorizeConnection: () =>
+          Promise.resolve({
+            connectionId: "connection-1",
+            packageId: "composio",
+            connectionTypeId: "gmail",
+            displayName: "Gmail",
+            state: "ready",
+            safeMetadata: {
+              connectedAccountId: "ca_123",
+              toolkitSlug: "gmail",
+            },
+          }),
+      },
+    );
+    expect(runtime.map((pkg) => pkg.contributionSpecifier)).toEqual([
+      "@frockbot/plugin-composio/agent",
     ]);
   });
 });

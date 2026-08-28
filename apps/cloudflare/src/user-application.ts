@@ -182,14 +182,45 @@ export function createUserApplication() {
     }
 
     const turnMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/turns$/);
-    if (!turnMatch) return jsonError(404, "not found");
+    const reconcileMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/reconcile$/,
+    );
+    if (!turnMatch && !reconcileMatch) return jsonError(404, "not found");
     let botId: string;
     try {
-      botId = decodeURIComponent(turnMatch[1]);
+      botId = decodeURIComponent((turnMatch ?? reconcileMatch)![1]);
     } catch {
       return jsonError(400, "invalid bot id");
     }
     if (!BOT_ID_PATTERN.test(botId)) return jsonError(400, "invalid bot id");
+
+    if (reconcileMatch) {
+      if (request.method !== "POST") return jsonError(405, "method not allowed");
+      let runId: string;
+      try {
+        runId = decodeURIComponent(reconcileMatch[2]);
+      } catch {
+        return jsonError(400, "invalid run id");
+      }
+      if (!BOT_ID_PATTERN.test(runId)) return jsonError(400, "invalid run id");
+      const input: unknown = await request.json();
+      if (
+        !input ||
+        typeof input !== "object" ||
+        !("action" in input) ||
+        input.action !== "resume"
+      ) {
+        return jsonError(400, "reconciliation action is invalid");
+      }
+      try {
+        return Response.json(await env.BOT_STATE.reconcileRun(botId, runId));
+      } catch (error) {
+        return jsonError(
+          409,
+          error instanceof Error ? error.message : "Reconciliation failed",
+        );
+      }
+    }
 
     if (request.method === "GET") {
       return Response.json({ runs: await env.BOT_STATE.listRuns(botId) });

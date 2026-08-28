@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   decodeDesktopApiRequest,
+  decodeDesktopApiResponse,
   decodeExternalAuthorizationUrl,
 } from "./desktop-api.js";
 
@@ -12,6 +13,11 @@ describe("desktop hosted protocol", () => {
       { path: "/api/bots/primary/settings", method: "GET" },
       { path: "/api/bots/primary/notifications", method: "POST", body: "{}" },
       { path: "/api/bots/primary/turns", method: "POST", body: "{}" },
+      {
+        path: "/api/bots/primary/turns/run-1/reconcile",
+        method: "POST",
+        body: '{"action":"resume"}',
+      },
       {
         path: "/api/plugins/composio/connections",
         method: "POST",
@@ -30,6 +36,15 @@ describe("desktop hosted protocol", () => {
     expect(() =>
       decodeDesktopApiRequest({ path: "/api/settings", method: "DELETE" }),
     ).toThrow("invalid API request");
+  });
+
+  test("decodes response envelopes before exposing them to the renderer", () => {
+    expect(
+      decodeDesktopApiResponse({ status: 200, contentType: "application/json", body: "{}" }),
+    ).toEqual({ status: 200, contentType: "application/json", body: "{}" });
+    expect(() =>
+      decodeDesktopApiResponse({ status: "200", contentType: null, body: "{}" }),
+    ).toThrow("invalid API response");
   });
 
   test("allows only HTTPS external authorization targets", () => {

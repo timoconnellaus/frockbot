@@ -7,12 +7,36 @@ import type {
   OperationReceiptV1,
 } from "@frockbot/configuration-core";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
-import type {
-  BackendRouteContribution,
-  ConnectionCompletionResult,
-  RevokeConnectionResult,
-  StartConnectionResult,
-} from "@frockbot/plugin-composio/backend";
+export interface BackendRouteContribution {
+  packageId: string;
+  publicRoute?(
+    request: Request,
+    url: URL,
+    context: { userId?: string; client: "browser" | "desktop" },
+  ): Promise<Response | undefined>;
+  route(
+    request: Request,
+    url: URL,
+    context: { userId?: string; client: "browser" | "desktop" },
+  ): Promise<Response | undefined>;
+}
+
+export interface StartConnectionResult {
+  connectionId: string;
+  redirectUrl: string;
+  expiresAt: string;
+  nativeReturnNonce?: string;
+}
+
+export interface RevokeConnectionResult {
+  status: "revoked" | "reconciliation-required";
+}
+
+export interface ConnectionCompletionResult {
+  returnTarget: "browser" | "desktop";
+  status: "ready" | "pending";
+  nativeReturnNonce?: string;
+}
 
 export interface UserApplicationIdentity {
   userId: string;
@@ -49,6 +73,7 @@ export interface BotTurnCommand {
 
 export interface BotNotificationIntent {
   notificationId: string;
+  runId: string;
   createdAt: string;
   title: string;
   body: string;
@@ -66,6 +91,7 @@ export interface BotStateBinding {
   listRuns(botId: string): Promise<StoredRun[]>;
   listNotifications(botId: string): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
+  reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;
 }
 
 export interface MemoryBinding {

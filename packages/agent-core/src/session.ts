@@ -121,6 +121,16 @@ export class Session {
   }
 
   reconcileInterrupted(): SessionEvent[] {
+    const repairs = this.interruptionRepairs(true);
+    return repairs.length > 0 ? this.appendBatch(repairs) : [];
+  }
+
+  reconcileForResume(): SessionEvent[] {
+    const repairs = this.interruptionRepairs(false);
+    return repairs.length > 0 ? this.appendBatch(repairs) : [];
+  }
+
+  private interruptionRepairs(closeTurn: boolean): SessionEventInput[] {
     let openTurn: number | undefined;
     let openStep: { turn: number; step: number } | undefined;
     const calls = new Map<
@@ -161,14 +171,14 @@ export class Session {
     if (openStep) {
       repairs.push({ type: "step/end", ...openStep, outcome: "interrupted" });
     }
-    if (openTurn !== undefined) {
+    if (closeTurn && openTurn !== undefined) {
       repairs.push({
         type: "turn/end",
         turn: openTurn,
         outcome: "interrupted",
       });
     }
-    return repairs.length > 0 ? this.appendBatch(repairs) : [];
+    return repairs;
   }
 
   dispose(): void {

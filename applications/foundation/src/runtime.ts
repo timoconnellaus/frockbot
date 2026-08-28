@@ -7,11 +7,24 @@ import type {
   ContributionResolver,
   PackageSource,
 } from "@frockbot/plugin-catalog";
+import type {
+  BotExecutionPlanV1,
+  BotSettingsViewV1,
+  ConnectionView,
+} from "@frockbot/configuration-core";
 import authManifest from "@frockbot/plugin-auth/manifest";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
 import composioManifest from "@frockbot/plugin-composio/manifest";
+import {
+  createConfiguredComposioBackendContribution,
+  type BackendRouteContribution,
+  type ComposioBackendHost,
+  type ComposioConnectionStore,
+} from "@frockbot/plugin-composio/backend";
+import { createConfiguredComposioRuntimeContribution } from "@frockbot/plugin-composio/agent";
+import type { Plugin } from "cordis";
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 // Desktop and mobile Package manifests remain part of the immutable plan.
@@ -63,6 +76,20 @@ const runtimeContributions = new Map([
   ["@frockbot/plugin-clock/agent", clockRuntimePlugin],
 ]);
 
+const backendContributionFactories = new Map([
+  [
+    "@frockbot/plugin-composio/backend",
+    createConfiguredComposioBackendContribution,
+  ],
+]);
+
+const assignedRuntimeContributionFactories = new Map([
+  [
+    "@frockbot/plugin-composio/agent",
+    createConfiguredComposioRuntimeContribution,
+  ],
+]);
+
 const applicationSource: ApplicationSource = {
   schemaVersion: 1,
   packages: applicationJson.packages,
@@ -73,6 +100,8 @@ export interface FoundationRuntimeApplication {
   packages: PackageSource[];
   resolveContribution: ContributionResolver;
 }
+
+export type FoundationConnectionStore = ComposioConnectionStore;
 
 export async function compileFoundationApplication(): Promise<ApplicationPlan> {
   return await compileApplicationPlan(
@@ -85,6 +114,78 @@ export async function compileFoundationApplication(): Promise<ApplicationPlan> {
     },
     { frockbotVersion: "0.0.1" },
   );
+}
+
+function contributionSpecifier(specifier: string, entry: string): string {
+  return `${specifier}${entry.slice(1)}`;
+}
+
+export function createFoundationBackendContributions(
+  plan: ApplicationPlan,
+  host: ComposioBackendHost,
+): BackendRouteContribution[] {
+  return plan.packages.flatMap((pkg) => {
+    const backend = pkg.manifest.contributions.backend;
+    if (!backend || !plan.contributions.backend.includes(pkg.id)) return [];
+    const specifier = contributionSpecifier(pkg.specifier, backend.entry);
+    const factory = backendContributionFactories.get(specifier);
+    if (!factory) {
+      throw new Error(`unknown foundation backend contribution: ${specifier}`);
+    }
+    return [factory(host)];
+  });
+}
+
+export interface FoundationAssignedRuntimePackage {
+  specifier: string;
+  contributionSpecifier: string;
+  manifest: unknown;
+  plugin: Plugin;
+}
+
+export async function createFoundationAssignedRuntimePackages(
+  plan: ApplicationPlan,
+  settings: BotSettingsViewV1,
+  execution: BotExecutionPlanV1,
+  host: {
+    userId: string;
+    readSecret(name: string): string | undefined;
+    authorizeConnection(
+      assignment: BotSettingsViewV1["assignments"][number],
+    ): Promise<ConnectionView>;
+  },
+): Promise<FoundationAssignedRuntimePackage[]> {
+  const result: FoundationAssignedRuntimePackage[] = [];
+  for (const assignment of execution.assignments) {
+    if (assignment.state !== "enabled") continue;
+    const pkg = plan.packages.find(
+      (candidate) => candidate.id === assignment.packageId,
+    );
+    const runtime = pkg?.manifest.contributions.runtime;
+    if (!pkg || !runtime) continue;
+    const specifier = contributionSpecifier(pkg.specifier, runtime.entry);
+    const factory = assignedRuntimeContributionFactories.get(specifier);
+    if (!factory) continue;
+    const admittedAssignment = settings.assignments.find(
+      (candidate) => candidate.assignmentId === assignment.assignmentId,
+    );
+    if (!admittedAssignment) continue;
+    await host.authorizeConnection(admittedAssignment);
+    const plugin = factory({
+      assignment,
+      userId: host.userId,
+      readSecret: host.readSecret,
+      authorizeConnection: () => host.authorizeConnection(admittedAssignment),
+    });
+    if (!plugin) continue;
+    result.push({
+      specifier: pkg.specifier,
+      contributionSpecifier: specifier,
+      manifest: pkg.manifest,
+      plugin,
+    });
+  }
+  return result;
 }
 
 export async function createFoundationRuntimeApplication(): Promise<FoundationRuntimeApplication> {

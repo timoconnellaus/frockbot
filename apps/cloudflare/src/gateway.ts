@@ -96,6 +96,16 @@ export function createGateway(dependencies: GatewayDependencies) {
       return dependencies.auth.handler(request);
     }
 
+    for (const contribution of dependencies.backendContributions ?? []) {
+      const response = await contribution.publicRoute?.(request, url, {
+        client:
+          request.headers.get("x-frockbot-client") === "desktop"
+            ? "desktop"
+            : "browser",
+      });
+      if (response) return response;
+    }
+
     const development = dependencies.allowDevelopmentIdentity
       ? developmentIdentity(request)
       : { persist: false };

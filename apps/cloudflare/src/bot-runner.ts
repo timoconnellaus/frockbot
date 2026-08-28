@@ -26,6 +26,7 @@ export interface ExecuteBotTurnOptions {
   persistSessionEvents?: PersistSessionEvents;
   agentPackages?: readonly FoundationAgentPackage[];
   systemPromptSection?: string;
+  resume?: boolean;
 }
 
 export async function executeBotTurn(
@@ -39,6 +40,7 @@ export async function executeBotTurn(
     persistSessionEvents,
     agentPackages,
     systemPromptSection,
+    resume,
   } = options;
   const runtime = await createFoundationRuntime(undefined, {
     agentId: botId,
@@ -52,7 +54,8 @@ export async function executeBotTurn(
   });
 
   try {
-    runtime.agent.agent.send(command.text);
+    if (resume) runtime.agent.agent.resume();
+    else runtime.agent.agent.send(command.text);
     await runtime.agent.agent.whenIdle();
     const events = [...runtime.agent.agent.session.events];
     const message = runtime.agent.agent.session.deriveMessages().at(-1);

@@ -24,6 +24,7 @@ export interface ClientTurnEvent {
 
 export interface ClientNotificationIntent {
   notificationId: string;
+  runId: string;
   createdAt: string;
   title: string;
   body: string;
@@ -40,6 +41,20 @@ export interface ClientStartConnectionResult {
   connectionId: string;
   redirectUrl: string;
   expiresAt: string;
+  nativeReturnNonce?: string;
+}
+
+export interface ClientRun {
+  runId: string;
+  input: string;
+  events: ClientTurnEvent[];
+  status:
+    | "running"
+    | "completed"
+    | "failed"
+    | "interrupted"
+    | "reconciliation-required";
+  responseText?: string;
 }
 
 export interface AgentTransport {
@@ -60,10 +75,11 @@ export interface AgentTransport {
     botId: string;
     alias?: string;
   }): Promise<ClientStartConnectionResult>;
+  listRuns?(): Promise<ClientRun[]>;
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;
   listNotifications?(): Promise<ClientNotificationIntent[]>;
   acknowledgeNotification?(notificationId: string): Promise<void>;
-  openExternalAuthorization?(url: string): Promise<void>;
+  openExternalAuthorization?(url: string, nativeReturnNonce?: string): Promise<void>;
 }
 
 function responseRecord(
@@ -117,12 +133,19 @@ function decodeTurnEvent(value: unknown): ClientTurnEvent {
 
 function decodeNotification(value: unknown): ClientNotificationIntent {
   const notification = responseRecord(value, "notification");
+  const notificationId = responseString(
+    notification,
+    "notificationId",
+    "notification",
+  );
+  const runId =
+    notification.runId === undefined && notificationId.startsWith("notification-")
+      ? notificationId.slice("notification-".length)
+      : responseString(notification, "runId", "notification");
+  if (!runId) throw new Error("notification.runId must be a string");
   return {
-    notificationId: responseString(
-      notification,
-      "notificationId",
-      "notification",
-    ),
+    notificationId,
+    runId,
     createdAt: responseString(notification, "createdAt", "notification"),
     title: responseString(notification, "title", "notification"),
     body: responseString(notification, "body", "notification"),
@@ -159,11 +182,50 @@ export function decodeStartConnectionResult(
   input: unknown,
 ): ClientStartConnectionResult {
   const value = responseRecord(input, "Connection result");
+  const nativeReturnNonce = value.nativeReturnNonce;
+  if (
+    nativeReturnNonce !== undefined &&
+    (typeof nativeReturnNonce !== "string" || !nativeReturnNonce)
+  ) {
+    throw new Error("Connection result.nativeReturnNonce must be a string");
+  }
   return {
     connectionId: responseString(value, "connectionId", "Connection result"),
     redirectUrl: responseString(value, "redirectUrl", "Connection result"),
     expiresAt: responseString(value, "expiresAt", "Connection result"),
+    nativeReturnNonce,
   };
+}
+
+export function decodeRunList(input: unknown): ClientRun[] {
+  const value = responseRecord(input, "run list");
+  if (!Array.isArray(value.runs)) {
+    throw new Error("run list.runs must be an array");
+  }
+  return value.runs.map((candidate) => {
+    const run = responseRecord(candidate, "run");
+    if (!Array.isArray(run.events)) throw new Error("run.events must be an array");
+    const status = run.status ?? "failed";
+    if (
+      status !== "running" &&
+      status !== "completed" &&
+      status !== "failed" &&
+      status !== "interrupted" &&
+      status !== "reconciliation-required"
+    ) {
+      throw new Error("run.status is invalid");
+    }
+    if (run.responseText !== undefined && typeof run.responseText !== "string") {
+      throw new Error("run.responseText must be a string");
+    }
+    return {
+      runId: responseString(run, "runId", "run"),
+      input: responseString(run, "input", "run"),
+      events: run.events.map(decodeTurnEvent),
+      status,
+      responseText: run.responseText,
+    };
+  });
 }
 
 export function decodeAcknowledgement(input: unknown): void {

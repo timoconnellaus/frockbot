@@ -1,6 +1,11 @@
 /// <reference path="../env.d.ts" />
 
-import type { ClientPlugin, ClientTurnEvent } from "@frockbot/client-core";
+import type {
+  ClientNotificationIntent,
+  ClientPlugin,
+  ClientRun,
+  ClientTurnEvent,
+} from "@frockbot/client-core";
 import type {
   BotNotificationPolicy,
   BotProfile,
@@ -39,6 +44,40 @@ function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {
     }
   }
   return [...tools.values()];
+}
+
+export function projectCompletedRuns(
+  messages: WebChatMessage[],
+  notifications: readonly ClientNotificationIntent[],
+  runs: readonly ClientRun[],
+): Set<string> {
+  const projected = new Set<string>();
+  for (const notification of notifications) {
+    const run = runs.find((candidate) => candidate.runId === notification.runId);
+    if (!run || run.status !== "completed") continue;
+    if (!messages.some((message) => message.runId === run.runId)) {
+      messages.push(
+        {
+          id: `${run.runId}:user`,
+          runId: run.runId,
+          role: "user",
+          text: run.input,
+          status: "completed",
+          tools: [],
+        },
+        {
+          id: `${run.runId}:assistant`,
+          runId: run.runId,
+          role: "assistant",
+          text: run.responseText ?? notification.body,
+          status: "completed",
+          tools: toolsFrom(run.events),
+        },
+      );
+    }
+    projected.add(notification.notificationId);
+  }
+  return projected;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -111,6 +150,11 @@ function selectedBotId(): string {
 export const shellClientPlugin: ClientPlugin = (ctx) => {
   let activeRequest: AbortController | undefined;
   const botId = selectedBotId();
+  const connectionOperationIds = new Map<string, string>();
+  const authorizationOperations = new Map<
+    string,
+    { key: string; nativeReturnNonce?: string }
+  >();
 
   async function deliverNotifications(): Promise<void> {
     if (
@@ -120,7 +164,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       return;
     }
     const notifications = await ctx.transport.listNotifications();
+    const runs = notifications.length > 0 ? await ctx.transport.listRuns?.() : [];
+    const projected = projectCompletedRuns(
+      web.value.messages,
+      notifications,
+      runs ?? [],
+    );
     for (const notification of notifications) {
+      if (!projected.has(notification.notificationId)) {
+        web.value.settingsError = "A completed Bot result is waiting to load";
+        continue;
+      }
       if (document.hidden) {
         if (
           !("Notification" in window) ||
@@ -282,11 +336,19 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
       }
+      const operationKey = `${packageId}:${connectionTypeId}`;
+      const commandId =
+        connectionOperationIds.get(operationKey) ?? crypto.randomUUID();
+      connectionOperationIds.set(operationKey, commandId);
       const result = await ctx.transport.startConnection({
-        commandId: crypto.randomUUID(),
+        commandId,
         packageId,
         connectionTypeId,
         botId,
+      });
+      authorizationOperations.set(result.redirectUrl, {
+        key: operationKey,
+        nativeReturnNonce: result.nativeReturnNonce,
       });
       return result.redirectUrl;
     },
@@ -301,8 +363,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       await web.value.loadPluginCatalog();
     },
     async openConnectionAuthorization(url: string): Promise<void> {
+      const operation = authorizationOperations.get(url);
       if (ctx.transport.openExternalAuthorization) {
-        await ctx.transport.openExternalAuthorization(url);
+        await ctx.transport.openExternalAuthorization(
+          url,
+          operation?.nativeReturnNonce,
+        );
+        if (operation) {
+          connectionOperationIds.delete(operation.key);
+          authorizationOperations.delete(url);
+        }
         return;
       }
       window.location.assign(url);

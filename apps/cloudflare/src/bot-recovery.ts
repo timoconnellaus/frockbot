@@ -33,5 +33,5 @@ export function planBotRunRecovery(
     };
   }
   const session = new Session(run.sessionId, () => {}, latest);
-  return { kind: "reconcile", repairs: session.reconcileInterrupted() };
+  return { kind: "reconcile", repairs: session.reconcileForResume() };
 }

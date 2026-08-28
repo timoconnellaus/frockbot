@@ -12,6 +12,7 @@ import {
   decodeAcknowledgement,
   decodeNotificationList,
   decodeRevocationResult,
+  decodeRunList,
   decodeStartConnectionResult,
 } from "@frockbot/client-core";
 import "@frockbot/plugin-clock/client/styles.css";
@@ -82,7 +83,38 @@ async function deliverMobileNotifications(): Promise<void> {
   const value: unknown = await response.json();
   if (!response.ok)
     throw new Error(responseError(value, "Could not load notifications"));
-  for (const notification of decodeNotificationList(value)) {
+  const notifications = decodeNotificationList(value);
+  const runsResponse = await auth.authorizedFetch(
+    `/api/bots/${encodeURIComponent(botId.value)}/turns`,
+  );
+  const runsValue: unknown = await runsResponse.json();
+  if (!runsResponse.ok) {
+    throw new Error(responseError(runsValue, "Could not load completed Turns"));
+  }
+  const runs = decodeRunList(runsValue);
+  for (const notification of notifications) {
+    const run = runs.find((candidate) => candidate.runId === notification.runId);
+    if (!run || run.status !== "completed") continue;
+    if (!web.value.messages.some((message) => message.runId === run.runId)) {
+      web.value.messages.push(
+        {
+          id: `${run.runId}:user`,
+          runId: run.runId,
+          role: "user",
+          text: run.input,
+          status: "completed",
+          tools: [],
+        },
+        {
+          id: `${run.runId}:assistant`,
+          runId: run.runId,
+          role: "assistant",
+          text: run.responseText ?? notification.body,
+          status: "completed",
+          tools: toolsFrom(run.events),
+        },
+      );
+    }
     if (document.hidden) {
       if (!host) continue;
       await host.invoke(SHOW_NOTIFICATION_COMMAND, {

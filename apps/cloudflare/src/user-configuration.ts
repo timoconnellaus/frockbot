@@ -13,6 +13,43 @@ const RECEIPT_PREFIX = "configuration-receipt:";
 const CONNECTION_EFFECT_ALARM_MS = 60_000;
 const LEGACY_ASSIGNMENT_GENERATION = "legacy:any";
 
+function revocationCompensations(
+  connection: UserSettingsViewV1["connections"][number],
+  activeGeneration?: string,
+): Array<{ botId: string; id: string; expectedGeneration: string }> {
+  const dependencies = Array.isArray(connection.safeMetadata.dependentAssignments)
+    ? connection.safeMetadata.dependentAssignments
+    : [];
+  const byBot = new Map<string, string>();
+  for (const candidate of dependencies) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      continue;
+    }
+    const dependency = candidate as Record<string, unknown>;
+    if (
+      typeof dependency.botId === "string" &&
+      typeof dependency.generation === "string"
+    ) {
+      byBot.set(dependency.botId, dependency.generation);
+    }
+  }
+  const targetBotId = connection.safeMetadata.targetBotId;
+  if (typeof targetBotId === "string" && !byBot.has(targetBotId)) {
+    byBot.set(
+      targetBotId,
+      activeGeneration ??
+        (typeof connection.safeMetadata.assignmentGeneration === "string"
+          ? connection.safeMetadata.assignmentGeneration
+          : LEGACY_ASSIGNMENT_GENERATION),
+    );
+  }
+  return [...byBot].map(([botId, expectedGeneration]) => ({
+    botId,
+    id: `revoke:${connection.connectionId}:${botId}:${expectedGeneration}`,
+    expectedGeneration,
+  }));
+}
+
 interface UserConfigurationEnv {
   BOT_STATES: DurableObjectNamespace<BotState>;
 }
@@ -247,7 +284,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       return {
         ...connection,
         state: "authorizing",
-        safeMetadata,
+        safeMetadata: {
+          ...safeMetadata,
+          ...(connection.safeMetadata.revocationRequested === true
+            ? { revocationRequested: true }
+            : {}),
+        },
         failure: undefined,
       };
     });
@@ -265,6 +307,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return this.transitionConnection(userId, connectionId, (connection) => {
       const operation = connection.safeMetadata.reconciliationOperation;
       if (
+        connection.safeMetadata.revocationRequested === true ||
         connection.state !== "authorizing" &&
         !(
           connection.state === "reconciliation-required" && operation === "link"
@@ -278,6 +321,47 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         safeMetadata: update.safeMetadata ?? connection.safeMetadata,
         failure: update.failure,
       };
+    });
+  }
+
+  async consumeAuthorizationState(
+    userId: string,
+    connectionId: string,
+    authorizationStateId: string,
+  ): Promise<"claimed" | "duplicate" | "invalid"> {
+    await this.assertIdentity(userId);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const current =
+        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ?? initialState();
+      const connection = current.connections.find(
+        (item) => item.connectionId === connectionId,
+      );
+      if (
+        !connection ||
+        connection.safeMetadata.authorizationStateId !== authorizationStateId ||
+        typeof connection.safeMetadata.authorizationStateExpiresAt !== "number" ||
+        connection.safeMetadata.authorizationStateExpiresAt <= Date.now()
+      ) {
+        return "invalid";
+      }
+      if (connection.safeMetadata.authorizationStateConsumed === true) {
+        return "duplicate";
+      }
+      const nextConnection = {
+        ...connection,
+        safeMetadata: {
+          ...connection.safeMetadata,
+          authorizationStateConsumed: true,
+        },
+      };
+      await transaction.put(STATE_KEY, {
+        ...current,
+        revision: current.revision + 1,
+        connections: current.connections.map((item) =>
+          item.connectionId === connectionId ? nextConnection : item,
+        ),
+      } satisfies UserSettingsViewV1);
+      return "claimed";
     });
   }
 
@@ -305,6 +389,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         return { phase: "done" as const, connection };
       }
       if (connection.safeMetadata.assignmentCompensationPending === true) {
+        return { phase: "pending" as const, connection };
+      }
+      if (connection.safeMetadata.revocationRequested === true) {
         return { phase: "pending" as const, connection };
       }
       const operation = connection.safeMetadata.reconciliationOperation;
@@ -414,6 +501,42 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     compensationId: string,
   ): Promise<boolean> {
     return this.transitionConnection(userId, connectionId, (connection) => {
+      if (Array.isArray(connection.safeMetadata.assignmentCompensations)) {
+        const remaining = connection.safeMetadata.assignmentCompensations.filter(
+          (candidate) =>
+            !candidate ||
+            typeof candidate !== "object" ||
+            Array.isArray(candidate) ||
+            (candidate as Record<string, unknown>).id !== compensationId,
+        );
+        if (
+          remaining.length ===
+          connection.safeMetadata.assignmentCompensations.length
+        ) {
+          return undefined;
+        }
+        const {
+          compensationRetryAt,
+          assignmentCompensationPending: _,
+          ...safeMetadata
+        } = connection.safeMetadata;
+        return {
+          ...connection,
+          safeMetadata: {
+            ...safeMetadata,
+            assignmentCompensations: remaining,
+            ...(remaining.length > 0
+              ? {
+                  assignmentCompensationPending: true,
+                  compensationRetryAt:
+                    typeof compensationRetryAt === "number"
+                      ? compensationRetryAt
+                      : Date.now() + CONNECTION_EFFECT_ALARM_MS,
+                }
+              : {}),
+          },
+        };
+      }
       if (
         connection.safeMetadata.assignmentCompensationPending !== true ||
         connection.safeMetadata.assignmentCompensationId !== compensationId
@@ -428,6 +551,41 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         ...safeMetadata
       } = connection.safeMetadata;
       return { ...connection, safeMetadata };
+    });
+  }
+
+  async recordConnectionDependency(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    generation: string,
+  ): Promise<boolean> {
+    return this.transitionConnection(userId, connectionId, (connection) => {
+      if (connection.state === "revoking" || connection.state === "revoked") {
+        return undefined;
+      }
+      const existing = Array.isArray(connection.safeMetadata.dependentAssignments)
+        ? connection.safeMetadata.dependentAssignments.filter(
+            (candidate) =>
+              candidate &&
+              typeof candidate === "object" &&
+              !Array.isArray(candidate) &&
+              typeof (candidate as Record<string, unknown>).botId === "string",
+          )
+        : [];
+      return {
+        ...connection,
+        safeMetadata: {
+          ...connection.safeMetadata,
+          dependentAssignments: [
+            ...existing.filter(
+              (candidate) =>
+                (candidate as Record<string, unknown>).botId !== botId,
+            ),
+            { botId, generation },
+          ],
+        },
+      };
     });
   }
 
@@ -520,6 +678,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         }
         const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
         const leaseId = connection.safeMetadata.assignmentLeaseId;
+        const assignmentCompensations = revocationCompensations(
+          connection,
+          typeof leaseId === "string" ? leaseId : undefined,
+        );
         const claimed = {
           ...connection,
           state: "revoking" as const,
@@ -530,6 +692,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             revocationProviderCompleted: false,
             effectDeadlineAt,
             assignmentCompensationPending: true,
+            assignmentCompensations,
             assignmentCompensationId: `revoke:${connectionId}`,
             assignmentCompensationGeneration:
               typeof leaseId === "string"
@@ -574,6 +737,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           safeMetadata: {
             ...connection.safeMetadata,
             reconciliationOperation: "link",
+            revocationRequested: true,
           },
           failure:
             "Connection identity requires reconciliation before revocation",
@@ -588,6 +752,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         return { phase: "pending" as const, connection: pending };
       }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
+      const assignmentCompensations = revocationCompensations(connection);
       const claimed = {
         ...connection,
         state: "revoking" as const,
@@ -596,6 +761,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           reconciliationOperation: "revoke",
           revocationProviderCompleted: false,
           effectDeadlineAt,
+          assignmentCompensationPending: assignmentCompensations.length > 0,
+          assignmentCompensations,
+          ...(assignmentCompensations.length > 0
+            ? { compensationRetryAt: effectDeadlineAt }
+            : {}),
           ...(typeof connection.safeMetadata.targetBotId === "string"
             ? {
                 assignmentCompensationPending: true,
@@ -658,6 +828,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return this.transitionConnection(userId, connectionId, (connection) => {
       if (
         connection.safeMetadata.revocationProviderCompleted !== true ||
+        (Array.isArray(connection.safeMetadata.assignmentCompensations) &&
+          connection.safeMetadata.assignmentCompensations.length > 0) ||
         (connection.state !== "revoking" &&
           !(
             connection.state === "reconciliation-required" &&
@@ -745,21 +917,47 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             typeof next.safeMetadata.compensationRetryAt === "number" &&
             next.safeMetadata.compensationRetryAt <= now
           ) {
-            const botId = next.safeMetadata.targetBotId;
-            const compensationId = next.safeMetadata.assignmentCompensationId;
-            const expectedGeneration =
-              next.safeMetadata.assignmentCompensationGeneration;
-            if (
-              typeof botId === "string" &&
-              typeof compensationId === "string" &&
-              typeof expectedGeneration === "string"
-            ) {
-              pending.push({
-                connectionId: next.connectionId,
-                botId,
-                compensationId,
-                expectedGeneration,
-              });
+            const stored = Array.isArray(
+              next.safeMetadata.assignmentCompensations,
+            )
+              ? next.safeMetadata.assignmentCompensations
+              : typeof next.safeMetadata.targetBotId === "string" &&
+                  typeof next.safeMetadata.assignmentCompensationId ===
+                    "string" &&
+                  typeof next.safeMetadata.assignmentCompensationGeneration ===
+                    "string"
+                ? [
+                    {
+                      botId: next.safeMetadata.targetBotId,
+                      id: next.safeMetadata.assignmentCompensationId,
+                      expectedGeneration:
+                        next.safeMetadata.assignmentCompensationGeneration,
+                    },
+                  ]
+                : [];
+            for (const candidate of stored) {
+              if (
+                !candidate ||
+                typeof candidate !== "object" ||
+                Array.isArray(candidate)
+              ) {
+                continue;
+              }
+              const compensation = candidate as Record<string, unknown>;
+              if (
+                typeof compensation.botId === "string" &&
+                typeof compensation.id === "string" &&
+                typeof compensation.expectedGeneration === "string"
+              ) {
+                pending.push({
+                  connectionId: next.connectionId,
+                  botId: compensation.botId,
+                  compensationId: compensation.id,
+                  expectedGeneration: compensation.expectedGeneration,
+                });
+              }
+            }
+            if (stored.length > 0) {
               next = {
                 ...next,
                 safeMetadata: {

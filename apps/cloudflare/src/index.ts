@@ -7,13 +7,11 @@ import type {
   OperationReceiptV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
-import { ComposioClient } from "@frockbot/plugin-composio/client";
 import {
-  type BackendRouteContribution,
-  createComposioBackendContribution,
-  type ComposioConnectionStore,
-} from "@frockbot/plugin-composio/backend";
+  compileFoundationApplication,
+  createFoundationBackendContributions,
+  type FoundationConnectionStore,
+} from "@frockbot/application-foundation/runtime";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -68,6 +66,10 @@ interface BotStateRpc {
   listRuns(): Promise<StoredRun[]>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
+  reconcileRun(
+    identity: { userId: string; botId: string },
+    runId: string,
+  ): Promise<BotTurnResult>;
   getSettings(identity: {
     userId: string;
     botId: string;
@@ -83,7 +85,7 @@ interface BotStateRpc {
   ): Promise<"applied" | "stale">;
 }
 
-interface UserConfigurationRpc extends ComposioConnectionStore {
+interface UserConfigurationRpc extends FoundationConnectionStore {
   read(userId: string): Promise<UserSettingsViewV1>;
   execute(
     userId: string,
@@ -185,6 +187,13 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       botId,
     ).acknowledgeNotification(notificationId);
   }
+
+  async reconcileRun(botId: string, runId: string): Promise<BotTurnResult> {
+    return botStateStub(this.env, this.ctx.props.userId, botId).reconcileRun(
+      { userId: this.ctx.props.userId, botId },
+      runId,
+    );
+  }
 }
 
 class R2ApplicationArtifacts implements ApplicationArtifactStore {
@@ -214,52 +223,51 @@ export default {
     // workers-types cannot infer the generated local RPC stubs.
     const runtimeExports = ctx.exports as unknown as RuntimeExports;
     const application = await compileFoundationApplication();
-    const backendContributions: BackendRouteContribution[] = [];
-    if (application.contributions.backend.includes("composio")) {
-      if (!env.COMPOSIO_API_KEY || !env.COMPOSIO_GMAIL_AUTH_CONFIG_ID) {
-        throw new Error("Composio backend Contribution is not configured");
-      }
-      backendContributions.push(
-        createComposioBackendContribution({
-          client: new ComposioClient({ apiKey: env.COMPOSIO_API_KEY }),
-          storeFor: (userId) => userConfigurationStub(env, userId),
-          callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
-          connectionTypes: {
-            gmail: {
-              authConfigId: env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
-              displayName: "Gmail",
-              toolkitSlug: "gmail",
-            },
-          },
-          assignBot: async (userId, botId, connectionId, leaseId) => {
-            const bot = botStateStub(env, userId, botId);
-            const settings = await bot.getSettings({ userId, botId });
-            await bot.executeConfiguration(
-              { userId, botId },
-              {
-                schemaVersion: 1,
-                type: "bot/assign-capability",
-                commandId: leaseId,
-                botId,
-                expectedRevision: settings.revision,
-                assignment: {
-                  assignmentId: `composio-${connectionId}`,
-                  packageId: "composio",
-                  capabilityId: "gmail-tools",
-                  connectionId,
-                },
+    const backendContributions = createFoundationBackendContributions(
+      application,
+      {
+        callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
+        readSecret: (name) => {
+          const value = (env as unknown as Record<string, unknown>)[name];
+          return typeof value === "string" ? value : undefined;
+        },
+        storeFor: (userId) => userConfigurationStub(env, userId),
+        assignCapability: async (assignment) => {
+          const bot = botStateStub(env, assignment.userId, assignment.botId);
+          const settings = await bot.getSettings({
+            userId: assignment.userId,
+            botId: assignment.botId,
+          });
+          await bot.executeConfiguration(
+            { userId: assignment.userId, botId: assignment.botId },
+            {
+              schemaVersion: 1,
+              type: "bot/assign-capability",
+              commandId: assignment.generation,
+              botId: assignment.botId,
+              expectedRevision: settings.revision,
+              assignment: {
+                assignmentId: assignment.assignmentId,
+                packageId: assignment.packageId,
+                capabilityId: assignment.capabilityId,
+                connectionId: assignment.connectionId,
               },
-            );
-          },
-          markBotUnavailable: (userId, botId, connectionId, compensation) =>
-            botStateStub(env, userId, botId).markConnectionUnavailable(
-              { userId, botId },
-              connectionId,
-              compensation,
-            ),
-        }),
-      );
-    }
+            },
+          );
+        },
+        markConnectionUnavailable: (
+          userId,
+          botId,
+          connectionId,
+          compensation,
+        ) =>
+          botStateStub(env, userId, botId).markConnectionUnavailable(
+            { userId, botId },
+            connectionId,
+            compensation,
+          ),
+      },
+    );
     const gateway = createGateway({
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),

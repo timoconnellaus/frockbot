@@ -39,6 +39,11 @@ export interface ComposioConnectionStore {
       failure?: string;
     },
   ): Promise<boolean>;
+  consumeAuthorizationState(
+    userId: string,
+    connectionId: string,
+    authorizationStateId: string,
+  ): Promise<"claimed" | "duplicate" | "invalid">;
   claimConnectionAssignment(
     userId: string,
     connectionId: string,
@@ -62,6 +67,12 @@ export interface ComposioConnectionStore {
     userId: string,
     connectionId: string,
     compensationId: string,
+  ): Promise<boolean>;
+  recordConnectionDependency(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    generation: string,
   ): Promise<boolean>;
   requireConnectionReconciliation(
     userId: string,
@@ -122,6 +133,10 @@ export class ComposioConnectionCoordinator {
       botId: string;
       alias?: string;
       returnTarget?: "browser" | "desktop";
+      callbackState?: string;
+      authorizationStateId?: string;
+      authorizationStateExpiresAt?: number;
+      nativeReturnNonce?: string;
     },
   ): Promise<StartConnectionResult> {
     const type = this.config.connectionTypes[input.connectionTypeId];
@@ -143,6 +158,12 @@ export class ComposioConnectionCoordinator {
         toolkitSlug: type.toolkitSlug,
         providerAlias: connectionId,
         returnTarget: input.returnTarget ?? "browser",
+        authorizationStateId: input.authorizationStateId ?? connectionId,
+        authorizationStateExpiresAt:
+          input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
+        ...(input.nativeReturnNonce
+          ? { nativeReturnNonce: input.nativeReturnNonce }
+          : {}),
       },
     });
     if (!claimed) {
@@ -153,7 +174,15 @@ export class ComposioConnectionCoordinator {
       const redirectUrl = existing?.safeMetadata.redirectUrl;
       const expiresAt = existing?.safeMetadata.expiresAt;
       if (typeof redirectUrl === "string" && typeof expiresAt === "string") {
-        return { connectionId, redirectUrl, expiresAt };
+        return {
+          connectionId,
+          redirectUrl,
+          expiresAt,
+          nativeReturnNonce:
+            typeof existing?.safeMetadata.nativeReturnNonce === "string"
+              ? existing.safeMetadata.nativeReturnNonce
+              : undefined,
+        };
       }
       if (
         existing?.state === "reconciliation-required" &&
@@ -174,18 +203,29 @@ export class ComposioConnectionCoordinator {
               ...existing.safeMetadata,
               connectedAccountId: account.id,
               toolkitSlug: account.toolkitSlug,
+              authorizationStateId: input.authorizationStateId ?? connectionId,
+              authorizationStateExpiresAt:
+                input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
+              authorizationStateConsumed: false,
+              ...(input.nativeReturnNonce
+                ? { nativeReturnNonce: input.nativeReturnNonce }
+                : {}),
             },
           );
           const callbackUrl = new URL(
             "/api/plugins/composio/callback",
             this.config.callbackBaseUrl,
           );
-          callbackUrl.searchParams.set("connection", connectionId);
+          callbackUrl.searchParams.set(
+            "state",
+            input.callbackState ?? connectionId,
+          );
           callbackUrl.searchParams.set("connected_account_id", account.id);
           return {
             connectionId,
             redirectUrl: callbackUrl.toString(),
             expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+            nativeReturnNonce: input.nativeReturnNonce,
           };
         }
       }
@@ -196,7 +236,7 @@ export class ComposioConnectionCoordinator {
       link = await this.config.client.createConnectLink({
         userId,
         authConfigId: type.authConfigId,
-        callbackUrl: `${this.config.callbackBaseUrl}/api/plugins/composio/callback?connection=${encodeURIComponent(connectionId)}`,
+        callbackUrl: `${this.config.callbackBaseUrl}/api/plugins/composio/callback?state=${encodeURIComponent(input.callbackState ?? connectionId)}`,
         alias: connectionId,
       });
     } catch (error) {
@@ -219,6 +259,12 @@ export class ComposioConnectionCoordinator {
         toolkitSlug: type.toolkitSlug,
         targetBotId: input.botId,
         expiresAt: link.expiresAt,
+        authorizationStateId: input.authorizationStateId ?? connectionId,
+        authorizationStateExpiresAt:
+          input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
+        ...(input.nativeReturnNonce
+          ? { nativeReturnNonce: input.nativeReturnNonce }
+          : {}),
       },
     );
     if (!recorded) {
@@ -226,10 +272,16 @@ export class ComposioConnectionCoordinator {
         "Connection authorization changed while creating its link",
       );
     }
+    const afterLink = await this.config.store.getConnection(userId, connectionId);
+    if (afterLink?.safeMetadata.revocationRequested === true) {
+      await this.revoke(userId, connectionId);
+      throw new Error("Connection was revoked while creating its link");
+    }
     return {
       connectionId,
       redirectUrl: link.redirectUrl,
       expiresAt: link.expiresAt,
+      nativeReturnNonce: input.nativeReturnNonce,
     };
   }
 
@@ -237,11 +289,21 @@ export class ComposioConnectionCoordinator {
     userId: string,
     connectionId: string,
     message: string,
+    authorizationStateId?: string,
   ): Promise<ConnectionCompletionResult> {
     const connection = await this.config.store.getConnection(
       userId,
       connectionId,
     );
+    const stateClaim = await this.config.store.consumeAuthorizationState(
+      userId,
+      connectionId,
+      authorizationStateId ??
+        (connection?.safeMetadata.authorizationStateId as string),
+    );
+    if (stateClaim === "invalid") {
+      throw new Error("Composio authorization state is invalid or expired");
+    }
     await this.config.store.finishConnectionAuthorization(
       userId,
       connectionId,
@@ -255,6 +317,11 @@ export class ComposioConnectionCoordinator {
         connection?.safeMetadata.returnTarget === "desktop"
           ? "desktop"
           : "browser",
+      status: "ready",
+      nativeReturnNonce:
+        typeof connection?.safeMetadata.nativeReturnNonce === "string"
+          ? connection.safeMetadata.nativeReturnNonce
+          : undefined,
     };
   }
 
@@ -316,31 +383,52 @@ export class ComposioConnectionCoordinator {
     if (refreshed?.safeMetadata.revocationProviderCompleted !== true) {
       return { status: "reconciliation-required" };
     }
-    const targetBotId = refreshed.safeMetadata.targetBotId;
-    if (typeof targetBotId === "string" && this.config.markBotUnavailable) {
-      const compensationId = refreshed.safeMetadata.assignmentCompensationId;
-      const expectedGeneration =
-        refreshed.safeMetadata.assignmentCompensationGeneration;
-      if (
-        typeof compensationId !== "string" ||
-        typeof expectedGeneration !== "string"
-      ) {
-        return { status: "reconciliation-required" };
+    const compensations = Array.isArray(
+      refreshed.safeMetadata.assignmentCompensations,
+    )
+      ? refreshed.safeMetadata.assignmentCompensations
+      : typeof refreshed.safeMetadata.targetBotId === "string" &&
+          typeof refreshed.safeMetadata.assignmentCompensationId === "string" &&
+          typeof refreshed.safeMetadata.assignmentCompensationGeneration ===
+            "string"
+        ? [
+            {
+              botId: refreshed.safeMetadata.targetBotId,
+              id: refreshed.safeMetadata.assignmentCompensationId,
+              expectedGeneration:
+                refreshed.safeMetadata.assignmentCompensationGeneration,
+            },
+          ]
+        : [];
+    if (this.config.markBotUnavailable) {
+      for (const candidate of compensations) {
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+          return { status: "reconciliation-required" };
+        }
+        const compensation = candidate as Record<string, unknown>;
+        if (
+          typeof compensation.botId !== "string" ||
+          typeof compensation.id !== "string" ||
+          typeof compensation.expectedGeneration !== "string"
+        ) {
+          return { status: "reconciliation-required" };
+        }
+        const result = await this.config.markBotUnavailable(
+          userId,
+          compensation.botId,
+          connectionId,
+          {
+            id: compensation.id,
+            expectedGeneration: compensation.expectedGeneration,
+          },
+        );
+        if (result !== "applied") continue;
+        await this.config.store.recordAssignmentCompensated(
+          userId,
+          connectionId,
+          compensation.id,
+        );
       }
-      const result = await this.config.markBotUnavailable(
-        userId,
-        targetBotId,
-        connectionId,
-        { id: compensationId, expectedGeneration },
-      );
-      if (result !== "applied") {
-        return { status: "reconciliation-required" };
-      }
-      await this.config.store.recordAssignmentCompensated(
-        userId,
-        connectionId,
-        compensationId,
-      );
     }
     const finished = await this.config.store.finishConnectionRevocation(
       userId,
@@ -353,7 +441,11 @@ export class ComposioConnectionCoordinator {
 
   async complete(
     userId: string,
-    input: { connectionId: string; connectedAccountId: string },
+    input: {
+      connectionId: string;
+      connectedAccountId: string;
+      authorizationStateId?: string;
+    },
   ): Promise<ConnectionCompletionResult> {
     let connection = await this.config.store.getConnection(
       userId,
@@ -366,7 +458,22 @@ export class ComposioConnectionCoordinator {
       connection.safeMetadata.returnTarget === "desktop"
         ? "desktop"
         : "browser";
-    if (connection.state === "ready") return { returnTarget };
+    const nativeReturnNonce =
+      typeof connection.safeMetadata.nativeReturnNonce === "string"
+        ? connection.safeMetadata.nativeReturnNonce
+        : undefined;
+    const stateClaim = await this.config.store.consumeAuthorizationState(
+      userId,
+      input.connectionId,
+      input.authorizationStateId ??
+        (connection.safeMetadata.authorizationStateId as string),
+    );
+    if (stateClaim === "invalid") {
+      throw new Error("Composio authorization state is invalid or expired");
+    }
+    if (connection.state === "ready") {
+      return { returnTarget, status: "ready", nativeReturnNonce };
+    }
 
     let verifiedMetadata: ConnectionView["safeMetadata"] | undefined;
     if (connection.safeMetadata.reconciliationOperation !== "assignment") {
@@ -408,12 +515,14 @@ export class ComposioConnectionCoordinator {
       leaseId,
       verifiedMetadata,
     );
-    if (claim.phase === "done") return { returnTarget };
+    if (claim.phase === "done") {
+      return { returnTarget, status: "ready", nativeReturnNonce };
+    }
     if (claim.phase === "pending") {
       if (
         claim.connection.safeMetadata.reconciliationOperation === "assignment"
       ) {
-        return { returnTarget };
+        return { returnTarget, status: "pending", nativeReturnNonce };
       }
       throw new Error("Connection state changed during callback verification");
     }
@@ -432,13 +541,17 @@ export class ComposioConnectionCoordinator {
       input.connectionId,
       leaseId,
     );
-    if (finished) return { returnTarget };
+    if (finished) {
+      return { returnTarget, status: "ready", nativeReturnNonce };
+    }
 
     const current = await this.config.store.getConnection(
       userId,
       input.connectionId,
     );
-    if (current?.state === "ready") return { returnTarget };
+    if (current?.state === "ready") {
+      return { returnTarget, status: "ready", nativeReturnNonce };
+    }
     const compensationClaimed =
       await this.config.store.requireAssignmentCompensation(
         userId,

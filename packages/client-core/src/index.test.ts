@@ -68,6 +68,7 @@ describe("hosted response decoders", () => {
         notifications: [
           {
             notificationId: "notification-1",
+            runId: "run-1",
             createdAt: "2026-08-28T00:00:00.000Z",
             title: "Done",
             body: "Finished",
