@@ -1,13 +1,18 @@
 {
   "name": "@frockbot/desktop",
   "version": "0.0.1",
+  "description": "FrockBot desktop app for persistent conversational bots",
+  "author": "Tim O'Connell",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
     "build:webui": "bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
+    "build:agent": "bun run --filter @frockbot/agent-runtime build",
     "dev": "bun run build:webui && electron-vite dev",
     "build": "bun run build:webui && electron-vite build",
+    "package": "bun run build:agent && bun run build && electron-builder",
+    "package:dir": "bun run build:agent && bun run build && electron-builder --dir",
     "start": "bun run build:webui && electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -25,10 +30,44 @@
     "conf": "15.0.2",
     "cordis": "4.0.0-rc.8"
   },
+  "build": {
+    "appId": "com.frockbot.desktop",
+    "productName": "FrockBot",
+    "asar": true,
+    "directories": {
+      "buildResources": "resources",
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/cordis-agent",
+        "to": "cordis-agent",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "icon": "resources/icon.icns",
+      "target": "dmg"
+    },
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": "nsis"
+    },
+    "linux": {
+      "icon": "resources/icons",
+      "target": "AppImage",
+      "category": "Utility"
+    }
+  },
   "devDependencies": {
     "@types/bun": "^1.3.6",
     "@types/node": "^22.19.3",
     "electron": "^44.0.0",
+    "electron-builder": "26.0.12",
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
     "vite": "7.3.2"
