@@ -95,6 +95,15 @@ describe("legal policy pages", () => {
     expect(homepage).toContain('href="/terms/"');
   });
 
+  test.each(["index.html", "privacy/index.html", "terms/index.html"])(
+    "%s uses the app icon and pink Bot wordmark",
+    async (path: string) => {
+      const page = await publicFile(path);
+      expect(page).toContain('src="/assets/app-icon.png"');
+      expect(page).toContain('Frock<span class="brand-accent">Bot</span>');
+    },
+  );
+
   test("privacy policy covers the evidenced data flows and reciprocal navigation", async () => {
     const privacy = await publicFile("privacy/index.html");
     const normalizedPrivacy = privacy.replace(/\s+/g, " ");
