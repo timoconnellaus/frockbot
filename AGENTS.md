@@ -27,6 +27,13 @@ These rules govern production features and architecture. Treat them as invariant
 - Development and test adapters exercise the production architecture rather than introducing alternate product runtimes.
 - Platform capabilities such as notifications, clipboard access, file selection, authentication handoff, and deep links are progressive enhancements. Core workflows remain available without a native client process.
 
+## Plugin composition
+
+- Every production capability beyond the minimal host bootstrap is implemented as a Plugin mounted from a declared Package Contribution.
+- The host bootstrap only initializes its runtime, mounts root Contributions, reports fatal startup failures, and disposes the runtime.
+- Product policy, Bot behavior, session orchestration, model and tool behavior, and feature-specific UI live in Plugins rather than the host bootstrap or transport adapters.
+- Built-in Plugins follow the same manifest, authority, lifecycle, and test requirements as installable Packages.
+
 ## Plugin-owned integrations
 
 - Models, Sprites, memory, and other external systems are backend capabilities exposed through narrow interfaces.
