@@ -2,10 +2,18 @@ import "@frockbot/client-core/fonts.css";
 import type {
   BotNotificationPolicy,
   BotProfile,
-  BotSettingsViewV1,
-  OperationReceiptV1,
-  UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import {
+  decodeBotSettingsViewV1,
+  decodeOperationReceiptV1,
+  decodeUserSettingsViewV1,
+} from "@frockbot/configuration-core";
+import {
+  decodeAcknowledgement,
+  decodeNotificationList,
+  decodeRevocationResult,
+  decodeStartConnectionResult,
+} from "@frockbot/client-core";
 import "@frockbot/plugin-clock/client/styles.css";
 import {
   clockWebDataKey,
@@ -15,10 +23,10 @@ import "@frockbot/plugin-shell/client/styles.css";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
-  type PluginCatalogItem,
   type SendPromptResult,
   type WebChatMessage,
 } from "@frockbot/plugin-shell/shared";
+import { decodePluginCatalog } from "@frockbot/plugin-shell/client";
 import { createApp, ref, type Ref } from "vue";
 import { createMobileHost, type MobileHost } from "../host/index.ts";
 import { createCapacitorAdapters } from "../host/capacitor-adapters.ts";
@@ -56,36 +64,6 @@ const auth = createAuthSession({
   defaultGatewayUrl: defaultGatewayUrl || undefined,
 });
 
-function mobilePluginCatalog(value: unknown): PluginCatalogItem[] {
-  if (typeof value !== "object" || value === null || !("packages" in value)) {
-    throw new Error("Application manifest is invalid");
-  }
-  const packages = (value as { packages?: unknown }).packages;
-  if (!Array.isArray(packages))
-    throw new Error("Application manifest is invalid");
-  return packages.flatMap((candidate) => {
-    if (typeof candidate !== "object" || candidate === null) return [];
-    const pkg = candidate as Record<string, unknown>;
-    const configuration = pkg.configuration;
-    if (typeof configuration !== "object" || configuration === null) return [];
-    const connections = (configuration as Record<string, unknown>)
-      .connectionTypes;
-    if (!Array.isArray(connections) || connections.length === 0) return [];
-    if (typeof pkg.id !== "string" || typeof pkg.version !== "string") {
-      throw new Error("Application Package metadata is invalid");
-    }
-    return [
-      {
-        packageId: pkg.id,
-        displayName:
-          typeof pkg.displayName === "string" ? pkg.displayName : pkg.id,
-        version: pkg.version,
-        connectionTypes: connections as PluginCatalogItem["connectionTypes"],
-      },
-    ];
-  });
-}
-
 const botId = ref("default");
 let activeRequest: AbortController | undefined;
 let host: MobileHost | undefined;
@@ -101,18 +79,10 @@ async function deliverMobileNotifications(): Promise<void> {
   const response = await auth.authorizedFetch(
     `/api/bots/${encodeURIComponent(botId.value)}/notifications`,
   );
-  const result = (await response.json()) as {
-    notifications?: Array<{
-      notificationId: string;
-      title: string;
-      body: string;
-    }>;
-    error?: string;
-  };
-  if (!response.ok || !result.notifications) {
-    throw new Error(result.error ?? "Could not load notifications");
-  }
-  for (const notification of result.notifications) {
+  const value: unknown = await response.json();
+  if (!response.ok)
+    throw new Error(responseError(value, "Could not load notifications"));
+  for (const notification of decodeNotificationList(value)) {
     if (document.hidden) {
       if (!host) continue;
       await host.invoke(SHOW_NOTIFICATION_COMMAND, {
@@ -120,14 +90,33 @@ async function deliverMobileNotifications(): Promise<void> {
         body: notification.body,
       });
     }
-    await auth.authorizedFetch(
+    const acknowledgement = await auth.authorizedFetch(
       `/api/bots/${encodeURIComponent(botId.value)}/notifications`,
       {
         method: "POST",
         body: JSON.stringify({ notificationId: notification.notificationId }),
       },
     );
+    const acknowledgementValue: unknown = await acknowledgement.json();
+    if (!acknowledgement.ok) {
+      throw new Error(
+        responseError(
+          acknowledgementValue,
+          "Could not acknowledge notification",
+        ),
+      );
+    }
+    decodeAcknowledgement(acknowledgementValue);
   }
+}
+
+function responseError(value: unknown, fallback: string): string {
+  return typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    typeof value.error === "string"
+    ? value.error
+    : fallback;
 }
 
 const web: Ref<FrockBotWebData> = ref({
@@ -142,11 +131,10 @@ const web: Ref<FrockBotWebData> = ref({
       const response = await auth.authorizedFetch(
         `/api/bots/${encodeURIComponent(botId.value)}/settings`,
       );
-      const result = (await response.json()) as BotSettingsViewV1 & {
-        error?: string;
-      };
-      if (!response.ok) throw new Error(result.error ?? "Settings failed");
-      web.value.botSettings = result;
+      const value: unknown = await response.json();
+      if (!response.ok)
+        throw new Error(responseError(value, "Settings failed"));
+      web.value.botSettings = decodeBotSettingsViewV1(value);
       web.value.settingsError = undefined;
       await deliverMobileNotifications();
     } catch (error) {
@@ -171,10 +159,9 @@ const web: Ref<FrockBotWebData> = ref({
         }),
       },
     );
-    const result = (await response.json()) as OperationReceiptV1 & {
-      error?: string;
-    };
-    if (!response.ok) throw new Error(result.error ?? "Settings failed");
+    const value: unknown = await response.json();
+    if (!response.ok) throw new Error(responseError(value, "Settings failed"));
+    decodeOperationReceiptV1(value);
     await web.value.loadBotSettings();
   },
   async saveBotNotifications(
@@ -196,20 +183,17 @@ const web: Ref<FrockBotWebData> = ref({
         }),
       },
     );
-    const result = (await response.json()) as OperationReceiptV1 & {
-      error?: string;
-    };
-    if (!response.ok) throw new Error(result.error ?? "Settings failed");
+    const value: unknown = await response.json();
+    if (!response.ok) throw new Error(responseError(value, "Settings failed"));
+    decodeOperationReceiptV1(value);
     await web.value.loadBotSettings();
   },
   async loadUserSettings(): Promise<void> {
     const response = await auth.authorizedFetch("/api/settings");
-    const result = (await response.json()) as UserSettingsViewV1 & {
-      error?: string;
-    };
+    const value: unknown = await response.json();
     if (!response.ok)
-      throw new Error(result.error ?? "Could not load settings");
-    web.value.userSettings = result;
+      throw new Error(responseError(value, "Could not load settings"));
+    web.value.userSettings = decodeUserSettingsViewV1(value);
   },
   async saveUserProfile(profile: {
     name: string;
@@ -227,10 +211,10 @@ const web: Ref<FrockBotWebData> = ref({
         profile,
       }),
     });
-    if (!response.ok) {
-      const error = (await response.json()) as { error?: string };
-      throw new Error(error.error ?? "Could not save settings");
-    }
+    const value: unknown = await response.json();
+    if (!response.ok)
+      throw new Error(responseError(value, "Could not save settings"));
+    decodeOperationReceiptV1(value);
     await web.value.loadUserSettings();
   },
   async loadPluginCatalog(): Promise<void> {
@@ -238,15 +222,13 @@ const web: Ref<FrockBotWebData> = ref({
       auth.authorizedFetch("/app-manifest"),
       auth.authorizedFetch("/api/settings"),
     ]);
-    const manifest = await manifestResponse.json();
-    const settings = (await settingsResponse.json()) as UserSettingsViewV1 & {
-      error?: string;
-    };
+    const manifest: unknown = await manifestResponse.json();
+    const settingsValue: unknown = await settingsResponse.json();
     if (!manifestResponse.ok || !settingsResponse.ok) {
-      throw new Error(settings.error ?? "Could not load Plugins");
+      throw new Error(responseError(settingsValue, "Could not load Plugins"));
     }
-    web.value.pluginCatalog = mobilePluginCatalog(manifest);
-    web.value.userSettings = settings;
+    web.value.pluginCatalog = decodePluginCatalog(manifest);
+    web.value.userSettings = decodeUserSettingsViewV1(settingsValue);
   },
   async installPackage(packageId: string, version: string): Promise<void> {
     const settings = web.value.userSettings;
@@ -262,10 +244,10 @@ const web: Ref<FrockBotWebData> = ref({
         version,
       }),
     });
-    if (!response.ok) {
-      const error = (await response.json()) as { error?: string };
-      throw new Error(error.error ?? "Could not install Package");
-    }
+    const value: unknown = await response.json();
+    if (!response.ok)
+      throw new Error(responseError(value, "Could not install Package"));
+    decodeOperationReceiptV1(value);
     await web.value.loadPluginCatalog();
   },
   async startConnection(
@@ -286,14 +268,11 @@ const web: Ref<FrockBotWebData> = ref({
         }),
       },
     );
-    const result = (await response.json()) as {
-      redirectUrl?: string;
-      error?: string;
-    };
-    if (!response.ok || !result.redirectUrl) {
-      throw new Error(result.error ?? "Could not start Connection");
+    const value: unknown = await response.json();
+    if (!response.ok) {
+      throw new Error(responseError(value, "Could not start Connection"));
     }
-    return result.redirectUrl;
+    return decodeStartConnectionResult(value).redirectUrl;
   },
   async revokeConnection(
     packageId: string,
@@ -306,11 +285,14 @@ const web: Ref<FrockBotWebData> = ref({
       `/api/plugins/composio/connections/${encodeURIComponent(connectionId)}/revoke`,
       { method: "POST" },
     );
-    if (!response.ok) {
-      const error = (await response.json()) as { error?: string };
-      throw new Error(error.error ?? "Could not revoke Connection");
-    }
+    const value: unknown = await response.json();
+    if (!response.ok)
+      throw new Error(responseError(value, "Could not revoke Connection"));
+    decodeRevocationResult(value);
     await web.value.loadPluginCatalog();
+  },
+  openConnectionAuthorization(): Promise<void> {
+    return Promise.reject(new Error("Connections are unavailable on mobile"));
   },
   async sendPrompt(text: string): Promise<SendPromptResult> {
     if (web.value.activeRunId) return { accepted: false, error: "busy" };

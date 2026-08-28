@@ -43,6 +43,7 @@ export interface ApplicationPlan {
   applicationHash: string;
   packages: CompiledPackage[];
   contributions: {
+    backend: string[];
     runtime: string[];
     client: string[];
     desktop: string[];
@@ -236,6 +237,9 @@ export async function compileApplicationPlan(
     schemaVersion: 1 as const,
     packages,
     contributions: {
+      backend: packages
+        .filter((pkg) => pkg.manifest.contributions.backend)
+        .map((pkg) => pkg.id),
       runtime: packages
         .filter((pkg) => pkg.manifest.contributions.runtime)
         .map((pkg) => pkg.id),

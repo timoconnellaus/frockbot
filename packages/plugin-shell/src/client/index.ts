@@ -45,7 +45,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
+export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   if (!isRecord(value) || !Array.isArray(value.packages)) {
     throw new Error("Application manifest is invalid");
   }
@@ -299,6 +299,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       }
       await ctx.transport.revokeConnection(packageId, connectionId);
       await web.value.loadPluginCatalog();
+    },
+    async openConnectionAuthorization(url: string): Promise<void> {
+      if (ctx.transport.openExternalAuthorization) {
+        await ctx.transport.openExternalAuthorization(url);
+        return;
+      }
+      window.location.assign(url);
     },
     async sendPrompt(text: string): Promise<SendPromptResult> {
       if (web.value.activeRunId) return { accepted: false, error: "busy" };

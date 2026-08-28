@@ -1,4 +1,10 @@
-export type ContributionKind = "runtime" | "client" | "desktop" | "mobile";
+export type ContributionKind =
+  "backend" | "runtime" | "client" | "desktop" | "mobile";
+
+export interface BackendContribution {
+  entry: string;
+  host: "gateway";
+}
 
 export interface RuntimeContribution {
   entry: string;
@@ -65,6 +71,7 @@ export interface FrockBotManifest {
   compatibility: { frockbot: string };
   dependencies: Record<string, string>;
   contributions: {
+    backend?: BackendContribution;
     runtime?: RuntimeContribution;
     client?: ClientContribution;
     desktop?: DesktopContribution;
@@ -184,6 +191,7 @@ function decodeV1(value: Record<string, unknown>): FrockBotManifest {
     mobile: mobile ? { entry: mobile } : undefined,
   };
   if (
+    !contributions.backend &&
     !contributions.runtime &&
     !contributions.client &&
     !contributions.desktop &&
@@ -209,6 +217,18 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     throw new Error("manifest contributions must be an object");
   }
   const contributions: FrockBotManifest["contributions"] = {};
+  if (value.contributions.backend !== undefined) {
+    if (!isRecord(value.contributions.backend)) {
+      throw new Error("manifest backend contribution must be an object");
+    }
+    if (value.contributions.backend.host !== "gateway") {
+      throw new Error('manifest backend host must be "gateway"');
+    }
+    contributions.backend = {
+      entry: relativeEntry(value.contributions.backend, "entry"),
+      host: "gateway",
+    };
+  }
   if (value.contributions.runtime !== undefined) {
     if (!isRecord(value.contributions.runtime)) {
       throw new Error("manifest runtime contribution must be an object");
@@ -266,6 +286,7 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     };
   }
   if (
+    !contributions.backend &&
     !contributions.runtime &&
     !contributions.client &&
     !contributions.desktop &&
@@ -427,6 +448,7 @@ export function declaredContributionKinds(
   manifest: FrockBotManifest,
 ): ContributionKind[] {
   const kinds: ContributionKind[] = [];
+  if (manifest.contributions.backend) kinds.push("backend");
   if (manifest.contributions.runtime) kinds.push("runtime");
   if (manifest.contributions.client) kinds.push("client");
   if (manifest.contributions.desktop) kinds.push("desktop");

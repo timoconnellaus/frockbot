@@ -3,6 +3,10 @@ import {
   ConfigurationDecodeError,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
+  decodeOperationReceiptV1,
+  decodeUserSettingsViewV1,
+  initializeBotSettingsV1,
+  resolveBotExecutionPlanV1,
 } from "./index.js";
 
 describe("configuration DTO seam", () => {
@@ -64,5 +68,139 @@ describe("configuration DTO seam", () => {
     expect(() =>
       decodeConfigurationQueryV1({ schemaVersion: 1, type: "all/get" }),
     ).toThrow(ConfigurationDecodeError);
+  });
+
+  test("decodes server projections and rejects malformed nested values", () => {
+    expect(
+      decodeOperationReceiptV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        revision: 2,
+        status: "applied",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      commandId: "command-1",
+      revision: 2,
+      status: "applied",
+    });
+    expect(() =>
+      decodeUserSettingsViewV1({
+        schemaVersion: 1,
+        revision: 1,
+        profile: { name: "User" },
+        packages: [],
+        connections: [
+          {
+            connectionId: "gmail",
+            packageId: "composio",
+            connectionTypeId: "gmail",
+            displayName: "Gmail",
+            state: "ready",
+            safeMetadata: { unsafe: undefined },
+          },
+        ],
+      }),
+    ).toThrow(ConfigurationDecodeError);
+  });
+});
+
+describe("Bot execution-plan authority", () => {
+  test("copies the User model template only when Bot settings initialize", () => {
+    const template = {
+      connectionId: "provider-1",
+      providerModelId: "model-1",
+    };
+    const initialized = initializeBotSettingsV1("primary", template);
+    template.providerModelId = "model-2";
+    expect(initialized.model).toEqual({
+      connectionId: "provider-1",
+      providerModelId: "model-1",
+    });
+  });
+
+  const bot = {
+    schemaVersion: 1 as const,
+    botId: "primary",
+    revision: 4,
+    profile: { name: "Primary" },
+    notifications: { enabled: false },
+    assignments: [
+      {
+        assignmentId: "gmail-assignment",
+        packageId: "composio",
+        capabilityId: "gmail-tools",
+        connectionId: "gmail-connection",
+        state: "enabled" as const,
+      },
+    ],
+  };
+  const packages = [
+    {
+      packageId: "composio",
+      version: "0.0.1",
+      capabilities: [{ id: "gmail-tools", connectionTypes: ["gmail"] }],
+      connectionTypes: [{ id: "gmail", capabilities: ["gmail-tools"] }],
+    },
+  ];
+
+  test("requires an enabled installation, declared capability, and ready typed Connection", () => {
+    const user = {
+      schemaVersion: 1 as const,
+      revision: 2,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "composio",
+          version: "0.0.1",
+          state: "installed" as const,
+        },
+      ],
+      connections: [
+        {
+          connectionId: "gmail-connection",
+          packageId: "composio",
+          connectionTypeId: "gmail",
+          displayName: "Gmail",
+          state: "ready" as const,
+          safeMetadata: {},
+        },
+      ],
+    };
+    expect(
+      resolveBotExecutionPlanV1({ bot, user, packages }).assignments[0]?.state,
+    ).toBe("enabled");
+    expect(
+      resolveBotExecutionPlanV1({
+        bot: {
+          ...bot,
+          assignments: [{ ...bot.assignments[0]!, capabilityId: "anything" }],
+        },
+        user,
+        packages,
+      }).assignments[0]?.state,
+    ).toBe("unavailable");
+    expect(
+      resolveBotExecutionPlanV1({
+        bot,
+        user: {
+          ...user,
+          packages: [{ ...user.packages[0]!, state: "disabled" }],
+        },
+        packages,
+      }).assignments[0]?.state,
+    ).toBe("unavailable");
+    expect(
+      resolveBotExecutionPlanV1({
+        bot,
+        user: {
+          ...user,
+          connections: [
+            { ...user.connections[0]!, connectionTypeId: "calendar" },
+          ],
+        },
+        packages,
+      }).assignments[0]?.state,
+    ).toBe("unavailable");
   });
 });

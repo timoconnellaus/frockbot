@@ -52,6 +52,8 @@ class WebChatController {
         Promise.reject(new Error("Connections require the hosted backend")),
       revokeConnection: () =>
         Promise.reject(new Error("Connections require the hosted backend")),
+      openConnectionAuthorization: () =>
+        Promise.reject(new Error("Connections require the hosted backend")),
       sendPrompt: (text: string) => Promise.resolve(this.sendPrompt(text)),
       abort: () => Promise.resolve(this.abort()),
       restart: () => Promise.resolve(this.restart()),

@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
-import { Session, type SessionEvent } from "@frockbot/agent-core";
+import type { SessionEvent } from "@frockbot/agent-core";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
+import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
   ConfigurationConflictError,
   type BotExecutionPlanV1,
@@ -8,6 +9,9 @@ import {
   type ConnectionView,
   type ConfigurationCommandV1,
   type OperationReceiptV1,
+  initializeBotSettingsV1,
+  resolveBotExecutionPlanV1,
+  type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
   createComposioRouterPlugin,
@@ -17,6 +21,7 @@ import composioManifest from "@frockbot/plugin-composio/manifest";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 import type { UserConfiguration } from "./user-configuration.js";
 import { BotTurnExecutionError, executeBotTurn } from "./bot-runner.js";
+import { planBotRunRecovery } from "./bot-recovery.js";
 import type {
   BotNotificationIntent,
   BotTurnCommand,
@@ -119,11 +124,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   private executingRunId: string | undefined;
 
   async getSettings(identity: BotIdentity): Promise<BotSettingsViewV1> {
-    await this.assertIdentity(identity);
-    return (
-      (await this.ctx.storage.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-      this.initialBotSettings(identity.botId)
-    );
+    return this.ensureBotSettings(identity);
   }
 
   async executeConfiguration(
@@ -142,6 +143,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       throw new Error("Bot command does not match its durable identity");
     }
     await this.assertIdentity(identity);
+    await this.ensureBotSettings(identity);
     return this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
       const existing = await transaction.get<OperationReceiptV1>(receiptKey);
@@ -209,6 +211,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     compensation?: { id: string; expectedGeneration: string },
   ): Promise<"applied" | "stale"> {
     await this.assertIdentity(identity);
+    await this.ensureBotSettings(identity);
     return this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = compensation
         ? `${ASSIGNMENT_COMPENSATION_PREFIX}${compensation.id}`
@@ -256,24 +259,40 @@ export class BotState extends DurableObject<BotStateEnv> {
   async resolveConfiguration(
     identity: BotIdentity,
   ): Promise<BotExecutionPlanV1> {
-    const settings = await this.getSettings(identity);
-    return {
-      schemaVersion: 1,
-      botId: identity.botId,
-      revision: settings.revision,
-      model: settings.model,
-      assignments: settings.assignments,
-    };
+    return (await this.resolveExecutionContext(identity)).plan;
   }
 
   async run(command: OwnedBotTurnCommand): Promise<BotTurnResult> {
-    await this.reconcileInterruptedRun();
+    await this.recoverActiveRun();
     const replay = await this.completedRunResult(command.runId);
     if (replay) return replay;
-    const previous = await this.acceptRun(command);
+    const admission = await this.acceptRun(command);
+    return this.executeAcceptedRun(
+      command,
+      admission.previous,
+      admission.settings,
+    );
+  }
+
+  private async executeAcceptedRun(
+    command: OwnedBotTurnCommand,
+    previous: SessionEvent[],
+    settings: BotSettingsViewV1,
+  ): Promise<BotTurnResult> {
     this.executingRunId = command.runId;
     try {
-      const settings = await this.getSettings(command);
+      await this.ctx.storage.transaction(async (transaction) => {
+        const key = `${RUN_PREFIX}${command.runId}`;
+        const run = await transaction.get<StoredRun>(key);
+        if (!run || run.status !== "running") {
+          throw new Error(`run "${command.runId}" is not resumable`);
+        }
+        await transaction.put(key, {
+          ...run,
+          phase: "executing",
+        } satisfies StoredRun);
+        await transaction.setAlarm(Date.now() + RECOVERY_ALARM_DELAY_MS);
+      });
       const agentPackages = await this.composioAgentPackages(command, settings);
       const promptParts = [
         `You are ${settings.profile.name}.`,
@@ -318,38 +337,13 @@ export class BotState extends DurableObject<BotStateEnv> {
     const assignment = settings.assignments.find(
       (candidate) =>
         candidate.packageId === "composio" &&
+        candidate.capabilityId === "gmail-tools" &&
         candidate.state === "enabled" &&
         candidate.connectionId,
     );
     if (!assignment?.connectionId) return [];
-    const userConfigurationId = this.env.USER_CONFIGURATIONS.idFromName(
-      identity.userId,
-    );
-    // SAFETY: USER_CONFIGURATIONS is bound to UserConfiguration and this is a
-    // backend-only RPC projection of its public getConnection method.
-    const userConfiguration = this.env.USER_CONFIGURATIONS.get(
-      userConfigurationId,
-    ) as unknown as {
-      getConnection(
-        userId: string,
-        connectionId: string,
-      ): Promise<ConnectionView | undefined>;
-    };
-    const connection = await userConfiguration.getConnection(
-      identity.userId,
-      assignment.connectionId,
-    );
-    if (!connection || connection.state !== "ready") {
-      await this.markConnectionUnavailable(identity, assignment.connectionId);
-      throw new Error("Assigned Composio Connection is unavailable");
-    }
-    const connectedAccountId = connection.safeMetadata.connectedAccountId;
-    const toolkitSlug = connection.safeMetadata.toolkitSlug;
-    if (
-      typeof connectedAccountId !== "string" ||
-      typeof toolkitSlug !== "string" ||
-      !this.env.COMPOSIO_API_KEY
-    ) {
+    const grant = await this.authorizeComposioEffect(identity, assignment);
+    if (!this.env.COMPOSIO_API_KEY) {
       throw new Error("Assigned Composio Connection is misconfigured");
     }
     return [
@@ -360,11 +354,58 @@ export class BotState extends DurableObject<BotStateEnv> {
         plugin: createComposioRouterPlugin({
           client: new ComposioClient({ apiKey: this.env.COMPOSIO_API_KEY }),
           userId: identity.userId,
-          connectedAccountId,
-          toolkitSlug,
+          toolkitSlug: grant.toolkitSlug,
+          authorizeEffect: () =>
+            this.authorizeComposioEffect(identity, assignment),
         }),
       },
     ];
+  }
+
+  private async authorizeComposioEffect(
+    identity: BotIdentity,
+    admittedAssignment: BotSettingsViewV1["assignments"][number],
+  ): Promise<{ connectedAccountId: string; toolkitSlug: string }> {
+    const user = await this.userConfiguration(identity).read(identity.userId);
+    const application = await compileFoundationApplication();
+    const admittedBot = {
+      ...this.initialBotSettings(identity.botId),
+      assignments: [admittedAssignment],
+    } satisfies BotSettingsViewV1;
+    const plan = resolveBotExecutionPlanV1({
+      bot: admittedBot,
+      user,
+      packages: application.packages.map((pkg) => ({
+        packageId: pkg.id,
+        version: pkg.version,
+        capabilities: pkg.manifest.configuration?.capabilities ?? [],
+        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+      })),
+    });
+    const assignment = plan.assignments.find(
+      (candidate) =>
+        candidate.assignmentId === admittedAssignment.assignmentId &&
+        candidate.packageId === "composio" &&
+        candidate.capabilityId === "gmail-tools" &&
+        candidate.connectionId === admittedAssignment.connectionId &&
+        candidate.state === "enabled",
+    );
+    const connection = user.connections.find(
+      (candidate) =>
+        candidate.connectionId === assignment?.connectionId &&
+        candidate.packageId === "composio" &&
+        candidate.connectionTypeId === "gmail" &&
+        candidate.state === "ready",
+    );
+    const connectedAccountId = connection?.safeMetadata.connectedAccountId;
+    const toolkitSlug = connection?.safeMetadata.toolkitSlug;
+    if (
+      typeof connectedAccountId !== "string" ||
+      typeof toolkitSlug !== "string"
+    ) {
+      throw new Error("Composio effect is no longer authorized");
+    }
+    return { connectedAccountId, toolkitSlug };
   }
 
   private async completedRunResult(
@@ -423,11 +464,11 @@ export class BotState extends DurableObject<BotStateEnv> {
       await this.ctx.storage.setAlarm(Date.now() + RECOVERY_ALARM_DELAY_MS);
       return;
     }
-    await this.reconcileInterruptedRun();
+    await this.recoverActiveRun();
   }
 
   async listRuns(): Promise<StoredRun[]> {
-    await this.reconcileInterruptedRun();
+    await this.recoverActiveRun();
     const entries = await this.ctx.storage.list<StoredRun>({
       prefix: RUN_PREFIX,
     });
@@ -438,15 +479,96 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
-  private initialBotSettings(botId: string): BotSettingsViewV1 {
-    return {
-      schemaVersion: 1,
-      botId,
-      revision: 0,
-      profile: { name: botId === "default" ? "Barebones" : botId },
-      notifications: { enabled: false },
-      assignments: [],
+  private initialBotSettings(
+    botId: string,
+    model?: BotSettingsViewV1["model"],
+  ): BotSettingsViewV1 {
+    return initializeBotSettingsV1(botId, model);
+  }
+
+  private userConfiguration(identity: BotIdentity): {
+    read(userId: string): Promise<UserSettingsViewV1>;
+    getConnection(
+      userId: string,
+      connectionId: string,
+    ): Promise<ConnectionView | undefined>;
+  } {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    return this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      read(userId: string): Promise<UserSettingsViewV1>;
+      getConnection(
+        userId: string,
+        connectionId: string,
+      ): Promise<ConnectionView | undefined>;
     };
+  }
+
+  private async ensureBotSettings(
+    identity: BotIdentity,
+  ): Promise<BotSettingsViewV1> {
+    await this.assertIdentity(identity);
+    const existing = await this.ctx.storage.get<BotSettingsViewV1>(
+      BOT_CONFIGURATION_KEY,
+    );
+    if (existing) return existing;
+    const user = await this.userConfiguration(identity).read(identity.userId);
+    const initial = this.initialBotSettings(
+      identity.botId,
+      user.newBotModelTemplate,
+    );
+    return this.ctx.storage.transaction(async (transaction) => {
+      const concurrent = await transaction.get<BotSettingsViewV1>(
+        BOT_CONFIGURATION_KEY,
+      );
+      if (concurrent) return concurrent;
+      await transaction.put(BOT_CONFIGURATION_KEY, initial);
+      return initial;
+    });
+  }
+
+  private async resolveExecutionContext(identity: BotIdentity): Promise<{
+    settings: BotSettingsViewV1;
+    user: UserSettingsViewV1;
+    plan: BotExecutionPlanV1;
+  }> {
+    let settings = await this.ensureBotSettings(identity);
+    const user = await this.userConfiguration(identity).read(identity.userId);
+    const application = await compileFoundationApplication();
+    let plan = resolveBotExecutionPlanV1({
+      bot: settings,
+      user,
+      packages: application.packages.map((pkg) => ({
+        packageId: pkg.id,
+        version: pkg.version,
+        capabilities: pkg.manifest.configuration?.capabilities ?? [],
+        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+      })),
+    });
+    const changed = settings.assignments.some(
+      (assignment, index) =>
+        assignment.state !== plan.assignments[index]?.state,
+    );
+    if (changed) {
+      settings = await this.ctx.storage.transaction(async (transaction) => {
+        const current =
+          (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
+          settings;
+        if (current.revision !== settings.revision) return current;
+        const next = {
+          ...current,
+          revision: current.revision + 1,
+          assignments: plan.assignments,
+        } satisfies BotSettingsViewV1;
+        await transaction.put(BOT_CONFIGURATION_KEY, next);
+        return next;
+      });
+      plan = {
+        ...plan,
+        revision: settings.revision,
+        assignments: settings.assignments,
+      };
+    }
+    return { settings, user, plan };
   }
 
   private async assertIdentity(identity: BotIdentity): Promise<void> {
@@ -462,7 +584,12 @@ export class BotState extends DurableObject<BotStateEnv> {
 
   private async acceptRun(
     command: OwnedBotTurnCommand,
-  ): Promise<SessionEvent[]> {
+  ): Promise<{ previous: SessionEvent[]; settings: BotSettingsViewV1 }> {
+    const context = await this.resolveExecutionContext(command);
+    const settings = {
+      ...context.settings,
+      assignments: context.plan.assignments,
+    } satisfies BotSettingsViewV1;
     const key = `${RUN_PREFIX}${command.runId}`;
     return this.ctx.storage.transaction(async (transaction) => {
       const existing = await transaction.get<StoredRun>(key);
@@ -484,6 +611,9 @@ export class BotState extends DurableObject<BotStateEnv> {
       }
       const latestEvents =
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+      const admittedSettings =
+        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
+        settings;
       await transaction.put({
         [key]: {
           runId: command.runId,
@@ -492,6 +622,9 @@ export class BotState extends DurableObject<BotStateEnv> {
           input: command.text,
           events: [],
           status: "running",
+          phase: "admitted",
+          configurationSnapshot: structuredClone(admittedSettings),
+          previousEventCount: latestEvents.length,
         } satisfies StoredRun,
         [ACTIVE_RUN_KEY]: command.runId,
         [IDENTITY_KEY]: identity ?? {
@@ -500,7 +633,7 @@ export class BotState extends DurableObject<BotStateEnv> {
         },
       });
       await transaction.setAlarm(Date.now() + RECOVERY_ALARM_DELAY_MS);
-      return latestEvents;
+      return { previous: latestEvents, settings: admittedSettings };
     });
   }
 
@@ -587,37 +720,79 @@ export class BotState extends DurableObject<BotStateEnv> {
     });
   }
 
-  private async reconcileInterruptedRun(): Promise<void> {
+  private async recoverActiveRun(): Promise<void> {
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
     if (!activeRunId || activeRunId === this.executingRunId) return;
+    const durableIdentity =
+      await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
     const key = `${RUN_PREFIX}${activeRunId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
+    const recovery = await this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<string>(ACTIVE_RUN_KEY);
-      if (!current || current === this.executingRunId) return;
+      if (!current || current === this.executingRunId) return undefined;
       const run = await transaction.get<StoredRun>(key);
-      if (run) {
-        const latest =
-          (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
-        const repairs =
-          latest.length === 0
-            ? []
-            : new Session(
-                run.sessionId,
-                () => {},
-                latest,
-              ).reconcileInterrupted();
+      if (!run || run.status !== "running") {
+        await transaction.delete(ACTIVE_RUN_KEY);
+        await transaction.deleteAlarm();
+        return undefined;
+      }
+      const latest =
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+      const plan = planBotRunRecovery(run, latest);
+      if (plan.kind === "complete") {
         await transaction.put({
           [key]: {
             ...run,
-            events: [...run.events, ...repairs],
-            status: "interrupted",
-            failure: "Bot execution was interrupted and was not retried",
+            status: "completed",
+            responseText: plan.responseText,
           } satisfies StoredRun,
-          [LATEST_EVENTS_KEY]: [...latest, ...repairs],
         });
+        await transaction.delete(ACTIVE_RUN_KEY);
+        await transaction.deleteAlarm();
+        return undefined;
       }
+      if (plan.kind === "restart") {
+        const settings =
+          run.configurationSnapshot ??
+          this.initialBotSettings(durableIdentity?.botId ?? "default");
+        await transaction.put({
+          [key]: {
+            ...run,
+            events: [],
+            phase: "admitted",
+          } satisfies StoredRun,
+          [LATEST_EVENTS_KEY]: plan.previous,
+        });
+        await transaction.setAlarm(Date.now() + RECOVERY_ALARM_DELAY_MS);
+        return { run, previous: plan.previous, settings };
+      }
+      await transaction.put({
+        [key]: {
+          ...run,
+          events: [...run.events, ...plan.repairs],
+          status: "reconciliation-required",
+          phase: "reconciliation-required",
+          failure:
+            "Execution outcome requires reconciliation before it can resume",
+        } satisfies StoredRun,
+        [LATEST_EVENTS_KEY]: [...latest, ...plan.repairs],
+      });
       await transaction.delete(ACTIVE_RUN_KEY);
       await transaction.deleteAlarm();
+      return undefined;
     });
+    if (!recovery) return;
+    if (!durableIdentity) throw new Error("Bot identity is unavailable");
+    await this.executeAcceptedRun(
+      {
+        userId: durableIdentity.userId,
+        botId: durableIdentity.botId,
+        runId: recovery.run.runId,
+        sessionId: recovery.run.sessionId,
+        acceptedAt: recovery.run.acceptedAt,
+        text: recovery.run.input,
+      },
+      recovery.previous,
+      recovery.settings,
+    );
   }
 }

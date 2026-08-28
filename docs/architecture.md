@@ -215,6 +215,8 @@ input/queued wakes agent
 
 Every started step receives exactly one `step/end` before another step starts. Every started turn receives exactly one `turn/end`. Atomic session batches and `finally` paths enforce the pairing during ordinary errors and cancellation.
 
+Bot Durable Objects persist the admitted configuration snapshot and execution phase with each run. Recovery restarts only work that has not recorded an external effect intent, finalizes already-durable completion, and moves uncertain model or tool outcomes into durable reconciliation instead of duplicating the effect.
+
 Cancellation uses an `AbortSignal` for the active turn and atomically appends `input/cancelled` for selected queued input. Teardown stops admission, cancels active work, waits for the driver and durability flush, detaches the agent, and only then detaches its session.
 
 Before a restarted runtime accepts work, the session store scans for unmatched starts and execution intents. It appends interrupted `tool/result`, `step/end`, and `turn/end` events in dependency order and flushes them. Queued input that was never admitted remains eligible to run. Work after a durable `model/request` or `tool/call` is never retried automatically because the external side effect may have occurred; an explicit policy may retry only operations whose definition supplies an idempotency key and retry contract.
@@ -241,6 +243,8 @@ A tool definition declares whether calls may run concurrently, which resources t
 ## Package model
 
 A Package is the installable unit. A Contribution is one process-specific entry in that package. A Plugin is the live Cordis instance created from a contribution.
+
+Manifest v3 backend Contributions declare their backend host explicitly. The hosted gateway mounts their narrow route handlers from the compiled application plan; provider routes, callback policy, and external-system coordinators stay in the owning Package. The gateway supplies authenticated User authority and platform context without branching on provider identity.
 
 A package manifest has a versioned FrockBot section that can declare:
 

@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/composio-client.ts",
+    "./backend": "./src/backend.ts",
     "./agent": "./src/agent.ts",
     "./manifest": "./src/manifest.ts",
     "./frockbot.json": "./frockbot.json",
@@ -20,6 +21,7 @@
   },
   "dependencies": {
     "@frockbot/agent-core": "workspace:*",
+    "@frockbot/configuration-core": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {

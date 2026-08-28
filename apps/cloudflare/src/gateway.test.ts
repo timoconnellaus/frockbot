@@ -228,13 +228,16 @@ class MemoryConnections implements ConnectionBinding {
   complete(input: {
     connectionId: string;
     connectedAccountId: string;
-  }): Promise<void> {
+  }): Promise<{ returnTarget: "browser" | "desktop" }> {
     this.completed.push(input);
-    return Promise.resolve();
+    return Promise.resolve({ returnTarget: "browser" });
   }
 
-  fail(_connectionId: string, _message: string): Promise<void> {
-    return Promise.resolve();
+  fail(
+    _connectionId: string,
+    _message: string,
+  ): Promise<{ returnTarget: "browser" | "desktop" }> {
+    return Promise.resolve({ returnTarget: "browser" });
   }
 
   revoke(
@@ -295,11 +298,47 @@ function createTestGateway(
       configurations.set(userId, configuration);
       return configuration;
     },
-    connectionsFor: (userId) => {
-      const connection = connections.get(userId) ?? new MemoryConnections();
-      connections.set(userId, connection);
-      return connection;
-    },
+    backendContributions: [
+      {
+        packageId: "composio",
+        async route(request, url, context) {
+          if (!url.pathname.startsWith("/api/plugins/composio/")) {
+            return undefined;
+          }
+          if (!context.userId) {
+            return Response.json(
+              { error: "authentication required" },
+              { status: 401 },
+            );
+          }
+          const connection =
+            connections.get(context.userId) ?? new MemoryConnections();
+          connections.set(context.userId, connection);
+          if (url.pathname === "/api/plugins/composio/connections") {
+            const input = (await request.json()) as Parameters<
+              ConnectionBinding["start"]
+            >[0];
+            return Response.json(await connection.start(input), {
+              status: 201,
+            });
+          }
+          if (url.pathname === "/api/plugins/composio/callback") {
+            const connectionId = url.searchParams.get("connection") ?? "";
+            const connectedAccountId =
+              url.searchParams.get("connected_account_id") ?? "";
+            await connection.complete({ connectionId, connectedAccountId });
+            return Response.redirect(
+              new URL("/?connection=composio-ready", url.origin),
+              303,
+            );
+          }
+          const connectionId = decodeURIComponent(
+            url.pathname.split("/").at(-2) ?? "",
+          );
+          return Response.json(await connection.revoke(connectionId));
+        },
+      },
+    ],
     allowedClientOrigins,
     allowDevelopmentIdentity,
   });

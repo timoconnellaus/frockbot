@@ -13,6 +13,7 @@ afterEach(async () => {
 describe("Composio router Plugin", () => {
   test("refuses invented slugs until search returns the exact tool", async () => {
     const calls: string[] = [];
+    let authorizationCalls = 0;
     const client = new ComposioClient({
       apiKey: "secret",
       fetch: (input) => {
@@ -41,8 +42,14 @@ describe("Composio router Plugin", () => {
       createComposioRouterPlugin({
         client,
         userId: "user-1",
-        connectedAccountId: "ca_123",
         toolkitSlug: "gmail",
+        authorizeEffect: () => {
+          authorizationCalls += 1;
+          return Promise.resolve({
+            connectedAccountId: "ca_123",
+            toolkitSlug: "gmail",
+          });
+        },
       }),
     );
     const context = {
@@ -92,5 +99,6 @@ describe("Composio router Plugin", () => {
       isError: false,
     });
     expect(calls).toHaveLength(2);
+    expect(authorizationCalls).toBe(2);
   });
 });

@@ -63,6 +63,124 @@ export interface AgentTransport {
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;
   listNotifications?(): Promise<ClientNotificationIntent[]>;
   acknowledgeNotification?(notificationId: string): Promise<void>;
+  openExternalAuthorization?(url: string): Promise<void>;
+}
+
+function responseRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function responseString(
+  value: Record<string, unknown>,
+  key: string,
+  label: string,
+): string {
+  const field = value[key];
+  if (typeof field !== "string") {
+    throw new Error(`${label}.${key} must be a string`);
+  }
+  return field;
+}
+
+function decodeTurnEvent(value: unknown): ClientTurnEvent {
+  const event = responseRecord(value, "turn event");
+  const decoded: ClientTurnEvent = {
+    type: responseString(event, "type", "turn event"),
+  };
+  if (event.call !== undefined) {
+    const call = responseRecord(event.call, "tool call");
+    decoded.call = {
+      id: responseString(call, "id", "tool call"),
+      name: responseString(call, "name", "tool call"),
+    };
+  }
+  if (event.callId !== undefined) {
+    decoded.callId = responseString(event, "callId", "turn event");
+  }
+  if (event.content !== undefined) {
+    decoded.content = responseString(event, "content", "turn event");
+  }
+  if (event.isError !== undefined) {
+    if (typeof event.isError !== "boolean") {
+      throw new Error("turn event.isError must be a boolean");
+    }
+    decoded.isError = event.isError;
+  }
+  return decoded;
+}
+
+function decodeNotification(value: unknown): ClientNotificationIntent {
+  const notification = responseRecord(value, "notification");
+  return {
+    notificationId: responseString(
+      notification,
+      "notificationId",
+      "notification",
+    ),
+    createdAt: responseString(notification, "createdAt", "notification"),
+    title: responseString(notification, "title", "notification"),
+    body: responseString(notification, "body", "notification"),
+  };
+}
+
+export function decodeClientTurnResponse(input: unknown): ClientTurnResponse {
+  const value = responseRecord(input, "turn response");
+  if (!Array.isArray(value.events)) {
+    throw new Error("turn response.events must be an array");
+  }
+  return {
+    runId: responseString(value, "runId", "turn response"),
+    text: responseString(value, "text", "turn response"),
+    events: value.events.map(decodeTurnEvent),
+    notification:
+      value.notification === undefined
+        ? undefined
+        : decodeNotification(value.notification),
+  };
+}
+
+export function decodeNotificationList(
+  input: unknown,
+): ClientNotificationIntent[] {
+  const value = responseRecord(input, "notification list");
+  if (!Array.isArray(value.notifications)) {
+    throw new Error("notification list.notifications must be an array");
+  }
+  return value.notifications.map(decodeNotification);
+}
+
+export function decodeStartConnectionResult(
+  input: unknown,
+): ClientStartConnectionResult {
+  const value = responseRecord(input, "Connection result");
+  return {
+    connectionId: responseString(value, "connectionId", "Connection result"),
+    redirectUrl: responseString(value, "redirectUrl", "Connection result"),
+    expiresAt: responseString(value, "expiresAt", "Connection result"),
+  };
+}
+
+export function decodeAcknowledgement(input: unknown): void {
+  const value = responseRecord(input, "acknowledgement");
+  if (value.status !== "acknowledged") {
+    throw new Error("acknowledgement status is invalid");
+  }
+}
+
+export function decodeRevocationResult(input: unknown): void {
+  const value = responseRecord(input, "revocation result");
+  if (
+    value.status !== "revoked" &&
+    value.status !== "reconciliation-required"
+  ) {
+    throw new Error("revocation result status is invalid");
+  }
 }
 
 export interface ClientSlotRegistration {

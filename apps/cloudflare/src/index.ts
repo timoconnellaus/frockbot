@@ -9,12 +9,13 @@ import type {
 } from "@frockbot/configuration-core";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import { ComposioClient } from "@frockbot/plugin-composio/client";
+import {
+  type BackendRouteContribution,
+  createComposioBackendContribution,
+  type ComposioConnectionStore,
+} from "@frockbot/plugin-composio/backend";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
-import {
-  ComposioConnectionCoordinator,
-  type ComposioConnectionStore,
-} from "./composio-connections.js";
 import type {
   ApplicationArtifactStore,
   BotNotificationIntent,
@@ -22,7 +23,6 @@ import type {
   BotTurnCommand,
   BotTurnResult,
   ConfigurationBinding,
-  ConnectionBinding,
   StoredRun,
   WorkerLoader,
 } from "./contracts.js";
@@ -103,86 +103,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration, whose
   // public RPC methods exactly match UserConfigurationRpc.
   return env.USER_CONFIGURATIONS.get(id) as unknown as UserConfigurationRpc;
-}
-
-export class ComposioConnectionApi
-  extends WorkerEntrypoint<Env, UserScopedProps>
-  implements ConnectionBinding
-{
-  private coordinator(): ComposioConnectionCoordinator {
-    if (!this.env.COMPOSIO_API_KEY || !this.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID) {
-      throw new Error("Composio is not configured");
-    }
-    return new ComposioConnectionCoordinator({
-      client: new ComposioClient({ apiKey: this.env.COMPOSIO_API_KEY }),
-      store: userConfigurationStub(this.env, this.ctx.props.userId),
-      callbackBaseUrl: this.env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
-      connectionTypes: {
-        gmail: {
-          authConfigId: this.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
-          displayName: "Gmail",
-          toolkitSlug: "gmail",
-        },
-      },
-      assignBot: async (userId, botId, connectionId, leaseId) => {
-        const bot = botStateStub(this.env, userId, botId);
-        const settings = await bot.getSettings({ userId, botId });
-        await bot.executeConfiguration(
-          { userId, botId },
-          {
-            schemaVersion: 1,
-            type: "bot/assign-capability",
-            commandId: leaseId,
-            botId,
-            expectedRevision: settings.revision,
-            assignment: {
-              assignmentId: `composio-${connectionId}`,
-              packageId: "composio",
-              capabilityId: "gmail-tools",
-              connectionId,
-            },
-          },
-        );
-      },
-      markBotUnavailable: (userId, botId, connectionId, compensation) =>
-        botStateStub(this.env, userId, botId).markConnectionUnavailable(
-          { userId, botId },
-          connectionId,
-          compensation,
-        ),
-    });
-  }
-
-  start(input: {
-    commandId: string;
-    connectionTypeId: string;
-    botId: string;
-    alias?: string;
-  }): ReturnType<ConnectionBinding["start"]> {
-    return this.coordinator().start(this.ctx.props.userId, input);
-  }
-
-  complete(input: {
-    connectionId: string;
-    connectedAccountId: string;
-  }): ReturnType<ConnectionBinding["complete"]> {
-    return this.coordinator().complete(this.ctx.props.userId, input);
-  }
-
-  fail(
-    connectionId: string,
-    message: string,
-  ): ReturnType<ConnectionBinding["fail"]> {
-    return this.coordinator().fail(
-      this.ctx.props.userId,
-      connectionId,
-      message,
-    );
-  }
-
-  revoke(connectionId: string): ReturnType<ConnectionBinding["revoke"]> {
-    return this.coordinator().revoke(this.ctx.props.userId, connectionId);
-  }
 }
 
 export class UserConfigurationApi
@@ -286,7 +206,6 @@ interface RuntimeExports {
   UserConfigurationApi(options: {
     props: UserScopedProps;
   }): ConfigurationBinding;
-  ComposioConnectionApi(options: { props: UserScopedProps }): ConnectionBinding;
 }
 
 export default {
@@ -294,6 +213,53 @@ export default {
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
     const runtimeExports = ctx.exports as unknown as RuntimeExports;
+    const application = await compileFoundationApplication();
+    const backendContributions: BackendRouteContribution[] = [];
+    if (application.contributions.backend.includes("composio")) {
+      if (!env.COMPOSIO_API_KEY || !env.COMPOSIO_GMAIL_AUTH_CONFIG_ID) {
+        throw new Error("Composio backend Contribution is not configured");
+      }
+      backendContributions.push(
+        createComposioBackendContribution({
+          client: new ComposioClient({ apiKey: env.COMPOSIO_API_KEY }),
+          storeFor: (userId) => userConfigurationStub(env, userId),
+          callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
+          connectionTypes: {
+            gmail: {
+              authConfigId: env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
+              displayName: "Gmail",
+              toolkitSlug: "gmail",
+            },
+          },
+          assignBot: async (userId, botId, connectionId, leaseId) => {
+            const bot = botStateStub(env, userId, botId);
+            const settings = await bot.getSettings({ userId, botId });
+            await bot.executeConfiguration(
+              { userId, botId },
+              {
+                schemaVersion: 1,
+                type: "bot/assign-capability",
+                commandId: leaseId,
+                botId,
+                expectedRevision: settings.revision,
+                assignment: {
+                  assignmentId: `composio-${connectionId}`,
+                  packageId: "composio",
+                  capabilityId: "gmail-tools",
+                  connectionId,
+                },
+              },
+            );
+          },
+          markBotUnavailable: (userId, botId, connectionId, compensation) =>
+            botStateStub(env, userId, botId).markConnectionUnavailable(
+              { userId, botId },
+              connectionId,
+              compensation,
+            ),
+        }),
+      );
+    }
     const gateway = createGateway({
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
@@ -303,8 +269,7 @@ export default {
         runtimeExports.UserBotState({ props: { userId } }),
       configurationFor: (userId): ConfigurationBinding =>
         runtimeExports.UserConfigurationApi({ props: { userId } }),
-      connectionsFor: (userId): ConnectionBinding =>
-        runtimeExports.ComposioConnectionApi({ props: { userId } }),
+      backendContributions,
       allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });

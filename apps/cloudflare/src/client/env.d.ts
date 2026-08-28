@@ -21,6 +21,7 @@ interface DesktopApiResponse {
 interface Window {
   frockbotDesktop?: {
     request(request: DesktopApiRequest): Promise<DesktopApiResponse>;
+    openExternalAuthorization(url: string): Promise<void>;
   };
   getUser(): Promise<DesktopAuthUser | null>;
   requestAuth(options?: { provider?: string }): Promise<void>;

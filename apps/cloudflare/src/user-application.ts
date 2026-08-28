@@ -131,6 +131,7 @@ export function createUserApplication() {
           displayName: pkg.manifest.displayName,
           version: pkg.version,
           contributions: [
+            ...(pkg.manifest.contributions.backend ? ["backend"] : []),
             ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
             ...(pkg.manifest.contributions.client ? ["client"] : []),
             ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),

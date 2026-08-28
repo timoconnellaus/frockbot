@@ -75,6 +75,21 @@ export interface BotSettingsViewV1 {
   model?: ModelAssignment;
 }
 
+export function initializeBotSettingsV1(
+  botId: string,
+  model?: ModelAssignment,
+): BotSettingsViewV1 {
+  return {
+    schemaVersion: 1,
+    botId,
+    revision: 0,
+    profile: { name: botId === "default" ? "Barebones" : botId },
+    notifications: { enabled: false },
+    assignments: [],
+    model: model ? structuredClone(model) : undefined,
+  };
+}
+
 export type ConfigurationViewV1 = UserSettingsViewV1 | BotSettingsViewV1;
 
 export type ConfigurationQueryV1 =
@@ -140,6 +155,74 @@ export interface BotExecutionPlanV1 {
   revision: number;
   model?: ModelAssignment;
   assignments: CapabilityAssignmentView[];
+}
+
+export interface ExecutionPackageDefinition {
+  packageId: string;
+  version: string;
+  capabilities: Array<{
+    id: string;
+    connectionTypes: string[];
+  }>;
+  connectionTypes: Array<{
+    id: string;
+    capabilities: string[];
+  }>;
+}
+
+export function resolveBotExecutionPlanV1(input: {
+  bot: BotSettingsViewV1;
+  user: UserSettingsViewV1;
+  packages: readonly ExecutionPackageDefinition[];
+}): BotExecutionPlanV1 {
+  const assignments = input.bot.assignments.map((assignment) => {
+    if (assignment.state !== "enabled") return structuredClone(assignment);
+    const installation = input.user.packages.find(
+      (pkg) =>
+        pkg.packageId === assignment.packageId && pkg.state === "installed",
+    );
+    const pkg = input.packages.find(
+      (candidate) =>
+        candidate.packageId === assignment.packageId &&
+        candidate.version === installation?.version,
+    );
+    const capability = pkg?.capabilities.find(
+      (candidate) => candidate.id === assignment.capabilityId,
+    );
+    if (!installation || !pkg || !capability) {
+      return { ...assignment, state: "unavailable" as const };
+    }
+    if (capability.connectionTypes.length === 0) {
+      return assignment.connectionId
+        ? { ...assignment, state: "unavailable" as const }
+        : structuredClone(assignment);
+    }
+    const connection = input.user.connections.find(
+      (candidate) =>
+        candidate.connectionId === assignment.connectionId &&
+        candidate.packageId === assignment.packageId &&
+        candidate.state === "ready",
+    );
+    const connectionType = pkg.connectionTypes.find(
+      (candidate) => candidate.id === connection?.connectionTypeId,
+    );
+    if (
+      !connection ||
+      !connectionType ||
+      !capability.connectionTypes.includes(connectionType.id) ||
+      !connectionType.capabilities.includes(capability.id)
+    ) {
+      return { ...assignment, state: "unavailable" as const };
+    }
+    return structuredClone(assignment);
+  });
+  return {
+    schemaVersion: 1,
+    botId: input.bot.botId,
+    revision: input.bot.revision,
+    model: input.bot.model ? structuredClone(input.bot.model) : undefined,
+    assignments,
+  };
 }
 
 export interface ConfigurationApplication {
@@ -356,4 +439,181 @@ export function decodeConfigurationCommandV1(
     default:
       throw new ConfigurationDecodeError("unknown configuration command");
   }
+}
+
+function safeJsonValue(value: unknown, label: string): JsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return value as JsonValue;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => safeJsonValue(item, label));
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        safeJsonValue(item, label),
+      ]),
+    );
+  }
+  throw new ConfigurationDecodeError(`${label} is not JSON`);
+}
+
+function viewRevision(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new ConfigurationDecodeError("configuration revision is invalid");
+  }
+  return value as number;
+}
+
+function packageInstallation(value: unknown): PackageInstallationView {
+  const installation = record(value, "Package installation");
+  if (
+    installation.state !== "installed" &&
+    installation.state !== "disabled" &&
+    installation.state !== "failed"
+  ) {
+    throw new ConfigurationDecodeError("Package installation state is invalid");
+  }
+  return {
+    packageId: identifier(installation.packageId, "packageId"),
+    version: text(installation.version, "version", 100),
+    state: installation.state,
+    failure: optionalText(installation.failure, "failure", 2_000),
+  };
+}
+
+function connectionView(value: unknown): ConnectionView {
+  const connection = record(value, "Connection");
+  const states: ConnectionView["state"][] = [
+    "authorizing",
+    "ready",
+    "revoking",
+    "revoked",
+    "reconciliation-required",
+    "failed",
+  ];
+  if (!states.includes(connection.state as ConnectionView["state"])) {
+    throw new ConfigurationDecodeError("Connection state is invalid");
+  }
+  const safeMetadata = record(connection.safeMetadata, "safeMetadata");
+  return {
+    connectionId: identifier(connection.connectionId, "connectionId"),
+    packageId: identifier(connection.packageId, "packageId"),
+    connectionTypeId: identifier(
+      connection.connectionTypeId,
+      "connectionTypeId",
+    ),
+    displayName: text(connection.displayName, "displayName", 200),
+    state: connection.state as ConnectionView["state"],
+    safeMetadata: Object.fromEntries(
+      Object.entries(safeMetadata).map(([key, item]) => [
+        key,
+        safeJsonValue(item, `safeMetadata.${key}`),
+      ]),
+    ),
+    failure: optionalText(connection.failure, "failure", 2_000),
+  };
+}
+
+function capabilityAssignment(value: unknown): CapabilityAssignmentView {
+  const assignment = record(value, "Capability Assignment");
+  if (
+    assignment.state !== "enabled" &&
+    assignment.state !== "disabled" &&
+    assignment.state !== "unavailable"
+  ) {
+    throw new ConfigurationDecodeError(
+      "Capability Assignment state is invalid",
+    );
+  }
+  return {
+    assignmentId: identifier(assignment.assignmentId, "assignmentId"),
+    packageId: identifier(assignment.packageId, "assignment.packageId"),
+    capabilityId: identifier(
+      assignment.capabilityId,
+      "assignment.capabilityId",
+    ),
+    connectionId:
+      assignment.connectionId === undefined
+        ? undefined
+        : identifier(assignment.connectionId, "assignment.connectionId"),
+    state: assignment.state,
+  };
+}
+
+function schemaVersion(value: Record<string, unknown>): void {
+  if (value.schemaVersion !== 1) {
+    throw new ConfigurationDecodeError("unsupported configuration schema");
+  }
+}
+
+export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
+  const value = record(input, "User settings");
+  schemaVersion(value);
+  const profile = record(value.profile, "profile");
+  if (!Array.isArray(value.packages) || !Array.isArray(value.connections)) {
+    throw new ConfigurationDecodeError(
+      "User settings Packages and Connections must be arrays",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    revision: viewRevision(value.revision),
+    profile: {
+      name: text(profile.name, "profile.name", 100),
+      email: optionalText(profile.email, "profile.email", 320),
+    },
+    packages: value.packages.map(packageInstallation),
+    connections: value.connections.map(connectionView),
+    newBotModelTemplate:
+      value.newBotModelTemplate === undefined
+        ? undefined
+        : model(value.newBotModelTemplate),
+  };
+}
+
+export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
+  const value = record(input, "Bot settings");
+  schemaVersion(value);
+  if (!Array.isArray(value.assignments)) {
+    throw new ConfigurationDecodeError(
+      "Bot settings Assignments must be an array",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    botId: identifier(value.botId, "botId"),
+    revision: viewRevision(value.revision),
+    profile: botProfile(value.profile),
+    notifications: notifications(value.notifications),
+    assignments: value.assignments.map(capabilityAssignment),
+    model: value.model === undefined ? undefined : model(value.model),
+  };
+}
+
+export function decodeConfigurationViewV1(input: unknown): ConfigurationViewV1 {
+  const value = record(input, "configuration");
+  return "botId" in value
+    ? decodeBotSettingsViewV1(value)
+    : decodeUserSettingsViewV1(value);
+}
+
+export function decodeOperationReceiptV1(input: unknown): OperationReceiptV1 {
+  const value = record(input, "operation receipt");
+  schemaVersion(value);
+  if (value.status !== "applied") {
+    throw new ConfigurationDecodeError("operation receipt status is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    commandId: identifier(value.commandId, "commandId"),
+    revision: viewRevision(value.revision),
+    status: "applied",
+  };
 }

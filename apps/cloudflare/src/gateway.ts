@@ -108,110 +108,15 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
     if (!userId) return jsonError(401, "authentication required");
 
-    if (url.pathname === "/api/plugins/composio/connections") {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      try {
-        const input: unknown = await request.json();
-        if (typeof input !== "object" || input === null) {
-          return jsonError(400, "Connection request must be an object");
-        }
-        const value = input as Record<string, unknown>;
-        if (
-          typeof value.commandId !== "string" ||
-          !ID_PATTERN.test(value.commandId)
-        ) {
-          return jsonError(400, "commandId is invalid");
-        }
-        if (typeof value.connectionTypeId !== "string") {
-          return jsonError(400, "connectionTypeId is required");
-        }
-        if (typeof value.botId !== "string" || !ID_PATTERN.test(value.botId)) {
-          return jsonError(400, "botId is invalid");
-        }
-        if (
-          value.alias !== undefined &&
-          (typeof value.alias !== "string" || value.alias.trim().length > 100)
-        ) {
-          return jsonError(400, "alias is invalid");
-        }
-        return Response.json(
-          await dependencies.connectionsFor(userId).start({
-            commandId: value.commandId,
-            connectionTypeId: value.connectionTypeId,
-            botId: value.botId,
-            alias: value.alias as string | undefined,
-          }),
-          { status: 201 },
-        );
-      } catch (error) {
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "Connection failed",
-        );
-      }
-    }
-
-    const composioRevokeMatch = url.pathname.match(
-      /^\/api\/plugins\/composio\/connections\/([^/]+)\/revoke$/,
-    );
-    if (composioRevokeMatch) {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      try {
-        return Response.json(
-          await dependencies
-            .connectionsFor(userId)
-            .revoke(decodeURIComponent(composioRevokeMatch[1])),
-        );
-      } catch (error) {
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "Revocation failed",
-        );
-      }
-    }
-
-    if (url.pathname === "/api/plugins/composio/callback") {
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      const connectionId = url.searchParams.get("connection");
-      const connectedAccountId =
-        url.searchParams.get("connected_account_id") ??
-        url.searchParams.get("connectedAccountId");
-      if (connectionId && url.searchParams.get("status") === "failed") {
-        try {
-          await dependencies
-            .connectionsFor(userId)
-            .fail(connectionId, "Composio authorization was not completed");
-          return Response.redirect(
-            new URL("/?connection=composio-failed", url.origin),
-            303,
-          );
-        } catch (error) {
-          return jsonError(
-            500,
-            error instanceof Error ? error.message : "Connection failed",
-          );
-        }
-      }
-      if (!connectionId || !connectedAccountId) {
-        return jsonError(400, "Composio callback is incomplete");
-      }
-      try {
-        await dependencies.connectionsFor(userId).complete({
-          connectionId,
-          connectedAccountId,
-        });
-        return Response.redirect(
-          new URL("/?connection=composio-ready", url.origin),
-          303,
-        );
-      } catch (error) {
-        return jsonError(
-          400,
-          error instanceof Error ? error.message : "Connection failed",
-        );
-      }
+    for (const contribution of dependencies.backendContributions ?? []) {
+      const response = await contribution.route(request, url, {
+        userId,
+        client:
+          request.headers.get("x-frockbot-client") === "desktop"
+            ? "desktop"
+            : "browser",
+      });
+      if (response) return response;
     }
 
     const botSettingsMatch = url.pathname.match(

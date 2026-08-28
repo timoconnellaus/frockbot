@@ -28,6 +28,7 @@ describe("foundation application", () => {
       "shell",
     ]);
     expect(first.contributions).toEqual({
+      backend: ["composio"],
       runtime: [
         "clock",
         "composio",

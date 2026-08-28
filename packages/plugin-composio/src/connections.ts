@@ -4,10 +4,10 @@ import type {
   ConnectLink,
 } from "@frockbot/plugin-composio/client";
 import type {
+  ConnectionCompletionResult,
   RevokeConnectionResult,
   StartConnectionResult,
-} from "./contracts.js";
-import type { StartConnectionInput } from "./user-configuration.js";
+} from "./backend-contracts.js";
 
 export interface ComposioConnectionStore {
   isPackageInstalled(userId: string, packageId: string): Promise<boolean>;
@@ -17,7 +17,13 @@ export interface ComposioConnectionStore {
   ): Promise<ConnectionView | undefined>;
   startConnection(
     userId: string,
-    input: StartConnectionInput,
+    input: {
+      connectionId: string;
+      packageId: string;
+      connectionTypeId: string;
+      displayName: string;
+      safeMetadata?: ConnectionView["safeMetadata"];
+    },
   ): Promise<boolean>;
   recordConnectLinkResult(
     userId: string,
@@ -115,6 +121,7 @@ export class ComposioConnectionCoordinator {
       connectionTypeId: string;
       botId: string;
       alias?: string;
+      returnTarget?: "browser" | "desktop";
     },
   ): Promise<StartConnectionResult> {
     const type = this.config.connectionTypes[input.connectionTypeId];
@@ -135,6 +142,7 @@ export class ComposioConnectionCoordinator {
         targetBotId: input.botId,
         toolkitSlug: type.toolkitSlug,
         providerAlias: connectionId,
+        returnTarget: input.returnTarget ?? "browser",
       },
     });
     if (!claimed) {
@@ -204,6 +212,8 @@ export class ComposioConnectionCoordinator {
       userId,
       connectionId,
       {
+        returnTarget: input.returnTarget ?? "browser",
+        providerAlias: connectionId,
         connectedAccountId: link.connectedAccountId,
         redirectUrl: link.redirectUrl,
         toolkitSlug: type.toolkitSlug,
@@ -227,7 +237,11 @@ export class ComposioConnectionCoordinator {
     userId: string,
     connectionId: string,
     message: string,
-  ): Promise<void> {
+  ): Promise<ConnectionCompletionResult> {
+    const connection = await this.config.store.getConnection(
+      userId,
+      connectionId,
+    );
     await this.config.store.finishConnectionAuthorization(
       userId,
       connectionId,
@@ -236,6 +250,12 @@ export class ComposioConnectionCoordinator {
         failure: message.slice(0, 500),
       },
     );
+    return {
+      returnTarget:
+        connection?.safeMetadata.returnTarget === "desktop"
+          ? "desktop"
+          : "browser",
+    };
   }
 
   async revoke(
@@ -334,7 +354,7 @@ export class ComposioConnectionCoordinator {
   async complete(
     userId: string,
     input: { connectionId: string; connectedAccountId: string },
-  ): Promise<void> {
+  ): Promise<ConnectionCompletionResult> {
     let connection = await this.config.store.getConnection(
       userId,
       input.connectionId,
@@ -342,7 +362,11 @@ export class ComposioConnectionCoordinator {
     if (!connection || connection.packageId !== "composio") {
       throw new Error("Composio Connection was not admitted");
     }
-    if (connection.state === "ready") return;
+    const returnTarget =
+      connection.safeMetadata.returnTarget === "desktop"
+        ? "desktop"
+        : "browser";
+    if (connection.state === "ready") return { returnTarget };
 
     let verifiedMetadata: ConnectionView["safeMetadata"] | undefined;
     if (connection.safeMetadata.reconciliationOperation !== "assignment") {
@@ -384,12 +408,12 @@ export class ComposioConnectionCoordinator {
       leaseId,
       verifiedMetadata,
     );
-    if (claim.phase === "done") return;
+    if (claim.phase === "done") return { returnTarget };
     if (claim.phase === "pending") {
       if (
         claim.connection.safeMetadata.reconciliationOperation === "assignment"
       ) {
-        return;
+        return { returnTarget };
       }
       throw new Error("Connection state changed during callback verification");
     }
@@ -408,13 +432,13 @@ export class ComposioConnectionCoordinator {
       input.connectionId,
       leaseId,
     );
-    if (finished) return;
+    if (finished) return { returnTarget };
 
     const current = await this.config.store.getConnection(
       userId,
       input.connectionId,
     );
-    if (current?.state === "ready") return;
+    if (current?.state === "ready") return { returnTarget };
     const compensationClaimed =
       await this.config.store.requireAssignmentCompensation(
         userId,

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { defineComponent } from "vue";
-import { ClientApplication, type ClientPlugin } from "./index.js";
+import {
+  ClientApplication,
+  type ClientPlugin,
+  decodeClientTurnResponse,
+  decodeNotificationList,
+  decodeStartConnectionResult,
+} from "./index.js";
 
 const transport = {
   turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
@@ -45,5 +51,48 @@ describe("ClientApplication", () => {
       "root is already registered",
     );
     application.dispose();
+  });
+});
+
+describe("hosted response decoders", () => {
+  test("decodes nested turn, notification, and Connection responses", () => {
+    expect(
+      decodeClientTurnResponse({
+        runId: "run-1",
+        text: "done",
+        events: [{ type: "tool/result", callId: "call-1", isError: false }],
+      }),
+    ).toMatchObject({ runId: "run-1", events: [{ callId: "call-1" }] });
+    expect(
+      decodeNotificationList({
+        notifications: [
+          {
+            notificationId: "notification-1",
+            createdAt: "2026-08-28T00:00:00.000Z",
+            title: "Done",
+            body: "Finished",
+          },
+        ],
+      }),
+    ).toHaveLength(1);
+    expect(
+      decodeStartConnectionResult({
+        connectionId: "connection-1",
+        redirectUrl: "https://connect.example/authorize",
+        expiresAt: "2026-08-28T00:05:00.000Z",
+      }).connectionId,
+    ).toBe("connection-1");
+  });
+
+  test("rejects malformed nested response values", () => {
+    expect(() =>
+      decodeClientTurnResponse({ runId: "run-1", text: "done", events: [{}] }),
+    ).toThrow("turn event.type must be a string");
+    expect(() =>
+      decodeNotificationList({ notifications: [{ notificationId: 1 }] }),
+    ).toThrow("notification.notificationId must be a string");
+    expect(() =>
+      decodeStartConnectionResult({ connectionId: "connection-1" }),
+    ).toThrow("Connection result.redirectUrl must be a string");
   });
 });

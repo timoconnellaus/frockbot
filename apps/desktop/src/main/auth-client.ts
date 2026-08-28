@@ -1,11 +1,14 @@
 import { electronClient } from "@better-auth/electron/client";
 import { storage } from "@better-auth/electron/storage";
 import { createAuthClient } from "better-auth/client";
-import { BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
+import {
+  decodeDesktopApiRequest,
+  decodeExternalAuthorizationUrl,
+  type DesktopApiResponse,
+} from "./desktop-api.js";
 
 const AUTH_PROTOCOL = "com.frockbot.desktop";
-const API_PATH_PATTERN = /^\/api\/bots\/[a-zA-Z0-9._-]+\/turns$/;
-const MAX_BODY_BYTES = 64 * 1024;
 const authBaseURL = process.env.FROCKBOT_AUTH_BASE_URL?.trim();
 const applicationURL = process.env.FROCKBOT_APPLICATION_URL?.trim();
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -22,16 +25,30 @@ function isLoopbackUrl(value: string | undefined): boolean {
 const useDevelopmentIdentity =
   isLoopbackUrl(authBaseURL) && isLoopbackUrl(applicationURL);
 
-export interface DesktopApiRequest {
-  path: string;
-  method: "GET" | "POST";
-  body?: string;
-}
+const pendingAuthorizationReturns = new Set<
+  (status: "ready" | "failed") => void
+>();
 
-export interface DesktopApiResponse {
-  status: number;
-  contentType: string | null;
-  body: string;
+function acceptAuthorizationReturn(value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return;
+  }
+  const status = url.searchParams.get("status");
+  if (
+    url.protocol !== `${AUTH_PROTOCOL}:` ||
+    url.pathname !== "/connections" ||
+    (status !== "ready" && status !== "failed")
+  ) {
+    return;
+  }
+  for (const resolve of pendingAuthorizationReturns) resolve(status);
+  pendingAuthorizationReturns.clear();
+  const window = BrowserWindow.getAllWindows()[0];
+  window?.show();
+  window?.focus();
 }
 
 export const authClient = authBaseURL
@@ -57,21 +74,16 @@ function trustedRenderer(url: string): boolean {
   }
 }
 
-function validApiRequest(value: unknown): value is DesktopApiRequest {
-  if (!value || typeof value !== "object") return false;
-  const request = value as Partial<DesktopApiRequest>;
-  return (
-    typeof request.path === "string" &&
-    API_PATH_PATTERN.test(request.path) &&
-    (request.method === "GET" || request.method === "POST") &&
-    (request.body === undefined ||
-      (typeof request.body === "string" &&
-        new TextEncoder().encode(request.body).byteLength <= MAX_BODY_BYTES))
-  );
-}
-
 export function setupDesktopAuth(): void {
   if (!authClient || !authBaseURL) return;
+
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    acceptAuthorizationReturn(url);
+  });
+  app.on("second-instance", (_event, argv) => {
+    for (const argument of argv) acceptAuthorizationReturn(argument);
+  });
 
   authClient.setupMain({
     csp: false,
@@ -82,19 +94,20 @@ export function setupDesktopAuth(): void {
     if (!event.senderFrame || !trustedRenderer(event.senderFrame.url)) {
       throw new Error("untrusted renderer");
     }
-    if (!validApiRequest(request)) throw new Error("invalid API request");
+    const decodedRequest = decodeDesktopApiRequest(request);
 
     const headers = new Headers({ cookie: authClient.getCookie() });
+    headers.set("x-frockbot-client", "desktop");
     if (useDevelopmentIdentity) {
       headers.set("x-frockbot-user-id", "development");
     }
-    if (request.body !== undefined) {
+    if (decodedRequest.body !== undefined) {
       headers.set("content-type", "application/json");
     }
-    const response = await fetch(new URL(request.path, authBaseURL), {
-      method: request.method,
+    const response = await fetch(new URL(decodedRequest.path, authBaseURL), {
+      method: decodedRequest.method,
       headers,
-      body: request.body,
+      body: decodedRequest.body,
       redirect: "error",
     });
     return {
@@ -103,4 +116,27 @@ export function setupDesktopAuth(): void {
       body: await response.text(),
     } satisfies DesktopApiResponse;
   });
+
+  ipcMain.handle(
+    "frockbot:open-external-authorization",
+    async (event, url: unknown) => {
+      if (!event.senderFrame || !trustedRenderer(event.senderFrame.url)) {
+        throw new Error("untrusted renderer");
+      }
+      await shell.openExternal(decodeExternalAuthorizationUrl(url));
+      return new Promise<void>((resolve, reject) => {
+        const finish = (status: "ready" | "failed") => {
+          clearTimeout(timeout);
+          pendingAuthorizationReturns.delete(finish);
+          if (status === "ready") resolve();
+          else reject(new Error("Connection authorization was not completed"));
+        };
+        const timeout = setTimeout(() => {
+          pendingAuthorizationReturns.delete(finish);
+          reject(new Error("Connection authorization timed out"));
+        }, 10 * 60_000);
+        pendingAuthorizationReturns.add(finish);
+      });
+    },
+  );
 }

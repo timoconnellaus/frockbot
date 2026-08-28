@@ -321,6 +321,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@frockbot/agent-core": "workspace:*",
+        "@frockbot/configuration-core": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {

@@ -24,8 +24,11 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export interface ComposioRouterPluginConfig {
   client: ComposioClient;
   userId: string;
-  connectedAccountId: string;
   toolkitSlug: string;
+  authorizeEffect(): Promise<{
+    connectedAccountId: string;
+    toolkitSlug: string;
+  }>;
 }
 
 export function createComposioRouterPlugin(
@@ -46,7 +49,11 @@ export function createComposioRouterPlugin(
         isObject(input) && typeof input.query === "string"
           ? input.query
           : undefined;
-      const result = await config.client.searchTools(config.toolkitSlug, query);
+      const grant = await config.authorizeEffect();
+      if (grant.toolkitSlug !== config.toolkitSlug) {
+        throw new Error("Composio effect grant changed toolkit");
+      }
+      const result = await config.client.searchTools(grant.toolkitSlug, query);
       for (const tool of result) allowedToolSlugs.add(tool.slug);
       return { content: JSON.stringify(result), isError: false };
     },
@@ -82,10 +89,17 @@ export function createComposioRouterPlugin(
           isError: true,
         };
       }
+      const grant = await config.authorizeEffect();
+      if (grant.toolkitSlug !== config.toolkitSlug) {
+        return {
+          content: "Composio effect grant changed toolkit",
+          isError: true,
+        };
+      }
       const result = await config.client.executeTool({
         toolSlug: input.toolSlug,
         userId: config.userId,
-        connectedAccountId: config.connectedAccountId,
+        connectedAccountId: grant.connectedAccountId,
         arguments: input.arguments,
       });
       return { content: JSON.stringify(result), isError: false };

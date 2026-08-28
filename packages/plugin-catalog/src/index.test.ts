@@ -215,6 +215,26 @@ describe("PackageCatalog", () => {
 });
 
 describe("decodeFrockBotManifest", () => {
+  test("decodes an explicitly hosted backend Contribution", () => {
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 3,
+      id: "connection-driver",
+      displayName: "Connection driver",
+      version: "1.0.0",
+      compatibility: { frockbot: ">=0.0.1" },
+      contributions: {
+        backend: { entry: "./backend", host: "gateway" },
+      },
+      permissions: [],
+      configuration: {},
+    });
+    expect(decoded.contributions.backend).toEqual({
+      entry: "./backend",
+      host: "gateway",
+    });
+    expect(declaredContributionKinds(decoded)).toEqual(["backend"]);
+  });
+
   test("accepts a manifest that only contributes to mobile", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 1,

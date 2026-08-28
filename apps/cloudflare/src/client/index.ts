@@ -1,14 +1,20 @@
 /// <reference path="./env.d.ts" />
 
 import { foundationClientPlugins } from "@frockbot/application-foundation/client";
-import type {
-  ConfigurationCommandV1,
-  ConfigurationQueryV1,
-  ConfigurationViewV1,
-  OperationReceiptV1,
+import {
+  decodeBotSettingsViewV1,
+  decodeOperationReceiptV1,
+  decodeUserSettingsViewV1,
+  type ConfigurationCommandV1,
+  type ConfigurationQueryV1,
 } from "@frockbot/configuration-core";
 import {
   ClientApplication,
+  decodeAcknowledgement,
+  decodeClientTurnResponse,
+  decodeNotificationList,
+  decodeRevocationResult,
+  decodeStartConnectionResult,
   type ClientTurnResponse,
 } from "@frockbot/client-core";
 function selectedBotId(): string {
@@ -21,11 +27,11 @@ function selectedBotId(): string {
 
 const botId = selectedBotId();
 
-async function configurationRequest<T>(
+async function apiRequest(
   path: string,
   method: "GET" | "POST" = "GET",
   body?: string,
-): Promise<T> {
+): Promise<unknown> {
   const response = window.frockbotDesktop
     ? await window.frockbotDesktop.request({ path, method, body }).then(
         (result: DesktopApiResponse) =>
@@ -41,8 +47,17 @@ async function configurationRequest<T>(
         headers: body ? { "content-type": "application/json" } : undefined,
         body,
       });
-  const value = (await response.json()) as T & { error?: string };
-  if (!response.ok) throw new Error(value.error ?? "Settings request failed");
+  const value: unknown = await response.json();
+  if (!response.ok) {
+    const error =
+      typeof value === "object" &&
+      value !== null &&
+      "error" in value &&
+      typeof value.error === "string"
+        ? value.error
+        : "Hosted request failed";
+    throw new Error(error);
+  }
   return value;
 }
 
@@ -74,39 +89,46 @@ const application = new ClientApplication({
           signal,
         });
     signal.throwIfAborted();
-    const result = (await response.json()) as ClientTurnResponse & {
-      error?: string;
-    };
-    if (!response.ok) throw new Error(result.error ?? "Agent request failed");
-    return result;
+    const result: unknown = await response.json();
+    if (!response.ok) {
+      const error =
+        typeof result === "object" &&
+        result !== null &&
+        "error" in result &&
+        typeof result.error === "string"
+          ? result.error
+          : "Agent request failed";
+      throw new Error(error);
+    }
+    return decodeClientTurnResponse(result);
   },
   readConfiguration(query: ConfigurationQueryV1) {
     const path =
       query.type === "user/get"
         ? "/api/settings"
         : `/api/bots/${encodeURIComponent(query.botId)}/settings`;
-    return configurationRequest<ConfigurationViewV1>(path);
+    return apiRequest(path).then((value) =>
+      query.type === "user/get"
+        ? decodeUserSettingsViewV1(value)
+        : decodeBotSettingsViewV1(value),
+    );
   },
   async listNotifications() {
-    const result = await configurationRequest<{
-      notifications: Array<{
-        notificationId: string;
-        createdAt: string;
-        title: string;
-        body: string;
-      }>;
-    }>(`/api/bots/${encodeURIComponent(botId)}/notifications`);
-    return result.notifications;
+    return decodeNotificationList(
+      await apiRequest(`/api/bots/${encodeURIComponent(botId)}/notifications`),
+    );
   },
   async acknowledgeNotification(notificationId: string) {
-    await configurationRequest<{ status: "acknowledged" }>(
-      `/api/bots/${encodeURIComponent(botId)}/notifications`,
-      "POST",
-      JSON.stringify({ notificationId }),
+    decodeAcknowledgement(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/notifications`,
+        "POST",
+        JSON.stringify({ notificationId }),
+      ),
     );
   },
   readApplicationManifest() {
-    return configurationRequest<unknown>("/app-manifest");
+    return apiRequest("/app-manifest");
   },
   startConnection(input: {
     commandId: string;
@@ -118,11 +140,7 @@ const application = new ClientApplication({
     if (input.packageId !== "composio") {
       return Promise.reject(new Error("Connection Package is unavailable"));
     }
-    return configurationRequest<{
-      connectionId: string;
-      redirectUrl: string;
-      expiresAt: string;
-    }>(
+    return apiRequest(
       "/api/plugins/composio/connections",
       "POST",
       JSON.stringify({
@@ -131,26 +149,33 @@ const application = new ClientApplication({
         botId: input.botId,
         alias: input.alias,
       }),
-    );
+    ).then(decodeStartConnectionResult);
   },
   async revokeConnection(packageId: string, connectionId: string) {
     if (packageId !== "composio") {
       throw new Error("Connection Package is unavailable");
     }
-    await configurationRequest<{ status: "revoked" }>(
-      `/api/plugins/composio/connections/${encodeURIComponent(connectionId)}/revoke`,
-      "POST",
+    decodeRevocationResult(
+      await apiRequest(
+        `/api/plugins/composio/connections/${encodeURIComponent(connectionId)}/revoke`,
+        "POST",
+      ),
     );
+  },
+  openExternalAuthorization(url: string): Promise<void> {
+    if (window.frockbotDesktop) {
+      return window.frockbotDesktop.openExternalAuthorization(url);
+    }
+    window.location.assign(url);
+    return Promise.resolve();
   },
   executeConfiguration(command: ConfigurationCommandV1) {
     const path =
       "botId" in command
         ? `/api/bots/${encodeURIComponent(command.botId)}/settings`
         : "/api/settings";
-    return configurationRequest<OperationReceiptV1>(
-      path,
-      "POST",
-      JSON.stringify(command),
+    return apiRequest(path, "POST", JSON.stringify(command)).then(
+      decodeOperationReceiptV1,
     );
   },
 });

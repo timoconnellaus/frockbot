@@ -4,7 +4,7 @@ import { ComposioClient } from "@frockbot/plugin-composio/client";
 import {
   ComposioConnectionCoordinator,
   type ComposioConnectionStore,
-} from "./composio-connections.js";
+} from "@frockbot/plugin-composio";
 import type { StartConnectionInput } from "./user-configuration.js";
 
 class MemoryConnectionStore implements ComposioConnectionStore {

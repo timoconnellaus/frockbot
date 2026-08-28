@@ -144,7 +144,8 @@ async function connectPlugin(
       packageId,
       connectionTypeId,
     );
-    window.location.assign(redirectUrl);
+    await web.value.openConnectionAuthorization(redirectUrl);
+    await web.value.loadPluginCatalog();
   } catch (error) {
     web.value.settingsError =
       error instanceof Error ? error.message : "Could not start Connection";

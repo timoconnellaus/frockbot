@@ -1,11 +1,18 @@
 import type { SessionEvent } from "@frockbot/agent-core";
 import type {
+  BotSettingsViewV1,
   ConfigurationCommandV1,
   ConfigurationQueryV1,
   ConfigurationViewV1,
   OperationReceiptV1,
 } from "@frockbot/configuration-core";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
+import type {
+  BackendRouteContribution,
+  ConnectionCompletionResult,
+  RevokeConnectionResult,
+  StartConnectionResult,
+} from "@frockbot/plugin-composio/backend";
 
 export interface UserApplicationIdentity {
   userId: string;
@@ -13,7 +20,11 @@ export interface UserApplicationIdentity {
 }
 
 export type StoredRunStatus =
-  "running" | "completed" | "failed" | "interrupted";
+  | "running"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "reconciliation-required";
 
 export interface StoredRun {
   runId: string;
@@ -24,6 +35,9 @@ export interface StoredRun {
   status?: StoredRunStatus;
   responseText?: string;
   failure?: string;
+  phase?: "admitted" | "executing" | "reconciliation-required";
+  configurationSnapshot?: BotSettingsViewV1;
+  previousEventCount?: number;
 }
 
 export interface BotTurnCommand {
@@ -119,16 +133,6 @@ export interface GatewayAuth {
   getSession(headers: Headers): Promise<AuthSession | null>;
 }
 
-export interface StartConnectionResult {
-  connectionId: string;
-  redirectUrl: string;
-  expiresAt: string;
-}
-
-export interface RevokeConnectionResult {
-  status: "revoked" | "reconciliation-required";
-}
-
 export interface ConnectionBinding {
   start(input: {
     commandId: string;
@@ -139,8 +143,11 @@ export interface ConnectionBinding {
   complete(input: {
     connectionId: string;
     connectedAccountId: string;
-  }): Promise<void>;
-  fail(connectionId: string, message: string): Promise<void>;
+  }): Promise<ConnectionCompletionResult>;
+  fail(
+    connectionId: string,
+    message: string,
+  ): Promise<ConnectionCompletionResult>;
   revoke(connectionId: string): Promise<RevokeConnectionResult>;
 }
 
@@ -156,7 +163,7 @@ export interface GatewayDependencies {
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): BotStateBinding;
   configurationFor(userId: string): ConfigurationBinding;
-  connectionsFor(userId: string): ConnectionBinding;
+  backendContributions?: readonly BackendRouteContribution[];
   allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;

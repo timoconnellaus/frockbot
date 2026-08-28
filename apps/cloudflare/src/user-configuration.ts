@@ -499,7 +499,58 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         typeof assignmentLeaseExpiresAt === "number" &&
         assignmentLeaseExpiresAt > Date.now()
       ) {
-        return { phase: "pending" as const, connection };
+        const connectedAccountId = connection.safeMetadata.connectedAccountId;
+        if (typeof connectedAccountId !== "string") {
+          const pending = {
+            ...connection,
+            safeMetadata: {
+              ...connection.safeMetadata,
+              revocationRequested: true,
+            },
+            failure: "Revocation is waiting for Connection reconciliation",
+          };
+          await transaction.put(STATE_KEY, {
+            ...current,
+            revision: current.revision + 1,
+            connections: current.connections.map((item) =>
+              item.connectionId === connectionId ? pending : item,
+            ),
+          } satisfies UserSettingsViewV1);
+          return { phase: "pending" as const, connection: pending };
+        }
+        const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
+        const leaseId = connection.safeMetadata.assignmentLeaseId;
+        const claimed = {
+          ...connection,
+          state: "revoking" as const,
+          safeMetadata: {
+            ...connection.safeMetadata,
+            reconciliationOperation: "revoke",
+            revocationRequested: true,
+            revocationProviderCompleted: false,
+            effectDeadlineAt,
+            assignmentCompensationPending: true,
+            assignmentCompensationId: `revoke:${connectionId}`,
+            assignmentCompensationGeneration:
+              typeof leaseId === "string"
+                ? leaseId
+                : LEGACY_ASSIGNMENT_GENERATION,
+            compensationRetryAt: effectDeadlineAt,
+          },
+          failure: undefined,
+        };
+        const next = {
+          ...current,
+          revision: current.revision + 1,
+          connections: current.connections.map((item) =>
+            item.connectionId === connectionId ? claimed : item,
+          ),
+        } satisfies UserSettingsViewV1;
+        await transaction.put(STATE_KEY, next);
+        await transaction.setAlarm(
+          nextConnectionAlarm(next) ?? effectDeadlineAt,
+        );
+        return { phase: "provider" as const, connection: claimed };
       }
       const providerCompleted =
         connection.safeMetadata.revocationProviderCompleted === true;

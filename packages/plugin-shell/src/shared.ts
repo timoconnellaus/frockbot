@@ -63,6 +63,7 @@ export interface FrockBotWebData {
   loadPluginCatalog(): Promise<void>;
   installPackage(packageId: string, version: string): Promise<void>;
   startConnection(packageId: string, connectionTypeId: string): Promise<string>;
+  openConnectionAuthorization(url: string): Promise<void>;
   revokeConnection(packageId: string, connectionId: string): Promise<void>;
   sendPrompt(text: string): Promise<SendPromptResult>;
   abort(): Promise<void>;
