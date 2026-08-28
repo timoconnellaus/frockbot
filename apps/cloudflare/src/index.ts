@@ -1,16 +1,35 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import type {
+  BotSettingsViewV1,
+  ConfigurationCommandV1,
+  ConfigurationQueryV1,
+  ConfigurationViewV1,
+  OperationReceiptV1,
+  UserSettingsViewV1,
+} from "@frockbot/configuration-core";
+import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
+import { ComposioClient } from "@frockbot/plugin-composio/client";
 import { gatewayAuth } from "./auth.js";
-import { BotState } from "./bot-state.js";
+import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
+import {
+  ComposioConnectionCoordinator,
+  type ComposioConnectionStore,
+} from "./composio-connections.js";
 import type {
   ApplicationArtifactStore,
+  BotNotificationIntent,
   BotStateBinding,
-  MemoryBinding,
+  BotTurnCommand,
+  BotTurnResult,
+  ConfigurationBinding,
+  ConnectionBinding,
   StoredRun,
   WorkerLoader,
 } from "./contracts.js";
 import { createGateway } from "./gateway.js";
+import { UserConfiguration } from "./user-configuration.js";
 
-export { BotState };
+export { BotState, UserConfiguration };
 
 interface Env {
   USER_APPLICATIONS: WorkerLoader;
@@ -19,12 +38,15 @@ interface Env {
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   BOT_STATES: DurableObjectNamespace<BotState>;
+  USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
   AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  COMPOSIO_API_KEY?: string;
+  COMPOSIO_GMAIL_AUTH_CONFIG_ID?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
 }
@@ -37,14 +59,36 @@ function allowedClientOrigins(env: Env): string[] | undefined {
   return origins.length > 0 ? origins : undefined;
 }
 
-interface UserBotStateProps {
+interface UserScopedProps {
   userId: string;
 }
 
 interface BotStateRpc {
-  acceptRun(run: Omit<StoredRun, "events">): Promise<StoredRun["events"]>;
-  completeRun(runId: string, events: StoredRun["events"]): Promise<void>;
+  run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(): Promise<StoredRun[]>;
+  listNotifications(): Promise<BotNotificationIntent[]>;
+  acknowledgeNotification(notificationId: string): Promise<void>;
+  getSettings(identity: {
+    userId: string;
+    botId: string;
+  }): Promise<BotSettingsViewV1>;
+  executeConfiguration(
+    identity: { userId: string; botId: string },
+    command: ConfigurationCommandV1,
+  ): Promise<OperationReceiptV1>;
+  markConnectionUnavailable(
+    identity: { userId: string; botId: string },
+    connectionId: string,
+    compensation?: { id: string; expectedGeneration: string },
+  ): Promise<"applied" | "stale">;
+}
+
+interface UserConfigurationRpc extends ComposioConnectionStore {
+  read(userId: string): Promise<UserSettingsViewV1>;
+  execute(
+    userId: string,
+    command: ConfigurationCommandV1,
+  ): Promise<OperationReceiptV1>;
 }
 
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
@@ -54,88 +98,172 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   return env.BOT_STATES.get(id) as unknown as BotStateRpc;
 }
 
-export class UserMemory extends WorkerEntrypoint<Env> implements MemoryBinding {
-  async get(key: string): Promise<string | null> {
-    const object = await this.env.MEMORY_FILES.get(key);
-    return object ? object.text() : null;
-  }
+function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
+  const id = env.USER_CONFIGURATIONS.idFromName(userId);
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration, whose
+  // public RPC methods exactly match UserConfigurationRpc.
+  return env.USER_CONFIGURATIONS.get(id) as unknown as UserConfigurationRpc;
+}
 
-  async put(key: string, value: string, contentType?: string): Promise<void> {
-    await this.env.MEMORY_FILES.put(key, value, {
-      httpMetadata: contentType ? { contentType } : undefined,
+export class ComposioConnectionApi
+  extends WorkerEntrypoint<Env, UserScopedProps>
+  implements ConnectionBinding
+{
+  private coordinator(): ComposioConnectionCoordinator {
+    if (!this.env.COMPOSIO_API_KEY || !this.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID) {
+      throw new Error("Composio is not configured");
+    }
+    return new ComposioConnectionCoordinator({
+      client: new ComposioClient({ apiKey: this.env.COMPOSIO_API_KEY }),
+      store: userConfigurationStub(this.env, this.ctx.props.userId),
+      callbackBaseUrl: this.env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
+      connectionTypes: {
+        gmail: {
+          authConfigId: this.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
+          displayName: "Gmail",
+          toolkitSlug: "gmail",
+        },
+      },
+      assignBot: async (userId, botId, connectionId, leaseId) => {
+        const bot = botStateStub(this.env, userId, botId);
+        const settings = await bot.getSettings({ userId, botId });
+        await bot.executeConfiguration(
+          { userId, botId },
+          {
+            schemaVersion: 1,
+            type: "bot/assign-capability",
+            commandId: leaseId,
+            botId,
+            expectedRevision: settings.revision,
+            assignment: {
+              assignmentId: `composio-${connectionId}`,
+              packageId: "composio",
+              capabilityId: "gmail-tools",
+              connectionId,
+            },
+          },
+        );
+      },
+      markBotUnavailable: (userId, botId, connectionId, compensation) =>
+        botStateStub(this.env, userId, botId).markConnectionUnavailable(
+          { userId, botId },
+          connectionId,
+          compensation,
+        ),
     });
   }
 
-  async delete(key: string): Promise<void> {
-    await this.env.MEMORY_FILES.delete(key);
+  start(input: {
+    commandId: string;
+    connectionTypeId: string;
+    botId: string;
+    alias?: string;
+  }): ReturnType<ConnectionBinding["start"]> {
+    return this.coordinator().start(this.ctx.props.userId, input);
   }
 
-  async list(
-    prefix: string,
-    cursor?: string,
-  ): ReturnType<MemoryBinding["list"]> {
-    const page = await this.env.MEMORY_FILES.list({ prefix, cursor });
-    return {
-      objects: page.objects.map((object) => ({ key: object.key })),
-      truncated: page.truncated,
-      cursor: page.truncated ? page.cursor : undefined,
-    };
+  complete(input: {
+    connectionId: string;
+    connectedAccountId: string;
+  }): ReturnType<ConnectionBinding["complete"]> {
+    return this.coordinator().complete(this.ctx.props.userId, input);
   }
 
-  async vectorUpsert(
-    vectors: Parameters<MemoryBinding["vectorUpsert"]>[0],
-  ): Promise<void> {
-    await this.env.MEMORY_INDEX.upsert(vectors);
+  fail(
+    connectionId: string,
+    message: string,
+  ): ReturnType<ConnectionBinding["fail"]> {
+    return this.coordinator().fail(
+      this.ctx.props.userId,
+      connectionId,
+      message,
+    );
   }
 
-  async vectorQuery(
-    vector: number[],
-    options: Parameters<MemoryBinding["vectorQuery"]>[1],
-  ): ReturnType<MemoryBinding["vectorQuery"]> {
-    const result = await this.env.MEMORY_INDEX.query(vector, options);
-    return {
-      matches: result.matches.map((match) => ({
-        id: match.id,
-        score: match.score,
-        metadata: match.metadata,
-      })),
-    };
-  }
-
-  async vectorDeleteByIds(ids: string[]): Promise<void> {
-    await this.env.MEMORY_INDEX.deleteByIds(ids);
-  }
-
-  async embed(model: string, texts: string[]): Promise<{ data: number[][] }> {
-    // SAFETY: The memory plugin only requests the configured Workers AI text
-    // embedding model, whose response contract is `{ data: number[][] }`.
-    return this.env.AI.run(model as keyof AiModels, {
-      text: texts,
-    }) as Promise<{ data: number[][] }>;
+  revoke(connectionId: string): ReturnType<ConnectionBinding["revoke"]> {
+    return this.coordinator().revoke(this.ctx.props.userId, connectionId);
   }
 }
 
-export class UserBotState extends WorkerEntrypoint<Env, UserBotStateProps> {
-  async acceptRun(
-    botId: string,
-    run: Omit<StoredRun, "events">,
-  ): Promise<StoredRun["events"]> {
-    return botStateStub(this.env, this.ctx.props.userId, botId).acceptRun(run);
+export class UserConfigurationApi
+  extends WorkerEntrypoint<Env, UserScopedProps>
+  implements ConfigurationBinding
+{
+  async read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
+    if (query.type === "user/get") {
+      return userConfigurationStub(this.env, this.ctx.props.userId).read(
+        this.ctx.props.userId,
+      );
+    }
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      query.botId,
+    ).getSettings({ userId: this.ctx.props.userId, botId: query.botId });
   }
 
-  async completeRun(
-    botId: string,
-    runId: string,
-    events: StoredRun["events"],
-  ): Promise<void> {
-    return botStateStub(this.env, this.ctx.props.userId, botId).completeRun(
-      runId,
-      events,
+  async execute(command: ConfigurationCommandV1): Promise<OperationReceiptV1> {
+    if (command.type === "user/install-package") {
+      const application = await compileFoundationApplication();
+      const available = application.packages.find(
+        (pkg) =>
+          pkg.id === command.packageId && pkg.version === command.version,
+      );
+      if (!available)
+        throw new Error("Package is not available in this application");
+    }
+    if (
+      command.type === "user/update-profile" ||
+      command.type === "user/set-new-bot-model" ||
+      command.type === "user/install-package" ||
+      command.type === "user/set-package-enabled"
+    ) {
+      return userConfigurationStub(this.env, this.ctx.props.userId).execute(
+        this.ctx.props.userId,
+        command,
+      );
+    }
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      command.botId,
+    ).executeConfiguration(
+      { userId: this.ctx.props.userId, botId: command.botId },
+      command,
     );
+  }
+}
+
+export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
+  async run(botId: string, command: BotTurnCommand): Promise<BotTurnResult> {
+    return botStateStub(this.env, this.ctx.props.userId, botId).run({
+      ...command,
+      userId: this.ctx.props.userId,
+      botId,
+    });
   }
 
   async listRuns(botId: string): Promise<StoredRun[]> {
     return botStateStub(this.env, this.ctx.props.userId, botId).listRuns();
+  }
+
+  async listNotifications(botId: string): Promise<BotNotificationIntent[]> {
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      botId,
+    ).listNotifications();
+  }
+
+  async acknowledgeNotification(
+    botId: string,
+    notificationId: string,
+  ): Promise<void> {
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      botId,
+    ).acknowledgeNotification(notificationId);
   }
 }
 
@@ -154,14 +282,17 @@ class R2ApplicationArtifacts implements ApplicationArtifactStore {
 }
 
 interface RuntimeExports {
-  UserBotState(options: { props: UserBotStateProps }): BotStateBinding;
-  UserMemory(options: Record<string, never>): MemoryBinding;
+  UserBotState(options: { props: UserScopedProps }): BotStateBinding;
+  UserConfigurationApi(options: {
+    props: UserScopedProps;
+  }): ConfigurationBinding;
+  ComposioConnectionApi(options: { props: UserScopedProps }): ConnectionBinding;
 }
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    // SAFETY: UserBotState is exported by this module; workerd materializes it
-    // on ctx.exports, which the generic workers-types declaration cannot see.
+    // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
+    // workers-types cannot infer the generated local RPC stubs.
     const runtimeExports = ctx.exports as unknown as RuntimeExports;
     const gateway = createGateway({
       loader: env.USER_APPLICATIONS,
@@ -170,7 +301,10 @@ export default {
       applicationHashFor: () => Promise.resolve(env.DEFAULT_APPLICATION_HASH),
       botStateFor: (userId): BotStateBinding =>
         runtimeExports.UserBotState({ props: { userId } }),
-      memoryFor: () => runtimeExports.UserMemory({}),
+      configurationFor: (userId): ConfigurationBinding =>
+        runtimeExports.UserConfigurationApi({ props: { userId } }),
+      connectionsFor: (userId): ConnectionBinding =>
+        runtimeExports.ComposioConnectionApi({ props: { userId } }),
       allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });

@@ -11,6 +11,7 @@ import authManifest from "@frockbot/plugin-auth/manifest";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
+import composioManifest from "@frockbot/plugin-composio/manifest";
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 // Desktop and mobile Package manifests remain part of the immutable plan.
@@ -47,6 +48,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
   ["@frockbot/plugin-clock", clockManifest],
+  ["@frockbot/plugin-composio", composioManifest],
   ["@frockbot/plugin-computer", computerManifest],
   ["@frockbot/plugin-desktop-clipboard", clipboardManifest],
   ["@frockbot/plugin-desktop-directory-picker", directoryPickerManifest],
@@ -91,6 +93,8 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Computer providers require host authority and are added only by a capable runtime.
   runtimeIds.delete("computer");
   runtimeIds.delete("fly-sprite");
+  // Composio mounts only after durable Connections resolve its backend config.
+  runtimeIds.delete("composio");
   return {
     plan,
     packages: plan.packages
@@ -99,7 +103,9 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
         specifier: pkg.specifier,
         manifest: {
           ...pkg.manifest,
-          contributions: { runtime: pkg.manifest.contributions.runtime },
+          contributions: {
+            runtime: pkg.manifest.contributions.runtime,
+          },
         },
       })),
     resolveContribution: (specifier) => {

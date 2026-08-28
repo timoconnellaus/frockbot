@@ -160,11 +160,12 @@ export async function requestTurn(
   fetcher: Fetcher,
   botId: string,
   text: string,
+  commandId: string,
   signal?: AbortSignal,
 ): Promise<TurnResponse> {
   const response = await fetcher(turnsPath(botId), {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, commandId }),
     signal,
   });
   return decodeTurnResponse(await decodeBody(response));

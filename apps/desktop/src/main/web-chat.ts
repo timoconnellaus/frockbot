@@ -30,7 +30,28 @@ class WebChatController {
     this.data = {
       connection: "starting",
       modelLabel: "Cordis · custom agent loop",
+      settingsAvailable: false,
+      connectionsAvailable: false,
       messages: [],
+      pluginCatalog: [],
+      loadBotSettings: () =>
+        Promise.reject(new Error("Settings require the hosted backend")),
+      saveBotProfile: () =>
+        Promise.reject(new Error("Settings require the hosted backend")),
+      saveBotNotifications: () =>
+        Promise.reject(new Error("Settings require the hosted backend")),
+      loadUserSettings: () =>
+        Promise.reject(new Error("Settings require the hosted backend")),
+      saveUserProfile: () =>
+        Promise.reject(new Error("Settings require the hosted backend")),
+      loadPluginCatalog: () =>
+        Promise.reject(new Error("Plugins require the hosted backend")),
+      installPackage: () =>
+        Promise.reject(new Error("Plugins require the hosted backend")),
+      startConnection: () =>
+        Promise.reject(new Error("Connections require the hosted backend")),
+      revokeConnection: () =>
+        Promise.reject(new Error("Connections require the hosted backend")),
       sendPrompt: (text: string) => Promise.resolve(this.sendPrompt(text)),
       abort: () => Promise.resolve(this.abort()),
       restart: () => Promise.resolve(this.restart()),

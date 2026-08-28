@@ -3,4 +3,6 @@ BETTER_AUTH_URL=http://127.0.0.1:8787
 BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
 GOOGLE_CLIENT_ID=replace-with-google-web-client-id
 GOOGLE_CLIENT_SECRET=replace-with-google-web-client-secret
+COMPOSIO_API_KEY=replace-with-composio-project-api-key
+COMPOSIO_GMAIL_AUTH_CONFIG_ID=replace-with-composio-gmail-auth-config-id
 ALLOW_DEVELOPMENT_AUTH=true

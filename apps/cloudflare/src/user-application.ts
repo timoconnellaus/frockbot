@@ -1,8 +1,5 @@
-import { createFoundationRuntime } from "@frockbot/agent-runtime/runtime";
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 import type { UserApplicationEnv } from "./contracts.js";
-import { appendedSessionEvents } from "./durable-session.js";
 
 const BOT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const USER_ID_PATTERN = BOT_ID_PATTERN;
@@ -55,48 +52,9 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
-function parseStoredJson<T>(body: string): Promise<T> {
-  try {
-    return Promise.resolve(JSON.parse(body) as T);
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
-
-function memoryPluginConfig(
-  env: UserApplicationEnv,
-  botId: string,
-): MemoryPluginConfig {
-  return {
-    ownerId: env.DEPLOYMENT.userId,
-    botId,
-    bucket: {
-      get: async (key) => {
-        const body = await env.MEMORY.get(key);
-        return body === null
-          ? null
-          : {
-              text: () => Promise.resolve(body),
-              json: <T>() => parseStoredJson<T>(body),
-            };
-      },
-      put: (key, value, options) =>
-        env.MEMORY.put(key, value, options?.httpMetadata?.contentType),
-      delete: (key) => env.MEMORY.delete(key),
-      list: ({ prefix, cursor }) => env.MEMORY.list(prefix, cursor),
-    },
-    vectorize: {
-      upsert: (vectors) => env.MEMORY.vectorUpsert(vectors),
-      query: (vector, options) => env.MEMORY.vectorQuery(vector, options),
-      deleteByIds: (ids) => env.MEMORY.vectorDeleteByIds(ids),
-    },
-    ai: {
-      run: (model, input) => env.MEMORY.embed(model, input.text),
-    },
-  };
-}
-
-async function readPrompt(request: Request): Promise<string> {
+async function readTurnCommand(
+  request: Request,
+): Promise<{ commandId: string; text: string }> {
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (contentLength > MAX_INPUT_LENGTH * 2)
     throw new Error("prompt is too large");
@@ -105,11 +63,18 @@ async function readPrompt(request: Request): Promise<string> {
     typeof value === "object" && value !== null && "text" in value
       ? (value as { text?: unknown }).text
       : undefined;
+  const commandId =
+    typeof value === "object" && value !== null && "commandId" in value
+      ? (value as { commandId?: unknown }).commandId
+      : undefined;
   if (typeof text !== "string" || !text.trim()) {
     throw new Error("prompt text is required");
   }
   if (text.length > MAX_INPUT_LENGTH) throw new Error("prompt is too large");
-  return text.trim();
+  if (typeof commandId !== "string" || !BOT_ID_PATTERN.test(commandId)) {
+    throw new Error("commandId is invalid");
+  }
+  return { commandId, text: text.trim() };
 }
 
 export function createUserApplication() {
@@ -163,14 +128,56 @@ export function createUserApplication() {
         applicationHash: compiled.plan.applicationHash,
         packages: compiled.plan.packages.map((pkg) => ({
           id: pkg.id,
+          displayName: pkg.manifest.displayName,
           version: pkg.version,
           contributions: [
             ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
             ...(pkg.manifest.contributions.client ? ["client"] : []),
             ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
           ],
+          configuration: pkg.manifest.configuration,
         })),
       });
+    }
+
+    const notificationMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/notifications$/,
+    );
+    if (notificationMatch) {
+      let notificationBotId: string;
+      try {
+        notificationBotId = decodeURIComponent(notificationMatch[1]);
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      if (!BOT_ID_PATTERN.test(notificationBotId)) {
+        return jsonError(400, "invalid bot id");
+      }
+      if (request.method === "GET") {
+        return Response.json({
+          notifications:
+            await env.BOT_STATE.listNotifications(notificationBotId),
+        });
+      }
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      const input: unknown = await request.json();
+      const notificationId =
+        typeof input === "object" &&
+        input !== null &&
+        "notificationId" in input &&
+        typeof input.notificationId === "string"
+          ? input.notificationId
+          : undefined;
+      if (!notificationId) {
+        return jsonError(400, "notificationId is required");
+      }
+      await env.BOT_STATE.acknowledgeNotification(
+        notificationBotId,
+        notificationId,
+      );
+      return Response.json({ status: "acknowledged" });
     }
 
     const turnMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/turns$/);
@@ -188,9 +195,9 @@ export function createUserApplication() {
     }
     if (request.method !== "POST") return jsonError(405, "method not allowed");
 
-    let text: string;
+    let turnCommand: { commandId: string; text: string };
     try {
-      text = await readPrompt(request);
+      turnCommand = await readTurnCommand(request);
     } catch (error) {
       return jsonError(
         400,
@@ -198,38 +205,20 @@ export function createUserApplication() {
       );
     }
 
-    const runId = crypto.randomUUID();
-    const sessionId = `${env.DEPLOYMENT.userId}:${botId}`;
-    const sessionEvents = await env.BOT_STATE.acceptRun(botId, {
-      runId,
-      sessionId,
-      acceptedAt: new Date().toISOString(),
-      input: text,
-    });
-
-    const runtime = await createFoundationRuntime(undefined, {
-      botId,
-      agentId: botId,
-      sessionId,
-      sessionEvents,
-      application: await application,
-      memory: memoryPluginConfig(env, botId),
-    });
-
     try {
-      runtime.agent.agent.send(text);
-      await runtime.agent.agent.whenIdle();
-      const events = [...runtime.agent.agent.session.events];
-      const runEvents = appendedSessionEvents(sessionEvents, events);
-      await env.BOT_STATE.completeRun(botId, runId, events);
-      const message = runtime.agent.agent.session.deriveMessages().at(-1);
-      return Response.json({
-        runId,
-        text: message?.role === "assistant" ? message.content : "",
-        events: runEvents,
-      });
-    } finally {
-      await runtime.dispose();
+      return Response.json(
+        await env.BOT_STATE.run(botId, {
+          runId: turnCommand.commandId,
+          sessionId: `${env.DEPLOYMENT.userId}:${botId}`,
+          acceptedAt: new Date().toISOString(),
+          text: turnCommand.text,
+        }),
+      );
+    } catch (error) {
+      return jsonError(
+        500,
+        error instanceof Error ? error.message : "Bot turn failed",
+      );
     }
   };
 }

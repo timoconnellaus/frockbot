@@ -1,4 +1,10 @@
 import type { SessionEvent } from "@frockbot/agent-core";
+import type {
+  ConfigurationCommandV1,
+  ConfigurationQueryV1,
+  ConfigurationViewV1,
+  OperationReceiptV1,
+} from "@frockbot/configuration-core";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 
 export interface UserApplicationIdentity {
@@ -6,25 +12,46 @@ export interface UserApplicationIdentity {
   applicationHash: string;
 }
 
+export type StoredRunStatus =
+  "running" | "completed" | "failed" | "interrupted";
+
 export interface StoredRun {
   runId: string;
   sessionId: string;
   acceptedAt: string;
   input: string;
   events: SessionEvent[];
+  status?: StoredRunStatus;
+  responseText?: string;
+  failure?: string;
+}
+
+export interface BotTurnCommand {
+  runId: string;
+  sessionId: string;
+  acceptedAt: string;
+  text: string;
+}
+
+export interface BotNotificationIntent {
+  notificationId: string;
+  createdAt: string;
+  title: string;
+  body: string;
+}
+
+export interface BotTurnResult {
+  runId: string;
+  text: string;
+  events: SessionEvent[];
+  notification?: BotNotificationIntent;
 }
 
 export interface BotStateBinding {
-  acceptRun(
-    botId: string,
-    run: Omit<StoredRun, "events">,
-  ): Promise<SessionEvent[]>;
-  completeRun(
-    botId: string,
-    runId: string,
-    events: SessionEvent[],
-  ): Promise<void>;
+  run(botId: string, command: BotTurnCommand): Promise<BotTurnResult>;
   listRuns(botId: string): Promise<StoredRun[]>;
+  listNotifications(botId: string): Promise<BotNotificationIntent[]>;
+  acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
 }
 
 export interface MemoryBinding {
@@ -50,7 +77,6 @@ export interface MemoryBinding {
 
 export interface UserApplicationEnv {
   BOT_STATE: BotStateBinding;
-  MEMORY: MemoryBinding;
   DEPLOYMENT: UserApplicationIdentity;
 }
 
@@ -93,13 +119,44 @@ export interface GatewayAuth {
   getSession(headers: Headers): Promise<AuthSession | null>;
 }
 
+export interface StartConnectionResult {
+  connectionId: string;
+  redirectUrl: string;
+  expiresAt: string;
+}
+
+export interface RevokeConnectionResult {
+  status: "revoked" | "reconciliation-required";
+}
+
+export interface ConnectionBinding {
+  start(input: {
+    commandId: string;
+    connectionTypeId: string;
+    botId: string;
+    alias?: string;
+  }): Promise<StartConnectionResult>;
+  complete(input: {
+    connectionId: string;
+    connectedAccountId: string;
+  }): Promise<void>;
+  fail(connectionId: string, message: string): Promise<void>;
+  revoke(connectionId: string): Promise<RevokeConnectionResult>;
+}
+
+export interface ConfigurationBinding {
+  read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1>;
+  execute(command: ConfigurationCommandV1): Promise<OperationReceiptV1>;
+}
+
 export interface GatewayDependencies {
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
   auth: GatewayAuth;
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): BotStateBinding;
-  memoryFor(): MemoryBinding;
+  configurationFor(userId: string): ConfigurationBinding;
+  connectionsFor(userId: string): ConnectionBinding;
   allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;

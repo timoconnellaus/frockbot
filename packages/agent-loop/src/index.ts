@@ -148,6 +148,7 @@ class LoopAgent implements Agent {
       { type: "turn/start", turn },
       { type: "input/admitted", messageId: input.messageId, turn },
     ]);
+    await this.session.flush();
     this.#inbox.shift();
     this.#ctx.emit("agent/inbox/claimed", this, [input], turn);
 
@@ -191,6 +192,7 @@ class LoopAgent implements Agent {
           text: response.text,
           toolCalls: response.toolCalls,
         });
+        await this.session.flush();
 
         if (response.toolCalls.length === 0) {
           this.session.append({
@@ -232,6 +234,7 @@ class LoopAgent implements Agent {
         });
       }
       this.session.append({ type: "turn/end", turn, outcome: turnOutcome });
+      await this.session.flush();
       await this.#ctx.serial("agent/turn-stopping", this, turn);
     }
   }
@@ -264,6 +267,7 @@ class LoopAgent implements Agent {
         () => Promise.resolve(proposed),
       );
       this.session.append({ type: "model/request", turn, step, request });
+      await this.session.flush();
 
       try {
         return await this.#consumeStream(request, turn, step, signal);
@@ -343,6 +347,7 @@ class LoopAgent implements Agent {
       };
       const preparation = await this.#ctx.tools.prepare(call, context);
       this.session.append({ type: "tool/call", turn, step, call });
+      await this.session.flush();
       let result: ToolExecutionResult;
       if (preparation.kind === "denied") {
         result = preparation.result;

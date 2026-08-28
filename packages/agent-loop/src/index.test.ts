@@ -4,6 +4,7 @@ import {
   type AgentOptions,
   LlmRegistry,
   type LlmProvider,
+  type PersistSessionEvents,
   SessionStore,
   SystemPromptRegistry,
   ToolRegistry,
@@ -17,10 +18,11 @@ const roots: Context[] = [];
 async function mountRuntime(
   provider: LlmProvider,
   tool?: ToolDefinition,
+  persistEvents?: PersistSessionEvents,
 ): Promise<Context> {
   const root = new Context();
   roots.push(root);
-  await root.plugin(SessionStore);
+  await root.plugin(SessionStore, { persistEvents });
   await root.plugin(SystemPromptRegistry);
   await root.plugin(LlmRegistry);
   await root.plugin(ToolRegistry);
@@ -72,6 +74,9 @@ describe("AgentLoop", () => {
   test("streams, journals a tool before execution, and repeats the model step", async () => {
     const requests: string[] = [];
     let toolWasJournaled = false;
+    let modelIntentWasDurable = false;
+    let toolIntentWasDurable = false;
+    const durableEventTypes: string[] = [];
     let turnStoppingSawCompletedJournal = false;
     let observedPromptSessionId: string | undefined;
     let observedToolIdentity:
@@ -80,6 +85,7 @@ describe("AgentLoop", () => {
     const provider: LlmProvider = {
       id: "scripted",
       async *stream(request) {
+        modelIntentWasDurable = durableEventTypes.at(-1) === "model/request";
         requests.push(request.requestId);
         if (requests.length === 1) {
           yield { type: "text-delta", text: "Checking. " };
@@ -115,6 +121,7 @@ describe("AgentLoop", () => {
       async execute(input, context) {
         const session = root.agents.get("general")?.session;
         toolWasJournaled = session?.events.at(-1)?.type === "tool/call";
+        toolIntentWasDurable = durableEventTypes.at(-1) === "tool/call";
         const identifiedContext = context as typeof context & {
           agentId: string;
         };
@@ -130,7 +137,10 @@ describe("AgentLoop", () => {
       },
     };
 
-    root = await mountRuntime(provider, tool);
+    root = await mountRuntime(provider, tool, (_sessionId, events) => {
+      durableEventTypes.push(...events.map((event) => event.type));
+      return Promise.resolve();
+    });
     root.systemPrompt.register({
       id: "session-observer",
       render: (context) => {
@@ -157,6 +167,8 @@ describe("AgentLoop", () => {
     const events = handle.agent.session.events;
     expect(requests).toHaveLength(2);
     expect(toolWasJournaled).toBe(true);
+    expect(modelIntentWasDurable).toBe(true);
+    expect(toolIntentWasDurable).toBe(true);
     expect(turnStoppingSawCompletedJournal).toBe(true);
     expect(handle.agent.id).toBe("general");
     expect(handle.agent.botId).toBe("general-bot");

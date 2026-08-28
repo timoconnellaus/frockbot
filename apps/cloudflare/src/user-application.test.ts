@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { UserApplicationEnv } from "./contracts.js";
+import type {
+  BotStateBinding,
+  BotTurnResult,
+  UserApplicationEnv,
+} from "./contracts.js";
 import { createUserApplication } from "./user-application.js";
 
 function parseContentSecurityPolicy(
@@ -13,7 +17,7 @@ function parseContentSecurityPolicy(
   return directives;
 }
 
-const env = {
+const securityEnv = {
   DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
 } as unknown as UserApplicationEnv;
 
@@ -23,7 +27,7 @@ describe("user application security headers", () => {
 
     const response = await fetchUserApplication(
       new Request("https://app.example/app.css"),
-      env,
+      securityEnv,
     );
 
     expect(response.status).toBe(200);
@@ -34,5 +38,42 @@ describe("user application security headers", () => {
     // so fonts render only when the policy declares font-src for them.
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
+  });
+});
+
+describe("user application Bot seam", () => {
+  test("delegates an admitted turn to the Bot owner", async () => {
+    const calls: Array<{ botId: string; text: string }> = [];
+    const result: BotTurnResult = {
+      runId: "run-1",
+      text: "owned by bot",
+      events: [],
+    };
+    const botState: BotStateBinding = {
+      run: (botId, command) => {
+        calls.push({ botId, text: command.text });
+        return Promise.resolve(result);
+      },
+      listRuns: () => Promise.resolve([]),
+      listNotifications: () => Promise.resolve([]),
+      acknowledgeNotification: () => Promise.resolve(),
+    };
+    const env: UserApplicationEnv = {
+      BOT_STATE: botState,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello", commandId: "command-1" }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as BotTurnResult).toEqual(result);
+    expect(calls).toEqual([{ botId: "primary", text: "hello" }]);
   });
 });

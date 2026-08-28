@@ -246,6 +246,75 @@ describe("decodeFrockBotManifest", () => {
     ).toThrow('manifest contribution "mobile" must be a relative export path');
   });
 
+  test("decodes manifest v3 settings, Connection Types, and capabilities", () => {
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 3,
+      id: "composio",
+      displayName: "Composio",
+      version: "1.0.0",
+      compatibility: { frockbot: ">=0.0.1" },
+      contributions: { runtime: { entry: "./runtime" } },
+      permissions: ["connections:manage"],
+      configuration: {
+        settings: [
+          {
+            id: "preferences",
+            schemaVersion: 1,
+            scopes: ["user"],
+            schema: { type: "object", properties: {} },
+          },
+        ],
+        connectionTypes: [
+          {
+            id: "gmail",
+            displayName: "Gmail",
+            allowMultiple: true,
+            authorization: { kind: "oauth2", driverId: "composio" },
+            capabilities: ["gmail-tools"],
+          },
+        ],
+        capabilities: [
+          {
+            id: "gmail-tools",
+            kind: "tool",
+            connectionTypes: ["gmail"],
+          },
+        ],
+      },
+    });
+
+    expect(decoded).toMatchObject({
+      schemaVersion: 3,
+      configuration: {
+        connectionTypes: [{ id: "gmail", authorization: { kind: "oauth2" } }],
+        capabilities: [{ id: "gmail-tools", kind: "tool" }],
+      },
+    });
+  });
+
+  test("rejects remote schema references in manifest v3", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 3,
+        id: "unsafe",
+        displayName: "Unsafe",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: { runtime: { entry: "./runtime" } },
+        configuration: {
+          settings: [
+            {
+              id: "unsafe",
+              schemaVersion: 1,
+              scopes: ["user"],
+              schema: { $ref: "https://attacker.test/schema.json" },
+            },
+          ],
+        },
+      }),
+    ).toThrow("remote schema references are not supported");
+  });
+
   test("orders normalized contribution kinds", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 1,

@@ -1,10 +1,17 @@
 /// <reference path="../env.d.ts" />
 
 import type { ClientPlugin, ClientTurnEvent } from "@frockbot/client-core";
+import type {
+  BotNotificationPolicy,
+  BotProfile,
+  BotSettingsViewV1,
+  UserSettingsViewV1,
+} from "@frockbot/configuration-core";
 import { ref } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
+  type PluginCatalogItem,
   type SendPromptResult,
   type WebChatMessage,
   type WebToolActivity,
@@ -34,12 +41,265 @@ function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {
   return [...tools.values()];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
+  if (!isRecord(value) || !Array.isArray(value.packages)) {
+    throw new Error("Application manifest is invalid");
+  }
+  return value.packages.flatMap((candidate) => {
+    if (!isRecord(candidate) || !isRecord(candidate.configuration)) return [];
+    const connectionTypes = candidate.configuration.connectionTypes;
+    if (!Array.isArray(connectionTypes) || connectionTypes.length === 0) {
+      return [];
+    }
+    if (
+      typeof candidate.id !== "string" ||
+      typeof candidate.version !== "string"
+    ) {
+      throw new Error("Application Package metadata is invalid");
+    }
+    const decodedConnections = connectionTypes.map((connection) => {
+      if (
+        !isRecord(connection) ||
+        !isRecord(connection.authorization) ||
+        typeof connection.id !== "string" ||
+        typeof connection.displayName !== "string" ||
+        typeof connection.allowMultiple !== "boolean" ||
+        (connection.authorization.kind !== "oauth2" &&
+          connection.authorization.kind !== "api-key" &&
+          connection.authorization.kind !== "custom") ||
+        !Array.isArray(connection.capabilities) ||
+        !connection.capabilities.every((item) => typeof item === "string")
+      ) {
+        throw new Error("Application Connection Type metadata is invalid");
+      }
+      const authorizationKind: PluginCatalogItem["connectionTypes"][number]["authorizationKind"] =
+        connection.authorization.kind;
+      return {
+        id: connection.id,
+        displayName: connection.displayName,
+        allowMultiple: connection.allowMultiple,
+        authorizationKind,
+        capabilities: connection.capabilities as string[],
+      };
+    });
+    return [
+      {
+        packageId: candidate.id,
+        displayName:
+          typeof candidate.displayName === "string"
+            ? candidate.displayName
+            : candidate.id,
+        version: candidate.version,
+        connectionTypes: decodedConnections,
+      },
+    ];
+  });
+}
+
+function selectedBotId(): string {
+  try {
+    return new URL(window.location.href).searchParams.get("bot") ?? "default";
+  } catch {
+    return "default";
+  }
+}
+
 export const shellClientPlugin: ClientPlugin = (ctx) => {
   let activeRequest: AbortController | undefined;
+  const botId = selectedBotId();
+
+  async function deliverNotifications(): Promise<void> {
+    if (
+      !ctx.transport.listNotifications ||
+      !ctx.transport.acknowledgeNotification
+    ) {
+      return;
+    }
+    const notifications = await ctx.transport.listNotifications();
+    for (const notification of notifications) {
+      if (document.hidden) {
+        if (
+          !("Notification" in window) ||
+          Notification.permission !== "granted"
+        ) {
+          web.value.settingsError =
+            "A completed Bot notification is waiting for permission";
+          continue;
+        }
+        new Notification(notification.title, { body: notification.body });
+      }
+      await ctx.transport.acknowledgeNotification(notification.notificationId);
+    }
+  }
+
   const web = ref<FrockBotWebData>({
     connection: "ready",
     modelLabel: "Foundation · Dynamic Worker",
+    settingsAvailable: true,
+    connectionsAvailable: true,
     messages: [],
+    pluginCatalog: [],
+    async loadBotSettings(): Promise<void> {
+      if (!ctx.transport.readConfiguration) {
+        web.value.settingsError = "Settings are unavailable";
+        return;
+      }
+      try {
+        web.value.botSettings = (await ctx.transport.readConfiguration({
+          schemaVersion: 1,
+          type: "bot/get",
+          botId,
+        })) as BotSettingsViewV1;
+        web.value.settingsError = undefined;
+        await deliverNotifications();
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error ? error.message : "Could not load settings";
+      }
+    },
+    async saveBotProfile(profile: BotProfile): Promise<void> {
+      const current = web.value.botSettings;
+      if (!current || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/update-profile",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        profile,
+      });
+      await web.value.loadBotSettings();
+    },
+    async saveBotNotifications(
+      notifications: BotNotificationPolicy,
+    ): Promise<void> {
+      if (
+        notifications.enabled &&
+        "Notification" in window &&
+        Notification.permission === "default"
+      ) {
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          throw new Error("Notification permission was not granted");
+        }
+      }
+      const current = web.value.botSettings;
+      if (!current || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/update-notifications",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        notifications,
+      });
+      await web.value.loadBotSettings();
+    },
+    async loadUserSettings(): Promise<void> {
+      if (!ctx.transport.readConfiguration) {
+        web.value.settingsError = "Settings are unavailable";
+        return;
+      }
+      try {
+        web.value.userSettings = (await ctx.transport.readConfiguration({
+          schemaVersion: 1,
+          type: "user/get",
+        })) as UserSettingsViewV1;
+        web.value.settingsError = undefined;
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error ? error.message : "Could not load settings";
+      }
+    },
+    async saveUserProfile(profile: {
+      name: string;
+      email?: string;
+    }): Promise<void> {
+      const settings = web.value.userSettings;
+      if (!settings || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "user/update-profile",
+        commandId: crypto.randomUUID(),
+        expectedRevision: settings.revision,
+        profile,
+      });
+      await web.value.loadUserSettings();
+    },
+    async loadPluginCatalog(): Promise<void> {
+      if (
+        !ctx.transport.readApplicationManifest ||
+        !ctx.transport.readConfiguration
+      ) {
+        web.value.settingsError = "Plugins are unavailable";
+        return;
+      }
+      try {
+        const [manifest, settings] = await Promise.all([
+          ctx.transport.readApplicationManifest(),
+          ctx.transport.readConfiguration({
+            schemaVersion: 1,
+            type: "user/get",
+          }),
+        ]);
+        web.value.pluginCatalog = decodePluginCatalog(manifest);
+        web.value.userSettings = settings as typeof web.value.userSettings;
+        web.value.settingsError = undefined;
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error ? error.message : "Could not load Plugins";
+      }
+    },
+    async installPackage(packageId: string, version: string): Promise<void> {
+      const settings = web.value.userSettings;
+      if (!settings || !ctx.transport.executeConfiguration) {
+        throw new Error("Plugins are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: crypto.randomUUID(),
+        expectedRevision: settings.revision,
+        packageId,
+        version,
+      });
+      await web.value.loadPluginCatalog();
+    },
+    async startConnection(
+      packageId: string,
+      connectionTypeId: string,
+    ): Promise<string> {
+      if (!ctx.transport.startConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const result = await ctx.transport.startConnection({
+        commandId: crypto.randomUUID(),
+        packageId,
+        connectionTypeId,
+        botId,
+      });
+      return result.redirectUrl;
+    },
+    async revokeConnection(
+      packageId: string,
+      connectionId: string,
+    ): Promise<void> {
+      if (!ctx.transport.revokeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      await ctx.transport.revokeConnection(packageId, connectionId);
+      await web.value.loadPluginCatalog();
+    },
     async sendPrompt(text: string): Promise<SendPromptResult> {
       if (web.value.activeRunId) return { accepted: false, error: "busy" };
       const pendingRunId = crypto.randomUUID();
@@ -65,7 +325,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       );
       activeRequest = new AbortController();
       try {
-        const result = await ctx.transport.turn(text, activeRequest.signal);
+        if (!web.value.botSettings) await web.value.loadBotSettings();
+        const result = await ctx.transport.turn(
+          text,
+          activeRequest.signal,
+          pendingRunId,
+        );
         for (const message of web.value.messages) {
           if (message.runId === pendingRunId) message.runId = result.runId;
         }
@@ -77,6 +342,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           status: "completed",
           tools: toolsFrom(result.events),
         });
+        try {
+          await deliverNotifications();
+        } catch (error) {
+          web.value.settingsError =
+            error instanceof Error
+              ? error.message
+              : "Notification delivery failed";
+        }
         return { accepted: true, runId: result.runId };
       } catch (error) {
         const aborted =

@@ -149,12 +149,15 @@ describe("gateway requests", () => {
       },
       "my bot",
       "hello",
+      "command-1",
     );
 
     expect(result).toEqual({ runId: "run-1", text: "hi", events: [] });
     expect(calls[0]?.path).toBe("/api/bots/my%20bot/turns");
     expect(calls[0]?.init?.method).toBe("POST");
-    expect(calls[0]?.init?.body).toBe(JSON.stringify({ text: "hello" }));
+    expect(calls[0]?.init?.body).toBe(
+      JSON.stringify({ text: "hello", commandId: "command-1" }),
+    );
   });
 
   test("surfaces a gateway error body", async () => {
@@ -164,6 +167,7 @@ describe("gateway requests", () => {
         () => Promise.resolve(jsonResponse({ error: "invalid prompt" }, 400)),
         "default",
         "",
+        "command-1",
       );
     } catch (error) {
       failure = error;
@@ -179,6 +183,7 @@ describe("gateway requests", () => {
         () => Promise.resolve(new Response("<html>", { status: 502 })),
         "default",
         "hello",
+        "command-1",
       );
     } catch (error) {
       failure = error;

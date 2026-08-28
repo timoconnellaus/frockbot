@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Context } from "cordis";
-import { SessionStore } from "./session.js";
+import { SessionStore, type SessionStoreConfig } from "./session.js";
 import type { NormalizedModelRequest, SessionEvent } from "./types.js";
 
 const roots: Context[] = [];
 
 async function createStore(
   initialSessions?: Readonly<Record<string, readonly SessionEvent[]>>,
+  config: Omit<SessionStoreConfig, "initialSessions"> = {},
 ): Promise<Context> {
   const root = new Context();
   roots.push(root);
-  await root.plugin(SessionStore, { initialSessions });
+  await root.plugin(SessionStore, { ...config, initialSessions });
   return root;
 }
 
@@ -68,6 +69,34 @@ describe("SessionStore", () => {
     expect(session.events.map((event) => event.seq)).toEqual(
       session.events.map((_, index) => index),
     );
+  });
+
+  test("flushes appended events through the durable seam in order", async () => {
+    const persisted: Array<{ sessionId: string; types: string[] }> = [];
+    const root = await createStore(undefined, {
+      persistEvents: async (sessionId, events) => {
+        await Promise.resolve();
+        persisted.push({
+          sessionId,
+          types: events.map((event) => event.type),
+        });
+      },
+    });
+    const session = root.sessions.create("durable-session");
+    session.appendBatch([
+      { type: "turn/start", turn: 1 },
+      { type: "turn/end", turn: 1, outcome: "completed" },
+    ]);
+
+    expect(persisted).toEqual([]);
+    await session.flush();
+    expect(persisted).toEqual([
+      { sessionId: "durable-session", types: ["session/created"] },
+      {
+        sessionId: "durable-session",
+        types: ["turn/start", "turn/end"],
+      },
+    ]);
   });
 
   test("rehydrates a session and continues its sequence", async () => {

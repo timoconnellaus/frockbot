@@ -19,6 +19,8 @@
     "@frockbot/agent-runtime": "workspace:*",
     "@frockbot/application-foundation": "workspace:*",
     "@frockbot/client-core": "workspace:*",
+    "@frockbot/configuration-core": "workspace:*",
+    "@frockbot/plugin-composio": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "better-auth": "1.7.2",
     "cordis": "4.0.0-rc.8",

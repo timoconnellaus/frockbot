@@ -84,15 +84,17 @@ Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first 
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                        | Purpose                                                                       |
-| -------- | --------------------------- | ----------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                        |
-| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                               |
-| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                             |
-| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                         |
-| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
-| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
+| Type     | Name                            | Purpose                                                                       |
+| -------- | ------------------------------- | ----------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`          | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`         | Cloudflare account containing the production resources                        |
+| Variable | `CLOUDFLARE_D1_DATABASE_ID`     | Immutable ID of `frockbot-auth`                                               |
+| Variable | `BETTER_AUTH_URL`               | Set to `https://bot.frockbot.com`                                             |
+| Secret   | `BETTER_AUTH_SECRET`            | Better Auth secret with at least 32 random characters                         |
+| Secret   | `GOOGLE_CLIENT_ID`              | Google Web application OAuth client ID                                        |
+| Secret   | `GOOGLE_CLIENT_SECRET`          | Google Web application OAuth client secret                                    |
+| Secret   | `COMPOSIO_API_KEY`              | Composio project API key used only by backend Connection and tool drivers     |
+| Variable | `COMPOSIO_GMAIL_AUTH_CONFIG_ID` | Composio Gmail auth config used by hosted Connect Link                        |
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
 

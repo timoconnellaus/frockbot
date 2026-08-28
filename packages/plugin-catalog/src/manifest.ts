@@ -25,8 +25,40 @@ export interface MobileContribution {
   entry: string;
 }
 
+export type SettingScope = "user" | "bot";
+
+export interface PackageSettingDefinition {
+  id: string;
+  schemaVersion: number;
+  scopes: SettingScope[];
+  schema: Record<string, unknown>;
+}
+
+export interface ConnectionTypeDefinition {
+  id: string;
+  displayName: string;
+  allowMultiple: boolean;
+  authorization: {
+    kind: "oauth2" | "api-key" | "custom";
+    driverId: string;
+  };
+  capabilities: string[];
+}
+
+export interface CapabilityDefinition {
+  id: string;
+  kind: "tool" | "model" | "memory" | "notification";
+  connectionTypes: string[];
+}
+
+export interface PackageConfiguration {
+  settings: PackageSettingDefinition[];
+  connectionTypes: ConnectionTypeDefinition[];
+  capabilities: CapabilityDefinition[];
+}
+
 export interface FrockBotManifest {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   id: string;
   displayName: string;
   version: string;
@@ -39,6 +71,7 @@ export interface FrockBotManifest {
     mobile?: MobileContribution;
   };
   permissions: string[];
+  configuration?: PackageConfiguration;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -251,10 +284,142 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
   };
 }
 
+function definitionArray(
+  value: Record<string, unknown>,
+  key: string,
+): Record<string, unknown>[] {
+  const candidate = value[key] ?? [];
+  if (!Array.isArray(candidate) || !candidate.every(isRecord)) {
+    throw new Error(`manifest configuration "${key}" must be an array`);
+  }
+  return candidate;
+}
+
+function definitionId(value: Record<string, unknown>): string {
+  const id = requiredString(value, "id");
+  if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+    throw new Error("manifest configuration id must be lowercase kebab-case");
+  }
+  return id;
+}
+
+function safeSchema(value: unknown, depth = 0): Record<string, unknown> {
+  if (!isRecord(value))
+    throw new Error("manifest setting schema must be an object");
+  if (depth > 12)
+    throw new Error("manifest setting schema is too deeply nested");
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === "$ref") {
+      throw new Error("remote schema references are not supported");
+    }
+    if (Array.isArray(nested)) {
+      for (const item of nested) {
+        if (isRecord(item)) safeSchema(item, depth + 1);
+      }
+    } else if (isRecord(nested)) {
+      safeSchema(nested, depth + 1);
+    }
+  }
+  if (JSON.stringify(value).length > 50_000) {
+    throw new Error("manifest setting schema is too large");
+  }
+  return structuredClone(value);
+}
+
+function decodeConfiguration(value: unknown): PackageConfiguration {
+  if (value === undefined) {
+    return { settings: [], connectionTypes: [], capabilities: [] };
+  }
+  if (!isRecord(value))
+    throw new Error("manifest configuration must be an object");
+  const settings = definitionArray(value, "settings").map((setting) => {
+    const schemaVersion = setting.schemaVersion;
+    if (!Number.isSafeInteger(schemaVersion) || (schemaVersion as number) < 1) {
+      throw new Error(
+        "manifest setting schemaVersion must be a positive integer",
+      );
+    }
+    const scopes = optionalStringArray(setting, "scopes");
+    if (
+      scopes.length === 0 ||
+      !scopes.every((scope) => scope === "user" || scope === "bot")
+    ) {
+      throw new Error("manifest setting scopes must contain user or bot");
+    }
+    return {
+      id: definitionId(setting),
+      schemaVersion: schemaVersion as number,
+      scopes: scopes as SettingScope[],
+      schema: safeSchema(setting.schema),
+    };
+  });
+  const connectionTypes = definitionArray(value, "connectionTypes").map(
+    (connection) => {
+      if (!isRecord(connection.authorization)) {
+        throw new Error("manifest connection authorization must be an object");
+      }
+      const rawKind = requiredString(connection.authorization, "kind");
+      if (
+        rawKind !== "oauth2" &&
+        rawKind !== "api-key" &&
+        rawKind !== "custom"
+      ) {
+        throw new Error(
+          "manifest connection authorization kind is unsupported",
+        );
+      }
+      const kind: ConnectionTypeDefinition["authorization"]["kind"] = rawKind;
+      if (typeof connection.allowMultiple !== "boolean") {
+        throw new Error("manifest connection allowMultiple must be boolean");
+      }
+      return {
+        id: definitionId(connection),
+        displayName: requiredString(connection, "displayName"),
+        allowMultiple: connection.allowMultiple,
+        authorization: {
+          kind,
+          driverId: requiredString(connection.authorization, "driverId"),
+        },
+        capabilities: optionalStringArray(connection, "capabilities"),
+      };
+    },
+  );
+  const capabilities = definitionArray(value, "capabilities").map(
+    (capability) => {
+      const rawKind = requiredString(capability, "kind");
+      if (
+        rawKind !== "tool" &&
+        rawKind !== "model" &&
+        rawKind !== "memory" &&
+        rawKind !== "notification"
+      ) {
+        throw new Error("manifest capability kind is unsupported");
+      }
+      const kind: CapabilityDefinition["kind"] = rawKind;
+      return {
+        id: definitionId(capability),
+        kind,
+        connectionTypes: optionalStringArray(capability, "connectionTypes"),
+      };
+    },
+  );
+  return { settings, connectionTypes, capabilities };
+}
+
+function decodeV3(value: Record<string, unknown>): FrockBotManifest {
+  const base = decodeV2(value);
+  return {
+    ...base,
+    schemaVersion: 3,
+    configuration: decodeConfiguration(value.configuration),
+  };
+}
+
 export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
   if (!isRecord(value)) throw new Error("manifest must be an object");
   if (value.schemaVersion === 1) return decodeV1(value);
   if (value.schemaVersion === 2) return decodeV2(value);
+  if (value.schemaVersion === 3) return decodeV3(value);
   throw new Error("unsupported FrockBot manifest version");
 }
 

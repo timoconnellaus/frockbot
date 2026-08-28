@@ -1,53 +1,246 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
 import type {
+  BotSettingsViewV1,
+  ConfigurationCommandV1,
+  ConfigurationQueryV1,
+  ConfigurationViewV1,
+  OperationReceiptV1,
+  UserSettingsViewV1,
+} from "@frockbot/configuration-core";
+import type {
+  BotNotificationIntent,
   BotStateBinding,
+  BotTurnCommand,
+  BotTurnResult,
+  ConfigurationBinding,
+  ConnectionBinding,
   GatewayAuth,
   LoadedWorker,
-  MemoryBinding,
   StoredRun,
   WorkerCode,
   WorkerLoader,
 } from "./contracts.js";
+import { executeBotTurn } from "./bot-runner.js";
 import { applicationDeploymentId, createGateway } from "./gateway.js";
 import { createUserApplication } from "./user-application.js";
 
 class MemoryBotState implements BotStateBinding {
   private readonly runs = new Map<string, StoredRun[]>();
   private readonly sessions = new Map<string, SessionEvent[]>();
+  readonly notifications = new Map<string, BotNotificationIntent[]>();
 
-  async acceptRun(
-    botId: string,
-    run: Omit<StoredRun, "events">,
-  ): Promise<SessionEvent[]> {
+  async run(botId: string, command: BotTurnCommand): Promise<BotTurnResult> {
     const runs = this.runs.get(botId) ?? [];
-    if (runs.some((candidate) => candidate.runId === run.runId)) {
-      throw new Error("duplicate run");
+    const existing = runs.find(
+      (candidate) => candidate.runId === command.runId,
+    );
+    if (existing?.status === "completed") {
+      return {
+        runId: existing.runId,
+        text: existing.responseText ?? "",
+        events: structuredClone(existing.events),
+      };
     }
-    if (runs.some((candidate) => candidate.events.length === 0)) {
+    if (existing) throw new Error("duplicate run is still active");
+    if (runs.some((candidate) => candidate.status === "running")) {
       throw new Error("bot already has an active run");
     }
-    runs.push({ ...run, events: [] });
+    const run: StoredRun = {
+      runId: command.runId,
+      sessionId: command.sessionId,
+      acceptedAt: command.acceptedAt,
+      input: command.text,
+      events: [],
+      status: "running",
+    };
+    runs.push(run);
     this.runs.set(botId, runs);
-    return structuredClone(this.sessions.get(botId) ?? []);
-  }
-
-  async completeRun(
-    botId: string,
-    runId: string,
-    events: SessionEvent[],
-  ): Promise<void> {
-    const run = this.runs
-      .get(botId)
-      ?.find((candidate) => candidate.runId === runId);
-    if (!run) throw new Error("run was not accepted");
     const previousEvents = this.sessions.get(botId) ?? [];
-    run.events = structuredClone(events.slice(previousEvents.length));
-    this.sessions.set(botId, structuredClone(events));
+    try {
+      const result = await executeBotTurn({
+        botId,
+        command,
+        previousEvents,
+      });
+      run.events = structuredClone(result.events);
+      run.status = "completed";
+      run.responseText = result.text;
+      this.sessions.set(botId, [...previousEvents, ...result.events]);
+      return result;
+    } catch (error) {
+      run.status = "failed";
+      run.failure = error instanceof Error ? error.message : "Bot turn failed";
+      throw error;
+    }
   }
 
   async listRuns(botId: string): Promise<StoredRun[]> {
     return structuredClone(this.runs.get(botId) ?? []);
+  }
+
+  listNotifications(botId: string): Promise<BotNotificationIntent[]> {
+    return Promise.resolve(
+      structuredClone(this.notifications.get(botId) ?? []),
+    );
+  }
+
+  acknowledgeNotification(
+    botId: string,
+    notificationId: string,
+  ): Promise<void> {
+    this.notifications.set(
+      botId,
+      (this.notifications.get(botId) ?? []).filter(
+        (notification) => notification.notificationId !== notificationId,
+      ),
+    );
+    return Promise.resolve();
+  }
+}
+
+class MemoryConfiguration implements ConfigurationBinding {
+  private user: UserSettingsViewV1 = {
+    schemaVersion: 1,
+    revision: 0,
+    profile: { name: "FrockBot user" },
+    packages: [],
+    connections: [],
+  };
+  private readonly bots = new Map<string, BotSettingsViewV1>();
+  private readonly receipts = new Map<string, OperationReceiptV1>();
+
+  read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
+    if (query.type === "user/get") return Promise.resolve(this.user);
+    const current = this.bots.get(query.botId) ?? {
+      schemaVersion: 1 as const,
+      botId: query.botId,
+      revision: 0,
+      profile: { name: query.botId },
+      notifications: { enabled: false },
+      assignments: [],
+    };
+    this.bots.set(query.botId, current);
+    return Promise.resolve(current);
+  }
+
+  async execute(command: ConfigurationCommandV1): Promise<OperationReceiptV1> {
+    const duplicate = this.receipts.get(command.commandId);
+    if (duplicate) return duplicate;
+    const current = await this.read(
+      "botId" in command
+        ? { schemaVersion: 1, type: "bot/get", botId: command.botId }
+        : { schemaVersion: 1, type: "user/get" },
+    );
+    if (current.revision !== command.expectedRevision) {
+      throw new Error(`configuration revision is ${current.revision}`);
+    }
+    const revision = current.revision + 1;
+    if ("botId" in command) {
+      const bot = current as BotSettingsViewV1;
+      this.bots.set(command.botId, {
+        ...bot,
+        revision,
+        ...(command.type === "bot/update-profile"
+          ? { profile: command.profile }
+          : command.type === "bot/update-notifications"
+            ? { notifications: command.notifications }
+            : command.type === "bot/select-model"
+              ? { model: command.model }
+              : {
+                  assignments: [
+                    ...bot.assignments.filter(
+                      (assignment) =>
+                        assignment.assignmentId !==
+                        command.assignment.assignmentId,
+                    ),
+                    { ...command.assignment, state: "enabled" as const },
+                  ],
+                }),
+      });
+    } else {
+      const user = current as UserSettingsViewV1;
+      if (command.type === "user/update-profile") {
+        this.user = { ...user, revision, profile: command.profile };
+      } else if (command.type === "user/set-new-bot-model") {
+        this.user = {
+          ...user,
+          revision,
+          newBotModelTemplate: command.model,
+        };
+      } else if (command.type === "user/install-package") {
+        this.user = {
+          ...user,
+          revision,
+          packages: [
+            ...user.packages.filter(
+              (pkg) => pkg.packageId !== command.packageId,
+            ),
+            {
+              packageId: command.packageId,
+              version: command.version,
+              state: "installed",
+            },
+          ],
+        };
+      } else {
+        this.user = {
+          ...user,
+          revision,
+          packages: user.packages.map((pkg) =>
+            pkg.packageId === command.packageId
+              ? {
+                  ...pkg,
+                  state: command.enabled ? "installed" : "disabled",
+                }
+              : pkg,
+          ),
+        };
+      }
+    }
+    const receipt: OperationReceiptV1 = {
+      schemaVersion: 1,
+      commandId: command.commandId,
+      revision,
+      status: "applied",
+    };
+    this.receipts.set(command.commandId, receipt);
+    return receipt;
+  }
+}
+
+class MemoryConnections implements ConnectionBinding {
+  completed: Array<{ connectionId: string; connectedAccountId: string }> = [];
+
+  start(input: {
+    commandId: string;
+    connectionTypeId: string;
+    botId: string;
+    alias?: string;
+  }) {
+    return Promise.resolve({
+      connectionId: `connection-${input.connectionTypeId}`,
+      redirectUrl: "https://connect.composio.dev/link/test",
+      expiresAt: "2026-08-28T01:00:00.000Z",
+    });
+  }
+
+  complete(input: {
+    connectionId: string;
+    connectedAccountId: string;
+  }): Promise<void> {
+    this.completed.push(input);
+    return Promise.resolve();
+  }
+
+  fail(_connectionId: string, _message: string): Promise<void> {
+    return Promise.resolve();
+  }
+
+  revoke(
+    _connectionId: string,
+  ): Promise<{ status: "revoked" | "reconciliation-required" }> {
+    return Promise.resolve({ status: "revoked" });
   }
 }
 
@@ -75,22 +268,6 @@ const unauthenticatedAuth: GatewayAuth = {
   getSession: () => Promise.resolve(null),
 };
 
-function testMemoryBinding(): MemoryBinding {
-  return {
-    get: () => Promise.resolve(null),
-    put: () => Promise.resolve(),
-    delete: () => Promise.resolve(),
-    list: () => Promise.resolve({ objects: [], truncated: false }),
-    vectorUpsert: () => Promise.resolve(),
-    vectorQuery: () => Promise.resolve({ matches: [] }),
-    vectorDeleteByIds: () => Promise.resolve(),
-    embed: (_model, texts) =>
-      Promise.resolve({
-        data: texts.map(() => Array.from({ length: 768 }, () => 0)),
-      }),
-  };
-}
-
 function createTestGateway(
   applicationHashFor: (userId: string) => Promise<string> = () =>
     Promise.resolve("foundation-v1"),
@@ -100,6 +277,8 @@ function createTestGateway(
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
+  const configurations = new Map<string, MemoryConfiguration>();
+  const connections = new Map<string, MemoryConnections>();
   const gateway = createGateway({
     loader,
     artifacts: { load: () => Promise.resolve("export default {}") },
@@ -110,11 +289,21 @@ function createTestGateway(
       states.set(userId, state);
       return state;
     },
-    memoryFor: testMemoryBinding,
+    configurationFor: (userId) => {
+      const configuration =
+        configurations.get(userId) ?? new MemoryConfiguration();
+      configurations.set(userId, configuration);
+      return configuration;
+    },
+    connectionsFor: (userId) => {
+      const connection = connections.get(userId) ?? new MemoryConnections();
+      connections.set(userId, connection);
+      return connection;
+    },
     allowedClientOrigins,
     allowDevelopmentIdentity,
   });
-  return { gateway, loader, states };
+  return { gateway, loader, states, configurations, connections };
 }
 
 function request(path: string, userId: string, init?: RequestInit): Request {
@@ -145,6 +334,116 @@ describe("Cloudflare user application gateway", () => {
     expect(loader.ids).toEqual(["alice:application-a", "bob:application-b"]);
   });
 
+  test("reads and durably commands User and Bot settings before loading the app", async () => {
+    const { gateway, loader } = createTestGateway();
+
+    const initial = await gateway(
+      request("/api/bots/primary/settings", "alice"),
+    );
+    expect(await initial.json()).toMatchObject({
+      schemaVersion: 1,
+      botId: "primary",
+      revision: 0,
+      notifications: { enabled: false },
+    });
+
+    const saved = await gateway(
+      request("/api/bots/primary/settings", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "bot/update-profile",
+          commandId: "profile-1",
+          botId: "primary",
+          expectedRevision: 0,
+          profile: {
+            name: "Housework",
+            label: "Research, marketing, admin",
+            description: "Keeps the household organized.",
+          },
+        }),
+      }),
+    );
+    expect((await saved.json()) as OperationReceiptV1).toEqual({
+      schemaVersion: 1,
+      commandId: "profile-1",
+      revision: 1,
+      status: "applied",
+    });
+
+    const reloaded = await gateway(
+      request("/api/bots/primary/settings", "alice"),
+    );
+    expect(await reloaded.json()).toMatchObject({
+      revision: 1,
+      profile: { name: "Housework" },
+    });
+    expect(loader.ids).toEqual([]);
+  });
+
+  test("replays and acknowledges durable Bot notification intents", async () => {
+    const { gateway, states } = createTestGateway();
+    await gateway(request("/api/bots/primary/turns", "alice"));
+    states.get("alice")?.notifications.set("primary", [
+      {
+        notificationId: "notification-run-1",
+        createdAt: "2026-08-28T01:00:00.000Z",
+        title: "Housework replied",
+        body: "Done.",
+      },
+    ]);
+
+    const pending = await gateway(
+      request("/api/bots/primary/notifications", "alice"),
+    );
+    expect(await pending.json()).toMatchObject({
+      notifications: [{ notificationId: "notification-run-1" }],
+    });
+
+    const acknowledged = await gateway(
+      request("/api/bots/primary/notifications", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ notificationId: "notification-run-1" }),
+      }),
+    );
+    expect(acknowledged.status).toBe(200);
+    expect(states.get("alice")?.notifications.get("primary")).toEqual([]);
+  });
+
+  test("starts and verifies Composio Connections through the authenticated backend", async () => {
+    const { gateway, connections } = createTestGateway();
+    const started = await gateway(
+      request("/api/plugins/composio/connections", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          commandId: "connection-command-1",
+          connectionTypeId: "gmail",
+          botId: "primary",
+          alias: "personal",
+        }),
+      }),
+    );
+    expect(started.status).toBe(201);
+    expect(await started.json()).toMatchObject({
+      connectionId: "connection-gmail",
+      redirectUrl: "https://connect.composio.dev/link/test",
+    });
+
+    const callback = await gateway(
+      request(
+        "/api/plugins/composio/callback?connection=connection-gmail&connected_account_id=ca_123",
+        "alice",
+      ),
+    );
+    expect(callback.status).toBe(303);
+    expect(connections.get("alice")?.completed).toEqual([
+      { connectionId: "connection-gmail", connectedAccountId: "ca_123" },
+    ]);
+  });
+
   test("serves UI and agent behavior through the same user application", async () => {
     const { gateway, loader } = createTestGateway();
 
@@ -162,7 +461,10 @@ describe("Cloudflare user application gateway", () => {
       request("/api/bots/primary/turns", "alice", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: "/echo hello workers" }),
+        body: JSON.stringify({
+          text: "/echo hello workers",
+          commandId: "workers-turn-1",
+        }),
       }),
     );
     expect(turn.status).toBe(200);
@@ -174,8 +476,25 @@ describe("Cloudflare user application gateway", () => {
     expect(Object.keys(loader.codes[0]?.env ?? {}).sort()).toEqual([
       "BOT_STATE",
       "DEPLOYMENT",
-      "MEMORY",
     ]);
+  });
+
+  test("replays a duplicate Turn command without another model effect", async () => {
+    const { gateway, states } = createTestGateway();
+    const turn = () =>
+      gateway(
+        request("/api/bots/primary/turns", "alice", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: "hello", commandId: "stable-turn-1" }),
+        }),
+      );
+
+    const first = await turn();
+    const second = await turn();
+
+    expect(await first.json()).toEqual(await second.json());
+    expect(await states.get("alice")?.listRuns("primary")).toHaveLength(1);
   });
 
   test("shares the user deployment while isolating bot state", async () => {
@@ -185,7 +504,10 @@ describe("Cloudflare user application gateway", () => {
         request(`/api/bots/${botId}/turns`, "alice", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: `hello ${botId}` }),
+          body: JSON.stringify({
+            text: `hello ${botId}`,
+            commandId: `turn-${botId}`,
+          }),
         }),
       );
       expect(response.status).toBe(200);
@@ -210,7 +532,10 @@ describe("Cloudflare user application gateway", () => {
         request("/api/bots/continuing/turns", "alice", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({
+            text,
+            commandId: `turn-${responses.length + 1}`,
+          }),
         }),
       );
       expect(response.status).toBe(200);
@@ -256,7 +581,10 @@ describe("Cloudflare user application gateway", () => {
         request("/api/bots/default/turns", userId, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: `hello ${userId}` }),
+          body: JSON.stringify({
+            text: `hello ${userId}`,
+            commandId: `turn-${userId}`,
+          }),
         }),
       );
       expect(response.status).toBe(200);
@@ -425,7 +753,10 @@ describe("Cross-origin access for mobile clients", () => {
           authorization: "Bearer test-token",
           "content-type": "application/json",
         },
-        body: JSON.stringify({ text: "/echo hello mobile" }),
+        body: JSON.stringify({
+          text: "/echo hello mobile",
+          commandId: "mobile-turn-1",
+        }),
       }),
     );
     expect(response.status).toBe(200);

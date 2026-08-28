@@ -1,3 +1,9 @@
+import {
+  ConfigurationConflictError,
+  ConfigurationDecodeError,
+  decodeConfigurationCommandV1,
+  type ConfigurationQueryV1,
+} from "@frockbot/configuration-core";
 import type {
   GatewayDependencies,
   UserApplicationIdentity,
@@ -102,6 +108,181 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
     if (!userId) return jsonError(401, "authentication required");
 
+    if (url.pathname === "/api/plugins/composio/connections") {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      try {
+        const input: unknown = await request.json();
+        if (typeof input !== "object" || input === null) {
+          return jsonError(400, "Connection request must be an object");
+        }
+        const value = input as Record<string, unknown>;
+        if (
+          typeof value.commandId !== "string" ||
+          !ID_PATTERN.test(value.commandId)
+        ) {
+          return jsonError(400, "commandId is invalid");
+        }
+        if (typeof value.connectionTypeId !== "string") {
+          return jsonError(400, "connectionTypeId is required");
+        }
+        if (typeof value.botId !== "string" || !ID_PATTERN.test(value.botId)) {
+          return jsonError(400, "botId is invalid");
+        }
+        if (
+          value.alias !== undefined &&
+          (typeof value.alias !== "string" || value.alias.trim().length > 100)
+        ) {
+          return jsonError(400, "alias is invalid");
+        }
+        return Response.json(
+          await dependencies.connectionsFor(userId).start({
+            commandId: value.commandId,
+            connectionTypeId: value.connectionTypeId,
+            botId: value.botId,
+            alias: value.alias as string | undefined,
+          }),
+          { status: 201 },
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "Connection failed",
+        );
+      }
+    }
+
+    const composioRevokeMatch = url.pathname.match(
+      /^\/api\/plugins\/composio\/connections\/([^/]+)\/revoke$/,
+    );
+    if (composioRevokeMatch) {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      try {
+        return Response.json(
+          await dependencies
+            .connectionsFor(userId)
+            .revoke(decodeURIComponent(composioRevokeMatch[1])),
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "Revocation failed",
+        );
+      }
+    }
+
+    if (url.pathname === "/api/plugins/composio/callback") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      const connectionId = url.searchParams.get("connection");
+      const connectedAccountId =
+        url.searchParams.get("connected_account_id") ??
+        url.searchParams.get("connectedAccountId");
+      if (connectionId && url.searchParams.get("status") === "failed") {
+        try {
+          await dependencies
+            .connectionsFor(userId)
+            .fail(connectionId, "Composio authorization was not completed");
+          return Response.redirect(
+            new URL("/?connection=composio-failed", url.origin),
+            303,
+          );
+        } catch (error) {
+          return jsonError(
+            500,
+            error instanceof Error ? error.message : "Connection failed",
+          );
+        }
+      }
+      if (!connectionId || !connectedAccountId) {
+        return jsonError(400, "Composio callback is incomplete");
+      }
+      try {
+        await dependencies.connectionsFor(userId).complete({
+          connectionId,
+          connectedAccountId,
+        });
+        return Response.redirect(
+          new URL("/?connection=composio-ready", url.origin),
+          303,
+        );
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "Connection failed",
+        );
+      }
+    }
+
+    const botSettingsMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/settings$/,
+    );
+    const isUserSettings = url.pathname === "/api/settings";
+    if (isUserSettings || botSettingsMatch) {
+      const configuration = dependencies.configurationFor(userId);
+      try {
+        if (request.method === "GET") {
+          let query: ConfigurationQueryV1 = {
+            schemaVersion: 1,
+            type: "user/get",
+          };
+          if (botSettingsMatch) {
+            const botId = decodeURIComponent(botSettingsMatch[1]);
+            query = { schemaVersion: 1, type: "bot/get", botId };
+          }
+          return Response.json(await configuration.read(query));
+        }
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const command = decodeConfigurationCommandV1(await request.json());
+        if (
+          botSettingsMatch &&
+          "botId" in command &&
+          command.botId !== decodeURIComponent(botSettingsMatch[1])
+        ) {
+          return jsonError(400, "Bot command does not match the request path");
+        }
+        if (botSettingsMatch && !("botId" in command)) {
+          return jsonError(400, "Bot settings require a Bot command");
+        }
+        if (isUserSettings && "botId" in command) {
+          return jsonError(400, "User settings require a User command");
+        }
+        return Response.json(await configuration.execute(command));
+      } catch (error) {
+        if (error instanceof ConfigurationDecodeError) {
+          return jsonError(400, error.message);
+        }
+        if (
+          error instanceof ConfigurationConflictError ||
+          (typeof error === "object" &&
+            error !== null &&
+            "name" in error &&
+            error.name === "ConfigurationConflictError" &&
+            "currentRevision" in error &&
+            typeof error.currentRevision === "number")
+        ) {
+          const currentRevision =
+            error instanceof ConfigurationConflictError
+              ? error.currentRevision
+              : error.currentRevision;
+          return Response.json(
+            {
+              error: `configuration revision is ${currentRevision}`,
+              code: "revision-conflict",
+              currentRevision,
+            },
+            { status: 409 },
+          );
+        }
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "Configuration failed",
+        );
+      }
+    }
+
     let applicationHash: string;
     let workerId: string;
     try {
@@ -124,7 +305,6 @@ export function createGateway(dependencies: GatewayDependencies) {
         globalOutbound: null,
         env: {
           BOT_STATE: dependencies.botStateFor(userId),
-          MEMORY: dependencies.memoryFor(),
           DEPLOYMENT: identity,
         },
         limits: { cpuMs: 30_000, subRequests: 1_000 },

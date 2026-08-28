@@ -16,19 +16,28 @@ declare module "cordis" {
   }
 }
 
+export type PersistSessionEvents = (
+  sessionId: string,
+  events: readonly SessionEvent[],
+) => Promise<void>;
+
 export class Session {
   readonly id: string;
   #events: SessionEvent[] = [];
   #disposed = false;
   #emit: (envelope: SessionEventEnvelope) => void;
+  #persist?: PersistSessionEvents;
+  #pendingPersistence: Promise<void> = Promise.resolve();
 
   constructor(
     id: string,
     emit: (envelope: SessionEventEnvelope) => void,
     initialEvents: readonly SessionEvent[] = [],
+    persist?: PersistSessionEvents,
   ) {
     this.id = id;
     this.#emit = emit;
+    this.#persist = persist;
     if (initialEvents.length > 0) {
       for (const [index, event] of initialEvents.entries()) {
         if (event.seq !== index) {
@@ -66,7 +75,17 @@ export class Session {
     })) as SessionEvent[];
     this.#events.push(...events);
     for (const event of events) this.#emit({ sessionId: this.id, event });
+    if (this.#persist && events.length > 0) {
+      const durableEvents = structuredClone(events);
+      this.#pendingPersistence = this.#pendingPersistence.then(() =>
+        this.#persist?.(this.id, durableEvents),
+      );
+    }
     return events;
+  }
+
+  flush(): Promise<void> {
+    return this.#pendingPersistence;
   }
 
   deriveMessages(): LlmMessage[] {
@@ -164,15 +183,18 @@ export class Session {
 
 export interface SessionStoreConfig {
   initialSessions?: Readonly<Record<string, readonly SessionEvent[]>>;
+  persistEvents?: PersistSessionEvents;
 }
 
 export class SessionStore extends Service {
   private sessions = new Map<string, Session>();
   private initialSessions: Readonly<Record<string, readonly SessionEvent[]>>;
+  private persistEvents?: PersistSessionEvents;
 
   constructor(ctx: Context, config: SessionStoreConfig = {}) {
     super(ctx, "sessions");
     this.initialSessions = config.initialSessions ?? {};
+    this.persistEvents = config.persistEvents;
   }
 
   create(sessionId: string): Session {
@@ -185,6 +207,7 @@ export class SessionStore extends Service {
         this.ctx.emit("session/event", envelope);
       },
       this.initialSessions[sessionId],
+      this.persistEvents,
     );
     this.sessions.set(sessionId, session);
     return session;

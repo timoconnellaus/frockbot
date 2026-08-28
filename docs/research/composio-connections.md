@@ -1,0 +1,19 @@
+# Composio Connections
+
+## Findings
+
+- Composio's current REST interface is v3.1 at `https://backend.composio.dev/api/v3.1`; new integrations should use it rather than frozen v3 defaults. [Composio auth-config reference](https://docs.composio.dev/reference/api-reference/auth-configs)
+- An auth config is a reusable toolkit-level authentication blueprint. A connected account is one user's authorized toolkit account and stores the external credentials. [Auth configs](https://docs.composio.dev/reference/api-reference/auth-configs) · [Connected accounts](https://docs.composio.dev/reference/api-reference/connected-accounts)
+- FrockBot should use Composio's hosted Connect Link for managed OAuth. `POST /api/v3.1/connected_accounts/link` accepts an auth-config ID, stable User ID, callback URL, optional alias, and multiple-account policy, then returns a redirect URL and connected-account ID. [Create auth link](https://docs.composio.dev/reference/api-reference/connected-accounts/postConnectedAccountsLink)
+- `connectedAccounts.initiate()` is being retired for Composio-managed redirectable OAuth. The TypeScript SDK and migration guide direct callers to `connectedAccounts.link()`, with cutovers beginning 2026-05-08 and completing 2026-07-03. Custom OAuth and non-OAuth schemes remain on `initiate()`. [Migration guide](https://docs.composio.dev/docs/auth-configuration/migrating-initiate-to-link) · [SDK source](https://github.com/ComposioHQ/composio/blob/5dcb3634/ts/packages/core/src/models/ConnectedAccounts.ts)
+- Composio stores and refreshes managed OAuth tokens. FrockBot can keep only safe connected-account metadata and opaque Composio IDs; it should not request or persist the connected account's credential state. [Authentication](https://github.com/ComposioHQ/composio/blob/next/docs/content/docs/authentication.mdx) · [Connected accounts](https://docs.composio.dev/docs/auth-configuration/connected-accounts)
+- Use FrockBot's stable immutable User ID as Composio's `user_id`, never email or a shared `default` identity. Composio scopes connected accounts under that identifier and explicitly warns against mutable/shared identifiers. [Authentication](https://docs.composio.dev/docs/authentication)
+- A User may have multiple connected accounts for the same toolkit. Additional accounts require explicit `allowMultiple`; aliases and explicit connected-account selection avoid ambiguous execution. [Connected accounts](https://docs.composio.dev/docs/auth-configuration/connected-accounts)
+- Only active connected accounts should resolve for tool execution. Expired, disabled, failed, or revoked accounts must make the FrockBot Assignment unavailable rather than silently selecting another account. [Connected accounts](https://docs.composio.dev/docs/auth-configuration/connected-accounts)
+- Direct tool execution can specify both User ID and connected-account ID. Session execution binds tools and authentication to a Composio session. FrockBot should retain its own durable tool intent/result journal either way. [Connected accounts](https://docs.composio.dev/docs/auth-configuration/connected-accounts) · [Authentication](https://docs.composio.dev/docs/authentication)
+
+## Architectural consequence
+
+The Composio Package should implement a backend Connection driver over Connect Link, connected-account listing/status, revocation, and explicit tool execution. The Package's project API key stays in a Cloudflare backend secret. User OAuth tokens remain in Composio custody. FrockBot stores operation state, toolkit/auth-config metadata, opaque connected-account IDs, Bot Assignments, and durable effect intents/results.
+
+OAuth callback completion must not trust callback query identifiers as authority. Bind the initiation to the authenticated User and a durable operation, then reconcile the returned connected-account state through the authenticated Composio backend interface before marking the Connection ready.

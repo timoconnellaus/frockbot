@@ -1,3 +1,9 @@
+import type {
+  ConfigurationCommandV1,
+  ConfigurationQueryV1,
+  ConfigurationViewV1,
+  OperationReceiptV1,
+} from "@frockbot/configuration-core";
 import {
   createApp,
   defineComponent,
@@ -16,14 +22,47 @@ export interface ClientTurnEvent {
   isError?: boolean;
 }
 
+export interface ClientNotificationIntent {
+  notificationId: string;
+  createdAt: string;
+  title: string;
+  body: string;
+}
+
 export interface ClientTurnResponse {
   runId: string;
   text: string;
   events: ClientTurnEvent[];
+  notification?: ClientNotificationIntent;
+}
+
+export interface ClientStartConnectionResult {
+  connectionId: string;
+  redirectUrl: string;
+  expiresAt: string;
 }
 
 export interface AgentTransport {
-  turn(text: string, signal: AbortSignal): Promise<ClientTurnResponse>;
+  turn(
+    text: string,
+    signal: AbortSignal,
+    commandId: string,
+  ): Promise<ClientTurnResponse>;
+  readConfiguration?(query: ConfigurationQueryV1): Promise<ConfigurationViewV1>;
+  executeConfiguration?(
+    command: ConfigurationCommandV1,
+  ): Promise<OperationReceiptV1>;
+  readApplicationManifest?(): Promise<unknown>;
+  startConnection?(input: {
+    commandId: string;
+    packageId: string;
+    connectionTypeId: string;
+    botId: string;
+    alias?: string;
+  }): Promise<ClientStartConnectionResult>;
+  revokeConnection?(packageId: string, connectionId: string): Promise<void>;
+  listNotifications?(): Promise<ClientNotificationIntent[]>;
+  acknowledgeNotification?(notificationId: string): Promise<void>;
 }
 
 export interface ClientSlotRegistration {
