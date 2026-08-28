@@ -22,7 +22,7 @@ export type ComposioProviderReconciliationResult =
   | { status: "failed"; account: ConnectedAccountSummary }
   | { status: "revoked" }
   | { status: "absent" }
-  | { status: "pending" };
+  | { status: "pending"; account?: ConnectedAccountSummary };
 
 export async function reconcileComposioProviderConnection(
   client: ComposioClient,
@@ -43,7 +43,7 @@ export async function reconcileComposioProviderConnection(
     ) {
       return { status: "failed", account };
     }
-    return { status: "pending" };
+    return { status: "pending", account };
   }
 
   let account: ConnectedAccountSummary;
@@ -60,5 +60,5 @@ export async function reconcileComposioProviderConnection(
   }
   return account.status === "REVOKED"
     ? { status: "revoked" }
-    : { status: "pending" };
+    : { status: "pending", account };
 }

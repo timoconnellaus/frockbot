@@ -54,8 +54,9 @@ function backendHost(
     request: ComposioProviderReconciliationRequest,
   ) => Promise<ComposioProviderReconciliationResult> = () =>
     Promise.resolve({ status: "pending" }),
-  revokeConnectedAccount: (connectedAccountId: string) => Promise<unknown> =
-    () => Promise.resolve({ success: true }),
+  revokeConnectedAccount: (
+    connectedAccountId: string,
+  ) => Promise<unknown> = () => Promise.resolve({ success: true }),
 ) {
   return {
     state: { storage } as unknown as DurableObjectState,
@@ -67,9 +68,7 @@ function backendHost(
 }
 
 async function makeReconciliationDue(storage: MemoryStorage): Promise<void> {
-  const settings = await storage.get<UserSettingsViewV1>(
-    "user-configuration",
-  );
+  const settings = await storage.get<UserSettingsViewV1>("user-configuration");
   if (!settings) throw new Error("user configuration was not stored");
   await storage.put("user-configuration", {
     ...settings,
@@ -405,6 +404,111 @@ describe("Connection provider reconciliation alarms", () => {
     });
   });
 
+  test("expires a recorded Link through its durable alarm after eviction", async () => {
+    const storage = new MemoryStorage();
+    const admitted = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    const authorizationStateExpiresAt = Date.now() + 60_000;
+    const linkExpiresAt = new Date(Date.now() + 30_000).toISOString();
+    await admitted.startConnection("user-1", {
+      connectionId: "link-command",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+      safeMetadata: {
+        providerAlias: "link-command",
+        toolkitSlug: "gmail",
+        authorizationStateExpiresAt,
+      },
+    });
+    await admitted.recordConnectLinkResult("user-1", "link-command", {
+      connectedAccountId: "account-1",
+      providerAlias: "link-command",
+      toolkitSlug: "gmail",
+      redirectUrl: "https://connect.example/authorize",
+      expiresAt: linkExpiresAt,
+      authorizationStateExpiresAt,
+    });
+
+    expect(storage.alarmAt).toBe(Date.parse(linkExpiresAt));
+    const settings =
+      await storage.get<UserSettingsViewV1>("user-configuration");
+    if (!settings) throw new Error("user configuration was not stored");
+    await storage.put("user-configuration", {
+      ...settings,
+      connections: settings.connections.map((item) => ({
+        ...item,
+        safeMetadata: {
+          ...item.safeMetadata,
+          expiresAt: new Date(Date.now() - 1).toISOString(),
+        },
+      })),
+    } satisfies UserSettingsViewV1);
+    const recovered = createComposioUserBackendContribution(
+      backendHost(storage, () =>
+        Promise.reject(new Error("provider read was not expected")),
+      ),
+    );
+
+    await recovered.alarm();
+
+    expect(
+      await recovered.getConnection("user-1", "link-command"),
+    ).toMatchObject({
+      state: "failed",
+      failure: "Connection authorization expired",
+      safeMetadata: { authorizationStateConsumed: true },
+    });
+    expect(storage.alarmAt).toBeUndefined();
+  });
+
+  test("schedules no-account revocation reconciliation after eviction", async () => {
+    const storage = new MemoryStorage();
+    const admitted = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    await admitted.startConnection("user-1", {
+      connectionId: "link-command",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+      safeMetadata: {
+        providerAlias: "link-command",
+        toolkitSlug: "gmail",
+        authorizationStateExpiresAt: Date.now() + 10 * 60_000,
+      },
+    });
+    await admitted.finishConnectionAuthorization("user-1", "link-command", {
+      state: "failed",
+      failure: "Authorization failed",
+    });
+    expect(storage.alarmAt).toBeUndefined();
+
+    const recovered = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    const claim = await recovered.claimConnectionRevocation(
+      "user-1",
+      "link-command",
+    );
+
+    expect(claim).toMatchObject({
+      phase: "pending",
+      connection: {
+        state: "reconciliation-required",
+        safeMetadata: {
+          reconciliationOperation: "link",
+          revocationRequested: true,
+        },
+      },
+    });
+    expect(storage.alarmAt).toBe(
+      claim.connection.safeMetadata.reconciliationRetryAt,
+    );
+    expect(storage.alarmAt).toBeGreaterThan(Date.now());
+  });
+
   test("finishes uncertain revocation through a provider read after eviction", async () => {
     const storage = new MemoryStorage();
     const admitted = createComposioUserBackendContribution(
@@ -421,11 +525,9 @@ describe("Connection provider reconciliation alarms", () => {
       providerAlias: "connection-1",
       toolkitSlug: "gmail",
     });
-    await admitted.finishConnectionAuthorization(
-      "user-1",
-      "connection-1",
-      { state: "ready" },
-    );
+    await admitted.finishConnectionAuthorization("user-1", "connection-1", {
+      state: "ready",
+    });
     expect(
       (await admitted.claimConnectionRevocation("user-1", "connection-1"))
         .phase,
@@ -509,10 +611,10 @@ describe("Connection provider reconciliation alarms", () => {
         storage,
         () =>
           Promise.resolve({
-            status: "active",
+            status: "pending",
             account: {
               id: "account-1",
-              status: "ACTIVE",
+              status: "INITIALIZING",
               toolkitSlug: "gmail",
               alias: "link-command",
             },
@@ -584,11 +686,9 @@ describe("Connection provider reconciliation alarms", () => {
       providerAlias: "connection-1",
       toolkitSlug: "gmail",
     });
-    await contribution.finishConnectionAuthorization(
-      "user-1",
-      "connection-1",
-      { state: "ready" },
-    );
+    await contribution.finishConnectionAuthorization("user-1", "connection-1", {
+      state: "ready",
+    });
     await contribution.claimConnectionRevocation("user-1", "connection-1");
     await contribution.requireConnectionReconciliation(
       "user-1",

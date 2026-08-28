@@ -17,9 +17,7 @@ class MemoryConnectionStore implements ComposioConnectionStore {
 
   isPackageInstalled(_userId: string, packageId: string): Promise<boolean> {
     this.packagePolicyReads += 1;
-    return Promise.resolve(
-      this.packageInstalled && packageId === "composio",
-    );
+    return Promise.resolve(this.packageInstalled && packageId === "composio");
   }
 
   getConnection(
@@ -345,12 +343,24 @@ class MemoryConnectionStore implements ComposioConnectionStore {
   claimConnectionRevocation(
     _userId: string,
     connectionId: string,
+    recoveredSafeMetadata?: ConnectionView["safeMetadata"],
   ): Promise<{
     phase: "provider" | "finalize" | "pending" | "done";
     connection: ConnectionView;
   }> {
-    const connection = this.connections.get(connectionId);
+    let connection = this.connections.get(connectionId);
     if (!connection) throw new Error("missing connection");
+    if (recoveredSafeMetadata) {
+      connection = {
+        ...connection,
+        safeMetadata: {
+          ...connection.safeMetadata,
+          ...recoveredSafeMetadata,
+          revocationRequested: true,
+        },
+      };
+      this.connections.set(connectionId, connection);
+    }
     if (connection.state === "revoked") {
       return Promise.resolve({ phase: "done", connection });
     }
@@ -734,7 +744,7 @@ describe("ComposioConnectionCoordinator", () => {
               items: [
                 {
                   id: "ca_123",
-                  status: "ACTIVE",
+                  status: "INITIALIZING",
                   toolkit: { slug: "gmail" },
                   alias: "connection-1",
                 },
@@ -964,9 +974,9 @@ describe("ComposioConnectionCoordinator", () => {
     await expect(coordinator.revoke("user-1", "connection-1")).rejects.toThrow(
       "response lost",
     );
-    await expect(
-      coordinator.revoke("user-1", "connection-1"),
-    ).resolves.toEqual({ status: "revoked" });
+    await expect(coordinator.revoke("user-1", "connection-1")).resolves.toEqual(
+      { status: "revoked" },
+    );
 
     expect(revokeCalls).toBe(1);
     expect(store.connections.get("connection-1")?.state).toBe("revoked");

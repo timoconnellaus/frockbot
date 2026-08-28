@@ -127,6 +127,19 @@ function nextConnectionAlarm(settings: UserSettingsViewV1): number | undefined {
       values.push(metadata.effectDeadlineAt);
     }
     if (
+      connection.state === "authorizing" ||
+      (connection.state === "reconciliation-required" &&
+        metadata.reconciliationOperation === "link")
+    ) {
+      if (typeof metadata.authorizationStateExpiresAt === "number") {
+        values.push(metadata.authorizationStateExpiresAt);
+      }
+      if (typeof metadata.expiresAt === "string") {
+        const expiresAt = Date.parse(metadata.expiresAt);
+        values.push(Number.isFinite(expiresAt) ? expiresAt : 0);
+      }
+    }
+    if (
       connection.state === "reconciliation-required" &&
       metadata.reconciliationOperation === "assignment" &&
       typeof metadata.assignmentLeaseExpiresAt === "number"
@@ -150,6 +163,33 @@ function nextConnectionAlarm(settings: UserSettingsViewV1): number | undefined {
     return values;
   });
   return deadlines.length > 0 ? Math.min(...deadlines) : undefined;
+}
+
+function connectionAuthorizationExpired(
+  connection: UserSettingsViewV1["connections"][number],
+  now: number,
+): boolean {
+  const metadata = connection.safeMetadata;
+  if (
+    connection.state !== "authorizing" &&
+    !(
+      connection.state === "reconciliation-required" &&
+      metadata.reconciliationOperation === "link"
+    )
+  ) {
+    return false;
+  }
+  const stateExpired =
+    typeof metadata.authorizationStateExpiresAt === "number" &&
+    metadata.authorizationStateExpiresAt <= now;
+  const linkExpiry =
+    typeof metadata.expiresAt === "string"
+      ? Date.parse(metadata.expiresAt)
+      : undefined;
+  const linkExpired =
+    linkExpiry !== undefined &&
+    (!Number.isFinite(linkExpiry) || linkExpiry <= now);
+  return stateExpired || linkExpired;
 }
 
 const initialState = (): UserSettingsViewV1 => ({
@@ -218,10 +258,8 @@ export class ComposioUserBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: UserConfigurationEnv;
   private readonly availablePackages: ReadonlySet<string>;
-  private readonly reconcileProviderConnection:
-    ComposioUserBackendHost["reconcileProviderConnection"];
-  private readonly revokeConnectedAccount:
-    ComposioUserBackendHost["revokeConnectedAccount"];
+  private readonly reconcileProviderConnection: ComposioUserBackendHost["reconcileProviderConnection"];
+  private readonly revokeConnectedAccount: ComposioUserBackendHost["revokeConnectedAccount"];
 
   constructor(host: ComposioUserBackendHost) {
     this.ctx = host.state;
@@ -889,6 +927,7 @@ export class ComposioUserBackendContribution {
   async claimConnectionRevocation(
     userId: string,
     connectionId: string,
+    recoveredSafeMetadata?: UserSettingsViewV1["connections"][number]["safeMetadata"],
   ): Promise<{
     phase: "provider" | "finalize" | "pending" | "done";
     connection: UserSettingsViewV1["connections"][number];
@@ -898,7 +937,7 @@ export class ComposioUserBackendContribution {
       const current =
         (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
         initialState();
-      const connection = current.connections.find(
+      let connection = current.connections.find(
         (item) => item.connectionId === connectionId,
       );
       if (!connection) {
@@ -906,6 +945,29 @@ export class ComposioUserBackendContribution {
       }
       if (connection.state === "revoked") {
         return { phase: "done" as const, connection };
+      }
+      if (recoveredSafeMetadata) {
+        if (
+          connection.safeMetadata.revocationRequested !== true ||
+          typeof recoveredSafeMetadata.connectedAccountId !== "string" ||
+          (connection.state !== "authorizing" &&
+            !(
+              connection.state === "reconciliation-required" &&
+              connection.safeMetadata.reconciliationOperation === "link"
+            ))
+        ) {
+          throw new Error(
+            "Recovered Connection identity cannot enter revocation",
+          );
+        }
+        connection = {
+          ...connection,
+          safeMetadata: {
+            ...connection.safeMetadata,
+            ...recoveredSafeMetadata,
+            revocationRequested: true,
+          },
+        };
       }
       const assignmentLeaseExpiresAt =
         connection.safeMetadata.assignmentLeaseExpiresAt;
@@ -983,6 +1045,7 @@ export class ComposioUserBackendContribution {
       }
       const connectedAccountId = connection.safeMetadata.connectedAccountId;
       if (typeof connectedAccountId !== "string") {
+        const reconciliationRetryAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
         const pending = {
           ...connection,
           state: "reconciliation-required" as const,
@@ -990,18 +1053,25 @@ export class ComposioUserBackendContribution {
             ...connection.safeMetadata,
             reconciliationOperation: "link",
             revocationRequested: true,
-            reconciliationRetryAt: Date.now() + CONNECTION_EFFECT_ALARM_MS,
+            reconciliationRetryAt,
           },
           failure:
             "Connection identity requires reconciliation before revocation",
         };
-        await transaction.put(STATE_KEY, {
+        const next = {
           ...current,
           revision: current.revision + 1,
           connections: current.connections.map((item) =>
             item.connectionId === connectionId ? pending : item,
           ),
-        } satisfies UserSettingsViewV1);
+        } satisfies UserSettingsViewV1;
+        await transaction.put(STATE_KEY, next);
+        await transaction.setAlarm(
+          Math.max(
+            Date.now(),
+            nextConnectionAlarm(next) ?? reconciliationRetryAt,
+          ),
+        );
         return { phase: "pending" as const, connection: pending };
       }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
@@ -1086,150 +1156,165 @@ export class ComposioUserBackendContribution {
   async alarm(): Promise<void> {
     const userId = await this.ctx.storage.get<string>(IDENTITY_KEY);
     if (!userId) return;
-    const pending = await this.ctx.storage.transaction(
-      async (transaction) => {
-        const current =
-          (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-          initialState();
-        const now = Date.now();
-        let changed = false;
-        const pending: Array<{
-          connectionId: string;
-          botId: string;
-          compensationId: string;
-          expectedGeneration: string;
-        }> = [];
-        const reconciliations: Array<{
-          connection: UserSettingsViewV1["connections"][number];
-          operation: "link" | "revoke";
-        }> = [];
-        const connections = current.connections.map((connection) => {
-          let next = connection;
-          const metadata = connection.safeMetadata;
-          const expiredAssignment = expireAssignmentLease(connection, now);
-          if (expiredAssignment) {
-            next = expiredAssignment;
-            changed = true;
-          }
+    const pending = await this.ctx.storage.transaction(async (transaction) => {
+      const current =
+        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
+        initialState();
+      const now = Date.now();
+      let changed = false;
+      const pending: Array<{
+        connectionId: string;
+        botId: string;
+        compensationId: string;
+        expectedGeneration: string;
+      }> = [];
+      const reconciliations: Array<{
+        connection: UserSettingsViewV1["connections"][number];
+        operation: "link" | "revoke";
+      }> = [];
+      const connections = current.connections.map((connection) => {
+        let next = connection;
+        const expiredAssignment = expireAssignmentLease(connection, now);
+        if (expiredAssignment) {
+          next = expiredAssignment;
+          changed = true;
+        }
 
-          const effectExpired =
-            ((next.state === "authorizing" &&
-              typeof next.safeMetadata.connectedAccountId !== "string") ||
-              next.state === "revoking") &&
-            typeof next.safeMetadata.effectDeadlineAt === "number" &&
-            next.safeMetadata.effectDeadlineAt <= now;
-          if (effectExpired) {
-            const { effectDeadlineAt: _, ...safeMetadata } = next.safeMetadata;
-            const operation = next.state === "authorizing" ? "link" : "revoke";
-            next = {
-              ...next,
-              state: "reconciliation-required",
-              safeMetadata: {
-                ...safeMetadata,
-                reconciliationOperation: operation,
-                reconciliationRetryAt: now,
-              },
-              failure: `${operation === "link" ? "Connect Link" : "Revocation"} outcome requires reconciliation`,
-            };
-            changed = true;
-          }
+        if (connectionAuthorizationExpired(next, now)) {
+          const {
+            effectDeadlineAt: _,
+            reconciliationRetryAt: __,
+            ...safeMetadata
+          } = next.safeMetadata;
+          next = {
+            ...next,
+            state: "failed",
+            safeMetadata: {
+              ...safeMetadata,
+              authorizationStateConsumed: true,
+            },
+            failure: "Connection authorization expired",
+          };
+          changed = true;
+        }
 
-          const reconciliationOperation =
-            next.safeMetadata.reconciliationOperation;
-          if (
-            next.state === "reconciliation-required" &&
-            (reconciliationOperation === "link" ||
-              reconciliationOperation === "revoke") &&
-            typeof next.safeMetadata.reconciliationRetryAt === "number" &&
-            next.safeMetadata.reconciliationRetryAt <= now
-          ) {
-            reconciliations.push({
-              connection: next,
-              operation: reconciliationOperation,
-            });
+        const effectExpired =
+          ((next.state === "authorizing" &&
+            typeof next.safeMetadata.connectedAccountId !== "string") ||
+            next.state === "revoking") &&
+          typeof next.safeMetadata.effectDeadlineAt === "number" &&
+          next.safeMetadata.effectDeadlineAt <= now;
+        if (effectExpired) {
+          const { effectDeadlineAt: _, ...safeMetadata } = next.safeMetadata;
+          const operation = next.state === "authorizing" ? "link" : "revoke";
+          next = {
+            ...next,
+            state: "reconciliation-required",
+            safeMetadata: {
+              ...safeMetadata,
+              reconciliationOperation: operation,
+              reconciliationRetryAt: now,
+            },
+            failure: `${operation === "link" ? "Connect Link" : "Revocation"} outcome requires reconciliation`,
+          };
+          changed = true;
+        }
+
+        const reconciliationOperation =
+          next.safeMetadata.reconciliationOperation;
+        if (
+          next.state === "reconciliation-required" &&
+          (reconciliationOperation === "link" ||
+            reconciliationOperation === "revoke") &&
+          typeof next.safeMetadata.reconciliationRetryAt === "number" &&
+          next.safeMetadata.reconciliationRetryAt <= now
+        ) {
+          reconciliations.push({
+            connection: next,
+            operation: reconciliationOperation,
+          });
+          next = {
+            ...next,
+            safeMetadata: {
+              ...next.safeMetadata,
+              reconciliationRetryAt: now + CONNECTION_EFFECT_ALARM_MS,
+            },
+          };
+          changed = true;
+        }
+
+        if (
+          next.safeMetadata.assignmentCompensationPending === true &&
+          typeof next.safeMetadata.compensationRetryAt === "number" &&
+          next.safeMetadata.compensationRetryAt <= now
+        ) {
+          const stored = Array.isArray(
+            next.safeMetadata.assignmentCompensations,
+          )
+            ? next.safeMetadata.assignmentCompensations
+            : typeof next.safeMetadata.targetBotId === "string" &&
+                typeof next.safeMetadata.assignmentCompensationId ===
+                  "string" &&
+                typeof next.safeMetadata.assignmentCompensationGeneration ===
+                  "string"
+              ? [
+                  {
+                    botId: next.safeMetadata.targetBotId,
+                    id: next.safeMetadata.assignmentCompensationId,
+                    expectedGeneration:
+                      next.safeMetadata.assignmentCompensationGeneration,
+                  },
+                ]
+              : [];
+          for (const candidate of stored) {
+            if (
+              !candidate ||
+              typeof candidate !== "object" ||
+              Array.isArray(candidate)
+            ) {
+              continue;
+            }
+            const compensation = candidate as Record<string, unknown>;
+            if (
+              typeof compensation.botId === "string" &&
+              typeof compensation.id === "string" &&
+              typeof compensation.expectedGeneration === "string"
+            ) {
+              pending.push({
+                connectionId: next.connectionId,
+                botId: compensation.botId,
+                compensationId: compensation.id,
+                expectedGeneration: compensation.expectedGeneration,
+              });
+            }
+          }
+          if (stored.length > 0) {
             next = {
               ...next,
               safeMetadata: {
                 ...next.safeMetadata,
-                reconciliationRetryAt: now + CONNECTION_EFFECT_ALARM_MS,
+                compensationRetryAt: now + CONNECTION_EFFECT_ALARM_MS,
               },
             };
             changed = true;
           }
-
-          if (
-            next.safeMetadata.assignmentCompensationPending === true &&
-            typeof next.safeMetadata.compensationRetryAt === "number" &&
-            next.safeMetadata.compensationRetryAt <= now
-          ) {
-            const stored = Array.isArray(
-              next.safeMetadata.assignmentCompensations,
-            )
-              ? next.safeMetadata.assignmentCompensations
-              : typeof next.safeMetadata.targetBotId === "string" &&
-                  typeof next.safeMetadata.assignmentCompensationId ===
-                    "string" &&
-                  typeof next.safeMetadata.assignmentCompensationGeneration ===
-                    "string"
-                ? [
-                    {
-                      botId: next.safeMetadata.targetBotId,
-                      id: next.safeMetadata.assignmentCompensationId,
-                      expectedGeneration:
-                        next.safeMetadata.assignmentCompensationGeneration,
-                    },
-                  ]
-                : [];
-            for (const candidate of stored) {
-              if (
-                !candidate ||
-                typeof candidate !== "object" ||
-                Array.isArray(candidate)
-              ) {
-                continue;
-              }
-              const compensation = candidate as Record<string, unknown>;
-              if (
-                typeof compensation.botId === "string" &&
-                typeof compensation.id === "string" &&
-                typeof compensation.expectedGeneration === "string"
-              ) {
-                pending.push({
-                  connectionId: next.connectionId,
-                  botId: compensation.botId,
-                  compensationId: compensation.id,
-                  expectedGeneration: compensation.expectedGeneration,
-                });
-              }
-            }
-            if (stored.length > 0) {
-              next = {
-                ...next,
-                safeMetadata: {
-                  ...next.safeMetadata,
-                  compensationRetryAt: now + CONNECTION_EFFECT_ALARM_MS,
-                },
-              };
-              changed = true;
-            }
-          }
-          return next;
-        });
-        const next = {
-          ...current,
-          revision: changed ? current.revision + 1 : current.revision,
-          connections,
-        } satisfies UserSettingsViewV1;
-        if (changed) await transaction.put(STATE_KEY, next);
-        const alarmAt = nextConnectionAlarm(next);
-        if (alarmAt === undefined) {
-          await transaction.deleteAlarm();
-        } else {
-          await transaction.setAlarm(Math.max(Date.now(), alarmAt));
         }
-        return { compensations: pending, reconciliations };
-      },
-    );
+        return next;
+      });
+      const next = {
+        ...current,
+        revision: changed ? current.revision + 1 : current.revision,
+        connections,
+      } satisfies UserSettingsViewV1;
+      if (changed) await transaction.put(STATE_KEY, next);
+      const alarmAt = nextConnectionAlarm(next);
+      if (alarmAt === undefined) {
+        await transaction.deleteAlarm();
+      } else {
+        await transaction.setAlarm(Math.max(Date.now(), alarmAt));
+      }
+      return { compensations: pending, reconciliations };
+    });
 
     for (const reconciliation of pending.reconciliations) {
       try {
@@ -1284,8 +1369,13 @@ export class ComposioUserBackendContribution {
             );
             continue;
           }
-          if (result.status !== "active") continue;
-          const account = result.account;
+          const account =
+            result.status === "active"
+              ? result.account
+              : result.status === "pending"
+                ? result.account
+                : undefined;
+          if (!account) continue;
           const safeMetadata = {
             ...connection.safeMetadata,
             connectedAccountId: account.id,
@@ -1293,15 +1383,10 @@ export class ComposioUserBackendContribution {
             ...(account.alias ? { providerAlias: account.alias } : {}),
           };
           if (connection.safeMetadata.revocationRequested === true) {
-            const recorded = await this.recordConnectLinkResult(
-              userId,
-              connection.connectionId,
-              safeMetadata,
-            );
-            if (!recorded) continue;
             const claim = await this.claimConnectionRevocation(
               userId,
               connection.connectionId,
+              safeMetadata,
             );
             if (claim.phase !== "provider") continue;
             try {
@@ -1327,6 +1412,12 @@ export class ComposioUserBackendContribution {
             }
             continue;
           }
+          const recorded = await this.recordConnectLinkResult(
+            userId,
+            connection.connectionId,
+            safeMetadata,
+          );
+          if (!recorded || result.status !== "active") continue;
           await this.finishConnectionAuthorization(
             userId,
             connection.connectionId,
@@ -1340,8 +1431,7 @@ export class ComposioUserBackendContribution {
           );
           continue;
         }
-        const connectedAccountId =
-          connection.safeMetadata.connectedAccountId;
+        const connectedAccountId = connection.safeMetadata.connectedAccountId;
         if (typeof connectedAccountId !== "string") continue;
         const result = await this.reconcileProviderConnection({
           operation: "revoke",

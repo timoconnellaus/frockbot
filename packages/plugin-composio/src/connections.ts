@@ -100,6 +100,7 @@ export interface ComposioConnectionStore {
   claimConnectionRevocation(
     userId: string,
     connectionId: string,
+    recoveredSafeMetadata?: ConnectionView["safeMetadata"],
   ): Promise<{
     phase: "provider" | "finalize" | "pending" | "done";
     connection: ConnectionView;
@@ -241,8 +242,7 @@ export class ComposioConnectionCoordinator {
     }
     if (!claimed) {
       const existing =
-        stored ??
-        (await this.config.store.getConnection(userId, connectionId));
+        stored ?? (await this.config.store.getConnection(userId, connectionId));
       if (
         existing?.safeMetadata.startCommandFingerprint !== commandFingerprint
       ) {
@@ -325,35 +325,44 @@ export class ComposioConnectionCoordinator {
             toolkitSlug: admittedToolkitSlug,
           },
         );
-        if (reconciliation.status === "active") {
-          const account = reconciliation.account;
+        const account =
+          reconciliation.status === "active"
+            ? reconciliation.account
+            : reconciliation.status === "pending"
+              ? reconciliation.account
+              : undefined;
+        if (account) {
+          const safeMetadata = {
+            ...existing.safeMetadata,
+            connectedAccountId: account.id,
+            toolkitSlug: account.toolkitSlug,
+            authorizationStateId: input.authorizationStateId ?? connectionId,
+            authorizationStateExpiresAt:
+              input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
+            authorizationStateConsumed: false,
+            ...(input.nativeReturnNonce
+              ? { nativeReturnNonce: input.nativeReturnNonce }
+              : {}),
+          };
+          if (existing.safeMetadata.revocationRequested === true) {
+            await this.revoke(userId, connectionId, safeMetadata);
+            throw new DefinitiveConnectionOperationError(
+              "Connection was revoked during authorization",
+            );
+          }
           const recorded = await this.config.store.recordConnectLinkResult(
             userId,
             connectionId,
-            {
-              ...existing.safeMetadata,
-              connectedAccountId: account.id,
-              toolkitSlug: account.toolkitSlug,
-              authorizationStateId: input.authorizationStateId ?? connectionId,
-              authorizationStateExpiresAt:
-                input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
-              authorizationStateConsumed: false,
-              ...(input.nativeReturnNonce
-                ? { nativeReturnNonce: input.nativeReturnNonce }
-                : {}),
-            },
+            safeMetadata,
           );
           if (!recorded) {
             throw new Error(
               "Connection authorization changed during reconciliation",
             );
           }
-          if (existing.safeMetadata.revocationRequested === true) {
-            await this.revoke(userId, connectionId);
-            throw new DefinitiveConnectionOperationError(
-              "Connection was revoked during authorization",
-            );
-          }
+        }
+        if (reconciliation.status === "active") {
+          const account = reconciliation.account;
           const callbackUrl = new URL(
             "/api/plugins/composio/callback",
             this.config.callbackBaseUrl,
@@ -480,10 +489,12 @@ export class ComposioConnectionCoordinator {
   async revoke(
     userId: string,
     connectionId: string,
+    recoveredSafeMetadata?: ConnectionView["safeMetadata"],
   ): Promise<RevokeConnectionResult> {
     const claim = await this.config.store.claimConnectionRevocation(
       userId,
       connectionId,
+      recoveredSafeMetadata,
     );
     const connection = claim.connection;
     if (connection.packageId !== "composio") {
