@@ -154,6 +154,15 @@ describe("legal policy pages", () => {
     expect(homepage).toContain('href="/terms/"');
   });
 
+  test("uses accessible GitHub logo links in the header and footer", async () => {
+    const homepage = await publicFile("index.html");
+    expect(homepage.match(/class="github-logo-link"/g)).toHaveLength(2);
+    expect(
+      homepage.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g),
+    ).toHaveLength(2);
+    expect(homepage).not.toContain(">GitHub ↗<");
+  });
+
   test.each(["index.html", "privacy/index.html", "terms/index.html"])(
     "%s uses the app icon and pink Bot wordmark",
     async (path: string) => {
