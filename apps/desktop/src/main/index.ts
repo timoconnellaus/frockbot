@@ -1,5 +1,6 @@
 import type { Context } from "cordis";
 import { app, BrowserWindow } from "electron";
+import { setDevelopmentAppIcon } from "./app-icon.js";
 import { setupDesktopAuth } from "./auth-client.js";
 import { createCordisDesktopHost } from "./cordis-host.js";
 
@@ -11,6 +12,7 @@ setupDesktopAuth();
 
 void app.whenReady().then(
   async () => {
+    setDevelopmentAppIcon(app);
     host = await createCordisDesktopHost();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {

@@ -113,7 +113,7 @@ FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot-chat.png" \
   bun run --filter @frockbot/desktop start
 ```
 
-`bun run --filter @frockbot/desktop package` builds unsigned installers (DMG, NSIS, AppImage) into `apps/desktop/release/`. `bun run icons:generate` regenerates the desktop, Android, and iOS app icons from the canonical `assets/marketing/app-icon/frockbot-icon-1024.png`; it requires ImageMagick 7 and macOS `iconutil`.
+`bun run --filter @frockbot/desktop package` builds unsigned installers (DMG, NSIS, AppImage) into `apps/desktop/release/`. `bun run icons:generate` regenerates the desktop, Android, and iOS app icons from the canonical `assets/marketing/app-icon/frockbot-icon-1024.png`; it requires ImageMagick 7 and macOS `iconutil`. Packaged builds take their icon from those generated resources; on macOS an unpackaged local run also sets the Dock icon to `apps/desktop/resources/icons/512x512.png` so development windows show the FrockBot sheep rather than Electron's default.
 
 ## Structure
 
