@@ -1,10 +1,12 @@
 import type { SessionEvent } from "@frockbot/agent-core";
 import type {
+  BotConfigurationExecuteRpcV1,
+  BotConfigurationReadRpcV1,
   BotSettingsViewV1,
-  ConfigurationCommandV1,
-  ConfigurationQueryV1,
-  ConfigurationViewV1,
   OperationReceiptV1,
+  UserConfigurationExecuteRpcV1,
+  UserConfigurationReadRpcV1,
+  UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 export interface BackendRouteContribution {
@@ -177,9 +179,22 @@ export interface ConnectionBinding {
   revoke(connectionId: string): Promise<RevokeConnectionResult>;
 }
 
-export interface ConfigurationBinding {
-  read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1>;
-  execute(command: ConfigurationCommandV1): Promise<OperationReceiptV1>;
+export interface UserConfigurationBinding {
+  readConfiguration(
+    request: UserConfigurationReadRpcV1,
+  ): Promise<UserSettingsViewV1>;
+  executeConfiguration(
+    request: UserConfigurationExecuteRpcV1,
+  ): Promise<OperationReceiptV1>;
+}
+
+export interface BotConfigurationBinding {
+  readConfiguration(
+    request: BotConfigurationReadRpcV1,
+  ): Promise<BotSettingsViewV1>;
+  executeConfiguration(
+    request: BotConfigurationExecuteRpcV1,
+  ): Promise<OperationReceiptV1>;
 }
 
 export interface GatewayDependencies {
@@ -188,7 +203,8 @@ export interface GatewayDependencies {
   auth: GatewayAuth;
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): BotStateBinding;
-  configurationFor(userId: string): ConfigurationBinding;
+  userConfigurationFor(userId: string): UserConfigurationBinding;
+  botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   backendContributions?: readonly BackendRouteContribution[];
   allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;

@@ -1,9 +1,11 @@
 import {
   ConfigurationConflictError,
   decodeConnectionDependencyRequirementV1,
+  decodeUserConfigurationExecuteRpcV1,
+  decodeUserConfigurationReadRpcV1,
   type ConnectionDependencyRequirementV1,
-  type ConfigurationCommandV1,
   type OperationReceiptV1,
+  type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
@@ -73,6 +75,7 @@ export interface UserConfigurationEnv {
 export interface ComposioUserBackendHost {
   state: DurableObjectState;
   env: UserConfigurationEnv;
+  availablePackages: readonly { packageId: string; version: string }[];
 }
 
 export interface StartConnectionInput {
@@ -121,29 +124,9 @@ const initialState = (): UserSettingsViewV1 => ({
   connections: [],
 });
 
-type UserConfigurationCommand = Extract<
-  ConfigurationCommandV1,
-  {
-    type:
-      | "user/update-profile"
-      | "user/set-new-bot-model"
-      | "user/install-package"
-      | "user/set-package-enabled";
-  }
->;
-
-function userCommand(
-  command: ConfigurationCommandV1,
-): UserConfigurationCommand {
-  if (!command.type.startsWith("user/")) {
-    throw new Error("User configuration cannot execute a Bot command");
-  }
-  return command as UserConfigurationCommand;
-}
-
 function applyUserCommand(
   current: UserSettingsViewV1,
-  command: UserConfigurationCommand,
+  command: UserConfigurationCommandV1,
 ): UserSettingsViewV1 {
   const revision = current.revision + 1;
   switch (command.type) {
@@ -198,25 +181,35 @@ function applyUserCommand(
 export class ComposioUserBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: UserConfigurationEnv;
+  private readonly availablePackages: ReadonlySet<string>;
 
   constructor(host: ComposioUserBackendHost) {
     this.ctx = host.state;
     this.env = host.env;
-  }
-  async read(userId: string): Promise<UserSettingsViewV1> {
-    await this.assertIdentity(userId);
-    return (
-      (await this.ctx.storage.get<UserSettingsViewV1>(STATE_KEY)) ??
-      initialState()
+    this.availablePackages = new Set(
+      host.availablePackages.map(
+        ({ packageId, version }) => `${packageId}\u0000${version}`,
+      ),
     );
   }
 
-  async execute(
-    userId: string,
-    command: ConfigurationCommandV1,
-  ): Promise<OperationReceiptV1> {
-    const decodedCommand = userCommand(command);
-    await this.assertIdentity(userId);
+  async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
+    const request = decodeUserConfigurationReadRpcV1(input);
+    return this.read(request.userId);
+  }
+
+  async executeConfiguration(input: unknown): Promise<OperationReceiptV1> {
+    const request = decodeUserConfigurationExecuteRpcV1(input);
+    const { command } = request;
+    if (
+      command.type === "user/install-package" &&
+      !this.availablePackages.has(
+        `${command.packageId}\u0000${command.version}`,
+      )
+    ) {
+      throw new Error("Package is not available in this application");
+    }
+    await this.assertIdentity(request.userId);
     return this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
       const existing = await transaction.get<OperationReceiptV1>(receiptKey);
@@ -227,7 +220,7 @@ export class ComposioUserBackendContribution {
       if (command.expectedRevision !== current.revision) {
         throw new ConfigurationConflictError(current.revision);
       }
-      const next = applyUserCommand(current, decodedCommand);
+      const next = applyUserCommand(current, command);
       const receipt: OperationReceiptV1 = {
         schemaVersion: 1,
         commandId: command.commandId,
@@ -237,6 +230,14 @@ export class ComposioUserBackendContribution {
       await transaction.put({ [STATE_KEY]: next, [receiptKey]: receipt });
       return receipt;
     });
+  }
+
+  async read(userId: string): Promise<UserSettingsViewV1> {
+    await this.assertIdentity(userId);
+    return (
+      (await this.ctx.storage.get<UserSettingsViewV1>(STATE_KEY)) ??
+      initialState()
+    );
   }
 
   async isPackageInstalled(

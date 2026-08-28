@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { ConnectionView } from "@frockbot/configuration-core";
+import type {
+  ConnectionView,
+  UserConfigurationCommandV1,
+} from "@frockbot/configuration-core";
 import {
   createComposioUserBackendContribution,
   deriveRevocationCompensations,
@@ -100,8 +103,46 @@ describe("Connection dependency admission", () => {
     const contribution = createComposioUserBackendContribution({
       state: { storage } as unknown as DurableObjectState,
       env: {} as never,
+      availablePackages: [{ packageId: "composio", version: "0.0.1" }],
     });
-    await contribution.execute("user-1", {
+    const execute = (command: UserConfigurationCommandV1) =>
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command,
+      });
+    const read = () =>
+      contribution.readConfiguration({ schemaVersion: 1, userId: "user-1" });
+
+    await expect(
+      contribution.readConfiguration({ schemaVersion: 1, userId: 42 }),
+    ).rejects.toThrow("userId is invalid");
+    await expect(
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/update-profile",
+          commandId: "malformed-profile",
+          expectedRevision: 0,
+          profile: { name: 42 },
+        },
+      }),
+    ).rejects.toThrow("profile.name must be a string");
+    await expect(
+      execute({
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-unknown",
+        expectedRevision: 0,
+        packageId: "unknown",
+        version: "1.0.0",
+      }),
+    ).rejects.toThrow("Package is not available");
+    expect((await read()).revision).toBe(0);
+
+    await execute({
       schemaVersion: 1,
       type: "user/install-package",
       commandId: "install-composio",
@@ -144,7 +185,7 @@ describe("Connection dependency admission", () => {
         { ...requirement, connectionTypeIds: ["calendar"] },
       ),
     ).toBe(false);
-    const beforeClaim = await contribution.read("user-1");
+    const beforeClaim = await read();
     expect(beforeClaim.revision).toBe(3);
     expect(beforeClaim.connections[0]?.safeMetadata).not.toHaveProperty(
       "dependentAssignments",
@@ -159,9 +200,7 @@ describe("Connection dependency admission", () => {
         requirement,
       ),
     ).toBe(true);
-    expect(
-      (await contribution.read("user-1")).connections[0]?.safeMetadata,
-    ).toMatchObject({
+    expect((await read()).connections[0]?.safeMetadata).toMatchObject({
       dependentAssignments: [
         {
           botId: "primary",

@@ -1,23 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
 import type {
+  BotConfigurationReadRpcV1,
   BotSettingsViewV1,
   ConfigurationCommandV1,
   ConfigurationQueryV1,
   ConfigurationViewV1,
   OperationReceiptV1,
+  UserConfigurationReadRpcV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type {
   BotNotificationIntent,
+  BotConfigurationBinding,
   BotStateBinding,
   BotTurnCommand,
   BotTurnResult,
-  ConfigurationBinding,
   ConnectionBinding,
   GatewayAuth,
   LoadedWorker,
   StoredRun,
+  UserConfigurationBinding,
   WorkerCode,
   WorkerLoader,
 } from "./contracts.js";
@@ -113,7 +116,9 @@ class MemoryBotState implements BotStateBinding {
   }
 }
 
-class MemoryConfiguration implements ConfigurationBinding {
+class MemoryConfiguration
+  implements UserConfigurationBinding, BotConfigurationBinding
+{
   private user: UserSettingsViewV1 = {
     schemaVersion: 1,
     revision: 0,
@@ -124,7 +129,7 @@ class MemoryConfiguration implements ConfigurationBinding {
   private readonly bots = new Map<string, BotSettingsViewV1>();
   private readonly receipts = new Map<string, OperationReceiptV1>();
 
-  read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
+  private read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
     if (query.type === "user/get") return Promise.resolve(this.user);
     const current = this.bots.get(query.botId) ?? {
       schemaVersion: 1 as const,
@@ -138,7 +143,9 @@ class MemoryConfiguration implements ConfigurationBinding {
     return Promise.resolve(current);
   }
 
-  async execute(command: ConfigurationCommandV1): Promise<OperationReceiptV1> {
+  private async execute(
+    command: ConfigurationCommandV1,
+  ): Promise<OperationReceiptV1> {
     const duplicate = this.receipts.get(command.commandId);
     if (duplicate) return duplicate;
     const current = await this.read(
@@ -221,6 +228,32 @@ class MemoryConfiguration implements ConfigurationBinding {
     this.receipts.set(command.commandId, receipt);
     return receipt;
   }
+
+  readConfiguration(
+    request: UserConfigurationReadRpcV1,
+  ): Promise<UserSettingsViewV1>;
+  readConfiguration(
+    request: BotConfigurationReadRpcV1,
+  ): Promise<BotSettingsViewV1>;
+  readConfiguration(
+    request:
+      | Parameters<UserConfigurationBinding["readConfiguration"]>[0]
+      | Parameters<BotConfigurationBinding["readConfiguration"]>[0],
+  ): Promise<ConfigurationViewV1> {
+    return this.read(
+      "botId" in request
+        ? { schemaVersion: 1, type: "bot/get", botId: request.botId }
+        : { schemaVersion: 1, type: "user/get" },
+    );
+  }
+
+  executeConfiguration(
+    request:
+      | Parameters<UserConfigurationBinding["executeConfiguration"]>[0]
+      | Parameters<BotConfigurationBinding["executeConfiguration"]>[0],
+  ): Promise<OperationReceiptV1> {
+    return this.execute(request.command);
+  }
 }
 
 class MemoryConnections implements ConnectionBinding {
@@ -301,6 +334,7 @@ function createTestGateway(
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
   const configurations = new Map<string, MemoryConfiguration>();
+  const configurationRoutes: string[] = [];
   const connections = new Map<string, MemoryConnections>();
   const gateway = createGateway({
     loader,
@@ -312,7 +346,15 @@ function createTestGateway(
       states.set(userId, state);
       return state;
     },
-    configurationFor: (userId) => {
+    userConfigurationFor: (userId) => {
+      configurationRoutes.push(`user:${userId}`);
+      const configuration =
+        configurations.get(userId) ?? new MemoryConfiguration();
+      configurations.set(userId, configuration);
+      return configuration;
+    },
+    botConfigurationFor: (userId, botId) => {
+      configurationRoutes.push(`bot:${userId}:${botId}`);
       const configuration =
         configurations.get(userId) ?? new MemoryConfiguration();
       configurations.set(userId, configuration);
@@ -362,7 +404,14 @@ function createTestGateway(
     allowedClientOrigins,
     allowDevelopmentIdentity,
   });
-  return { gateway, loader, states, configurations, connections };
+  return {
+    gateway,
+    loader,
+    states,
+    configurations,
+    connections,
+    configurationRoutes,
+  };
 }
 
 function request(path: string, userId: string, init?: RequestInit): Request {
@@ -394,7 +443,7 @@ describe("Cloudflare user application gateway", () => {
   });
 
   test("reads and durably commands User and Bot settings before loading the app", async () => {
-    const { gateway, loader } = createTestGateway();
+    const { gateway, loader, configurationRoutes } = createTestGateway();
 
     const initial = await gateway(
       request("/api/bots/primary/settings", "alice"),
@@ -438,6 +487,32 @@ describe("Cloudflare user application gateway", () => {
       revision: 1,
       profile: { name: "Housework" },
     });
+    const initialUser = await gateway(request("/api/settings", "alice"));
+    expect(await initialUser.json()).toMatchObject({ revision: 0 });
+    const savedUser = await gateway(
+      request("/api/settings", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "user/update-profile",
+          commandId: "user-profile-1",
+          expectedRevision: 0,
+          profile: { name: "Alice" },
+        }),
+      }),
+    );
+    expect(await savedUser.json()).toMatchObject({
+      commandId: "user-profile-1",
+      status: "applied",
+    });
+    expect(configurationRoutes).toEqual([
+      "bot:alice:primary",
+      "bot:alice:primary",
+      "bot:alice:primary",
+      "user:alice",
+      "user:alice",
+    ]);
     expect(loader.ids).toEqual([]);
   });
 

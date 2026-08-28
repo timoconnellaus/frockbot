@@ -3,7 +3,6 @@ import {
   ConfigurationDecodeError,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
-  type ConfigurationQueryV1,
 } from "@frockbot/configuration-core";
 import type {
   GatewayDependencies,
@@ -135,21 +134,34 @@ export function createGateway(dependencies: GatewayDependencies) {
     );
     const isUserSettings = url.pathname === "/api/settings";
     if (isUserSettings || botSettingsMatch) {
-      const configuration = dependencies.configurationFor(userId);
       try {
         if (request.method === "GET") {
-          let query: ConfigurationQueryV1 = {
-            schemaVersion: 1,
-            type: "user/get",
-          };
-          if (botSettingsMatch) {
-            query = decodeConfigurationQueryV1({
-              schemaVersion: 1,
-              type: "bot/get",
-              botId: decodeURIComponent(botSettingsMatch[1]),
-            });
+          if (!botSettingsMatch) {
+            return Response.json(
+              await dependencies
+                .userConfigurationFor(userId)
+                .readConfiguration({ schemaVersion: 1, userId }),
+            );
           }
-          return Response.json(await configuration.read(query));
+          const query = decodeConfigurationQueryV1({
+            schemaVersion: 1,
+            type: "bot/get",
+            botId: decodeURIComponent(botSettingsMatch[1]),
+          });
+          if (query.type !== "bot/get") {
+            throw new ConfigurationDecodeError(
+              "Bot settings require a Bot query",
+            );
+          }
+          return Response.json(
+            await dependencies
+              .botConfigurationFor(userId, query.botId)
+              .readConfiguration({
+                schemaVersion: 1,
+                userId,
+                botId: query.botId,
+              }),
+          );
         }
         if (request.method !== "POST") {
           return jsonError(405, "method not allowed");
@@ -168,7 +180,25 @@ export function createGateway(dependencies: GatewayDependencies) {
         if (isUserSettings && "botId" in command) {
           return jsonError(400, "User settings require a User command");
         }
-        return Response.json(await configuration.execute(command));
+        if ("botId" in command) {
+          return Response.json(
+            await dependencies
+              .botConfigurationFor(userId, command.botId)
+              .executeConfiguration({
+                schemaVersion: 1,
+                userId,
+                botId: command.botId,
+                command,
+              }),
+          );
+        }
+        return Response.json(
+          await dependencies.userConfigurationFor(userId).executeConfiguration({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        );
       } catch (error) {
         if (error instanceof ConfigurationDecodeError) {
           return jsonError(400, error.message);

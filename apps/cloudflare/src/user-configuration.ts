@@ -21,15 +21,16 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         const contributions = createFoundationBackendContributions(plan, {
           backendHost: "user",
           mount: (specifier) => {
-            if (
-              specifier !==
-              "@frockbot/plugin-composio/user-configuration"
-            ) {
+            if (specifier !== "@frockbot/plugin-composio/user-configuration") {
               throw new Error(`Unsupported User Contribution: ${specifier}`);
             }
             return createComposioUserBackendContribution({
               state: this.ctx,
               env: this.env,
+              availablePackages: plan.packages.map((pkg) => ({
+                packageId: pkg.id,
+                version: pkg.version,
+              })),
             });
           },
         });
@@ -42,20 +43,16 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return this.mounted;
   }
 
-  async read(...args: Parameters<ComposioUserBackendContribution["read"]>) {
-    return (await this.contribution()).read(...args);
+  async readConfiguration(input: unknown) {
+    return (await this.contribution()).readConfiguration(input);
   }
 
-  async execute(
-    ...args: Parameters<ComposioUserBackendContribution["execute"]>
-  ) {
-    return (await this.contribution()).execute(...args);
+  async executeConfiguration(input: unknown) {
+    return (await this.contribution()).executeConfiguration(input);
   }
 
   async isPackageInstalled(
-    ...args: Parameters<
-      ComposioUserBackendContribution["isPackageInstalled"]
-    >
+    ...args: Parameters<ComposioUserBackendContribution["isPackageInstalled"]>
   ) {
     return (await this.contribution()).isPackageInstalled(...args);
   }
@@ -190,7 +187,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     >
   ) {
     return (await this.contribution()).recordRevocationProviderCompleted(
-      ...args
+      ...args,
     );
   }
 

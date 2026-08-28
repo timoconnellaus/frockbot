@@ -4,6 +4,8 @@ import { compileFoundationApplication } from "@frockbot/application-foundation/r
 import {
   capabilityAssignmentFailureV1,
   ConfigurationConflictError,
+  decodeBotConfigurationExecuteRpcV1,
+  decodeBotConfigurationReadRpcV1,
   type ConnectionDependencyRequirementV1,
   type BotExecutionPlanV1,
   type BotSettingsViewV1,
@@ -149,21 +151,23 @@ export class ShellBotBackendContribution {
     return this.ensureBotSettings(identity);
   }
 
-  async executeConfiguration(
+  async readConfiguration(input: unknown): Promise<BotSettingsViewV1> {
+    const request = decodeBotConfigurationReadRpcV1(input);
+    return this.getSettings({ userId: request.userId, botId: request.botId });
+  }
+
+  async executeConfiguration(input: unknown): Promise<OperationReceiptV1> {
+    const request = decodeBotConfigurationExecuteRpcV1(input);
+    return this.executeConfigurationCommand(
+      { userId: request.userId, botId: request.botId },
+      request.command,
+    );
+  }
+
+  private async executeConfigurationCommand(
     identity: BotIdentity,
-    command: ConfigurationCommandV1,
+    command: Extract<ConfigurationCommandV1, { botId: string }>,
   ): Promise<OperationReceiptV1> {
-    if (
-      command.type !== "bot/update-profile" &&
-      command.type !== "bot/update-notifications" &&
-      command.type !== "bot/select-model" &&
-      command.type !== "bot/assign-capability"
-    ) {
-      throw new Error("Bot configuration cannot execute a User command");
-    }
-    if (command.botId !== identity.botId) {
-      throw new Error("Bot command does not match its durable identity");
-    }
     const active = this.assignmentActivities.get(command.commandId);
     if (active) return active;
     const activity: Promise<OperationReceiptV1> =
@@ -200,7 +204,10 @@ export class ShellBotBackendContribution {
     let dependencyRequirement: ConnectionDependencyRequirementV1 | undefined;
     if (command.type === "bot/assign-capability") {
       const [user, application] = await Promise.all([
-        this.userConfiguration(identity).read(identity.userId),
+        this.userConfiguration(identity).readConfiguration({
+          schemaVersion: 1,
+          userId: identity.userId,
+        }),
         compileFoundationApplication(),
       ]);
       const failure = capabilityAssignmentFailureV1({
@@ -782,7 +789,10 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     settings: BotSettingsViewV1,
   ): Promise<FoundationAgentPackage[]> {
-    const user = await this.userConfiguration(identity).read(identity.userId);
+    const user = await this.userConfiguration(identity).readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
     const application = await compileFoundationApplication();
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
@@ -821,7 +831,10 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     admittedAssignment: BotSettingsViewV1["assignments"][number],
   ): Promise<ConnectionView> {
-    const user = await this.userConfiguration(identity).read(identity.userId);
+    const user = await this.userConfiguration(identity).readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
     const application = await compileFoundationApplication();
     const admittedBot = {
       ...this.initialBotSettings(identity.botId),
@@ -965,7 +978,10 @@ export class ShellBotBackendContribution {
   }
 
   private userConfiguration(identity: BotIdentity): {
-    read(userId: string): Promise<UserSettingsViewV1>;
+    readConfiguration(input: {
+      schemaVersion: 1;
+      userId: string;
+    }): Promise<UserSettingsViewV1>;
     getConnection(
       userId: string,
       connectionId: string,
@@ -993,7 +1009,10 @@ export class ShellBotBackendContribution {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     return this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      read(userId: string): Promise<UserSettingsViewV1>;
+      readConfiguration(input: {
+        schemaVersion: 1;
+        userId: string;
+      }): Promise<UserSettingsViewV1>;
       getConnection(
         userId: string,
         connectionId: string,
@@ -1038,7 +1057,10 @@ export class ShellBotBackendContribution {
       durableIdentity || latestEvents?.length || activeRun || legacyRuns.size,
     );
     await this.assertIdentity(identity);
-    const user = await this.userConfiguration(identity).read(identity.userId);
+    const user = await this.userConfiguration(identity).readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
     const initial = this.initialBotSettings(
       identity.botId,
       existedBeforeConfiguration ? undefined : user.newBotModelTemplate,
@@ -1059,7 +1081,10 @@ export class ShellBotBackendContribution {
     plan: BotExecutionPlanV1;
   }> {
     let settings = await this.ensureBotSettings(identity);
-    const user = await this.userConfiguration(identity).read(identity.userId);
+    const user = await this.userConfiguration(identity).readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
     const application = await compileFoundationApplication();
     let plan = resolveBotExecutionPlanV1({
       bot: settings,

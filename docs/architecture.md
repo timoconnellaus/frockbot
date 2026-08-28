@@ -274,7 +274,7 @@ Computer assignments are keyed by `botId`, not live `agentId`. A provider change
 
 ## Configuration and Connections
 
-The cloud gateway owns the production settings protocol. `@frockbot/configuration-core` defines versioned User and Bot queries, commands, views, revisions, and receipts. The `UserConfiguration` Durable Object owns User profile state, durable Package installation state, and User Connections; each `BotState` Durable Object owns Bot profile, notification policy, model selection, and Capability Assignments. Commands carry stable IDs and expected revisions, so duplicate delivery returns the existing receipt and stale writes fail explicitly.
+The cloud gateway owns the authenticated production settings transport. `@frockbot/configuration-core` defines versioned User and Bot queries, commands, RPC authority envelopes, views, revisions, and receipts. Declared User and Bot backend Contributions decode those envelopes and own configuration policy and orchestration; `UserConfiguration` and `BotState` Durable Objects provide their authority, storage, scheduling, and narrow RPC adapters. Commands carry stable IDs and expected revisions, so duplicate delivery returns the existing receipt and stale writes fail explicitly.
 
 Manifest v3 lets a Package declare bounded User/Bot setting schemas, Connection Types, and Capabilities. Remote schema references, excessive nesting, and oversized schemas are rejected at manifest decoding. The hosted Plugins surface projects those declarations from the immutable application manifest; installing a Package records durable User availability but does not grant a Bot authority.
 

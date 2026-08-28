@@ -150,6 +150,40 @@ export type ConfigurationCommandV1 =
       assignment: Omit<CapabilityAssignmentView, "state">;
     });
 
+export type UserConfigurationCommandV1 = Exclude<
+  ConfigurationCommandV1,
+  { botId: string }
+>;
+
+export type BotConfigurationCommandV1 = Extract<
+  ConfigurationCommandV1,
+  { botId: string }
+>;
+
+export interface UserConfigurationReadRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+}
+
+export interface UserConfigurationExecuteRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  command: UserConfigurationCommandV1;
+}
+
+export interface BotConfigurationReadRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+}
+
+export interface BotConfigurationExecuteRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  command: BotConfigurationCommandV1;
+}
+
 export type OperationReceiptV1 =
   | {
       schemaVersion: 1;
@@ -505,6 +539,72 @@ export function decodeConfigurationCommandV1(
     default:
       throw new ConfigurationDecodeError("unknown configuration command");
   }
+}
+
+export function decodeUserConfigurationReadRpcV1(
+  input: unknown,
+): UserConfigurationReadRpcV1 {
+  const value = record(input, "User configuration read RPC");
+  schemaVersion(value);
+  return {
+    schemaVersion: 1,
+    userId: identifier(value.userId, "userId"),
+  };
+}
+
+export function decodeUserConfigurationExecuteRpcV1(
+  input: unknown,
+): UserConfigurationExecuteRpcV1 {
+  const value = record(input, "User configuration execute RPC");
+  schemaVersion(value);
+  const command = decodeConfigurationCommandV1(value.command);
+  if ("botId" in command) {
+    throw new ConfigurationDecodeError(
+      "User configuration RPC requires a User command",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    userId: identifier(value.userId, "userId"),
+    command,
+  };
+}
+
+export function decodeBotConfigurationReadRpcV1(
+  input: unknown,
+): BotConfigurationReadRpcV1 {
+  const value = record(input, "Bot configuration read RPC");
+  schemaVersion(value);
+  return {
+    schemaVersion: 1,
+    userId: identifier(value.userId, "userId"),
+    botId: identifier(value.botId, "botId"),
+  };
+}
+
+export function decodeBotConfigurationExecuteRpcV1(
+  input: unknown,
+): BotConfigurationExecuteRpcV1 {
+  const value = record(input, "Bot configuration execute RPC");
+  schemaVersion(value);
+  const botId = identifier(value.botId, "botId");
+  const command = decodeConfigurationCommandV1(value.command);
+  if (!("botId" in command)) {
+    throw new ConfigurationDecodeError(
+      "Bot configuration RPC requires a Bot command",
+    );
+  }
+  if (command.botId !== botId) {
+    throw new ConfigurationDecodeError(
+      "Bot configuration command does not match its authority",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    userId: identifier(value.userId, "userId"),
+    botId,
+    command,
+  };
 }
 
 function safeJsonValue(value: unknown, label: string): JsonValue {

@@ -39,16 +39,12 @@ export class BotState extends DurableObject<BotStateEnv> {
     return this.mounted;
   }
 
-  async getSettings(
-    ...args: Parameters<ShellBotBackendContribution["getSettings"]>
-  ) {
-    return (await this.contribution()).getSettings(...args);
+  async readConfiguration(input: unknown) {
+    return (await this.contribution()).readConfiguration(input);
   }
 
-  async executeConfiguration(
-    ...args: Parameters<ShellBotBackendContribution["executeConfiguration"]>
-  ) {
-    return (await this.contribution()).executeConfiguration(...args);
+  async executeConfiguration(input: unknown) {
+    return (await this.contribution()).executeConfiguration(input);
   }
 
   async markConnectionUnavailable(
@@ -80,9 +76,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async acknowledgeNotification(
-    ...args: Parameters<
-      ShellBotBackendContribution["acknowledgeNotification"]
-    >
+    ...args: Parameters<ShellBotBackendContribution["acknowledgeNotification"]>
   ) {
     return (await this.contribution()).acknowledgeNotification(...args);
   }

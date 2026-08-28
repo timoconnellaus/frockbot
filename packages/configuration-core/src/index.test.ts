@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   capabilityAssignmentFailureV1,
   ConfigurationDecodeError,
+  decodeBotConfigurationExecuteRpcV1,
   decodeConnectionDependencyRequirementV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
   decodeOperationReceiptV1,
+  decodeUserConfigurationExecuteRpcV1,
   decodeUserSettingsViewV1,
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
@@ -97,6 +99,53 @@ describe("configuration DTO seam", () => {
         connectionTypeIds: [],
       }),
     ).toThrow(ConfigurationDecodeError);
+  });
+
+  test("decodes configuration RPC authority before commands", () => {
+    expect(
+      decodeUserConfigurationExecuteRpcV1({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/update-profile",
+          commandId: "profile-1",
+          expectedRevision: 0,
+          profile: { name: "Alice" },
+        },
+      }),
+    ).toMatchObject({
+      userId: "user-1",
+      command: { profile: { name: "Alice" } },
+    });
+    expect(() =>
+      decodeUserConfigurationExecuteRpcV1({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/update-profile",
+          commandId: "profile-1",
+          expectedRevision: 0,
+          profile: { name: 42 },
+        },
+      }),
+    ).toThrow(ConfigurationDecodeError);
+    expect(() =>
+      decodeBotConfigurationExecuteRpcV1({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "primary",
+        command: {
+          schemaVersion: 1,
+          type: "bot/update-profile",
+          commandId: "profile-1",
+          botId: "other",
+          expectedRevision: 0,
+          profile: { name: "Other" },
+        },
+      }),
+    ).toThrow("does not match its authority");
   });
 
   test("decodes server projections and rejects malformed nested values", () => {

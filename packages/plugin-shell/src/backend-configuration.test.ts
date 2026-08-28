@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
+  BotConfigurationCommandV1,
   BotSettingsViewV1,
-  ConfigurationCommandV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import { createShellBotBackendContribution } from "./backend.js";
@@ -76,7 +76,7 @@ function assignmentCommand(
     capabilityId: string;
     connectionId?: string;
   },
-): ConfigurationCommandV1 {
+): BotConfigurationCommandV1 {
   return {
     schemaVersion: 1,
     type: "bot/assign-capability",
@@ -99,7 +99,7 @@ describe("Bot capability assignment admission", () => {
     let reads = 0;
     let claimAuthorized = true;
     const userConfiguration = {
-      read: () => {
+      readConfiguration: () => {
         reads += 1;
         return Promise.resolve(structuredClone(user));
       },
@@ -136,29 +136,54 @@ describe("Bot capability assignment admission", () => {
       } as never,
     });
     const identity = { userId: "user-1", botId: "primary" };
+    const execute = (command: BotConfigurationCommandV1) =>
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        ...identity,
+        command,
+      });
+    const read = () =>
+      contribution.readConfiguration({ schemaVersion: 1, ...identity });
+
+    await expect(
+      contribution.readConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "../primary",
+      }),
+    ).rejects.toThrow("botId is invalid");
+    await expect(
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          type: "bot/update-profile",
+          commandId: "malformed-profile",
+          botId: "primary",
+          expectedRevision: 0,
+          profile: { name: 42 },
+        },
+      }),
+    ).rejects.toThrow("profile.name must be a string");
+    expect(await read()).toMatchObject({ revision: 0, assignments: [] });
 
     const missingConnection = assignmentCommand("missing-connection", {
       packageId: "composio",
       capabilityId: "gmail-tools",
     });
-    const first = await contribution.executeConfiguration(
-      identity,
-      missingConnection,
-    );
+    const first = await execute(missingConnection);
     expect(first).toMatchObject({
       status: "rejected",
       revision: 0,
       failure: expect.stringContaining("requires a Connection"),
     });
     const readsAfterFirst = reads;
-    expect(
-      await contribution.executeConfiguration(identity, missingConnection),
-    ).toEqual(first);
+    expect(await execute(missingConnection)).toEqual(first);
     expect(reads).toBe(readsAfterFirst);
 
     expect(
-      await contribution.executeConfiguration(
-        identity,
+      await execute(
         assignmentCommand("unknown-capability", {
           packageId: "composio",
           capabilityId: "unknown",
@@ -174,8 +199,7 @@ describe("Bot capability assignment admission", () => {
       ],
     };
     expect(
-      await contribution.executeConfiguration(
-        identity,
+      await execute(
         assignmentCommand("wrong-connection-type", {
           packageId: "composio",
           capabilityId: "gmail-tools",
@@ -189,8 +213,7 @@ describe("Bot capability assignment admission", () => {
       packages: [{ ...installedUser().packages[0]!, state: "disabled" }],
     };
     expect(
-      await contribution.executeConfiguration(
-        identity,
+      await execute(
         assignmentCommand("disabled-package", {
           packageId: "composio",
           capabilityId: "gmail-tools",
@@ -200,7 +223,7 @@ describe("Bot capability assignment admission", () => {
     ).toMatchObject({ status: "rejected", revision: 0 });
 
     expect(dependencyClaims).toBe(0);
-    expect(await contribution.getSettings(identity)).toMatchObject({
+    expect(await read()).toMatchObject({
       revision: 0,
       assignments: [],
     } satisfies Partial<BotSettingsViewV1>);
@@ -212,25 +235,19 @@ describe("Bot capability assignment admission", () => {
       capabilityId: "gmail-tools",
       connectionId: "gmail-1",
     });
-    const changedReceipt = await contribution.executeConfiguration(
-      identity,
-      changedDuringClaim,
-    );
+    const changedReceipt = await execute(changedDuringClaim);
     expect(changedReceipt).toMatchObject({ status: "rejected", revision: 0 });
-    expect(
-      await contribution.executeConfiguration(identity, changedDuringClaim),
-    ).toEqual(changedReceipt);
+    expect(await execute(changedDuringClaim)).toEqual(changedReceipt);
     expect(dependencyClaims).toBe(1);
     expect(dependencyAcknowledgements).toBe(0);
-    expect(await contribution.getSettings(identity)).toMatchObject({
+    expect(await read()).toMatchObject({
       revision: 0,
       assignments: [],
     });
 
     claimAuthorized = true;
     expect(
-      await contribution.executeConfiguration(
-        identity,
+      await execute(
         assignmentCommand("valid-assignment", {
           packageId: "composio",
           capabilityId: "gmail-tools",
@@ -240,7 +257,7 @@ describe("Bot capability assignment admission", () => {
     ).toMatchObject({ status: "applied", revision: 1 });
     expect(dependencyClaims).toBe(2);
     expect(dependencyAcknowledgements).toBe(1);
-    expect(await contribution.getSettings(identity)).toMatchObject({
+    expect(await read()).toMatchObject({
       revision: 1,
       assignments: [
         {

@@ -1,12 +1,4 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
-import type {
-  BotSettingsViewV1,
-  ConfigurationCommandV1,
-  ConfigurationQueryV1,
-  ConfigurationViewV1,
-  OperationReceiptV1,
-  UserSettingsViewV1,
-} from "@frockbot/configuration-core";
 import {
   compileFoundationApplication,
   createFoundationBackendContributions,
@@ -16,12 +8,13 @@ import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
+  BotConfigurationBinding,
   BotNotificationIntent,
   BotStateBinding,
   BotTurnCommand,
   BotTurnResult,
-  ConfigurationBinding,
   StoredRun,
+  UserConfigurationBinding,
   WorkerLoader,
 } from "./contracts.js";
 import { createGateway } from "./gateway.js";
@@ -62,7 +55,7 @@ interface UserScopedProps {
   userId: string;
 }
 
-interface BotStateRpc {
+interface BotStateRpc extends BotConfigurationBinding {
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(): Promise<StoredRun[]>;
   listNotifications(): Promise<BotNotificationIntent[]>;
@@ -71,14 +64,6 @@ interface BotStateRpc {
     identity: { userId: string; botId: string },
     runId: string,
   ): Promise<BotTurnResult>;
-  getSettings(identity: {
-    userId: string;
-    botId: string;
-  }): Promise<BotSettingsViewV1>;
-  executeConfiguration(
-    identity: { userId: string; botId: string },
-    command: ConfigurationCommandV1,
-  ): Promise<OperationReceiptV1>;
   markConnectionUnavailable(
     identity: { userId: string; botId: string },
     connectionId: string,
@@ -86,13 +71,8 @@ interface BotStateRpc {
   ): Promise<"applied" | "stale">;
 }
 
-interface UserConfigurationRpc extends FoundationConnectionStore {
-  read(userId: string): Promise<UserSettingsViewV1>;
-  execute(
-    userId: string,
-    command: ConfigurationCommandV1,
-  ): Promise<OperationReceiptV1>;
-}
+interface UserConfigurationRpc
+  extends FoundationConnectionStore, UserConfigurationBinding {}
 
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   const id = env.BOT_STATES.idFromName(`${userId}:${botId}`);
@@ -106,55 +86,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration, whose
   // public RPC methods exactly match UserConfigurationRpc.
   return env.USER_CONFIGURATIONS.get(id) as unknown as UserConfigurationRpc;
-}
-
-export class UserConfigurationApi
-  extends WorkerEntrypoint<Env, UserScopedProps>
-  implements ConfigurationBinding
-{
-  async read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
-    if (query.type === "user/get") {
-      return userConfigurationStub(this.env, this.ctx.props.userId).read(
-        this.ctx.props.userId,
-      );
-    }
-    return botStateStub(
-      this.env,
-      this.ctx.props.userId,
-      query.botId,
-    ).getSettings({ userId: this.ctx.props.userId, botId: query.botId });
-  }
-
-  async execute(command: ConfigurationCommandV1): Promise<OperationReceiptV1> {
-    if (command.type === "user/install-package") {
-      const application = await compileFoundationApplication();
-      const available = application.packages.find(
-        (pkg) =>
-          pkg.id === command.packageId && pkg.version === command.version,
-      );
-      if (!available)
-        throw new Error("Package is not available in this application");
-    }
-    if (
-      command.type === "user/update-profile" ||
-      command.type === "user/set-new-bot-model" ||
-      command.type === "user/install-package" ||
-      command.type === "user/set-package-enabled"
-    ) {
-      return userConfigurationStub(this.env, this.ctx.props.userId).execute(
-        this.ctx.props.userId,
-        command,
-      );
-    }
-    return botStateStub(
-      this.env,
-      this.ctx.props.userId,
-      command.botId,
-    ).executeConfiguration(
-      { userId: this.ctx.props.userId, botId: command.botId },
-      command,
-    );
-  }
 }
 
 export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
@@ -213,9 +144,6 @@ class R2ApplicationArtifacts implements ApplicationArtifactStore {
 
 interface RuntimeExports {
   UserBotState(options: { props: UserScopedProps }): BotStateBinding;
-  UserConfigurationApi(options: {
-    props: UserScopedProps;
-  }): ConfigurationBinding;
 }
 
 export default {
@@ -254,8 +182,10 @@ export default {
       applicationHashFor: () => Promise.resolve(env.DEFAULT_APPLICATION_HASH),
       botStateFor: (userId): BotStateBinding =>
         runtimeExports.UserBotState({ props: { userId } }),
-      configurationFor: (userId): ConfigurationBinding =>
-        runtimeExports.UserConfigurationApi({ props: { userId } }),
+      userConfigurationFor: (userId): UserConfigurationBinding =>
+        userConfigurationStub(env, userId),
+      botConfigurationFor: (userId, botId): BotConfigurationBinding =>
+        botStateStub(env, userId, botId),
       backendContributions,
       allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
