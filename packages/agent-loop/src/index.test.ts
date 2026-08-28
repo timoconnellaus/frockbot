@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   AgentRegistry,
   type AgentOptions,
+  LlmEffectNotStartedError,
   type LlmReconciliationOutcome,
   LlmRegistry,
   type LlmProvider,
@@ -244,6 +245,115 @@ describe("AgentLoop", () => {
         (event) => event.type === "step/end" || event.type === "turn/end",
       ),
     ).toBe(false);
+  });
+
+  test("keeps an ambiguous dispatched effect open for provider reconciliation", async () => {
+    let streams = 0;
+    const retrieved: string[] = [];
+    const durableEventTypes: string[] = [];
+    let dispatchSawDurableIntent = false;
+    const provider: LlmProvider = {
+      id: "lost-response",
+      async *stream() {
+        streams += 1;
+        dispatchSawDurableIntent = durableEventTypes.at(-1) === "model/request";
+        throw new Error("response lost after dispatch");
+      },
+      reconciliation: {
+        retrieve(effect) {
+          retrieved.push(effect.providerEffectId);
+          return Promise.resolve({
+            status: "unavailable",
+            reason: "provider result is not retrievable yet",
+          });
+        },
+      },
+    };
+    const root = await mountRuntime(
+      provider,
+      undefined,
+      (_sessionId, events) => {
+        durableEventTypes.push(...events.map((event) => event.type));
+        return Promise.resolve();
+      },
+    );
+    const handle = await root.agents.create({
+      botId: "bot-lost-response",
+      sessionId: "lost-response",
+      provider: "lost-response",
+      model: "test-model",
+    });
+
+    handle.agent.send("Dispatch once.");
+    await handle.agent.whenIdle();
+    const request = handle.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    if (request?.type !== "model/request") {
+      throw new Error("model request was not recorded");
+    }
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "model/reconciliation-required",
+        requestId: request.request.requestId,
+        reason:
+          "Model response outcome is uncertain: response lost after dispatch",
+      }),
+    );
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "step/end" || event.type === "turn/end",
+      ),
+    ).toBe(false);
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(streams).toBe(1);
+    expect(dispatchSawDurableIntent).toBe(true);
+    expect(durableEventTypes).toContain("model/reconciliation-required");
+    expect(durableEventTypes).not.toContain("turn/end");
+    expect(retrieved).toEqual([request.request.requestId]);
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "step/end" || event.type === "turn/end",
+      ),
+    ).toBe(false);
+  });
+
+  test("terminally fails only an explicitly unstarted model effect", async () => {
+    const provider: LlmProvider = {
+      id: "pre-effect-failure",
+      async *stream() {
+        throw new LlmEffectNotStartedError(
+          "provider rejected before effect creation",
+        );
+      },
+    };
+    const root = await mountRuntime(provider);
+    const handle = await root.agents.create({
+      botId: "bot-pre-effect-failure",
+      sessionId: "pre-effect-failure",
+      provider: "pre-effect-failure",
+      model: "test-model",
+    });
+
+    handle.agent.send("Fail safely.");
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "model/reconciliation-required",
+      ),
+    ).toBe(false);
+    expect(handle.agent.session.events.at(-2)).toMatchObject({
+      type: "step/end",
+      outcome: "model-error",
+    });
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "model-error",
+    });
   });
 
   test("streams, journals a tool before execution, and repeats the model step", async () => {

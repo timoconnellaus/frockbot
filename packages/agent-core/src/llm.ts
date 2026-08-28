@@ -6,6 +6,13 @@ export interface DurableModelEffect {
   request: NormalizedModelRequest;
 }
 
+export class LlmEffectNotStartedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmEffectNotStartedError";
+  }
+}
+
 export type LlmReconciliationOutcome =
   | {
       status: "recovered";
@@ -79,7 +86,9 @@ export class LlmRegistry extends Service {
   ): AsyncIterable<LlmStreamEvent> {
     const provider = this.providers.get(request.provider);
     if (!provider)
-      throw new Error(`LLM provider "${request.provider}" is unavailable`);
+      throw new LlmEffectNotStartedError(
+        `LLM provider "${request.provider}" is unavailable`,
+      );
     return this.ctx.waterfall("llm/stream", request, signal, () =>
       provider.stream(request, signal),
     );

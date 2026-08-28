@@ -724,6 +724,15 @@ export class ShellBotBackendContribution {
       const events = eventsForFailedRun(durableRun, error);
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
+      if (error instanceof BotTurnReconciliationRequiredError) {
+        await this.requireRunReconciliation(
+          command.runId,
+          previous,
+          events,
+          message,
+        );
+        throw new Error(message);
+      }
       await this.failRun(command.runId, previous, events, message);
       throw new Error(message);
     } finally {
@@ -791,22 +800,12 @@ export class ShellBotBackendContribution {
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
       if (error instanceof BotTurnReconciliationRequiredError) {
-        await this.ctx.storage.transaction(async (transaction) => {
-          await requireStoredRunReconciliation(
-            transaction,
-            {
-              run: `${RUN_PREFIX}${run.runId}`,
-              activeRun: ACTIVE_RUN_KEY,
-              latestEvents: LATEST_EVENTS_KEY,
-              notificationPrefix: NOTIFICATION_PREFIX,
-            },
-            run.runId,
-            previous,
-            events,
-            message,
-          );
-          await this.refreshRecoveryAlarm(transaction);
-        });
+        await this.requireRunReconciliation(
+          run.runId,
+          previous,
+          events,
+          message,
+        );
         throw new Error(message);
       }
       await this.failRun(run.runId, previous, events, message);
@@ -1286,6 +1285,30 @@ export class ShellBotBackendContribution {
         transaction,
         {
           run: key,
+          activeRun: ACTIVE_RUN_KEY,
+          latestEvents: LATEST_EVENTS_KEY,
+          notificationPrefix: NOTIFICATION_PREFIX,
+        },
+        runId,
+        previous,
+        events,
+        failure,
+      );
+      await this.refreshRecoveryAlarm(transaction);
+    });
+  }
+
+  private async requireRunReconciliation(
+    runId: string,
+    previous: SessionEvent[],
+    events: SessionEvent[],
+    failure: string,
+  ): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      await requireStoredRunReconciliation(
+        transaction,
+        {
+          run: `${RUN_PREFIX}${runId}`,
           activeRun: ACTIVE_RUN_KEY,
           latestEvents: LATEST_EVENTS_KEY,
           notificationPrefix: NOTIFICATION_PREFIX,

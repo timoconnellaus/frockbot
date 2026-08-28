@@ -1,18 +1,19 @@
-import type {
-  Agent,
-  AgentFactory,
-  AgentHandle,
-  AgentInput,
-  AgentOptions,
-  AgentStatus,
-  LlmStreamEvent,
-  NormalizedModelRequest,
-  PreStepDecision,
-  Session,
-  SessionEvent,
-  StepOutcome,
-  ToolCall,
-  ToolExecutionResult,
+import {
+  type Agent,
+  type AgentFactory,
+  type AgentHandle,
+  type AgentInput,
+  type AgentOptions,
+  type AgentStatus,
+  LlmEffectNotStartedError,
+  type LlmStreamEvent,
+  type NormalizedModelRequest,
+  type PreStepDecision,
+  type Session,
+  type SessionEvent,
+  type StepOutcome,
+  type ToolCall,
+  type ToolExecutionResult,
 } from "@frockbot/agent-core";
 import { type Context, Service } from "cordis";
 
@@ -35,6 +36,22 @@ interface ModelResponse {
 type ModelReconciliation =
   | { status: "recovered"; response: ModelResponse }
   | { status: "unavailable"; reason: string };
+
+class ModelEffectReconciliationRequiredError extends Error {
+  constructor(
+    readonly requestId: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ModelEffectReconciliationRequiredError";
+  }
+}
+
+function modelFailureMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : "Model provider response was lost";
+}
 
 class LoopAgent implements Agent {
   readonly id: string;
@@ -371,6 +388,9 @@ class LoopAgent implements Agent {
     } catch (error) {
       if (signal.aborted) {
         turnOutcome = "cancelled";
+      } else if (error instanceof ModelEffectReconciliationRequiredError) {
+        reconciliationRequired = true;
+        this.#ctx.emit("agent/error", this, error);
       } else {
         turnOutcome = "model-error";
         this.#ctx.emit("agent/error", this, error);
@@ -410,6 +430,7 @@ class LoopAgent implements Agent {
 
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
+    let reconciliationRequired = false;
     try {
       let inputs = [input];
       for (let step = 1; step <= this.#maxSteps; step += 1) {
@@ -476,20 +497,25 @@ class LoopAgent implements Agent {
     } catch (error) {
       if (signal.aborted) {
         turnOutcome = "cancelled";
+      } else if (error instanceof ModelEffectReconciliationRequiredError) {
+        reconciliationRequired = true;
+        this.#ctx.emit("agent/error", this, error);
       } else {
         turnOutcome = "model-error";
         this.#ctx.emit("agent/error", this, error);
       }
     } finally {
-      if (openStep !== undefined) {
-        this.session.append({
-          type: "step/end",
-          turn,
-          step: openStep,
-          outcome: turnOutcome,
-        });
+      if (!reconciliationRequired) {
+        if (openStep !== undefined) {
+          this.session.append({
+            type: "step/end",
+            turn,
+            step: openStep,
+            outcome: turnOutcome,
+          });
+        }
+        this.session.append({ type: "turn/end", turn, outcome: turnOutcome });
       }
-      this.session.append({ type: "turn/end", turn, outcome: turnOutcome });
       await this.session.flush();
       await this.#ctx.serial("agent/turn-stopping", this, turn);
     }
@@ -529,6 +555,21 @@ class LoopAgent implements Agent {
         return await this.#consumeStream(request, turn, step, signal);
       } catch (error) {
         if (signal.aborted) throw error;
+        if (!(error instanceof LlmEffectNotStartedError)) {
+          const reason = `Model response outcome is uncertain: ${modelFailureMessage(error)}`;
+          this.session.append({
+            type: "model/reconciliation-required",
+            turn,
+            step,
+            requestId: request.requestId,
+            reason,
+          });
+          await this.session.flush();
+          throw new ModelEffectReconciliationRequiredError(
+            request.requestId,
+            reason,
+          );
+        }
         const action = await this.#ctx.waterfall(
           "agent/request-error",
           this,
