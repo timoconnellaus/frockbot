@@ -45,6 +45,7 @@ describe("user application Bot seam", () => {
   test("delegates an admitted turn to the Bot owner", async () => {
     const calls: Array<{ botId: string; text: string }> = [];
     const result: BotTurnResult = {
+      schemaVersion: 1,
       runId: "run-1",
       text: "owned by bot",
       events: [],

@@ -10,7 +10,6 @@ import {
 } from "@frockbot/configuration-core";
 import {
   decodeAcknowledgement,
-  decodeClientTurnResponse,
   decodeNotificationList,
   decodeRevocationResult,
   decodeStartConnectionResult,
@@ -28,7 +27,10 @@ import {
   type WebChatMessage,
 } from "@frockbot/plugin-shell/shared";
 import { decodePluginCatalog } from "@frockbot/plugin-shell/client";
-import { decodeClientRunListV1 } from "@frockbot/plugin-shell/run-protocol";
+import {
+  decodeClientRunListV1,
+  decodeClientTurnV1,
+} from "@frockbot/plugin-shell/run-protocol";
 import { createApp, ref, watch, type Ref } from "vue";
 import { createMobileHost, type MobileHost } from "../host/index.ts";
 import { createCapacitorAdapters } from "../host/capacitor-adapters.ts";
@@ -351,7 +353,7 @@ const web: Ref<FrockBotWebData> = ref({
       if (!response.ok) {
         throw new Error(responseError(value, "Reconciliation failed"));
       }
-      decodeClientTurnResponse(value);
+      decodeClientTurnV1(value);
     } catch (error) {
       if (botProjection.isCurrent(projectionToken)) {
         web.value.settingsError =
@@ -418,7 +420,9 @@ botProjection = new MobileBotProjectionController(botId.value, {
     );
     const value: unknown = await response.json();
     if (!response.ok) {
-      throw new Error(responseError(value, "Could not acknowledge notification"));
+      throw new Error(
+        responseError(value, "Could not acknowledge notification"),
+      );
     }
     decodeAcknowledgement(value);
   },

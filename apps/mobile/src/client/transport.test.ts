@@ -18,18 +18,17 @@ describe("decodeTurnResponse", () => {
   test("decodes a turn with tool events", () => {
     expect(
       decodeTurnResponse({
+        schemaVersion: 1,
         runId: "run-1",
         text: "hello",
         events: [
           {
             type: "tool/call",
-            occurrenceId: "tool:1:1:0",
-            name: "echo",
-            input: { value: "hi" },
+            call: { id: "tool-1", name: "echo" },
           },
           {
             type: "tool/result",
-            occurrenceId: "tool:1:1:0",
+            callId: "tool-1",
             content: "hi",
             isError: false,
           },
@@ -41,13 +40,11 @@ describe("decodeTurnResponse", () => {
       events: [
         {
           type: "tool/call",
-          call: { id: "tool:1:1:0", name: "echo" },
-          callId: undefined,
-          content: undefined,
+          call: { id: "tool-1", name: "echo" },
         },
         {
           type: "tool/result",
-          callId: "tool:1:1:0",
+          callId: "tool-1",
           content: "hi",
           isError: false,
         },
@@ -56,32 +53,37 @@ describe("decodeTurnResponse", () => {
   });
 
   test("rejects malformed payloads", () => {
-    expect(() => decodeTurnResponse(null)).toThrow(
-      "turn response must be an object",
-    );
+    expect(() => decodeTurnResponse(null)).toThrow("turn must be an object");
     expect(() =>
-      decodeTurnResponse({ runId: 1, text: "x", events: [] }),
-    ).toThrow('turn response field "runId" must be a string');
-    expect(() => decodeTurnResponse({ runId: "r", text: "x" })).toThrow(
-      'turn response field "events" must be an array',
-    );
+      decodeTurnResponse({ schemaVersion: 1, runId: 1, text: "x", events: [] }),
+    ).toThrow("turn.runId must be a bounded string");
     expect(() =>
-      decodeTurnResponse({ runId: "r", text: "x", events: [{ type: 3 }] }),
-    ).toThrow('turn event field "type" must be a string');
+      decodeTurnResponse({ schemaVersion: 1, runId: "r", text: "x" }),
+    ).toThrow("turn.events must be a bounded array");
     expect(() =>
       decodeTurnResponse({
+        schemaVersion: 1,
+        runId: "r",
+        text: "x",
+        events: [{ type: 3 }],
+      }),
+    ).toThrow("run event.type is invalid");
+    expect(() =>
+      decodeTurnResponse({
+        schemaVersion: 1,
         runId: "r",
         text: "x",
         events: [{ type: "tool/call", call: { id: "c" } }],
       }),
-    ).toThrow('tool call field "name" must be a string');
+    ).toThrow("run event.call.name must be a wire-bounded string");
     expect(() =>
       decodeTurnResponse({
+        schemaVersion: 1,
         runId: "r",
         text: "x",
         events: [{ type: "tool/result", isError: "no" }],
       }),
-    ).toThrow('turn event field "isError" must be a boolean');
+    ).toThrow("run event.isError must be a boolean");
   });
 });
 
@@ -159,7 +161,12 @@ describe("gateway requests", () => {
       (path, init) => {
         calls.push({ path, init });
         return Promise.resolve(
-          jsonResponse({ runId: "run-1", text: "hi", events: [] }),
+          jsonResponse({
+            schemaVersion: 1,
+            runId: "run-1",
+            text: "hi",
+            events: [],
+          }),
         );
       },
       "my bot",

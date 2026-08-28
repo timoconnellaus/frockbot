@@ -1392,6 +1392,90 @@ describe("AgentLoop", () => {
     });
   });
 
+  test("does not request another model after a result without durable intent", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const call = {
+      id: "provider-call",
+      name: "echo",
+      input: { value: "unsafe" },
+    };
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "malformed-request",
+          provider: "malformed-tools",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "malformed-request",
+        text: "",
+        toolCalls: [call],
+      },
+      {
+        type: "tool/result",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: call.name,
+        content: "unsafe",
+        isError: false,
+        status: "completed",
+      },
+      { type: "step/end", turn: 1, step: 1, outcome: "completed" },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    let modelRequests = 0;
+    let toolExecutions = 0;
+    const root = await mountRuntime(
+      {
+        id: "malformed-tools",
+        async *stream() {
+          modelRequests += 1;
+          yield { type: "finish", reason: "completed" };
+        },
+      },
+      {
+        name: "echo",
+        description: "Echo a value.",
+        inputSchema: { type: "object" },
+        execute() {
+          toolExecutions += 1;
+          return Promise.resolve({ content: "unsafe", isError: false });
+        },
+      },
+      undefined,
+      { "malformed-tools": initial },
+    );
+    const handle = await root.agents.create({
+      botId: "resume-bot",
+      sessionId: "malformed-tools",
+      provider: "malformed-tools",
+      model: "test-model",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(modelRequests).toBe(0);
+    expect(toolExecutions).toBe(0);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "model-error",
+    });
+  });
+
   test("finishes a durable text response without another model request", async () => {
     const timestamp = "2026-08-28T00:00:00.000Z";
     const initial = [

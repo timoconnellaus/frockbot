@@ -16,7 +16,8 @@ import {
   type ToolCallOccurrence,
   type ToolExecutionResult,
   toolCallOccurrences,
-  toolIntentMatches,
+  validateSettledToolOccurrenceJournal,
+  validateToolOccurrenceJournal,
 } from "@frockbot/agent-core";
 import { type Context, Service } from "cordis";
 
@@ -54,57 +55,6 @@ function modelFailureMessage(error: unknown): string {
   return error instanceof Error && error.message
     ? error.message
     : "Model provider response was lost";
-}
-
-function durableToolJournal(
-  events: readonly SessionEvent[],
-  turn: number,
-  step: number,
-  occurrences: readonly ToolCallOccurrence[],
-): {
-  intents: Map<string, Extract<SessionEvent, { type: "tool/call" }>>;
-  results: Set<string>;
-} {
-  const expected = new Map(
-    occurrences.map((occurrence) => [occurrence.occurrenceId, occurrence]),
-  );
-  const intents = new Map<
-    string,
-    Extract<SessionEvent, { type: "tool/call" }>
-  >();
-  const results = new Set<string>();
-  for (const event of events) {
-    if (event.type !== "tool/call" && event.type !== "tool/result") continue;
-    if (event.turn !== turn || event.step !== step) continue;
-    if (event.type === "tool/call") {
-      const occurrence = expected.get(event.occurrenceId);
-      if (!occurrence || !toolIntentMatches(occurrence.call, event)) {
-        throw new Error(
-          `tool occurrence "${event.occurrenceId}" intent does not match its assistant call`,
-        );
-      }
-      if (intents.has(event.occurrenceId) || results.has(event.occurrenceId)) {
-        throw new Error(
-          `tool occurrence "${event.occurrenceId}" has duplicate intent`,
-        );
-      }
-      intents.set(event.occurrenceId, event);
-    } else if (event.type === "tool/result") {
-      const occurrence = expected.get(event.occurrenceId);
-      if (!occurrence || occurrence.call.name !== event.name) {
-        throw new Error(
-          `tool occurrence "${event.occurrenceId}" result does not match its assistant call`,
-        );
-      }
-      if (!intents.has(event.occurrenceId) || results.has(event.occurrenceId)) {
-        throw new Error(
-          `tool occurrence "${event.occurrenceId}" has a result without one intent`,
-        );
-      }
-      results.add(event.occurrenceId);
-    }
-  }
-  return { intents, results };
 }
 
 class LoopAgent implements Agent {
@@ -389,17 +339,10 @@ class LoopAgent implements Agent {
           latestStep,
           latestAssistant.toolCalls,
         );
-        const journal = durableToolJournal(
-          this.session.events,
-          openTurn,
-          latestStep,
-          occurrences,
-        );
+        const journal = validateToolOccurrenceJournal(this.session.events);
         for (const occurrence of occurrences) {
-          if (
-            journal.intents.has(occurrence.occurrenceId) &&
-            !journal.results.has(occurrence.occurrenceId)
-          ) {
+          const entry = journal.get(occurrence.occurrenceId);
+          if (entry?.intent && !entry.result) {
             this.session.append({
               type: "tool/result",
               turn: openTurn,
@@ -415,9 +358,7 @@ class LoopAgent implements Agent {
         await this.session.flush();
         await this.#executeTools(
           occurrences.filter(
-            (occurrence) =>
-              !journal.intents.has(occurrence.occurrenceId) &&
-              !journal.results.has(occurrence.occurrenceId),
+            (occurrence) => !journal.get(occurrence.occurrenceId)?.intent,
           ),
           signal,
         );
@@ -625,6 +566,7 @@ class LoopAgent implements Agent {
     step: number,
     signal: AbortSignal,
   ): Promise<ModelResponse> {
+    validateSettledToolOccurrenceJournal(this.session.events);
     const assembly = await this.#ctx.systemPrompt.assemble({
       sessionId: this.session.id,
       provider: this.#options.provider,

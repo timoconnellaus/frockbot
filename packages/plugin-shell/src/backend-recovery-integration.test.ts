@@ -298,6 +298,60 @@ describe("Bot recovery", () => {
     expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
   });
 
+  test("fails an ended step whose tool result has no durable intent", () => {
+    const events = [
+      {
+        type: "assistant/message" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        requestId: "completed-request",
+        text: "",
+        toolCalls: [
+          { id: "provider-call", name: "echo", input: { value: "unsafe" } },
+        ],
+      },
+      {
+        type: "tool/result" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "echo",
+        content: "unsafe",
+        isError: false,
+        status: "completed" as const,
+      },
+      {
+        type: "step/end" as const,
+        seq: 2,
+        timestamp: "2026-08-28T00:00:02.000Z",
+        turn: 1,
+        step: 1,
+        outcome: "completed" as const,
+      },
+    ] satisfies SessionEvent[];
+    const run = {
+      runId: "run-malformed-tool",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "hello",
+      events,
+      status: "running",
+      phase: "executing",
+      previousEventCount: 0,
+    } satisfies StoredRun;
+
+    expect(planBotRunRecovery(run, events)).toEqual({
+      kind: "fail",
+      failure:
+        'Invalid durable tool journal: tool occurrence "tool:1:1:0" has a result without intent',
+    });
+  });
+
   test.each([
     ["text response", []],
     [

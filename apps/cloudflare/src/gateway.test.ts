@@ -13,7 +13,9 @@ import type {
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import {
   decodeClientRunListV1,
+  decodeClientTurnV1,
   projectClientRunListV1,
+  projectClientTurnV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
 } from "@frockbot/plugin-shell/run-protocol";
@@ -45,11 +47,11 @@ class MemoryBotState implements BotStateBinding {
       (candidate) => candidate.runId === command.runId,
     );
     if (existing?.status === "completed") {
-      return {
+      return projectClientTurnV1({
         runId: existing.runId,
         text: existing.responseText ?? "",
         events: structuredClone(existing.events),
-      };
+      });
     }
     if (existing) throw new Error("duplicate run is still active");
     if (runs.some((candidate) => candidate.status === "running")) {
@@ -87,7 +89,7 @@ class MemoryBotState implements BotStateBinding {
       run.status = "completed";
       run.responseText = result.text;
       this.sessions.set(botId, [...previousEvents, ...result.events]);
-      return result;
+      return projectClientTurnV1(result);
     } catch (error) {
       run.status = "failed";
       run.failure = error instanceof Error ? error.message : "Bot turn failed";
@@ -134,11 +136,13 @@ class MemoryBotState implements BotStateBinding {
     if (!run || run.status !== "completed") {
       return Promise.reject(new Error("run does not require reconciliation"));
     }
-    return Promise.resolve({
-      runId,
-      text: run.responseText ?? "",
-      events: structuredClone(run.events),
-    });
+    return Promise.resolve(
+      projectClientTurnV1({
+        runId,
+        text: run.responseText ?? "",
+        events: structuredClone(run.events),
+      }),
+    );
   }
 }
 
@@ -691,7 +695,24 @@ describe("Cloudflare user application gateway", () => {
       }),
     );
     expect(turn.status).toBe(200);
-    expect(await turn.json()).toMatchObject({ text: "Echo: hello workers" });
+    const publicTurn: unknown = await turn.json();
+    expect(decodeClientTurnV1(publicTurn)).toMatchObject({
+      text: "Echo: hello workers",
+      events: [
+        { type: "tool/call", call: { name: "echo" } },
+        { type: "tool/result", content: "hello workers" },
+      ],
+    });
+    const wire = JSON.stringify(publicTurn);
+    expect(Object.keys(publicTurn as Record<string, unknown>).sort()).toEqual([
+      "events",
+      "runId",
+      "schemaVersion",
+      "text",
+    ]);
+    expect(wire).not.toContain("model/request");
+    expect(wire).not.toContain("input/queued");
+    expect(wire).not.toContain('"input"');
     expect(new Set(loader.ids)).toEqual(new Set(["alice:foundation-v1"]));
     expect(loader.codes.every((code) => code.globalOutbound === null)).toBe(
       true,
@@ -795,8 +816,8 @@ describe("Cloudflare user application gateway", () => {
   });
 
   test("rehydrates one bot session across disposable application runtimes", async () => {
-    const { gateway } = createTestGateway();
-    const responses: Array<{ events: SessionEvent[] }> = [];
+    const { gateway, states } = createTestGateway();
+    const responses: BotTurnResult[] = [];
     for (const text of ["first turn", "second turn"]) {
       const response = await gateway(
         request("/api/bots/continuing/turns", "alice", {
@@ -809,16 +830,18 @@ describe("Cloudflare user application gateway", () => {
         }),
       );
       expect(response.status).toBe(200);
-      responses.push((await response.json()) as { events: SessionEvent[] });
+      responses.push((await response.json()) as BotTurnResult);
     }
+    expect(responses.every((response) => response.schemaVersion === 1)).toBe(
+      true,
+    );
+    expect(JSON.stringify(responses)).not.toContain("turn/start");
+    const stored = states.get("alice")?.storedRuns("continuing") ?? [];
     expect(
-      responses[1]?.events
-        .filter((event) => event.type === "turn/start")
-        .map((event) => event.turn),
-    ).toEqual([2]);
-    expect(
-      responses[1]?.events.some((event) => event.type === "session/created"),
-    ).toBe(false);
+      stored.map(
+        (run) => run.events.find((event) => event.type === "turn/start")?.turn,
+      ),
+    ).toEqual([1, 2]);
 
     const history = await gateway(
       request("/api/bots/continuing/turns", "alice"),

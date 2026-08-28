@@ -4,48 +4,89 @@ import type {
   SessionEvent,
   SessionEventEnvelope,
   SessionEventInput,
-  ToolCall,
 } from "./types.js";
 import { toolCallOccurrences, toolIntentMatches } from "./types.js";
 
-function expectedToolCalls(
-  events: readonly SessionEvent[],
-): Map<string, ToolCall> {
-  const expected = new Map<string, ToolCall>();
-  for (const event of events) {
-    if (event.type !== "assistant/message") continue;
-    for (const occurrence of toolCallOccurrences(
-      event.turn,
-      event.step,
-      event.toolCalls,
-    )) {
-      if (expected.has(occurrence.occurrenceId)) {
-        throw new Error(
-          `tool occurrence "${occurrence.occurrenceId}" has multiple assistant calls`,
-        );
-      }
-      expected.set(occurrence.occurrenceId, occurrence.call);
-    }
-  }
-  return expected;
+export interface ToolOccurrenceJournalEntry {
+  occurrence: ReturnType<typeof toolCallOccurrences>[number];
+  intent?: Extract<SessionEvent, { type: "tool/call" }>;
+  result?: Extract<SessionEvent, { type: "tool/result" }>;
 }
 
-function requireMatchingToolCall(
-  expected: ReadonlyMap<string, ToolCall>,
-  event: Extract<SessionEvent, { type: "tool/call" | "tool/result" }>,
-): ToolCall {
-  const call = expected.get(event.occurrenceId);
-  if (!call || call.name !== event.name) {
+export function validateToolOccurrenceJournal(
+  events: readonly SessionEvent[],
+): ReadonlyMap<string, ToolOccurrenceJournalEntry> {
+  const journal = new Map<string, ToolOccurrenceJournalEntry>();
+  for (const event of events) {
+    if (event.type === "assistant/message") {
+      for (const occurrence of toolCallOccurrences(
+        event.turn,
+        event.step,
+        event.toolCalls,
+      )) {
+        if (journal.has(occurrence.occurrenceId)) {
+          throw new Error(
+            `tool occurrence "${occurrence.occurrenceId}" has multiple assistant calls`,
+          );
+        }
+        journal.set(occurrence.occurrenceId, { occurrence });
+      }
+      continue;
+    }
+    if (event.type !== "tool/call" && event.type !== "tool/result") continue;
+    const entry = journal.get(event.occurrenceId);
+    if (
+      !entry ||
+      entry.occurrence.turn !== event.turn ||
+      entry.occurrence.step !== event.step ||
+      entry.occurrence.call.name !== event.name
+    ) {
+      throw new Error(
+        `tool occurrence "${event.occurrenceId}" does not match an assistant call`,
+      );
+    }
+    if (event.type === "tool/call") {
+      if (!toolIntentMatches(entry.occurrence.call, event)) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" input does not match its assistant call`,
+        );
+      }
+      if (entry.intent || entry.result) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" has duplicate intent`,
+        );
+      }
+      entry.intent = event;
+      continue;
+    }
+    if (!entry.intent) {
+      throw new Error(
+        `tool occurrence "${event.occurrenceId}" has a result without intent`,
+      );
+    }
+    if (entry.result) {
+      throw new Error(
+        `tool occurrence "${event.occurrenceId}" has duplicate results`,
+      );
+    }
+    entry.result = event;
+  }
+  return journal;
+}
+
+export function validateSettledToolOccurrenceJournal(
+  events: readonly SessionEvent[],
+): ReadonlyMap<string, ToolOccurrenceJournalEntry> {
+  const journal = validateToolOccurrenceJournal(events);
+  const unsettled = [...journal.values()].find(
+    (entry) => !entry.intent || !entry.result,
+  );
+  if (unsettled) {
     throw new Error(
-      `tool occurrence "${event.occurrenceId}" does not match an assistant call`,
+      `tool occurrence "${unsettled.occurrence.occurrenceId}" is not durably settled`,
     );
   }
-  if (event.type === "tool/call" && !toolIntentMatches(call, event)) {
-    throw new Error(
-      `tool occurrence "${event.occurrenceId}" input does not match its assistant call`,
-    );
-  }
-  return call;
+  return journal;
 }
 
 declare module "cordis" {
@@ -132,7 +173,7 @@ export class Session {
 
   deriveMessages(): LlmMessage[] {
     const messages: LlmMessage[] = [];
-    const expected = expectedToolCalls(this.#events);
+    const journal = validateToolOccurrenceJournal(this.#events);
     for (const event of this.#events) {
       if (event.type === "user/message") {
         messages.push({ role: "user", content: event.text });
@@ -143,7 +184,7 @@ export class Session {
           toolCalls: event.toolCalls,
         });
       } else if (event.type === "tool/result") {
-        const call = requireMatchingToolCall(expected, event);
+        const call = journal.get(event.occurrenceId)!.occurrence.call;
         messages.push({
           role: "tool",
           callId: call.id,
@@ -178,13 +219,8 @@ export class Session {
     let openTurn: number | undefined;
     let openStep: { turn: number; step: number } | undefined;
     let openStepHasAssistant = false;
-    const calls = new Map<
-      string,
-      Extract<SessionEvent, { type: "tool/call" }>
-    >();
     const unresolvedModelRequests = new Set<string>();
-    const expected = expectedToolCalls(this.#events);
-    const completedOccurrences = new Set<string>();
+    const journal = validateToolOccurrenceJournal(this.#events);
 
     for (const event of this.#events) {
       if (event.type === "turn/start") openTurn = event.turn;
@@ -201,27 +237,6 @@ export class Session {
       ) {
         openStep = undefined;
       }
-      if (event.type === "tool/call") {
-        requireMatchingToolCall(expected, event);
-        if (
-          calls.has(event.occurrenceId) ||
-          completedOccurrences.has(event.occurrenceId)
-        ) {
-          throw new Error(
-            `tool occurrence "${event.occurrenceId}" has duplicate intent`,
-          );
-        }
-        calls.set(event.occurrenceId, event);
-      }
-      if (event.type === "tool/result") {
-        requireMatchingToolCall(expected, event);
-        if (!calls.delete(event.occurrenceId)) {
-          throw new Error(
-            `tool occurrence "${event.occurrenceId}" has a result without intent`,
-          );
-        }
-        completedOccurrences.add(event.occurrenceId);
-      }
       if (event.type === "model/request") {
         unresolvedModelRequests.add(event.request.requestId);
       }
@@ -234,7 +249,9 @@ export class Session {
     }
 
     const repairs: SessionEventInput[] = [];
-    for (const event of calls.values()) {
+    for (const entry of journal.values()) {
+      if (!entry.intent || entry.result) continue;
+      const event = entry.intent;
       repairs.push({
         type: "tool/result",
         turn: event.turn,

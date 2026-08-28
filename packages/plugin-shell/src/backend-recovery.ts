@@ -1,4 +1,10 @@
-import { Session, type SessionEvent } from "@frockbot/agent-core";
+import {
+  Session,
+  type SessionEvent,
+  toolCallOccurrences,
+  validateSettledToolOccurrenceJournal,
+  validateToolOccurrenceJournal,
+} from "@frockbot/agent-core";
 import { BotTurnExecutionError } from "./backend-runner.js";
 import type { StoredRun } from "./backend-contracts.js";
 
@@ -20,6 +26,15 @@ export type ModelRequestJournalState =
       request: Extract<SessionEvent, { type: "model/request" }>;
       outcome: Extract<SessionEvent, { type: "model/effect-not-started" }>;
     };
+
+function invalidToolJournal(error: unknown): BotRunRecoveryPlan {
+  return {
+    kind: "fail",
+    failure: `Invalid durable tool journal: ${
+      error instanceof Error ? error.message : "unknown structural error"
+    }`,
+  };
+}
 
 export function latestModelRequestJournalState(
   events: readonly SessionEvent[],
@@ -49,6 +64,12 @@ export function planBotRunRecovery(
   run: StoredRun,
   latest: readonly SessionEvent[],
 ): BotRunRecoveryPlan {
+  let toolJournal: ReturnType<typeof validateToolOccurrenceJournal>;
+  try {
+    toolJournal = validateToolOccurrenceJournal(run.events);
+  } catch (error) {
+    return invalidToolJournal(error);
+  }
   const terminalTurn = run.events.findLast(
     (event) => event.type === "turn/end",
   );
@@ -56,6 +77,11 @@ export function planBotRunRecovery(
     (event) => event.type === "assistant/message",
   );
   if (terminalTurn?.type === "turn/end") {
+    try {
+      validateSettledToolOccurrenceJournal(run.events);
+    } catch (error) {
+      return invalidToolJournal(error);
+    }
     if (terminalTurn.outcome !== "completed") {
       return {
         kind: "fail",
@@ -69,23 +95,51 @@ export function planBotRunRecovery(
     };
   }
   const modelState = latestModelRequestJournalState(run.events);
-  if (modelState.status === "no-effect") return { kind: "resume" };
-  if (modelState.status === "completed") {
-    const unresolvedToolCalls = new Set<string>();
-    for (const event of run.events) {
-      if (event.type === "tool/call") {
-        unresolvedToolCalls.add(event.occurrenceId);
-      }
-      if (event.type === "tool/result") {
-        unresolvedToolCalls.delete(event.occurrenceId);
-      }
+  if (modelState.status === "no-effect") {
+    try {
+      validateSettledToolOccurrenceJournal(run.events);
+    } catch (error) {
+      return invalidToolJournal(error);
     }
-    if (unresolvedToolCalls.size === 0) return { kind: "resume" };
+    return { kind: "resume" };
+  }
+  if (modelState.status === "completed") {
+    const resumableOccurrences = new Set(
+      lastAssistant?.type === "assistant/message"
+        ? toolCallOccurrences(
+            lastAssistant.turn,
+            lastAssistant.step,
+            lastAssistant.toolCalls,
+          ).map((occurrence) => occurrence.occurrenceId)
+        : [],
+    );
+    const skippedOccurrence = [...toolJournal.values()].find(
+      (entry) =>
+        !entry.intent &&
+        !entry.result &&
+        !resumableOccurrences.has(entry.occurrence.occurrenceId),
+    );
+    if (skippedOccurrence) {
+      return invalidToolJournal(
+        new Error(
+          `tool occurrence "${skippedOccurrence.occurrence.occurrenceId}" was skipped before recovery`,
+        ),
+      );
+    }
+    const unresolvedIntent = [...toolJournal.values()].some(
+      (entry) => entry.intent && !entry.result,
+    );
+    if (!unresolvedIntent) return { kind: "resume" };
   }
   const hasExternalIntent = run.events.some(
     (event) => event.type === "model/request" || event.type === "tool/call",
   );
   if (!hasExternalIntent) {
+    if (toolJournal.size > 0) {
+      return invalidToolJournal(
+        new Error("assistant tool occurrences have no durable model request"),
+      );
+    }
     return {
       kind: "restart",
       previous: [...latest.slice(0, run.previousEventCount ?? 0)],

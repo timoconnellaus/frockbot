@@ -49,7 +49,7 @@ export interface BotNotificationIntent {
   body: string;
 }
 
-export interface BotTurnResult {
+export interface BotTurnCompletion {
   runId: string;
   text: string;
   events: SessionEvent[];

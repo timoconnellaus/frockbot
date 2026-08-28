@@ -1,6 +1,15 @@
 import type { SessionEvent } from "@frockbot/agent-core";
-import type { ClientRun, ClientTurnEvent } from "@frockbot/client-core";
-import type { StoredRun } from "./backend-contracts.js";
+import type {
+  ClientNotificationIntent,
+  ClientRun,
+  ClientTurnEvent,
+  ClientTurnResponse,
+} from "@frockbot/client-core";
+import type {
+  BotNotificationIntent,
+  BotTurnCompletion,
+  StoredRun,
+} from "./backend-contracts.js";
 
 const MAX_RUN_ID_LENGTH = 128;
 const MAX_TIMESTAMP_LENGTH = 64;
@@ -12,6 +21,9 @@ const MAX_EVENT_ID_LENGTH = 256;
 const MAX_EVENT_NAME_BYTES = 256;
 const MAX_EVENT_CONTENT_BYTES = 32_000;
 const MAX_VISIBLE_EVENT_BYTES = 128_000;
+const MAX_NOTIFICATION_TITLE_BYTES = 512;
+const MAX_NOTIFICATION_BODY_BYTES = 2_000;
+const MAX_CLIENT_TURN_BYTES = 256_000;
 const MAX_CURSOR_LENGTH = 320;
 const RUN_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
@@ -74,6 +86,22 @@ export interface ClientRunListV1 {
 export interface ClientRunListQueryV1 {
   schemaVersion: 1;
   before?: string;
+}
+
+export interface ClientNotificationIntentV1 {
+  notificationId: string;
+  runId: string;
+  createdAt: string;
+  title: string;
+  body: string;
+}
+
+export interface ClientTurnV1 {
+  schemaVersion: 1;
+  runId: string;
+  text: string;
+  events: ClientRunEventV1[];
+  notification?: ClientNotificationIntentV1;
 }
 
 function truncate(value: string, maximum: number): string {
@@ -273,6 +301,33 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     events: visibleEvents(run.events, status),
     ...(outcome ? { outcome } : {}),
     ...(recovery ? { recovery } : {}),
+  };
+}
+
+function projectNotificationV1(
+  notification: BotNotificationIntent,
+): ClientNotificationIntentV1 {
+  return {
+    notificationId: truncate(notification.notificationId, MAX_EVENT_ID_LENGTH),
+    runId: truncate(notification.runId, MAX_RUN_ID_LENGTH),
+    createdAt: truncate(notification.createdAt, MAX_TIMESTAMP_LENGTH),
+    title: truncateWireString(notification.title, MAX_NOTIFICATION_TITLE_BYTES),
+    body: truncateWireString(notification.body, MAX_NOTIFICATION_BODY_BYTES),
+  };
+}
+
+export function projectClientTurnV1(result: BotTurnCompletion): ClientTurnV1 {
+  if (result.notification && result.notification.runId !== result.runId) {
+    throw new Error("turn notification does not match its run");
+  }
+  return {
+    schemaVersion: 1,
+    runId: truncate(result.runId, MAX_RUN_ID_LENGTH),
+    text: truncateWireString(result.text, MAX_OUTCOME_BYTES),
+    events: visibleEvents(result.events, "completed"),
+    ...(result.notification
+      ? { notification: projectNotificationV1(result.notification) }
+      : {}),
   };
 }
 
@@ -557,6 +612,87 @@ function decodePage(value: unknown): ClientRunPageV1 {
   return {
     truncated: page.truncated,
     ...(nextCursor ? { nextCursor } : {}),
+  };
+}
+
+function decodeNotificationV1(value: unknown): ClientNotificationIntent {
+  const notification = record(value, "turn.notification");
+  exactKeys(
+    notification,
+    ["notificationId", "runId", "createdAt", "title", "body"],
+    "turn.notification",
+  );
+  const createdAt = string(
+    notification,
+    "createdAt",
+    MAX_TIMESTAMP_LENGTH,
+    "turn.notification",
+  );
+  if (!Number.isFinite(Date.parse(createdAt))) {
+    throw new Error("turn.notification.createdAt is invalid");
+  }
+  return {
+    notificationId: publicEventId(
+      string(
+        notification,
+        "notificationId",
+        MAX_EVENT_ID_LENGTH,
+        "turn.notification",
+      ),
+      "turn.notification.notificationId",
+    ),
+    runId: string(
+      notification,
+      "runId",
+      MAX_RUN_ID_LENGTH,
+      "turn.notification",
+    ),
+    createdAt,
+    title: wireString(
+      notification,
+      "title",
+      MAX_NOTIFICATION_TITLE_BYTES,
+      "turn.notification",
+    ),
+    body: wireString(
+      notification,
+      "body",
+      MAX_NOTIFICATION_BODY_BYTES,
+      "turn.notification",
+    ),
+  };
+}
+
+export function decodeClientTurnV1(input: unknown): ClientTurnResponse {
+  const turn = record(input, "turn");
+  exactKeys(
+    turn,
+    ["schemaVersion", "runId", "text", "events", "notification"],
+    "turn",
+  );
+  if (turn.schemaVersion !== 1) {
+    throw new Error("turn.schemaVersion is invalid");
+  }
+  if (!Array.isArray(turn.events) || turn.events.length > MAX_VISIBLE_EVENTS) {
+    throw new Error("turn.events must be a bounded array");
+  }
+  if (wireBytes(input) > MAX_CLIENT_TURN_BYTES) {
+    throw new Error("turn exceeds the wire byte limit");
+  }
+  const runId = string(turn, "runId", MAX_RUN_ID_LENGTH, "turn");
+  if (!RUN_ID_PATTERN.test(runId)) throw new Error("turn.runId is invalid");
+  const notification =
+    turn.notification === undefined
+      ? undefined
+      : decodeNotificationV1(turn.notification);
+  if (notification && notification.runId !== runId) {
+    throw new Error("turn.notification.runId does not match turn.runId");
+  }
+  return {
+    runId,
+    text: wireString(turn, "text", MAX_OUTCOME_BYTES, "turn"),
+    events: decodeEvents(turn.events, "completed"),
+    ...(notification ? { notification } : {}),
   };
 }
 

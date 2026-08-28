@@ -1,5 +1,5 @@
 import type { SessionEvent } from "@frockbot/agent-core";
-import type { BotTurnResult, StoredRun } from "./backend-contracts.js";
+import type { BotTurnCompletion, StoredRun } from "./backend-contracts.js";
 
 export interface RunTerminalStorage {
   get<T>(key: string): Promise<T | undefined>;
@@ -19,7 +19,7 @@ export async function completeStoredRun(
   keys: RunTerminalKeys,
   runId: string,
   previous: readonly SessionEvent[],
-  result: BotTurnResult,
+  result: BotTurnCompletion,
 ): Promise<void> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);

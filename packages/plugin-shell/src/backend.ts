@@ -45,13 +45,15 @@ import {
   createClientRunListV1,
   decodeClientRunListQueryV1,
   projectClientRunV1,
+  projectClientTurnV1,
   type ClientRunListV1,
   type ClientRunV1,
+  type ClientTurnV1,
 } from "./run-protocol.js";
 import type {
   BotNotificationIntent,
   BotTurnCommand,
-  BotTurnResult,
+  BotTurnCompletion,
   StoredRun,
 } from "./backend-contracts.js";
 import { botTurnCommandFingerprintV1 } from "./backend-contracts.js";
@@ -752,23 +754,25 @@ export class ShellBotBackendContribution {
     return (await this.resolveExecutionContext(identity)).plan;
   }
 
-  async run(command: OwnedBotTurnCommand): Promise<BotTurnResult> {
+  async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
     await this.assertMatchingRunCommand(command);
     await this.recoverActiveRun();
     const replay = await this.completedRunResult(command);
-    if (replay) return replay;
+    if (replay) return projectClientTurnV1(replay);
     const admission = await this.acceptRun(command);
-    return this.executeAcceptedRun(
-      command,
-      admission.previous,
-      admission.settings,
+    return projectClientTurnV1(
+      await this.executeAcceptedRun(
+        command,
+        admission.previous,
+        admission.settings,
+      ),
     );
   }
 
   async reconcileRun(
     identity: BotIdentity,
     runId: string,
-  ): Promise<BotTurnResult> {
+  ): Promise<ClientTurnV1> {
     await this.assertIdentity(identity);
     const key = `${RUN_PREFIX}${runId}`;
     const recovery = await this.ctx.storage.transaction(async (transaction) => {
@@ -794,11 +798,13 @@ export class ShellBotBackendContribution {
       await this.refreshRecoveryAlarm(transaction);
       return { run, latest, settings };
     });
-    return this.executeResumedRun(
-      identity,
-      recovery.run,
-      recovery.latest,
-      recovery.settings,
+    return projectClientTurnV1(
+      await this.executeResumedRun(
+        identity,
+        recovery.run,
+        recovery.latest,
+        recovery.settings,
+      ),
     );
   }
 
@@ -806,7 +812,7 @@ export class ShellBotBackendContribution {
     command: OwnedBotTurnCommand,
     previous: SessionEvent[],
     settings: BotSettingsViewV1,
-  ): Promise<BotTurnResult> {
+  ): Promise<BotTurnCompletion> {
     this.executingRunId = command.runId;
     try {
       await this.ctx.storage.transaction(async (transaction) => {
@@ -881,7 +887,7 @@ export class ShellBotBackendContribution {
     run: StoredRun,
     latest: SessionEvent[],
     settings: BotSettingsViewV1,
-  ): Promise<BotTurnResult> {
+  ): Promise<BotTurnCompletion> {
     this.executingRunId = run.runId;
     const previous = latest.slice(0, run.previousEventCount ?? 0);
     try {
@@ -917,7 +923,7 @@ export class ShellBotBackendContribution {
       const fullResult = {
         ...result,
         events: durableRun.events,
-      } satisfies BotTurnResult;
+      } satisfies BotTurnCompletion;
       const completed = settings.notifications.enabled
         ? {
             ...fullResult,
@@ -1040,7 +1046,7 @@ export class ShellBotBackendContribution {
 
   private async completedRunResult(
     command: OwnedBotTurnCommand,
-  ): Promise<BotTurnResult | undefined> {
+  ): Promise<BotTurnCompletion | undefined> {
     const { runId } = command;
     const run = await this.ctx.storage.get<StoredRun>(`${RUN_PREFIX}${runId}`);
     if (!run) return undefined;
@@ -1096,7 +1102,7 @@ export class ShellBotBackendContribution {
 
   private createNotification(
     settings: BotSettingsViewV1,
-    result: BotTurnResult,
+    result: BotTurnCompletion,
   ): BotNotificationIntent {
     return {
       notificationId: `notification-${result.runId}`,
@@ -1523,7 +1529,7 @@ export class ShellBotBackendContribution {
   private async completeRun(
     runId: string,
     previous: SessionEvent[],
-    result: BotTurnResult,
+    result: BotTurnCompletion,
   ): Promise<void> {
     const key = `${RUN_PREFIX}${runId}`;
     await this.ctx.storage.transaction(async (transaction) => {
@@ -1625,7 +1631,7 @@ export class ShellBotBackendContribution {
           runId: run.runId,
           text: plan.responseText,
           events: run.events,
-        } satisfies BotTurnResult;
+        } satisfies BotTurnCompletion;
         const completed = run.configurationSnapshot.notifications.enabled
           ? {
               ...result,

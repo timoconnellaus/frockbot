@@ -5,7 +5,7 @@ import {
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
 import type { PersistSessionEvents, SessionEvent } from "@frockbot/agent-core";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
-import type { BotTurnCommand, BotTurnResult } from "./backend-contracts.js";
+import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 
 function appendedSessionEvents(
   previous: readonly SessionEvent[],
@@ -56,7 +56,7 @@ export interface ExecuteBotTurnOptions {
 
 export async function executeBotTurn(
   options: ExecuteBotTurnOptions,
-): Promise<BotTurnResult> {
+): Promise<BotTurnCompletion> {
   const {
     botId,
     command,

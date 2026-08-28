@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
 import {
   botTurnCommandFingerprintV1,
-  type BotTurnResult,
+  type BotTurnCompletion,
   type StoredRun,
 } from "./backend-contracts.js";
 import {
@@ -48,7 +48,7 @@ function storedRun(): StoredRun {
   };
 }
 
-function result(): BotTurnResult {
+function result(): BotTurnCompletion {
   return {
     runId: "run-1",
     text: "Done",

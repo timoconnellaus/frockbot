@@ -1,103 +1,23 @@
-import type { ClientRun } from "@frockbot/client-core";
-import { decodeClientRunListV1 } from "@frockbot/plugin-shell/run-protocol";
+import type {
+  ClientRun,
+  ClientTurnEvent,
+  ClientTurnResponse,
+} from "@frockbot/client-core";
+import {
+  decodeClientRunListV1,
+  decodeClientTurnV1,
+} from "@frockbot/plugin-shell/run-protocol";
 import type { WebToolActivity } from "@frockbot/plugin-shell/shared";
 
-export interface TurnEvent {
-  type: string;
-  call?: { id: string; name: string };
-  callId?: string;
-  content?: string;
-  isError?: boolean;
-}
-
-export interface TurnResponse {
-  runId: string;
-  text: string;
-  events: TurnEvent[];
-}
+export type TurnEvent = ClientTurnEvent;
+export type TurnResponse = ClientTurnResponse;
 
 export type RunSummary = ClientRun;
 
 export type Fetcher = (path: string, init?: RequestInit) => Promise<Response>;
 
-function record(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function requiredString(
-  source: Record<string, unknown>,
-  key: string,
-  label: string,
-): string {
-  const value = source[key];
-  if (typeof value !== "string") {
-    throw new Error(`${label} field "${key}" must be a string`);
-  }
-  return value;
-}
-
-function optionalString(
-  source: Record<string, unknown>,
-  key: string,
-  label: string,
-): string | undefined {
-  const value = source[key];
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== "string") {
-    throw new Error(`${label} field "${key}" must be a string`);
-  }
-  return value;
-}
-
-function decodeTurnEvent(value: unknown): TurnEvent {
-  const source = record(value, "turn event");
-  const event: TurnEvent = {
-    type: requiredString(source, "type", "turn event"),
-  };
-  if (
-    source.type === "tool/call" &&
-    source.occurrenceId !== undefined &&
-    source.name !== undefined
-  ) {
-    event.call = {
-      id: requiredString(source, "occurrenceId", "turn event"),
-      name: requiredString(source, "name", "turn event"),
-    };
-  } else if (source.call !== undefined) {
-    const call = record(source.call, "tool call");
-    event.call = {
-      id: requiredString(call, "id", "tool call"),
-      name: requiredString(call, "name", "tool call"),
-    };
-  }
-  event.callId =
-    source.type === "tool/result" && source.occurrenceId !== undefined
-      ? requiredString(source, "occurrenceId", "turn event")
-      : optionalString(source, "callId", "turn event");
-  event.content = optionalString(source, "content", "turn event");
-  if (source.isError !== undefined) {
-    if (typeof source.isError !== "boolean") {
-      throw new Error('turn event field "isError" must be a boolean');
-    }
-    event.isError = source.isError;
-  }
-  return event;
-}
-
 export function decodeTurnResponse(value: unknown): TurnResponse {
-  const source = record(value, "turn response");
-  const events = source.events;
-  if (!Array.isArray(events)) {
-    throw new Error('turn response field "events" must be an array');
-  }
-  return {
-    runId: requiredString(source, "runId", "turn response"),
-    text: requiredString(source, "text", "turn response"),
-    events: events.map(decodeTurnEvent),
-  };
+  return decodeClientTurnV1(value);
 }
 
 export function decodeRunList(value: unknown): RunSummary[] {

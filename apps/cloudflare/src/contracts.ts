@@ -12,6 +12,7 @@ import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 import type {
   ClientRunListQueryV1,
   ClientRunListV1,
+  ClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
 
 export interface BackendRouteContribution {
@@ -93,12 +94,7 @@ export interface BotNotificationIntent {
   body: string;
 }
 
-export interface BotTurnResult {
-  runId: string;
-  text: string;
-  events: SessionEvent[];
-  notification?: BotNotificationIntent;
-}
+export type BotTurnResult = ClientTurnV1;
 
 export interface BotStateBinding {
   run(botId: string, command: BotTurnCommand): Promise<BotTurnResult>;

@@ -3,10 +3,12 @@ import type { SessionEvent } from "@frockbot/agent-core";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
 import {
+  decodeClientTurnV1,
   decodeClientRunPageV1,
   decodeClientRunListV1,
   decodeClientRunListQueryV1,
   projectClientRunListV1,
+  projectClientTurnV1,
 } from "./run-protocol.js";
 
 const timestamp = "2026-08-29T00:00:00.000Z";
@@ -60,6 +62,105 @@ function storedRun(
 }
 
 describe("client run protocol v1", () => {
+  test("projects bounded Turn responses without internal events", () => {
+    const providerCallId = "provider-call-private";
+    const projected = projectClientTurnV1({
+      runId: "run-turn-1",
+      text: "✅".repeat(40_000),
+      events: [
+        event({
+          type: "model/request",
+          seq: 0,
+          timestamp,
+          turn: 1,
+          step: 1,
+          request: {
+            requestId: "request-private",
+            provider: "provider-private",
+            model: "model-private",
+            system: "system-prompt-secret",
+            messages: [],
+            tools: [],
+          },
+        }),
+        event({
+          type: "assistant/message",
+          seq: 1,
+          timestamp,
+          turn: 1,
+          step: 1,
+          requestId: "request-private",
+          text: "",
+          toolCalls: [
+            {
+              id: providerCallId,
+              name: "calendar_lookup",
+              input: { accessToken: "tool-input-secret" },
+            },
+          ],
+        }),
+        event({
+          type: "tool/call",
+          seq: 2,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "calendar_lookup",
+          input: { accessToken: "tool-input-secret" },
+        }),
+        event({
+          type: "tool/result",
+          seq: 3,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "calendar_lookup",
+          content: "visible result",
+          isError: false,
+          status: "completed",
+        }),
+      ],
+    });
+
+    expect(projected).toMatchObject({
+      schemaVersion: 1,
+      runId: "run-turn-1",
+      events: [
+        {
+          type: "tool/call",
+          call: { id: "tool-1", name: "calendar_lookup" },
+        },
+        {
+          type: "tool/result",
+          callId: "tool-1",
+          content: "visible result",
+          isError: false,
+        },
+      ],
+    });
+    expect(
+      new TextEncoder().encode(JSON.stringify(projected.text)).length,
+    ).toBeLessThanOrEqual(64_000);
+    expect(decodeClientTurnV1(structuredClone(projected))).toMatchObject({
+      runId: "run-turn-1",
+      events: projected.events,
+    });
+    const wire = JSON.stringify(projected);
+    for (const privateValue of [
+      "model/request",
+      "provider-private",
+      "model-private",
+      "system-prompt-secret",
+      "tool-input-secret",
+      providerCallId,
+      "occurrenceId",
+    ]) {
+      expect(wire).not.toContain(privateValue);
+    }
+  });
+
   test("projects only bounded user-visible run state", () => {
     const stored = {
       runId: "run-1",

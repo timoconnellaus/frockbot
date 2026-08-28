@@ -11,13 +11,15 @@ import {
 import {
   ClientApplication,
   decodeAcknowledgement,
-  decodeClientTurnResponse,
   decodeNotificationList,
   decodeRevocationResult,
   decodeStartConnectionResult,
   type ClientTurnResponse,
 } from "@frockbot/client-core";
-import { decodeClientRunListV1 } from "@frockbot/plugin-shell/run-protocol";
+import {
+  decodeClientRunListV1,
+  decodeClientTurnV1,
+} from "@frockbot/plugin-shell/run-protocol";
 
 function selectedBotId(): string {
   try {
@@ -111,7 +113,7 @@ const application = new ClientApplication({
           : "Agent request failed";
       throw new Error(error);
     }
-    return decodeClientTurnResponse(result);
+    return decodeClientTurnV1(result);
   },
   readConfiguration(query: ConfigurationQueryV1) {
     const path =
@@ -135,7 +137,7 @@ const application = new ClientApplication({
     );
   },
   async reconcileRun(runId: string) {
-    return decodeClientTurnResponse(
+    return decodeClientTurnV1(
       await apiRequest(
         `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
         "POST",
