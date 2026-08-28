@@ -457,6 +457,11 @@ describe("ComposioConnectionCoordinator", () => {
       store,
       callbackBaseUrl: "https://bot.frockbot.com",
       connectionTypes: {
+        calendar: {
+          authConfigId: "ac_calendar",
+          displayName: "Calendar",
+          toolkitSlug: "googlecalendar",
+        },
         gmail: {
           authConfigId: "ac_gmail",
           displayName: "Gmail",
@@ -480,6 +485,10 @@ describe("ComposioConnectionCoordinator", () => {
       },
     });
     expect(
+      typeof store.connections.get("connection-1")?.safeMetadata
+        .startCommandFingerprint,
+    ).toBe("string");
+    expect(
       store.connections.get("connection-1")?.safeMetadata,
     ).not.toHaveProperty("targetBotId");
 
@@ -489,11 +498,44 @@ describe("ComposioConnectionCoordinator", () => {
     });
     expect(duplicate).toEqual(result);
     expect(store.log).toEqual(["intent", "external-link", "authorizing"]);
+
+    const beforeCollision = structuredClone(
+      store.connections.get("connection-1"),
+    );
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+        alias: "Work",
+      }),
+    ).rejects.toThrow(
+      'Connection command idempotency key "connection-1" was reused for a different command',
+    );
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+        returnTarget: "desktop",
+      }),
+    ).rejects.toThrow(
+      'Connection command idempotency key "connection-1" was reused for a different command',
+    );
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-1",
+        connectionTypeId: "calendar",
+      }),
+    ).rejects.toThrow(
+      'Connection command idempotency key "connection-1" was reused for a different command',
+    );
+    expect(store.connections.get("connection-1")).toEqual(beforeCollision);
+    expect(store.log).toEqual(["intent", "external-link", "authorizing"]);
   });
 
   test("reconciles an uncertain Connect Link without repeating its effect", async () => {
     const store = new MemoryConnectionStore();
     let createCalls = 0;
+    let reconciliationReads = 0;
     const client = new ComposioClient({
       apiKey: "secret",
       fetch: (_input, init) => {
@@ -501,6 +543,7 @@ describe("ComposioConnectionCoordinator", () => {
           createCalls += 1;
           return Promise.reject(new Error("response lost"));
         }
+        reconciliationReads += 1;
         return Promise.resolve(
           Response.json({
             items: [
@@ -534,12 +577,27 @@ describe("ComposioConnectionCoordinator", () => {
         connectionTypeId: "gmail",
       }),
     ).rejects.toThrow("response lost");
+    const beforeCollision = structuredClone(
+      store.connections.get("connection-1"),
+    );
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+        alias: "Work",
+      }),
+    ).rejects.toThrow(
+      'Connection command idempotency key "connection-1" was reused for a different command',
+    );
+    expect(store.connections.get("connection-1")).toEqual(beforeCollision);
+    expect(reconciliationReads).toBe(0);
     const reconciled = await coordinator.start("user-1", {
       commandId: "connection-1",
       connectionTypeId: "gmail",
     });
 
     expect(createCalls).toBe(1);
+    expect(reconciliationReads).toBe(1);
     expect(reconciled.redirectUrl).toContain("connected_account_id=ca_123");
     expect(store.connections.get("connection-1")?.safeMetadata).toMatchObject({
       connectedAccountId: "ca_123",
@@ -561,6 +619,16 @@ describe("ComposioConnectionCoordinator", () => {
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
         authorizationStateId: "expired-state",
         authorizationStateExpiresAt: Date.now() - 1_000,
+        startCommandFingerprint: `connection-start-command-v1:${JSON.stringify({
+          userId: "user-1",
+          packageId: "composio",
+          connectionTypeId: "gmail",
+          displayName: "Gmail",
+          safeMetadata: {
+            toolkitSlug: "gmail",
+            returnTarget: "browser",
+          },
+        })}`,
       },
     });
     const coordinator = new ComposioConnectionCoordinator({

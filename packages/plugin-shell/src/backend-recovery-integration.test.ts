@@ -317,4 +317,67 @@ describe("Bot recovery", () => {
     );
     expect(storage.values.get(`run:${run.runId}`)).toEqual(run);
   });
+
+  test("rejects a Turn collision before recovering durable work", async () => {
+    const storage = new MemoryStorage();
+    const original = {
+      userId: "user-1",
+      botId: "primary",
+      runId: "run-collision",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      text: "original input",
+    };
+    const events = [
+      {
+        type: "assistant/message" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        step: 1,
+        requestId: "request-collision",
+        text: "Durable reply",
+        toolCalls: [],
+      },
+      {
+        type: "turn/end" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:02.000Z",
+        turn: 1,
+        outcome: "completed" as const,
+      },
+    ] satisfies SessionEvent[];
+    const run = {
+      runId: original.runId,
+      commandFingerprint: botTurnCommandFingerprintV1(original),
+      sessionId: original.sessionId,
+      acceptedAt: original.acceptedAt,
+      input: original.text,
+      events,
+      status: "running",
+      phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
+    } satisfies StoredRun;
+    await storage.put({
+      "active-run": run.runId,
+      [`run:${run.runId}`]: run,
+      "latest-events": events,
+    });
+    storage.alarmAt = Date.parse("2026-08-28T00:05:00.000Z");
+    const before = structuredClone([...storage.values.entries()]);
+    const alarmBefore = storage.alarmAt;
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(
+      contribution.run({ ...original, text: "colliding input" }),
+    ).rejects.toThrow(
+      'Turn idempotency key "run-collision" was reused for a different command',
+    );
+    expect([...storage.values.entries()]).toEqual(before);
+    expect(storage.alarmAt).toBe(alarmBefore);
+  });
 });

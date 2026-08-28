@@ -738,6 +738,7 @@ export class ShellBotBackendContribution {
   }
 
   async run(command: OwnedBotTurnCommand): Promise<BotTurnResult> {
+    await this.assertMatchingRunCommand(command);
     await this.recoverActiveRun();
     const replay = await this.completedRunResult(command);
     if (replay) return replay;
@@ -1047,6 +1048,22 @@ export class ShellBotBackendContribution {
       events: structuredClone(run.events),
       notification,
     };
+  }
+
+  private async assertMatchingRunCommand(
+    command: OwnedBotTurnCommand,
+  ): Promise<void> {
+    const run = await this.ctx.storage.get<StoredRun>(
+      `${RUN_PREFIX}${command.runId}`,
+    );
+    if (
+      run &&
+      run.commandFingerprint !== botTurnCommandFingerprintV1(command)
+    ) {
+      throw new Error(
+        `Turn idempotency key "${command.runId}" was reused for a different command`,
+      );
+    }
   }
 
   async listNotifications(): Promise<BotNotificationIntent[]> {

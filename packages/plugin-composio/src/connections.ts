@@ -164,6 +164,27 @@ function durableCompletionResult(
   return undefined;
 }
 
+function connectionStartCommandFingerprintV1(
+  userId: string,
+  input: {
+    connectionTypeId: string;
+    displayName: string;
+    toolkitSlug: string;
+    returnTarget: "browser" | "desktop";
+  },
+): string {
+  return `connection-start-command-v1:${JSON.stringify({
+    userId,
+    packageId: "composio",
+    connectionTypeId: input.connectionTypeId,
+    displayName: input.displayName,
+    safeMetadata: {
+      toolkitSlug: input.toolkitSlug,
+      returnTarget: input.returnTarget,
+    },
+  })}`;
+}
+
 export class ComposioConnectionCoordinator {
   constructor(private readonly config: ComposioConnectionCoordinatorConfig) {}
 
@@ -189,15 +210,24 @@ export class ComposioConnectionCoordinator {
       throw new Error("Connection commandId is invalid");
     }
     const connectionId = input.commandId;
+    const displayName = input.alias?.trim() || type.displayName;
+    const returnTarget = input.returnTarget ?? "browser";
+    const commandFingerprint = connectionStartCommandFingerprintV1(userId, {
+      connectionTypeId: input.connectionTypeId,
+      displayName,
+      toolkitSlug: type.toolkitSlug,
+      returnTarget,
+    });
     const claimed = await this.config.store.startConnection(userId, {
       connectionId,
       packageId: "composio",
       connectionTypeId: input.connectionTypeId,
-      displayName: input.alias?.trim() || type.displayName,
+      displayName,
       safeMetadata: {
         toolkitSlug: type.toolkitSlug,
         providerAlias: connectionId,
-        returnTarget: input.returnTarget ?? "browser",
+        returnTarget,
+        startCommandFingerprint: commandFingerprint,
         authorizationStateId: input.authorizationStateId ?? connectionId,
         authorizationStateExpiresAt:
           input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
@@ -211,6 +241,13 @@ export class ComposioConnectionCoordinator {
         userId,
         connectionId,
       );
+      if (
+        existing?.safeMetadata.startCommandFingerprint !== commandFingerprint
+      ) {
+        throw new Error(
+          `Connection command idempotency key "${input.commandId}" was reused for a different command`,
+        );
+      }
       const redirectUrl = existing?.safeMetadata.redirectUrl;
       const expiresAt = existing?.safeMetadata.expiresAt;
       const expiry =
@@ -337,8 +374,9 @@ export class ComposioConnectionCoordinator {
       userId,
       connectionId,
       {
-        returnTarget: input.returnTarget ?? "browser",
+        returnTarget,
         providerAlias: connectionId,
+        startCommandFingerprint: commandFingerprint,
         connectedAccountId: link.connectedAccountId,
         redirectUrl: link.redirectUrl,
         toolkitSlug: type.toolkitSlug,
