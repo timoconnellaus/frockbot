@@ -8,6 +8,7 @@ import type {
   RevokeConnectionResult,
   StartConnectionResult,
 } from "./backend-contracts.js";
+import { isSettledBotCompensation } from "./connection-recovery.js";
 
 export interface ComposioConnectionStore {
   isPackageInstalled(userId: string, packageId: string): Promise<boolean>;
@@ -37,6 +38,7 @@ export interface ComposioConnectionStore {
       state: "ready" | "failed";
       safeMetadata?: ConnectionView["safeMetadata"];
       failure?: string;
+      authorizationStateId?: string;
     },
   ): Promise<boolean>;
   consumeAuthorizationState(
@@ -389,60 +391,27 @@ export class ComposioConnectionCoordinator {
       userId,
       connectionId,
     );
-    const stateClaim = await this.config.store.consumeAuthorizationState(
-      userId,
-      connectionId,
-      authorizationStateId ??
-        (connection?.safeMetadata.authorizationStateId as string),
-    );
-    if (stateClaim === "duplicate") {
-      const current = await this.config.store.getConnection(
-        userId,
-        connectionId,
-      );
-      const durable = current ? durableCompletionResult(current) : undefined;
-      if (durable) return durable;
+    const callbackStateId =
+      authorizationStateId ?? connection?.safeMetadata.authorizationStateId;
+    if (typeof callbackStateId !== "string") {
+      throw new Error("Composio authorization state is invalid or expired");
     }
-    if (stateClaim !== "claimed") {
-      throw new Error(
-        stateClaim === "duplicate"
-          ? "Composio authorization state was already consumed"
-          : "Composio authorization state is invalid or expired",
-      );
+    if (connection?.safeMetadata.authorizationStateId !== callbackStateId) {
+      throw new Error("Composio authorization state is invalid or expired");
     }
-    const finished = await this.config.store.finishConnectionAuthorization(
+    await this.config.store.finishConnectionAuthorization(
       userId,
       connectionId,
       {
         state: "failed",
         failure: message.slice(0, 500),
+        authorizationStateId: callbackStateId,
       },
     );
-    if (finished)
-      return {
-        returnTarget:
-          connection?.safeMetadata.returnTarget === "desktop"
-            ? "desktop"
-            : "browser",
-        status: "failed",
-        nativeReturnNonce:
-          typeof connection?.safeMetadata.nativeReturnNonce === "string"
-            ? connection.safeMetadata.nativeReturnNonce
-            : undefined,
-      };
     const current = await this.config.store.getConnection(userId, connectionId);
-    if (current?.state !== "ready" && current?.state !== "failed") {
-      throw new Error("Connection state changed during failed callback");
-    }
-    return {
-      returnTarget:
-        current.safeMetadata.returnTarget === "desktop" ? "desktop" : "browser",
-      status: current.state,
-      nativeReturnNonce:
-        typeof current.safeMetadata.nativeReturnNonce === "string"
-          ? current.safeMetadata.nativeReturnNonce
-          : undefined,
-    };
+    const durable = current ? durableCompletionResult(current) : undefined;
+    if (durable) return durable;
+    throw new Error("Composio authorization state is invalid or expired");
   }
 
   async revoke(
@@ -546,12 +515,13 @@ export class ComposioConnectionCoordinator {
             expectedGeneration: compensation.expectedGeneration,
           },
         );
-        if (result !== "applied") continue;
-        await this.config.store.recordAssignmentCompensated(
-          userId,
-          connectionId,
-          compensation.id,
-        );
+        if (isSettledBotCompensation(result)) {
+          await this.config.store.recordAssignmentCompensated(
+            userId,
+            connectionId,
+            compensation.id,
+          );
+        }
       }
     }
     const finished = await this.config.store.finishConnectionRevocation(
@@ -714,7 +684,7 @@ export class ComposioConnectionCoordinator {
       connectionId,
       { id: leaseId, expectedGeneration: leaseId },
     );
-    if (result === "applied") {
+    if (isSettledBotCompensation(result)) {
       await this.config.store.recordAssignmentCompensated(
         userId,
         connectionId,

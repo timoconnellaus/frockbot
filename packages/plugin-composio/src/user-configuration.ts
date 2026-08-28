@@ -10,6 +10,11 @@ import {
   claimDependentAssignment,
   compensateDependentAssignment,
 } from "./dependency-coordination.js";
+import {
+  completeAssignmentCompensation,
+  expireAssignmentLease,
+  isSettledBotCompensation,
+} from "./connection-recovery.js";
 
 const STATE_KEY = "user-configuration";
 const IDENTITY_KEY = "user-id";
@@ -317,8 +322,74 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       state: "ready" | "failed";
       safeMetadata?: UserSettingsViewV1["connections"][number]["safeMetadata"];
       failure?: string;
+      authorizationStateId?: string;
     },
   ): Promise<boolean> {
+    if (update.authorizationStateId !== undefined) {
+      await this.assertIdentity(userId);
+      return this.ctx.storage.transaction(async (transaction) => {
+        const current =
+          (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
+          initialState();
+        const connection = current.connections.find(
+          (item) => item.connectionId === connectionId,
+        );
+        if (
+          !connection ||
+          update.state !== "failed" ||
+          connection.safeMetadata.authorizationStateId !==
+            update.authorizationStateId
+        ) {
+          return false;
+        }
+        if (
+          connection.state === "ready" ||
+          connection.state === "failed" ||
+          connection.safeMetadata.revocationRequested === true
+        ) {
+          return false;
+        }
+        const operation = connection.safeMetadata.reconciliationOperation;
+        if (
+          connection.state !== "authorizing" &&
+          !(
+            connection.state === "reconciliation-required" &&
+            operation === "link"
+          )
+        ) {
+          return false;
+        }
+        if (
+          connection.safeMetadata.authorizationStateConsumed !== true &&
+          (typeof connection.safeMetadata.authorizationStateExpiresAt !==
+            "number" ||
+            connection.safeMetadata.authorizationStateExpiresAt <= Date.now())
+        ) {
+          return false;
+        }
+        const nextConnection = {
+          ...connection,
+          state: "failed" as const,
+          safeMetadata: {
+            ...(update.safeMetadata ?? connection.safeMetadata),
+            authorizationStateConsumed: true,
+          },
+          failure: update.failure,
+        };
+        const next = {
+          ...current,
+          revision: current.revision + 1,
+          connections: current.connections.map((item) =>
+            item.connectionId === connectionId ? nextConnection : item,
+          ),
+        } satisfies UserSettingsViewV1;
+        await transaction.put(STATE_KEY, next);
+        const alarmAt = nextConnectionAlarm(next);
+        if (alarmAt === undefined) await transaction.deleteAlarm();
+        else await transaction.setAlarm(alarmAt);
+        return true;
+      });
+    }
     return this.transitionConnection(userId, connectionId, (connection) => {
       const operation = connection.safeMetadata.reconciliationOperation;
       if (
@@ -621,59 +692,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     connectionId: string,
     compensationId: string,
   ): Promise<boolean> {
-    return this.transitionConnection(userId, connectionId, (connection) => {
-      if (Array.isArray(connection.safeMetadata.assignmentCompensations)) {
-        const remaining =
-          connection.safeMetadata.assignmentCompensations.filter(
-            (candidate) =>
-              !candidate ||
-              typeof candidate !== "object" ||
-              Array.isArray(candidate) ||
-              (candidate as Record<string, unknown>).id !== compensationId,
-          );
-        if (
-          remaining.length ===
-          connection.safeMetadata.assignmentCompensations.length
-        ) {
-          return undefined;
-        }
-        const {
-          compensationRetryAt,
-          assignmentCompensationPending: _,
-          ...safeMetadata
-        } = connection.safeMetadata;
-        return {
-          ...connection,
-          safeMetadata: {
-            ...safeMetadata,
-            assignmentCompensations: remaining,
-            ...(remaining.length > 0
-              ? {
-                  assignmentCompensationPending: true,
-                  compensationRetryAt:
-                    typeof compensationRetryAt === "number"
-                      ? compensationRetryAt
-                      : Date.now() + CONNECTION_EFFECT_ALARM_MS,
-                }
-              : {}),
-          },
-        };
-      }
-      if (
-        connection.safeMetadata.assignmentCompensationPending !== true ||
-        connection.safeMetadata.assignmentCompensationId !== compensationId
-      ) {
-        return undefined;
-      }
-      const {
-        assignmentCompensationPending: _,
-        assignmentCompensationId: __,
-        assignmentCompensationGeneration: ___,
-        compensationRetryAt: ____,
-        ...safeMetadata
-      } = connection.safeMetadata;
-      return { ...connection, safeMetadata };
-    });
+    return this.transitionConnection(userId, connectionId, (connection) =>
+      completeAssignmentCompensation(connection, compensationId),
+    );
   }
 
   async claimConnectionDependency(
@@ -995,33 +1016,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         const connections = current.connections.map((connection) => {
           let next = connection;
           const metadata = connection.safeMetadata;
-          const assignmentLeaseExpired =
-            connection.state === "reconciliation-required" &&
-            metadata.reconciliationOperation === "assignment" &&
-            typeof metadata.assignmentLeaseExpiresAt === "number" &&
-            metadata.assignmentLeaseExpiresAt <= now;
-          if (assignmentLeaseExpired) {
-            const expiredLeaseId = metadata.assignmentLeaseId;
-            const {
-              assignmentLeaseId: _,
-              assignmentLeaseExpiresAt: __,
-              ...safeMetadata
-            } = metadata;
-            next = {
-              ...connection,
-              safeMetadata: {
-                ...safeMetadata,
-                assignmentCompensationPending: true,
-                ...(typeof expiredLeaseId === "string"
-                  ? {
-                      assignmentCompensationId: expiredLeaseId,
-                      assignmentCompensationGeneration: expiredLeaseId,
-                    }
-                  : {}),
-                compensationRetryAt: now,
-              },
-              failure: "Bot assignment was interrupted and can be retried",
-            };
+          const expiredAssignment = expireAssignmentLease(connection, now);
+          if (expiredAssignment) {
+            next = expiredAssignment;
             changed = true;
           }
 
@@ -1142,7 +1139,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             expectedGeneration: compensation.expectedGeneration,
           },
         );
-        if (result !== "applied") continue;
+        if (!isSettledBotCompensation(result)) continue;
         const cleared = await this.recordAssignmentCompensated(
           userId,
           compensation.connectionId,

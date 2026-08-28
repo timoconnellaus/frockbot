@@ -21,6 +21,7 @@ import {
   settleAssignmentSaga,
   type StoredAssignmentSaga,
 } from "./backend-assignment.js";
+import { completeStoredRun, failStoredRun } from "./backend-completion.js";
 import { executeBotTurn } from "./backend-runner.js";
 import { eventsForFailedRun, planBotRunRecovery } from "./backend-recovery.js";
 import type {
@@ -585,7 +586,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       const completed = settings.notifications.enabled
         ? {
             ...result,
-            notification: await this.recordNotification(settings, result),
+            notification: this.createNotification(settings, result),
           }
         : result;
       await this.completeRun(command.runId, previous, completed);
@@ -651,7 +652,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       const completed = settings.notifications.enabled
         ? {
             ...fullResult,
-            notification: await this.recordNotification(settings, fullResult),
+            notification: this.createNotification(settings, fullResult),
           }
         : fullResult;
       await this.completeRun(run.runId, previous, completed);
@@ -781,22 +782,17 @@ export class BotState extends DurableObject<BotStateEnv> {
     await this.ctx.storage.delete(`${NOTIFICATION_PREFIX}${notificationId}`);
   }
 
-  private async recordNotification(
+  private createNotification(
     settings: BotSettingsViewV1,
     result: BotTurnResult,
-  ): Promise<BotNotificationIntent> {
-    const notification: BotNotificationIntent = {
+  ): BotNotificationIntent {
+    return {
       notificationId: `notification-${result.runId}`,
       runId: result.runId,
       createdAt: new Date().toISOString(),
       title: `${settings.profile.name} replied`,
       body: result.text.slice(0, 240),
     };
-    await this.ctx.storage.put(
-      `${NOTIFICATION_PREFIX}${notification.notificationId}`,
-      notification,
-    );
-    return notification;
   }
 
   async alarm(): Promise<void> {
@@ -1097,21 +1093,18 @@ export class BotState extends DurableObject<BotStateEnv> {
   ): Promise<void> {
     const key = `${RUN_PREFIX}${runId}`;
     await this.ctx.storage.transaction(async (transaction) => {
-      const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
-      if (activeRunId !== runId)
-        throw new Error(`run "${runId}" is not active`);
-      const run = await transaction.get<StoredRun>(key);
-      if (!run) throw new Error(`run "${runId}" was not accepted`);
-      await transaction.put({
-        [key]: {
-          ...run,
-          events: structuredClone(result.events),
-          status: "completed",
-          responseText: result.text,
-        } satisfies StoredRun,
-        [LATEST_EVENTS_KEY]: structuredClone([...previous, ...result.events]),
-      });
-      await transaction.delete(ACTIVE_RUN_KEY);
+      await completeStoredRun(
+        transaction,
+        {
+          run: key,
+          activeRun: ACTIVE_RUN_KEY,
+          latestEvents: LATEST_EVENTS_KEY,
+          notificationPrefix: NOTIFICATION_PREFIX,
+        },
+        runId,
+        previous,
+        result,
+      );
       await this.refreshRecoveryAlarm(transaction);
     });
   }
@@ -1124,20 +1117,19 @@ export class BotState extends DurableObject<BotStateEnv> {
   ): Promise<void> {
     const key = `${RUN_PREFIX}${runId}`;
     await this.ctx.storage.transaction(async (transaction) => {
-      const run = await transaction.get<StoredRun>(key);
-      if (!run) return;
-      await transaction.put({
-        [key]: {
-          ...run,
-          events: structuredClone(events),
-          status: "failed",
-          failure,
-        } satisfies StoredRun,
-        [LATEST_EVENTS_KEY]: structuredClone([...previous, ...events]),
-      });
-      if ((await transaction.get<string>(ACTIVE_RUN_KEY)) === runId) {
-        await transaction.delete(ACTIVE_RUN_KEY);
-      }
+      await failStoredRun(
+        transaction,
+        {
+          run: key,
+          activeRun: ACTIVE_RUN_KEY,
+          latestEvents: LATEST_EVENTS_KEY,
+          notificationPrefix: NOTIFICATION_PREFIX,
+        },
+        runId,
+        previous,
+        events,
+        failure,
+      );
       await this.refreshRecoveryAlarm(transaction);
     });
   }

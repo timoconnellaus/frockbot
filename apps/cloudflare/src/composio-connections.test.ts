@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ConnectionView } from "@frockbot/configuration-core";
 import { ComposioClient } from "@frockbot/plugin-composio/client";
 import {
+  completeAssignmentCompensation,
   ComposioConnectionCoordinator,
   type ComposioConnectionStore,
 } from "@frockbot/plugin-composio";
@@ -55,11 +56,40 @@ class MemoryConnectionStore implements ComposioConnectionStore {
       state: "ready" | "failed";
       safeMetadata?: ConnectionView["safeMetadata"];
       failure?: string;
+      authorizationStateId?: string;
     },
   ): Promise<boolean> {
     const current = this.connections.get(connectionId);
-    if (!current || current.state !== "authorizing")
-      return Promise.resolve(false);
+    if (!current) return Promise.resolve(false);
+    if (update.authorizationStateId !== undefined) {
+      if (
+        current.safeMetadata.authorizationStateId !==
+          update.authorizationStateId ||
+        current.state === "ready" ||
+        current.state === "failed" ||
+        current.safeMetadata.revocationRequested === true ||
+        (current.state !== "authorizing" &&
+          !(
+            current.state === "reconciliation-required" &&
+            current.safeMetadata.reconciliationOperation === "link"
+          )) ||
+        (current.safeMetadata.authorizationStateConsumed !== true &&
+          typeof current.safeMetadata.authorizationStateExpiresAt ===
+            "number" &&
+          current.safeMetadata.authorizationStateExpiresAt <= Date.now())
+      ) {
+        return Promise.resolve(false);
+      }
+      this.updateConnection(_userId, connectionId, {
+        ...update,
+        safeMetadata: {
+          ...(update.safeMetadata ?? current.safeMetadata),
+          authorizationStateConsumed: true,
+        },
+      });
+      return Promise.resolve(true);
+    }
+    if (current.state !== "authorizing") return Promise.resolve(false);
     this.updateConnection(_userId, connectionId, update);
     return Promise.resolve(true);
   }
@@ -276,44 +306,10 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     compensationId: string,
   ): Promise<boolean> {
     const current = this.connections.get(connectionId);
-    if (
-      current &&
-      Array.isArray(current.safeMetadata.assignmentCompensations)
-    ) {
-      const remaining = current.safeMetadata.assignmentCompensations.filter(
-        (candidate) =>
-          !candidate ||
-          typeof candidate !== "object" ||
-          Array.isArray(candidate) ||
-          (candidate as Record<string, unknown>).id !== compensationId,
-      );
-      if (
-        remaining.length === current.safeMetadata.assignmentCompensations.length
-      ) {
-        return Promise.resolve(false);
-      }
-      this.connections.set(connectionId, {
-        ...current,
-        safeMetadata: {
-          ...current.safeMetadata,
-          assignmentCompensations: remaining,
-        },
-      });
-      return Promise.resolve(true);
-    }
-    if (
-      !current ||
-      current.safeMetadata.assignmentCompensationId !== compensationId
-    ) {
-      return Promise.resolve(false);
-    }
-    const {
-      assignmentCompensationPending: _,
-      assignmentCompensationId: __,
-      assignmentCompensationGeneration: ___,
-      ...safeMetadata
-    } = current.safeMetadata;
-    this.connections.set(connectionId, { ...current, safeMetadata });
+    if (!current) return Promise.resolve(false);
+    const completed = completeAssignmentCompensation(current, compensationId);
+    if (!completed) return Promise.resolve(false);
+    this.connections.set(connectionId, completed);
     return Promise.resolve(true);
   }
 
@@ -789,6 +785,8 @@ describe("ComposioConnectionCoordinator", () => {
     await store.updateConnection("user-1", "connection-1", {
       state: "authorizing",
       safeMetadata: {
+        authorizationStateId: "state-1",
+        authorizationStateExpiresAt: Date.now() + 60_000,
         connectedAccountId: "ca_123",
         targetBotId: "primary",
       },
@@ -839,7 +837,7 @@ describe("ComposioConnectionCoordinator", () => {
     ]);
 
     await expect(
-      coordinator.fail("user-1", "connection-1", "delayed failure"),
+      coordinator.fail("user-1", "connection-1", "delayed failure", "state-1"),
     ).resolves.toMatchObject({ status: "ready" });
     expect(store.connections.get("connection-1")?.state).toBe("ready");
   });
@@ -1000,6 +998,13 @@ describe("ComposioConnectionCoordinator", () => {
       connectionTypeId: "gmail",
       displayName: "Gmail",
     });
+    await store.updateConnection("user-1", "connection-1", {
+      state: "authorizing",
+      safeMetadata: {
+        authorizationStateId: "state-1",
+        authorizationStateExpiresAt: Date.now() + 60_000,
+      },
+    });
     store.finishConnectionAuthorization = async (userId, connectionId) => {
       await store.updateConnection(userId, connectionId, { state: "ready" });
       return false;
@@ -1015,9 +1020,56 @@ describe("ComposioConnectionCoordinator", () => {
     });
 
     await expect(
-      coordinator.fail("user-1", "connection-1", "stale failure"),
+      coordinator.fail("user-1", "connection-1", "stale failure", "state-1"),
     ).resolves.toMatchObject({ status: "ready" });
     expect(store.connections.get("connection-1")?.state).toBe("ready");
+  });
+
+  test("atomically consumes a failed callback into durable failure", async () => {
+    const store = new MemoryConnectionStore();
+    await store.startConnection("user-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await store.updateConnection("user-1", "connection-1", {
+      state: "authorizing",
+      safeMetadata: {
+        authorizationStateId: "state-1",
+        authorizationStateExpiresAt: Date.now() + 60_000,
+      },
+    });
+    store.consumeAuthorizationState = () =>
+      Promise.reject(new Error("separate state consumption is unsafe"));
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({ apiKey: "secret" }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+    });
+
+    await expect(
+      coordinator.fail(
+        "user-1",
+        "connection-1",
+        "provider rejected authorization",
+        "state-1",
+      ),
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(store.connections.get("connection-1")).toMatchObject({
+      state: "failed",
+      failure: "provider rejected authorization",
+      safeMetadata: { authorizationStateConsumed: true },
+    });
+    await expect(
+      coordinator.fail(
+        "user-1",
+        "connection-1",
+        "duplicate callback",
+        "state-1",
+      ),
+    ).resolves.toMatchObject({ status: "failed" });
   });
 
   test("does not re-enter a consumed callback after lease expiry", async () => {
@@ -1285,5 +1337,47 @@ describe("ComposioConnectionCoordinator", () => {
       status: "revoked",
     });
     expect(invalidated).toEqual(["bot-a", "bot-b"]);
+  });
+
+  test("retires stale and applied generations during revocation", async () => {
+    const store = new MemoryConnectionStore();
+    store.connections.set("connection-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+      state: "revoking",
+      safeMetadata: {
+        connectedAccountId: "ca_123",
+        revocationProviderCompleted: true,
+        assignmentCompensationPending: true,
+        assignmentCompensations: [
+          { botId: "primary", id: "old", expectedGeneration: "gen-old" },
+          { botId: "primary", id: "new", expectedGeneration: "gen-new" },
+        ],
+      },
+    });
+    const results: string[] = [];
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({ apiKey: "secret" }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+      markBotUnavailable: (_userId, _botId, _connectionId, compensation) => {
+        results.push(compensation.expectedGeneration);
+        return Promise.resolve(
+          compensation.expectedGeneration === "gen-old" ? "stale" : "applied",
+        );
+      },
+    });
+
+    await expect(coordinator.revoke("user-1", "connection-1")).resolves.toEqual(
+      { status: "revoked" },
+    );
+    expect(results).toEqual(["gen-old", "gen-new"]);
+    expect(store.connections.get("connection-1")).toMatchObject({
+      state: "revoked",
+      safeMetadata: { assignmentCompensations: [] },
+    });
   });
 });
