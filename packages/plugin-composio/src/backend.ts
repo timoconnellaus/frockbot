@@ -1,5 +1,10 @@
 import type { ConnectionView } from "@frockbot/configuration-core";
 import type { ComposioClient } from "./composio-client.js";
+export type {
+  ConnectionCompletionResult,
+  RevokeConnectionResult,
+  StartConnectionResult,
+} from "./backend-contracts.js";
 import {
   ComposioConnectionCoordinator,
   type ComposioConnectionStore,
@@ -70,11 +75,11 @@ export function connectionCompletionResponse(
 ): Response {
   const destination =
     target === "desktop"
-      ? new URL(`com.frockbot.desktop:/connections?status=${status}`)
-      : new URL(`/?connection=composio-${status}`, url.origin);
+      ? `com.frockbot.desktop:/connections?status=${status}`
+      : new URL(`/?connection=composio-${status}`, url.origin).toString();
   return new Response(null, {
     status: 303,
-    headers: { location: destination.toString() },
+    headers: { location: destination },
   });
 }
 

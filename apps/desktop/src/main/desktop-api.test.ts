@@ -21,7 +21,7 @@ describe("desktop hosted protocol", () => {
         path: "/api/plugins/composio/connections/connection-1/revoke",
         method: "POST",
       },
-    ]) {
+    ] as const) {
       expect(decodeDesktopApiRequest(request)).toEqual(request);
     }
     expect(() =>
