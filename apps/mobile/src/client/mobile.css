@@ -1,8 +1,17 @@
 :root {
-  --mobile-safe-top: env(safe-area-inset-top, 0px);
-  --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --mobile-safe-left: env(safe-area-inset-left, 0px);
-  --mobile-safe-right: env(safe-area-inset-right, 0px);
+  --mobile-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --mobile-safe-bottom: var(
+    --safe-area-inset-bottom,
+    env(safe-area-inset-bottom, 0px)
+  );
+  --mobile-safe-left: var(
+    --safe-area-inset-left,
+    env(safe-area-inset-left, 0px)
+  );
+  --mobile-safe-right: var(
+    --safe-area-inset-right,
+    env(safe-area-inset-right, 0px)
+  );
   --frock-ink: #1e1d27;
   --frock-pink: #ec386b;
   --frock-pink-dark: #d92d5f;
@@ -35,6 +44,7 @@ body {
 
 .mobile-root {
   display: grid;
+  box-sizing: border-box;
   height: 100dvh;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   padding: var(--mobile-safe-top) var(--mobile-safe-right)
@@ -44,6 +54,7 @@ body {
 
 .mobile-topbar {
   display: flex;
+  grid-row: 1;
   min-height: 58px;
   align-items: center;
   justify-content: space-between;
@@ -66,6 +77,7 @@ body {
 
 .mobile-settings {
   display: grid;
+  grid-row: 2;
   gap: 10px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--frock-line);
@@ -78,11 +90,17 @@ body {
 }
 
 .mobile-surface {
+  grid-row: 3;
   min-height: 0;
   overflow: hidden;
 }
 
-.mobile-surface .frockbot-root,
+.mobile-surface .frockbot-root {
+  position: static;
+  width: 100%;
+  height: 100%;
+}
+
 .mobile-surface .app-shell {
   height: 100%;
 }
@@ -106,6 +124,7 @@ body {
 
 .mobile-actions {
   display: flex;
+  grid-row: 4;
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
@@ -120,6 +139,7 @@ body {
 
 .mobile-auth {
   display: grid;
+  box-sizing: border-box;
   height: 100dvh;
   place-items: center;
   padding: calc(var(--mobile-safe-top) + 24px)
