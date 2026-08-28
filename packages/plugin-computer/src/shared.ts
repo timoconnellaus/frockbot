@@ -1,7 +1,7 @@
 import type { InjectionKey, Ref } from "vue";
 
-export type FlySpriteComputerPhase =
-  | "missing-token"
+export type ComputerPhase =
+  | "unconfigured"
   | "idle"
   | "provisioning"
   | "ready"
@@ -9,10 +9,11 @@ export type FlySpriteComputerPhase =
   | "human-control"
   | "error";
 
-export interface FlySpriteComputerState {
-  phase: FlySpriteComputerPhase;
-  agentId: string;
-  spriteName: string;
+/** Provider-neutral state published by the selected Computer adapter. */
+export interface ComputerState {
+  phase: ComputerPhase;
+  botId: string;
+  providerLabel: string;
   message: string;
   viewerUrl?: string;
   takingControl: boolean;
@@ -22,5 +23,5 @@ export interface FlySpriteComputerState {
   retry(): Promise<void>;
 }
 
-export const flySpriteComputerKey: InjectionKey<Ref<FlySpriteComputerState>> =
-  Symbol("fly-sprite-computer-data");
+export const computerKey: InjectionKey<Ref<ComputerState>> =
+  Symbol("computer-data");

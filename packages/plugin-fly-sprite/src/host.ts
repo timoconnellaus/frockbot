@@ -1,31 +1,32 @@
 import type { Entry } from "@cordisjs/plugin-webui";
 import type { Context, Plugin } from "cordis";
 import {
-  type ComputerAgentIdentity,
+  type ComputerBotIdentity,
   type FlySpriteAgentComputer,
   FlySpriteComputer,
+  flySpriteNameForBot,
 } from "./computer.ts";
-import type { FlySpriteComputerState } from "./shared.ts";
+import type { ComputerState } from "../../plugin-computer/src/shared.ts";
 
 class FlySpriteHostController {
   private readonly computer: FlySpriteAgentComputer;
   private readonly configured: boolean;
-  private readonly entry: Entry<FlySpriteComputerState>;
-  private readonly data: FlySpriteComputerState;
+  private readonly entry: Entry<ComputerState>;
+  private readonly data: ComputerState;
   private heartbeat?: ReturnType<typeof setInterval>;
   private takingControl = false;
 
   constructor(
     ctx: Context,
     computer: FlySpriteComputer,
-    identity: ComputerAgentIdentity,
+    identity: ComputerBotIdentity,
   ) {
-    this.computer = computer.agent(identity);
+    this.computer = computer.bot(identity);
     this.configured = computer.configured;
-    const data: FlySpriteComputerState = {
-      phase: computer.configured ? "idle" : "missing-token",
-      agentId: this.computer.agentId,
-      spriteName: computer.spriteName,
+    const data: ComputerState = {
+      phase: computer.configured ? "idle" : "unconfigured",
+      botId: this.computer.botId,
+      providerLabel: "Fly Sprites",
       message: computer.configured
         ? "Persistent Fly Sprite computer"
         : "Set SPRITES_TOKEN to attach a computer",
@@ -38,10 +39,8 @@ class FlySpriteHostController {
     this.data = data;
     this.entry = ctx.webui.addEntry(
       {
-        modulePath: "@frockbot/plugin-fly-sprite",
-        baseUrl: import.meta.resolve(
-          "@frockbot/plugin-fly-sprite/package.json",
-        ),
+        modulePath: "@frockbot/plugin-computer",
+        baseUrl: import.meta.resolve("@frockbot/plugin-computer/package.json"),
         source: "./src/client/index.ts",
         manifest: "./dist/manifest.json",
       },
@@ -118,7 +117,7 @@ class FlySpriteHostController {
     }
   }
 
-  private current(): FlySpriteComputerState {
+  private current(): ComputerState {
     return this.data;
   }
 
@@ -149,10 +148,7 @@ class FlySpriteHostController {
 
   private mutate(
     patch: Partial<
-      Pick<
-        FlySpriteComputerState,
-        "phase" | "message" | "viewerUrl" | "takingControl"
-      >
+      Pick<ComputerState, "phase" | "message" | "viewerUrl" | "takingControl">
     >,
   ): void {
     Object.assign(this.data, patch);
@@ -170,8 +166,11 @@ class FlySpriteHostController {
 
 export function createFlySpriteHostPlugin(
   computer: FlySpriteComputer,
-  identity: ComputerAgentIdentity = {
-    id: process.env.FROCKBOT_AGENT_ID?.trim() || "barebones",
+  identity: ComputerBotIdentity = {
+    id:
+      process.env.FROCKBOT_BOT_ID?.trim() ||
+      process.env.FROCKBOT_AGENT_ID?.trim() ||
+      "barebones",
     name: process.env.FROCKBOT_AGENT_NAME?.trim() || "Barebones",
   },
 ): Plugin.Function {
@@ -183,8 +182,27 @@ export function createFlySpriteHostPlugin(
   return plugin;
 }
 
-export const flySpriteHostPlugin = createFlySpriteHostPlugin(
-  new FlySpriteComputer({ respectHumanControl: true }),
-);
+const defaultUserId = process.env.FROCKBOT_USER_ID?.trim() || "local-user";
+const defaultBotId =
+  process.env.FROCKBOT_BOT_ID?.trim() ||
+  process.env.FROCKBOT_AGENT_ID?.trim() ||
+  "barebones";
+
+const selectedProvider =
+  process.env.FROCKBOT_COMPUTER_PROVIDER?.trim() || "fly-sprite";
+
+export const flySpriteHostPlugin: Plugin.Function =
+  selectedProvider === "fly-sprite"
+    ? createFlySpriteHostPlugin(
+        new FlySpriteComputer({
+          respectHumanControl: true,
+          spriteName: flySpriteNameForBot(`${defaultUserId}:${defaultBotId}`),
+        }),
+        {
+          id: defaultBotId,
+          name: process.env.FROCKBOT_AGENT_NAME?.trim() || "Barebones",
+        },
+      )
+    : () => undefined;
 
 export default flySpriteHostPlugin;

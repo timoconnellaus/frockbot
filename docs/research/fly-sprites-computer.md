@@ -2,7 +2,7 @@
 
 ## Status
 
-Primary-source research for a FrockBot computer package backed by Fly.io Sprites.
+Primary-source research for a FrockBot Computer provider backed by Fly.io Sprites. The provider now implements `@frockbot/computer-core`; generic tools, memory, and viewer UI are owned by separate Packages.
 
 ## Documented capabilities
 
@@ -21,20 +21,20 @@ The first-party Sprites documentation does not describe a built-in graphical des
 
 ## Integration design inferred from those capabilities
 
-1. Use one stable Sprite per FrockBot user/application so bots share a persistent Linux filesystem.
-2. Create shared `/home/box` and `/workspace` roots. Under `/home/box/agent-data`, create bot-scoped profile, standing-memory, log, skills, automation-storage, and transcript-mirror directories plus shared user memory.
-3. Derive a traversal-safe bot key from the explicit agent identity. Allocate each bot a persistent registry slot, Chromium profile, X display, CDP port, and VNC port.
+1. Use one stable Sprite per Bot and a separate non-viewer storage Sprite for User-scoped Package files. Expose both through the Computer workspace interface.
+2. Create `/workspaces/<bot-key>` for shell work and Package-private durable directories under `/home/box/agent-data`. Memory owns its Markdown and index layout; the Fly provider does not inject memory or mirror sessions.
+3. Derive a traversal-safe Bot key from persistent `botId`. Allocate each Bot a registry slot, Chromium profile, X display, CDP port, and VNC port.
 4. Provision Chromium, Xvfb, a lightweight window manager, x11vnc, noVNC, and websockify in the Sprite. A single supervised gateway service serves noVNC and uses websockify's reloadable `TokenFile` routing to reach bot-scoped loopback VNC ports.
 5. Route noVNC through the Sprite HTTPS URL. Because an embedded iframe cannot attach an API `Authorization` header, use public URL mode only for this gateway and protect each route with an opaque viewer token plus a high-entropy VNC password passed in the URL fragment. Public exposure, token routing, and passwords are FrockBot design choices, not guarantees supplied by Sprites.
-6. Put an owner-scoped takeover lease under each bot runtime directory. Serialize assertion, acquisition, renewal, release, and expired-lease replacement with `flock`. Agent and desktop provisioning plus computer tools refuse new operations only while that bot has another fresh human lease. A failed heartbeat immediately re-shields the viewer.
+6. Put an owner-scoped takeover lease under each Bot runtime directory. Serialize assertion, acquisition, renewal, release, and expired-lease replacement with `flock`. New process and browser operations refuse work while another fresh human lease exists; durable Package file operations remain available. A failed heartbeat immediately re-shields the viewer.
 7. Keep the Sprites token only in desktop-host and agent-runtime processes. The trusted WebUI receives the selected bot's noVNC URL/password through authenticated loopback RPC, never the API token.
 8. Use the SDK's cancellable HTTP exec path for bounded non-interactive commands; the pinned SDK's WebSocket `execFile` path does not honor `AbortSignal` or timeouts.
-9. Treat bot directories and takeover as coordination, not security boundaries: bots share one Unix account, commands already running when takeover starts may continue briefly, and software inside the Sprite can inspect shared files and displays.
-10. Treat Sprite standing-memory files as the local desktop computer's canonical notes. Transcript files are derived mirrors of the event journal. Do not present cloud R2/Vectorize memory or cloud Durable Object transcripts as synchronized until an explicit one-way export exists. Automation folders are durable storage only; no scheduler exists yet.
+9. Treat takeover as coordination rather than a security boundary for work already in flight. Bot isolation comes from assigning separate Sprites; Cordis contexts and directory names are not security controls.
+10. Treat the memory Package's workspace-backed Markdown as canonical on desktop. Cloudflare uses its explicit R2 adapter. Vector indexes are derived; session events remain authoritative and are not mirrored by the Fly provider.
 
 ## Configuration
 
-Support `SPRITES_TOKEN` (the current SDK README spelling) and `SPRITE_TOKEN` (used by some first-party examples) for compatibility. Use `FROCKBOT_SPRITE_NAME` to override the stable shared Sprite name. `FROCKBOT_AGENT_ID` selects the desktop-host bot binding, `FROCKBOT_AGENT_NAME` supplies its display name, and `FROCKBOT_SESSION_ID` may separate a conversation journal from the stable agent identity.
+Support `SPRITES_TOKEN` (the current SDK README spelling) and `SPRITE_TOKEN` (used by some first-party examples) for compatibility. Use `FROCKBOT_SPRITE_NAME` to override the base name from which stable Bot and User storage Sprite names are derived, `FROCKBOT_COMPUTER_PROVIDER=fly-sprite` to select this adapter, `FROCKBOT_BOT_ID` for durable assignment, `FROCKBOT_AGENT_ID` for live execution identity, and `FROCKBOT_SESSION_ID` for conversation identity.
 
 ## Verification limits
 

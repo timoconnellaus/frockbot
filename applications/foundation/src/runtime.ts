@@ -11,6 +11,9 @@ import authManifest from "@frockbot/plugin-auth/manifest";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
+// pi-lens-ignore: ts:2307
+import computerManifest from "@frockbot/plugin-computer/manifest";
+// Desktop and mobile Package manifests remain part of the immutable plan.
 import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
 import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
 // pi-lens-ignore: ts:2307
@@ -46,6 +49,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
   ["@frockbot/plugin-clock", clockManifest],
+  ["@frockbot/plugin-computer", computerManifest],
   ["@frockbot/plugin-desktop-clipboard", clipboardManifest],
   ["@frockbot/plugin-desktop-directory-picker", directoryPickerManifest],
   ["@frockbot/plugin-desktop-notifications", notificationsManifest],
@@ -86,7 +90,8 @@ export async function compileFoundationApplication(): Promise<ApplicationPlan> {
 export async function createFoundationRuntimeApplication(): Promise<FoundationRuntimeApplication> {
   const plan = await compileFoundationApplication();
   const runtimeIds = new Set(plan.contributions.runtime);
-  // Fly Sprite requires Node authority and is added only by the desktop runtime.
+  // Computer providers require host authority and are added only by a capable runtime.
+  runtimeIds.delete("computer");
   runtimeIds.delete("fly-sprite");
   return {
     plan,

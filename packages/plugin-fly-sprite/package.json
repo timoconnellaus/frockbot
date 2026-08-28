@@ -6,11 +6,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
-    "./client": "./src/client/application.ts",
     "./host": "./src/host.ts",
     "./manifest": "./src/manifest.ts",
-    "./shared": "./src/shared.ts",
     "./computer": "./src/computer.ts",
+    "./provider": "./src/provider.ts",
     "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"
   },
@@ -18,26 +17,20 @@
     "manifest": "./frockbot.json"
   },
   "scripts": {
-    "build": "vite build",
     "test": "bun test src",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@cordisjs/client": "0.8.2",
     "@cordisjs/plugin-webui": "0.8.2",
     "@fly/sprites": "0.1.0",
-    "@frockbot/agent-core": "workspace:*",
-    "@frockbot/client-core": "workspace:*",
-    "cordis": "4.0.0-rc.8",
-    "vue": "3.5.33"
+    "@frockbot/computer-core": "workspace:*",
+    "@frockbot/plugin-computer": "workspace:*",
+    "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
     "@frockbot/plugin-testkit": "workspace:*",
     "@types/bun": "1.3.6",
     "@types/node": "22.19.3",
-    "@vitejs/plugin-vue": "6.0.6",
-    "typescript": "5.9.3",
-    "vite": "7.3.2",
-    "vue-tsc": "3.2.5"
+    "typescript": "5.9.3"
   }
 }
