@@ -399,6 +399,19 @@ export class ComposioUserBackendContribution {
         (connection) => connection.connectionId === input.connectionId,
       );
       if (existing) return false;
+      const cleanup = current.connections.find(
+        (connection) =>
+          connection.packageId === input.packageId &&
+          connection.connectionTypeId === input.connectionTypeId &&
+          connection.safeMetadata.lostLinkCleanup === true &&
+          connection.state !== "revoked" &&
+          connection.state !== "failed",
+      );
+      if (cleanup) {
+        throw new Error(
+          "Previous Connection cleanup requires reconciliation",
+        );
+      }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
       const next = {
         ...current,
@@ -494,6 +507,82 @@ export class ComposioUserBackendContribution {
     });
   }
 
+  async claimLostLinkCleanup(
+    userId: string,
+    connectionId: string,
+    safeMetadata: UserSettingsViewV1["connections"][number]["safeMetadata"],
+  ): Promise<{
+    phase: "provider" | "pending" | "done";
+    connection: UserSettingsViewV1["connections"][number];
+  }> {
+    await this.assertIdentity(userId);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const current =
+        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
+        initialState();
+      const connection = current.connections.find(
+        (item) => item.connectionId === connectionId,
+      );
+      if (!connection) {
+        throw new Error(`Connection "${connectionId}" was not admitted`);
+      }
+      if (connection.state === "revoked") {
+        return { phase: "done" as const, connection };
+      }
+      if (
+        connection.safeMetadata.lostLinkCleanup === true &&
+        (connection.state === "revoking" ||
+          (connection.state === "reconciliation-required" &&
+            connection.safeMetadata.reconciliationOperation === "revoke"))
+      ) {
+        return { phase: "pending" as const, connection };
+      }
+      const connectedAccountId = safeMetadata.connectedAccountId;
+      if (
+        connection.state !== "reconciliation-required" ||
+        connection.safeMetadata.reconciliationOperation !== "link" ||
+        connection.safeMetadata.revocationRequested === true ||
+        typeof connectedAccountId !== "string" ||
+        (typeof connection.safeMetadata.connectedAccountId === "string" &&
+          connection.safeMetadata.connectedAccountId !== connectedAccountId)
+      ) {
+        throw new Error("Pending Link cannot enter cleanup");
+      }
+      const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
+      const assignmentCompensations = deriveRevocationCompensations(connection);
+      const claimed = {
+        ...connection,
+        state: "revoking" as const,
+        safeMetadata: {
+          ...connection.safeMetadata,
+          ...safeMetadata,
+          authorizationStateConsumed: true,
+          lostLinkCleanup: true,
+          revocationRequested: true,
+          reconciliationOperation: "revoke",
+          revocationProviderCompleted: false,
+          effectDeadlineAt,
+          assignmentCompensationPending: assignmentCompensations.length > 0,
+          assignmentCompensations,
+          ...(assignmentCompensations.length > 0
+            ? { compensationRetryAt: effectDeadlineAt }
+            : {}),
+        },
+        failure: "Lost Connect Link cleanup requires provider reconciliation",
+      };
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        connections: current.connections.map((item) =>
+          item.connectionId === connectionId ? claimed : item,
+        ),
+      } satisfies UserSettingsViewV1;
+      await transaction.put(STATE_KEY, next);
+      await transaction.setAlarm(nextConnectionAlarm(next) ?? effectDeadlineAt);
+      return { phase: "provider" as const, connection: claimed };
+    });
+  }
+
   async finishConnectionAuthorization(
     userId: string,
     connectionId: string,
@@ -551,7 +640,10 @@ export class ComposioUserBackendContribution {
                 connection,
                 update.safeMetadata ?? connection.safeMetadata,
               )
-            : (update.safeMetadata ?? connection.safeMetadata);
+            : {
+                ...(update.safeMetadata ?? connection.safeMetadata),
+                authorizationStateConsumed: true,
+              };
         if (!safeMetadata) return false;
         const nextConnection = {
           ...connection,
@@ -591,7 +683,10 @@ export class ComposioUserBackendContribution {
               connection,
               update.safeMetadata ?? connection.safeMetadata,
             )
-          : (update.safeMetadata ?? connection.safeMetadata);
+          : {
+              ...(update.safeMetadata ?? connection.safeMetadata),
+              authorizationStateConsumed: true,
+            };
       if (!safeMetadata) return undefined;
       return {
         ...connection,
@@ -1537,11 +1632,25 @@ export class ComposioUserBackendContribution {
           }
           if (disposition === "pending") {
             if (safeMetadata) {
-              await this.recordLinkReconciliationIdentity(
+              const cleanup = await this.claimLostLinkCleanup(
                 userId,
                 connection.connectionId,
                 safeMetadata,
               );
+              if (cleanup.phase === "provider") {
+                const connectedAccountId = safeMetadata.connectedAccountId;
+                if (typeof connectedAccountId !== "string") continue;
+                try {
+                  await this.revokeConnectedAccount(connectedAccountId);
+                } finally {
+                  await this.requireConnectionReconciliation(
+                    userId,
+                    connection.connectionId,
+                    "revoke",
+                    "Lost Connect Link cleanup requires provider reconciliation",
+                  );
+                }
+              }
             }
             continue;
           }

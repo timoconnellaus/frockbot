@@ -704,6 +704,211 @@ describe("Connection provider reconciliation alarms", () => {
     });
   });
 
+  test("retires a pending account after a lost Link response", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage, (request) => {
+        if (request.operation !== "revoke") {
+          throw new Error("Unexpected Link reconciliation alarm");
+        }
+        return Promise.resolve({
+          status: "revoked",
+          account: {
+            id: "account-1",
+            status: "REVOKED",
+            toolkitSlug: "gmail",
+            alias: "link-command",
+          },
+        });
+      }),
+    );
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-composio",
+        expectedRevision: 0,
+        packageId: "composio",
+        version: "0.0.1",
+      },
+    });
+    let createCalls = 0;
+    let providerReads = 0;
+    let revokeCalls = 0;
+    const client = new ComposioClient({
+      apiKey: "secret",
+      fetch: (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/connected_accounts/link")) {
+          createCalls += 1;
+          if (createCalls === 1) {
+            return Promise.reject(new Error("Link response was lost"));
+          }
+          return Promise.resolve(
+            Response.json({
+              connected_account_id: "account-2",
+              redirect_url: "https://connect.example/authorize",
+              expires_at: new Date(Date.now() + 60_000).toISOString(),
+            }),
+          );
+        }
+        if (url.endsWith("/connected_accounts/account-1/revoke")) {
+          revokeCalls += 1;
+          return Promise.resolve(Response.json({ success: true }));
+        }
+        if (url.includes("/connected_accounts?")) {
+          providerReads += 1;
+          return Promise.resolve(
+            Response.json({
+              items: [
+                {
+                  id: "account-1",
+                  status: "INITIALIZING",
+                  alias: "link-command",
+                  toolkit: { slug: "gmail" },
+                },
+              ],
+            }),
+          );
+        }
+        throw new Error(`Unexpected Composio request: ${url} ${init?.method}`);
+      },
+    });
+    const coordinator = new ComposioConnectionCoordinator({
+      client,
+      store: contribution,
+      callbackBaseUrl: "https://app.example.com",
+      connectionTypes: {
+        gmail: {
+          authConfigId: "gmail-auth",
+          displayName: "Gmail",
+          toolkitSlug: "gmail",
+        },
+      },
+    });
+    const command = {
+      commandId: "link-command",
+      connectionTypeId: "gmail",
+      callbackState: "signed-state",
+      authorizationStateId: "authorization-state",
+      authorizationStateExpiresAt: Date.now() + 10 * 60_000,
+    };
+
+    await expect(coordinator.start("user-1", command)).rejects.toThrow(
+      "Link response was lost",
+    );
+    await expect(coordinator.start("user-1", command)).rejects.toThrow(
+      "cleanup requires reconciliation",
+    );
+    expect(createCalls).toBe(1);
+    expect(providerReads).toBe(1);
+    expect(revokeCalls).toBe(1);
+    expect(
+      await contribution.getConnection("user-1", "link-command"),
+    ).toMatchObject({
+      state: "reconciliation-required",
+      safeMetadata: {
+        connectedAccountId: "account-1",
+        authorizationStateConsumed: true,
+        lostLinkCleanup: true,
+        reconciliationOperation: "revoke",
+      },
+    });
+
+    await expect(
+      coordinator.start("user-1", {
+        ...command,
+        commandId: "replacement-command",
+        authorizationStateId: "replacement-state",
+      }),
+    ).rejects.toThrow("Previous Connection cleanup requires reconciliation");
+    expect(createCalls).toBe(1);
+
+    await makeReconciliationDue(storage);
+    await contribution.alarm();
+
+    expect(
+      await contribution.getConnection("user-1", "link-command"),
+    ).toMatchObject({ state: "revoked" });
+    await expect(
+      coordinator.start("user-1", {
+        ...command,
+        commandId: "replacement-command",
+        authorizationStateId: "replacement-state",
+      }),
+    ).resolves.toMatchObject({
+      status: "authorization-required",
+      connectionId: "replacement-command",
+    });
+    expect(createCalls).toBe(2);
+  });
+
+  test("consumes failed callback state and replays its terminal result", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    const authorizationStateExpiresAt = Date.now() + 60_000;
+    await contribution.startConnection("user-1", {
+      connectionId: "link-command",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+      safeMetadata: {
+        authorizationStateId: "authorization-state",
+        authorizationStateExpiresAt,
+        returnTarget: "desktop",
+      },
+    });
+    const coordinator = new ComposioConnectionCoordinator({
+      client: {} as ComposioClient,
+      store: contribution,
+      callbackBaseUrl: "https://app.example.com",
+      connectionTypes: {},
+    });
+
+    await expect(
+      coordinator.fail(
+        "user-1",
+        "link-command",
+        "Authorization failed",
+        "authorization-state",
+      ),
+    ).resolves.toEqual({
+      returnTarget: "desktop",
+      status: "failed",
+      nativeReturnNonce: undefined,
+    });
+    const first = await contribution.read("user-1");
+    expect(first.connections[0]).toMatchObject({
+      state: "failed",
+      safeMetadata: { authorizationStateConsumed: true },
+    });
+
+    await expect(
+      coordinator.fail(
+        "user-1",
+        "link-command",
+        "Different replayed failure",
+        "authorization-state",
+      ),
+    ).resolves.toEqual({
+      returnTarget: "desktop",
+      status: "failed",
+      nativeReturnNonce: undefined,
+    });
+    expect((await contribution.read("user-1")).revision).toBe(first.revision);
+    await expect(
+      contribution.consumeAuthorizationState(
+        "user-1",
+        "link-command",
+        "authorization-state",
+      ),
+    ).resolves.toBe("duplicate");
+  });
+
   test("survives interruption immediately after recovered ACTIVE commit", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution(
@@ -915,33 +1120,41 @@ describe("Connection provider reconciliation alarms", () => {
     });
   });
 
-  test("keeps an INITIALIZING identity scheduled until it becomes ACTIVE", async () => {
+  test("retires an INITIALIZING identity through verified cleanup", async () => {
     const storage = new MemoryStorage();
     let reads = 0;
+    let revokeCalls = 0;
     const contribution = createComposioUserBackendContribution(
-      backendHost(storage, () => {
-        reads += 1;
-        if (reads === 1) {
+      backendHost(
+        storage,
+        (request) => {
+          reads += 1;
+          if (request.operation === "link") {
+            return Promise.resolve({
+              status: "pending" as const,
+              account: {
+                id: "account-1",
+                status: "INITIALIZING",
+                toolkitSlug: "gmail",
+                alias: "link-command",
+              },
+            });
+          }
           return Promise.resolve({
-            status: "pending" as const,
+            status: "revoked" as const,
             account: {
               id: "account-1",
-              status: "INITIALIZING",
+              status: "REVOKED",
               toolkitSlug: "gmail",
               alias: "link-command",
             },
           });
-        }
-        return Promise.resolve({
-          status: "active" as const,
-          account: {
-            id: "account-1",
-            status: "ACTIVE",
-            toolkitSlug: "gmail",
-            alias: "link-command",
-          },
-        });
-      }),
+        },
+        () => {
+          revokeCalls += 1;
+          return Promise.resolve({ success: true });
+        },
+      ),
     );
     await contribution.startConnection("user-1", {
       connectionId: "link-command",
@@ -970,9 +1183,12 @@ describe("Connection provider reconciliation alarms", () => {
       state: "reconciliation-required",
       safeMetadata: {
         connectedAccountId: "account-1",
-        reconciliationOperation: "link",
+        authorizationStateConsumed: true,
+        lostLinkCleanup: true,
+        reconciliationOperation: "revoke",
       },
     });
+    expect(revokeCalls).toBe(1);
     expect(storage.alarmAt).toBeGreaterThan(Date.now());
     await makeReconciliationDue(storage);
 
@@ -982,11 +1198,8 @@ describe("Connection provider reconciliation alarms", () => {
     expect(
       await contribution.getConnection("user-1", "link-command"),
     ).toMatchObject({
-      state: "ready",
-      safeMetadata: {
-        connectedAccountId: "account-1",
-        authorizationStateConsumed: true,
-      },
+      state: "revoked",
+      safeMetadata: { connectedAccountId: "account-1" },
     });
     expect(storage.alarmAt).toBeUndefined();
   });

@@ -40,6 +40,14 @@ export interface ComposioConnectionStore {
     connectionId: string,
     safeMetadata: ConnectionView["safeMetadata"],
   ): Promise<boolean>;
+  claimLostLinkCleanup(
+    userId: string,
+    connectionId: string,
+    safeMetadata: ConnectionView["safeMetadata"],
+  ): Promise<{
+    phase: "provider" | "pending" | "done";
+    connection: ConnectionView;
+  }>;
   finishConnectionAuthorization(
     userId: string,
     connectionId: string,
@@ -224,6 +232,43 @@ function decodeConnectionStartReplayV1(
 
 export class ComposioConnectionCoordinator {
   constructor(private readonly config: ComposioConnectionCoordinatorConfig) {}
+
+  private async retirePendingLink(
+    userId: string,
+    connectionId: string,
+    safeMetadata: ConnectionView["safeMetadata"],
+  ): Promise<never> {
+    const cleanup = await this.config.store.claimLostLinkCleanup(
+      userId,
+      connectionId,
+      safeMetadata,
+    );
+    if (cleanup.phase === "done") {
+      throw new DefinitiveConnectionOperationError(
+        "Connection authorization was retired; retry with a new operation",
+      );
+    }
+    if (cleanup.phase === "provider") {
+      const connectedAccountId = safeMetadata.connectedAccountId;
+      if (typeof connectedAccountId !== "string") {
+        throw new Error("Pending Link cleanup identity is invalid");
+      }
+      let providerError: unknown;
+      try {
+        await this.config.client.revokeConnectedAccount(connectedAccountId);
+      } catch (error) {
+        providerError = error;
+      }
+      await this.config.store.requireConnectionReconciliation(
+        userId,
+        connectionId,
+        "revoke",
+        "Lost Connect Link cleanup requires provider reconciliation",
+      );
+      if (providerError !== undefined) throw providerError;
+    }
+    throw new Error("Connection cleanup requires reconciliation");
+  }
 
   async replayStart(
     userId: string,
@@ -506,17 +551,11 @@ export class ComposioConnectionCoordinator {
         }
         if (disposition === "pending") {
           if (safeMetadata) {
-            const recorded =
-              await this.config.store.recordLinkReconciliationIdentity(
-                userId,
-                connectionId,
-                safeMetadata,
-              );
-            if (!recorded) {
-              throw new Error(
-                "Connection authorization changed during reconciliation",
-              );
-            }
+            return this.retirePendingLink(
+              userId,
+              connectionId,
+              safeMetadata,
+            );
           }
         }
         if (disposition === "ready" && safeMetadata) {
