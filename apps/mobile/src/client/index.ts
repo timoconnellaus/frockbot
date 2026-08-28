@@ -49,6 +49,7 @@ import { createContributionSlot } from "./ContributionSlot.ts";
 import "./mobile.css";
 import MobileAuthGate from "./MobileAuthGate.vue";
 import { requestTurn, toolsFrom } from "./transport.ts";
+import { admitMobileTurn } from "./turn-admission.ts";
 
 const browserFetch = globalThis.fetch.bind(globalThis);
 
@@ -272,18 +273,88 @@ const web: Ref<FrockBotWebData> = ref({
     );
     const request = new AbortController();
     activeRequest = request;
+    let retainPendingRun = false;
     try {
-      if (!web.value.botSettings) await web.value.loadBotSettings();
-      if (!botProjection.isCurrent(projectionToken)) {
-        return { accepted: true, runId: pendingRunId };
+      const admission = await admitMobileTurn({
+        commandId: pendingRunId,
+        prepare: async () => {
+          if (!web.value.botSettings) await web.value.loadBotSettings();
+        },
+        isCurrent: () => botProjection.isCurrent(projectionToken),
+        request: () =>
+          requestTurn(
+            auth.authorizedFetch,
+            projectionToken.botId,
+            text,
+            pendingRunId,
+            request.signal,
+          ),
+        reconcile: () =>
+          requestTurn(
+            auth.authorizedFetch,
+            projectionToken.botId,
+            text,
+            pendingRunId,
+          ),
+      });
+      if (admission.status === "not-started") {
+        if (botProjection.isCurrent(projectionToken)) {
+          replaceMessage(pendingRunId, {
+            id: crypto.randomUUID(),
+            runId: pendingRunId,
+            role: "assistant",
+            text: "Turn was not admitted.",
+            status: "error",
+            tools: [],
+          });
+          web.value.error = admission.error
+            ? admission.error instanceof Error
+              ? admission.error.message
+              : "Turn was not admitted"
+            : undefined;
+        }
+        return {
+          accepted: false,
+          runId: pendingRunId,
+          error: "Turn was not admitted",
+        };
       }
-      const result = await requestTurn(
-        auth.authorizedFetch,
-        projectionToken.botId,
-        text,
-        pendingRunId,
-        request.signal,
-      );
+      if (admission.status === "uncertain") {
+        retainPendingRun = botProjection.isCurrent(projectionToken);
+        void admission.reconciliation
+          .then(async () => {
+            const current = botProjection.currentToken();
+            if (current.botId === projectionToken.botId) {
+              await botProjection.refreshHistory(current);
+            }
+          })
+          .catch((error) => {
+            const current = botProjection.currentToken();
+            if (current.botId === projectionToken.botId) {
+              web.value.settingsError =
+                error instanceof Error
+                  ? error.message
+                  : "Turn admission reconciliation failed";
+            }
+          });
+        if (botProjection.isCurrent(projectionToken)) {
+          replaceMessage(pendingRunId, {
+            id: crypto.randomUUID(),
+            runId: pendingRunId,
+            role: "assistant",
+            text: "Confirming whether this Turn was admitted.",
+            status: "interrupted",
+            tools: [],
+          });
+        }
+        return {
+          accepted: false,
+          runId: pendingRunId,
+          error: "Turn admission is being reconciled",
+        };
+      }
+
+      const result = admission.response;
       if (!botProjection.isCurrent(projectionToken)) {
         return { accepted: true, runId: result.runId };
       }
@@ -298,32 +369,19 @@ const web: Ref<FrockBotWebData> = ref({
         status: "completed",
         tools: toolsFrom(result.events),
       });
-      await botProjection.refreshHistory(projectionToken);
-      return { accepted: true, runId: result.runId };
-    } catch (error) {
-      if (!botProjection.isCurrent(projectionToken)) {
-        return { accepted: true, runId: pendingRunId };
+      try {
+        await botProjection.refreshHistory(projectionToken);
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error
+            ? error.message
+            : "Could not refresh the admitted Turn";
       }
-      const aborted =
-        error instanceof DOMException && error.name === "AbortError";
-      replaceMessage(pendingRunId, {
-        id: crypto.randomUUID(),
-        runId: pendingRunId,
-        role: "assistant",
-        text: aborted ? "Request stopped locally." : "Agent request failed.",
-        status: aborted ? "aborted" : "error",
-        tools: [],
-      });
-      web.value.error = aborted
-        ? undefined
-        : error instanceof Error
-          ? error.message
-          : "Agent request failed";
-      await botProjection.refreshHistory(projectionToken);
-      return { accepted: true, runId: pendingRunId };
+      return { accepted: true, runId: result.runId };
     } finally {
       if (activeRequest === request) activeRequest = undefined;
       if (
+        !retainPendingRun &&
         botProjection.isCurrent(projectionToken) &&
         web.value.activeRunId === pendingRunId &&
         web.value.activeRun?.runId !== pendingRunId

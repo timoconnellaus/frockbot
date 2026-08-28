@@ -958,6 +958,113 @@ describe("AgentLoop", () => {
     expect(turnEnds[0]).toMatchObject({ outcome: "cancelled" });
   });
 
+  test("settles remaining tool occurrences before closing a cancelled turn", async () => {
+    let requests = 0;
+    const provider: LlmProvider = {
+      id: "multi-tool-cancellation",
+      async *stream() {
+        requests += 1;
+        if (requests === 1) {
+          yield {
+            type: "tool-call",
+            call: { id: "first", name: "echo", input: { value: "first" } },
+          };
+          yield {
+            type: "tool-call",
+            call: {
+              id: "second",
+              name: "echo",
+              input: { value: "second" },
+            },
+          };
+          yield { type: "finish", reason: "tool-calls" };
+          return;
+        }
+        yield { type: "text-delta", text: "Next Turn completed." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const executions: string[] = [];
+    let cancel = () => {
+      throw new Error("agent is not ready");
+    };
+    const tool: ToolDefinition = {
+      name: "echo",
+      description: "Return a supplied value.",
+      inputSchema: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+      },
+      execute(input) {
+        const value = (input as { value: string }).value;
+        executions.push(value);
+        cancel();
+        return Promise.resolve({ content: value, isError: false });
+      },
+    };
+    const root = await mountRuntime(provider, tool);
+    const handle = await root.agents.create({
+      botId: "bot-cancel-tools",
+      sessionId: "agent-cancel-tools",
+      provider: "multi-tool-cancellation",
+      model: "test-model",
+    });
+    cancel = () => handle.agent.cancel();
+
+    handle.agent.send("Run two tools.");
+    await handle.agent.whenIdle();
+
+    expect(executions).toEqual(["first"]);
+    expect(
+      handle.agent.session.events.flatMap((event) =>
+        (event.type === "tool/call" || event.type === "tool/result") &&
+        event.turn === 1
+          ? [
+              {
+                type: event.type,
+                occurrenceId: event.occurrenceId,
+                ...(event.type === "tool/result"
+                  ? { status: event.status }
+                  : {}),
+              },
+            ]
+          : [],
+      ),
+    ).toEqual([
+      { type: "tool/call", occurrenceId: "tool:1:1:0" },
+      {
+        type: "tool/result",
+        occurrenceId: "tool:1:1:0",
+        status: "completed",
+      },
+      { type: "tool/call", occurrenceId: "tool:1:1:1" },
+      {
+        type: "tool/result",
+        occurrenceId: "tool:1:1:1",
+        status: "interrupted",
+      },
+    ]);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "turn/end",
+        turn: 1,
+        outcome: "cancelled",
+      }),
+    );
+
+    handle.agent.send("Continue with another Turn.");
+    await handle.agent.whenIdle();
+
+    expect(requests).toBe(2);
+    expect(executions).toEqual(["first"]);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      turn: 2,
+      outcome: "completed",
+    });
+  });
+
   test("journals a failed prepared tool result before completing the turn", async () => {
     let requests = 0;
     const durableTypes: string[] = [];

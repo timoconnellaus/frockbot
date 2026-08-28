@@ -434,6 +434,9 @@ class LoopAgent implements Agent {
       }
     } finally {
       if (!reconciliationRequired) {
+        if (openStep !== undefined && turnOutcome === "cancelled") {
+          await this.#settleCancelledStep(openTurn, openStep);
+        }
         if (openStep !== undefined) {
           this.session.append({
             type: "step/end",
@@ -546,6 +549,9 @@ class LoopAgent implements Agent {
       }
     } finally {
       if (!reconciliationRequired) {
+        if (openStep !== undefined && turnOutcome === "cancelled") {
+          await this.#settleCancelledStep(turn, openStep);
+        }
         if (openStep !== undefined) {
           this.session.append({
             type: "step/end",
@@ -772,6 +778,7 @@ class LoopAgent implements Agent {
         signal,
       };
       const preparation = await this.#ctx.tools.prepare(call, context);
+      signal.throwIfAborted();
       this.session.append({
         type: "tool/call",
         turn,
@@ -786,6 +793,7 @@ class LoopAgent implements Agent {
         result = preparation.result;
         this.#ctx.emit("tools/result", call, result);
       } else {
+        signal.throwIfAborted();
         try {
           result = await this.#ctx.tools.executePrepared(preparation, context);
         } catch (error) {
@@ -808,6 +816,48 @@ class LoopAgent implements Agent {
         status: "completed",
       });
     }
+  }
+
+  async #settleCancelledStep(turn: number, step: number): Promise<void> {
+    const assistant = this.session.events.findLast(
+      (event) =>
+        event.type === "assistant/message" &&
+        event.turn === turn &&
+        event.step === step,
+    );
+    if (!assistant || assistant.toolCalls.length === 0) return;
+
+    const journal = validateToolOccurrenceJournal(this.session.events);
+    for (const occurrence of toolCallOccurrences(
+      turn,
+      step,
+      assistant.toolCalls,
+    )) {
+      const entry = journal.get(occurrence.occurrenceId);
+      if (!entry?.intent) {
+        this.session.append({
+          type: "tool/call",
+          turn,
+          step,
+          occurrenceId: occurrence.occurrenceId,
+          name: occurrence.call.name,
+          input: occurrence.call.input,
+        });
+      }
+      if (!entry?.result) {
+        this.session.append({
+          type: "tool/result",
+          turn,
+          step,
+          occurrenceId: occurrence.occurrenceId,
+          name: occurrence.call.name,
+          content: "Cancelled before tool execution started.",
+          isError: true,
+          status: "interrupted",
+        });
+      }
+    }
+    await this.session.flush();
   }
 }
 
