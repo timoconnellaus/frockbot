@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { ToolRegistry } from "@frockbot/agent-core";
+import {
+  type SessionEvent,
+  SessionStore,
+  ToolRegistry,
+} from "@frockbot/agent-core";
 import { Context } from "cordis";
 import { createComposioRouterPlugin } from "./agent.js";
 import { ComposioClient } from "./composio-client.js";
@@ -37,6 +41,7 @@ describe("Composio router Plugin", () => {
     });
     const root = new Context();
     roots.push(root);
+    await root.plugin(SessionStore);
     await root.plugin(ToolRegistry);
     await root.plugin(
       createComposioRouterPlugin({
@@ -100,5 +105,78 @@ describe("Composio router Plugin", () => {
     });
     expect(calls).toHaveLength(2);
     expect(authorizationCalls).toBe(2);
+  });
+
+  test("restores searched slug authorization from the durable session", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const durableEvents = [
+      {
+        type: "session/created",
+        createdAt: timestamp,
+      },
+      {
+        type: "tool/result",
+        turn: 1,
+        step: 1,
+        callId: "search-before-eviction",
+        name: "composio_search_tools",
+        content: JSON.stringify([
+          {
+            slug: "GMAIL_FETCH_EMAILS",
+            name: "Fetch emails",
+            description: "Fetch Gmail messages",
+          },
+        ]),
+        isError: false,
+        status: "completed",
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const calls: string[] = [];
+    const client = new ComposioClient({
+      apiKey: "secret",
+      fetch: (input) => {
+        calls.push(String(input));
+        return Promise.resolve(Response.json({ data: { messages: [] } }));
+      },
+    });
+    const root = new Context();
+    roots.push(root);
+    await root.plugin(SessionStore, {
+      initialSessions: { "resumed-session": durableEvents },
+    });
+    root.sessions.create("resumed-session");
+    await root.plugin(ToolRegistry);
+    await root.plugin(
+      createComposioRouterPlugin({
+        client,
+        userId: "user-1",
+        toolkitSlug: "gmail",
+        authorizeEffect: () =>
+          Promise.resolve({
+            connectedAccountId: "ca_123",
+            toolkitSlug: "gmail",
+          }),
+      }),
+    );
+    const context = {
+      botId: "primary",
+      agentId: "primary",
+      sessionId: "resumed-session",
+      signal: new AbortController().signal,
+    };
+    const execution = await root.tools.prepare(
+      {
+        id: "execute-after-eviction",
+        name: "composio_execute_tool",
+        input: { toolSlug: "GMAIL_FETCH_EMAILS", arguments: {} },
+      },
+      context,
+    );
+    if (execution.kind !== "ready") throw new Error("execute tool was denied");
+
+    await expect(
+      root.tools.executePrepared(execution, context),
+    ).resolves.toMatchObject({ isError: false });
+    expect(calls).toHaveLength(1);
   });
 });

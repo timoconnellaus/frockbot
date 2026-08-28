@@ -479,4 +479,152 @@ describe("AgentLoop", () => {
       outcome: "completed",
     });
   });
+
+  test("resumes durable assistant tool calls that were not journaled", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const call = {
+      id: "durable-call",
+      name: "echo",
+      input: { value: "resumed" },
+    };
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "completed-request",
+          provider: "resume-tools",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "completed-request",
+        text: "",
+        toolCalls: [call],
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    let toolExecutions = 0;
+    let modelRequests = 0;
+    const provider: LlmProvider = {
+      id: "resume-tools",
+      async *stream(request) {
+        modelRequests += 1;
+        expect(request.messages.at(-1)).toMatchObject({
+          role: "tool",
+          callId: "durable-call",
+          content: "resumed",
+        });
+        yield { type: "text-delta", text: "Finished after recovery." };
+        yield { type: "finish", reason: "completed" };
+      },
+      async *reconcile() {
+        throw new Error("completed model effects must not be reconciled");
+      },
+    };
+    const root = await mountRuntime(
+      provider,
+      {
+        name: "echo",
+        description: "Echo a value.",
+        inputSchema: { type: "object" },
+        execute: (input) => {
+          toolExecutions += 1;
+          return Promise.resolve({
+            content: (input as { value: string }).value,
+            isError: false,
+          });
+        },
+      },
+      undefined,
+      { "resume-tools": initial },
+    );
+    const handle = await root.agents.create({
+      botId: "resume-bot",
+      sessionId: "resume-tools",
+      provider: "resume-tools",
+      model: "test-model",
+    });
+
+    expect(handle.agent.session.reconcileForResume()).toEqual([]);
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(toolExecutions).toBe(1);
+    expect(modelRequests).toBe(1);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({ type: "tool/call", call }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+
+  test("finishes a durable text response without another model request", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "completed-text-request",
+          provider: "resume-text",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "completed-text-request",
+        text: "Already durable.",
+        toolCalls: [],
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const provider: LlmProvider = {
+      id: "resume-text",
+      async *stream() {
+        throw new Error("resume must not create another model request");
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      "resume-text": initial,
+    });
+    const handle = await root.agents.create({
+      botId: "resume-bot",
+      sessionId: "resume-text",
+      provider: "resume-text",
+      model: "test-model",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/request",
+      ),
+    ).toHaveLength(1);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
 });

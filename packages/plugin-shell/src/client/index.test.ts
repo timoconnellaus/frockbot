@@ -88,6 +88,75 @@ describe("detached Turn projection", () => {
       "Completed while detached",
     ]);
   });
+
+  test("replaces a local placeholder with the durable completion", () => {
+    const messages: Parameters<typeof projectCompletedRuns>[0] = [
+      {
+        id: "local-user",
+        runId: "run-1",
+        role: "user",
+        text: "Keep working",
+        status: "completed",
+        tools: [],
+      },
+      {
+        id: "local-assistant",
+        runId: "run-1",
+        role: "assistant",
+        text: "Request stopped locally.",
+        status: "aborted",
+        tools: [],
+      },
+    ];
+
+    projectCompletedRuns(
+      messages,
+      [],
+      [
+        {
+          runId: "run-1",
+          input: "Keep working",
+          events: [],
+          status: "completed",
+          responseText: "Finished durably.",
+        },
+      ],
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toMatchObject({
+      role: "assistant",
+      text: "Finished durably.",
+      status: "completed",
+    });
+  });
+
+  test("projects durable failures visibly", () => {
+    const messages: Parameters<typeof projectCompletedRuns>[0] = [];
+
+    projectCompletedRuns(
+      messages,
+      [],
+      [
+        {
+          runId: "failed-run",
+          input: "Do something risky",
+          events: [],
+          status: "failed",
+          failure: "Provider reconciliation is required",
+        },
+      ],
+    );
+
+    expect(messages).toMatchObject([
+      { role: "user", status: "completed" },
+      {
+        role: "assistant",
+        text: "Provider reconciliation is required",
+        status: "error",
+      },
+    ]);
+  });
 });
 
 describe("Connection operation reconciliation", () => {

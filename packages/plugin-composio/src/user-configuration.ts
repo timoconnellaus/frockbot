@@ -8,6 +8,7 @@ import {
 import {
   acknowledgeDependentAssignment,
   claimDependentAssignment,
+  compensateDependentAssignment,
 } from "./dependency-coordination.js";
 
 const STATE_KEY = "user-configuration";
@@ -25,7 +26,7 @@ function revocationCompensations(
   )
     ? connection.safeMetadata.dependentAssignments
     : [];
-  const byBot = new Map<string, string>();
+  const dependenciesByKey = new Map<string, string>();
   for (const candidate of dependencies) {
     if (
       !candidate ||
@@ -39,24 +40,29 @@ function revocationCompensations(
       typeof dependency.botId === "string" &&
       typeof dependency.generation === "string"
     ) {
-      byBot.set(dependency.botId, dependency.generation);
+      dependenciesByKey.set(
+        `${dependency.botId}\u0000${dependency.generation}`,
+        dependency.generation,
+      );
     }
   }
   const targetBotId = connection.safeMetadata.targetBotId;
-  if (typeof targetBotId === "string" && !byBot.has(targetBotId)) {
-    byBot.set(
-      targetBotId,
+  if (typeof targetBotId === "string") {
+    const generation =
       activeGeneration ??
-        (typeof connection.safeMetadata.assignmentGeneration === "string"
-          ? connection.safeMetadata.assignmentGeneration
-          : LEGACY_ASSIGNMENT_GENERATION),
-    );
+      (typeof connection.safeMetadata.assignmentGeneration === "string"
+        ? connection.safeMetadata.assignmentGeneration
+        : LEGACY_ASSIGNMENT_GENERATION);
+    dependenciesByKey.set(`${targetBotId}\u0000${generation}`, generation);
   }
-  return [...byBot].map(([botId, expectedGeneration]) => ({
-    botId,
-    id: `revoke:${connection.connectionId}:${botId}:${expectedGeneration}`,
-    expectedGeneration,
-  }));
+  return [...dependenciesByKey].map(([key, expectedGeneration]) => {
+    const botId = key.slice(0, key.indexOf("\u0000"));
+    return {
+      botId,
+      id: `revoke:${connection.connectionId}:${botId}:${expectedGeneration}`,
+      expectedGeneration,
+    };
+  });
 }
 
 interface UserConfigurationEnv {
@@ -586,6 +592,17 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   ): Promise<boolean> {
     return this.transitionConnection(userId, connectionId, (connection) =>
       acknowledgeDependentAssignment(connection, botId, generation),
+    );
+  }
+
+  async compensateConnectionDependency(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    generation: string,
+  ): Promise<boolean> {
+    return this.transitionConnection(userId, connectionId, (connection) =>
+      compensateDependentAssignment(connection, botId, generation),
     );
   }
 

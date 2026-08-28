@@ -3,6 +3,7 @@ import type { StoredRun } from "./backend-contracts.js";
 
 export type BotRunRecoveryPlan =
   | { kind: "complete"; responseText: string }
+  | { kind: "fail"; failure: string }
   | { kind: "restart"; previous: SessionEvent[] }
   | { kind: "reconcile"; repairs: SessionEvent[] };
 
@@ -17,6 +18,12 @@ export function planBotRunRecovery(
     (event) => event.type === "assistant/message",
   );
   if (terminalTurn?.type === "turn/end") {
+    if (terminalTurn.outcome !== "completed") {
+      return {
+        kind: "fail",
+        failure: `Bot turn ended with outcome ${terminalTurn.outcome}`,
+      };
+    }
     return {
       kind: "complete",
       responseText:

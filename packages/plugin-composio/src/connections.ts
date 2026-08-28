@@ -129,6 +129,31 @@ export class DefinitiveConnectionOperationError extends Error {
   }
 }
 
+function durableCompletionResult(
+  connection: ConnectionView,
+): ConnectionCompletionResult | undefined {
+  const returnTarget =
+    connection.safeMetadata.returnTarget === "desktop" ? "desktop" : "browser";
+  const nativeReturnNonce =
+    typeof connection.safeMetadata.nativeReturnNonce === "string"
+      ? connection.safeMetadata.nativeReturnNonce
+      : undefined;
+  if (connection.state === "ready" || connection.state === "failed") {
+    return {
+      returnTarget,
+      status: connection.state,
+      nativeReturnNonce,
+    };
+  }
+  if (
+    connection.state === "reconciliation-required" &&
+    connection.safeMetadata.reconciliationOperation === "assignment"
+  ) {
+    return { returnTarget, status: "pending", nativeReturnNonce };
+  }
+  return undefined;
+}
+
 export class ComposioConnectionCoordinator {
   constructor(private readonly config: ComposioConnectionCoordinatorConfig) {}
 
@@ -182,12 +207,49 @@ export class ComposioConnectionCoordinator {
       const expiresAt = existing?.safeMetadata.expiresAt;
       const expiry =
         typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
+      const authorizationStateExpiresAt =
+        existing?.safeMetadata.authorizationStateExpiresAt;
+      const authorizationStateExpiry =
+        typeof authorizationStateExpiresAt === "number"
+          ? authorizationStateExpiresAt
+          : Number.NaN;
+      const now = Date.now();
+      const authorizationStateExpired =
+        !Number.isFinite(authorizationStateExpiry) ||
+        authorizationStateExpiry <= now;
+      const persistedLinkExpired =
+        typeof redirectUrl === "string" &&
+        (!Number.isFinite(expiry) || expiry <= now);
+      if (
+        existing?.state === "failed" ||
+        existing?.state === "revoked" ||
+        authorizationStateExpired ||
+        persistedLinkExpired
+      ) {
+        if (
+          existing?.state === "authorizing" ||
+          (existing?.state === "reconciliation-required" &&
+            existing.safeMetadata.reconciliationOperation === "link")
+        ) {
+          await this.config.store.finishConnectionAuthorization(
+            userId,
+            connectionId,
+            {
+              state: "failed",
+              failure: "Connection authorization expired",
+            },
+          );
+        }
+        throw new DefinitiveConnectionOperationError(
+          "Connection authorization expired; retry with a new operation",
+        );
+      }
       if (
         existing?.state === "authorizing" &&
         typeof redirectUrl === "string" &&
         typeof expiresAt === "string" &&
         Number.isFinite(expiry) &&
-        expiry > Date.now()
+        expiry > now
       ) {
         return {
           connectionId,
@@ -243,25 +305,6 @@ export class ComposioConnectionCoordinator {
             nativeReturnNonce: input.nativeReturnNonce,
           };
         }
-      }
-      if (
-        existing?.state === "failed" ||
-        existing?.state === "revoked" ||
-        (Number.isFinite(expiry) && expiry <= Date.now())
-      ) {
-        if (existing?.state === "authorizing") {
-          await this.config.store.finishConnectionAuthorization(
-            userId,
-            connectionId,
-            {
-              state: "failed",
-              failure: "Connection authorization expired",
-            },
-          );
-        }
-        throw new DefinitiveConnectionOperationError(
-          "Connection authorization expired; retry with a new operation",
-        );
       }
       throw new Error("Connection authorization requires reconciliation");
     }
@@ -338,10 +381,22 @@ export class ComposioConnectionCoordinator {
       authorizationStateId ??
         (connection?.safeMetadata.authorizationStateId as string),
     );
-    if (stateClaim === "invalid") {
-      throw new Error("Composio authorization state is invalid or expired");
+    if (stateClaim === "duplicate") {
+      const current = await this.config.store.getConnection(
+        userId,
+        connectionId,
+      );
+      const durable = current ? durableCompletionResult(current) : undefined;
+      if (durable) return durable;
     }
-    await this.config.store.finishConnectionAuthorization(
+    if (stateClaim !== "claimed") {
+      throw new Error(
+        stateClaim === "duplicate"
+          ? "Composio authorization state was already consumed"
+          : "Composio authorization state is invalid or expired",
+      );
+    }
+    const finished = await this.config.store.finishConnectionAuthorization(
       userId,
       connectionId,
       {
@@ -349,15 +404,29 @@ export class ComposioConnectionCoordinator {
         failure: message.slice(0, 500),
       },
     );
+    if (finished)
+      return {
+        returnTarget:
+          connection?.safeMetadata.returnTarget === "desktop"
+            ? "desktop"
+            : "browser",
+        status: "failed",
+        nativeReturnNonce:
+          typeof connection?.safeMetadata.nativeReturnNonce === "string"
+            ? connection.safeMetadata.nativeReturnNonce
+            : undefined,
+      };
+    const current = await this.config.store.getConnection(userId, connectionId);
+    if (current?.state !== "ready" && current?.state !== "failed") {
+      throw new Error("Connection state changed during failed callback");
+    }
     return {
       returnTarget:
-        connection?.safeMetadata.returnTarget === "desktop"
-          ? "desktop"
-          : "browser",
-      status: "failed",
+        current.safeMetadata.returnTarget === "desktop" ? "desktop" : "browser",
+      status: current.state,
       nativeReturnNonce:
-        typeof connection?.safeMetadata.nativeReturnNonce === "string"
-          ? connection.safeMetadata.nativeReturnNonce
+        typeof current.safeMetadata.nativeReturnNonce === "string"
+          ? current.safeMetadata.nativeReturnNonce
           : undefined,
     };
   }
@@ -509,8 +578,20 @@ export class ComposioConnectionCoordinator {
       input.authorizationStateId ??
         (connection.safeMetadata.authorizationStateId as string),
     );
-    if (stateClaim === "invalid") {
-      throw new Error("Composio authorization state is invalid or expired");
+    if (stateClaim === "duplicate") {
+      const current = await this.config.store.getConnection(
+        userId,
+        input.connectionId,
+      );
+      const durable = current ? durableCompletionResult(current) : undefined;
+      if (durable) return durable;
+    }
+    if (stateClaim !== "claimed") {
+      throw new Error(
+        stateClaim === "duplicate"
+          ? "Composio authorization state was already consumed"
+          : "Composio authorization state is invalid or expired",
+      );
     }
     if (connection.state === "ready") {
       return { returnTarget, status: "ready", nativeReturnNonce };

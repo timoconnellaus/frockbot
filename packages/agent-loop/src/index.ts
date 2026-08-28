@@ -9,6 +9,7 @@ import type {
   NormalizedModelRequest,
   PreStepDecision,
   Session,
+  SessionEvent,
   StepOutcome,
   ToolCall,
   ToolExecutionResult,
@@ -164,7 +165,11 @@ class LoopAgent implements Agent {
     let latestStep = 0;
     let unresolvedRequest: NormalizedModelRequest | undefined;
     for (const event of this.session.events) {
-      if (event.type === "turn/start") openTurn = event.turn;
+      if (event.type === "turn/start") {
+        openTurn = event.turn;
+        latestStep = 0;
+        unresolvedRequest = undefined;
+      }
       if (event.type === "turn/end" && event.turn === openTurn)
         openTurn = undefined;
       if (event.type === "step/start" && event.turn === openTurn) {
@@ -182,6 +187,35 @@ class LoopAgent implements Agent {
     }
     if (openTurn === undefined)
       throw new Error("session has no resumable turn");
+    let latestAssistant:
+      Extract<SessionEvent, { type: "assistant/message" }> | undefined;
+    for (const event of this.session.events) {
+      if (
+        event.type === "assistant/message" &&
+        event.turn === openTurn &&
+        event.step === latestStep
+      ) {
+        latestAssistant = event;
+      }
+    }
+    const journaledCalls = new Map(
+      this.session.events.flatMap((event) =>
+        event.type === "tool/call" &&
+        event.turn === openTurn &&
+        event.step === latestStep
+          ? [[event.call.id, event] as const]
+          : [],
+      ),
+    );
+    const durableResults = new Set(
+      this.session.events.flatMap((event) =>
+        event.type === "tool/result" &&
+        event.turn === openTurn &&
+        event.step === latestStep
+          ? [event.callId]
+          : [],
+      ),
+    );
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
     try {
@@ -218,6 +252,52 @@ class LoopAgent implements Agent {
           openTurn,
           latestStep,
           response.toolCalls,
+          signal,
+        );
+        this.session.append({
+          type: "step/end",
+          turn: openTurn,
+          step: latestStep,
+          outcome: "completed",
+        });
+        openStep = undefined;
+        nextStep = latestStep + 1;
+      } else if (latestAssistant) {
+        openStep = latestStep;
+        if (latestAssistant.toolCalls.length === 0) {
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step: latestStep,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          turnOutcome = "completed";
+          return;
+        }
+        for (const call of latestAssistant.toolCalls) {
+          const journaled = journaledCalls.get(call.id);
+          if (journaled && !durableResults.has(call.id)) {
+            this.session.append({
+              type: "tool/result",
+              turn: openTurn,
+              step: latestStep,
+              callId: call.id,
+              name: call.name,
+              content: "Interrupted before a durable result was recorded.",
+              isError: true,
+              status: "interrupted",
+            });
+          }
+        }
+        await this.session.flush();
+        await this.#executeTools(
+          openTurn,
+          latestStep,
+          latestAssistant.toolCalls.filter(
+            (call) =>
+              !journaledCalls.has(call.id) && !durableResults.has(call.id),
+          ),
           signal,
         );
         this.session.append({

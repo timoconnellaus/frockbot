@@ -73,6 +73,19 @@ export async function executeBotTurn(
     else runtime.agent.agent.send(command.text);
     await runtime.agent.agent.whenIdle();
     const events = [...runtime.agent.agent.session.events];
+    const terminalTurn = events.findLast((event) => event.type === "turn/end");
+    if (!terminalTurn) {
+      throw new BotTurnExecutionError(
+        "Bot turn did not reach a durable terminal state",
+        appendedSessionEvents(previousEvents, events),
+      );
+    }
+    if (terminalTurn.outcome !== "completed") {
+      throw new BotTurnExecutionError(
+        `Bot turn ended with outcome ${terminalTurn.outcome}`,
+        appendedSessionEvents(previousEvents, events),
+      );
+    }
     const message = runtime.agent.agent.session.deriveMessages().at(-1);
     return {
       runId: command.runId,
@@ -80,6 +93,7 @@ export async function executeBotTurn(
       events: appendedSessionEvents(previousEvents, events),
     };
   } catch (error) {
+    if (error instanceof BotTurnExecutionError) throw error;
     const events = [...runtime.agent.agent.session.events];
     throw new BotTurnExecutionError(
       error instanceof Error ? error.message : "Bot turn failed",

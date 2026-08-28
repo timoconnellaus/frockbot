@@ -150,93 +150,158 @@ export class BotState extends DurableObject<BotStateEnv> {
             generation: command.commandId,
           }
         : undefined;
-    if (
-      connectionAssignment &&
-      !(await this.userConfiguration(identity).claimConnectionDependency(
-        identity.userId,
-        connectionAssignment.connectionId,
-        identity.botId,
-        connectionAssignment.generation,
-      ))
-    ) {
-      throw new Error("Connection assignment is no longer authorized");
-    }
-    const receipt = await this.ctx.storage.transaction(async (transaction) => {
-      const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
-      const existing = await transaction.get<OperationReceiptV1>(receiptKey);
-      if (existing) return existing;
-      const current =
-        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-        this.initialBotSettings(identity.botId);
-      if (command.expectedRevision !== current.revision) {
-        throw new ConfigurationConflictError(current.revision);
-      }
-      if (
-        connectionAssignment &&
-        (await transaction.get(
-          `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionAssignment.connectionId}:${connectionAssignment.generation}`,
-        ))
-      ) {
-        throw new Error("Connection assignment was revoked before admission");
-      }
-      const revision = current.revision + 1;
-      const next: BotSettingsViewV1 =
-        command.type === "bot/update-profile"
-          ? { ...current, revision, profile: command.profile }
-          : command.type === "bot/update-notifications"
-            ? { ...current, revision, notifications: command.notifications }
-            : command.type === "bot/select-model"
-              ? { ...current, revision, model: command.model }
-              : {
-                  ...current,
-                  revision,
-                  assignments: [
-                    ...current.assignments
-                      .filter(
-                        (assignment) =>
-                          assignment.assignmentId !==
-                          command.assignment.assignmentId,
-                      )
-                      .map((assignment) =>
-                        assignment.packageId === command.assignment.packageId &&
-                        assignment.capabilityId ===
-                          command.assignment.capabilityId
-                          ? { ...assignment, state: "unavailable" as const }
-                          : assignment,
-                      ),
-                    { ...command.assignment, state: "enabled" },
-                  ],
-                };
-      const receipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId: command.commandId,
-        revision,
-        status: "applied",
-      };
-      await transaction.put({
-        [BOT_CONFIGURATION_KEY]: next,
-        [receiptKey]: receipt,
-      });
-      if (
-        command.type === "bot/assign-capability" &&
-        command.assignment.connectionId
-      ) {
-        await transaction.put(
-          `${ASSIGNMENT_GENERATION_PREFIX}${command.assignment.connectionId}`,
-          command.commandId,
-        );
-      }
-      return receipt;
-    });
+    const userConfiguration = connectionAssignment
+      ? this.userConfiguration(identity)
+      : undefined;
     if (connectionAssignment) {
-      const acknowledged = await this.userConfiguration(
-        identity,
-      ).acknowledgeConnectionDependency(
-        identity.userId,
-        connectionAssignment.connectionId,
-        identity.botId,
-        connectionAssignment.generation,
-      );
+      const replay = await this.ctx.storage.transaction(async (transaction) => {
+        const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
+        const existing = await transaction.get<OperationReceiptV1>(receiptKey);
+        if (existing) return existing;
+        const current =
+          (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
+          this.initialBotSettings(identity.botId);
+        if (command.expectedRevision !== current.revision) {
+          throw new ConfigurationConflictError(current.revision);
+        }
+        if (
+          await transaction.get(
+            `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionAssignment.connectionId}:${connectionAssignment.generation}`,
+          )
+        ) {
+          throw new Error("Connection assignment was revoked before admission");
+        }
+        return undefined;
+      });
+      if (replay) return replay;
+    }
+    let claimAttempted = false;
+    let connectionCommitted = false;
+    const receipt = await (async () => {
+      try {
+        if (connectionAssignment) {
+          claimAttempted = true;
+          if (
+            !(await userConfiguration!.claimConnectionDependency(
+              identity.userId,
+              connectionAssignment.connectionId,
+              identity.botId,
+              connectionAssignment.generation,
+            ))
+          ) {
+            throw new Error("Connection assignment is no longer authorized");
+          }
+        }
+        const committed = await this.ctx.storage.transaction(
+          async (transaction) => {
+            const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
+            const existing =
+              await transaction.get<OperationReceiptV1>(receiptKey);
+            if (existing) return existing;
+            const current =
+              (await transaction.get<BotSettingsViewV1>(
+                BOT_CONFIGURATION_KEY,
+              )) ?? this.initialBotSettings(identity.botId);
+            if (command.expectedRevision !== current.revision) {
+              throw new ConfigurationConflictError(current.revision);
+            }
+            if (
+              connectionAssignment &&
+              (await transaction.get(
+                `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionAssignment.connectionId}:${connectionAssignment.generation}`,
+              ))
+            ) {
+              throw new Error(
+                "Connection assignment was revoked before admission",
+              );
+            }
+            const revision = current.revision + 1;
+            const next: BotSettingsViewV1 =
+              command.type === "bot/update-profile"
+                ? { ...current, revision, profile: command.profile }
+                : command.type === "bot/update-notifications"
+                  ? {
+                      ...current,
+                      revision,
+                      notifications: command.notifications,
+                    }
+                  : command.type === "bot/select-model"
+                    ? { ...current, revision, model: command.model }
+                    : {
+                        ...current,
+                        revision,
+                        assignments: [
+                          ...current.assignments
+                            .filter(
+                              (assignment) =>
+                                assignment.assignmentId !==
+                                command.assignment.assignmentId,
+                            )
+                            .map((assignment) =>
+                              assignment.packageId ===
+                                command.assignment.packageId &&
+                              assignment.capabilityId ===
+                                command.assignment.capabilityId
+                                ? {
+                                    ...assignment,
+                                    state: "unavailable" as const,
+                                  }
+                                : assignment,
+                            ),
+                          { ...command.assignment, state: "enabled" },
+                        ],
+                      };
+            const receipt: OperationReceiptV1 = {
+              schemaVersion: 1,
+              commandId: command.commandId,
+              revision,
+              status: "applied",
+            };
+            await transaction.put({
+              [BOT_CONFIGURATION_KEY]: next,
+              [receiptKey]: receipt,
+            });
+            if (
+              command.type === "bot/assign-capability" &&
+              command.assignment.connectionId
+            ) {
+              await transaction.put(
+                `${ASSIGNMENT_GENERATION_PREFIX}${command.assignment.connectionId}`,
+                command.commandId,
+              );
+            }
+            return receipt;
+          },
+        );
+        connectionCommitted = true;
+        return committed;
+      } catch (error) {
+        if (connectionAssignment && claimAttempted && !connectionCommitted) {
+          try {
+            await userConfiguration!.compensateConnectionDependency(
+              identity.userId,
+              connectionAssignment.connectionId,
+              identity.botId,
+              connectionAssignment.generation,
+            );
+          } catch (compensationError) {
+            throw new AggregateError(
+              [error, compensationError],
+              "Connection assignment admission and compensation failed",
+            );
+          }
+        }
+        throw error;
+      }
+    })();
+    if (connectionAssignment) {
+      const acknowledged =
+        await userConfiguration!.acknowledgeConnectionDependency(
+          identity.userId,
+          connectionAssignment.connectionId,
+          identity.botId,
+          connectionAssignment.generation,
+        );
       if (!acknowledged) {
         await this.markConnectionUnavailable(
           identity,
@@ -671,6 +736,12 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: string,
       generation: string,
     ): Promise<boolean>;
+    compensateConnectionDependency(
+      userId: string,
+      connectionId: string,
+      botId: string,
+      generation: string,
+    ): Promise<boolean>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
@@ -687,6 +758,12 @@ export class BotState extends DurableObject<BotStateEnv> {
         generation: string,
       ): Promise<boolean>;
       acknowledgeConnectionDependency(
+        userId: string,
+        connectionId: string,
+        botId: string,
+        generation: string,
+      ): Promise<boolean>;
+      compensateConnectionDependency(
         userId: string,
         connectionId: string,
         botId: string,
@@ -950,6 +1027,18 @@ export class BotState extends DurableObject<BotStateEnv> {
             ...run,
             status: "completed",
             responseText: plan.responseText,
+          } satisfies StoredRun,
+        });
+        await transaction.delete(ACTIVE_RUN_KEY);
+        await transaction.deleteAlarm();
+        return undefined;
+      }
+      if (plan.kind === "fail") {
+        await transaction.put({
+          [key]: {
+            ...run,
+            status: "failed",
+            failure: plan.failure,
           } satisfies StoredRun,
         });
         await transaction.delete(ACTIVE_RUN_KEY);

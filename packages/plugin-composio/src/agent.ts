@@ -76,6 +76,7 @@ export function createComposioRouterPlugin(
   config: ComposioRouterPluginConfig,
 ): Plugin.Function {
   const allowedToolSlugs = new Set<string>();
+  let runtimeContext: Context | undefined;
   const search: ToolDefinition = {
     name: "composio_search_tools",
     description:
@@ -115,7 +116,7 @@ export function createComposioRouterPlugin(
       isObject(input) &&
       typeof input.toolSlug === "string" &&
       isObject(input.arguments),
-    execute: async (input: unknown) => {
+    execute: async (input: unknown, context) => {
       if (
         !isObject(input) ||
         typeof input.toolSlug !== "string" ||
@@ -123,7 +124,30 @@ export function createComposioRouterPlugin(
       ) {
         return { content: "Invalid Composio tool input", isError: true };
       }
-      if (!allowedToolSlugs.has(input.toolSlug)) {
+      const wasDurablySearched = runtimeContext?.sessions
+        .get(context.sessionId)
+        ?.events.some((event) => {
+          if (
+            event.type !== "tool/result" ||
+            event.name !== "composio_search_tools" ||
+            event.isError
+          ) {
+            return false;
+          }
+          try {
+            const result: unknown = JSON.parse(event.content);
+            return (
+              Array.isArray(result) &&
+              result.some(
+                (candidate) =>
+                  isObject(candidate) && candidate.slug === input.toolSlug,
+              )
+            );
+          } catch {
+            return false;
+          }
+        });
+      if (!allowedToolSlugs.has(input.toolSlug) && !wasDurablySearched) {
         return {
           content:
             "Tool slug was not returned by composio_search_tools in this runtime.",
@@ -147,14 +171,16 @@ export function createComposioRouterPlugin(
     },
   };
   const plugin: Plugin.Function = (ctx: Context) => {
+    runtimeContext = ctx;
     const removeSearch = ctx.tools.register(search);
     const removeExecute = ctx.tools.register(execute);
     return () => {
+      runtimeContext = undefined;
       removeExecute();
       removeSearch();
     };
   };
-  plugin.inject = ["tools"];
+  plugin.inject = ["tools", "sessions"];
   return plugin;
 }
 

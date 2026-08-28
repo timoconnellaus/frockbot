@@ -133,6 +133,7 @@ export class Session {
   private interruptionRepairs(closeTurn: boolean): SessionEventInput[] {
     let openTurn: number | undefined;
     let openStep: { turn: number; step: number } | undefined;
+    let openStepHasAssistant = false;
     const calls = new Map<
       string,
       Extract<SessionEvent, { type: "tool/call" }>
@@ -143,8 +144,10 @@ export class Session {
       if (event.type === "turn/start") openTurn = event.turn;
       if (event.type === "turn/end" && openTurn === event.turn)
         openTurn = undefined;
-      if (event.type === "step/start")
+      if (event.type === "step/start") {
         openStep = { turn: event.turn, step: event.step };
+        openStepHasAssistant = false;
+      }
       if (
         event.type === "step/end" &&
         openStep?.turn === event.turn &&
@@ -159,6 +162,9 @@ export class Session {
       }
       if (event.type === "assistant/message") {
         unresolvedModelRequests.delete(event.requestId);
+        if (openStep?.turn === event.turn && openStep.step === event.step) {
+          openStepHasAssistant = true;
+        }
       }
     }
 
@@ -175,7 +181,11 @@ export class Session {
         status: "interrupted",
       });
     }
-    if (openStep && unresolvedModelRequests.size === 0) {
+    if (
+      openStep &&
+      unresolvedModelRequests.size === 0 &&
+      (closeTurn || !openStepHasAssistant)
+    ) {
       repairs.push({ type: "step/end", ...openStep, outcome: "interrupted" });
     }
     if (closeTurn && openTurn !== undefined) {

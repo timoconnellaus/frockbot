@@ -53,30 +53,40 @@ export function projectCompletedRuns(
 ): Set<string> {
   const projected = new Set<string>();
   for (const run of runs) {
-    if (run.status !== "completed") continue;
+    if (run.status !== "completed" && run.status !== "failed") continue;
     const notification = notifications.find(
       (candidate) => candidate.runId === run.runId,
     );
-    if (!messages.some((message) => message.runId === run.runId)) {
-      messages.push(
-        {
-          id: `${run.runId}:user`,
-          runId: run.runId,
-          role: "user",
-          text: run.input,
-          status: "completed",
-          tools: [],
-        },
-        {
-          id: `${run.runId}:assistant`,
-          runId: run.runId,
-          role: "assistant",
-          text: run.responseText ?? notification?.body ?? "",
-          status: "completed",
-          tools: toolsFrom(run.events),
-        },
-      );
+    if (
+      !messages.some(
+        (message) => message.runId === run.runId && message.role === "user",
+      )
+    ) {
+      messages.push({
+        id: `${run.runId}:user`,
+        runId: run.runId,
+        role: "user",
+        text: run.input,
+        status: "completed",
+        tools: [],
+      });
     }
+    const assistant: WebChatMessage = {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text:
+        run.status === "failed"
+          ? (run.failure ?? "Agent request failed.")
+          : (run.responseText ?? notification?.body ?? ""),
+      status: run.status === "failed" ? "error" : "completed",
+      tools: toolsFrom(run.events),
+    };
+    const assistantIndex = messages.findIndex(
+      (message) => message.runId === run.runId && message.role === "assistant",
+    );
+    if (assistantIndex >= 0) messages[assistantIndex] = assistant;
+    else messages.push(assistant);
     if (notification) projected.add(notification.notificationId);
   }
   return projected;

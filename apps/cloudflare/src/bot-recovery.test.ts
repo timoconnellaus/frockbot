@@ -79,4 +79,19 @@ describe("Bot run recovery", () => {
     if (plan.kind !== "reconcile") throw new Error("expected reconciliation");
     expect(plan.repairs).toEqual([]);
   });
+
+  test("fails recovery when the durable Turn ended unsuccessfully", () => {
+    const ended = {
+      type: "turn/end" as const,
+      seq: 0,
+      timestamp: "2026-08-28T00:00:00.000Z",
+      turn: 1,
+      outcome: "model-error" as const,
+    };
+
+    expect(planBotRunRecovery(run([ended]), [ended])).toEqual({
+      kind: "fail",
+      failure: "Bot turn ended with outcome model-error",
+    });
+  });
 });

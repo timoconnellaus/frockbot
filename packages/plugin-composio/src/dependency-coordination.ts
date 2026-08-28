@@ -38,7 +38,9 @@ export function claimDependentAssignment(
       ...connection.safeMetadata,
       dependentAssignments: [
         ...existing.filter(
-          (candidate) => (candidate as Record<string, unknown>).botId !== botId,
+          (candidate) =>
+            (candidate as Record<string, unknown>).botId !== botId ||
+            (candidate as Record<string, unknown>).generation !== generation,
         ),
         { botId, generation, status: "pending" },
       ],
@@ -64,7 +66,7 @@ export function acknowledgeDependentAssignment(
     ? connection.safeMetadata.dependentAssignments
     : [];
   let matched = false;
-  const acknowledged = dependencies.map((candidate) => {
+  const acknowledged = dependencies.flatMap((candidate) => {
     if (
       candidate &&
       typeof candidate === "object" &&
@@ -73,9 +75,17 @@ export function acknowledgeDependentAssignment(
       (candidate as Record<string, unknown>).generation === generation
     ) {
       matched = true;
-      return { ...candidate, status: "acknowledged" };
+      return [{ ...candidate, status: "acknowledged" }];
     }
-    return candidate;
+    if (
+      candidate &&
+      typeof candidate === "object" &&
+      !Array.isArray(candidate) &&
+      (candidate as Record<string, unknown>).botId === botId
+    ) {
+      return [];
+    }
+    return [candidate];
   });
   if (!matched) return undefined;
   return {
@@ -83,6 +93,35 @@ export function acknowledgeDependentAssignment(
     safeMetadata: {
       ...connection.safeMetadata,
       dependentAssignments: acknowledged,
+    },
+  };
+}
+
+export function compensateDependentAssignment(
+  connection: ConnectionView,
+  botId: string,
+  generation: string,
+): ConnectionView | undefined {
+  const dependencies = Array.isArray(
+    connection.safeMetadata.dependentAssignments,
+  )
+    ? connection.safeMetadata.dependentAssignments
+    : [];
+  const remaining = dependencies.filter(
+    (candidate) =>
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      (candidate as Record<string, unknown>).botId !== botId ||
+      (candidate as Record<string, unknown>).generation !== generation ||
+      (candidate as Record<string, unknown>).status !== "pending",
+  );
+  if (remaining.length === dependencies.length) return undefined;
+  return {
+    ...connection,
+    safeMetadata: {
+      ...connection.safeMetadata,
+      dependentAssignments: remaining,
     },
   };
 }

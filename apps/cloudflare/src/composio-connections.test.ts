@@ -479,7 +479,7 @@ describe("ComposioConnectionCoordinator", () => {
     });
   });
 
-  test("retires an expired persisted Connect Link operation", async () => {
+  test("retires a persisted Link whose callback state expired first", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
       connectionId: "connection-expired",
@@ -490,8 +490,10 @@ describe("ComposioConnectionCoordinator", () => {
     await store.updateConnection("user-1", "connection-expired", {
       state: "authorizing",
       safeMetadata: {
-        redirectUrl: "https://connect.example/expired",
-        expiresAt: new Date(Date.now() - 1_000).toISOString(),
+        redirectUrl: "https://connect.example/still-live",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        authorizationStateId: "expired-state",
+        authorizationStateExpiresAt: Date.now() - 1_000,
       },
     });
     const coordinator = new ComposioConnectionCoordinator({
@@ -756,16 +758,13 @@ describe("ComposioConnectionCoordinator", () => {
       { userId: "user-1", botId: "primary", connectionId: "connection-1" },
     ]);
 
-    const failed = await coordinator.fail(
-      "user-1",
-      "connection-1",
-      "delayed failure",
-    );
-    expect(failed.status).toBe("failed");
+    await expect(
+      coordinator.fail("user-1", "connection-1", "delayed failure"),
+    ).resolves.toMatchObject({ status: "ready" });
     expect(store.connections.get("connection-1")?.state).toBe("ready");
   });
 
-  test("serializes concurrent successful callbacks behind one assignment lease", async () => {
+  test("accepts callback state only once during concurrent completion", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
       connectionId: "connection-1",
@@ -824,10 +823,12 @@ describe("ComposioConnectionCoordinator", () => {
       connectedAccountId: "ca_123",
     });
     await started;
-    await coordinator.complete("user-1", {
-      connectionId: "connection-1",
-      connectedAccountId: "ca_123",
-    });
+    await expect(
+      coordinator.complete("user-1", {
+        connectionId: "connection-1",
+        connectedAccountId: "ca_123",
+      }),
+    ).resolves.toMatchObject({ status: "pending" });
     releaseAssignment();
     await first;
 
@@ -835,7 +836,35 @@ describe("ComposioConnectionCoordinator", () => {
     expect(store.connections.get("connection-1")?.state).toBe("ready");
   });
 
-  test("does not let a stale callback compensate a newer assignment lease", async () => {
+  test("reports the durable terminal status when failure loses a race", async () => {
+    const store = new MemoryConnectionStore();
+    await store.startConnection("user-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    store.finishConnectionAuthorization = async (userId, connectionId) => {
+      await store.updateConnection(userId, connectionId, { state: "ready" });
+      return false;
+    };
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: () => Promise.reject(new Error("provider not expected")),
+      }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+    });
+
+    await expect(
+      coordinator.fail("user-1", "connection-1", "stale failure"),
+    ).resolves.toMatchObject({ status: "ready" });
+    expect(store.connections.get("connection-1")?.state).toBe("ready");
+  });
+
+  test("does not re-enter a consumed callback after lease expiry", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
       connectionId: "connection-1",
@@ -844,92 +873,37 @@ describe("ComposioConnectionCoordinator", () => {
       displayName: "Gmail",
     });
     await store.updateConnection("user-1", "connection-1", {
-      state: "authorizing",
+      state: "reconciliation-required",
       safeMetadata: {
         connectedAccountId: "ca_123",
         targetBotId: "primary",
+        authorizationStateConsumed: true,
+        reconciliationOperation: "assignment",
+        assignmentLeaseId: "expired-lease",
+        assignmentLeaseExpiresAt: Date.now() - 1,
       },
     });
-    const client = new ComposioClient({
-      apiKey: "secret",
-      fetch: () =>
-        Promise.resolve(
-          Response.json({
-            items: [
-              {
-                id: "ca_123",
-                status: "ACTIVE",
-                toolkit: { slug: "gmail" },
-              },
-            ],
-          }),
-        ),
-    });
-    let releaseFirst!: () => void;
-    let releaseSecond!: () => void;
-    let firstStarted!: () => void;
-    let secondStarted!: () => void;
-    const firstGate = new Promise<void>((resolve) => {
-      releaseFirst = resolve;
-    });
-    const secondGate = new Promise<void>((resolve) => {
-      releaseSecond = resolve;
-    });
-    const firstStart = new Promise<void>((resolve) => {
-      firstStarted = resolve;
-    });
-    const secondStart = new Promise<void>((resolve) => {
-      secondStarted = resolve;
-    });
     let assignmentAttempt = 0;
-    let invalidations = 0;
     const coordinator = new ComposioConnectionCoordinator({
-      client,
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: () => Promise.reject(new Error("provider not expected")),
+      }),
       store,
       callbackBaseUrl: "https://bot.frockbot.com",
       connectionTypes: {},
       assignBot: () => {
         assignmentAttempt += 1;
-        if (assignmentAttempt === 1) {
-          firstStarted();
-          return firstGate;
-        }
-        secondStarted();
-        return secondGate;
-      },
-      markBotUnavailable: () => {
-        invalidations += 1;
-        return Promise.resolve("applied" as const);
+        return Promise.resolve();
       },
     });
 
-    const first = coordinator.complete("user-1", {
+    const result = await coordinator.complete("user-1", {
       connectionId: "connection-1",
       connectedAccountId: "ca_123",
     });
-    await firstStart;
-    const leased = store.connections.get("connection-1");
-    if (!leased) throw new Error("missing leased connection");
-    store.connections.set("connection-1", {
-      ...leased,
-      safeMetadata: {
-        ...leased.safeMetadata,
-        assignmentLeaseExpiresAt: Date.now() - 1,
-      },
-    });
-    const second = coordinator.complete("user-1", {
-      connectionId: "connection-1",
-      connectedAccountId: "ca_123",
-    });
-    await secondStart;
-    releaseFirst();
-    await expect(first).rejects.toThrow("state changed");
-    expect(invalidations).toBe(0);
-    releaseSecond();
-    await second;
-
-    expect(store.connections.get("connection-1")?.state).toBe("ready");
-    expect(invalidations).toBe(0);
+    expect(result.status).toBe("pending");
+    expect(assignmentAttempt).toBe(0);
   });
 
   test("reacquires an expired assignment lease with a fresh command id", async () => {

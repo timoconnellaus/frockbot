@@ -55,6 +55,7 @@ export interface ClientRun {
     | "interrupted"
     | "reconciliation-required";
   responseText?: string;
+  failure?: string;
 }
 
 export interface AgentTransport {
@@ -226,12 +227,16 @@ export function decodeRunList(input: unknown): ClientRun[] {
     ) {
       throw new Error("run.responseText must be a string");
     }
+    if (run.failure !== undefined && typeof run.failure !== "string") {
+      throw new Error("run.failure must be a string");
+    }
     return {
       runId: responseString(run, "runId", "run"),
       input: responseString(run, "input", "run"),
       events: run.events.map(decodeTurnEvent),
       status,
       responseText: run.responseText,
+      failure: run.failure,
     };
   });
 }
