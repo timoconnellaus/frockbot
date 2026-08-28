@@ -1,10 +1,11 @@
 /// <reference path="../env.d.ts" />
 
-import type {
-  ClientNotificationIntent,
-  ClientPlugin,
-  ClientRun,
-  ClientTurnEvent,
+import {
+  decodeExternalAuthorizationUrl,
+  type ClientNotificationIntent,
+  type ClientPlugin,
+  type ClientRun,
+  type ClientTurnEvent,
 } from "@frockbot/client-core";
 import type {
   BotNotificationPolicy,
@@ -472,18 +473,19 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       await web.value.loadPluginCatalog();
     },
     async openConnectionAuthorization(url: string): Promise<void> {
-      const operation = authorizationOperations.get(url);
+      const authorizationUrl = decodeExternalAuthorizationUrl(url);
+      const operation = authorizationOperations.get(authorizationUrl);
       if (ctx.transport.openExternalAuthorization) {
         await ctx.transport.openExternalAuthorization(
-          url,
+          authorizationUrl,
           operation?.nativeReturnNonce,
         );
         if (operation) {
-          authorizationOperations.delete(url);
+          authorizationOperations.delete(authorizationUrl);
         }
         return;
       }
-      window.location.assign(url);
+      window.location.assign(authorizationUrl);
     },
     async sendPrompt(text: string): Promise<SendPromptResult> {
       if (web.value.activeRunId) return { accepted: false, error: "busy" };

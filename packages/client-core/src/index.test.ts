@@ -112,4 +112,42 @@ describe("hosted response decoders", () => {
       decodeStartConnectionResult({ connectionId: "connection-1" }),
     ).toThrow("Connection result.redirectUrl must be a string");
   });
+
+  test("allows only bounded absolute HTTPS Connection redirects", () => {
+    const decode = (redirectUrl: string) =>
+      decodeStartConnectionResult({
+        connectionId: "connection-1",
+        redirectUrl,
+        expiresAt: "2026-08-28T00:05:00.000Z",
+      }).redirectUrl;
+
+    expect(decode("https://connect.example/authorize?account=primary")).toBe(
+      "https://connect.example/authorize?account=primary",
+    );
+    expect(decode("https://[::1]/authorize")).toBe("https://[::1]/authorize");
+    for (const invalid of [
+      "http://connect.example/authorize",
+      "javascript:alert(1)",
+      "data:text/html,unsafe",
+      "/authorize",
+      "//connect.example/authorize",
+      "https://user:secret@connect.example/authorize",
+      "https://connect.example/authorize#complete",
+      "https://connect.example/authorize#",
+      "https://connect.example/authorize\nnext",
+      "https://connect.example/\u0000authorize",
+      "https://connect.example/\u001bauthorize",
+      "https:\\connect.example\\authorize",
+      "https://connect_example/authorize",
+      "https://connect..example/authorize",
+      "https://-connect.example/authorize",
+      "https://connect-.example/authorize",
+      "https://connect.example:99999/authorize",
+      `https://connect.example/${"x".repeat(4_096)}`,
+    ]) {
+      expect(() => decode(invalid)).toThrow(
+        "invalid external authorization URL",
+      );
+    }
+  });
 });

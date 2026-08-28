@@ -63,6 +63,16 @@ describe("desktop hosted protocol", () => {
     expect(() => decodeExternalAuthorizationUrl("javascript:alert(1)")).toThrow(
       "invalid external authorization URL",
     );
+    expect(() =>
+      decodeExternalAuthorizationUrl(
+        "https://user:secret@connect.example/authorize",
+      ),
+    ).toThrow("invalid external authorization URL");
+    expect(() =>
+      decodeExternalAuthorizationUrl(
+        "https://connect.example/authorize#complete",
+      ),
+    ).toThrow("invalid external authorization URL");
   });
 
   test("accepts only the main-process authorization acknowledgement", () => {

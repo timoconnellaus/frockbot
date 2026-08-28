@@ -1,3 +1,5 @@
+export { decodeExternalAuthorizationUrl } from "@frockbot/plugin-shell/shared";
+
 const MAX_BODY_BYTES = 64 * 1024;
 
 export interface DesktopApiRequest {
@@ -84,18 +86,6 @@ export function decodeDesktopApiRequest(value: unknown): DesktopApiRequest {
     method: request.method,
     body: request.body,
   };
-}
-
-export function decodeExternalAuthorizationUrl(value: unknown): string {
-  if (typeof value !== "string" || value.length > 4_096) {
-    throw new Error("invalid external authorization URL");
-  }
-  try {
-    if (new URL(value).protocol !== "https:") throw new Error();
-  } catch {
-    throw new Error("invalid external authorization URL");
-  }
-  return value;
 }
 
 export function decodeExternalAuthorizationAcknowledgement(

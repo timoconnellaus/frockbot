@@ -182,6 +182,50 @@ export function decodeNotificationList(
   return value.notifications.map(decodeNotification);
 }
 
+const MAX_EXTERNAL_AUTHORIZATION_URL_BYTES = 4_096;
+const EXTERNAL_AUTHORIZATION_URL_UNSAFE_CHARACTER =
+  /[\u0000-\u0020\u007f-\u009f]|\s/u;
+const HTTPS_AUTHORIZATION_PREFIX = /^https:\/\/[^/?#]/iu;
+const DNS_HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
+
+function validAuthorizationHostname(hostname: string): boolean {
+  if (hostname.startsWith("[") && hostname.endsWith("]")) return true;
+  const normalized = hostname.endsWith(".") ? hostname.slice(0, -1) : hostname;
+  return (
+    normalized.length > 0 &&
+    normalized.length <= 253 &&
+    normalized.split(".").every((label) => DNS_HOST_LABEL.test(label))
+  );
+}
+
+export function decodeExternalAuthorizationUrl(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !HTTPS_AUTHORIZATION_PREFIX.test(value) ||
+    EXTERNAL_AUTHORIZATION_URL_UNSAFE_CHARACTER.test(value) ||
+    value.includes("\\") ||
+    value.includes("#") ||
+    new TextEncoder().encode(value).byteLength >
+      MAX_EXTERNAL_AUTHORIZATION_URL_BYTES
+  ) {
+    throw new Error("invalid external authorization URL");
+  }
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      !validAuthorizationHostname(url.hostname)
+    ) {
+      throw new Error();
+    }
+  } catch {
+    throw new Error("invalid external authorization URL");
+  }
+  return value;
+}
+
 export function decodeStartConnectionResult(
   input: unknown,
 ): ClientStartConnectionResult {
@@ -195,7 +239,9 @@ export function decodeStartConnectionResult(
   }
   return {
     connectionId: responseString(value, "connectionId", "Connection result"),
-    redirectUrl: responseString(value, "redirectUrl", "Connection result"),
+    redirectUrl: decodeExternalAuthorizationUrl(
+      responseString(value, "redirectUrl", "Connection result"),
+    ),
     expiresAt: responseString(value, "expiresAt", "Connection result"),
     nativeReturnNonce,
   };

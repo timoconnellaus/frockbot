@@ -201,4 +201,36 @@ describe("Connection operation reconciliation", () => {
     expect(commandIds).toHaveLength(2);
     expect(commandIds[1]).toBe(commandIds[0]);
   });
+
+  test("validates browser authorization targets before opening them", async () => {
+    installMemoryStorage();
+    const opened: string[] = [];
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        openExternalAuthorization: (url) => {
+          opened.push(url);
+          return Promise.resolve();
+        },
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    await provided.value.openConnectionAuthorization(
+      "https://connect.example/authorize",
+    );
+    await expect(
+      provided.value.openConnectionAuthorization(
+        "https://connect.example/authorize#unsafe",
+      ),
+    ).rejects.toThrow("invalid external authorization URL");
+
+    expect(opened).toEqual(["https://connect.example/authorize"]);
+  });
 });
