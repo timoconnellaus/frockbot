@@ -2,6 +2,7 @@ import { desktopComputerRuntimePackages } from "../../../applications/foundation
 
 // Desktop-only runtime authority is added outside the Worker-safe application.
 import {
+  EphemeralIndexMetaStore,
   type MemoryPluginConfig,
   type MemoryVector,
   WorkspaceMemoryDocumentStore,
@@ -88,8 +89,10 @@ function desktopMemoryConfig(botId: string): MemoryPluginConfig {
           durability: "durable",
         }),
       ]);
-      return new WorkspaceMemoryDocumentStore({ agent, global }, () =>
-        computer.close(),
+      return new EphemeralIndexMetaStore(
+        new WorkspaceMemoryDocumentStore({ agent, global }, () =>
+          computer.close(),
+        ),
       );
     },
     vectorize: {

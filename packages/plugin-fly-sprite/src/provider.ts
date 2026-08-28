@@ -281,7 +281,7 @@ class FlyComputerDirectory implements ComputerDirectory {
         '  if [ -n "$PREFIX" ]; then case "$REL" in "$PREFIX"|"$PREFIX"/*) ;; *) continue ;; esac; fi',
         '  if [ "$INDEX" -lt "$OFFSET" ]; then INDEX=$((INDEX + 1)); continue; fi',
         '  HASH=$(sha256sum "$FILE" | cut -d" " -f1)',
-        '  printf "%s\\t%s\\t%s\\t%s\\n" "$REL" "$HASH" "$(stat -c %s "$FILE")" "$(stat -c %Y "$FILE")"',
+        '  printf "%s\\t%s\\t%s\\t%s\\n" "$(printf %s "$REL" | base64 -w0)" "$HASH" "$(stat -c %s "$FILE")" "$(stat -c %Y "$FILE")"',
         "  EMITTED=$((EMITTED + 1))",
         '  if [ "$EMITTED" -gt "$LIMIT" ]; then break; fi',
         "done",
@@ -290,7 +290,11 @@ class FlyComputerDirectory implements ComputerDirectory {
     );
     const files: ComputerFileInfo[] = output
       ? output.split("\n").map((line) => {
-          const [path, version, sizeText, modifiedText] = line.split("\t");
+          const [encodedPath, version, sizeText, modifiedText] =
+            line.split("\t");
+          const path = encodedPath
+            ? Buffer.from(encodedPath, "base64").toString("utf8")
+            : "";
           const size = Number(sizeText);
           const modifiedSeconds = Number(modifiedText);
           if (

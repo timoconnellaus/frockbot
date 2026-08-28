@@ -90,7 +90,9 @@ class FakeSprite implements SpriteHandle {
       const limit = Number(/LIMIT=(\d+)/.exec(shell)?.[1] ?? 100);
       const lines = Array.from({ length: 205 }, (_, index) =>
         [
-          `memory-${String(index).padStart(3, "0")}.md`,
+          Buffer.from(`memory-${String(index).padStart(3, "0")}.md`).toString(
+            "base64",
+          ),
           `version-${index}`,
           "7",
           "1700000000",
