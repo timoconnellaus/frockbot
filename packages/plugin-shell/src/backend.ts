@@ -2,7 +2,9 @@ import type { SessionEvent } from "@frockbot/agent-core";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
+  capabilityAssignmentFailureV1,
   ConfigurationConflictError,
+  type ConnectionDependencyRequirementV1,
   type BotExecutionPlanV1,
   type BotSettingsViewV1,
   type ConnectionView,
@@ -187,13 +189,70 @@ export class ShellBotBackendContribution {
       }
     >,
   ): Promise<OperationReceiptV1> {
-    await this.ensureBotSettings(identity);
+    const settings = await this.ensureBotSettings(identity);
+    const existing = await this.ctx.storage.get<OperationReceiptV1>(
+      `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`,
+    );
+    if (existing) return existing;
+    if (command.expectedRevision !== settings.revision) {
+      throw new ConfigurationConflictError(settings.revision);
+    }
+    let dependencyRequirement: ConnectionDependencyRequirementV1 | undefined;
+    if (command.type === "bot/assign-capability") {
+      const [user, application] = await Promise.all([
+        this.userConfiguration(identity).read(identity.userId),
+        compileFoundationApplication(),
+      ]);
+      const failure = capabilityAssignmentFailureV1({
+        assignment: command.assignment,
+        user,
+        packages: application.packages.map((pkg) => ({
+          packageId: pkg.id,
+          version: pkg.version,
+          capabilities: pkg.manifest.configuration?.capabilities ?? [],
+          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+        })),
+      });
+      if (failure) {
+        return this.rejectConfigurationCommand(identity, command, failure);
+      }
+      if (command.assignment.connectionId) {
+        const installation = user.packages.find(
+          (pkg) =>
+            pkg.packageId === command.assignment.packageId &&
+            pkg.state === "installed",
+        );
+        const pkg = application.packages.find(
+          (candidate) =>
+            candidate.id === command.assignment.packageId &&
+            candidate.version === installation?.version,
+        );
+        const capability = pkg?.manifest.configuration?.capabilities.find(
+          (candidate) => candidate.id === command.assignment.capabilityId,
+        );
+        if (!installation || !pkg || !capability) {
+          return this.rejectConfigurationCommand(
+            identity,
+            command,
+            "Capability assignment policy changed during validation",
+          );
+        }
+        dependencyRequirement = {
+          schemaVersion: 1,
+          packageId: pkg.id,
+          packageVersion: pkg.version,
+          capabilityId: capability.id,
+          connectionTypeIds: [...capability.connectionTypes],
+        };
+      }
+    }
     const connectionAssignment =
       command.type === "bot/assign-capability" &&
       command.assignment.connectionId
         ? {
             connectionId: command.assignment.connectionId,
             generation: command.commandId,
+            requirement: dependencyRequirement!,
           }
         : undefined;
     const userConfiguration = connectionAssignment
@@ -249,9 +308,15 @@ export class ShellBotBackendContribution {
           saga.connectionId,
           identity.botId,
           saga.generation,
+          connectionAssignment.requirement,
         ))
       ) {
-        throw new Error("Connection assignment is no longer authorized");
+        return await this.rejectConfigurationCommand(
+          identity,
+          command,
+          "Connection assignment is no longer authorized",
+          saga,
+        );
       }
       const receipt = await this.applyConfigurationCommand(
         identity,
@@ -271,6 +336,38 @@ export class ShellBotBackendContribution {
       }
       throw error;
     }
+  }
+
+  private async rejectConfigurationCommand(
+    identity: BotIdentity,
+    command: Extract<ConfigurationCommandV1, { type: "bot/assign-capability" }>,
+    failure: string,
+    saga?: StoredAssignmentSaga,
+  ): Promise<OperationReceiptV1> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
+      const existing = await transaction.get<OperationReceiptV1>(receiptKey);
+      if (existing) return existing;
+      const current =
+        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
+        this.initialBotSettings(identity.botId);
+      if (command.expectedRevision !== current.revision) {
+        throw new ConfigurationConflictError(current.revision);
+      }
+      const receipt: OperationReceiptV1 = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: current.revision,
+        status: "rejected",
+        failure,
+      };
+      await transaction.put(receiptKey, receipt);
+      if (saga) {
+        await transaction.delete(`${ASSIGNMENT_SAGA_PREFIX}${saga.commandId}`);
+        await this.refreshRecoveryAlarm(transaction);
+      }
+      return receipt;
+    });
   }
 
   private async applyConfigurationCommand(
@@ -878,6 +975,7 @@ export class ShellBotBackendContribution {
       connectionId: string,
       botId: string,
       generation: string,
+      requirement: ConnectionDependencyRequirementV1,
     ): Promise<boolean>;
     acknowledgeConnectionDependency(
       userId: string,
@@ -905,6 +1003,7 @@ export class ShellBotBackendContribution {
         connectionId: string,
         botId: string,
         generation: string,
+        requirement: ConnectionDependencyRequirementV1,
       ): Promise<boolean>;
       acknowledgeConnectionDependency(
         userId: string,

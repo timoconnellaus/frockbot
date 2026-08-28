@@ -65,6 +65,14 @@ export interface CapabilityAssignmentView {
   state: "enabled" | "disabled" | "unavailable";
 }
 
+export interface ConnectionDependencyRequirementV1 {
+  schemaVersion: 1;
+  packageId: string;
+  packageVersion: string;
+  capabilityId: string;
+  connectionTypeIds: string[];
+}
+
 export interface BotSettingsViewV1 {
   schemaVersion: 1;
   botId: string;
@@ -142,12 +150,20 @@ export type ConfigurationCommandV1 =
       assignment: Omit<CapabilityAssignmentView, "state">;
     });
 
-export interface OperationReceiptV1 {
-  schemaVersion: 1;
-  commandId: string;
-  revision: number;
-  status: "applied";
-}
+export type OperationReceiptV1 =
+  | {
+      schemaVersion: 1;
+      commandId: string;
+      revision: number;
+      status: "applied";
+    }
+  | {
+      schemaVersion: 1;
+      commandId: string;
+      revision: number;
+      status: "rejected";
+      failure: string;
+    };
 
 export interface BotExecutionPlanV1 {
   schemaVersion: 1;
@@ -170,6 +186,60 @@ export interface ExecutionPackageDefinition {
   }>;
 }
 
+export function capabilityAssignmentFailureV1(input: {
+  assignment: Omit<CapabilityAssignmentView, "state">;
+  user: UserSettingsViewV1;
+  packages: readonly ExecutionPackageDefinition[];
+}): string | undefined {
+  const installation = input.user.packages.find(
+    (pkg) =>
+      pkg.packageId === input.assignment.packageId && pkg.state === "installed",
+  );
+  const pkg = input.packages.find(
+    (candidate) =>
+      candidate.packageId === input.assignment.packageId &&
+      candidate.version === installation?.version,
+  );
+  if (!installation || !pkg) {
+    return `Package "${input.assignment.packageId}" is not installed and enabled`;
+  }
+  const capability = pkg.capabilities.find(
+    (candidate) => candidate.id === input.assignment.capabilityId,
+  );
+  if (!capability) {
+    return `Capability "${input.assignment.capabilityId}" is not declared by Package "${input.assignment.packageId}"`;
+  }
+  if (capability.connectionTypes.length === 0) {
+    return input.assignment.connectionId
+      ? `Capability "${input.assignment.capabilityId}" does not accept a Connection`
+      : undefined;
+  }
+  if (!input.assignment.connectionId) {
+    return `Capability "${input.assignment.capabilityId}" requires a Connection`;
+  }
+  const connection = input.user.connections.find(
+    (candidate) => candidate.connectionId === input.assignment.connectionId,
+  );
+  if (
+    !connection ||
+    connection.packageId !== input.assignment.packageId ||
+    connection.state !== "ready"
+  ) {
+    return `Connection "${input.assignment.connectionId}" is not a ready Connection for Package "${input.assignment.packageId}"`;
+  }
+  const connectionType = pkg.connectionTypes.find(
+    (candidate) => candidate.id === connection.connectionTypeId,
+  );
+  if (
+    !connectionType ||
+    !capability.connectionTypes.includes(connectionType.id) ||
+    !connectionType.capabilities.includes(capability.id)
+  ) {
+    return `Connection "${input.assignment.connectionId}" has an incompatible Connection Type`;
+  }
+  return undefined;
+}
+
 export function resolveBotExecutionPlanV1(input: {
   bot: BotSettingsViewV1;
   user: UserSettingsViewV1;
@@ -177,40 +247,12 @@ export function resolveBotExecutionPlanV1(input: {
 }): BotExecutionPlanV1 {
   const assignments = input.bot.assignments.map((assignment) => {
     if (assignment.state !== "enabled") return structuredClone(assignment);
-    const installation = input.user.packages.find(
-      (pkg) =>
-        pkg.packageId === assignment.packageId && pkg.state === "installed",
-    );
-    const pkg = input.packages.find(
-      (candidate) =>
-        candidate.packageId === assignment.packageId &&
-        candidate.version === installation?.version,
-    );
-    const capability = pkg?.capabilities.find(
-      (candidate) => candidate.id === assignment.capabilityId,
-    );
-    if (!installation || !pkg || !capability) {
-      return { ...assignment, state: "unavailable" as const };
-    }
-    if (capability.connectionTypes.length === 0) {
-      return assignment.connectionId
-        ? { ...assignment, state: "unavailable" as const }
-        : structuredClone(assignment);
-    }
-    const connection = input.user.connections.find(
-      (candidate) =>
-        candidate.connectionId === assignment.connectionId &&
-        candidate.packageId === assignment.packageId &&
-        candidate.state === "ready",
-    );
-    const connectionType = pkg.connectionTypes.find(
-      (candidate) => candidate.id === connection?.connectionTypeId,
-    );
     if (
-      !connection ||
-      !connectionType ||
-      !capability.connectionTypes.includes(connectionType.id) ||
-      !connectionType.capabilities.includes(capability.id)
+      capabilityAssignmentFailureV1({
+        assignment,
+        user: input.user,
+        packages: input.packages,
+      })
     ) {
       return { ...assignment, state: "unavailable" as const };
     }
@@ -265,6 +307,30 @@ function identifier(value: unknown, label: string): string {
     throw new ConfigurationDecodeError(`${label} is invalid`);
   }
   return value;
+}
+
+export function decodeConnectionDependencyRequirementV1(
+  input: unknown,
+): ConnectionDependencyRequirementV1 {
+  const value = record(input, "Connection dependency requirement");
+  schemaVersion(value);
+  if (
+    !Array.isArray(value.connectionTypeIds) ||
+    value.connectionTypeIds.length === 0
+  ) {
+    throw new ConfigurationDecodeError(
+      "Connection dependency requirement connectionTypeIds are invalid",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    packageId: identifier(value.packageId, "packageId"),
+    packageVersion: text(value.packageVersion, "packageVersion", 128),
+    capabilityId: identifier(value.capabilityId, "capabilityId"),
+    connectionTypeIds: value.connectionTypeIds.map((item) =>
+      identifier(item, "connectionTypeId"),
+    ),
+  };
 }
 
 function text(value: unknown, label: string, maximum: number): string {
@@ -607,13 +673,20 @@ export function decodeConfigurationViewV1(input: unknown): ConfigurationViewV1 {
 export function decodeOperationReceiptV1(input: unknown): OperationReceiptV1 {
   const value = record(input, "operation receipt");
   schemaVersion(value);
-  if (value.status !== "applied") {
+  if (value.status !== "applied" && value.status !== "rejected") {
     throw new ConfigurationDecodeError("operation receipt status is invalid");
   }
-  return {
+  const receipt = {
     schemaVersion: 1,
     commandId: identifier(value.commandId, "commandId"),
     revision: viewRevision(value.revision),
-    status: "applied",
-  };
+  } as const;
+  if (value.status === "rejected") {
+    return {
+      ...receipt,
+      status: "rejected",
+      failure: text(value.failure, "operation receipt failure", 1_000),
+    };
+  }
+  return { ...receipt, status: "applied" };
 }

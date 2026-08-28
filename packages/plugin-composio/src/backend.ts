@@ -277,12 +277,6 @@ export function createComposioBackendContribution(
             return jsonError(400, "connectionTypeId is required");
           }
           if (
-            typeof value.botId !== "string" ||
-            !ID_PATTERN.test(value.botId)
-          ) {
-            return jsonError(400, "botId is invalid");
-          }
-          if (
             value.alias !== undefined &&
             (typeof value.alias !== "string" || value.alias.trim().length > 100)
           ) {
@@ -317,7 +311,6 @@ export function createComposioBackendContribution(
             await connections.start(user, {
               commandId: value.commandId,
               connectionTypeId: value.connectionTypeId,
-              botId: value.botId,
               alias: value.alias as string | undefined,
               returnTarget: context.client,
               callbackState,

@@ -73,7 +73,6 @@ export interface AgentTransport {
     commandId: string;
     packageId: string;
     connectionTypeId: string;
-    botId: string;
     alias?: string;
   }): Promise<ClientStartConnectionResult>;
   listRuns?(): Promise<ClientRun[]>;

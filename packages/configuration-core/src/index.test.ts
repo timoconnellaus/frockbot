@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  capabilityAssignmentFailureV1,
   ConfigurationDecodeError,
+  decodeConnectionDependencyRequirementV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
   decodeOperationReceiptV1,
@@ -70,6 +72,33 @@ describe("configuration DTO seam", () => {
     ).toThrow(ConfigurationDecodeError);
   });
 
+  test("decodes versioned Connection dependency requirements", () => {
+    expect(
+      decodeConnectionDependencyRequirementV1({
+        schemaVersion: 1,
+        packageId: "composio",
+        packageVersion: "0.0.1",
+        capabilityId: "gmail-tools",
+        connectionTypeIds: ["gmail"],
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      packageId: "composio",
+      packageVersion: "0.0.1",
+      capabilityId: "gmail-tools",
+      connectionTypeIds: ["gmail"],
+    });
+    expect(() =>
+      decodeConnectionDependencyRequirementV1({
+        schemaVersion: 1,
+        packageId: "composio",
+        packageVersion: "0.0.1",
+        capabilityId: "gmail-tools",
+        connectionTypeIds: [],
+      }),
+    ).toThrow(ConfigurationDecodeError);
+  });
+
   test("decodes server projections and rejects malformed nested values", () => {
     expect(
       decodeOperationReceiptV1({
@@ -83,6 +112,21 @@ describe("configuration DTO seam", () => {
       commandId: "command-1",
       revision: 2,
       status: "applied",
+    });
+    expect(
+      decodeOperationReceiptV1({
+        schemaVersion: 1,
+        commandId: "command-2",
+        revision: 2,
+        status: "rejected",
+        failure: "Capability requires a Connection",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      commandId: "command-2",
+      revision: 2,
+      status: "rejected",
+      failure: "Capability requires a Connection",
     });
     expect(() =>
       decodeUserSettingsViewV1({
@@ -180,6 +224,20 @@ describe("Bot execution-plan authority", () => {
         packages,
       }).assignments[0]?.state,
     ).toBe("unavailable");
+    expect(
+      capabilityAssignmentFailureV1({
+        assignment: { ...bot.assignments[0]!, connectionId: undefined },
+        user,
+        packages,
+      }),
+    ).toContain("requires a Connection");
+    expect(
+      capabilityAssignmentFailureV1({
+        assignment: { ...bot.assignments[0]!, capabilityId: "anything" },
+        user,
+        packages,
+      }),
+    ).toContain("is not declared");
     expect(
       resolveBotExecutionPlanV1({
         bot,

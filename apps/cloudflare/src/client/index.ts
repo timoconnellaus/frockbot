@@ -149,7 +149,6 @@ const application = new ClientApplication({
     commandId: string;
     packageId: string;
     connectionTypeId: string;
-    botId: string;
     alias?: string;
   }) {
     const nativeReturnNonce = window.frockbotDesktop
@@ -161,7 +160,6 @@ const application = new ClientApplication({
       JSON.stringify({
         commandId: input.commandId,
         connectionTypeId: input.connectionTypeId,
-        botId: input.botId,
         alias: input.alias,
         nativeReturnNonce,
       }),

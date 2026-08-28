@@ -28,6 +28,7 @@ describe("Connection recovery", () => {
       assignmentLeaseId: "lease-1",
       assignmentLeaseExpiresAt: 100,
       targetBotId: "primary",
+      assignmentGeneration: "lease-1",
     });
     const interrupted = expireAssignmentLease(admitted, 101);
 

@@ -172,7 +172,6 @@ export class ComposioConnectionCoordinator {
     input: {
       commandId: string;
       connectionTypeId: string;
-      botId: string;
       alias?: string;
       returnTarget?: "browser" | "desktop";
       callbackState?: string;
@@ -343,7 +342,6 @@ export class ComposioConnectionCoordinator {
         connectedAccountId: link.connectedAccountId,
         redirectUrl: link.redirectUrl,
         toolkitSlug: type.toolkitSlug,
-        targetBotId: input.botId,
         expiresAt: link.expiresAt,
         authorizationStateId: input.authorizationStateId ?? connectionId,
         authorizationStateExpiresAt:

@@ -6,6 +6,7 @@ import {
   ComposioConnectionCoordinator,
   type ComposioConnectionStore,
 } from "@frockbot/plugin-composio";
+import { deriveRevocationCompensations } from "@frockbot/plugin-composio/user-configuration";
 import type { StartConnectionInput } from "./user-configuration.js";
 
 class MemoryConnectionStore implements ComposioConnectionStore {
@@ -369,6 +370,7 @@ class MemoryConnectionStore implements ComposioConnectionStore {
         connection,
       });
     }
+    const assignmentCompensations = deriveRevocationCompensations(connection);
     const claimed: ConnectionView = {
       ...connection,
       state: "revoking",
@@ -376,16 +378,8 @@ class MemoryConnectionStore implements ComposioConnectionStore {
         ...connection.safeMetadata,
         reconciliationOperation: "revoke",
         revocationProviderCompleted: false,
-        ...(typeof connection.safeMetadata.targetBotId === "string"
-          ? {
-              assignmentCompensationPending: true,
-              assignmentCompensationId: `revoke:${connectionId}`,
-              assignmentCompensationGeneration:
-                typeof connection.safeMetadata.assignmentGeneration === "string"
-                  ? connection.safeMetadata.assignmentGeneration
-                  : "legacy:any",
-            }
-          : {}),
+        assignmentCompensations,
+        assignmentCompensationPending: assignmentCompensations.length > 0,
       },
     };
     this.connections.set(connectionId, claimed);
@@ -474,7 +468,6 @@ describe("ComposioConnectionCoordinator", () => {
     const result = await coordinator.start("user-1", {
       commandId: "connection-1",
       connectionTypeId: "gmail",
-      botId: "primary",
     });
 
     expect(store.log).toEqual(["intent", "external-link", "authorizing"]);
@@ -486,11 +479,13 @@ describe("ComposioConnectionCoordinator", () => {
         toolkitSlug: "gmail",
       },
     });
+    expect(
+      store.connections.get("connection-1")?.safeMetadata,
+    ).not.toHaveProperty("targetBotId");
 
     const duplicate = await coordinator.start("user-1", {
       commandId: "connection-1",
       connectionTypeId: "gmail",
-      botId: "primary",
     });
     expect(duplicate).toEqual(result);
     expect(store.log).toEqual(["intent", "external-link", "authorizing"]);
@@ -537,13 +532,11 @@ describe("ComposioConnectionCoordinator", () => {
       coordinator.start("user-1", {
         commandId: "connection-1",
         connectionTypeId: "gmail",
-        botId: "primary",
       }),
     ).rejects.toThrow("response lost");
     const reconciled = await coordinator.start("user-1", {
       commandId: "connection-1",
       connectionTypeId: "gmail",
-      botId: "primary",
     });
 
     expect(createCalls).toBe(1);
@@ -590,7 +583,6 @@ describe("ComposioConnectionCoordinator", () => {
       coordinator.start("user-1", {
         commandId: "connection-expired",
         connectionTypeId: "gmail",
-        botId: "primary",
       }),
     ).rejects.toMatchObject({
       name: "DefinitiveConnectionOperationError",
@@ -645,7 +637,7 @@ describe("ComposioConnectionCoordinator", () => {
     expect(store.connections.get("connection-1")?.state).toBe("revoked");
   });
 
-  test("revokes a targeted legacy assignment without generation metadata", async () => {
+  test("does not infer an Assignment from legacy target metadata alone", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
       connectionId: "connection-1",
@@ -657,8 +649,10 @@ describe("ComposioConnectionCoordinator", () => {
       state: "ready",
       safeMetadata: {
         connectedAccountId: "ca_123",
+        targetBotId: "primary",
       },
     });
+    let invalidations = 0;
     const coordinator = new ComposioConnectionCoordinator({
       client: new ComposioClient({
         apiKey: "secret",
@@ -667,8 +661,8 @@ describe("ComposioConnectionCoordinator", () => {
       store,
       callbackBaseUrl: "https://bot.frockbot.com",
       connectionTypes: {},
-      markBotUnavailable: (_userId, _botId, _connectionId, compensation) => {
-        expect(compensation.expectedGeneration).toBe("legacy:any");
+      markBotUnavailable: () => {
+        invalidations += 1;
         return Promise.resolve("applied");
       },
     });
@@ -677,6 +671,7 @@ describe("ComposioConnectionCoordinator", () => {
       status: "revoked",
     });
     expect(store.connections.get("connection-1")?.state).toBe("revoked");
+    expect(invalidations).toBe(0);
   });
 
   test("durably retains normal revocation compensation after Bot RPC failure", async () => {

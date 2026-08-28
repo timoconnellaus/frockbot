@@ -1,5 +1,7 @@
 import {
   ConfigurationConflictError,
+  decodeConnectionDependencyRequirementV1,
+  type ConnectionDependencyRequirementV1,
   type ConfigurationCommandV1,
   type OperationReceiptV1,
   type UserSettingsViewV1,
@@ -19,11 +21,9 @@ const STATE_KEY = "user-configuration";
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
 const CONNECTION_EFFECT_ALARM_MS = 60_000;
-const LEGACY_ASSIGNMENT_GENERATION = "legacy:any";
 
-function revocationCompensations(
+export function deriveRevocationCompensations(
   connection: UserSettingsViewV1["connections"][number],
-  activeGeneration?: string,
 ): Array<{ botId: string; id: string; expectedGeneration: string }> {
   const dependencies = Array.isArray(
     connection.safeMetadata.dependentAssignments,
@@ -42,7 +42,8 @@ function revocationCompensations(
     const dependency = candidate as Record<string, unknown>;
     if (
       typeof dependency.botId === "string" &&
-      typeof dependency.generation === "string"
+      typeof dependency.generation === "string" &&
+      dependency.status === "acknowledged"
     ) {
       dependenciesByKey.set(
         `${dependency.botId}\u0000${dependency.generation}`,
@@ -51,12 +52,8 @@ function revocationCompensations(
     }
   }
   const targetBotId = connection.safeMetadata.targetBotId;
-  if (typeof targetBotId === "string") {
-    const generation =
-      activeGeneration ??
-      (typeof connection.safeMetadata.assignmentGeneration === "string"
-        ? connection.safeMetadata.assignmentGeneration
-        : LEGACY_ASSIGNMENT_GENERATION);
+  const generation = connection.safeMetadata.assignmentGeneration;
+  if (typeof targetBotId === "string" && typeof generation === "string") {
     dependenciesByKey.set(`${targetBotId}\u0000${generation}`, generation);
   }
   return [...dependenciesByKey].map(([key, expectedGeneration]) => {
@@ -712,10 +709,53 @@ export class ComposioUserBackendContribution {
     connectionId: string,
     botId: string,
     generation: string,
+    requirement: ConnectionDependencyRequirementV1,
   ): Promise<boolean> {
-    return this.transitionConnection(userId, connectionId, (connection) =>
-      claimDependentAssignment(connection, botId, generation),
-    );
+    const decoded = decodeConnectionDependencyRequirementV1(requirement);
+    await this.assertIdentity(userId);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const current =
+        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
+        initialState();
+      const installation = current.packages.find(
+        (pkg) =>
+          pkg.packageId === decoded.packageId &&
+          pkg.version === decoded.packageVersion &&
+          pkg.state === "installed",
+      );
+      const connection = current.connections.find(
+        (item) => item.connectionId === connectionId,
+      );
+      if (
+        !installation ||
+        !connection ||
+        connection.packageId !== decoded.packageId ||
+        !decoded.connectionTypeIds.includes(connection.connectionTypeId)
+      ) {
+        return false;
+      }
+      const nextConnection = claimDependentAssignment(
+        connection,
+        botId,
+        generation,
+      );
+      if (!nextConnection) return false;
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        connections: current.connections.map((item) =>
+          item.connectionId === connectionId ? nextConnection : item,
+        ),
+      } satisfies UserSettingsViewV1;
+      await transaction.put(STATE_KEY, next);
+      const alarmAt = nextConnectionAlarm(next);
+      if (alarmAt === undefined) {
+        await transaction.deleteAlarm();
+      } else {
+        await transaction.setAlarm(Math.max(Date.now(), alarmAt));
+      }
+      return true;
+    });
   }
 
   async acknowledgeConnectionDependency(
@@ -746,11 +786,8 @@ export class ComposioUserBackendContribution {
     botId: string,
     generation: string,
   ): Promise<boolean> {
-    return this.claimConnectionDependency(
-      userId,
-      connectionId,
-      botId,
-      generation,
+    return this.transitionConnection(userId, connectionId, (connection) =>
+      claimDependentAssignment(connection, botId, generation),
     );
   }
 
@@ -842,11 +879,8 @@ export class ComposioUserBackendContribution {
           return { phase: "pending" as const, connection: pending };
         }
         const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
-        const leaseId = connection.safeMetadata.assignmentLeaseId;
-        const assignmentCompensations = revocationCompensations(
-          connection,
-          typeof leaseId === "string" ? leaseId : undefined,
-        );
+        const assignmentCompensations =
+          deriveRevocationCompensations(connection);
         const claimed = {
           ...connection,
           state: "revoking" as const,
@@ -856,14 +890,11 @@ export class ComposioUserBackendContribution {
             revocationRequested: true,
             revocationProviderCompleted: false,
             effectDeadlineAt,
-            assignmentCompensationPending: true,
+            assignmentCompensationPending: assignmentCompensations.length > 0,
             assignmentCompensations,
-            assignmentCompensationId: `revoke:${connectionId}`,
-            assignmentCompensationGeneration:
-              typeof leaseId === "string"
-                ? leaseId
-                : LEGACY_ASSIGNMENT_GENERATION,
-            compensationRetryAt: effectDeadlineAt,
+            ...(assignmentCompensations.length > 0
+              ? { compensationRetryAt: effectDeadlineAt }
+              : {}),
           },
           failure: undefined,
         };
@@ -917,7 +948,7 @@ export class ComposioUserBackendContribution {
         return { phase: "pending" as const, connection: pending };
       }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
-      const assignmentCompensations = revocationCompensations(connection);
+      const assignmentCompensations = deriveRevocationCompensations(connection);
       const claimed = {
         ...connection,
         state: "revoking" as const,
@@ -930,18 +961,6 @@ export class ComposioUserBackendContribution {
           assignmentCompensations,
           ...(assignmentCompensations.length > 0
             ? { compensationRetryAt: effectDeadlineAt }
-            : {}),
-          ...(typeof connection.safeMetadata.targetBotId === "string"
-            ? {
-                assignmentCompensationPending: true,
-                assignmentCompensationId: `revoke:${connectionId}`,
-                assignmentCompensationGeneration:
-                  typeof connection.safeMetadata.assignmentGeneration ===
-                  "string"
-                    ? connection.safeMetadata.assignmentGeneration
-                    : LEGACY_ASSIGNMENT_GENERATION,
-                compensationRetryAt: effectDeadlineAt,
-              }
             : {}),
         },
         failure: undefined,

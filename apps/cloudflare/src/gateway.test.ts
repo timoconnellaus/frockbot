@@ -539,7 +539,6 @@ describe("Cloudflare user application gateway", () => {
         body: JSON.stringify({
           commandId: "connection-command-1",
           connectionTypeId: "gmail",
-          botId: "primary",
           alias: "personal",
         }),
       }),

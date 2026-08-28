@@ -30,7 +30,8 @@ export function expireAssignmentLease(
   } = metadata;
   if (
     typeof metadata.targetBotId !== "string" ||
-    typeof expiredLeaseId !== "string"
+    typeof expiredLeaseId !== "string" ||
+    typeof metadata.assignmentGeneration !== "string"
   ) {
     return {
       ...connection,
@@ -46,7 +47,7 @@ export function expireAssignmentLease(
       reconciliationOperation: "assignment",
       assignmentCompensationPending: true,
       assignmentCompensationId: expiredLeaseId,
-      assignmentCompensationGeneration: expiredLeaseId,
+      assignmentCompensationGeneration: metadata.assignmentGeneration,
       compensationRetryAt: now,
     },
     failure: "Bot assignment was interrupted and can be retried",

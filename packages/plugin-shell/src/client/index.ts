@@ -425,7 +425,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
       }
-      const operationKey = `${botId}:${packageId}:${connectionTypeId}`;
+      const operationKey = `${packageId}:${connectionTypeId}`;
       const now = Date.now();
       const existing = connectionOperations[operationKey];
       const expired =
@@ -445,7 +445,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           commandId: operation.commandId,
           packageId,
           connectionTypeId,
-          botId,
         });
       } catch (error) {
         if (isDefinitiveConnectionFailure(error)) {

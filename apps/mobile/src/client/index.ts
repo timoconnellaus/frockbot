@@ -295,7 +295,6 @@ const web: Ref<FrockBotWebData> = ref({
         body: JSON.stringify({
           commandId: crypto.randomUUID(),
           connectionTypeId,
-          botId: botId.value,
         }),
       },
     );
