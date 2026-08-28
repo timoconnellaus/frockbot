@@ -21,10 +21,13 @@ function record(input: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+const MAX_EXEC_COMMAND_LENGTH = 20_000;
+
 function decodeExec(input: unknown): ExecInput | undefined {
   const value = record(input);
   const command = value?.command;
   if (typeof command !== "string" || !command.trim()) return undefined;
+  if (command.length > MAX_EXEC_COMMAND_LENGTH) return undefined;
   return { command };
 }
 
@@ -122,7 +125,9 @@ export function createComputerAgentPlugin(
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
       inputSchema: {
         type: "object",
-        properties: { command: { type: "string" } },
+        properties: {
+          command: { type: "string", maxLength: MAX_EXEC_COMMAND_LENGTH },
+        },
         required: ["command"],
         additionalProperties: false,
       },
@@ -130,7 +135,10 @@ export function createComputerAgentPlugin(
       execute: async (input, context) => {
         const decoded = decodeExec(input);
         if (!decoded)
-          return { content: "A command is required", isError: true };
+          return {
+            content: `A command of at most ${MAX_EXEC_COMMAND_LENGTH} characters is required`,
+            isError: true,
+          };
         try {
           return await useComputer(
             await open(context.botId, context.signal),

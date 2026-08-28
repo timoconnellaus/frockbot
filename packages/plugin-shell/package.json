@@ -33,5 +33,13 @@
     "typescript": "5.9.3",
     "vite": "7.3.2",
     "vue-tsc": "3.2.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/webui-shell"
   }
 }
