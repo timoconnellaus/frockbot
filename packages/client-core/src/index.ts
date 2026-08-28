@@ -53,6 +53,7 @@ export type ClientStartConnectionResult =
 
 export interface ClientRun {
   runId: string;
+  admittedAt?: string;
   input: string;
   events: ClientTurnEvent[];
   status:
@@ -63,6 +64,7 @@ export interface ClientRun {
     | "reconciliation-required";
   responseText?: string;
   failure?: string;
+  recovery?: { action: "resume"; message: string };
 }
 
 export interface AgentTransport {
@@ -275,45 +277,6 @@ export function decodeStartConnectionResult(
     expiresAt: responseString(value, "expiresAt", "Connection result"),
     nativeReturnNonce,
   };
-}
-
-export function decodeRunList(input: unknown): ClientRun[] {
-  const value = responseRecord(input, "run list");
-  if (!Array.isArray(value.runs)) {
-    throw new Error("run list.runs must be an array");
-  }
-  return value.runs.map((candidate) => {
-    const run = responseRecord(candidate, "run");
-    if (!Array.isArray(run.events))
-      throw new Error("run.events must be an array");
-    const status = run.status ?? "failed";
-    if (
-      status !== "running" &&
-      status !== "completed" &&
-      status !== "failed" &&
-      status !== "interrupted" &&
-      status !== "reconciliation-required"
-    ) {
-      throw new Error("run.status is invalid");
-    }
-    if (
-      run.responseText !== undefined &&
-      typeof run.responseText !== "string"
-    ) {
-      throw new Error("run.responseText must be a string");
-    }
-    if (run.failure !== undefined && typeof run.failure !== "string") {
-      throw new Error("run.failure must be a string");
-    }
-    return {
-      runId: responseString(run, "runId", "run"),
-      input: responseString(run, "input", "run"),
-      events: run.events.map(decodeTurnEvent),
-      status,
-      responseText: run.responseText,
-      failure: run.failure,
-    };
-  });
 }
 
 export function decodeAcknowledgement(input: unknown): void {

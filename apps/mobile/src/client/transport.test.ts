@@ -84,33 +84,38 @@ describe("decodeRunList", () => {
   test("decodes stored runs", () => {
     expect(
       decodeRunList({
+        schemaVersion: 1,
         runs: [
           {
+            schemaVersion: 1,
             runId: "run-1",
-            sessionId: "user:default",
-            acceptedAt: "2026-08-27T00:00:00.000Z",
+            admittedAt: "2026-08-27T00:00:00.000Z",
             input: "hello",
+            status: "completed",
             events: [],
+            outcome: { type: "completed", text: "done" },
           },
         ],
       }),
     ).toEqual([
       {
         runId: "run-1",
-        sessionId: "user:default",
-        acceptedAt: "2026-08-27T00:00:00.000Z",
+        admittedAt: "2026-08-27T00:00:00.000Z",
         input: "hello",
+        status: "completed",
+        events: [],
+        responseText: "done",
       },
     ]);
   });
 
   test("rejects malformed payloads", () => {
     expect(() => decodeRunList({})).toThrow(
-      'run list field "runs" must be an array',
+      "run list.schemaVersion is invalid",
     );
-    expect(() => decodeRunList({ runs: [{ runId: "run-1" }] })).toThrow(
-      'run field "sessionId" must be a string',
-    );
+    expect(() =>
+      decodeRunList({ schemaVersion: 1, runs: [{ runId: "run-1" }] }),
+    ).toThrow("run.schemaVersion is invalid");
   });
 });
 
@@ -198,12 +203,16 @@ describe("gateway requests", () => {
       () =>
         Promise.resolve(
           jsonResponse({
+            schemaVersion: 1,
             runs: [
               {
+                schemaVersion: 1,
                 runId: "run-1",
-                sessionId: "s",
-                acceptedAt: "2026-08-27T00:00:00.000Z",
+                admittedAt: "2026-08-27T00:00:00.000Z",
                 input: "hello",
+                status: "completed",
+                events: [],
+                outcome: { type: "completed", text: "done" },
               },
             ],
           }),

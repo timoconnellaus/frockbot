@@ -243,7 +243,9 @@ describe("probe", () => {
       store: createMemoryPreferenceStore(),
       fetch: () =>
         Promise.resolve(
-          new Response(JSON.stringify({ runs: [] }), { status: 200 }),
+          new Response(JSON.stringify({ schemaVersion: 1, runs: [] }), {
+            status: 200,
+          }),
         ),
       defaultGatewayUrl: "https://gateway.example.com",
     });

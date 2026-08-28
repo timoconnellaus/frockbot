@@ -76,9 +76,10 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
       runId: run.runId,
       status: run.status,
       message:
+        run.recovery?.message ??
         run.failure ??
         "This Turn requires provider reconciliation before it can continue.",
-      canResume: true,
+      canResume: run.recovery?.action === "resume",
     };
   }
   return undefined;
@@ -114,6 +115,7 @@ function assistantMessage(
       runId: run.runId,
       role: "assistant",
       text:
+        run.recovery?.message ??
         run.failure ??
         "Provider reconciliation is required before this Turn can continue.",
       status: "reconciliation-required",

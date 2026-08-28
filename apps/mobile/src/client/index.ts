@@ -13,7 +13,6 @@ import {
   decodeClientTurnResponse,
   decodeNotificationList,
   decodeRevocationResult,
-  decodeRunList,
   decodeStartConnectionResult,
 } from "@frockbot/client-core";
 import "@frockbot/plugin-clock/client/styles.css";
@@ -29,6 +28,7 @@ import {
   type WebChatMessage,
 } from "@frockbot/plugin-shell/shared";
 import { decodePluginCatalog } from "@frockbot/plugin-shell/client";
+import { decodeClientRunListV1 } from "@frockbot/plugin-shell/run-protocol";
 import { createApp, ref, watch, type Ref } from "vue";
 import { createMobileHost, type MobileHost } from "../host/index.ts";
 import { createCapacitorAdapters } from "../host/capacitor-adapters.ts";
@@ -389,7 +389,7 @@ botProjection = new MobileBotProjectionController(botId.value, {
     if (!response.ok) {
       throw new Error(responseError(value, "Could not load completed Turns"));
     }
-    return decodeRunList(value);
+    return decodeClientRunListV1(value);
   },
   async listNotifications(selectedBotId) {
     const response = await auth.authorizedFetch(

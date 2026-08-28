@@ -10,6 +10,12 @@ import type {
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
+import {
+  decodeClientRunListV1,
+  projectClientRunListV1,
+  type ClientRunListV1,
+} from "@frockbot/plugin-shell/run-protocol";
 import type {
   BotNotificationIntent,
   BotConfigurationBinding,
@@ -19,7 +25,6 @@ import type {
   ConnectionBinding,
   GatewayAuth,
   LoadedWorker,
-  StoredRun,
   UserConfigurationBinding,
   WorkerCode,
   WorkerLoader,
@@ -49,17 +54,28 @@ class MemoryBotState implements BotStateBinding {
     if (runs.some((candidate) => candidate.status === "running")) {
       throw new Error("bot already has an active run");
     }
+    const previousEvents = this.sessions.get(botId) ?? [];
     const run: StoredRun = {
       runId: command.runId,
+      commandFingerprint: "internal-command-fingerprint",
       sessionId: command.sessionId,
       acceptedAt: command.acceptedAt,
       input: command.text,
       events: [],
       status: "running",
+      phase: "admitted",
+      configurationSnapshot: {
+        schemaVersion: 1,
+        botId,
+        revision: 0,
+        profile: { name: "Internal Bot configuration" },
+        notifications: { enabled: false },
+        assignments: [],
+      },
+      previousEventCount: previousEvents.length,
     };
     runs.push(run);
     this.runs.set(botId, runs);
-    const previousEvents = this.sessions.get(botId) ?? [];
     try {
       const result = await executeBotTurn({
         botId,
@@ -78,7 +94,15 @@ class MemoryBotState implements BotStateBinding {
     }
   }
 
-  async listRuns(botId: string): Promise<StoredRun[]> {
+  listRuns(botId: string): Promise<ClientRunListV1> {
+    return Promise.resolve(
+      projectClientRunListV1(
+        structuredClone(this.runs.get(botId) ?? []),
+      ),
+    );
+  }
+
+  storedRuns(botId: string): StoredRun[] {
     return structuredClone(this.runs.get(botId) ?? []);
   }
 
@@ -691,7 +715,9 @@ describe("Cloudflare user application gateway", () => {
     const second = await turn();
 
     expect(await first.json()).toEqual(await second.json());
-    expect(await states.get("alice")?.listRuns("primary")).toHaveLength(1);
+    expect((await states.get("alice")?.listRuns("primary"))?.runs).toHaveLength(
+      1,
+    );
   });
 
   test("shares the user deployment while isolating bot state", async () => {
@@ -712,13 +738,54 @@ describe("Cloudflare user application gateway", () => {
 
     const alpha = await gateway(request("/api/bots/alpha/turns", "alice"));
     const beta = await gateway(request("/api/bots/beta/turns", "alice"));
-    const alphaRuns = (await alpha.json()) as { runs: StoredRun[] };
-    const betaRuns = (await beta.json()) as { runs: StoredRun[] };
-    expect(alphaRuns.runs).toHaveLength(1);
-    expect(betaRuns.runs).toHaveLength(1);
-    expect(alphaRuns.runs[0]?.input).toBe("hello alpha");
-    expect(betaRuns.runs[0]?.input).toBe("hello beta");
+    const alphaRuns = decodeClientRunListV1(await alpha.json());
+    const betaRuns = decodeClientRunListV1(await beta.json());
+    expect(alphaRuns).toHaveLength(1);
+    expect(betaRuns).toHaveLength(1);
+    expect(alphaRuns[0]?.input).toBe("hello alpha");
+    expect(betaRuns[0]?.input).toBe("hello beta");
     expect(new Set(loader.ids)).toEqual(new Set(["alice:foundation-v1"]));
+  });
+
+  test("returns only the versioned client run wire contract", async () => {
+    const { gateway } = createTestGateway();
+    await gateway(
+      request("/api/bots/primary/turns", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello", commandId: "wire-turn-1" }),
+      }),
+    );
+
+    const response = await gateway(
+      request("/api/bots/primary/turns", "alice"),
+    );
+    const value = (await response.json()) as Record<string, unknown>;
+    const runs = value.runs as Array<Record<string, unknown>>;
+
+    expect(Object.keys(value).sort()).toEqual(["runs", "schemaVersion"]);
+    expect(value.schemaVersion).toBe(1);
+    expect(Object.keys(runs[0] ?? {}).sort()).toEqual([
+      "admittedAt",
+      "events",
+      "input",
+      "outcome",
+      "runId",
+      "schemaVersion",
+      "status",
+    ]);
+    const wire = JSON.stringify(value);
+    for (const internalField of [
+      "commandFingerprint",
+      "sessionId",
+      "configurationSnapshot",
+      "phase",
+      "previousEventCount",
+      "deadline",
+      "receipt",
+    ]) {
+      expect(wire).not.toContain(internalField);
+    }
   });
 
   test("rehydrates one bot session across disposable application runtimes", async () => {
@@ -750,25 +817,13 @@ describe("Cloudflare user application gateway", () => {
     const history = await gateway(
       request("/api/bots/continuing/turns", "alice"),
     );
-    const { runs } = (await history.json()) as { runs: StoredRun[] };
+    const runs = decodeClientRunListV1(await history.json());
     expect(runs).toHaveLength(2);
-    expect(new Set(runs.map((run) => run.sessionId))).toEqual(
-      new Set(["alice:continuing"]),
-    );
-    const sessionEvents = runs.flatMap((run) => run.events);
-    expect(
-      sessionEvents
-        .filter((event) => event.type === "turn/start")
-        .map((event) => event.turn),
-    ).toEqual([1, 2]);
-    expect(
-      sessionEvents
-        .filter((event) => event.type === "user/message")
-        .map((event) => event.text),
-    ).toEqual(["first turn", "second turn"]);
-    expect(sessionEvents.every((event, index) => event.seq === index)).toBe(
-      true,
-    );
+    expect(runs.map((run) => run.input)).toEqual([
+      "first turn",
+      "second turn",
+    ]);
+    expect(runs.every((run) => run.status === "completed")).toBe(true);
   });
 
   test("separates different users and durably accepts before execution", async () => {
@@ -790,8 +845,8 @@ describe("Cloudflare user application gateway", () => {
     expect(new Set(loader.ids)).toEqual(
       new Set(["alice:foundation-v1", "bob:foundation-v1"]),
     );
-    const aliceRuns = await states.get("alice")?.listRuns("default");
-    const bobRuns = await states.get("bob")?.listRuns("default");
+    const aliceRuns = states.get("alice")?.storedRuns("default");
+    const bobRuns = states.get("bob")?.storedRuns("default");
     expect(aliceRuns?.[0]?.input).toBe("hello alice");
     expect(bobRuns?.[0]?.input).toBe("hello bob");
     expect(aliceRuns?.[0]?.events[0]?.type).toBe("session/created");

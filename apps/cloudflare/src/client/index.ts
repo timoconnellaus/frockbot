@@ -14,10 +14,11 @@ import {
   decodeClientTurnResponse,
   decodeNotificationList,
   decodeRevocationResult,
-  decodeRunList,
   decodeStartConnectionResult,
   type ClientTurnResponse,
 } from "@frockbot/client-core";
+import { decodeClientRunListV1 } from "@frockbot/plugin-shell/run-protocol";
+
 function selectedBotId(): string {
   try {
     return new URL(window.location.href).searchParams.get("bot") ?? "default";
@@ -129,7 +130,7 @@ const application = new ClientApplication({
     );
   },
   async listRuns() {
-    return decodeRunList(
+    return decodeClientRunListV1(
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
     );
   },

@@ -1,3 +1,5 @@
+import type { ClientRun } from "@frockbot/client-core";
+import { decodeClientRunListV1 } from "@frockbot/plugin-shell/run-protocol";
 import type { WebToolActivity } from "@frockbot/plugin-shell/shared";
 
 export interface TurnEvent {
@@ -14,12 +16,7 @@ export interface TurnResponse {
   events: TurnEvent[];
 }
 
-export interface RunSummary {
-  runId: string;
-  sessionId: string;
-  acceptedAt: string;
-  input: string;
-}
+export type RunSummary = ClientRun;
 
 export type Fetcher = (path: string, init?: RequestInit) => Promise<Response>;
 
@@ -92,20 +89,7 @@ export function decodeTurnResponse(value: unknown): TurnResponse {
 }
 
 export function decodeRunList(value: unknown): RunSummary[] {
-  const source = record(value, "run list");
-  const runs = source.runs;
-  if (!Array.isArray(runs)) {
-    throw new Error('run list field "runs" must be an array');
-  }
-  return runs.map((run) => {
-    const entry = record(run, "run");
-    return {
-      runId: requiredString(entry, "runId", "run"),
-      sessionId: requiredString(entry, "sessionId", "run"),
-      acceptedAt: requiredString(entry, "acceptedAt", "run"),
-      input: requiredString(entry, "input", "run"),
-    };
-  });
+  return decodeClientRunListV1(value);
 }
 
 export function toolsFrom(events: readonly TurnEvent[]): WebToolActivity[] {

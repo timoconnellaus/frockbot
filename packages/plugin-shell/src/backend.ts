@@ -38,6 +38,10 @@ import {
   latestModelRequestJournalState,
   planBotRunRecovery,
 } from "./backend-recovery.js";
+import {
+  projectClientRunListV1,
+  type ClientRunListV1,
+} from "./run-protocol.js";
 import type {
   BotNotificationIntent,
   BotTurnCommand,
@@ -1135,15 +1139,17 @@ export class ShellBotBackendContribution {
     await this.recoverActiveRun();
   }
 
-  async listRuns(): Promise<StoredRun[]> {
+  async listRuns(): Promise<ClientRunListV1> {
     await this.recoverActiveRun();
     const entries = await this.ctx.storage.list<StoredRun>({
       prefix: RUN_PREFIX,
     });
-    return [...entries.values()].sort(
-      (left, right) =>
-        left.acceptedAt.localeCompare(right.acceptedAt) ||
-        left.runId.localeCompare(right.runId),
+    return projectClientRunListV1(
+      [...entries.values()].sort(
+        (left, right) =>
+          left.acceptedAt.localeCompare(right.acceptedAt) ||
+          left.runId.localeCompare(right.runId),
+      ),
     );
   }
 

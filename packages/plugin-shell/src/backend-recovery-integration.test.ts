@@ -118,13 +118,17 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await expect(recovered.listRuns()).resolves.toEqual([
-      expect.objectContaining({
-        runId: "run-1",
-        status: "completed",
-        responseText: "Durable reply",
-      }),
-    ]);
+    await expect(recovered.listRuns()).resolves.toEqual({
+      schemaVersion: 1,
+      runs: [
+        expect.objectContaining({
+          schemaVersion: 1,
+          runId: "run-1",
+          status: "completed",
+          outcome: { type: "completed", text: "Durable reply" },
+        }),
+      ],
+    });
     const notifications = await recovered.listNotifications();
     expect(notifications).toEqual([
       expect.objectContaining({
@@ -205,13 +209,17 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await expect(recovered.listRuns()).resolves.toEqual([
-      expect.objectContaining({
-        runId: "run-lost-marker",
-        status: "reconciliation-required",
-        phase: "reconciliation-required",
-      }),
-    ]);
+    await expect(recovered.listRuns()).resolves.toEqual({
+      schemaVersion: 1,
+      runs: [
+        expect.objectContaining({
+          schemaVersion: 1,
+          runId: "run-lost-marker",
+          status: "reconciliation-required",
+          recovery: expect.objectContaining({ action: "resume" }),
+        }),
+      ],
+    });
     expect(storage.values.get("active-run")).toBe("run-lost-marker");
     expect(typeof storage.alarmAt).toBe("number");
   });

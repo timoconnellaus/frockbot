@@ -158,6 +158,10 @@ describe("mobile Bot projection", () => {
             events: [],
             status: "reconciliation-required",
             failure: "Provider result needs confirmation",
+            recovery: {
+              action: "resume",
+              message: "Provider result needs confirmation",
+            },
           },
         ]),
     });

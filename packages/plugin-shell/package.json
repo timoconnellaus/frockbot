@@ -12,6 +12,7 @@
     "./backend-recovery": "./src/backend-recovery.ts",
     "./backend-runner": "./src/backend-runner.ts",
     "./manifest": "./src/manifest.ts",
+    "./run-protocol": "./src/run-protocol.ts",
     "./shared": "./src/shared.ts",
     "./client/FrockBotApp.vue": "./src/client/FrockBotApp.vue",
     "./client/styles.css": "./src/client/styles.css",

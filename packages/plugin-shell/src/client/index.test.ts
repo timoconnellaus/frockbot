@@ -241,6 +241,10 @@ describe("active durable Turn projection", () => {
         events: [],
         status: "reconciliation-required",
         failure: "Provider result needs confirmation",
+        recovery: {
+          action: "resume",
+          message: "Provider result needs confirmation",
+        },
       },
     ]);
     expect(reconciliation.activeRun).toEqual({
@@ -266,6 +270,10 @@ describe("active durable Turn projection", () => {
         input: "Continue",
         events: [],
         status: "reconciliation-required",
+        recovery: {
+          action: "resume",
+          message: "Provider reconciliation is required",
+        },
       },
     ]);
     projectDurableRuns(state, [], [
@@ -304,6 +312,14 @@ describe("active durable Turn projection", () => {
               events: [],
               status,
               ...(status === "completed" ? { responseText: "Done" } : {}),
+              ...(status === "reconciliation-required"
+                ? {
+                    recovery: {
+                      action: "resume" as const,
+                      message: "Provider confirmation required",
+                    },
+                  }
+                : {}),
             },
           ]),
         listNotifications: () =>

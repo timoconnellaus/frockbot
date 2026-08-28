@@ -224,7 +224,7 @@ export function createUserApplication() {
     }
 
     if (request.method === "GET") {
-      return Response.json({ runs: await env.BOT_STATE.listRuns(botId) });
+      return Response.json(await env.BOT_STATE.listRuns(botId));
     }
     if (request.method !== "POST") return jsonError(405, "method not allowed");
 

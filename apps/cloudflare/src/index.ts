@@ -4,6 +4,7 @@ import {
   createFoundationBackendContributions,
   type FoundationConnectionStore,
 } from "@frockbot/application-foundation/runtime";
+import type { ClientRunListV1 } from "@frockbot/plugin-shell/run-protocol";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -13,7 +14,6 @@ import type {
   BotStateBinding,
   BotTurnCommand,
   BotTurnResult,
-  StoredRun,
   UserConfigurationBinding,
   WorkerLoader,
 } from "./contracts.js";
@@ -58,7 +58,7 @@ interface UserScopedProps {
 
 interface BotStateRpc extends BotConfigurationBinding {
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
-  listRuns(): Promise<StoredRun[]>;
+  listRuns(): Promise<ClientRunListV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
   reconcileRun(
@@ -98,7 +98,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     });
   }
 
-  async listRuns(botId: string): Promise<StoredRun[]> {
+  async listRuns(botId: string): Promise<ClientRunListV1> {
     return botStateStub(this.env, this.ctx.props.userId, botId).listRuns();
   }
 

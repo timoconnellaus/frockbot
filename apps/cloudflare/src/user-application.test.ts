@@ -54,7 +54,7 @@ describe("user application Bot seam", () => {
         calls.push({ botId, text: command.text });
         return Promise.resolve(result);
       },
-      listRuns: () => Promise.resolve([]),
+      listRuns: () => Promise.resolve({ schemaVersion: 1, runs: [] }),
       listNotifications: () => Promise.resolve([]),
       acknowledgeNotification: () => Promise.resolve(),
       reconcileRun: () => Promise.resolve(result),

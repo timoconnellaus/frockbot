@@ -5,7 +5,6 @@ import {
   type ClientPlugin,
   decodeClientTurnResponse,
   decodeNotificationList,
-  decodeRunList,
   decodeStartConnectionResult,
 } from "./index.js";
 
@@ -93,21 +92,6 @@ describe("hosted response decoders", () => {
       status: "ready",
       connectionId: "connection-1",
     });
-    expect(
-      decodeRunList({
-        runs: [
-          {
-            runId: "failed-run",
-            input: "Continue",
-            events: [],
-            status: "failed",
-            failure: "Model reconciliation failed",
-          },
-        ],
-      }),
-    ).toMatchObject([
-      { status: "failed", failure: "Model reconciliation failed" },
-    ]);
   });
 
   test("rejects malformed nested response values", () => {
