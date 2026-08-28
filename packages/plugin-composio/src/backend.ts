@@ -13,6 +13,34 @@ import {
 } from "./connections.js";
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const RESERVED_CONNECTION_IDENTIFIERS = new Set([
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
+  "__proto__",
+  "constructor",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "prototype",
+  "toLocaleString",
+  "toString",
+  "valueOf",
+]);
+
+function decodeConnectionPathIdentifier(value: string): string | undefined {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+  if (!ID_PATTERN.test(decoded) || RESERVED_CONNECTION_IDENTIFIERS.has(decoded)) {
+    return undefined;
+  }
+  return decoded;
+}
 
 export interface BackendRouteContext {
   userId?: string;
@@ -236,6 +264,17 @@ export function createComposioBackendContribution(
       const isCallback = url.pathname === "/api/plugins/composio/callback";
       if (!isStart && !revokeMatch && !isCallback) return undefined;
 
+      let revokeConnectionId: string | undefined;
+      if (revokeMatch) {
+        revokeConnectionId = decodeConnectionPathIdentifier(revokeMatch[1]);
+        if (!revokeConnectionId) {
+          return jsonError(400, "connectionId is invalid");
+        }
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+      }
+
       let callbackState: AuthorizationState | undefined;
       if (isCallback) {
         const encodedState = url.searchParams.get("state");
@@ -336,13 +375,10 @@ export function createComposioBackendContribution(
         }
       }
 
-      if (revokeMatch) {
-        if (request.method !== "POST") {
-          return jsonError(405, "method not allowed");
-        }
+      if (revokeConnectionId) {
         try {
           return Response.json(
-            await connections.revoke(user, decodeURIComponent(revokeMatch[1])),
+            await connections.revoke(user, revokeConnectionId),
           );
         } catch (error) {
           return jsonError(
