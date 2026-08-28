@@ -27,6 +27,17 @@ function parseDeclarations(block: string) {
   return declarations;
 }
 
+function headerBrandImageAttributes(page: string) {
+  const lockup = page.slice(page.indexOf('<a class="brand"'));
+  const start = lockup.indexOf("<img");
+  const image = lockup.slice(start, lockup.indexOf(">", start));
+  const attributes: Record<string, string> = {};
+  for (const [, name, value] of image.matchAll(/([a-zA-Z-]+)="([^"]*)"/g)) {
+    attributes[name.toLowerCase()] = value;
+  }
+  return attributes;
+}
+
 function parseStyleRules(source: string): StyleRule[] {
   const rules: StyleRule[] = [];
   const preludes: string[] = [];
@@ -149,6 +160,11 @@ describe("legal policy pages", () => {
       const page = await publicFile(path);
       expect(page).toContain('src="/assets/app-icon.png"');
       expect(page).toContain('Frock<span class="brand-accent">Bot</span>');
+
+      const headerBrandImage = headerBrandImageAttributes(page);
+      expect(headerBrandImage["src"]).toBe("/assets/app-icon.png");
+      expect(headerBrandImage["width"]).toBe("48");
+      expect(headerBrandImage["height"]).toBe("48");
     },
   );
 
@@ -164,12 +180,11 @@ describe("legal policy pages", () => {
       Object.assign(merged, rule.declarations);
       expect(rule.declarations["border-radius"]).toBeUndefined();
       expect(rule.declarations["clip-path"]).toBeUndefined();
-      expect(rule.declarations["object-fit"] ?? "contain").toBe("contain");
     }
 
     expect(merged["object-fit"]).toBe("contain");
-    expect(merged["width"] ?? "42px").toBe("42px");
-    expect(merged["height"] ?? "42px").toBe("42px");
+    expect(merged["width"]).toBe("42px");
+    expect(merged["height"]).toBe("42px");
   });
 
   test("privacy policy covers the evidenced data flows and reciprocal navigation", async () => {
