@@ -168,8 +168,7 @@ function connectionStartCommandFingerprintV1(
   userId: string,
   input: {
     connectionTypeId: string;
-    displayName: string;
-    toolkitSlug: string;
+    alias?: string;
     returnTarget: "browser" | "desktop";
   },
 ): string {
@@ -177,9 +176,8 @@ function connectionStartCommandFingerprintV1(
     userId,
     packageId: "composio",
     connectionTypeId: input.connectionTypeId,
-    displayName: input.displayName,
+    alias: input.alias ?? null,
     safeMetadata: {
-      toolkitSlug: input.toolkitSlug,
       returnTarget: input.returnTarget,
     },
   })}`;
@@ -201,52 +199,59 @@ export class ComposioConnectionCoordinator {
       nativeReturnNonce?: string;
     },
   ): Promise<StartConnectionResult> {
-    const type = this.config.connectionTypes[input.connectionTypeId];
-    if (!type) throw new Error("Unknown Composio Connection Type");
-    if (!(await this.config.store.isPackageInstalled(userId, "composio"))) {
-      throw new Error("Composio Package is not installed");
-    }
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.commandId)) {
       throw new Error("Connection commandId is invalid");
     }
     const connectionId = input.commandId;
-    const displayName = input.alias?.trim() || type.displayName;
+    const alias = input.alias?.trim() || undefined;
     const returnTarget = input.returnTarget ?? "browser";
     const commandFingerprint = connectionStartCommandFingerprintV1(userId, {
       connectionTypeId: input.connectionTypeId,
-      displayName,
-      toolkitSlug: type.toolkitSlug,
+      alias,
       returnTarget,
     });
-    const claimed = await this.config.store.startConnection(userId, {
-      connectionId,
-      packageId: "composio",
-      connectionTypeId: input.connectionTypeId,
-      displayName,
-      safeMetadata: {
-        toolkitSlug: type.toolkitSlug,
-        providerAlias: connectionId,
-        returnTarget,
-        startCommandFingerprint: commandFingerprint,
-        authorizationStateId: input.authorizationStateId ?? connectionId,
-        authorizationStateExpiresAt:
-          input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
-        ...(input.nativeReturnNonce
-          ? { nativeReturnNonce: input.nativeReturnNonce }
-          : {}),
-      },
-    });
-    if (!claimed) {
-      const existing = await this.config.store.getConnection(
-        userId,
+    const stored = await this.config.store.getConnection(userId, connectionId);
+    let type: ComposioConnectionTypeConfig | undefined;
+    let claimed = false;
+    if (!stored) {
+      if (!(await this.config.store.isPackageInstalled(userId, "composio"))) {
+        throw new Error("Composio Package is not installed");
+      }
+      type = this.config.connectionTypes[input.connectionTypeId];
+      if (!type) throw new Error("Unknown Composio Connection Type");
+      claimed = await this.config.store.startConnection(userId, {
         connectionId,
-      );
+        packageId: "composio",
+        connectionTypeId: input.connectionTypeId,
+        displayName: alias ?? type.displayName,
+        safeMetadata: {
+          toolkitSlug: type.toolkitSlug,
+          providerAlias: connectionId,
+          returnTarget,
+          startCommandFingerprint: commandFingerprint,
+          authorizationStateId: input.authorizationStateId ?? connectionId,
+          authorizationStateExpiresAt:
+            input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
+          ...(input.nativeReturnNonce
+            ? { nativeReturnNonce: input.nativeReturnNonce }
+            : {}),
+        },
+      });
+    }
+    if (!claimed) {
+      const existing =
+        stored ??
+        (await this.config.store.getConnection(userId, connectionId));
       if (
         existing?.safeMetadata.startCommandFingerprint !== commandFingerprint
       ) {
         throw new Error(
           `Connection command idempotency key "${input.commandId}" was reused for a different command`,
         );
+      }
+      const admittedToolkitSlug = existing.safeMetadata.toolkitSlug;
+      if (typeof admittedToolkitSlug !== "string") {
+        throw new Error("Connection command snapshot is invalid");
       }
       const redirectUrl = existing?.safeMetadata.redirectUrl;
       const expiresAt = existing?.safeMetadata.expiresAt;
@@ -315,7 +320,7 @@ export class ComposioConnectionCoordinator {
         ).find(
           (candidate) =>
             candidate.alias === connectionId &&
-            candidate.toolkitSlug === type.toolkitSlug,
+            candidate.toolkitSlug === admittedToolkitSlug,
         );
         if (account?.status === "ACTIVE") {
           await this.config.store.recordConnectLinkResult(
@@ -353,6 +358,7 @@ export class ComposioConnectionCoordinator {
       }
       throw new Error("Connection authorization requires reconciliation");
     }
+    if (!type) throw new Error("Connection command snapshot is invalid");
     let link: ConnectLink;
     try {
       link = await this.config.client.createConnectLink({

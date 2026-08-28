@@ -12,9 +12,14 @@ import type { StartConnectionInput } from "./user-configuration.js";
 class MemoryConnectionStore implements ComposioConnectionStore {
   readonly log: string[] = [];
   readonly connections = new Map<string, ConnectionView>();
+  packageInstalled = true;
+  packagePolicyReads = 0;
 
   isPackageInstalled(_userId: string, packageId: string): Promise<boolean> {
-    return Promise.resolve(packageId === "composio");
+    this.packagePolicyReads += 1;
+    return Promise.resolve(
+      this.packageInstalled && packageId === "composio",
+    );
   }
 
   getConnection(
@@ -497,6 +502,7 @@ describe("ComposioConnectionCoordinator", () => {
       connectionTypeId: "gmail",
     });
     expect(duplicate).toEqual(result);
+    expect(store.packagePolicyReads).toBe(1);
     expect(store.log).toEqual(["intent", "external-link", "authorizing"]);
 
     const beforeCollision = structuredClone(
@@ -577,11 +583,18 @@ describe("ComposioConnectionCoordinator", () => {
         connectionTypeId: "gmail",
       }),
     ).rejects.toThrow("response lost");
+    store.packageInstalled = false;
+    const replayCoordinator = new ComposioConnectionCoordinator({
+      client,
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+    });
     const beforeCollision = structuredClone(
       store.connections.get("connection-1"),
     );
     await expect(
-      coordinator.start("user-1", {
+      replayCoordinator.start("user-1", {
         commandId: "connection-1",
         connectionTypeId: "gmail",
         alias: "Work",
@@ -591,17 +604,28 @@ describe("ComposioConnectionCoordinator", () => {
     );
     expect(store.connections.get("connection-1")).toEqual(beforeCollision);
     expect(reconciliationReads).toBe(0);
-    const reconciled = await coordinator.start("user-1", {
+    expect(store.packagePolicyReads).toBe(1);
+    const reconciled = await replayCoordinator.start("user-1", {
       commandId: "connection-1",
       connectionTypeId: "gmail",
     });
 
     expect(createCalls).toBe(1);
     expect(reconciliationReads).toBe(1);
+    expect(store.packagePolicyReads).toBe(1);
     expect(reconciled.redirectUrl).toContain("connected_account_id=ca_123");
     expect(store.connections.get("connection-1")?.safeMetadata).toMatchObject({
       connectedAccountId: "ca_123",
     });
+    await expect(
+      replayCoordinator.start("user-1", {
+        commandId: "connection-2",
+        connectionTypeId: "gmail",
+      }),
+    ).rejects.toThrow("Composio Package is not installed");
+    expect(store.packagePolicyReads).toBe(2);
+    expect(createCalls).toBe(1);
+    expect(reconciliationReads).toBe(1);
   });
 
   test("retires a persisted Link whose callback state expired first", async () => {
@@ -615,6 +639,7 @@ describe("ComposioConnectionCoordinator", () => {
     await store.updateConnection("user-1", "connection-expired", {
       state: "authorizing",
       safeMetadata: {
+        toolkitSlug: "gmail",
         redirectUrl: "https://connect.example/still-live",
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
         authorizationStateId: "expired-state",
@@ -623,9 +648,8 @@ describe("ComposioConnectionCoordinator", () => {
           userId: "user-1",
           packageId: "composio",
           connectionTypeId: "gmail",
-          displayName: "Gmail",
+          alias: null,
           safeMetadata: {
-            toolkitSlug: "gmail",
             returnTarget: "browser",
           },
         })}`,
