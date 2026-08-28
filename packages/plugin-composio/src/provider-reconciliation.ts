@@ -20,7 +20,7 @@ export type ComposioProviderReconciliationRequest =
 export type ComposioProviderReconciliationResult =
   | { status: "active"; account: ConnectedAccountSummary }
   | { status: "failed"; account: ConnectedAccountSummary }
-  | { status: "revoked" }
+  | { status: "revoked"; account?: ConnectedAccountSummary }
   | { status: "absent" }
   | { status: "pending"; account?: ConnectedAccountSummary };
 
@@ -34,13 +34,10 @@ export async function reconcileComposioProviderConnection(
         candidate.alias === request.providerAlias &&
         candidate.toolkitSlug === request.toolkitSlug,
     );
-    if (!account) return { status: "pending" };
+    if (!account) return { status: "absent" };
     if (account.status === "ACTIVE") return { status: "active", account };
-    if (
-      account.status === "FAILED" ||
-      account.status === "EXPIRED" ||
-      account.status === "REVOKED"
-    ) {
+    if (account.status === "REVOKED") return { status: "revoked", account };
+    if (account.status === "FAILED" || account.status === "EXPIRED") {
       return { status: "failed", account };
     }
     return { status: "pending", account };
@@ -59,6 +56,6 @@ export async function reconcileComposioProviderConnection(
     throw new Error("Composio connected account does not belong to the User");
   }
   return account.status === "REVOKED"
-    ? { status: "revoked" }
+    ? { status: "revoked", account }
     : { status: "pending", account };
 }

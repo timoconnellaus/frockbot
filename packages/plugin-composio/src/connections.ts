@@ -32,6 +32,11 @@ export interface ComposioConnectionStore {
     connectionId: string,
     safeMetadata: ConnectionView["safeMetadata"],
   ): Promise<boolean>;
+  recordLinkReconciliationIdentity(
+    userId: string,
+    connectionId: string,
+    safeMetadata: ConnectionView["safeMetadata"],
+  ): Promise<boolean>;
   finishConnectionAuthorization(
     userId: string,
     connectionId: string,
@@ -271,11 +276,13 @@ export class ComposioConnectionCoordinator {
       const persistedLinkExpired =
         typeof redirectUrl === "string" &&
         (!Number.isFinite(expiry) || expiry <= now);
+      const revocationRequested =
+        existing.safeMetadata.revocationRequested === true;
       if (
         existing?.state === "failed" ||
         existing?.state === "revoked" ||
-        authorizationStateExpired ||
-        persistedLinkExpired
+        (!revocationRequested &&
+          (authorizationStateExpired || persistedLinkExpired))
       ) {
         if (
           existing?.state === "authorizing" ||
@@ -328,28 +335,92 @@ export class ComposioConnectionCoordinator {
         const account =
           reconciliation.status === "active"
             ? reconciliation.account
-            : reconciliation.status === "pending"
+            : reconciliation.status === "pending" ||
+                reconciliation.status === "failed" ||
+                reconciliation.status === "revoked"
               ? reconciliation.account
               : undefined;
-        if (account) {
-          const safeMetadata = {
-            ...existing.safeMetadata,
-            connectedAccountId: account.id,
-            toolkitSlug: account.toolkitSlug,
-            authorizationStateId: input.authorizationStateId ?? connectionId,
-            authorizationStateExpiresAt:
-              input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
-            authorizationStateConsumed: false,
-            ...(input.nativeReturnNonce
-              ? { nativeReturnNonce: input.nativeReturnNonce }
-              : {}),
-          };
-          if (existing.safeMetadata.revocationRequested === true) {
-            await this.revoke(userId, connectionId, safeMetadata);
+        const safeMetadata = account
+          ? {
+              ...existing.safeMetadata,
+              connectedAccountId: account.id,
+              toolkitSlug: account.toolkitSlug,
+              authorizationStateConsumed: false,
+            }
+          : undefined;
+        if (revocationRequested && reconciliation.status === "absent") {
+          const completed =
+            await this.config.store.recordRevocationProviderCompleted(
+              userId,
+              connectionId,
+            );
+          if (completed) {
+            await this.config.store.finishConnectionRevocation(
+              userId,
+              connectionId,
+            );
+          }
+          throw new DefinitiveConnectionOperationError(
+            "Connection was revoked during authorization",
+          );
+        }
+        if (revocationRequested && safeMetadata) {
+          if (reconciliation.status === "revoked") {
+            const claim = await this.config.store.claimConnectionRevocation(
+              userId,
+              connectionId,
+              safeMetadata,
+            );
+            if (claim.phase !== "done") {
+              await this.config.store.recordRevocationProviderCompleted(
+                userId,
+                connectionId,
+              );
+              await this.config.store.finishConnectionRevocation(
+                userId,
+                connectionId,
+              );
+            }
             throw new DefinitiveConnectionOperationError(
               "Connection was revoked during authorization",
             );
           }
+          await this.revoke(userId, connectionId, safeMetadata);
+          throw new DefinitiveConnectionOperationError(
+            "Connection was revoked during authorization",
+          );
+        }
+        if (
+          !revocationRequested &&
+          (reconciliation.status === "failed" ||
+            reconciliation.status === "revoked")
+        ) {
+          await this.config.store.finishConnectionAuthorization(
+            userId,
+            connectionId,
+            {
+              state: "failed",
+              failure: "Connection authorization could not be recovered",
+            },
+          );
+          throw new DefinitiveConnectionOperationError(
+            "Connection authorization failed; retry with a new operation",
+          );
+        }
+        if (reconciliation.status === "pending" && safeMetadata) {
+          const recorded =
+            await this.config.store.recordLinkReconciliationIdentity(
+              userId,
+              connectionId,
+              safeMetadata,
+            );
+          if (!recorded) {
+            throw new Error(
+              "Connection authorization changed during reconciliation",
+            );
+          }
+        }
+        if (reconciliation.status === "active" && safeMetadata) {
           const recorded = await this.config.store.recordConnectLinkResult(
             userId,
             connectionId,
@@ -360,8 +431,6 @@ export class ComposioConnectionCoordinator {
               "Connection authorization changed during reconciliation",
             );
           }
-        }
-        if (reconciliation.status === "active") {
           const account = reconciliation.account;
           const callbackUrl = new URL(
             "/api/plugins/composio/callback",
@@ -378,19 +447,6 @@ export class ComposioConnectionCoordinator {
             expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
             nativeReturnNonce: input.nativeReturnNonce,
           };
-        }
-        if (reconciliation.status === "failed") {
-          await this.config.store.finishConnectionAuthorization(
-            userId,
-            connectionId,
-            {
-              state: "failed",
-              failure: "Connection authorization could not be recovered",
-            },
-          );
-          throw new DefinitiveConnectionOperationError(
-            "Connection authorization failed; retry with a new operation",
-          );
         }
       }
       throw new Error("Connection authorization requires reconciliation");

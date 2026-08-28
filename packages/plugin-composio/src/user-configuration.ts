@@ -127,9 +127,10 @@ function nextConnectionAlarm(settings: UserSettingsViewV1): number | undefined {
       values.push(metadata.effectDeadlineAt);
     }
     if (
-      connection.state === "authorizing" ||
-      (connection.state === "reconciliation-required" &&
-        metadata.reconciliationOperation === "link")
+      metadata.revocationRequested !== true &&
+      (connection.state === "authorizing" ||
+        (connection.state === "reconciliation-required" &&
+          metadata.reconciliationOperation === "link"))
     ) {
       if (typeof metadata.authorizationStateExpiresAt === "number") {
         values.push(metadata.authorizationStateExpiresAt);
@@ -170,6 +171,7 @@ function connectionAuthorizationExpired(
   now: number,
 ): boolean {
   const metadata = connection.safeMetadata;
+  if (metadata.revocationRequested === true) return false;
   if (
     connection.state !== "authorizing" &&
     !(
@@ -401,6 +403,23 @@ export class ComposioUserBackendContribution {
       ) {
         return undefined;
       }
+      if (connection.safeMetadata.revocationRequested === true) {
+        return {
+          ...connection,
+          state: "reconciliation-required",
+          safeMetadata: {
+            ...safeMetadata,
+            revocationRequested: true,
+            reconciliationOperation: "link",
+            reconciliationRetryAt:
+              typeof connection.safeMetadata.reconciliationRetryAt === "number"
+                ? connection.safeMetadata.reconciliationRetryAt
+                : Date.now() + CONNECTION_EFFECT_ALARM_MS,
+          },
+          failure:
+            "Connection identity requires reconciliation before revocation",
+        };
+      }
       return {
         ...connection,
         state: "authorizing",
@@ -411,6 +430,33 @@ export class ComposioUserBackendContribution {
             : {}),
         },
         failure: undefined,
+      };
+    });
+  }
+
+  async recordLinkReconciliationIdentity(
+    userId: string,
+    connectionId: string,
+    safeMetadata: UserSettingsViewV1["connections"][number]["safeMetadata"],
+  ): Promise<boolean> {
+    return this.transitionConnection(userId, connectionId, (connection) => {
+      if (
+        connection.state !== "reconciliation-required" ||
+        connection.safeMetadata.reconciliationOperation !== "link"
+      ) {
+        return undefined;
+      }
+      return {
+        ...connection,
+        safeMetadata: {
+          ...connection.safeMetadata,
+          ...safeMetadata,
+          reconciliationOperation: "link",
+          reconciliationRetryAt:
+            typeof connection.safeMetadata.reconciliationRetryAt === "number"
+              ? connection.safeMetadata.reconciliationRetryAt
+              : Date.now() + CONNECTION_EFFECT_ALARM_MS,
+        },
       };
     });
   }
@@ -1114,7 +1160,9 @@ export class ComposioUserBackendContribution {
         connection.state !== "revoking" &&
         !(
           connection.state === "reconciliation-required" &&
-          connection.safeMetadata.reconciliationOperation === "revoke"
+          (connection.safeMetadata.reconciliationOperation === "revoke" ||
+            (connection.safeMetadata.reconciliationOperation === "link" &&
+              connection.safeMetadata.revocationRequested === true))
         )
       ) {
         return undefined;
@@ -1325,8 +1373,9 @@ export class ComposioUserBackendContribution {
           const authorizationStateExpiresAt =
             connection.safeMetadata.authorizationStateExpiresAt;
           if (
-            typeof authorizationStateExpiresAt !== "number" ||
-            authorizationStateExpiresAt <= Date.now()
+            connection.safeMetadata.revocationRequested !== true &&
+            (typeof authorizationStateExpiresAt !== "number" ||
+              authorizationStateExpiresAt <= Date.now())
           ) {
             await this.finishConnectionAuthorization(
               userId,
@@ -1354,7 +1403,80 @@ export class ComposioUserBackendContribution {
             providerAlias,
             toolkitSlug,
           });
-          if (result.status === "failed") {
+          const account =
+            result.status === "active"
+              ? result.account
+              : result.status === "pending" ||
+                  result.status === "failed" ||
+                  result.status === "revoked"
+                ? result.account
+                : undefined;
+          const safeMetadata = account
+            ? {
+                ...connection.safeMetadata,
+                connectedAccountId: account.id,
+                toolkitSlug: account.toolkitSlug,
+                ...(account.alias ? { providerAlias: account.alias } : {}),
+              }
+            : undefined;
+          if (
+            connection.safeMetadata.revocationRequested === true &&
+            result.status === "absent"
+          ) {
+            const completed = await this.recordRevocationProviderCompleted(
+              userId,
+              connection.connectionId,
+            );
+            if (completed) {
+              await this.finishConnectionRevocation(
+                userId,
+                connection.connectionId,
+              );
+            }
+            continue;
+          }
+          if (
+            connection.safeMetadata.revocationRequested === true &&
+            account &&
+            safeMetadata
+          ) {
+            const claim = await this.claimConnectionRevocation(
+              userId,
+              connection.connectionId,
+              safeMetadata,
+            );
+            if (result.status !== "revoked") {
+              if (claim.phase !== "provider") continue;
+              try {
+                await this.revokeConnectedAccount(account.id);
+              } catch (error) {
+                await this.requireConnectionReconciliation(
+                  userId,
+                  connection.connectionId,
+                  "revoke",
+                  "Revocation outcome requires reconciliation",
+                );
+                throw error;
+              }
+            }
+            if (claim.phase !== "done") {
+              const completed = await this.recordRevocationProviderCompleted(
+                userId,
+                connection.connectionId,
+              );
+              if (completed) {
+                await this.finishConnectionRevocation(
+                  userId,
+                  connection.connectionId,
+                );
+              }
+            }
+            continue;
+          }
+          if (
+            connection.safeMetadata.revocationRequested !== true &&
+            (result.status === "failed" || result.status === "revoked")
+          ) {
             await this.finishConnectionAuthorization(
               userId,
               connection.connectionId,
@@ -1369,47 +1491,13 @@ export class ComposioUserBackendContribution {
             );
             continue;
           }
-          const account =
-            result.status === "active"
-              ? result.account
-              : result.status === "pending"
-                ? result.account
-                : undefined;
-          if (!account) continue;
-          const safeMetadata = {
-            ...connection.safeMetadata,
-            connectedAccountId: account.id,
-            toolkitSlug: account.toolkitSlug,
-            ...(account.alias ? { providerAlias: account.alias } : {}),
-          };
-          if (connection.safeMetadata.revocationRequested === true) {
-            const claim = await this.claimConnectionRevocation(
+          if (!safeMetadata) continue;
+          if (result.status === "pending") {
+            await this.recordLinkReconciliationIdentity(
               userId,
               connection.connectionId,
               safeMetadata,
             );
-            if (claim.phase !== "provider") continue;
-            try {
-              await this.revokeConnectedAccount(account.id);
-            } catch (error) {
-              await this.requireConnectionReconciliation(
-                userId,
-                connection.connectionId,
-                "revoke",
-                "Revocation outcome requires reconciliation",
-              );
-              throw error;
-            }
-            const completed = await this.recordRevocationProviderCompleted(
-              userId,
-              connection.connectionId,
-            );
-            if (completed) {
-              await this.finishConnectionRevocation(
-                userId,
-                connection.connectionId,
-              );
-            }
             continue;
           }
           const recorded = await this.recordConnectLinkResult(
@@ -1417,7 +1505,7 @@ export class ComposioUserBackendContribution {
             connection.connectionId,
             safeMetadata,
           );
-          if (!recorded || result.status !== "active") continue;
+          if (!recorded) continue;
           await this.finishConnectionAuthorization(
             userId,
             connection.connectionId,

@@ -53,6 +53,30 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     return Promise.resolve(true);
   }
 
+  recordLinkReconciliationIdentity(
+    _userId: string,
+    connectionId: string,
+    safeMetadata: ConnectionView["safeMetadata"],
+  ): Promise<boolean> {
+    const current = this.connections.get(connectionId);
+    if (
+      !current ||
+      current.state !== "reconciliation-required" ||
+      current.safeMetadata.reconciliationOperation !== "link"
+    ) {
+      return Promise.resolve(false);
+    }
+    this.connections.set(connectionId, {
+      ...current,
+      safeMetadata: {
+        ...current.safeMetadata,
+        ...safeMetadata,
+        reconciliationOperation: "link",
+      },
+    });
+    return Promise.resolve(true);
+  }
+
   finishConnectionAuthorization(
     _userId: string,
     connectionId: string,
@@ -651,6 +675,80 @@ describe("ComposioConnectionCoordinator", () => {
     expect(reconciliationReads).toBe(2);
   });
 
+  test("keeps an INITIALIZING recovered account in Link reconciliation", async () => {
+    const store = new MemoryConnectionStore();
+    await store.startConnection("user-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await store.updateConnection("user-1", "connection-1", {
+      state: "reconciliation-required",
+      safeMetadata: {
+        toolkitSlug: "gmail",
+        providerAlias: "connection-1",
+        authorizationStateExpiresAt: Date.now() + 60_000,
+        reconciliationOperation: "link",
+        startCommandFingerprint: `connection-start-command-v1:${JSON.stringify({
+          userId: "user-1",
+          packageId: "composio",
+          connectionTypeId: "gmail",
+          alias: null,
+          safeMetadata: { returnTarget: "browser" },
+        })}`,
+      },
+    });
+    let reads = 0;
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: () => {
+          reads += 1;
+          return Promise.resolve(
+            Response.json({
+              items: [
+                {
+                  id: "ca_123",
+                  status: reads === 1 ? "INITIALIZING" : "ACTIVE",
+                  toolkit: { slug: "gmail" },
+                  alias: "connection-1",
+                },
+              ],
+            }),
+          );
+        },
+      }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+    });
+
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+      }),
+    ).rejects.toThrow("requires reconciliation");
+    expect(store.connections.get("connection-1")).toMatchObject({
+      state: "reconciliation-required",
+      safeMetadata: {
+        connectedAccountId: "ca_123",
+        reconciliationOperation: "link",
+      },
+    });
+
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+      }),
+    ).resolves.toMatchObject({
+      connectionId: "connection-1",
+    });
+    expect(reads).toBe(2);
+  });
+
   test("retires a persisted Link whose callback state expired first", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
@@ -766,6 +864,67 @@ describe("ComposioConnectionCoordinator", () => {
     ).rejects.toMatchObject({ name: "DefinitiveConnectionOperationError" });
 
     expect(revokeCalls).toBe(1);
+    expect(store.connections.get("connection-1")?.state).toBe("revoked");
+  });
+
+  test("finalizes a recovered REVOKED account without another effect", async () => {
+    const store = new MemoryConnectionStore();
+    await store.startConnection("user-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await store.updateConnection("user-1", "connection-1", {
+      state: "reconciliation-required",
+      safeMetadata: {
+        toolkitSlug: "gmail",
+        providerAlias: "connection-1",
+        authorizationStateExpiresAt: Date.now() - 1,
+        revocationRequested: true,
+        reconciliationOperation: "link",
+        startCommandFingerprint: `connection-start-command-v1:${JSON.stringify({
+          userId: "user-1",
+          packageId: "composio",
+          connectionTypeId: "gmail",
+          alias: null,
+          safeMetadata: { returnTarget: "browser" },
+        })}`,
+      },
+    });
+    let providerEffects = 0;
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: (_input, init) => {
+          if (init?.method === "POST") providerEffects += 1;
+          return Promise.resolve(
+            Response.json({
+              items: [
+                {
+                  id: "ca_123",
+                  status: "REVOKED",
+                  toolkit: { slug: "gmail" },
+                  alias: "connection-1",
+                },
+              ],
+            }),
+          );
+        },
+      }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+    });
+
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+      }),
+    ).rejects.toMatchObject({ name: "DefinitiveConnectionOperationError" });
+
+    expect(providerEffects).toBe(0);
     expect(store.connections.get("connection-1")?.state).toBe("revoked");
   });
 

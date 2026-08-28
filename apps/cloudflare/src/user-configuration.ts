@@ -90,6 +90,16 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return (await this.contribution()).recordConnectLinkResult(...args);
   }
 
+  async recordLinkReconciliationIdentity(
+    ...args: Parameters<
+      ComposioUserBackendContribution["recordLinkReconciliationIdentity"]
+    >
+  ) {
+    return (await this.contribution()).recordLinkReconciliationIdentity(
+      ...args,
+    );
+  }
+
   async finishConnectionAuthorization(
     ...args: Parameters<
       ComposioUserBackendContribution["finishConnectionAuthorization"]
