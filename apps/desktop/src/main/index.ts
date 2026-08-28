@@ -10,8 +10,9 @@ let disposing = false;
 app.setName("FrockBot");
 setupDesktopAuth();
 
-void app.whenReady().then(
-  async () => {
+void app
+  .whenReady()
+  .then(async () => {
     setDevelopmentAppIcon(app);
     host = await createCordisDesktopHost();
     app.on("activate", () => {
@@ -19,14 +20,13 @@ void app.whenReady().then(
         void host?.desktopWindows.create();
       }
     });
-  },
-  (error: unknown) => {
+  })
+  .catch((error: unknown) => {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
     process.stderr.write(`${message}\n`);
     app.quit();
-  },
-);
+  });
 
 app.on("before-quit", (event) => {
   if (!host || disposing) return;
