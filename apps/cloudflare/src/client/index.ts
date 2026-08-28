@@ -133,6 +133,15 @@ const application = new ClientApplication({
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
     );
   },
+  async reconcileRun(runId: string) {
+    return decodeClientTurnResponse(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
+        "POST",
+        JSON.stringify({ action: "resume" }),
+      ),
+    );
+  },
   async acknowledgeNotification(notificationId: string) {
     decodeAcknowledgement(
       await apiRequest(

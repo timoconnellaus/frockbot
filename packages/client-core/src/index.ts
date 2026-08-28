@@ -83,6 +83,7 @@ export interface AgentTransport {
     alias?: string;
   }): Promise<ClientStartConnectionResult>;
   listRuns?(): Promise<ClientRun[]>;
+  reconcileRun?(runId: string): Promise<ClientTurnResponse>;
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;
   listNotifications?(): Promise<ClientNotificationIntent[]>;
   acknowledgeNotification?(notificationId: string): Promise<void>;

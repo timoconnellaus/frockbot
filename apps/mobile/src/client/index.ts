@@ -10,6 +10,7 @@ import {
 } from "@frockbot/configuration-core";
 import {
   decodeAcknowledgement,
+  decodeClientTurnResponse,
   decodeNotificationList,
   decodeRevocationResult,
   decodeRunList,
@@ -316,16 +317,48 @@ const web: Ref<FrockBotWebData> = ref({
         : error instanceof Error
           ? error.message
           : "Agent request failed";
+      await botProjection.refreshHistory(projectionToken);
       return { accepted: true, runId: pendingRunId };
     } finally {
       if (activeRequest === request) activeRequest = undefined;
       if (
         botProjection.isCurrent(projectionToken) &&
-        web.value.activeRunId === pendingRunId
+        web.value.activeRunId === pendingRunId &&
+        web.value.activeRun?.runId !== pendingRunId
       ) {
         web.value.activeRunId = undefined;
       }
     }
+  },
+  async resumeRun(runId: string): Promise<void> {
+    const projectionToken = botProjection.currentToken();
+    if (web.value.activeRun?.runId !== runId) return;
+    web.value.activeRun = {
+      runId,
+      status: "running",
+      message: "Reconciliation requested; waiting for durable progress.",
+      canResume: false,
+    };
+    try {
+      const response = await auth.authorizedFetch(
+        `/api/bots/${encodeURIComponent(projectionToken.botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
+        {
+          method: "POST",
+          body: JSON.stringify({ action: "resume" }),
+        },
+      );
+      const value: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(responseError(value, "Reconciliation failed"));
+      }
+      decodeClientTurnResponse(value);
+    } catch (error) {
+      if (botProjection.isCurrent(projectionToken)) {
+        web.value.settingsError =
+          error instanceof Error ? error.message : "Reconciliation failed";
+      }
+    }
+    await botProjection.refreshHistory(projectionToken);
   },
   abort(): Promise<void> {
     activeRequest?.abort();

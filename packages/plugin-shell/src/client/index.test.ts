@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { projectCompletedRuns } from "./index.js";
+import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
+import { projectCompletedRuns, projectDurableRuns } from "./index.js";
 import { shellClientPlugin } from "./index.js";
 import type { FrockBotWebData } from "../shared.js";
 import type { Ref } from "vue";
@@ -156,6 +157,181 @@ describe("detached Turn projection", () => {
         status: "error",
       },
     ]);
+  });
+});
+
+describe("active durable Turn projection", () => {
+  test("restores busy state and replaces a stale running placeholder", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun" | "error"
+    > = {
+      activeRunId: "run-1",
+      error: "Observer disconnected",
+      messages: [
+        {
+          id: "local-user",
+          runId: "run-1",
+          role: "user",
+          text: "Keep going",
+          status: "completed",
+          tools: [],
+        },
+        {
+          id: "local-assistant",
+          runId: "run-1",
+          role: "assistant",
+          text: "Request stopped locally.",
+          status: "aborted",
+          tools: [],
+        },
+      ],
+    };
+
+    projectDurableRuns(state, [], [
+      {
+        runId: "run-1",
+        input: "Keep going",
+        events: [],
+        status: "running",
+      },
+    ]);
+
+    expect(state.activeRunId).toBe("run-1");
+    expect(state.error).toBeUndefined();
+    expect(state.activeRun).toMatchObject({
+      runId: "run-1",
+      status: "running",
+      canResume: false,
+    });
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]).toMatchObject({
+      text: "Working…",
+      status: "streaming",
+    });
+  });
+
+  test("projects interrupted and reconciliation-required recovery states", () => {
+    const interrupted: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+    projectDurableRuns(interrupted, [], [
+      {
+        runId: "run-interrupted",
+        input: "Continue",
+        events: [],
+        status: "interrupted",
+      },
+    ]);
+    expect(interrupted.activeRun).toMatchObject({
+      status: "interrupted",
+      canResume: false,
+    });
+    expect(interrupted.messages[1]).toMatchObject({ status: "interrupted" });
+
+    const reconciliation: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+    projectDurableRuns(reconciliation, [], [
+      {
+        runId: "run-reconciliation",
+        input: "Continue",
+        events: [],
+        status: "reconciliation-required",
+        failure: "Provider result needs confirmation",
+      },
+    ]);
+    expect(reconciliation.activeRun).toEqual({
+      runId: "run-reconciliation",
+      status: "reconciliation-required",
+      message: "Provider result needs confirmation",
+      canResume: true,
+    });
+    expect(reconciliation.messages[1]).toMatchObject({
+      text: "Provider result needs confirmation",
+      status: "reconciliation-required",
+    });
+  });
+
+  test("keeps busy state until the durable run becomes terminal", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+    projectDurableRuns(state, [], [
+      {
+        runId: "run-1",
+        input: "Continue",
+        events: [],
+        status: "reconciliation-required",
+      },
+    ]);
+    projectDurableRuns(state, [], [
+      {
+        runId: "run-1",
+        input: "Continue",
+        events: [],
+        status: "completed",
+        responseText: "Done",
+      },
+    ]);
+
+    expect(state.activeRunId).toBeUndefined();
+    expect(state.activeRun).toBeUndefined();
+    expect(state.messages[1]).toMatchObject({
+      text: "Done",
+      status: "completed",
+    });
+  });
+
+  test("uses the hosted reconciliation action and projects its result", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    let status: "reconciliation-required" | "completed" =
+      "reconciliation-required";
+    const reconciled: string[] = [];
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: () =>
+          Promise.resolve(initializeBotSettingsV1("default")),
+        listRuns: () =>
+          Promise.resolve([
+            {
+              runId: "run-1",
+              input: "Continue",
+              events: [],
+              status,
+              ...(status === "completed" ? { responseText: "Done" } : {}),
+            },
+          ]),
+        listNotifications: () =>
+          Promise.reject(new Error("notifications unavailable")),
+        reconcileRun: (runId) => {
+          reconciled.push(runId);
+          status = "completed";
+          return Promise.resolve({ runId, text: "Done", events: [] });
+        },
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    await provided.value.loadBotSettings();
+    expect(provided.value.activeRunId).toBe("run-1");
+    await provided.value.resumeRun("run-1");
+
+    expect(reconciled).toEqual(["run-1"]);
+    expect(provided.value.activeRunId).toBeUndefined();
+    expect(provided.value.messages[1]).toMatchObject({
+      text: "Done",
+      status: "completed",
+    });
   });
 });
 

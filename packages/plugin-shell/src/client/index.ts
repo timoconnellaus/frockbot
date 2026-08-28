@@ -19,6 +19,7 @@ import {
   type FrockBotWebData,
   type PluginCatalogItem,
   type SendPromptResult,
+  type WebActiveRun,
   type WebChatMessage,
   type WebToolActivity,
 } from "../shared.js";
@@ -47,23 +48,109 @@ function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {
   return [...tools.values()];
 }
 
-export function projectCompletedRuns(
-  messages: WebChatMessage[],
+type DurableRunProjectionState = Pick<
+  FrockBotWebData,
+  "messages" | "activeRunId" | "activeRun" | "error"
+>;
+
+function activeRunView(run: ClientRun): WebActiveRun | undefined {
+  if (run.status === "running") {
+    return {
+      runId: run.runId,
+      status: run.status,
+      message: "This Turn is still running in the backend.",
+      canResume: false,
+    };
+  }
+  if (run.status === "interrupted") {
+    return {
+      runId: run.runId,
+      status: run.status,
+      message:
+        run.failure ?? "This Turn is interrupted while durable recovery runs.",
+      canResume: false,
+    };
+  }
+  if (run.status === "reconciliation-required") {
+    return {
+      runId: run.runId,
+      status: run.status,
+      message:
+        run.failure ??
+        "This Turn requires provider reconciliation before it can continue.",
+      canResume: true,
+    };
+  }
+  return undefined;
+}
+
+function assistantMessage(
+  run: ClientRun,
+  notification: ClientNotificationIntent | undefined,
+): WebChatMessage {
+  if (run.status === "running") {
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text: run.responseText ?? "Working…",
+      status: "streaming",
+      tools: toolsFrom(run.events),
+    };
+  }
+  if (run.status === "interrupted") {
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text: run.failure ?? "Turn interrupted; durable recovery is pending.",
+      status: "interrupted",
+      tools: toolsFrom(run.events),
+    };
+  }
+  if (run.status === "reconciliation-required") {
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text:
+        run.failure ??
+        "Provider reconciliation is required before this Turn can continue.",
+      status: "reconciliation-required",
+      tools: toolsFrom(run.events),
+    };
+  }
+  return {
+    id: `${run.runId}:assistant`,
+    runId: run.runId,
+    role: "assistant",
+    text:
+      run.status === "failed"
+        ? (run.failure ?? "Agent request failed.")
+        : (run.responseText ?? notification?.body ?? ""),
+    status: run.status === "failed" ? "error" : "completed",
+    tools: toolsFrom(run.events),
+  };
+}
+
+export function projectDurableRuns(
+  state: DurableRunProjectionState,
   notifications: readonly ClientNotificationIntent[],
   runs: readonly ClientRun[],
 ): Set<string> {
   const projected = new Set<string>();
+  const observedRunId = state.activeRunId;
+  let activeRun: WebActiveRun | undefined;
   for (const run of runs) {
-    if (run.status !== "completed" && run.status !== "failed") continue;
     const notification = notifications.find(
       (candidate) => candidate.runId === run.runId,
     );
     if (
-      !messages.some(
+      !state.messages.some(
         (message) => message.runId === run.runId && message.role === "user",
       )
     ) {
-      messages.push({
+      state.messages.push({
         id: `${run.runId}:user`,
         runId: run.runId,
         role: "user",
@@ -72,25 +159,59 @@ export function projectCompletedRuns(
         tools: [],
       });
     }
-    const assistant: WebChatMessage = {
-      id: `${run.runId}:assistant`,
-      runId: run.runId,
-      role: "assistant",
-      text:
-        run.status === "failed"
-          ? (run.failure ?? "Agent request failed.")
-          : (run.responseText ?? notification?.body ?? ""),
-      status: run.status === "failed" ? "error" : "completed",
-      tools: toolsFrom(run.events),
-    };
-    const assistantIndex = messages.findIndex(
+    const assistant = assistantMessage(run, notification);
+    const assistantIndex = state.messages.findIndex(
       (message) => message.runId === run.runId && message.role === "assistant",
     );
-    if (assistantIndex >= 0) messages[assistantIndex] = assistant;
-    else messages.push(assistant);
-    if (notification) projected.add(notification.notificationId);
+    if (assistantIndex >= 0) state.messages[assistantIndex] = assistant;
+    else state.messages.push(assistant);
+
+    activeRun = activeRunView(run) ?? activeRun;
+    if (
+      notification &&
+      (run.status === "completed" || run.status === "failed")
+    ) {
+      projected.add(notification.notificationId);
+    }
+  }
+
+  if (observedRunId && runs.some((run) => run.runId === observedRunId)) {
+    state.error = undefined;
+  }
+
+  if (activeRun) {
+    state.activeRunId = activeRun.runId;
+    state.activeRun = activeRun;
+  } else {
+    const terminalRunIds = new Set(
+      runs
+        .filter(
+          (run) => run.status === "completed" || run.status === "failed",
+        )
+        .map((run) => run.runId),
+    );
+    if (state.activeRunId && terminalRunIds.has(state.activeRunId)) {
+      state.activeRunId = undefined;
+    }
+    if (state.activeRun && terminalRunIds.has(state.activeRun.runId)) {
+      state.activeRun = undefined;
+    }
   }
   return projected;
+}
+
+export function projectCompletedRuns(
+  messages: WebChatMessage[],
+  notifications: readonly ClientNotificationIntent[],
+  runs: readonly ClientRun[],
+): Set<string> {
+  return projectDurableRuns(
+    { messages },
+    notifications,
+    runs.filter(
+      (run) => run.status === "completed" || run.status === "failed",
+    ),
+  );
 }
 
 interface PendingConnectionOperation {
@@ -272,15 +393,18 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   >();
 
   async function deliverNotifications(): Promise<void> {
-    const [notifications, runs] = await Promise.all([
-      ctx.transport.listNotifications?.() ?? Promise.resolve([]),
-      ctx.transport.listRuns?.() ?? Promise.resolve([]),
-    ]);
-    const projected = projectCompletedRuns(
-      web.value.messages,
-      notifications,
-      runs,
-    );
+    const runs = await (ctx.transport.listRuns?.() ?? Promise.resolve([]));
+    projectDurableRuns(web.value, [], runs);
+    let notifications: ClientNotificationIntent[];
+    try {
+      notifications = await (ctx.transport.listNotifications?.() ??
+        Promise.resolve([]));
+    } catch (error) {
+      web.value.settingsError =
+        error instanceof Error ? error.message : "Could not load notifications";
+      return;
+    }
+    const projected = projectDurableRuns(web.value, notifications, runs);
     if (!ctx.transport.acknowledgeNotification) return;
     for (const notification of notifications) {
       if (!projected.has(notification.notificationId)) {
@@ -588,10 +712,50 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           : error instanceof Error
             ? error.message
             : "Agent request failed";
+        try {
+          await deliverNotifications();
+        } catch (projectionError) {
+          web.value.settingsError =
+            projectionError instanceof Error
+              ? projectionError.message
+              : "Could not restore the active Turn";
+        }
         return { accepted: true, runId: pendingRunId };
       } finally {
         activeRequest = undefined;
-        web.value.activeRunId = undefined;
+        if (
+          web.value.activeRunId === pendingRunId &&
+          web.value.activeRun?.runId !== pendingRunId
+        ) {
+          web.value.activeRunId = undefined;
+        }
+      }
+    },
+    async resumeRun(runId: string): Promise<void> {
+      if (!ctx.transport.reconcileRun) {
+        web.value.settingsError = "Turn reconciliation is unavailable";
+        return;
+      }
+      if (web.value.activeRun?.runId !== runId) return;
+      web.value.activeRun = {
+        runId,
+        status: "running",
+        message: "Reconciliation requested; waiting for durable progress.",
+        canResume: false,
+      };
+      try {
+        await ctx.transport.reconcileRun(runId);
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error ? error.message : "Reconciliation failed";
+      }
+      try {
+        await deliverNotifications();
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error
+            ? error.message
+            : "Could not refresh the reconciled Turn";
       }
     },
     async abort() {

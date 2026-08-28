@@ -147,6 +147,35 @@ describe("mobile Bot projection", () => {
     });
   });
 
+  test("restores durable active and reconciliation state on mobile", async () => {
+    const state: MobileBotProjectionState = { messages: [] };
+    const controller = createController(state, {
+      listRuns: () =>
+        Promise.resolve([
+          {
+            runId: "active-run",
+            input: "Continue after reconnect",
+            events: [],
+            status: "reconciliation-required",
+            failure: "Provider result needs confirmation",
+          },
+        ]),
+    });
+
+    await controller.reload("default");
+
+    expect(state.activeRunId).toBe("active-run");
+    expect(state.activeRun).toEqual({
+      runId: "active-run",
+      status: "reconciliation-required",
+      message: "Provider result needs confirmation",
+      canResume: true,
+    });
+    expect(state.messages[1]).toMatchObject({
+      status: "reconciliation-required",
+    });
+  });
+
   test("invalidates synchronously and rejects stale Bot responses", async () => {
     const oldSettings = deferred<ReturnType<typeof initializeBotSettingsV1>>();
     const oldRuns = deferred<ClientRun[]>();
@@ -163,6 +192,12 @@ describe("mobile Bot projection", () => {
         },
       ],
       activeRunId: "old-run",
+      activeRun: {
+        runId: "old-run",
+        status: "running",
+        message: "Running",
+        canResume: false,
+      },
       error: "old error",
       settingsError: "old settings error",
     };
@@ -190,6 +225,7 @@ describe("mobile Bot projection", () => {
     expect(state).toMatchObject({ messages: [] });
     expect(state.botSettings).toBeUndefined();
     expect(state.activeRunId).toBeUndefined();
+    expect(state.activeRun).toBeUndefined();
 
     const newLoad = controller.switchBot("new");
     expect(state.messages).toEqual([]);

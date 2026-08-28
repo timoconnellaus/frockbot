@@ -22,8 +22,21 @@ export interface WebChatMessage {
   runId: string;
   role: "user" | "assistant";
   text: string;
-  status: "streaming" | "completed" | "aborted" | "error";
+  status:
+    | "streaming"
+    | "completed"
+    | "aborted"
+    | "error"
+    | "interrupted"
+    | "reconciliation-required";
   tools: WebToolActivity[];
+}
+
+export interface WebActiveRun {
+  runId: string;
+  status: "running" | "interrupted" | "reconciliation-required";
+  message: string;
+  canResume: boolean;
 }
 
 export interface SendPromptResult {
@@ -52,6 +65,7 @@ export interface FrockBotWebData {
   connectionsAvailable: boolean;
   messages: WebChatMessage[];
   activeRunId?: string;
+  activeRun?: WebActiveRun;
   error?: string;
   botSettings?: BotSettingsViewV1;
   userSettings?: UserSettingsViewV1;
@@ -71,6 +85,7 @@ export interface FrockBotWebData {
   openConnectionAuthorization(url: string): Promise<void>;
   revokeConnection(packageId: string, connectionId: string): Promise<void>;
   sendPrompt(text: string): Promise<SendPromptResult>;
+  resumeRun(runId: string): Promise<void>;
   abort(): Promise<void>;
   restart(): Promise<void>;
 }

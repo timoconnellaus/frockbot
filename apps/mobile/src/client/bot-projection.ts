@@ -3,13 +3,17 @@ import type {
   ClientRun,
 } from "@frockbot/client-core";
 import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
-import { projectCompletedRuns } from "@frockbot/plugin-shell/client";
-import type { WebChatMessage } from "@frockbot/plugin-shell/shared";
+import { projectDurableRuns } from "@frockbot/plugin-shell/client";
+import type {
+  WebActiveRun,
+  WebChatMessage,
+} from "@frockbot/plugin-shell/shared";
 
 export interface MobileBotProjectionState {
   botSettings?: BotSettingsViewV1;
   messages: WebChatMessage[];
   activeRunId?: string;
+  activeRun?: WebActiveRun;
   error?: string;
   settingsError?: string;
 }
@@ -62,6 +66,7 @@ export class MobileBotProjectionController {
     state.botSettings = undefined;
     state.messages = [];
     state.activeRunId = undefined;
+    state.activeRun = undefined;
     state.error = undefined;
     state.settingsError = undefined;
     return this.#load(this.currentToken());
@@ -114,7 +119,7 @@ export class MobileBotProjectionController {
       return;
     }
     if (!this.isCurrent(token)) return;
-    projectCompletedRuns(this.#dependencies.state().messages, [], runs);
+    projectDurableRuns(this.#dependencies.state(), [], runs);
     await this.#deliverNotifications(token, runs);
   }
 
@@ -136,8 +141,8 @@ export class MobileBotProjectionController {
     }
     if (!this.isCurrent(token)) return;
 
-    const projected = projectCompletedRuns(
-      this.#dependencies.state().messages,
+    const projected = projectDurableRuns(
+      this.#dependencies.state(),
       notifications,
       runs,
     );

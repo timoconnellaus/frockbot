@@ -314,9 +314,23 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
           </article>
         </section>
 
-        <div v-if="state.error" class="error-banner" role="alert">
-          <span>{{ state.error }}</span>
-          <button v-if="state.connection !== 'ready'" @click="web.restart()">
+        <div
+          v-if="state.error || state.activeRun"
+          class="error-banner"
+          :role="state.error && !state.activeRun ? 'alert' : 'status'"
+        >
+          <span>{{ state.activeRun?.message ?? state.error }}</span>
+          <button
+            v-if="state.activeRun?.canResume"
+            type="button"
+            @click="web.resumeRun(state.activeRun.runId)"
+          >
+            Resume Turn
+          </button>
+          <button
+            v-else-if="state.error && state.connection !== 'ready'"
+            @click="web.restart()"
+          >
             Restart agent
           </button>
         </div>
@@ -329,7 +343,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
                 ? `Message ${botName}`
                 : 'Waiting for Cordis…'
             "
-            :disabled="state.connection !== 'ready'"
+            :disabled="state.connection !== 'ready' || isRunning"
             rows="1"
             @keydown="handleComposerKeydown"
           />
