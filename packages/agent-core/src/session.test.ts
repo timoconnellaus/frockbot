@@ -1,9 +1,26 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Context } from "cordis";
-import { SessionStore, type SessionStoreConfig } from "./session.js";
-import type { NormalizedModelRequest, SessionEvent } from "./types.js";
+import {
+  SessionStore,
+  type SessionStoreConfig,
+  validateToolOccurrenceJournal,
+} from "./session.js";
+import type {
+  NormalizedModelRequest,
+  SessionEvent,
+  SessionEventInput,
+} from "./types.js";
 
 const roots: Context[] = [];
+const timestamp = "2026-08-29T00:00:00.000Z";
+
+function durableEvents(inputs: SessionEventInput[]): SessionEvent[] {
+  return inputs.map((input, seq) => ({
+    ...input,
+    seq,
+    timestamp,
+  })) as SessionEvent[];
+}
 
 async function createStore(
   initialSessions?: Readonly<Record<string, readonly SessionEvent[]>>,
@@ -20,6 +37,170 @@ afterEach(async () => {
 });
 
 describe("SessionStore", () => {
+  test("accepts resumable tool crash states only while their step is open", () => {
+    const assistant = [
+      { type: "turn/start" as const, turn: 1 },
+      { type: "step/start" as const, turn: 1, step: 1 },
+      {
+        type: "assistant/message" as const,
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "",
+        toolCalls: [
+          { id: "provider-call", name: "write", input: { value: "x" } },
+        ],
+      },
+    ] satisfies SessionEventInput[];
+    const intent = {
+      type: "tool/call" as const,
+      turn: 1,
+      step: 1,
+      occurrenceId: "tool:1:1:0",
+      name: "write",
+      input: { value: "x" },
+    } satisfies SessionEventInput;
+
+    const unjournaled = validateToolOccurrenceJournal(
+      durableEvents(assistant),
+    ).get("tool:1:1:0");
+    expect(unjournaled?.intent).toBeUndefined();
+    expect(unjournaled?.result).toBeUndefined();
+    const journaled = validateToolOccurrenceJournal(
+      durableEvents([...assistant, intent]),
+    ).get("tool:1:1:0");
+    expect(journaled?.intent).toMatchObject(intent);
+    expect(journaled?.result).toBeUndefined();
+  });
+
+  test.each([
+    [
+      "tool intent after step end",
+      [
+        { type: "turn/start" as const, turn: 1 },
+        { type: "step/start" as const, turn: 1, step: 1 },
+        {
+          type: "assistant/message" as const,
+          turn: 1,
+          step: 1,
+          requestId: "request-1",
+          text: "",
+          toolCalls: [
+            { id: "provider-call", name: "write", input: { value: "x" } },
+          ],
+        },
+        {
+          type: "step/end" as const,
+          turn: 1,
+          step: 1,
+          outcome: "completed" as const,
+        },
+        {
+          type: "tool/call" as const,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "write",
+          input: { value: "x" },
+        },
+      ],
+      "was not settled before step end",
+    ],
+    [
+      "tool result after turn end",
+      [
+        { type: "turn/start" as const, turn: 1 },
+        { type: "step/start" as const, turn: 1, step: 1 },
+        {
+          type: "assistant/message" as const,
+          turn: 1,
+          step: 1,
+          requestId: "request-1",
+          text: "",
+          toolCalls: [
+            { id: "provider-call", name: "write", input: { value: "x" } },
+          ],
+        },
+        {
+          type: "tool/call" as const,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "write",
+          input: { value: "x" },
+        },
+        {
+          type: "tool/result" as const,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "write",
+          content: "done",
+          isError: false,
+          status: "completed" as const,
+        },
+        {
+          type: "step/end" as const,
+          turn: 1,
+          step: 1,
+          outcome: "completed" as const,
+        },
+        { type: "turn/end" as const, turn: 1, outcome: "completed" as const },
+        {
+          type: "tool/result" as const,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "write",
+          content: "duplicate",
+          isError: false,
+          status: "completed" as const,
+        },
+      ],
+      "outside its open step",
+    ],
+    [
+      "mismatched step end",
+      [
+        { type: "turn/start" as const, turn: 1 },
+        { type: "step/start" as const, turn: 1, step: 1 },
+        {
+          type: "step/end" as const,
+          turn: 1,
+          step: 2,
+          outcome: "completed" as const,
+        },
+      ],
+      "ended without its matching start",
+    ],
+    [
+      "turn end with an open step",
+      [
+        { type: "turn/start" as const, turn: 1 },
+        { type: "step/start" as const, turn: 1, step: 1 },
+        { type: "turn/end" as const, turn: 1, outcome: "completed" as const },
+      ],
+      "ended while step 1 is open",
+    ],
+    [
+      "nested turn start",
+      [
+        { type: "turn/start" as const, turn: 1 },
+        { type: "turn/start" as const, turn: 2 },
+      ],
+      "started while turn 1 is open",
+    ],
+  ])(
+    "rejects adversarial lifecycle ordering: %s",
+    (_label, inputs, message) => {
+      expect(() =>
+        validateToolOccurrenceJournal(
+          durableEvents(inputs as SessionEventInput[]),
+        ),
+      ).toThrow(message as string);
+    },
+  );
+
   test("records exact requests and derives model messages", async () => {
     const root = await createStore();
     const session = root.sessions.create("session-1");

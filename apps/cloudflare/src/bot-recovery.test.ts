@@ -81,15 +81,23 @@ describe("Bot run recovery", () => {
   });
 
   test("fails recovery when the durable Turn ended unsuccessfully", () => {
-    const ended = {
-      type: "turn/end" as const,
-      seq: 0,
-      timestamp: "2026-08-28T00:00:00.000Z",
-      turn: 1,
-      outcome: "model-error" as const,
-    };
+    const events = [
+      {
+        type: "turn/start" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "turn/end" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        outcome: "model-error" as const,
+      },
+    ] satisfies SessionEvent[];
 
-    expect(planBotRunRecovery(run([ended]), [ended])).toEqual({
+    expect(planBotRunRecovery(run(events), events)).toEqual({
       kind: "fail",
       failure: "Bot turn ended with outcome model-error",
     });

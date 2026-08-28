@@ -1392,7 +1392,7 @@ describe("AgentLoop", () => {
     });
   });
 
-  test("does not request another model after a result without durable intent", async () => {
+  test("does not request another model after tool events cross step closure", async () => {
     const timestamp = "2026-08-28T00:00:00.000Z";
     const call = {
       id: "provider-call",
@@ -1425,6 +1425,20 @@ describe("AgentLoop", () => {
         toolCalls: [call],
       },
       {
+        type: "step/end",
+        turn: 1,
+        step: 1,
+        outcome: "completed",
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: call.name,
+        input: call.input,
+      },
+      {
         type: "tool/result",
         turn: 1,
         step: 1,
@@ -1434,7 +1448,6 @@ describe("AgentLoop", () => {
         isError: false,
         status: "completed",
       },
-      { type: "step/end", turn: 1, step: 1, outcome: "completed" },
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
     let modelRequests = 0;
     let toolExecutions = 0;

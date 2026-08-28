@@ -93,8 +93,21 @@ describe("Bot recovery", () => {
     };
     const events = [
       {
-        type: "assistant/message" as const,
+        type: "turn/start" as const,
         seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "step/start" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+      },
+      {
+        type: "assistant/message" as const,
+        seq: 2,
         timestamp: "2026-08-28T00:00:00.000Z",
         turn: 1,
         step: 1,
@@ -103,8 +116,16 @@ describe("Bot recovery", () => {
         toolCalls: [],
       },
       {
+        type: "step/end" as const,
+        seq: 3,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        step: 1,
+        outcome: "completed" as const,
+      },
+      {
         type: "turn/end" as const,
-        seq: 1,
+        seq: 4,
         timestamp: "2026-08-28T00:00:01.000Z",
         turn: 1,
         outcome: "completed" as const,
@@ -301,8 +322,21 @@ describe("Bot recovery", () => {
   test("fails an ended step whose tool result has no durable intent", () => {
     const events = [
       {
-        type: "assistant/message" as const,
+        type: "turn/start" as const,
         seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "step/start" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+      },
+      {
+        type: "assistant/message" as const,
+        seq: 2,
         timestamp: "2026-08-28T00:00:00.000Z",
         turn: 1,
         step: 1,
@@ -314,7 +348,7 @@ describe("Bot recovery", () => {
       },
       {
         type: "tool/result" as const,
-        seq: 1,
+        seq: 3,
         timestamp: "2026-08-28T00:00:01.000Z",
         turn: 1,
         step: 1,
@@ -326,7 +360,7 @@ describe("Bot recovery", () => {
       },
       {
         type: "step/end" as const,
-        seq: 2,
+        seq: 4,
         timestamp: "2026-08-28T00:00:02.000Z",
         turn: 1,
         step: 1,
@@ -349,6 +383,98 @@ describe("Bot recovery", () => {
       kind: "fail",
       failure:
         'Invalid durable tool journal: tool occurrence "tool:1:1:0" has a result without intent',
+    });
+  });
+
+  test("rejects tool effects journaled after their step closed", () => {
+    const events = [
+      {
+        type: "turn/start" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "step/start" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+      },
+      {
+        type: "model/request" as const,
+        seq: 2,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "completed-request",
+          provider: "provider-1",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message" as const,
+        seq: 3,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        step: 1,
+        requestId: "completed-request",
+        text: "",
+        toolCalls: [
+          { id: "provider-call", name: "echo", input: { value: "unsafe" } },
+        ],
+      },
+      {
+        type: "step/end" as const,
+        seq: 4,
+        timestamp: "2026-08-28T00:00:02.000Z",
+        turn: 1,
+        step: 1,
+        outcome: "completed" as const,
+      },
+      {
+        type: "tool/call" as const,
+        seq: 5,
+        timestamp: "2026-08-28T00:00:03.000Z",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "echo",
+        input: { value: "unsafe" },
+      },
+      {
+        type: "tool/result" as const,
+        seq: 6,
+        timestamp: "2026-08-28T00:00:04.000Z",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "echo",
+        content: "unsafe",
+        isError: false,
+        status: "completed" as const,
+      },
+    ] satisfies SessionEvent[];
+    const run = {
+      runId: "run-post-closure-tool",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "hello",
+      events,
+      status: "running",
+      phase: "executing",
+      previousEventCount: 0,
+    } satisfies StoredRun;
+
+    expect(planBotRunRecovery(run, events)).toEqual({
+      kind: "fail",
+      failure:
+        'Invalid durable tool journal: tool occurrence "tool:1:1:0" was not settled before step end',
     });
   });
 
@@ -423,8 +549,21 @@ describe("Bot recovery", () => {
   test("keeps a journaled tool effect in reconciliation", () => {
     const events = [
       {
-        type: "model/request" as const,
+        type: "turn/start" as const,
         seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "step/start" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+      },
+      {
+        type: "model/request" as const,
+        seq: 2,
         timestamp: "2026-08-28T00:00:00.000Z",
         turn: 1,
         step: 1,
@@ -439,7 +578,7 @@ describe("Bot recovery", () => {
       },
       {
         type: "assistant/message" as const,
-        seq: 1,
+        seq: 3,
         timestamp: "2026-08-28T00:00:01.000Z",
         turn: 1,
         step: 1,
@@ -451,7 +590,7 @@ describe("Bot recovery", () => {
       },
       {
         type: "tool/call" as const,
-        seq: 2,
+        seq: 4,
         timestamp: "2026-08-28T00:00:02.000Z",
         turn: 1,
         step: 1,

@@ -17,8 +17,92 @@ export function validateToolOccurrenceJournal(
   events: readonly SessionEvent[],
 ): ReadonlyMap<string, ToolOccurrenceJournalEntry> {
   const journal = new Map<string, ToolOccurrenceJournalEntry>();
+  const startedTurns = new Set<number>();
+  const startedSteps = new Set<string>();
+  let openTurn: number | undefined;
+  let openStep:
+    { turn: number; step: number; occurrences: Set<string> } | undefined;
   for (const event of events) {
+    if (event.type === "turn/start") {
+      if (openTurn !== undefined) {
+        throw new Error(
+          `turn ${event.turn} started while turn ${openTurn} is open`,
+        );
+      }
+      if (startedTurns.has(event.turn)) {
+        throw new Error(`turn ${event.turn} started more than once`);
+      }
+      startedTurns.add(event.turn);
+      openTurn = event.turn;
+      continue;
+    }
+    if (event.type === "turn/end") {
+      if (openTurn !== event.turn) {
+        throw new Error(`turn ${event.turn} ended without its matching start`);
+      }
+      if (openStep) {
+        throw new Error(
+          `turn ${event.turn} ended while step ${openStep.step} is open`,
+        );
+      }
+      openTurn = undefined;
+      continue;
+    }
+    if (event.type === "step/start") {
+      if (openTurn !== event.turn) {
+        throw new Error(
+          `step ${event.turn}:${event.step} started outside its open turn`,
+        );
+      }
+      if (openStep) {
+        throw new Error(
+          `step ${event.turn}:${event.step} started while step ${openStep.turn}:${openStep.step} is open`,
+        );
+      }
+      const key = `${event.turn}:${event.step}`;
+      if (startedSteps.has(key)) {
+        throw new Error(`step ${key} started more than once`);
+      }
+      startedSteps.add(key);
+      openStep = {
+        turn: event.turn,
+        step: event.step,
+        occurrences: new Set(),
+      };
+      continue;
+    }
+    if (event.type === "step/end") {
+      if (
+        !openStep ||
+        openStep.turn !== event.turn ||
+        openStep.step !== event.step
+      ) {
+        throw new Error(
+          `step ${event.turn}:${event.step} ended without its matching start`,
+        );
+      }
+      const unsettled = [...openStep.occurrences]
+        .map((occurrenceId) => journal.get(occurrenceId)!)
+        .find((entry) => !entry.intent || !entry.result);
+      if (unsettled) {
+        throw new Error(
+          `tool occurrence "${unsettled.occurrence.occurrenceId}" was not settled before step end`,
+        );
+      }
+      openStep = undefined;
+      continue;
+    }
     if (event.type === "assistant/message") {
+      if (event.toolCalls.length === 0) continue;
+      if (
+        !openStep ||
+        openStep.turn !== event.turn ||
+        openStep.step !== event.step
+      ) {
+        throw new Error(
+          `assistant tool calls for ${event.turn}:${event.step} are outside their open step`,
+        );
+      }
       for (const occurrence of toolCallOccurrences(
         event.turn,
         event.step,
@@ -30,10 +114,20 @@ export function validateToolOccurrenceJournal(
           );
         }
         journal.set(occurrence.occurrenceId, { occurrence });
+        openStep.occurrences.add(occurrence.occurrenceId);
       }
       continue;
     }
     if (event.type !== "tool/call" && event.type !== "tool/result") continue;
+    if (
+      !openStep ||
+      openStep.turn !== event.turn ||
+      openStep.step !== event.step
+    ) {
+      throw new Error(
+        `tool occurrence "${event.occurrenceId}" is outside its open step`,
+      );
+    }
     const entry = journal.get(event.occurrenceId);
     if (
       !entry ||
