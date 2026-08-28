@@ -704,6 +704,112 @@ describe("Connection provider reconciliation alarms", () => {
     });
   });
 
+  test("serializes simultaneous Link effects for one Connection Type", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-composio",
+        expectedRevision: 0,
+        packageId: "composio",
+        version: "0.0.1",
+      },
+    });
+    const firstLink = deferred<Response>();
+    const firstLinkStarted = deferred<void>();
+    let createCalls = 0;
+    const client = new ComposioClient({
+      apiKey: "secret",
+      fetch: () => {
+        createCalls += 1;
+        if (createCalls === 1) {
+          firstLinkStarted.resolve();
+          return firstLink.promise;
+        }
+        return Promise.resolve(
+          Response.json({
+            connected_account_id: "account-2",
+            redirect_url: "https://connect.example/second",
+            expires_at: new Date(Date.now() + 60_000).toISOString(),
+          }),
+        );
+      },
+    });
+    const coordinator = new ComposioConnectionCoordinator({
+      client,
+      store: contribution,
+      callbackBaseUrl: "https://app.example.com",
+      connectionTypes: {
+        gmail: {
+          authConfigId: "gmail-auth",
+          displayName: "Gmail",
+          toolkitSlug: "gmail",
+        },
+      },
+    });
+    const first = coordinator.start("user-1", {
+      commandId: "first-command",
+      connectionTypeId: "gmail",
+      callbackState: "first-signed-state",
+      authorizationStateId: "first-state",
+      authorizationStateExpiresAt: Date.now() + 60_000,
+    });
+    await firstLinkStarted.promise;
+
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "second-command",
+        connectionTypeId: "gmail",
+        callbackState: "second-signed-state",
+        authorizationStateId: "second-state",
+        authorizationStateExpiresAt: Date.now() + 60_000,
+      }),
+    ).rejects.toThrow(
+      "Previous Connection authorization requires reconciliation",
+    );
+    expect(createCalls).toBe(1);
+
+    firstLink.resolve(
+      Response.json({
+        connected_account_id: "account-1",
+        redirect_url: "https://connect.example/first",
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    );
+    await expect(first).resolves.toMatchObject({
+      status: "authorization-required",
+      connectionId: "first-command",
+    });
+    await expect(
+      coordinator.fail(
+        "user-1",
+        "first-command",
+        "Authorization failed",
+        "first-state",
+      ),
+    ).resolves.toMatchObject({ status: "failed" });
+
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "second-command",
+        connectionTypeId: "gmail",
+        callbackState: "second-signed-state",
+        authorizationStateId: "second-state",
+        authorizationStateExpiresAt: Date.now() + 60_000,
+      }),
+    ).resolves.toMatchObject({
+      status: "authorization-required",
+      connectionId: "second-command",
+    });
+    expect(createCalls).toBe(2);
+  });
+
   test("retires a pending account after a lost Link response", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution(
@@ -823,7 +929,9 @@ describe("Connection provider reconciliation alarms", () => {
         commandId: "replacement-command",
         authorizationStateId: "replacement-state",
       }),
-    ).rejects.toThrow("Previous Connection cleanup requires reconciliation");
+    ).rejects.toThrow(
+      "Previous Connection authorization requires reconciliation",
+    );
     expect(createCalls).toBe(1);
 
     await makeReconciliationDue(storage);

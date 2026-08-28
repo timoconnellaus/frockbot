@@ -227,6 +227,30 @@ function connectionAuthorizationExpired(
   return stateExpired || linkExpired;
 }
 
+function hasUnresolvedLinkEffect(
+  connection: UserSettingsViewV1["connections"][number],
+): boolean {
+  const metadata = connection.safeMetadata;
+  if (
+    connection.state === "authorizing" &&
+    typeof metadata.connectedAccountId !== "string"
+  ) {
+    return true;
+  }
+  if (
+    connection.state === "reconciliation-required" &&
+    metadata.reconciliationOperation === "link"
+  ) {
+    return true;
+  }
+  return (
+    metadata.lostLinkCleanup === true &&
+    (connection.state === "revoking" ||
+      (connection.state === "reconciliation-required" &&
+        metadata.reconciliationOperation === "revoke"))
+  );
+}
+
 const initialState = (): UserSettingsViewV1 => ({
   schemaVersion: 1,
   revision: 0,
@@ -399,17 +423,15 @@ export class ComposioUserBackendContribution {
         (connection) => connection.connectionId === input.connectionId,
       );
       if (existing) return false;
-      const cleanup = current.connections.find(
+      const unresolved = current.connections.find(
         (connection) =>
           connection.packageId === input.packageId &&
           connection.connectionTypeId === input.connectionTypeId &&
-          connection.safeMetadata.lostLinkCleanup === true &&
-          connection.state !== "revoked" &&
-          connection.state !== "failed",
+          hasUnresolvedLinkEffect(connection),
       );
-      if (cleanup) {
+      if (unresolved) {
         throw new Error(
-          "Previous Connection cleanup requires reconciliation",
+          "Previous Connection authorization requires reconciliation",
         );
       }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;

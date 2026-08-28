@@ -902,9 +902,8 @@ export class ComposioConnectionCoordinator {
       userId,
       input.connectionId,
     );
-    if (current?.state === "ready") {
-      return { returnTarget, status: "ready", nativeReturnNonce };
-    }
+    const durable = current ? durableCompletionResult(current) : undefined;
+    if (durable) return durable;
     throw new Error("Connection state changed during authorization completion");
   }
 }

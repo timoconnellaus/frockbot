@@ -77,6 +77,44 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     return Promise.resolve(true);
   }
 
+  claimLostLinkCleanup(
+    _userId: string,
+    connectionId: string,
+    safeMetadata: ConnectionView["safeMetadata"],
+  ): Promise<{
+    phase: "provider" | "pending" | "done";
+    connection: ConnectionView;
+  }> {
+    const current = this.connections.get(connectionId);
+    if (!current) throw new Error("missing connection");
+    if (current.state === "revoked") {
+      return Promise.resolve({ phase: "done", connection: current });
+    }
+    if (
+      current.safeMetadata.lostLinkCleanup === true &&
+      (current.state === "revoking" ||
+        (current.state === "reconciliation-required" &&
+          current.safeMetadata.reconciliationOperation === "revoke"))
+    ) {
+      return Promise.resolve({ phase: "pending", connection: current });
+    }
+    const claimed: ConnectionView = {
+      ...current,
+      state: "revoking",
+      safeMetadata: {
+        ...current.safeMetadata,
+        ...safeMetadata,
+        authorizationStateConsumed: true,
+        lostLinkCleanup: true,
+        revocationRequested: true,
+        reconciliationOperation: "revoke",
+        revocationProviderCompleted: false,
+      },
+    };
+    this.connections.set(connectionId, claimed);
+    return Promise.resolve({ phase: "provider", connection: claimed });
+  }
+
   finishConnectionAuthorization(
     _userId: string,
     connectionId: string,
@@ -702,7 +740,7 @@ describe("ComposioConnectionCoordinator", () => {
     expect(reconciliationReads).toBe(2);
   });
 
-  test("keeps an INITIALIZING recovered account in Link reconciliation", async () => {
+  test("moves an INITIALIZING recovered account into cleanup", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
       connectionId: "connection-1",
@@ -727,17 +765,22 @@ describe("ComposioConnectionCoordinator", () => {
       },
     });
     let reads = 0;
+    let revokeCalls = 0;
     const coordinator = new ComposioConnectionCoordinator({
       client: new ComposioClient({
         apiKey: "secret",
-        fetch: () => {
+        fetch: (input) => {
+          if (String(input).endsWith("/connected_accounts/ca_123/revoke")) {
+            revokeCalls += 1;
+            return Promise.resolve(Response.json({ success: true }));
+          }
           reads += 1;
           return Promise.resolve(
             Response.json({
               items: [
                 {
                   id: "ca_123",
-                  status: reads === 1 ? "INITIALIZING" : "ACTIVE",
+                  status: "INITIALIZING",
                   toolkit: { slug: "gmail" },
                   alias: "connection-1",
                 },
@@ -761,19 +804,22 @@ describe("ComposioConnectionCoordinator", () => {
       state: "reconciliation-required",
       safeMetadata: {
         connectedAccountId: "ca_123",
-        reconciliationOperation: "link",
+        authorizationStateConsumed: true,
+        lostLinkCleanup: true,
+        reconciliationOperation: "revoke",
       },
     });
+    expect(reads).toBe(1);
+    expect(revokeCalls).toBe(1);
 
     await expect(
       coordinator.start("user-1", {
         commandId: "connection-1",
         connectionTypeId: "gmail",
       }),
-    ).resolves.toMatchObject({
-      connectionId: "connection-1",
-    });
-    expect(reads).toBe(2);
+    ).rejects.toThrow("requires reconciliation");
+    expect(reads).toBe(1);
+    expect(revokeCalls).toBe(1);
   });
 
   test("reconciles a persisted Link whose callback state expired first", async () => {
@@ -1394,6 +1440,74 @@ describe("ComposioConnectionCoordinator", () => {
       coordinator.fail("user-1", "connection-1", "stale failure", "state-1"),
     ).resolves.toMatchObject({ status: "ready" });
     expect(store.connections.get("connection-1")?.state).toBe("ready");
+  });
+
+  test("reports durable failure when success loses the callback race", async () => {
+    const store = new MemoryConnectionStore();
+    await store.startConnection("user-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await store.updateConnection("user-1", "connection-1", {
+      state: "authorizing",
+      safeMetadata: {
+        authorizationStateId: "state-1",
+        authorizationStateExpiresAt: Date.now() + 60_000,
+        connectedAccountId: "ca_123",
+      },
+    });
+    let releaseLookup!: (response: Response) => void;
+    let markLookupStarted!: () => void;
+    const lookup = new Promise<Response>((resolve) => {
+      releaseLookup = resolve;
+    });
+    const lookupStarted = new Promise<void>((resolve) => {
+      markLookupStarted = resolve;
+    });
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: () => {
+          markLookupStarted();
+          return lookup;
+        },
+      }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+    });
+
+    const completion = coordinator.complete("user-1", {
+      connectionId: "connection-1",
+      connectedAccountId: "ca_123",
+      authorizationStateId: "state-1",
+    });
+    await lookupStarted;
+    await expect(
+      coordinator.fail(
+        "user-1",
+        "connection-1",
+        "Authorization failed",
+        "state-1",
+      ),
+    ).resolves.toMatchObject({ status: "failed" });
+    releaseLookup(
+      Response.json({
+        id: "ca_123",
+        user_id: "user-1",
+        status: "ACTIVE",
+        toolkit: { slug: "gmail" },
+      }),
+    );
+
+    await expect(completion).resolves.toMatchObject({ status: "failed" });
+    expect(store.connections.get("connection-1")).toMatchObject({
+      state: "failed",
+      failure: "Authorization failed",
+      safeMetadata: { authorizationStateConsumed: true },
+    });
   });
 
   test("atomically consumes a failed callback into durable failure", async () => {

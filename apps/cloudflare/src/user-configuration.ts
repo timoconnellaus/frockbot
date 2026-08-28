@@ -100,6 +100,14 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     );
   }
 
+  async claimLostLinkCleanup(
+    ...args: Parameters<
+      ComposioUserBackendContribution["claimLostLinkCleanup"]
+    >
+  ) {
+    return (await this.contribution()).claimLostLinkCleanup(...args);
+  }
+
   async finishConnectionAuthorization(
     ...args: Parameters<
       ComposioUserBackendContribution["finishConnectionAuthorization"]
