@@ -87,6 +87,7 @@
   .brand { display: inline-flex; align-items: center; gap: 12px; flex: none; }
   .brand img { border-radius: 50%; object-fit: cover; }
   .brand-name { font-family: "Archivo Black", "Arial Black", sans-serif; font-size: 1.45rem; letter-spacing: -.045em; }
+  .brand-accent { color: var(--pink); }
   .brand-note { border-left: 1px solid var(--line); color: var(--muted); font-size: .7rem; line-height: 1.25; padding-left: 14px; }
   .site-nav { display: flex; align-items: center; gap: 34px; font-size: .87rem; font-weight: 700; }
   .site-nav > a:not(.button) { position: relative; }
