@@ -18,6 +18,7 @@ import type {
   WorkerLoader,
 } from "./contracts.js";
 import { createGateway } from "./gateway.js";
+import { createImmutablePlanRequestFactory } from "./immutable-application.js";
 import { UserConfiguration } from "./user-configuration.js";
 
 export { BotState, UserConfiguration };
@@ -146,15 +147,11 @@ interface RuntimeExports {
   UserBotState(options: { props: UserScopedProps }): BotStateBinding;
 }
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
-    // workers-types cannot infer the generated local RPC stubs.
-    const runtimeExports = ctx.exports as unknown as RuntimeExports;
-    const application = await compileFoundationApplication();
-    const backendContributions = createFoundationBackendContributions(
-      application,
-      {
+const createGatewayBackendContributions =
+  createImmutablePlanRequestFactory(
+    compileFoundationApplication,
+    (application, env: Env) =>
+      createFoundationBackendContributions(application, {
         backendHost: "gateway",
         callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
         readSecret: (name) => {
@@ -173,8 +170,15 @@ export default {
             connectionId,
             compensation,
           ),
-      },
-    );
+      }),
+  );
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
+    // workers-types cannot infer the generated local RPC stubs.
+    const runtimeExports = ctx.exports as unknown as RuntimeExports;
+    const backendContributions = await createGatewayBackendContributions(env);
     const gateway = createGateway({
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
