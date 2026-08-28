@@ -9,6 +9,7 @@ import type {
   StartConnectionResult,
 } from "./backend-contracts.js";
 import { isSettledBotCompensation } from "./connection-recovery.js";
+import { reconcileComposioProviderConnection } from "./provider-reconciliation.js";
 
 export interface ComposioConnectionStore {
   isPackageInstalled(userId: string, packageId: string): Promise<boolean>;
@@ -315,15 +316,18 @@ export class ComposioConnectionCoordinator {
         existing?.state === "reconciliation-required" &&
         existing.safeMetadata.reconciliationOperation === "link"
       ) {
-        const account = (
-          await this.config.client.listConnectedAccounts(userId)
-        ).find(
-          (candidate) =>
-            candidate.alias === connectionId &&
-            candidate.toolkitSlug === admittedToolkitSlug,
+        const reconciliation = await reconcileComposioProviderConnection(
+          this.config.client,
+          {
+            operation: "link",
+            userId,
+            providerAlias: connectionId,
+            toolkitSlug: admittedToolkitSlug,
+          },
         );
-        if (account?.status === "ACTIVE") {
-          await this.config.store.recordConnectLinkResult(
+        if (reconciliation.status === "active") {
+          const account = reconciliation.account;
+          const recorded = await this.config.store.recordConnectLinkResult(
             userId,
             connectionId,
             {
@@ -339,6 +343,17 @@ export class ComposioConnectionCoordinator {
                 : {}),
             },
           );
+          if (!recorded) {
+            throw new Error(
+              "Connection authorization changed during reconciliation",
+            );
+          }
+          if (existing.safeMetadata.revocationRequested === true) {
+            await this.revoke(userId, connectionId);
+            throw new DefinitiveConnectionOperationError(
+              "Connection was revoked during authorization",
+            );
+          }
           const callbackUrl = new URL(
             "/api/plugins/composio/callback",
             this.config.callbackBaseUrl,
@@ -354,6 +369,19 @@ export class ComposioConnectionCoordinator {
             expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
             nativeReturnNonce: input.nativeReturnNonce,
           };
+        }
+        if (reconciliation.status === "failed") {
+          await this.config.store.finishConnectionAuthorization(
+            userId,
+            connectionId,
+            {
+              state: "failed",
+              failure: "Connection authorization could not be recovered",
+            },
+          );
+          throw new DefinitiveConnectionOperationError(
+            "Connection authorization failed; retry with a new operation",
+          );
         }
       }
       throw new Error("Connection authorization requires reconciliation");
@@ -472,10 +500,14 @@ export class ComposioConnectionCoordinator {
       claim.phase === "pending" &&
       connection.safeMetadata.reconciliationOperation === "revoke"
     ) {
-      const account = (
-        await this.config.client.listConnectedAccounts(userId)
-      ).find((candidate) => candidate.id === connectedAccountId);
-      if (!account || account.status !== "ACTIVE") {
+      const reconciliation = await reconcileComposioProviderConnection(
+        this.config.client,
+        { operation: "revoke", userId, connectedAccountId },
+      );
+      if (
+        reconciliation.status === "revoked" ||
+        reconciliation.status === "absent"
+      ) {
         await this.config.store.recordRevocationProviderCompleted(
           userId,
           connectionId,
@@ -617,11 +649,10 @@ export class ComposioConnectionCoordinator {
           "Composio Connection cannot complete from its current state",
         );
       }
-      const accounts = await this.config.client.listConnectedAccounts(userId);
-      const account = accounts.find(
-        (candidate) => candidate.id === input.connectedAccountId,
+      const account = await this.config.client.getConnectedAccount(
+        input.connectedAccountId,
       );
-      if (!account || account.status !== "ACTIVE") {
+      if (account.userId !== userId || account.status !== "ACTIVE") {
         throw new Error("Composio connected account is not active");
       }
       verifiedMetadata = {

@@ -33,6 +33,7 @@ export interface ConnectedAccountSummary {
   status: string;
   toolkitSlug: string;
   alias?: string;
+  userId?: string;
 }
 
 export interface ExecuteComposioToolInput {
@@ -56,6 +57,33 @@ function requiredString(value: Record<string, unknown>, key: string): string {
     throw new Error(`Composio response omitted ${key}`);
   }
   return candidate;
+}
+
+function connectedAccountSummary(
+  value: unknown,
+  requireUserId = false,
+): ConnectedAccountSummary {
+  const account = asRecord(value);
+  const toolkit = asRecord(account.toolkit);
+  const userId = requireUserId
+    ? requiredString(account, "user_id")
+    : typeof account.user_id === "string"
+      ? account.user_id
+      : undefined;
+  return {
+    id: requiredString(account, "id"),
+    status: requiredString(account, "status"),
+    toolkitSlug: requiredString(toolkit, "slug"),
+    alias: typeof account.alias === "string" ? account.alias : undefined,
+    ...(userId ? { userId } : {}),
+  };
+}
+
+export class ComposioRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`Composio request failed (${status})`);
+    this.name = "ComposioRequestError";
+  }
 }
 
 export class ComposioClient {
@@ -94,24 +122,34 @@ export class ComposioClient {
   async listConnectedAccounts(
     userId: string,
   ): Promise<ConnectedAccountSummary[]> {
-    const query = new URLSearchParams();
-    query.append("user_ids", userId);
-    const value = asRecord(
-      await this.request(`/connected_accounts?${query.toString()}`),
-    );
-    if (!Array.isArray(value.items)) {
-      throw new Error("Composio returned an invalid account list");
+    const accounts: ConnectedAccountSummary[] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < 100; page += 1) {
+      const query = new URLSearchParams();
+      query.append("user_ids", userId);
+      query.append("limit", "100");
+      if (cursor) query.append("cursor", cursor);
+      const value = asRecord(
+        await this.request(`/connected_accounts?${query.toString()}`),
+      );
+      if (!Array.isArray(value.items)) {
+        throw new Error("Composio returned an invalid account list");
+      }
+      accounts.push(
+        ...value.items.map((candidate) => connectedAccountSummary(candidate)),
+      );
+      const nextCursor = value.next_cursor;
+      if (nextCursor === undefined || nextCursor === null || nextCursor === "") {
+        return accounts;
+      }
+      if (typeof nextCursor !== "string" || seenCursors.has(nextCursor)) {
+        throw new Error("Composio returned an invalid account cursor");
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
     }
-    return value.items.map((candidate) => {
-      const account = asRecord(candidate);
-      const toolkit = asRecord(account.toolkit);
-      return {
-        id: requiredString(account, "id"),
-        status: requiredString(account, "status"),
-        toolkitSlug: requiredString(toolkit, "slug"),
-        alias: typeof account.alias === "string" ? account.alias : undefined,
-      };
-    });
+    throw new Error("Composio account pagination exceeded its limit");
   }
 
   async searchTools(
@@ -136,9 +174,14 @@ export class ComposioClient {
     });
   }
 
-  getConnectedAccount(connectedAccountId: string): Promise<unknown> {
-    return this.request(
-      `/connected_accounts/${encodeURIComponent(connectedAccountId)}`,
+  async getConnectedAccount(
+    connectedAccountId: string,
+  ): Promise<ConnectedAccountSummary> {
+    return connectedAccountSummary(
+      await this.request(
+        `/connected_accounts/${encodeURIComponent(connectedAccountId)}`,
+      ),
+      true,
     );
   }
 
@@ -178,7 +221,7 @@ export class ComposioClient {
       headers,
     });
     if (!response.ok) {
-      throw new Error(`Composio request failed (${response.status})`);
+      throw new ComposioRequestError(response.status);
     }
     return response.json();
   }

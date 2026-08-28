@@ -544,23 +544,36 @@ describe("ComposioConnectionCoordinator", () => {
     let reconciliationReads = 0;
     const client = new ComposioClient({
       apiKey: "secret",
-      fetch: (_input, init) => {
+      fetch: (input, init) => {
         if (init?.method === "POST") {
           createCalls += 1;
           return Promise.reject(new Error("response lost"));
         }
         reconciliationReads += 1;
+        const cursor = new URL(String(input)).searchParams.get("cursor");
         return Promise.resolve(
-          Response.json({
-            items: [
-              {
-                id: "ca_123",
-                status: "ACTIVE",
-                toolkit: { slug: "gmail" },
-                alias: "connection-1",
-              },
-            ],
-          }),
+          cursor
+            ? Response.json({
+                items: [
+                  {
+                    id: "ca_123",
+                    status: "ACTIVE",
+                    toolkit: { slug: "gmail" },
+                    alias: "connection-1",
+                  },
+                ],
+              })
+            : Response.json({
+                items: [
+                  {
+                    id: "ca_other",
+                    status: "ACTIVE",
+                    toolkit: { slug: "gmail" },
+                    alias: "other",
+                  },
+                ],
+                next_cursor: "page-2",
+              }),
         );
       },
     });
@@ -611,7 +624,7 @@ describe("ComposioConnectionCoordinator", () => {
     });
 
     expect(createCalls).toBe(1);
-    expect(reconciliationReads).toBe(1);
+    expect(reconciliationReads).toBe(2);
     expect(store.packagePolicyReads).toBe(1);
     expect(reconciled.redirectUrl).toContain("connected_account_id=ca_123");
     expect(store.connections.get("connection-1")?.safeMetadata).toMatchObject({
@@ -625,7 +638,7 @@ describe("ComposioConnectionCoordinator", () => {
     ).rejects.toThrow("Composio Package is not installed");
     expect(store.packagePolicyReads).toBe(2);
     expect(createCalls).toBe(1);
-    expect(reconciliationReads).toBe(1);
+    expect(reconciliationReads).toBe(2);
   });
 
   test("retires a persisted Link whose callback state expired first", async () => {
@@ -680,6 +693,70 @@ describe("ComposioConnectionCoordinator", () => {
       name: "DefinitiveConnectionOperationError",
     });
     expect(store.connections.get("connection-expired")?.state).toBe("failed");
+  });
+
+  test("routes recovered Link identity into a requested revocation", async () => {
+    const store = new MemoryConnectionStore();
+    await store.startConnection("user-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await store.updateConnection("user-1", "connection-1", {
+      state: "reconciliation-required",
+      safeMetadata: {
+        toolkitSlug: "gmail",
+        providerAlias: "connection-1",
+        authorizationStateExpiresAt: Date.now() + 60_000,
+        revocationRequested: true,
+        reconciliationOperation: "link",
+        startCommandFingerprint: `connection-start-command-v1:${JSON.stringify({
+          userId: "user-1",
+          packageId: "composio",
+          connectionTypeId: "gmail",
+          alias: null,
+          safeMetadata: { returnTarget: "browser" },
+        })}`,
+      },
+    });
+    let revokeCalls = 0;
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: (_input, init) => {
+          if (init?.method === "POST") {
+            revokeCalls += 1;
+            return Promise.resolve(Response.json({ success: true }));
+          }
+          return Promise.resolve(
+            Response.json({
+              items: [
+                {
+                  id: "ca_123",
+                  status: "ACTIVE",
+                  toolkit: { slug: "gmail" },
+                  alias: "connection-1",
+                },
+              ],
+            }),
+          );
+        },
+      }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+    });
+
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+      }),
+    ).rejects.toMatchObject({ name: "DefinitiveConnectionOperationError" });
+
+    expect(revokeCalls).toBe(1);
+    expect(store.connections.get("connection-1")?.state).toBe("revoked");
   });
 
   test("records revocation intent before the provider effect", async () => {
@@ -828,13 +905,10 @@ describe("ComposioConnectionCoordinator", () => {
         }
         return Promise.resolve(
           Response.json({
-            items: [
-              {
-                id: "ca_123",
-                status: "ACTIVE",
-                toolkit: { slug: "gmail" },
-              },
-            ],
+            id: "ca_123",
+            user_id: "user-1",
+            status: "FAILED",
+            toolkit: { slug: "gmail" },
           }),
         );
       },
@@ -856,6 +930,46 @@ describe("ComposioConnectionCoordinator", () => {
     expect(store.connections.get("connection-1")?.state).toBe(
       "reconciliation-required",
     );
+  });
+
+  test("accepts exact provider absence as definitive revocation", async () => {
+    const store = new MemoryConnectionStore();
+    await store.startConnection("user-1", {
+      connectionId: "connection-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await store.updateConnection("user-1", "connection-1", {
+      state: "ready",
+      safeMetadata: { connectedAccountId: "ca_123" },
+    });
+    let revokeCalls = 0;
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: (_input, init) => {
+          if (init?.method === "POST") {
+            revokeCalls += 1;
+            return Promise.reject(new Error("response lost"));
+          }
+          return Promise.resolve(new Response(null, { status: 404 }));
+        },
+      }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {},
+    });
+
+    await expect(coordinator.revoke("user-1", "connection-1")).rejects.toThrow(
+      "response lost",
+    );
+    await expect(
+      coordinator.revoke("user-1", "connection-1"),
+    ).resolves.toEqual({ status: "revoked" });
+
+    expect(revokeCalls).toBe(1);
+    expect(store.connections.get("connection-1")?.state).toBe("revoked");
   });
 
   test("verifies account ownership and active state before readiness", async () => {
@@ -880,14 +994,11 @@ describe("ComposioConnectionCoordinator", () => {
       fetch: () =>
         Promise.resolve(
           Response.json({
-            items: [
-              {
-                id: "ca_123",
-                status: "ACTIVE",
-                toolkit: { slug: "gmail" },
-                alias: "personal",
-              },
-            ],
+            id: "ca_123",
+            user_id: "user-1",
+            status: "ACTIVE",
+            toolkit: { slug: "gmail" },
+            alias: "personal",
           }),
         ),
     });
@@ -941,13 +1052,10 @@ describe("ComposioConnectionCoordinator", () => {
           providerLookups += 1;
           return Promise.resolve(
             Response.json({
-              items: [
-                {
-                  id: "ca_expected",
-                  status: "ACTIVE",
-                  toolkit: { slug: "gmail" },
-                },
-              ],
+              id: "ca_expected",
+              user_id: "user-1",
+              status: "ACTIVE",
+              toolkit: { slug: "gmail" },
             }),
           );
         },
@@ -1007,13 +1115,10 @@ describe("ComposioConnectionCoordinator", () => {
       fetch: () =>
         Promise.resolve(
           Response.json({
-            items: [
-              {
-                id: "ca_123",
-                status: "ACTIVE",
-                toolkit: { slug: "gmail" },
-              },
-            ],
+            id: "ca_123",
+            user_id: "user-1",
+            status: "ACTIVE",
+            toolkit: { slug: "gmail" },
           }),
         ),
     });
@@ -1209,13 +1314,10 @@ describe("ComposioConnectionCoordinator", () => {
     await coordinator.revoke("user-1", "connection-1");
     releaseLookup(
       Response.json({
-        items: [
-          {
-            id: "ca_123",
-            status: "ACTIVE",
-            toolkit: { slug: "gmail" },
-          },
-        ],
+        id: "ca_123",
+        user_id: "user-1",
+        status: "ACTIVE",
+        toolkit: { slug: "gmail" },
       }),
     );
 

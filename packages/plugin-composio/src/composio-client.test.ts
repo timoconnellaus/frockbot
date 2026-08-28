@@ -96,4 +96,113 @@ describe("ComposioClient", () => {
       "Composio request failed (401)",
     );
   });
+
+  test("follows every connected-account cursor page", async () => {
+    const requested: string[] = [];
+    const client = new ComposioClient({
+      apiKey: "secret",
+      fetch: (input) => {
+        const url = new URL(String(input));
+        requested.push(url.toString());
+        if (!url.searchParams.has("cursor")) {
+          return Promise.resolve(
+            Response.json({
+              items: [
+                {
+                  id: "ca_first",
+                  status: "INITIALIZING",
+                  toolkit: { slug: "gmail" },
+                  alias: "other",
+                },
+              ],
+              next_cursor: "page-2",
+            }),
+          );
+        }
+        return Promise.resolve(
+          Response.json({
+            items: [
+              {
+                id: "ca_second",
+                status: "ACTIVE",
+                toolkit: { slug: "gmail" },
+                alias: "target",
+              },
+            ],
+            next_cursor: null,
+          }),
+        );
+      },
+    });
+
+    const accounts = await client.listConnectedAccounts("user-1");
+
+    expect(accounts.map((account) => account.id)).toEqual([
+      "ca_first",
+      "ca_second",
+    ]);
+    expect(new URL(requested[1]!).searchParams.get("cursor")).toBe("page-2");
+    expect(new URL(requested[1]!).searchParams.get("user_ids")).toBe("user-1");
+  });
+
+  test("rejects repeated and unbounded account cursors", async () => {
+    let loopCalls = 0;
+    const looping = new ComposioClient({
+      apiKey: "secret",
+      fetch: () => {
+        loopCalls += 1;
+        return Promise.resolve(
+          Response.json({ items: [], next_cursor: "same-cursor" }),
+        );
+      },
+    });
+    await expect(looping.listConnectedAccounts("user-1")).rejects.toThrow(
+      "invalid account cursor",
+    );
+    expect(loopCalls).toBe(2);
+
+    let boundedCalls = 0;
+    const unbounded = new ComposioClient({
+      apiKey: "secret",
+      fetch: () => {
+        boundedCalls += 1;
+        return Promise.resolve(
+          Response.json({ items: [], next_cursor: `page-${boundedCalls}` }),
+        );
+      },
+    });
+    await expect(unbounded.listConnectedAccounts("user-1")).rejects.toThrow(
+      "pagination exceeded its limit",
+    );
+    expect(boundedCalls).toBe(100);
+  });
+
+  test("retrieves a known connected account by exact ID", async () => {
+    let requestedUrl = "";
+    const client = new ComposioClient({
+      apiKey: "secret",
+      fetch: (input) => {
+        requestedUrl = String(input);
+        return Promise.resolve(
+          Response.json({
+            id: "ca_exact",
+            user_id: "user-1",
+            status: "REVOKED",
+            toolkit: { slug: "gmail" },
+          }),
+        );
+      },
+    });
+
+    await expect(client.getConnectedAccount("ca_exact")).resolves.toEqual({
+      id: "ca_exact",
+      userId: "user-1",
+      status: "REVOKED",
+      toolkitSlug: "gmail",
+      alias: undefined,
+    });
+    expect(requestedUrl).toBe(
+      "https://backend.composio.dev/api/v3.1/connected_accounts/ca_exact",
+    );
+  });
 });

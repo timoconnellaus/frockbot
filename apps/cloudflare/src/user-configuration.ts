@@ -3,6 +3,7 @@ import {
   compileFoundationApplication,
   createFoundationBackendContributions,
 } from "@frockbot/application-foundation/runtime";
+import { reconcileComposioProviderConnection } from "@frockbot/plugin-composio";
 import { ComposioClient } from "@frockbot/plugin-composio/client";
 import type {
   ComposioUserBackendContribution,
@@ -25,18 +26,20 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             if (specifier !== "@frockbot/plugin-composio/user-configuration") {
               throw new Error(`Unsupported User Contribution: ${specifier}`);
             }
+            const client = () => {
+              const apiKey = this.env.COMPOSIO_API_KEY;
+              if (!apiKey) {
+                throw new Error("Composio API key is not configured");
+              }
+              return new ComposioClient({ apiKey });
+            };
             return createComposioUserBackendContribution({
               state: this.ctx,
               env: this.env,
-              listConnectedAccounts: (userId) => {
-                const apiKey = this.env.COMPOSIO_API_KEY;
-                if (!apiKey) {
-                  throw new Error("Composio API key is not configured");
-                }
-                return new ComposioClient({ apiKey }).listConnectedAccounts(
-                  userId,
-                );
-              },
+              reconcileProviderConnection: (request) =>
+                reconcileComposioProviderConnection(client(), request),
+              revokeConnectedAccount: (connectedAccountId) =>
+                client().revokeConnectedAccount(connectedAccountId),
               availablePackages: plan.packages.map((pkg) => ({
                 packageId: pkg.id,
                 version: pkg.version,
