@@ -3,6 +3,7 @@ import { app, BrowserWindow } from "electron";
 
 const browserInsets = { top: 11, right: 17, bottom: 23, left: 29 };
 const nativeInsets = { top: 13, right: 19, bottom: 27, left: 31 };
+const resultMarker = "FROCKBOT_MOBILE_LAYOUT_RESULT=";
 const sharedStyles = await readFile(
   new URL(
     "../../../../packages/plugin-shell/src/client/styles.css",
@@ -104,7 +105,9 @@ async function run() {
   );
   const browser = await measureLayout(window);
   const native = await measureLayout(window, nativeInsets);
-  process.stdout.write(`${JSON.stringify({ browser, native })}\n`);
+  process.stdout.write(
+    `${resultMarker}${JSON.stringify({ browser, native })}\n`,
+  );
   window.destroy();
   app.quit();
 }

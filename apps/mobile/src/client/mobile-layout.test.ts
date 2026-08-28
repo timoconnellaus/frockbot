@@ -18,6 +18,7 @@ type Layout = {
 
 const browserInsets: Insets = { top: 11, right: 17, bottom: 23, left: 29 };
 const nativeInsets: Insets = { top: 13, right: 19, bottom: 27, left: 31 };
+const resultMarker = "FROCKBOT_MOBILE_LAYOUT_RESULT=";
 
 async function renderLayouts(): Promise<{
   browser: Layout;
@@ -51,7 +52,16 @@ async function renderLayouts(): Promise<{
   if (exitCode !== 0) {
     throw new Error(`layout browser exited ${exitCode}: ${stderr}`);
   }
-  return JSON.parse(stdout) as { browser: Layout; native: Layout };
+  const result = stdout
+    .split(/\r?\n/u)
+    .find((line) => line.startsWith(resultMarker));
+  if (!result) {
+    throw new Error(`layout browser returned no result: ${stdout}`);
+  }
+  return JSON.parse(result.slice(resultMarker.length)) as {
+    browser: Layout;
+    native: Layout;
+  };
 }
 
 function expectRect(rect: Rect, expected: Insets): void {
