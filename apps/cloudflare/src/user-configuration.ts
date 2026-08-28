@@ -3,6 +3,7 @@ import {
   compileFoundationApplication,
   createFoundationBackendContributions,
 } from "@frockbot/application-foundation/runtime";
+import { ComposioClient } from "@frockbot/plugin-composio/client";
 import type {
   ComposioUserBackendContribution,
   StartConnectionInput,
@@ -27,6 +28,15 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             return createComposioUserBackendContribution({
               state: this.ctx,
               env: this.env,
+              listConnectedAccounts: (userId) => {
+                const apiKey = this.env.COMPOSIO_API_KEY;
+                if (!apiKey) {
+                  throw new Error("Composio API key is not configured");
+                }
+                return new ComposioClient({ apiKey }).listConnectedAccounts(
+                  userId,
+                );
+              },
               availablePackages: plan.packages.map((pkg) => ({
                 packageId: pkg.id,
                 version: pkg.version,

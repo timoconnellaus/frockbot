@@ -164,6 +164,28 @@ function writeConnectionOperations(
   }
 }
 
+function retireSettledConnectionOperations(
+  operations: Record<string, PendingConnectionOperation>,
+  settings: UserSettingsViewV1,
+): void {
+  let changed = false;
+  for (const [key, operation] of Object.entries(operations)) {
+    const connection = settings.connections.find(
+      (candidate) => candidate.connectionId === operation.commandId,
+    );
+    if (
+      connection &&
+      (connection.state === "ready" ||
+        connection.state === "failed" ||
+        connection.state === "revoked")
+    ) {
+      delete operations[key];
+      changed = true;
+    }
+  }
+  if (changed) writeConnectionOperations(operations);
+}
+
 function isDefinitiveConnectionFailure(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -353,10 +375,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         return;
       }
       try {
-        web.value.userSettings = (await ctx.transport.readConfiguration({
+        const settings = (await ctx.transport.readConfiguration({
           schemaVersion: 1,
           type: "user/get",
         })) as UserSettingsViewV1;
+        retireSettledConnectionOperations(connectionOperations, settings);
+        web.value.userSettings = settings;
         web.value.settingsError = undefined;
       } catch (error) {
         web.value.settingsError =
@@ -397,7 +421,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           }),
         ]);
         web.value.pluginCatalog = decodePluginCatalog(manifest);
-        web.value.userSettings = settings as typeof web.value.userSettings;
+        const userSettings = settings as UserSettingsViewV1;
+        retireSettledConnectionOperations(
+          connectionOperations,
+          userSettings,
+        );
+        web.value.userSettings = userSettings;
         web.value.settingsError = undefined;
       } catch (error) {
         web.value.settingsError =

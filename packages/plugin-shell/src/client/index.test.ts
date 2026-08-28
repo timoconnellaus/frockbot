@@ -233,4 +233,62 @@ describe("Connection operation reconciliation", () => {
 
     expect(opened).toEqual(["https://connect.example/authorize"]);
   });
+
+  test("retires a settled callback operation before later revocation", async () => {
+    installMemoryStorage();
+    const commandIds: string[] = [];
+    let connectionState: "ready" | "revoked" | undefined;
+    let connectionId: string | undefined;
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        startConnection: (input) => {
+          commandIds.push(input.commandId);
+          connectionId = input.commandId;
+          return Promise.resolve({
+            connectionId: input.commandId,
+            redirectUrl: "https://connect.example/authorize",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          });
+        },
+        readConfiguration: () =>
+          Promise.resolve({
+            schemaVersion: 1,
+            revision: 1,
+            profile: { name: "User" },
+            packages: [],
+            connections:
+              connectionState && connectionId
+                ? [
+                    {
+                      connectionId,
+                      packageId: "composio",
+                      connectionTypeId: "gmail",
+                      displayName: "Gmail",
+                      state: connectionState,
+                      safeMetadata: {},
+                    },
+                  ]
+                : [],
+          }),
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    await provided.value.startConnection("composio", "gmail");
+    connectionState = "ready";
+    await provided.value.loadUserSettings();
+    connectionState = "revoked";
+    await provided.value.loadUserSettings();
+    await provided.value.startConnection("composio", "gmail");
+
+    expect(commandIds).toHaveLength(2);
+    expect(commandIds[1]).not.toBe(commandIds[0]);
+  });
 });

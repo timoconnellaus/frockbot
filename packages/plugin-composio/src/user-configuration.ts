@@ -89,12 +89,21 @@ export function deriveRevocationCompensations(
 
 export interface UserConfigurationEnv {
   BOT_STATES: DurableObjectNamespace;
+  COMPOSIO_API_KEY?: string;
+}
+
+export interface ConnectionProviderAccount {
+  id: string;
+  status: string;
+  toolkitSlug: string;
+  alias?: string;
 }
 
 export interface ComposioUserBackendHost {
   state: DurableObjectState;
   env: UserConfigurationEnv;
   availablePackages: readonly { packageId: string; version: string }[];
+  listConnectedAccounts(userId: string): Promise<ConnectionProviderAccount[]>;
 }
 
 export interface StartConnectionInput {
@@ -123,6 +132,14 @@ function nextConnectionAlarm(settings: UserSettingsViewV1): number | undefined {
       typeof metadata.assignmentLeaseExpiresAt === "number"
     ) {
       values.push(metadata.assignmentLeaseExpiresAt);
+    }
+    if (
+      connection.state === "reconciliation-required" &&
+      (metadata.reconciliationOperation === "link" ||
+        metadata.reconciliationOperation === "revoke") &&
+      typeof metadata.reconciliationRetryAt === "number"
+    ) {
+      values.push(metadata.reconciliationRetryAt);
     }
     if (
       metadata.assignmentCompensationPending === true &&
@@ -201,6 +218,8 @@ export class ComposioUserBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: UserConfigurationEnv;
   private readonly availablePackages: ReadonlySet<string>;
+  private readonly listConnectedAccounts:
+    ComposioUserBackendHost["listConnectedAccounts"];
 
   constructor(host: ComposioUserBackendHost) {
     this.ctx = host.state;
@@ -210,6 +229,7 @@ export class ComposioUserBackendContribution {
         ({ packageId, version }) => `${packageId}\u0000${version}`,
       ),
     );
+    this.listConnectedAccounts = host.listConnectedAccounts;
   }
 
   async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
@@ -855,6 +875,7 @@ export class ComposioUserBackendContribution {
         safeMetadata: {
           ...connection.safeMetadata,
           reconciliationOperation: operation,
+          reconciliationRetryAt: Date.now() + CONNECTION_EFFECT_ALARM_MS,
         },
         failure,
       };
@@ -965,6 +986,7 @@ export class ComposioUserBackendContribution {
             ...connection.safeMetadata,
             reconciliationOperation: "link",
             revocationRequested: true,
+            reconciliationRetryAt: Date.now() + CONNECTION_EFFECT_ALARM_MS,
           },
           failure:
             "Connection identity requires reconciliation before revocation",
@@ -1060,7 +1082,7 @@ export class ComposioUserBackendContribution {
   async alarm(): Promise<void> {
     const userId = await this.ctx.storage.get<string>(IDENTITY_KEY);
     if (!userId) return;
-    const compensations = await this.ctx.storage.transaction(
+    const pending = await this.ctx.storage.transaction(
       async (transaction) => {
         const current =
           (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
@@ -1072,6 +1094,10 @@ export class ComposioUserBackendContribution {
           botId: string;
           compensationId: string;
           expectedGeneration: string;
+        }> = [];
+        const reconciliations: Array<{
+          connection: UserSettingsViewV1["connections"][number];
+          operation: "link" | "revoke";
         }> = [];
         const connections = current.connections.map((connection) => {
           let next = connection;
@@ -1097,8 +1123,32 @@ export class ComposioUserBackendContribution {
               safeMetadata: {
                 ...safeMetadata,
                 reconciliationOperation: operation,
+                reconciliationRetryAt: now,
               },
               failure: `${operation === "link" ? "Connect Link" : "Revocation"} outcome requires reconciliation`,
+            };
+            changed = true;
+          }
+
+          const reconciliationOperation =
+            next.safeMetadata.reconciliationOperation;
+          if (
+            next.state === "reconciliation-required" &&
+            (reconciliationOperation === "link" ||
+              reconciliationOperation === "revoke") &&
+            typeof next.safeMetadata.reconciliationRetryAt === "number" &&
+            next.safeMetadata.reconciliationRetryAt <= now
+          ) {
+            reconciliations.push({
+              connection: next,
+              operation: reconciliationOperation,
+            });
+            next = {
+              ...next,
+              safeMetadata: {
+                ...next.safeMetadata,
+                reconciliationRetryAt: now + CONNECTION_EFFECT_ALARM_MS,
+              },
             };
             changed = true;
           }
@@ -1173,11 +1223,88 @@ export class ComposioUserBackendContribution {
         } else {
           await transaction.setAlarm(Math.max(Date.now(), alarmAt));
         }
-        return pending;
+        return { compensations: pending, reconciliations };
       },
     );
 
-    for (const compensation of compensations) {
+    for (const reconciliation of pending.reconciliations) {
+      try {
+        const accounts = await this.listConnectedAccounts(userId);
+        const connection = reconciliation.connection;
+        if (reconciliation.operation === "link") {
+          const providerAlias = connection.safeMetadata.providerAlias;
+          const toolkitSlug = connection.safeMetadata.toolkitSlug;
+          const account = accounts.find(
+            (candidate) =>
+              candidate.alias === providerAlias &&
+              candidate.toolkitSlug === toolkitSlug,
+          );
+          if (account?.status === "ACTIVE") {
+            await this.finishConnectionAuthorization(
+              userId,
+              connection.connectionId,
+              {
+                state: "ready",
+                safeMetadata: {
+                  ...connection.safeMetadata,
+                  connectedAccountId: account.id,
+                  toolkitSlug: account.toolkitSlug,
+                  ...(account.alias ? { providerAlias: account.alias } : {}),
+                  authorizationStateConsumed: true,
+                },
+              },
+            );
+            continue;
+          }
+          const stateExpired =
+            typeof connection.safeMetadata.authorizationStateExpiresAt ===
+              "number" &&
+            connection.safeMetadata.authorizationStateExpiresAt <= Date.now();
+          if (
+            stateExpired ||
+            account?.status === "FAILED" ||
+            account?.status === "EXPIRED" ||
+            account?.status === "REVOKED"
+          ) {
+            await this.finishConnectionAuthorization(
+              userId,
+              connection.connectionId,
+              {
+                state: "failed",
+                safeMetadata: {
+                  ...connection.safeMetadata,
+                  authorizationStateConsumed: true,
+                },
+                failure: "Connection authorization could not be recovered",
+              },
+            );
+          }
+          continue;
+        }
+        const connectedAccountId =
+          connection.safeMetadata.connectedAccountId;
+        const account =
+          typeof connectedAccountId === "string"
+            ? accounts.find((candidate) => candidate.id === connectedAccountId)
+            : undefined;
+        if (account?.status === "REVOKED") {
+          const completed = await this.recordRevocationProviderCompleted(
+            userId,
+            connection.connectionId,
+          );
+          if (completed) {
+            await this.finishConnectionRevocation(
+              userId,
+              connection.connectionId,
+            );
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    for (const compensation of pending.compensations) {
       try {
         const id = this.env.BOT_STATES.idFromName(
           `${userId}:${compensation.botId}`,
