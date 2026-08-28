@@ -40,6 +40,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
-    "directory": "packages/webui-shell"
+    "directory": "packages/plugin-shell"
   }
 }

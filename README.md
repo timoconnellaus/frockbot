@@ -63,7 +63,7 @@ GitHub Actions runs these checks on pushes to `main` and on pull requests. Depen
 
 ## Releases
 
-Pushing a semantic-version tag such as `v0.1.0` validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, and creates a GitHub release with generated notes. Application workspaces remain private.
+Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, and creates a GitHub release with generated notes. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
 
 For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
 
@@ -74,13 +74,13 @@ After CI succeeds on a push to `main`, `ci.yml` deploys two Cloudflare Workers t
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
-The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2, and then deploys the Worker. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
+The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
 
 Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first app deployment:
 
 - D1 database `frockbot-auth`;
 - R2 buckets `frockbot-application-artifacts` and `frockbot-memory-files`;
-- Vectorize index `frockbot-memory` with 768 cosine dimensions.
+- Vectorize index `frockbot-memory` with 768 cosine dimensions (`bunx wrangler vectorize create frockbot-memory --preset @cf/baai/bge-base-en-v1.5`).
 
 Configure these GitHub `production` environment values:
 
@@ -197,16 +197,7 @@ For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `pr
 
 The desktop host must receive both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. If `FROCKBOT_APPLICATION_URL` is absent, the desktop loads its local host; if `FROCKBOT_AUTH_BASE_URL` is absent, it does not initialize hosted authentication.
 
-The memory Package has a provider-neutral document-store seam. Desktop runtimes store canonical Markdown and incremental index metadata in private durable directories on the selected Computer; the Fly adapter places them on Sprite disk. Cloudflare runtimes use R2 for canonical documents and Vectorize with 768-dimensional embeddings from `@cf/baai/bge-base-en-v1.5`. Local Cloudflare development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`.
-
-Provision production resources before the first production deployment:
-
-```bash
-cd apps/cloudflare
-bunx wrangler r2 bucket create frockbot-memory-files
-bunx wrangler vectorize create frockbot-memory \
-  --preset @cf/baai/bge-base-en-v1.5
-```
+The memory Package has a provider-neutral document-store seam. Desktop runtimes store canonical Markdown and incremental index metadata in private durable directories on the selected Computer; the Fly adapter places them on Sprite disk. Cloudflare runtimes use R2 for canonical documents and Vectorize with 768-dimensional embeddings from `@cf/baai/bge-base-en-v1.5`. Local Cloudflare development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`. The development memory resources are separate from the production names listed in [Production deployment](#production-deployment).
 
 Memory has two user-private tiers: **agent** memory belongs to one bot, while **global** memory is shared by all of that user's bots. Reads and recall check both by default; when the same path exists in both tiers, the agent copy wins. Writes default to the safer agent tier.
 

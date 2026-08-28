@@ -46,6 +46,11 @@ jobs:
         run: bun run build
 
       - name: Run Cordis proof
+        # The smoke test launches a real Electron app; the hosted runner is
+        # headless and its Chromium SUID sandbox helper is not setuid-root, so
+        # run under a virtual display with the sandbox disabled.
+        env:
+          ELECTRON_DISABLE_SANDBOX: "1"
         run: xvfb-run --auto-servernum bun run proof:cordis
 
   deploy-marketing:
@@ -151,16 +156,41 @@ jobs:
         env:
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
         run: |
-          # shellcheck disable=SC2016
-          bun -e '
-          import config from "./wrangler.jsonc";
-          config.d1_databases[0].database_id = process.env.CLOUDFLARE_D1_DATABASE_ID;
-          await Bun.write("wrangler.jsonc", `${JSON.stringify(config, null, 2)}\n`);
-          '
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'wrangler.jsonc';
+          const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+          if (!/^[0-9a-fA-F-]{36}$/.test(databaseId)) {
+            throw new Error(`CLOUDFLARE_D1_DATABASE_ID is not a database identifier: ${databaseId}`);
+          }
+          const production = /("database_name":\s*"frockbot-auth",\s*"database_id":\s*")[^"]*(")/;
+          const source = fs.readFileSync(file, 'utf8');
+          if (!production.test(source)) {
+            throw new Error(`${file} no longer contains a production frockbot-auth database_id`);
+          }
+          fs.writeFileSync(file, source.replace(production, `$1${databaseId}$2`));
+          NODE
 
       - name: Build application artifact
         working-directory: apps/cloudflare
         run: bun run artifact:build
+
+      - name: Configure application artifact
+        id: artifact
+        working-directory: apps/cloudflare
+        run: |
+          artifact_hash="$(sha256sum dist/artifacts/foundation-v1.mjs | cut -d ' ' -f 1)"
+          echo "hash=$artifact_hash" >> "$GITHUB_OUTPUT"
+          ARTIFACT_HASH="$artifact_hash" node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'wrangler.jsonc';
+          const placeholder = 'foundation-v1';
+          const source = fs.readFileSync(file, 'utf8');
+          if (!source.includes(placeholder)) {
+            throw new Error(`${file} no longer contains the default application hash ${placeholder}`);
+          }
+          fs.writeFileSync(file, source.replaceAll(placeholder, process.env.ARTIFACT_HASH));
+          NODE
 
       - name: Apply D1 migrations
         working-directory: apps/cloudflare
@@ -176,7 +206,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
           bunx wrangler r2 object put
-          frockbot-application-artifacts/applications/foundation-v1.mjs
+          frockbot-application-artifacts/applications/${{ steps.artifact.outputs.hash }}.mjs
           --file dist/artifacts/foundation-v1.mjs
           --remote
 

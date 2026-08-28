@@ -45,12 +45,19 @@ jobs:
         id: version
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release tag: $GITHUB_REF_NAME" >&2
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          VERSION="${GITHUB_REF_NAME#v}" node <<'NODE'
+          const fs = require('node:fs');
+          const version = process.env.VERSION;
+          const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
+          if (!semver.test(version)) {
+            console.error(`Invalid release tag: ${process.env.GITHUB_REF_NAME}`);
+            if (version.includes('+')) {
+              console.error('npm does not accept SemVer build metadata in package versions.');
+            }
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
 
       - name: Typecheck
         run: bun run typecheck
@@ -108,6 +115,11 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
+          npm_tag_args=()
+          if [[ "$VERSION" == *-* ]]; then
+            npm_tag_args=(--tag next)
+          fi
+
           for manifest in packages/*/package.json; do
             package_dir="${manifest%/package.json}"
             package_name="$(node -p "require('./$manifest').name")"
@@ -117,7 +129,7 @@ jobs:
               continue
             fi
 
-            npm publish --workspace "$package_dir" --access public
+            npm publish --workspace "$package_dir" --access public "${npm_tag_args[@]}"
           done
 
       - name: Create GitHub release
