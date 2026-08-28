@@ -29,6 +29,17 @@ const RESERVED_CONNECTION_IDENTIFIERS = new Set([
   "valueOf",
 ]);
 
+function decodeConnectionIdentifier(value: unknown): string | undefined {
+  if (
+    typeof value !== "string" ||
+    !ID_PATTERN.test(value) ||
+    RESERVED_CONNECTION_IDENTIFIERS.has(value)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 function decodeConnectionPathIdentifier(value: string): string | undefined {
   let decoded: string;
   try {
@@ -36,10 +47,7 @@ function decodeConnectionPathIdentifier(value: string): string | undefined {
   } catch {
     return undefined;
   }
-  if (!ID_PATTERN.test(decoded) || RESERVED_CONNECTION_IDENTIFIERS.has(decoded)) {
-    return undefined;
-  }
-  return decoded;
+  return decodeConnectionIdentifier(decoded);
 }
 
 export interface BackendRouteContext {
@@ -294,7 +302,6 @@ export function createComposioBackendContribution(
       }
       const user = callbackState?.userId ?? requiredUser(context);
       if (user instanceof Response) return user;
-      const connections = coordinator(config, user);
 
       if (isStart) {
         if (request.method !== "POST") {
@@ -306,14 +313,18 @@ export function createComposioBackendContribution(
             return jsonError(400, "Connection request must be an object");
           }
           const value = input as Record<string, unknown>;
-          if (
-            typeof value.commandId !== "string" ||
-            !ID_PATTERN.test(value.commandId)
-          ) {
+          const commandId = decodeConnectionIdentifier(value.commandId);
+          if (!commandId) {
             return jsonError(400, "commandId is invalid");
           }
-          if (typeof value.connectionTypeId !== "string") {
-            return jsonError(400, "connectionTypeId is required");
+          const connectionTypeId = decodeConnectionIdentifier(
+            value.connectionTypeId,
+          );
+          if (
+            !connectionTypeId ||
+            !Object.hasOwn(config.connectionTypes, connectionTypeId)
+          ) {
+            return jsonError(400, "connectionTypeId is invalid");
           }
           if (
             value.alias !== undefined &&
@@ -333,11 +344,12 @@ export function createComposioBackendContribution(
               ? (value.nativeReturnNonce as string)
               : undefined;
           const startInput = {
-            commandId: value.commandId,
-            connectionTypeId: value.connectionTypeId,
+            commandId,
+            connectionTypeId,
             alias: value.alias as string | undefined,
             returnTarget: context.client,
           };
+          const connections = coordinator(config, user);
           const replay = await connections.replayStart(user, startInput);
           if (replay) return Response.json(replay);
           const authorizationStateId = crypto.randomUUID();
@@ -347,7 +359,7 @@ export function createComposioBackendContribution(
               schemaVersion: 1,
               authorizationStateId,
               userId: user,
-              connectionId: value.commandId,
+              connectionId: commandId,
               returnTarget: context.client,
               expiresAt: authorizationStateExpiresAt,
               nativeReturnNonce,
@@ -377,6 +389,7 @@ export function createComposioBackendContribution(
 
       if (revokeConnectionId) {
         try {
+          const connections = coordinator(config, user);
           return Response.json(
             await connections.revoke(user, revokeConnectionId),
           );
@@ -391,6 +404,7 @@ export function createComposioBackendContribution(
       if (request.method !== "GET") {
         return jsonError(405, "method not allowed");
       }
+      const connections = coordinator(config, user);
       const connectionId = callbackState?.connectionId;
       const connectedAccountId =
         url.searchParams.get("connected_account_id") ??

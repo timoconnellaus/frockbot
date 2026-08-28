@@ -7,23 +7,10 @@ import {
   decodeExternalAuthorizationUrl,
   type DesktopApiResponse,
 } from "./desktop-api.js";
+import { resolveHostedDesktopOrigins } from "./hosted-application.js";
 
 const AUTH_PROTOCOL = "com.frockbot.desktop";
-const authBaseURL = process.env.FROCKBOT_AUTH_BASE_URL?.trim();
-const applicationURL = process.env.FROCKBOT_APPLICATION_URL?.trim();
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-
-function isLoopbackUrl(value: string | undefined): boolean {
-  if (!value) return false;
-  try {
-    return LOOPBACK_HOSTS.has(new URL(value).hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-const useDevelopmentIdentity =
-  isLoopbackUrl(authBaseURL) && isLoopbackUrl(applicationURL);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 const pendingAuthorizationReturns = new Map<
   string,
@@ -56,31 +43,32 @@ function acceptAuthorizationReturn(value: string): void {
   window?.focus();
 }
 
-export const authClient = authBaseURL
-  ? createAuthClient({
-      baseURL: authBaseURL,
-      plugins: [
-        electronClient({
-          clientID: "frockbot-desktop",
-          protocol: { scheme: AUTH_PROTOCOL },
-          signInURL: new URL("/", authBaseURL),
-          storage: storage(),
-        }),
-      ],
-    })
-  : undefined;
-
-function trustedRenderer(url: string): boolean {
-  if (!applicationURL) return false;
-  try {
-    return new URL(url).origin === new URL(applicationURL).origin;
-  } catch {
-    return false;
-  }
-}
-
 export function setupDesktopAuth(): void {
-  if (!authClient || !authBaseURL) return;
+  const { applicationUrl, authBaseUrl } = resolveHostedDesktopOrigins(
+    process.env.FROCKBOT_APPLICATION_URL,
+    process.env.FROCKBOT_AUTH_BASE_URL,
+  );
+  const useDevelopmentIdentity =
+    LOOPBACK_HOSTS.has(new URL(authBaseUrl).hostname.toLowerCase()) &&
+    LOOPBACK_HOSTS.has(new URL(applicationUrl).hostname.toLowerCase());
+  const authClient = createAuthClient({
+    baseURL: authBaseUrl,
+    plugins: [
+      electronClient({
+        clientID: "frockbot-desktop",
+        protocol: { scheme: AUTH_PROTOCOL },
+        signInURL: new URL("/", authBaseUrl),
+        storage: storage(),
+      }),
+    ],
+  });
+  const trustedRenderer = (url: string): boolean => {
+    try {
+      return new URL(url).origin === applicationUrl;
+    } catch {
+      return false;
+    }
+  };
 
   app.on("open-url", (event, url) => {
     event.preventDefault();
@@ -109,7 +97,7 @@ export function setupDesktopAuth(): void {
     if (decodedRequest.body !== undefined) {
       headers.set("content-type", "application/json");
     }
-    const response = await fetch(new URL(decodedRequest.path, authBaseURL), {
+    const response = await fetch(new URL(decodedRequest.path, authBaseUrl), {
       method: decodedRequest.method,
       headers,
       body: decodedRequest.body,

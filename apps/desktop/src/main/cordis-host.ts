@@ -156,7 +156,8 @@ class DesktopWindowService extends Service {
 export async function createCordisDesktopHost(): Promise<Context> {
   return startHostedDesktopApplication(
     process.env.FROCKBOT_APPLICATION_URL,
-    async (applicationUrl) => {
+    process.env.FROCKBOT_AUTH_BASE_URL,
+    async ({ applicationUrl }) => {
       const root = new CordisContext();
       await root.plugin(DesktopWindowService, { baseUrl: applicationUrl });
       await root.desktopWindows.create();

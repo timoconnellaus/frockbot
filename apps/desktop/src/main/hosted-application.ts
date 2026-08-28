@@ -1,25 +1,58 @@
-export function resolveHostedApplicationUrl(value: string | undefined): string {
-  const applicationUrl = value?.trim();
-  if (!applicationUrl) {
-    throw new Error(
-      "FROCKBOT_APPLICATION_URL is required for desktop startup",
-    );
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+export interface HostedDesktopOrigins {
+  applicationUrl: string;
+  authBaseUrl: string;
+}
+
+function resolveHostedOrigin(
+  value: string | undefined,
+  variableName: string,
+): string {
+  const configured = value?.trim();
+  if (!configured) {
+    throw new Error(`${variableName} is required for desktop startup`);
   }
-  let protocol: string;
+  let url: URL;
   try {
-    protocol = new URL(applicationUrl).protocol;
+    url = new URL(configured);
   } catch {
-    throw new Error("FROCKBOT_APPLICATION_URL must be a valid URL");
+    throw new Error(`${variableName} must be a valid URL`);
   }
-  if (protocol !== "http:" && protocol !== "https:") {
-    throw new Error("FROCKBOT_APPLICATION_URL must use HTTP or HTTPS");
+  if (url.username || url.password) {
+    throw new Error(`${variableName} must not contain credentials`);
   }
-  return applicationUrl;
+  if (
+    url.protocol !== "https:" &&
+    !(
+      url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname.toLowerCase())
+    )
+  ) {
+    throw new Error(`${variableName} must use HTTPS or loopback HTTP`);
+  }
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error(`${variableName} must be an origin without a path`);
+  }
+  return url.origin;
+}
+
+export function resolveHostedDesktopOrigins(
+  applicationValue: string | undefined,
+  authValue: string | undefined,
+): HostedDesktopOrigins {
+  return {
+    applicationUrl: resolveHostedOrigin(
+      applicationValue,
+      "FROCKBOT_APPLICATION_URL",
+    ),
+    authBaseUrl: resolveHostedOrigin(authValue, "FROCKBOT_AUTH_BASE_URL"),
+  };
 }
 
 export async function startHostedDesktopApplication<T>(
-  value: string | undefined,
-  start: (applicationUrl: string) => Promise<T>,
+  applicationValue: string | undefined,
+  authValue: string | undefined,
+  start: (origins: HostedDesktopOrigins) => Promise<T>,
 ): Promise<T> {
-  return start(resolveHostedApplicationUrl(value));
+  return start(resolveHostedDesktopOrigins(applicationValue, authValue));
 }

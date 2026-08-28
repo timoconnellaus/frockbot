@@ -140,3 +140,50 @@ describe("Composio revoke route", () => {
     expect(claimedConnectionId).toBe("connection-1");
   });
 });
+
+describe("Composio Connection start route", () => {
+  test("rejects reserved and unconfigured identifiers before resolving storage", async () => {
+    let storeLookups = 0;
+    const contribution = createComposioBackendContribution({
+      client: {} as ComposioClient,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      authorizationStateSecret: "state-secret",
+      connectionTypes: {
+        gmail: {
+          authConfigId: "gmail-auth",
+          displayName: "Gmail",
+          toolkitSlug: "gmail",
+        },
+      },
+      storeFor() {
+        storeLookups += 1;
+        throw new Error("invalid routes must not resolve storage");
+      },
+    });
+    const invalidCommands = [
+      { commandId: "__proto__", connectionTypeId: "gmail" },
+      { commandId: "constructor", connectionTypeId: "gmail" },
+      { commandId: "connection-1", connectionTypeId: "constructor" },
+      { commandId: "connection-1", connectionTypeId: "prototype" },
+      { commandId: "connection-1", connectionTypeId: "__proto__" },
+      { commandId: "connection-1", connectionTypeId: "unconfigured" },
+    ];
+
+    for (const input of invalidCommands) {
+      const url = new URL(
+        "https://bot.frockbot.com/api/plugins/composio/connections",
+      );
+      const response = await contribution.route(
+        new Request(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+        url,
+        { userId: "user-1", client: "browser" },
+      );
+      expect(response?.status).toBe(400);
+    }
+    expect(storeLookups).toBe(0);
+  });
+});
