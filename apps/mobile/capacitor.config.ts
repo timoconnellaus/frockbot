@@ -7,6 +7,11 @@ const config: CapacitorConfig = {
   server: {
     androidScheme: "frockbot",
   },
+  plugins: {
+    SystemBars: {
+      insetsHandling: "css",
+    },
+  },
 };
 
 export default config;
