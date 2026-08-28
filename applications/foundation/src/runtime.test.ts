@@ -13,6 +13,7 @@ describe("foundation application", () => {
     expect(first.packages.map((pkg) => pkg.id)).toEqual([
       "auth",
       "clock",
+      "computer",
       "desktop-clipboard",
       "desktop-directory-picker",
       "desktop-notifications",
@@ -28,13 +29,14 @@ describe("foundation application", () => {
     expect(first.contributions).toEqual({
       runtime: [
         "clock",
+        "computer",
         "echo",
         "fly-sprite",
         "identity",
         "memory",
         "provider-foundation",
       ],
-      client: ["auth", "clock", "fly-sprite", "shell"],
+      client: ["auth", "clock", "computer", "shell"],
       desktop: [
         "clock",
         "desktop-clipboard",

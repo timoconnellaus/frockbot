@@ -33,6 +33,7 @@ interface ModelResponse {
 
 class LoopAgent implements Agent {
   readonly id: string;
+  readonly botId: string;
   readonly session: Session;
   #ctx: Context;
   #options: AgentOptions;
@@ -51,6 +52,7 @@ class LoopAgent implements Agent {
   ) {
     this.#ctx = ctx;
     this.session = session;
+    this.botId = options.botId;
     const explicitAgentId = (
       options as AgentOptions & { agentId?: string }
     ).agentId?.trim();
@@ -334,6 +336,7 @@ class LoopAgent implements Agent {
     for (const call of calls) {
       signal.throwIfAborted();
       const context = {
+        botId: this.botId,
         agentId: this.id,
         sessionId: this.session.id,
         signal,

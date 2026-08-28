@@ -8,11 +8,11 @@ import {
   ref,
 } from "vue";
 import {
-  flySpriteComputerKey,
-  type FlySpriteComputerState,
+  computerKey,
+  type ComputerState,
 } from "../shared.ts";
 
-const computer = inject(flySpriteComputerKey) ?? useRpc<FlySpriteComputerState>();
+const computer = inject(computerKey) ?? useRpc<ComputerState>();
 const busy = ref(false);
 const expanded = ref(false);
 const state = computed(() => computer.value);
@@ -59,19 +59,19 @@ onBeforeUnmount(() =>
 </script>
 
 <template>
-  <section class="sprite-computer" :class="{ 'human-control': isHuman }">
-    <header class="sprite-heading">
+  <section class="computer-card" :class="{ 'human-control': isHuman }">
+    <header class="computer-heading">
       <div>
         <strong>Computer</strong>
-        <small>{{ state.agentId }} · {{ state.spriteName }}</small>
+        <small>{{ state.botId }} · {{ state.providerLabel }}</small>
       </div>
-      <span class="sprite-status" :class="`status-${state.phase}`">
+      <span class="computer-status" :class="`status-${state.phase}`">
         {{ statusLabel }}
       </span>
     </header>
 
     <div
-      class="sprite-screen sprite-screen-thumbnail"
+      class="computer-screen computer-screen-thumbnail"
       role="button"
       tabindex="0"
       aria-label="Open computer in full window"
@@ -81,15 +81,15 @@ onBeforeUnmount(() =>
       <iframe
         v-if="state.viewerUrl && !expanded"
         :src="state.viewerUrl"
-        title="Fly Sprite computer preview"
+        title="Computer preview"
         sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts"
         referrerpolicy="no-referrer"
       />
-      <div v-else class="sprite-placeholder">
-        <span class="sprite-mark">✦</span>
-        <strong v-if="state.phase === 'missing-token'">Computer not configured</strong>
+      <div v-else class="computer-placeholder">
+        <span class="computer-mark">✦</span>
+        <strong v-if="state.phase === 'unconfigured'">Computer not configured</strong>
         <strong v-else-if="state.phase === 'provisioning'">Preparing computer…</strong>
-        <strong v-else>Persistent cloud computer</strong>
+        <strong v-else>Persistent Computer</strong>
         <p>{{ state.message }}</p>
         <button
           v-if="state.phase === 'idle'"
@@ -121,7 +121,7 @@ onBeforeUnmount(() =>
       </div>
     </div>
 
-    <footer class="sprite-footer">
+    <footer class="computer-footer">
       <p>{{ state.message }}</p>
       <button
         v-if="isHuman"
@@ -137,23 +137,23 @@ onBeforeUnmount(() =>
   <Teleport to="body">
     <div
       v-if="expanded"
-      class="sprite-computer-overlay"
+      class="computer-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="Fly Sprite computer"
+      aria-label="Computer"
     >
-      <header class="sprite-overlay-toolbar">
-        <div class="sprite-overlay-identity">
+      <header class="computer-overlay-toolbar">
+        <div class="computer-overlay-identity">
           <strong>Computer</strong>
-          <small>{{ state.agentId }} · {{ state.spriteName }}</small>
+          <small>{{ state.botId }} · {{ state.providerLabel }}</small>
         </div>
-        <div class="sprite-overlay-actions">
-          <span class="sprite-status" :class="`status-${state.phase}`">
+        <div class="computer-overlay-actions">
+          <span class="computer-status" :class="`status-${state.phase}`">
             {{ statusLabel }}
           </span>
           <button
             v-if="hasViewer && !isHuman"
-            class="sprite-overlay-control"
+            class="computer-overlay-control"
             :disabled="busy || state.phase === 'taking-control'"
             @click="invoke(state.takeControl)"
           >
@@ -162,14 +162,14 @@ onBeforeUnmount(() =>
           </button>
           <button
             v-else-if="isHuman"
-            class="sprite-overlay-control release-button"
+            class="computer-overlay-control release-button"
             :disabled="busy"
             @click="invoke(state.releaseControl)"
           >
             Release control
           </button>
           <button
-            class="sprite-overlay-close"
+            class="computer-overlay-close"
             aria-label="Close full-window computer"
             title="Close (Esc)"
             @click="closeExpanded"
@@ -179,20 +179,20 @@ onBeforeUnmount(() =>
         </div>
       </header>
 
-      <main class="sprite-overlay-stage" :class="{ 'human-control': isHuman }">
-        <div class="sprite-screen sprite-screen-expanded">
+      <main class="computer-overlay-stage" :class="{ 'human-control': isHuman }">
+        <div class="computer-screen computer-screen-expanded">
           <iframe
             v-if="state.viewerUrl"
             :src="state.viewerUrl"
-            title="Fly Sprite computer"
+            title="Computer"
             sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts"
             referrerpolicy="no-referrer"
           />
-          <div v-else class="sprite-placeholder">
-            <span class="sprite-mark">✦</span>
-            <strong v-if="state.phase === 'missing-token'">Computer not configured</strong>
+          <div v-else class="computer-placeholder">
+            <span class="computer-mark">✦</span>
+            <strong v-if="state.phase === 'unconfigured'">Computer not configured</strong>
             <strong v-else-if="state.phase === 'provisioning'">Preparing computer…</strong>
-            <strong v-else>Persistent cloud computer</strong>
+            <strong v-else>Persistent Computer</strong>
             <p>{{ state.message }}</p>
             <button
               v-if="state.phase === 'idle'"

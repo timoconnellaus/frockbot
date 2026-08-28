@@ -75,7 +75,7 @@ describe("AgentLoop", () => {
     let turnStoppingSawCompletedJournal = false;
     let observedPromptSessionId: string | undefined;
     let observedToolIdentity:
-      | { agentId: string; sessionId: string }
+      | { botId: string; agentId: string; sessionId: string }
       | undefined;
     let root: Context;
     const provider: LlmProvider = {
@@ -120,6 +120,7 @@ describe("AgentLoop", () => {
           agentId: string;
         };
         observedToolIdentity = {
+          botId: context.botId,
           agentId: identifiedContext.agentId,
           sessionId: context.sessionId,
         };
@@ -144,6 +145,7 @@ describe("AgentLoop", () => {
       return Promise.resolve();
     });
     const agentOptions: AgentOptions & { agentId: string } = {
+      botId: "general-bot",
       agentId: "general",
       sessionId: "owner:general:conversation-1",
       provider: "scripted",
@@ -158,9 +160,11 @@ describe("AgentLoop", () => {
     expect(toolWasJournaled).toBe(true);
     expect(turnStoppingSawCompletedJournal).toBe(true);
     expect(handle.agent.id).toBe("general");
+    expect(handle.agent.botId).toBe("general-bot");
     expect(handle.agent.session.id).toBe("owner:general:conversation-1");
     expect(observedPromptSessionId).toBe("owner:general:conversation-1");
     expect(observedToolIdentity).toEqual({
+      botId: "general-bot",
       agentId: "general",
       sessionId: "owner:general:conversation-1",
     });
@@ -215,6 +219,7 @@ describe("AgentLoop", () => {
     };
     const root = await mountRuntime(provider);
     const handle = await root.agents.create({
+      botId: "bot-2",
       sessionId: "agent-2",
       provider: "blocking",
       model: "test-model",

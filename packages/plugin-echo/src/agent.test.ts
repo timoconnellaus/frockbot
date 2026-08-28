@@ -38,6 +38,7 @@ describe("echo plugin", () => {
     harness.root.llm.register({
       id: "fixture",
       async *stream() {
+        yield* [] as LlmStreamEvent[];
         throw new Error("echo middleware delegated unexpectedly");
       },
     });
@@ -58,6 +59,7 @@ describe("echo plugin", () => {
     const first = events[0];
     if (first?.type !== "tool-call") throw new Error("expected a tool call");
     const preparation = await harness.root.tools.prepare(first.call, {
+      botId: "echo-bot",
       agentId: "echo-agent",
       sessionId: "session",
       signal: controller.signal,
@@ -65,6 +67,7 @@ describe("echo plugin", () => {
     if (preparation.kind !== "ready") throw new Error("echo tool was denied");
     expect(
       await harness.root.tools.executePrepared(preparation, {
+        botId: "echo-bot",
         agentId: "echo-agent",
         sessionId: "session",
         signal: controller.signal,
