@@ -34,7 +34,7 @@ FROCKBOT_LLM_API_KEY="..." \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-To attach the built-in Fly Sprite computer package, provide a Sprites token. The first start provisions a shared persistent Linux computer with bot-scoped Chromium/noVNC desktop sessions; `FROCKBOT_SPRITE_NAME` optionally selects the shared Sprite and `FROCKBOT_AGENT_ID`/`FROCKBOT_AGENT_NAME` bind the desktop host to a bot.
+To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools, memory, and viewer UI. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory; `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names and `FROCKBOT_BOT_ID`/`FROCKBOT_AGENT_NAME` bind the desktop host to a Bot. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
 
 ```bash
 SPRITES_TOKEN="..." \
@@ -42,7 +42,7 @@ FROCKBOT_SPRITE_NAME="frockbot-barebones" \
   bun run dev
 ```
 
-The computer panel shows the selected bot's live browser. **Take control** creates a bot-scoped lease that blocks new computer actions for that bot while leaving other bot desktops available; **Release control** returns it to the bot. One token-routed noVNC gateway serves the bot-scoped displays through the Sprite's public HTTPS URL. Shells start in shared `/workspace` with `HOME=/home/box`; durable profiles, standing memory, transcript mirrors, skills, and automation storage live under `/home/box/agent-data`. Automation files are not executed until a separate automation runtime is installed. See [`docs/research/fly-sprites-computer.md`](docs/research/fly-sprites-computer.md) for security constraints and primary sources.
+The Computer panel shows the selected Bot's live browser. **Take control** creates a Bot-scoped lease that blocks new process and browser actions while leaving durable Package file operations available; **Release control** returns it to the Bot. A token-routed noVNC gateway serves each Bot desktop through that Bot Sprite's public HTTPS URL. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical desktop memory Markdown and derived index metadata live in the memory Package's private Computer directory under `/home/box/agent-data`; cloud runtimes retain the explicit R2/Vectorize adapter. See [`docs/research/fly-sprites-computer.md`](docs/research/fly-sprites-computer.md) for provider constraints and primary sources.
 
 Electron's installer script is explicitly allowed through the root `trustedDependencies` setting. If Electron was installed before that setting existed, rebuild its binary once:
 
@@ -125,10 +125,12 @@ apps/
 packages/
   agent-core/       Session, LLM, prompt, tool, and agent Cordis services
   agent-loop/       Concrete event-sourced custom agent-loop plugin
+  computer-core/    Provider registry and capability interfaces for Computers
   plugin-catalog/   Manifest decoding, scoped activation, and rollback
   plugin-clock/     Reference package with agent, host, and WebUI contributions
-  plugin-fly-sprite/ Persistent Fly Sprite computer, browser tools, and takeover UI
-  plugin-memory/    R2/Vectorize-backed agent and global durable memory
+  plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
+  plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
+  plugin-memory/    Computer-workspace or R2-backed durable Markdown memory
   protocol/         Commands and events shared across process seams
   provider-openai-compatible/  Streaming production model adapter
   webui-shell/      FrockBot Cordis WebUI/Vue client plugin
@@ -193,7 +195,7 @@ For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `pr
 
 The desktop host must receive both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. If `FROCKBOT_APPLICATION_URL` is absent, the desktop loads its local host; if `FROCKBOT_AUTH_BASE_URL` is absent, it does not initialize hosted authentication.
 
-The memory plugin stores Markdown source documents and incremental index metadata in R2, with 768-dimensional cosine embeddings in Vectorize using `@cf/baai/bge-base-en-v1.5`. Local development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`. The development memory resources are separate from the production names below.
+The memory Package has a provider-neutral document-store seam. Desktop runtimes store canonical Markdown and incremental index metadata in private durable directories on the selected Computer; the Fly adapter places them on Sprite disk. Cloudflare runtimes use R2 for canonical documents and Vectorize with 768-dimensional embeddings from `@cf/baai/bge-base-en-v1.5`. Local Cloudflare development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`.
 
 Provision production resources before the first production deployment:
 
@@ -217,8 +219,8 @@ Cordis contexts provide composition and lifecycle ownership, not security isolat
 - model configuration currently uses environment variables rather than onboarding UI;
 - sessions are currently in memory;
 - Fly Sprite live provisioning requires a valid Sprites token and has not been exercised by repository CI;
-- bot-scoped directories and desktop processes share one Unix account and are namespaces, not strong security isolation;
-- transcript files in the Sprite are derived mirrors, while cloud memory remains canonical in R2/Vectorize;
-- automation folders and the routines panel are presentational until an automation runtime is implemented;
+- Fly uses one Sprite per Bot, but live isolation still depends on Fly's VM and network enforcement and has not been exercised by repository CI;
+- the local derived memory vector index is process-local and rebuilt through canonical-file fallback; cloud Vectorize remains durable;
+- Kubernetes and Cloudflare Containers can now be added as provider Packages, but adapters are not implemented yet;
 - the manifest-driven package catalog works for built-in packages, but external package discovery and download are not implemented;
 - application packaging and code signing are not configured.

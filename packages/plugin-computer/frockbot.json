@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "computer",
+  "displayName": "Computer",
+  "version": "0.0.1",
+  "contributions": {
+    "agent": "./agent",
+    "web": {
+      "entry": "./src/client/index.ts",
+      "manifest": "./dist/manifest.json",
+      "slots": ["frockbot.computer"]
+    }
+  },
+  "permissions": [
+    "computer:execute",
+    "computer:browser",
+    "webui:remote-frame"
+  ]
+}

@@ -161,6 +161,7 @@ async function executeTool(
 ): Promise<Record<string, unknown>> {
   const call = { id: crypto.randomUUID(), name, input };
   const context = {
+    botId: "alpha",
     agentId: "alpha",
     sessionId: "owner:alpha",
     signal: new AbortController().signal,
@@ -188,6 +189,7 @@ function modelRequest(text: string): NormalizedModelRequest {
 function fakeAgent(): Agent {
   return {
     id: "owner:alpha",
+    botId: "alpha",
     session: undefined as never,
     status: "idle",
     send: () => "message",
@@ -207,7 +209,7 @@ describe("memory plugin", () => {
     await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize,
         embed,
@@ -258,7 +260,7 @@ describe("memory plugin", () => {
     await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize,
         embed,
@@ -302,7 +304,7 @@ describe("memory plugin", () => {
     await alpha.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize,
         embed,
@@ -311,7 +313,7 @@ describe("memory plugin", () => {
     await beta.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "beta",
+        botId: "beta",
         bucket,
         vectorize,
         embed,
@@ -346,7 +348,7 @@ describe("memory plugin", () => {
     await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize,
         embed,
@@ -380,7 +382,7 @@ describe("memory plugin", () => {
     await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize,
         embed,
@@ -430,7 +432,7 @@ describe("memory plugin", () => {
     await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize,
         embed: selectiveEmbed,
@@ -477,7 +479,7 @@ describe("memory plugin", () => {
     await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize,
         embed,
@@ -515,7 +517,7 @@ describe("memory plugin", () => {
     await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize,
         embed,
@@ -556,7 +558,7 @@ describe("memory plugin", () => {
     await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket,
         vectorize: new FakeVectorize(),
         embed: () => Promise.reject(new Error("embedding unavailable")),
@@ -590,7 +592,7 @@ describe("memory plugin", () => {
     const fiber = await harness.mount(
       createMemoryPlugin({
         ownerId: "owner",
-        agentId: "alpha",
+        botId: "alpha",
         bucket: new FakeBucket(),
         vectorize: new FakeVectorize(),
         embed,

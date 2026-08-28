@@ -2,7 +2,6 @@ import { fileURLToPath } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 
-// Build the trusted WebUI contribution as an externalized Cordis client module.
 export default defineConfig({
   plugins: [vue()],
   build: {
@@ -16,7 +15,7 @@ export default defineConfig({
     rollupOptions: {
       external: ["vue", "@cordisjs/client"],
       output: {
-        entryFileNames: "assets/fly-sprite-[hash].js",
+        entryFileNames: "assets/computer-[hash].js",
         chunkFileNames: "assets/chunk-[hash].js",
         assetFileNames: "assets/[name]-[hash][extname]",
       },

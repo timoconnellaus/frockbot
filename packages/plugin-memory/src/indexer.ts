@@ -1,5 +1,5 @@
 import { chunkMarkdown, hashMemoryContent } from "./chunker.js";
-import type { MemoryStorage } from "./storage.js";
+import type { MemoryDocumentStore } from "./storage.js";
 import type {
   EmbedMemory,
   MemoryIndexResult,
@@ -31,7 +31,7 @@ export async function indexDocument(
   content: string,
   embed: EmbedMemory,
   vectorize: MemoryVectorIndex,
-  storage: MemoryStorage,
+  storage: MemoryDocumentStore,
 ): Promise<MemoryIndexResult> {
   const [chunks, documentHash] = await Promise.all([
     chunkMarkdown(content),
@@ -103,7 +103,7 @@ export async function removeDocument(
   scope: MemoryScope,
   path: string,
   vectorize: MemoryVectorIndex,
-  storage: MemoryStorage,
+  storage: MemoryDocumentStore,
 ): Promise<number> {
   const meta = await storage.readMeta(scope, path);
   if (meta.vectorIds.length > 0) {

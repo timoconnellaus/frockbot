@@ -2,7 +2,7 @@ import type {
   NormalizedModelRequest,
   ToolDefinition,
 } from "@frockbot/agent-core";
-import type { Plugin } from "cordis";
+import type { Context, Plugin } from "cordis";
 import { createMemoryEmbedder } from "./embeddings.js";
 import { indexDocument, removeDocument } from "./indexer.js";
 import { createMemoryScopes } from "./scopes.js";
@@ -11,7 +11,7 @@ import {
   scopesForTier,
   searchMemory,
 } from "./searcher.js";
-import { MemoryStorage } from "./storage.js";
+import { type MemoryDocumentStore, MemoryStorage } from "./storage.js";
 import type {
   EmbedMemory,
   MemoryAiBinding,
@@ -30,8 +30,14 @@ const DEFAULT_AUTO_RECALL_RESULTS = 4;
 
 export interface MemoryPluginConfig {
   ownerId: string;
-  agentId: string;
-  bucket: MemoryBucket;
+  botId?: string;
+  /** Legacy configuration alias; new compositions use botId. */
+  agentId?: string;
+  bucket?: MemoryBucket;
+  documents?: MemoryDocumentStore;
+  createDocuments?: (
+    ctx: Context,
+  ) => MemoryDocumentStore | Promise<MemoryDocumentStore>;
   vectorize: MemoryVectorIndex;
   ai?: MemoryAiBinding;
   embed?: EmbedMemory;
@@ -41,7 +47,7 @@ export interface MemoryPluginConfig {
 
 interface MemoryRuntime {
   scopes: Record<MemoryTier, MemoryScope>;
-  storage: MemoryStorage;
+  storage: MemoryDocumentStore;
   vectorize: MemoryVectorIndex;
   embed: EmbedMemory;
 }
@@ -326,6 +332,13 @@ export function createMemoryPlugin(
       "memory plugin requires an embed function or Workers AI binding",
     );
   }
+  const botId = config.botId?.trim() || config.agentId?.trim();
+  if (!botId) throw new Error("memory plugin requires a persistent botId");
+  if (!config.bucket && !config.documents && !config.createDocuments) {
+    throw new Error(
+      "memory plugin requires a bucket, documents, or createDocuments",
+    );
+  }
   const autoRecallResults =
     config.autoRecallResults ?? DEFAULT_AUTO_RECALL_RESULTS;
   if (
@@ -338,10 +351,15 @@ export function createMemoryPlugin(
     );
   }
 
-  const plugin: Plugin.Function = (ctx) => {
+  const plugin: Plugin.Function = async (ctx) => {
+    const storage: MemoryDocumentStore =
+      config.documents ??
+      (config.createDocuments
+        ? await config.createDocuments(ctx)
+        : new MemoryStorage(config.bucket as MemoryBucket));
     const runtime: MemoryRuntime = {
-      scopes: createMemoryScopes(config.ownerId, config.agentId),
-      storage: new MemoryStorage(config.bucket),
+      scopes: createMemoryScopes(config.ownerId, botId),
+      storage,
       vectorize: config.vectorize,
       embed:
         config.embed ??
@@ -360,8 +378,8 @@ export function createMemoryPlugin(
         render: () =>
           [
             "## Durable memory",
-            "You have agent memory (specific to this bot) and global memory (shared by this user's bots).",
-            "When memories conflict at the same path, agent memory is authoritative.",
+            "You have Bot memory (specific to this Bot) and global memory (shared by this User's Bots).",
+            "When memories conflict at the same path, Bot memory is authoritative.",
             "Use memory_search for deeper recall. Write only when the user asks to remember or persist something; memory_write defaults to agent memory.",
           ].join("\n"),
       }),
@@ -400,7 +418,10 @@ export function createMemoryPlugin(
         }),
       );
     }
-    return disposers;
+    return async () => {
+      for (const dispose of disposers.toReversed()) dispose();
+      await storage.dispose?.();
+    };
   };
   plugin.inject = ["tools", "systemPrompt"];
   return plugin;

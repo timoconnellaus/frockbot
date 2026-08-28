@@ -15,6 +15,7 @@ import {
   ToolRegistry,
 } from "@frockbot/agent-core";
 import { AgentLoop } from "@frockbot/agent-loop";
+import { ComputerRegistry } from "@frockbot/computer-core";
 import {
   type ContributionResolver,
   PackageCatalog,
@@ -60,6 +61,7 @@ export interface FoundationAgentPackage {
 }
 
 export interface FoundationRuntimeOptions {
+  botId?: string;
   agentId?: string;
   sessionId?: string;
   sessionEvents?: readonly SessionEvent[];
@@ -86,6 +88,8 @@ export async function createFoundationRuntime(
   await root.plugin(LlmRegistry);
   await root.plugin(ToolRegistry);
   await root.plugin(AgentRegistry);
+  // Provider Packages register adapters before Computer consumers activate.
+  await root.plugin(ComputerRegistry);
   await root.plugin(PackageCatalog, runtimePackageCatalogConfig);
 
   let provider = FOUNDATION_PROVIDER;
@@ -137,13 +141,15 @@ export async function createFoundationRuntime(
       }).manifest.id,
     ];
   });
-  for (const packageId of [...packageIds, ...additionalIds]) {
+  // Provider contributions must mount before consumers that open their capabilities.
+  for (const packageId of [...additionalIds, ...packageIds]) {
     if (packageId === "memory" && !options.memory) continue;
     await root.packages.enable(packageId);
   }
   await root.plugin(AgentLoop, { maxSteps: 8 });
 
-  const agentOptions: AgentOptions & { agentId?: string } = {
+  const agentOptions: AgentOptions = {
+    botId: options.botId?.trim() || options.agentId?.trim() || sessionId,
     agentId: options.agentId,
     sessionId,
     provider,

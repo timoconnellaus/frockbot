@@ -65,11 +65,11 @@ function parseStoredJson<T>(body: string): Promise<T> {
 
 function memoryPluginConfig(
   env: UserApplicationEnv,
-  agentId: string,
+  botId: string,
 ): MemoryPluginConfig {
   return {
     ownerId: env.DEPLOYMENT.userId,
-    agentId,
+    botId,
     bucket: {
       get: async (key) => {
         const body = await env.MEMORY.get(key);
@@ -208,6 +208,7 @@ export function createUserApplication() {
     });
 
     const runtime = await createFoundationRuntime(undefined, {
+      botId,
       agentId: botId,
       sessionId,
       sessionEvents,

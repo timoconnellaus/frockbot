@@ -4,18 +4,8 @@
   "displayName": "Fly Sprite Computer",
   "version": "0.0.1",
   "contributions": {
-    "agent": "./agent",
-    "desktop": "./host",
-    "web": {
-      "entry": "./client",
-      "manifest": "./dist/manifest.json",
-      "slots": ["frockbot.computer"]
-    }
+    "agent": "./provider",
+    "desktop": "./host"
   },
-  "permissions": [
-    "computer:execute",
-    "computer:browser",
-    "network:sprites",
-    "webui:remote-frame"
-  ]
+  "permissions": ["network:sprites"]
 }

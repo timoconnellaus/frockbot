@@ -22,6 +22,7 @@
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
+    "@frockbot/plugin-computer": "workspace:*",
     "@frockbot/plugin-desktop-clipboard": "workspace:*",
     "@frockbot/plugin-desktop-directory-picker": "workspace:*",
     "@frockbot/plugin-desktop-notifications": "workspace:*",

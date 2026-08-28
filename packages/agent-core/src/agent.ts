@@ -5,6 +5,7 @@ import type { NormalizedModelRequest } from "./types.js";
 export type AgentStatus = "idle" | "running" | "disposed";
 
 export interface AgentOptions {
+  botId: string;
   agentId?: string;
   sessionId: string;
   provider: string;
@@ -24,6 +25,7 @@ export type RequestErrorAction = { kind: "retry" } | { kind: "fail" };
 
 export interface Agent {
   readonly id: string;
+  readonly botId: string;
   readonly session: Session;
   readonly status: AgentStatus;
   send(text: string): string;
