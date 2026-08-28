@@ -74,7 +74,7 @@ After CI succeeds on a push to `main`, `ci.yml` deploys two Cloudflare Workers t
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
-The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2, and then deploys the Worker. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
+The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
 
 Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first app deployment:
 
