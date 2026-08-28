@@ -201,19 +201,19 @@ export class ComposioUserBackendContribution {
   async executeConfiguration(input: unknown): Promise<OperationReceiptV1> {
     const request = decodeUserConfigurationExecuteRpcV1(input);
     const { command } = request;
-    if (
-      command.type === "user/install-package" &&
-      !this.availablePackages.has(
-        `${command.packageId}\u0000${command.version}`,
-      )
-    ) {
-      throw new Error("Package is not available in this application");
-    }
     await this.assertIdentity(request.userId);
     return this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
       const existing = await transaction.get<OperationReceiptV1>(receiptKey);
       if (existing) return existing;
+      if (
+        command.type === "user/install-package" &&
+        !this.availablePackages.has(
+          `${command.packageId}\u0000${command.version}`,
+        )
+      ) {
+        throw new Error("Package is not available in this application");
+      }
       const current =
         (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
         initialState();

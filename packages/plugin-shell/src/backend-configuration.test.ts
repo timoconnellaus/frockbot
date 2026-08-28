@@ -268,4 +268,58 @@ describe("Bot capability assignment admission", () => {
       ],
     });
   });
+
+  test("settles a committed assignment saga before replaying its receipt", async () => {
+    const storage = new MemoryStorage();
+    let acknowledgementAttempts = 0;
+    let acknowledged = false;
+    const userConfiguration = {
+      readConfiguration: () => Promise.resolve(installedUser()),
+      claimConnectionDependency: () => Promise.resolve(true),
+      acknowledgeConnectionDependency: () => {
+        acknowledgementAttempts += 1;
+        if (acknowledgementAttempts <= 2) {
+          return Promise.reject(new Error("acknowledgement response lost"));
+        }
+        acknowledged = true;
+        return Promise.resolve(true);
+      },
+      compensateConnectionDependency: () => Promise.resolve(true),
+    };
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {
+        USER_CONFIGURATIONS: {
+          idFromName: () => "user-1",
+          get: () => userConfiguration,
+        },
+      } as never,
+    });
+    const command = assignmentCommand("lost-assignment-response", {
+      packageId: "composio",
+      capabilityId: "gmail-tools",
+      connectionId: "gmail-1",
+    });
+    const execute = () =>
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "primary",
+        command,
+      });
+
+    await expect(execute()).rejects.toThrow(
+      "Connection assignment admission and reconciliation failed",
+    );
+    expect(acknowledgementAttempts).toBe(2);
+    expect(acknowledged).toBe(false);
+
+    await expect(execute()).resolves.toMatchObject({
+      commandId: "lost-assignment-response",
+      status: "applied",
+      revision: 1,
+    });
+    expect(acknowledgementAttempts).toBe(3);
+    expect(acknowledged).toBe(true);
+  });
 });

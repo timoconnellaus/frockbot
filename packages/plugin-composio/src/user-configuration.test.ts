@@ -98,6 +98,56 @@ describe("Connection revocation dependencies", () => {
 });
 
 describe("Connection dependency admission", () => {
+  test("replays a Package receipt before deployment availability changes", async () => {
+    const storage = new MemoryStorage();
+    const host = {
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    };
+    const installed = createComposioUserBackendContribution({
+      ...host,
+      availablePackages: [{ packageId: "composio", version: "0.0.1" }],
+    });
+    const command: UserConfigurationCommandV1 = {
+      schemaVersion: 1,
+      type: "user/install-package",
+      commandId: "install-composio",
+      expectedRevision: 0,
+      packageId: "composio",
+      version: "0.0.1",
+    };
+    const request = {
+      schemaVersion: 1 as const,
+      userId: "user-1",
+      command,
+    };
+    const receipt = await installed.executeConfiguration(request);
+    const redeployed = createComposioUserBackendContribution({
+      ...host,
+      availablePackages: [],
+    });
+
+    await expect(redeployed.executeConfiguration(request)).resolves.toEqual(
+      receipt,
+    );
+    await expect(
+      redeployed.executeConfiguration({
+        ...request,
+        command: {
+          ...command,
+          commandId: "install-after-removal",
+          expectedRevision: 1,
+        },
+      }),
+    ).rejects.toThrow("Package is not available");
+    await expect(
+      redeployed.readConfiguration({ schemaVersion: 1, userId: "user-1" }),
+    ).resolves.toMatchObject({
+      revision: 1,
+      packages: [{ packageId: "composio", state: "installed" }],
+    });
+  });
+
   test("atomically enforces the Package and Connection Type requirement", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution({

@@ -197,7 +197,12 @@ export class ShellBotBackendContribution {
     const existing = await this.ctx.storage.get<OperationReceiptV1>(
       `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`,
     );
-    if (existing) return existing;
+    if (existing) {
+      if (existing.status === "applied") {
+        await this.reconcileStoredAssignmentSaga(identity, command.commandId);
+      }
+      return existing;
+    }
     if (command.expectedRevision !== settings.revision) {
       throw new ConfigurationConflictError(settings.revision);
     }
