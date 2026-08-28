@@ -91,6 +91,69 @@ function assignmentCommand(
 }
 
 describe("Bot capability assignment admission", () => {
+  test("binds in-flight and durable receipts to the complete Bot command", async () => {
+    const storage = new MemoryStorage();
+    const userConfiguration = {
+      readConfiguration: () => Promise.resolve(installedUser()),
+    };
+    const host = {
+      state: { storage } as unknown as DurableObjectState,
+      env: {
+        USER_CONFIGURATIONS: {
+          idFromName: () => "user-1",
+          get: () => userConfiguration,
+        },
+      } as never,
+    };
+    const original: BotConfigurationCommandV1 = {
+      schemaVersion: 1,
+      type: "bot/update-profile",
+      commandId: "profile-command",
+      botId: "primary",
+      expectedRevision: 0,
+      profile: { name: "Original" },
+    };
+    const collision: BotConfigurationCommandV1 = {
+      ...original,
+      profile: { name: "Collision" },
+    };
+    const request = (command: BotConfigurationCommandV1) => ({
+      schemaVersion: 1 as const,
+      userId: "user-1",
+      botId: "primary",
+      command,
+    });
+    const contribution = createShellBotBackendContribution(host);
+
+    const first = contribution.executeConfiguration(request(original));
+    await expect(
+      contribution.executeConfiguration(request(collision)),
+    ).rejects.toThrow(
+      'Configuration command idempotency key "profile-command" was reused for a different command',
+    );
+    const receipt = await first;
+
+    const redeployed = createShellBotBackendContribution(host);
+    await expect(
+      redeployed.executeConfiguration(request(original)),
+    ).resolves.toEqual(receipt);
+    await expect(
+      redeployed.executeConfiguration(request(collision)),
+    ).rejects.toThrow(
+      'Configuration command idempotency key "profile-command" was reused for a different command',
+    );
+    await expect(
+      redeployed.readConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "primary",
+      }),
+    ).resolves.toMatchObject({
+      revision: 1,
+      profile: { name: "Original" },
+    });
+  });
+
   test("durably rejects invalid assignments before dependency claims", async () => {
     const storage = new MemoryStorage();
     let user = installedUser();

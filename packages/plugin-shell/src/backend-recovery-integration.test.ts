@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import { createShellBotBackendContribution } from "./backend.js";
-import type { StoredRun } from "./backend-contracts.js";
+import {
+  botTurnCommandFingerprintV1,
+  type StoredRun,
+} from "./backend-contracts.js";
 import { planBotRunRecovery } from "./backend-recovery.js";
 
 class MemoryStorage {
@@ -86,6 +89,14 @@ describe("Bot recovery", () => {
     ] satisfies SessionEvent[];
     const run = {
       runId: "run-1",
+      commandFingerprint: botTurnCommandFingerprintV1({
+        userId: "user-1",
+        botId: "primary",
+        runId: "run-1",
+        sessionId: "user:primary",
+        acceptedAt: "2026-08-28T00:00:00.000Z",
+        text: "hello",
+      }),
       sessionId: "user:primary",
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
@@ -167,6 +178,14 @@ describe("Bot recovery", () => {
     ] satisfies SessionEvent[];
     const run = {
       runId: "run-lost-marker",
+      commandFingerprint: botTurnCommandFingerprintV1({
+        userId: "user-1",
+        botId: "primary",
+        runId: "run-lost-marker",
+        sessionId: "user:primary",
+        acceptedAt: "2026-08-28T00:00:00.000Z",
+        text: "hello",
+      }),
       sessionId: "user:primary",
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
@@ -226,6 +245,14 @@ describe("Bot recovery", () => {
     ] satisfies SessionEvent[];
     const run = {
       runId: "run-no-effect",
+      commandFingerprint: botTurnCommandFingerprintV1({
+        userId: "user-1",
+        botId: "primary",
+        runId: "run-no-effect",
+        sessionId: "user:primary",
+        acceptedAt: "2026-08-28T00:00:00.000Z",
+        text: "hello",
+      }),
       sessionId: "user:primary",
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
@@ -236,5 +263,58 @@ describe("Bot recovery", () => {
     } satisfies StoredRun;
 
     expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
+  });
+
+  test("replays only an identical completed Turn command", async () => {
+    const storage = new MemoryStorage();
+    const original = {
+      userId: "user-1",
+      botId: "primary",
+      runId: "run-replay",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      text: "hello",
+    };
+    const run = {
+      runId: original.runId,
+      commandFingerprint: botTurnCommandFingerprintV1(original),
+      sessionId: original.sessionId,
+      acceptedAt: original.acceptedAt,
+      input: original.text,
+      events: [],
+      status: "completed",
+      responseText: "Durable reply",
+    } satisfies StoredRun;
+    await storage.put(`run:${run.runId}`, run);
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(
+      contribution.run({
+        ...original,
+        acceptedAt: "2026-08-29T00:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run-replay",
+      text: "Durable reply",
+    });
+    await expect(
+      contribution.run({ ...original, text: "different input" }),
+    ).rejects.toThrow(
+      'Turn idempotency key "run-replay" was reused for a different command',
+    );
+    await expect(
+      contribution.run({ ...original, sessionId: "user:other" }),
+    ).rejects.toThrow(
+      'Turn idempotency key "run-replay" was reused for a different command',
+    );
+    await expect(
+      contribution.run({ ...original, userId: "user-2" }),
+    ).rejects.toThrow(
+      'Turn idempotency key "run-replay" was reused for a different command',
+    );
+    expect(storage.values.get(`run:${run.runId}`)).toEqual(run);
   });
 });

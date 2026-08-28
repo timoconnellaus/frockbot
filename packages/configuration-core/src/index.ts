@@ -160,6 +160,40 @@ export type BotConfigurationCommandV1 = Extract<
   { botId: string }
 >;
 
+function canonicalFingerprintValue(value: unknown): string {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    typeof value === "number"
+  ) {
+    const encoded = JSON.stringify(value);
+    if (encoded !== undefined) return encoded;
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalFingerprintValue).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .filter((key) => record[key] !== undefined)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${canonicalFingerprintValue(record[key])}`,
+      )
+      .join(",")}}`;
+  }
+  throw new Error("Configuration command fingerprint value is not JSON");
+}
+
+export function configurationCommandFingerprintV1(
+  command: ConfigurationCommandV1,
+): string {
+  const { commandId: _commandId, ...semanticCommand } = command;
+  return `configuration-command-v1:${canonicalFingerprintValue(semanticCommand)}`;
+}
+
 export interface UserConfigurationReadRpcV1 {
   schemaVersion: 1;
   userId: string;

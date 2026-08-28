@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
-import type { BotTurnResult, StoredRun } from "./backend-contracts.js";
+import {
+  botTurnCommandFingerprintV1,
+  type BotTurnResult,
+  type StoredRun,
+} from "./backend-contracts.js";
 import {
   completeStoredRun,
   failStoredRun,
@@ -27,6 +31,14 @@ const ended = {
 function storedRun(): StoredRun {
   return {
     runId: "run-1",
+    commandFingerprint: botTurnCommandFingerprintV1({
+      userId: "user-1",
+      botId: "primary",
+      runId: "run-1",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      text: "hello",
+    }),
     sessionId: "user:primary",
     acceptedAt: "2026-08-28T00:00:00.000Z",
     input: "hello",

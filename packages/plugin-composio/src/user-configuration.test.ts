@@ -134,6 +134,20 @@ describe("Connection dependency admission", () => {
       redeployed.executeConfiguration({
         ...request,
         command: {
+          schemaVersion: 1,
+          type: "user/update-profile",
+          commandId: command.commandId,
+          expectedRevision: 0,
+          profile: { name: "Collision" },
+        },
+      }),
+    ).rejects.toThrow(
+      'Configuration command idempotency key "install-composio" was reused for a different command',
+    );
+    await expect(
+      redeployed.executeConfiguration({
+        ...request,
+        command: {
           ...command,
           commandId: "install-after-removal",
           expectedRevision: 1,
@@ -144,6 +158,7 @@ describe("Connection dependency admission", () => {
       redeployed.readConfiguration({ schemaVersion: 1, userId: "user-1" }),
     ).resolves.toMatchObject({
       revision: 1,
+      profile: { name: "FrockBot user" },
       packages: [{ packageId: "composio", state: "installed" }],
     });
   });

@@ -3,6 +3,7 @@ import type { OperationReceiptV1 } from "@frockbot/configuration-core";
 export interface StoredAssignmentSaga {
   schemaVersion: 1;
   commandId: string;
+  commandFingerprint: string;
   userId: string;
   botId: string;
   connectionId: string;

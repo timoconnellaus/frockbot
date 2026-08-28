@@ -9,6 +9,7 @@ function saga(phase: StoredAssignmentSaga["phase"]): StoredAssignmentSaga {
   return {
     schemaVersion: 1,
     commandId: "command-1",
+    commandFingerprint: "configuration-command-v1:test",
     userId: "user-1",
     botId: "bot-1",
     connectionId: "connection-1",

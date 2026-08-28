@@ -1,4 +1,5 @@
 import {
+  configurationCommandFingerprintV1,
   ConfigurationConflictError,
   decodeConnectionDependencyRequirementV1,
   decodeUserConfigurationExecuteRpcV1,
@@ -23,6 +24,24 @@ const STATE_KEY = "user-configuration";
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
 const CONNECTION_EFFECT_ALARM_MS = 60_000;
+
+interface StoredConfigurationReceipt {
+  commandFingerprint: string;
+  receipt: OperationReceiptV1;
+}
+
+function requireMatchingConfigurationReceipt(
+  stored: StoredConfigurationReceipt,
+  commandFingerprint: string,
+  commandId: string,
+): OperationReceiptV1 {
+  if (stored.commandFingerprint !== commandFingerprint) {
+    throw new Error(
+      `Configuration command idempotency key "${commandId}" was reused for a different command`,
+    );
+  }
+  return stored.receipt;
+}
 
 export function deriveRevocationCompensations(
   connection: UserSettingsViewV1["connections"][number],
@@ -201,11 +220,19 @@ export class ComposioUserBackendContribution {
   async executeConfiguration(input: unknown): Promise<OperationReceiptV1> {
     const request = decodeUserConfigurationExecuteRpcV1(input);
     const { command } = request;
+    const commandFingerprint = configurationCommandFingerprintV1(command);
     await this.assertIdentity(request.userId);
     return this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
-      const existing = await transaction.get<OperationReceiptV1>(receiptKey);
-      if (existing) return existing;
+      const existing =
+        await transaction.get<StoredConfigurationReceipt>(receiptKey);
+      if (existing) {
+        return requireMatchingConfigurationReceipt(
+          existing,
+          commandFingerprint,
+          command.commandId,
+        );
+      }
       if (
         command.type === "user/install-package" &&
         !this.availablePackages.has(
@@ -227,7 +254,10 @@ export class ComposioUserBackendContribution {
         revision: next.revision,
         status: "applied",
       };
-      await transaction.put({ [STATE_KEY]: next, [receiptKey]: receipt });
+      await transaction.put({
+        [STATE_KEY]: next,
+        [receiptKey]: { commandFingerprint, receipt },
+      });
       return receipt;
     });
   }

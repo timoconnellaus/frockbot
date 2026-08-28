@@ -3,6 +3,7 @@ import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
   capabilityAssignmentFailureV1,
+  configurationCommandFingerprintV1,
   ConfigurationConflictError,
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
@@ -43,6 +44,7 @@ import type {
   BotTurnResult,
   StoredRun,
 } from "./backend-contracts.js";
+import { botTurnCommandFingerprintV1 } from "./backend-contracts.js";
 
 const RUN_PREFIX = "run:";
 const ACTIVE_RUN_KEY = "active-run";
@@ -62,6 +64,29 @@ const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
 interface BotIdentity {
   userId: string;
   botId: string;
+}
+
+interface StoredConfigurationReceipt {
+  commandFingerprint: string;
+  receipt: OperationReceiptV1;
+}
+
+interface AssignmentActivity {
+  commandFingerprint: string;
+  promise: Promise<OperationReceiptV1>;
+}
+
+function requireMatchingConfigurationReceipt(
+  stored: StoredConfigurationReceipt,
+  commandFingerprint: string,
+  commandId: string,
+): OperationReceiptV1 {
+  if (stored.commandFingerprint !== commandFingerprint) {
+    throw new Error(
+      `Configuration command idempotency key "${commandId}" was reused for a different command`,
+    );
+  }
+  return stored.receipt;
 }
 
 export interface OwnedBotTurnCommand extends BotTurnCommand, BotIdentity {}
@@ -148,10 +173,7 @@ export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
   private executingRunId: string | undefined;
-  private readonly assignmentActivities = new Map<
-    string,
-    Promise<OperationReceiptV1>
-  >();
+  private readonly assignmentActivities = new Map<string, AssignmentActivity>();
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -179,15 +201,32 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     command: Extract<ConfigurationCommandV1, { botId: string }>,
   ): Promise<OperationReceiptV1> {
+    const commandFingerprint = configurationCommandFingerprintV1(command);
     const active = this.assignmentActivities.get(command.commandId);
-    if (active) return active;
+    if (active) {
+      if (active.commandFingerprint !== commandFingerprint) {
+        throw new Error(
+          `Configuration command idempotency key "${command.commandId}" was reused for a different command`,
+        );
+      }
+      return active.promise;
+    }
     const activity: Promise<OperationReceiptV1> =
-      this.executeConfigurationDurably(identity, command).finally(() => {
-        if (this.assignmentActivities.get(command.commandId) === activity) {
+      this.executeConfigurationDurably(
+        identity,
+        command,
+        commandFingerprint,
+      ).finally(() => {
+        if (
+          this.assignmentActivities.get(command.commandId)?.promise === activity
+        ) {
           this.assignmentActivities.delete(command.commandId);
         }
       });
-    this.assignmentActivities.set(command.commandId, activity);
+    this.assignmentActivities.set(command.commandId, {
+      commandFingerprint,
+      promise: activity,
+    });
     return activity;
   }
 
@@ -203,16 +242,26 @@ export class ShellBotBackendContribution {
           | "bot/assign-capability";
       }
     >,
+    commandFingerprint: string,
   ): Promise<OperationReceiptV1> {
     const settings = await this.ensureBotSettings(identity);
-    const existing = await this.ctx.storage.get<OperationReceiptV1>(
+    const existing = await this.ctx.storage.get<StoredConfigurationReceipt>(
       `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`,
     );
     if (existing) {
-      if (existing.status === "applied") {
-        await this.reconcileStoredAssignmentSaga(identity, command.commandId);
+      const receipt = requireMatchingConfigurationReceipt(
+        existing,
+        commandFingerprint,
+        command.commandId,
+      );
+      if (receipt.status === "applied") {
+        await this.reconcileStoredAssignmentSaga(
+          identity,
+          command.commandId,
+          commandFingerprint,
+        );
       }
-      return existing;
+      return receipt;
     }
     if (command.expectedRevision !== settings.revision) {
       throw new ConfigurationConflictError(settings.revision);
@@ -237,7 +286,12 @@ export class ShellBotBackendContribution {
         })),
       });
       if (failure) {
-        return this.rejectConfigurationCommand(identity, command, failure);
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          failure,
+        );
       }
       if (command.assignment.connectionId) {
         const installation = user.packages.find(
@@ -257,6 +311,7 @@ export class ShellBotBackendContribution {
           return this.rejectConfigurationCommand(
             identity,
             command,
+            commandFingerprint,
             "Capability assignment policy changed during validation",
           );
         }
@@ -282,15 +337,32 @@ export class ShellBotBackendContribution {
       ? this.userConfiguration(identity)
       : undefined;
     if (!connectionAssignment || !userConfiguration) {
-      return this.applyConfigurationCommand(identity, command);
+      return this.applyConfigurationCommand(
+        identity,
+        command,
+        commandFingerprint,
+      );
     }
 
-    await this.reconcileStoredAssignmentSaga(identity, command.commandId);
+    await this.reconcileStoredAssignmentSaga(
+      identity,
+      command.commandId,
+      commandFingerprint,
+    );
     const admission = await this.ctx.storage.transaction(
       async (transaction) => {
         const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
-        const existing = await transaction.get<OperationReceiptV1>(receiptKey);
-        if (existing) return { receipt: existing };
+        const existing =
+          await transaction.get<StoredConfigurationReceipt>(receiptKey);
+        if (existing) {
+          return {
+            receipt: requireMatchingConfigurationReceipt(
+              existing,
+              commandFingerprint,
+              command.commandId,
+            ),
+          };
+        }
         const current =
           (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
           this.initialBotSettings(identity.botId);
@@ -307,6 +379,7 @@ export class ShellBotBackendContribution {
         const saga: StoredAssignmentSaga = {
           schemaVersion: 1,
           commandId: command.commandId,
+          commandFingerprint,
           userId: identity.userId,
           botId: identity.botId,
           connectionId: connectionAssignment.connectionId,
@@ -337,6 +410,7 @@ export class ShellBotBackendContribution {
         return await this.rejectConfigurationCommand(
           identity,
           command,
+          commandFingerprint,
           "Connection assignment is no longer authorized",
           saga,
         );
@@ -344,13 +418,22 @@ export class ShellBotBackendContribution {
       const receipt = await this.applyConfigurationCommand(
         identity,
         command,
+        commandFingerprint,
         saga,
       );
-      await this.reconcileStoredAssignmentSaga(identity, command.commandId);
+      await this.reconcileStoredAssignmentSaga(
+        identity,
+        command.commandId,
+        commandFingerprint,
+      );
       return receipt;
     } catch (error) {
       try {
-        await this.reconcileStoredAssignmentSaga(identity, command.commandId);
+        await this.reconcileStoredAssignmentSaga(
+          identity,
+          command.commandId,
+          commandFingerprint,
+        );
       } catch (reconciliationError) {
         throw new AggregateError(
           [error, reconciliationError],
@@ -364,13 +447,21 @@ export class ShellBotBackendContribution {
   private async rejectConfigurationCommand(
     identity: BotIdentity,
     command: Extract<ConfigurationCommandV1, { type: "bot/assign-capability" }>,
+    commandFingerprint: string,
     failure: string,
     saga?: StoredAssignmentSaga,
   ): Promise<OperationReceiptV1> {
     return this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
-      const existing = await transaction.get<OperationReceiptV1>(receiptKey);
-      if (existing) return existing;
+      const existing =
+        await transaction.get<StoredConfigurationReceipt>(receiptKey);
+      if (existing) {
+        return requireMatchingConfigurationReceipt(
+          existing,
+          commandFingerprint,
+          command.commandId,
+        );
+      }
       const current =
         (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
         this.initialBotSettings(identity.botId);
@@ -384,7 +475,7 @@ export class ShellBotBackendContribution {
         status: "rejected",
         failure,
       };
-      await transaction.put(receiptKey, receipt);
+      await transaction.put(receiptKey, { commandFingerprint, receipt });
       if (saga) {
         await transaction.delete(`${ASSIGNMENT_SAGA_PREFIX}${saga.commandId}`);
         await this.refreshRecoveryAlarm(transaction);
@@ -405,12 +496,20 @@ export class ShellBotBackendContribution {
           | "bot/assign-capability";
       }
     >,
+    commandFingerprint: string,
     saga?: StoredAssignmentSaga,
   ): Promise<OperationReceiptV1> {
     return this.ctx.storage.transaction(async (transaction) => {
       const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
-      const existing = await transaction.get<OperationReceiptV1>(receiptKey);
-      if (existing) return existing;
+      const existing =
+        await transaction.get<StoredConfigurationReceipt>(receiptKey);
+      if (existing) {
+        return requireMatchingConfigurationReceipt(
+          existing,
+          commandFingerprint,
+          command.commandId,
+        );
+      }
       const current =
         (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
         this.initialBotSettings(identity.botId);
@@ -461,7 +560,7 @@ export class ShellBotBackendContribution {
       };
       await transaction.put({
         [BOT_CONFIGURATION_KEY]: next,
-        [receiptKey]: receipt,
+        [receiptKey]: { commandFingerprint, receipt },
       });
       if (
         command.type === "bot/assign-capability" &&
@@ -488,12 +587,21 @@ export class ShellBotBackendContribution {
   private async reconcileStoredAssignmentSaga(
     identity: BotIdentity,
     commandId: string,
+    commandFingerprint?: string,
   ): Promise<void> {
     const key = `${ASSIGNMENT_SAGA_PREFIX}${commandId}`;
     const saga = await this.ctx.storage.get<StoredAssignmentSaga>(key);
     if (!saga) return;
     if (saga.userId !== identity.userId || saga.botId !== identity.botId) {
       throw new Error("Assignment saga does not match its durable identity");
+    }
+    if (
+      commandFingerprint !== undefined &&
+      saga.commandFingerprint !== commandFingerprint
+    ) {
+      throw new Error(
+        `Configuration command idempotency key "${commandId}" was reused for a different command`,
+      );
     }
     const userConfiguration = this.userConfiguration(identity);
     try {
@@ -631,7 +739,7 @@ export class ShellBotBackendContribution {
 
   async run(command: OwnedBotTurnCommand): Promise<BotTurnResult> {
     await this.recoverActiveRun();
-    const replay = await this.completedRunResult(command.runId);
+    const replay = await this.completedRunResult(command);
     if (replay) return replay;
     const admission = await this.acceptRun(command);
     return this.executeAcceptedRun(
@@ -915,10 +1023,16 @@ export class ShellBotBackendContribution {
   }
 
   private async completedRunResult(
-    runId: string,
+    command: OwnedBotTurnCommand,
   ): Promise<BotTurnResult | undefined> {
+    const { runId } = command;
     const run = await this.ctx.storage.get<StoredRun>(`${RUN_PREFIX}${runId}`);
     if (!run) return undefined;
+    if (run.commandFingerprint !== botTurnCommandFingerprintV1(command)) {
+      throw new Error(
+        `Turn idempotency key "${runId}" was reused for a different command`,
+      );
+    }
     if (run.status !== "completed") {
       throw new Error(
         `run "${runId}" already exists with status ${run.status}`,
@@ -1192,6 +1306,13 @@ export class ShellBotBackendContribution {
     return this.ctx.storage.transaction(async (transaction) => {
       const existing = await transaction.get<StoredRun>(key);
       if (existing) {
+        if (
+          existing.commandFingerprint !== botTurnCommandFingerprintV1(command)
+        ) {
+          throw new Error(
+            `Turn idempotency key "${command.runId}" was reused for a different command`,
+          );
+        }
         if (existing.status === "completed") {
           throw new Error(`run "${command.runId}" already completed`);
         }
@@ -1215,6 +1336,7 @@ export class ShellBotBackendContribution {
       await transaction.put({
         [key]: {
           runId: command.runId,
+          commandFingerprint: botTurnCommandFingerprintV1(command),
           sessionId: command.sessionId,
           acceptedAt: command.acceptedAt,
           input: command.text,

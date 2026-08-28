@@ -10,6 +10,7 @@ export type StoredRunStatus =
 
 export interface StoredRun {
   runId: string;
+  commandFingerprint: string;
   sessionId: string;
   acceptedAt: string;
   input: string;
@@ -27,6 +28,17 @@ export interface BotTurnCommand {
   sessionId: string;
   acceptedAt: string;
   text: string;
+}
+
+export function botTurnCommandFingerprintV1(
+  command: BotTurnCommand & { userId: string; botId: string },
+): string {
+  return `bot-turn-command-v1:${JSON.stringify({
+    userId: command.userId,
+    botId: command.botId,
+    sessionId: command.sessionId,
+    text: command.text,
+  })}`;
 }
 
 export interface BotNotificationIntent {
