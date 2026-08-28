@@ -3,7 +3,7 @@ export type ContributionKind =
 
 export interface BackendContribution {
   entry: string;
-  host: "gateway";
+  host: "gateway" | "bot" | "user";
 }
 
 export interface RuntimeContribution {
@@ -217,16 +217,20 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     throw new Error("manifest contributions must be an object");
   }
   const contributions: FrockBotManifest["contributions"] = {};
-  if (value.contributions.backend !== undefined) {
+  if (value.schemaVersion === 3 && value.contributions.backend !== undefined) {
     if (!isRecord(value.contributions.backend)) {
       throw new Error("manifest backend contribution must be an object");
     }
-    if (value.contributions.backend.host !== "gateway") {
-      throw new Error('manifest backend host must be "gateway"');
+    if (
+      value.contributions.backend.host !== "gateway" &&
+      value.contributions.backend.host !== "bot" &&
+      value.contributions.backend.host !== "user"
+    ) {
+      throw new Error("manifest backend host is invalid");
     }
     contributions.backend = {
       entry: relativeEntry(value.contributions.backend, "entry"),
-      host: "gateway",
+      host: value.contributions.backend.host,
     };
   }
   if (value.contributions.runtime !== undefined) {

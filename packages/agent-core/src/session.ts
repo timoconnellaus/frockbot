@@ -137,6 +137,7 @@ export class Session {
       string,
       Extract<SessionEvent, { type: "tool/call" }>
     >();
+    const unresolvedModelRequests = new Set<string>();
 
     for (const event of this.#events) {
       if (event.type === "turn/start") openTurn = event.turn;
@@ -153,6 +154,12 @@ export class Session {
       }
       if (event.type === "tool/call") calls.set(event.call.id, event);
       if (event.type === "tool/result") calls.delete(event.callId);
+      if (event.type === "model/request") {
+        unresolvedModelRequests.add(event.request.requestId);
+      }
+      if (event.type === "assistant/message") {
+        unresolvedModelRequests.delete(event.requestId);
+      }
     }
 
     const repairs: SessionEventInput[] = [];
@@ -168,7 +175,7 @@ export class Session {
         status: "interrupted",
       });
     }
-    if (openStep) {
+    if (openStep && unresolvedModelRequests.size === 0) {
       repairs.push({ type: "step/end", ...openStep, outcome: "interrupted" });
     }
     if (closeTurn && openTurn !== undefined) {

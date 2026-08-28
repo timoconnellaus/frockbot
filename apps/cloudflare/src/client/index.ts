@@ -57,7 +57,16 @@ async function apiRequest(
       typeof value.error === "string"
         ? value.error
         : "Hosted request failed";
-    throw new Error(error);
+    const failure = new Error(error) as Error & { definitive?: boolean };
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "definitive" in value &&
+      value.definitive === true
+    ) {
+      failure.definitive = true;
+    }
+    throw failure;
   }
   return value;
 }
@@ -143,14 +152,11 @@ const application = new ClientApplication({
     botId: string;
     alias?: string;
   }) {
-    if (input.packageId !== "composio") {
-      return Promise.reject(new Error("Connection Package is unavailable"));
-    }
     const nativeReturnNonce = window.frockbotDesktop
       ? crypto.randomUUID()
       : undefined;
     return apiRequest(
-      "/api/plugins/composio/connections",
+      `/api/plugins/${encodeURIComponent(input.packageId)}/connections`,
       "POST",
       JSON.stringify({
         commandId: input.commandId,
@@ -162,12 +168,9 @@ const application = new ClientApplication({
     ).then(decodeStartConnectionResult);
   },
   async revokeConnection(packageId: string, connectionId: string) {
-    if (packageId !== "composio") {
-      throw new Error("Connection Package is unavailable");
-    }
     decodeRevocationResult(
       await apiRequest(
-        `/api/plugins/composio/connections/${encodeURIComponent(connectionId)}/revoke`,
+        `/api/plugins/${encodeURIComponent(packageId)}/connections/${encodeURIComponent(connectionId)}/revoke`,
         "POST",
       ),
     );

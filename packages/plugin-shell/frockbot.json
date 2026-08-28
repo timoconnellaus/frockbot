@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "shell",
   "displayName": "FrockBot Shell",
   "version": "0.0.1",
@@ -7,6 +7,10 @@
     "frockbot": ">=0.0.1"
   },
   "contributions": {
+    "backend": {
+      "entry": "./backend",
+      "host": "bot"
+    },
     "client": {
       "entry": "./client",
       "mounts": [

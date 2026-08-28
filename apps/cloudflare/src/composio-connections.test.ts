@@ -365,6 +365,7 @@ class MemoryConnectionStore implements ComposioConnectionStore {
 describe("ComposioConnectionCoordinator", () => {
   test("records durable intent before creating a hosted Connect Link", async () => {
     const store = new MemoryConnectionStore();
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
     const client = new ComposioClient({
       apiKey: "secret",
       fetch: () => {
@@ -374,7 +375,7 @@ describe("ComposioConnectionCoordinator", () => {
             {
               connected_account_id: "ca_123",
               redirect_url: "https://connect.composio.dev/link/test",
-              expires_at: "2026-08-28T01:00:00.000Z",
+              expires_at: expiresAt,
             },
             { status: 201 },
           ),
@@ -476,6 +477,49 @@ describe("ComposioConnectionCoordinator", () => {
       connectedAccountId: "ca_123",
       targetBotId: "primary",
     });
+  });
+
+  test("retires an expired persisted Connect Link operation", async () => {
+    const store = new MemoryConnectionStore();
+    await store.startConnection("user-1", {
+      connectionId: "connection-expired",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await store.updateConnection("user-1", "connection-expired", {
+      state: "authorizing",
+      safeMetadata: {
+        redirectUrl: "https://connect.example/expired",
+        expiresAt: new Date(Date.now() - 1_000).toISOString(),
+      },
+    });
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: () => Promise.reject(new Error("provider not expected")),
+      }),
+      store,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      connectionTypes: {
+        gmail: {
+          authConfigId: "ac_gmail",
+          displayName: "Gmail",
+          toolkitSlug: "gmail",
+        },
+      },
+    });
+
+    await expect(
+      coordinator.start("user-1", {
+        commandId: "connection-expired",
+        connectionTypeId: "gmail",
+        botId: "primary",
+      }),
+    ).rejects.toMatchObject({
+      name: "DefinitiveConnectionOperationError",
+    });
+    expect(store.connections.get("connection-expired")?.state).toBe("failed");
   });
 
   test("records revocation intent before the provider effect", async () => {
@@ -712,7 +756,12 @@ describe("ComposioConnectionCoordinator", () => {
       { userId: "user-1", botId: "primary", connectionId: "connection-1" },
     ]);
 
-    await coordinator.fail("user-1", "connection-1", "delayed failure");
+    const failed = await coordinator.fail(
+      "user-1",
+      "connection-1",
+      "delayed failure",
+    );
+    expect(failed.status).toBe("failed");
     expect(store.connections.get("connection-1")?.state).toBe("ready");
   });
 

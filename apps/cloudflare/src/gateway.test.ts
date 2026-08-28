@@ -441,6 +441,14 @@ describe("Cloudflare user application gateway", () => {
     expect(loader.ids).toEqual([]);
   });
 
+  test("rejects an invalid decoded Bot settings identity at the gateway seam", async () => {
+    const { gateway } = createTestGateway();
+    const response = await gateway(
+      request("/api/bots/invalid%2Fbot/settings", "alice"),
+    );
+    expect(response.status).toBe(400);
+  });
+
   test("replays and acknowledges durable Bot notification intents", async () => {
     const { gateway, states } = createTestGateway();
     await gateway(request("/api/bots/primary/turns", "alice"));

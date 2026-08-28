@@ -2,6 +2,7 @@ import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
   decodeConfigurationCommandV1,
+  decodeConfigurationQueryV1,
   type ConfigurationQueryV1,
 } from "@frockbot/configuration-core";
 import type {
@@ -142,8 +143,11 @@ export function createGateway(dependencies: GatewayDependencies) {
             type: "user/get",
           };
           if (botSettingsMatch) {
-            const botId = decodeURIComponent(botSettingsMatch[1]);
-            query = { schemaVersion: 1, type: "bot/get", botId };
+            query = decodeConfigurationQueryV1({
+              schemaVersion: 1,
+              type: "bot/get",
+              botId: decodeURIComponent(botSettingsMatch[1]),
+            });
           }
           return Response.json(await configuration.read(query));
         }

@@ -45,6 +45,7 @@ interface Env {
   GOOGLE_CLIENT_SECRET?: string;
   COMPOSIO_API_KEY?: string;
   COMPOSIO_GMAIL_AUTH_CONFIG_ID?: string;
+  SPRITES_TOKEN?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
 }

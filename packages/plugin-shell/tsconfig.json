@@ -11,8 +11,8 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["bun", "node", "vite/client"]
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["bun", "node", "vite/client", "@cloudflare/workers-types"]
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
 }

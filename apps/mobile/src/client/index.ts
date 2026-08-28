@@ -288,11 +288,8 @@ const web: Ref<FrockBotWebData> = ref({
     packageId: string,
     connectionTypeId: string,
   ): Promise<string> {
-    if (packageId !== "composio") {
-      throw new Error("Connection Package is unavailable");
-    }
     const response = await auth.authorizedFetch(
-      "/api/plugins/composio/connections",
+      `/api/plugins/${encodeURIComponent(packageId)}/connections`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -312,11 +309,8 @@ const web: Ref<FrockBotWebData> = ref({
     packageId: string,
     connectionId: string,
   ): Promise<void> {
-    if (packageId !== "composio") {
-      throw new Error("Connection Package is unavailable");
-    }
     const response = await auth.authorizedFetch(
-      `/api/plugins/composio/connections/${encodeURIComponent(connectionId)}/revoke`,
+      `/api/plugins/${encodeURIComponent(packageId)}/connections/${encodeURIComponent(connectionId)}/revoke`,
       { method: "POST" },
     );
     const value: unknown = await response.json();

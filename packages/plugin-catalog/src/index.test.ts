@@ -72,6 +72,35 @@ afterEach(async () => {
 });
 
 describe("PackageCatalog", () => {
+  test("keeps backend Contributions unavailable to v2 manifests", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 2,
+        id: "legacy",
+        displayName: "Legacy",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: {
+          backend: { entry: "./backend", host: "gateway" },
+        },
+        permissions: [],
+      }),
+    ).toThrow("manifest has no contributions");
+    expect(
+      decodeFrockBotManifest({
+        schemaVersion: 3,
+        id: "current",
+        displayName: "Current",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: {
+          backend: { entry: "./backend", host: "bot" },
+        },
+        permissions: [],
+      }).contributions.backend,
+    ).toEqual({ entry: "./backend", host: "bot" });
+  });
+
   test("decodes the reference package manifest", async () => {
     const root = await createCatalog();
     const value = await Bun.file(

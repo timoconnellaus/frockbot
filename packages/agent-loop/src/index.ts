@@ -162,6 +162,7 @@ class LoopAgent implements Agent {
   async #resumeTurn(signal: AbortSignal): Promise<void> {
     let openTurn: number | undefined;
     let latestStep = 0;
+    let unresolvedRequest: NormalizedModelRequest | undefined;
     for (const event of this.session.events) {
       if (event.type === "turn/start") openTurn = event.turn;
       if (event.type === "turn/end" && event.turn === openTurn)
@@ -169,13 +170,66 @@ class LoopAgent implements Agent {
       if (event.type === "step/start" && event.turn === openTurn) {
         latestStep = Math.max(latestStep, event.step);
       }
+      if (event.type === "model/request" && event.turn === openTurn) {
+        unresolvedRequest = event.request;
+      }
+      if (
+        event.type === "assistant/message" &&
+        event.requestId === unresolvedRequest?.requestId
+      ) {
+        unresolvedRequest = undefined;
+      }
     }
     if (openTurn === undefined)
       throw new Error("session has no resumable turn");
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
     try {
-      for (let step = latestStep + 1; step <= this.#maxSteps; step += 1) {
+      let nextStep = latestStep + 1;
+      if (unresolvedRequest) {
+        openStep = latestStep;
+        const response = await this.#reconcileModel(
+          unresolvedRequest,
+          openTurn,
+          latestStep,
+          signal,
+        );
+        this.session.append({
+          type: "assistant/message",
+          turn: openTurn,
+          step: latestStep,
+          requestId: response.request.requestId,
+          text: response.text,
+          toolCalls: response.toolCalls,
+        });
+        await this.session.flush();
+        if (response.toolCalls.length === 0) {
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step: latestStep,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          turnOutcome = "completed";
+          return;
+        }
+        await this.#executeTools(
+          openTurn,
+          latestStep,
+          response.toolCalls,
+          signal,
+        );
+        this.session.append({
+          type: "step/end",
+          turn: openTurn,
+          step: latestStep,
+          outcome: "completed",
+        });
+        openStep = undefined;
+        nextStep = latestStep + 1;
+      }
+      for (let step = nextStep; step <= this.#maxSteps; step += 1) {
         signal.throwIfAborted();
         openStep = step;
         this.session.append({ type: "step/start", turn: openTurn, step });
@@ -390,6 +444,30 @@ class LoopAgent implements Agent {
     let text = "";
     const toolCalls: ToolCall[] = [];
     for await (const event of this.#ctx.llm.stream(request, signal)) {
+      signal.throwIfAborted();
+      this.#applyStreamEvent(
+        event,
+        request.requestId,
+        turn,
+        step,
+        toolCalls,
+        (delta) => {
+          text += delta;
+        },
+      );
+    }
+    return { request, text, toolCalls };
+  }
+
+  async #reconcileModel(
+    request: NormalizedModelRequest,
+    turn: number,
+    step: number,
+    signal: AbortSignal,
+  ): Promise<ModelResponse> {
+    let text = "";
+    const toolCalls: ToolCall[] = [];
+    for await (const event of this.#ctx.llm.reconcile(request, signal)) {
       signal.throwIfAborted();
       this.#applyStreamEvent(
         event,

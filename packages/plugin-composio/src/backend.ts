@@ -7,6 +7,7 @@ export type {
 } from "./backend-contracts.js";
 import {
   ComposioConnectionCoordinator,
+  DefinitiveConnectionOperationError,
   type ComposioConnectionStore,
   type ComposioConnectionTypeConfig,
 } from "./connections.js";
@@ -206,8 +207,12 @@ export async function decodeAuthorizationState(
   return state as AuthorizationState;
 }
 
-function jsonError(status: number, message: string): Response {
-  return Response.json({ error: message }, { status });
+function jsonError(
+  status: number,
+  message: string,
+  options?: { definitive?: boolean },
+): Response {
+  return Response.json({ error: message, ...options }, { status });
 }
 
 function requiredUser(context: BackendRouteContext): string | Response {
@@ -349,6 +354,9 @@ export function createComposioBackendContribution(
             { status: 201 },
           );
         } catch (error) {
+          if (error instanceof DefinitiveConnectionOperationError) {
+            return jsonError(409, error.message, { definitive: true });
+          }
           return jsonError(
             500,
             error instanceof Error ? error.message : "Connection failed",
@@ -390,7 +398,7 @@ export function createComposioBackendContribution(
           return connectionCompletionResponse(
             url,
             result.returnTarget,
-            "failed",
+            result.status,
             result.nativeReturnNonce,
           );
         } catch (error) {

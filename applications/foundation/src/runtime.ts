@@ -27,6 +27,7 @@ import { createConfiguredComposioRuntimeContribution } from "@frockbot/plugin-co
 import type { Plugin } from "cordis";
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
+import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
 // Desktop and mobile Package manifests remain part of the immutable plan.
 import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
 import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
@@ -35,6 +36,7 @@ import notificationsManifest from "@frockbot/plugin-desktop-notifications/manife
 // Runtime implementations are statically bound by the immutable application.
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
+import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
 import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
@@ -126,7 +128,12 @@ export function createFoundationBackendContributions(
 ): BackendRouteContribution[] {
   return plan.packages.flatMap((pkg) => {
     const backend = pkg.manifest.contributions.backend;
-    if (!backend || !plan.contributions.backend.includes(pkg.id)) return [];
+    if (
+      !backend ||
+      backend.host !== "gateway" ||
+      !plan.contributions.backend.includes(pkg.id)
+    )
+      return [];
     const specifier = contributionSpecifier(pkg.specifier, backend.entry);
     const factory = backendContributionFactories.get(specifier);
     if (!factory) {
@@ -141,6 +148,51 @@ export interface FoundationAssignedRuntimePackage {
   contributionSpecifier: string;
   manifest: unknown;
   plugin: Plugin;
+}
+
+function runtimePackage(
+  plan: ApplicationPlan,
+  packageId: string,
+  plugin: Plugin,
+): FoundationAssignedRuntimePackage {
+  const pkg = plan.packages.find((candidate) => candidate.id === packageId);
+  const runtime = pkg?.manifest.contributions.runtime;
+  if (!pkg || !runtime) {
+    throw new Error(`foundation runtime package "${packageId}" is unavailable`);
+  }
+  return {
+    specifier: pkg.specifier,
+    contributionSpecifier: contributionSpecifier(pkg.specifier, runtime.entry),
+    manifest: pkg.manifest,
+    plugin,
+  };
+}
+
+export function createFoundationHostedRuntimePackages(
+  plan: ApplicationPlan,
+  host: {
+    userId: string;
+    readSecret(name: string): string | undefined;
+  },
+): FoundationAssignedRuntimePackage[] {
+  return [
+    runtimePackage(
+      plan,
+      "fly-sprite",
+      createFlySpriteProviderPlugin(undefined, {
+        token:
+          host.readSecret("SPRITES_TOKEN") ?? host.readSecret("SPRITE_TOKEN"),
+      }),
+    ),
+    runtimePackage(
+      plan,
+      "computer",
+      createComputerAgentPlugin({
+        userId: host.userId,
+        defaultProviderId: "fly-sprite",
+      }),
+    ),
+  ];
 }
 
 export async function createFoundationAssignedRuntimePackages(

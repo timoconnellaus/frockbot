@@ -77,6 +77,6 @@ describe("Bot run recovery", () => {
     const plan = planBotRunRecovery(run(events.slice(1)), events);
     expect(plan.kind).toBe("reconcile");
     if (plan.kind !== "reconcile") throw new Error("expected reconciliation");
-    expect(plan.repairs.map((event) => event.type)).toEqual(["step/end"]);
+    expect(plan.repairs).toEqual([]);
   });
 });

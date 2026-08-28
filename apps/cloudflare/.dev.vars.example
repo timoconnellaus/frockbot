@@ -5,4 +5,5 @@ GOOGLE_CLIENT_ID=replace-with-google-web-client-id
 GOOGLE_CLIENT_SECRET=replace-with-google-web-client-secret
 COMPOSIO_API_KEY=replace-with-composio-project-api-key
 COMPOSIO_GMAIL_AUTH_CONFIG_ID=replace-with-composio-gmail-auth-config-id
+SPRITES_TOKEN=replace-with-fly-sprites-token
 ALLOW_DEVELOPMENT_AUTH=true

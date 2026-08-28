@@ -3,6 +3,7 @@ import {
   compileFoundationApplication,
   createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
+  createFoundationHostedRuntimePackages,
   createFoundationRuntimeApplication,
 } from "./runtime.js";
 
@@ -30,7 +31,7 @@ describe("foundation application", () => {
       "shell",
     ]);
     expect(first.contributions).toEqual({
-      backend: ["composio"],
+      backend: ["composio", "shell"],
       runtime: [
         "clock",
         "composio",
@@ -51,6 +52,14 @@ describe("foundation application", () => {
       ],
       mobile: ["mobile-clipboard", "mobile-notifications"],
     });
+    expect(
+      first.packages.find((pkg) => pkg.id === "shell")?.manifest.contributions
+        .backend,
+    ).toEqual({ entry: "./backend", host: "bot" });
+    expect(
+      first.packages.find((pkg) => pkg.id === "composio")?.manifest
+        .contributions.backend,
+    ).toEqual({ entry: "./backend", host: "gateway" });
   });
 
   test("exposes only compiled runtime packages to the runtime host", async () => {
@@ -85,6 +94,12 @@ describe("foundation application", () => {
     expect(backend.map((contribution) => contribution.packageId)).toEqual([
       "composio",
     ]);
+    expect(
+      createFoundationHostedRuntimePackages(plan, {
+        userId: "user-1",
+        readSecret: () => undefined,
+      }).map((pkg) => pkg.specifier),
+    ).toEqual(["@frockbot/plugin-fly-sprite", "@frockbot/plugin-computer"]);
 
     const assignment = {
       assignmentId: "gmail-primary",

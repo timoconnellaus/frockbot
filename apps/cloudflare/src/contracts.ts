@@ -34,7 +34,7 @@ export interface RevokeConnectionResult {
 
 export interface ConnectionCompletionResult {
   returnTarget: "browser" | "desktop";
-  status: "ready" | "pending";
+  status: "ready" | "pending" | "failed";
   nativeReturnNonce?: string;
 }
 

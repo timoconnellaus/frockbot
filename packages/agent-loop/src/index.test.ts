@@ -73,6 +73,85 @@ afterEach(async () => {
 });
 
 describe("AgentLoop", () => {
+  test("reconciles an admitted model request by its durable id", async () => {
+    let streams = 0;
+    const reconciled: string[] = [];
+    const provider: LlmProvider = {
+      id: "recoverable",
+      async *stream() {
+        streams += 1;
+        yield { type: "finish", reason: "completed" };
+      },
+      async *reconcile(request) {
+        reconciled.push(request.requestId);
+        yield { type: "text-delta", text: "Recovered response" };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const initial = [
+      {
+        type: "session/created" as const,
+        createdAt: "2026-08-28T00:00:00.000Z",
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+      },
+      {
+        type: "turn/start" as const,
+        turn: 1,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:01.000Z",
+      },
+      {
+        type: "step/start" as const,
+        turn: 1,
+        step: 1,
+        seq: 2,
+        timestamp: "2026-08-28T00:00:01.000Z",
+      },
+      {
+        type: "model/request" as const,
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "durable-request-1",
+          provider: "recoverable",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+        seq: 3,
+        timestamp: "2026-08-28T00:00:01.000Z",
+      },
+    ] satisfies SessionEvent[];
+    const root = await mountRuntime(provider, undefined, undefined, {
+      recovering: initial,
+    });
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "recovering",
+      provider: "recoverable",
+      model: "model-1",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(streams).toBe(0);
+    expect(reconciled).toEqual(["durable-request-1"]);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "assistant/message",
+        requestId: "durable-request-1",
+        text: "Recovered response",
+      }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+
   test("streams, journals a tool before execution, and repeats the model step", async () => {
     const requests: string[] = [];
     let toolWasJournaled = false;
@@ -358,6 +437,10 @@ describe("AgentLoop", () => {
     const provider: LlmProvider = {
       id: "resume-provider",
       async *stream() {
+        throw new Error("resume must not create a new model request");
+      },
+      async *reconcile(request) {
+        expect(request.requestId).toBe("uncertain-request");
         yield { type: "text-delta", text: "Resumed safely." };
         yield { type: "finish", reason: "completed" };
       },
@@ -384,7 +467,13 @@ describe("AgentLoop", () => {
       handle.agent.session.events.filter(
         (event) => event.type === "model/request",
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "assistant/message",
+        requestId: "uncertain-request",
+      }),
+    );
     expect(handle.agent.session.events.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeDesktopApiRequest,
   decodeDesktopApiResponse,
+  decodeExternalAuthorizationAcknowledgement,
   decodeExternalAuthorizationUrl,
 } from "./desktop-api.js";
 
@@ -61,6 +62,15 @@ describe("desktop hosted protocol", () => {
     ).toBe("https://connect.example/authorize");
     expect(() => decodeExternalAuthorizationUrl("javascript:alert(1)")).toThrow(
       "invalid external authorization URL",
+    );
+  });
+
+  test("accepts only the main-process authorization acknowledgement", () => {
+    expect(
+      decodeExternalAuthorizationAcknowledgement(undefined),
+    ).toBeUndefined();
+    expect(() => decodeExternalAuthorizationAcknowledgement({})).toThrow(
+      "invalid external authorization acknowledgement",
     );
   });
 });

@@ -122,6 +122,13 @@ export interface ComposioConnectionCoordinatorConfig {
   ) => Promise<"applied" | "stale">;
 }
 
+export class DefinitiveConnectionOperationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DefinitiveConnectionOperationError";
+  }
+}
+
 export class ComposioConnectionCoordinator {
   constructor(private readonly config: ComposioConnectionCoordinatorConfig) {}
 
@@ -173,7 +180,15 @@ export class ComposioConnectionCoordinator {
       );
       const redirectUrl = existing?.safeMetadata.redirectUrl;
       const expiresAt = existing?.safeMetadata.expiresAt;
-      if (typeof redirectUrl === "string" && typeof expiresAt === "string") {
+      const expiry =
+        typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
+      if (
+        existing?.state === "authorizing" &&
+        typeof redirectUrl === "string" &&
+        typeof expiresAt === "string" &&
+        Number.isFinite(expiry) &&
+        expiry > Date.now()
+      ) {
         return {
           connectionId,
           redirectUrl,
@@ -228,6 +243,25 @@ export class ComposioConnectionCoordinator {
             nativeReturnNonce: input.nativeReturnNonce,
           };
         }
+      }
+      if (
+        existing?.state === "failed" ||
+        existing?.state === "revoked" ||
+        (Number.isFinite(expiry) && expiry <= Date.now())
+      ) {
+        if (existing?.state === "authorizing") {
+          await this.config.store.finishConnectionAuthorization(
+            userId,
+            connectionId,
+            {
+              state: "failed",
+              failure: "Connection authorization expired",
+            },
+          );
+        }
+        throw new DefinitiveConnectionOperationError(
+          "Connection authorization expired; retry with a new operation",
+        );
       }
       throw new Error("Connection authorization requires reconciliation");
     }
@@ -320,7 +354,7 @@ export class ComposioConnectionCoordinator {
         connection?.safeMetadata.returnTarget === "desktop"
           ? "desktop"
           : "browser",
-      status: "ready",
+      status: "failed",
       nativeReturnNonce:
         typeof connection?.safeMetadata.nativeReturnNonce === "string"
           ? connection.safeMetadata.nativeReturnNonce
@@ -536,12 +570,22 @@ export class ComposioConnectionCoordinator {
     connection = claim.connection;
     const targetBotId = connection.safeMetadata.targetBotId;
     if (typeof targetBotId === "string" && this.config.assignBot) {
-      await this.config.assignBot(
-        userId,
-        targetBotId,
-        input.connectionId,
-        leaseId,
-      );
+      try {
+        await this.config.assignBot(
+          userId,
+          targetBotId,
+          input.connectionId,
+          leaseId,
+        );
+      } catch (error) {
+        await this.compensateAssignment(
+          userId,
+          input.connectionId,
+          targetBotId,
+          leaseId,
+        );
+        throw error;
+      }
     }
     const finished = await this.config.store.finishConnectionAssignment(
       userId,
@@ -559,31 +603,42 @@ export class ComposioConnectionCoordinator {
     if (current?.state === "ready") {
       return { returnTarget, status: "ready", nativeReturnNonce };
     }
+    if (typeof targetBotId === "string") {
+      await this.compensateAssignment(
+        userId,
+        input.connectionId,
+        targetBotId,
+        leaseId,
+      );
+    }
+    throw new Error("Connection state changed during Bot assignment");
+  }
+
+  private async compensateAssignment(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    leaseId: string,
+  ): Promise<void> {
     const compensationClaimed =
       await this.config.store.requireAssignmentCompensation(
         userId,
-        input.connectionId,
+        connectionId,
         leaseId,
       );
-    if (
-      compensationClaimed &&
-      typeof targetBotId === "string" &&
-      this.config.markBotUnavailable
-    ) {
-      const result = await this.config.markBotUnavailable(
+    if (!compensationClaimed || !this.config.markBotUnavailable) return;
+    const result = await this.config.markBotUnavailable(
+      userId,
+      botId,
+      connectionId,
+      { id: leaseId, expectedGeneration: leaseId },
+    );
+    if (result === "applied") {
+      await this.config.store.recordAssignmentCompensated(
         userId,
-        targetBotId,
-        input.connectionId,
-        { id: leaseId, expectedGeneration: leaseId },
+        connectionId,
+        leaseId,
       );
-      if (result === "applied") {
-        await this.config.store.recordAssignmentCompensated(
-          userId,
-          input.connectionId,
-          leaseId,
-        );
-      }
     }
-    throw new Error("Connection state changed during Bot assignment");
   }
 }

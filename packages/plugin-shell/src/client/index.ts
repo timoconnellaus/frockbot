@@ -52,11 +52,11 @@ export function projectCompletedRuns(
   runs: readonly ClientRun[],
 ): Set<string> {
   const projected = new Set<string>();
-  for (const notification of notifications) {
-    const run = runs.find(
-      (candidate) => candidate.runId === notification.runId,
+  for (const run of runs) {
+    if (run.status !== "completed") continue;
+    const notification = notifications.find(
+      (candidate) => candidate.runId === run.runId,
     );
-    if (!run || run.status !== "completed") continue;
     if (!messages.some((message) => message.runId === run.runId)) {
       messages.push(
         {
@@ -71,15 +71,95 @@ export function projectCompletedRuns(
           id: `${run.runId}:assistant`,
           runId: run.runId,
           role: "assistant",
-          text: run.responseText ?? notification.body,
+          text: run.responseText ?? notification?.body ?? "",
           status: "completed",
           tools: toolsFrom(run.events),
         },
       );
     }
-    projected.add(notification.notificationId);
+    if (notification) projected.add(notification.notificationId);
   }
   return projected;
+}
+
+interface PendingConnectionOperation {
+  commandId: string;
+  createdAt: number;
+  expiresAt?: number;
+}
+
+const CONNECTION_OPERATION_STORAGE_KEY =
+  "frockbot.pending-connection-operations.v1";
+const CONNECTION_OPERATION_MAX_AGE_MS = 10 * 60_000;
+
+function readConnectionOperations(): Record<
+  string,
+  PendingConnectionOperation
+> {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return {};
+    const value: unknown = JSON.parse(
+      storage.getItem(CONNECTION_OPERATION_STORAGE_KEY) ?? "{}",
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).flatMap(([key, candidate]) => {
+        if (
+          !candidate ||
+          typeof candidate !== "object" ||
+          Array.isArray(candidate)
+        ) {
+          return [];
+        }
+        const operation = candidate as Record<string, unknown>;
+        if (
+          typeof operation.commandId !== "string" ||
+          typeof operation.createdAt !== "number" ||
+          (operation.expiresAt !== undefined &&
+            typeof operation.expiresAt !== "number")
+        ) {
+          return [];
+        }
+        return [
+          [
+            key,
+            {
+              commandId: operation.commandId,
+              createdAt: operation.createdAt,
+              ...(typeof operation.expiresAt === "number"
+                ? { expiresAt: operation.expiresAt }
+                : {}),
+            },
+          ],
+        ];
+      }),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeConnectionOperations(
+  operations: Record<string, PendingConnectionOperation>,
+): void {
+  try {
+    globalThis.localStorage?.setItem(
+      CONNECTION_OPERATION_STORAGE_KEY,
+      JSON.stringify(operations),
+    );
+  } catch {
+    return;
+  }
+}
+
+function isDefinitiveConnectionFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "definitive" in error &&
+    error.definitive === true
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -152,27 +232,23 @@ function selectedBotId(): string {
 export const shellClientPlugin: ClientPlugin = (ctx) => {
   let activeRequest: AbortController | undefined;
   const botId = selectedBotId();
-  const connectionOperationIds = new Map<string, string>();
+  const connectionOperations = readConnectionOperations();
   const authorizationOperations = new Map<
     string,
-    { key: string; nativeReturnNonce?: string }
+    { nativeReturnNonce?: string }
   >();
 
   async function deliverNotifications(): Promise<void> {
-    if (
-      !ctx.transport.listNotifications ||
-      !ctx.transport.acknowledgeNotification
-    ) {
-      return;
-    }
-    const notifications = await ctx.transport.listNotifications();
-    const runs =
-      notifications.length > 0 ? await ctx.transport.listRuns?.() : [];
+    const [notifications, runs] = await Promise.all([
+      ctx.transport.listNotifications?.() ?? Promise.resolve([]),
+      ctx.transport.listRuns?.() ?? Promise.resolve([]),
+    ]);
     const projected = projectCompletedRuns(
       web.value.messages,
       notifications,
-      runs ?? [],
+      runs,
     );
+    if (!ctx.transport.acknowledgeNotification) return;
     for (const notification of notifications) {
       if (!projected.has(notification.notificationId)) {
         web.value.settingsError = "A completed Bot result is waiting to load";
@@ -339,18 +415,39 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
       }
-      const operationKey = `${packageId}:${connectionTypeId}`;
-      const commandId =
-        connectionOperationIds.get(operationKey) ?? crypto.randomUUID();
-      connectionOperationIds.set(operationKey, commandId);
-      const result = await ctx.transport.startConnection({
-        commandId,
-        packageId,
-        connectionTypeId,
-        botId,
-      });
+      const operationKey = `${botId}:${packageId}:${connectionTypeId}`;
+      const now = Date.now();
+      const existing = connectionOperations[operationKey];
+      const expired =
+        existing &&
+        (existing.expiresAt ??
+          existing.createdAt + CONNECTION_OPERATION_MAX_AGE_MS) <= now;
+      if (expired) delete connectionOperations[operationKey];
+      const operation = connectionOperations[operationKey] ?? {
+        commandId: crypto.randomUUID(),
+        createdAt: now,
+      };
+      connectionOperations[operationKey] = operation;
+      writeConnectionOperations(connectionOperations);
+      let result;
+      try {
+        result = await ctx.transport.startConnection({
+          commandId: operation.commandId,
+          packageId,
+          connectionTypeId,
+          botId,
+        });
+      } catch (error) {
+        if (isDefinitiveConnectionFailure(error)) {
+          delete connectionOperations[operationKey];
+          writeConnectionOperations(connectionOperations);
+        }
+        throw error;
+      }
+      const expiresAt = Date.parse(result.expiresAt);
+      if (Number.isFinite(expiresAt)) operation.expiresAt = expiresAt;
+      writeConnectionOperations(connectionOperations);
       authorizationOperations.set(result.redirectUrl, {
-        key: operationKey,
         nativeReturnNonce: result.nativeReturnNonce,
       });
       return result.redirectUrl;
@@ -373,7 +470,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           operation?.nativeReturnNonce,
         );
         if (operation) {
-          connectionOperationIds.delete(operation.key);
           authorizationOperations.delete(url);
         }
         return;

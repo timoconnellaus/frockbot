@@ -97,3 +97,11 @@ export function decodeExternalAuthorizationUrl(value: unknown): string {
   }
   return value;
 }
+
+export function decodeExternalAuthorizationAcknowledgement(
+  value: unknown,
+): void {
+  if (value !== undefined) {
+    throw new Error("invalid external authorization acknowledgement");
+  }
+}

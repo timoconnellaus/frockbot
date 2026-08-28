@@ -7,6 +7,10 @@ export interface LlmProvider {
     request: NormalizedModelRequest,
     signal: AbortSignal,
   ): AsyncIterable<LlmStreamEvent>;
+  reconcile?(
+    request: NormalizedModelRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<LlmStreamEvent>;
 }
 
 declare module "cordis" {
@@ -60,5 +64,20 @@ export class LlmRegistry extends Service {
     return this.ctx.waterfall("llm/stream", request, signal, () =>
       provider.stream(request, signal),
     );
+  }
+
+  reconcile(
+    request: NormalizedModelRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<LlmStreamEvent> {
+    const provider = this.providers.get(request.provider);
+    if (!provider)
+      throw new Error(`LLM provider "${request.provider}" is unavailable`);
+    if (!provider.reconcile) {
+      throw new Error(
+        `LLM provider "${request.provider}" cannot reconcile durable requests`,
+      );
+    }
+    return provider.reconcile(request, signal);
   }
 }

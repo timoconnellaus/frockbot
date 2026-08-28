@@ -217,6 +217,8 @@ Every started step receives exactly one `step/end` before another step starts. E
 
 Bot Durable Objects persist the admitted configuration snapshot and execution phase with each run. Recovery restarts only work that has not recorded an external effect intent, finalizes already-durable completion, and moves uncertain model or tool outcomes into durable reconciliation instead of duplicating the effect.
 
+The Durable Object bindings remain authority, transactional storage, and scheduler hosts. The shell's declared Bot backend Contribution owns admission, configuration, recovery, and runtime composition; Composio's declared backend Contribution owns the User Connection state machine and provider orchestration. Hosted Bot runtimes mount the declared Fly provider and provider-neutral Computer consumer before assigned Connection runtime Contributions, so browser and native shells observe one backend execution path.
+
 Cancellation uses an `AbortSignal` for the active turn and atomically appends `input/cancelled` for selected queued input. Teardown stops admission, cancels active work, waits for the driver and durability flush, detaches the agent, and only then detaches its session.
 
 Before a restarted runtime accepts work, the session store scans for unmatched starts and execution intents. It appends interrupted `tool/result`, `step/end`, and `turn/end` events in dependency order and flushes them. Queued input that was never admitted remains eligible to run. Work after a durable `model/request` or `tool/call` is never retried automatically because the external side effect may have occurred; an explicit policy may retry only operations whose definition supplies an idempotency key and retry contract.

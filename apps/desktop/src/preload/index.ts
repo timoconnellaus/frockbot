@@ -4,7 +4,10 @@ import type {
   DesktopApiRequest,
   DesktopApiResponse,
 } from "../main/desktop-api.js";
-import { decodeDesktopApiResponse } from "../main/desktop-api.js";
+import {
+  decodeDesktopApiResponse,
+  decodeExternalAuthorizationAcknowledgement,
+} from "../main/desktop-api.js";
 
 setupRenderer();
 
@@ -15,9 +18,7 @@ contextBridge.exposeInMainWorld("frockbotDesktop", {
     url: string,
     nativeReturnNonce?: string,
   ): Promise<void> =>
-    ipcRenderer.invoke(
-      "frockbot:open-external-authorization",
-      url,
-      nativeReturnNonce,
-    ) as Promise<void>,
+    ipcRenderer
+      .invoke("frockbot:open-external-authorization", url, nativeReturnNonce)
+      .then(decodeExternalAuthorizationAcknowledgement),
 });
