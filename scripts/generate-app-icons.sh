@@ -58,26 +58,16 @@ done
 iconutil --convert icns --output "$DESKTOP/icon.icns" "$iconset"
 
 # Android legacy launchers get a little breathing room on the brand-pink field.
-declare -A legacy_sizes=(
-  [mdpi]=48
-  [hdpi]=72
-  [xhdpi]=96
-  [xxhdpi]=144
-  [xxxhdpi]=192
-)
 # Adaptive foreground canvases are 108dp. The canonical image's face and
 # glasses sit inside Android's 66dp safe zone; the adaptive mask supplies the
 # final shape while the ears may extend into the maskable area.
-declare -A foreground_sizes=(
-  [mdpi]=108
-  [hdpi]=162
-  [xhdpi]=216
-  [xxhdpi]=324
-  [xxxhdpi]=432
-)
-for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-  legacy=${legacy_sizes[$density]}
-  foreground=${foreground_sizes[$density]}
+for spec in \
+  "mdpi 48 108" \
+  "hdpi 72 162" \
+  "xhdpi 96 216" \
+  "xxhdpi 144 324" \
+  "xxxhdpi 192 432"; do
+  read -r density legacy foreground <<< "$spec"
   legacy_art=$((legacy * 88 / 100))
   safe_art=$foreground
   directory="$ANDROID/mipmap-$density"

@@ -1,5 +1,9 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = new URL("../", import.meta.url);
 const file = (path: string) => Bun.file(new URL(path, root));
@@ -109,13 +113,82 @@ describe("generated app icons", () => {
     ).toEqual({ width: 1024, height: 1024, colorType: 2 });
   });
 
-  test("the repeatable generator uses the canonical marketing sheep icon", async () => {
-    const generator = await file("scripts/generate-app-icons.sh").text();
-    expect(generator).toContain(
-      "assets/marketing/app-icon/frockbot-icon-1024.png",
-    );
-    expect(generator).toContain("apps/desktop/resources");
-    expect(generator).toContain("apps/mobile/android/app/src/main/res");
-    expect(generator).toContain("Assets.xcassets/AppIcon.appiconset");
-  });
+  const generatorTools = ["magick", "iconutil"].filter(
+    (tool) => Bun.which(tool) === null,
+  );
+
+  test.skipIf(generatorTools.length > 0)(
+    "the repeatable generator recreates the committed artifact tree from only the canonical marketing sheep icon",
+    async () => {
+      const rootPath = fileURLToPath(root);
+      const checkout = await mkdtemp(join(tmpdir(), "frockbot-icons-"));
+      try {
+        for (const path of [
+          "scripts/generate-app-icons.sh",
+          "assets/marketing/app-icon/frockbot-icon-1024.png",
+        ]) {
+          const destination = join(checkout, path);
+          await mkdir(dirname(destination), { recursive: true });
+          await Bun.write(destination, file(path));
+        }
+
+        const run = Bun.spawnSync(
+          ["bash", join(checkout, "scripts/generate-app-icons.sh")],
+          { stderr: "pipe" },
+        );
+        expect(new TextDecoder().decode(run.stderr)).toBe("");
+        expect(run.exitCode).toBe(0);
+
+        const generated = (
+          await readdir(join(checkout, "apps"), {
+            recursive: true,
+            withFileTypes: true,
+          })
+        )
+          .filter((entry) => entry.isFile())
+          .map((entry) =>
+            relative(checkout, join(entry.parentPath, entry.name)),
+          )
+          .sort();
+
+        for (const expected of [
+          "apps/desktop/resources/icon.icns",
+          "apps/desktop/resources/icon.ico",
+          "apps/desktop/resources/icons/1024x1024.png",
+          "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png",
+          "apps/mobile/ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png",
+        ]) {
+          expect(generated).toContain(expected);
+        }
+
+        for (const path of generated) {
+          const committed = await bytes(path);
+          if (path.endsWith(".png")) {
+            expect(await pngInfo(join(checkout, path))).toEqual(
+              await pngInfo(path),
+            );
+          } else if (path.endsWith(".ico")) {
+            const regenerated = new Uint8Array(
+              await Bun.file(join(checkout, path)).arrayBuffer(),
+            );
+            expect(regenerated.slice(0, 6)).toEqual(committed.slice(0, 6));
+          } else {
+            expect(path.endsWith(".icns")).toBe(true);
+            const regenerated = new Uint8Array(
+              await Bun.file(join(checkout, path)).arrayBuffer(),
+            );
+            expect(new TextDecoder().decode(regenerated.slice(0, 4))).toBe(
+              "icns",
+            );
+            expect(new TextDecoder().decode(committed.slice(0, 4))).toBe(
+              "icns",
+            );
+          }
+        }
+      } finally {
+        await rm(checkout, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
 });
