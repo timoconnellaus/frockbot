@@ -70,6 +70,14 @@ export function planBotRunRecovery(
   }
   const modelState = latestModelRequestJournalState(run.events);
   if (modelState.status === "no-effect") return { kind: "resume" };
+  if (modelState.status === "completed") {
+    const unresolvedToolCalls = new Set<string>();
+    for (const event of run.events) {
+      if (event.type === "tool/call") unresolvedToolCalls.add(event.call.id);
+      if (event.type === "tool/result") unresolvedToolCalls.delete(event.callId);
+    }
+    if (unresolvedToolCalls.size === 0) return { kind: "resume" };
+  }
   const hasExternalIntent = run.events.some(
     (event) => event.type === "model/request" || event.type === "tool/call",
   );

@@ -265,6 +265,131 @@ describe("Bot recovery", () => {
     expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
   });
 
+  test.each([
+    ["text response", []],
+    [
+      "assistant tool calls before tool intent",
+      [
+        {
+          id: "durable-call",
+          name: "echo",
+          input: { value: "resumed" },
+        },
+      ],
+    ],
+  ])("resumes a durable %s", (_label, toolCalls) => {
+    const events = [
+      {
+        type: "turn/start" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "step/start" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+      },
+      {
+        type: "model/request" as const,
+        seq: 2,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "completed-request",
+          provider: "provider-1",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message" as const,
+        seq: 3,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        step: 1,
+        requestId: "completed-request",
+        text: toolCalls.length === 0 ? "Already durable." : "",
+        toolCalls,
+      },
+    ] satisfies SessionEvent[];
+    const run = {
+      runId: "run-completed-request",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "hello",
+      events,
+      status: "running",
+      phase: "executing",
+      previousEventCount: 0,
+    } satisfies StoredRun;
+
+    expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
+  });
+
+  test("keeps a journaled tool effect in reconciliation", () => {
+    const events = [
+      {
+        type: "model/request" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "completed-request",
+          provider: "provider-1",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        step: 1,
+        requestId: "completed-request",
+        text: "",
+        toolCalls: [
+          { id: "uncertain-call", name: "echo", input: { value: "hello" } },
+        ],
+      },
+      {
+        type: "tool/call" as const,
+        seq: 2,
+        timestamp: "2026-08-28T00:00:02.000Z",
+        turn: 1,
+        step: 1,
+        call: {
+          id: "uncertain-call",
+          name: "echo",
+          input: { value: "hello" },
+        },
+      },
+    ] satisfies SessionEvent[];
+    const run = {
+      runId: "run-uncertain-tool",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "hello",
+      events,
+      status: "running",
+      phase: "executing",
+      previousEventCount: 0,
+    } satisfies StoredRun;
+
+    expect(planBotRunRecovery(run, events).kind).toBe("reconcile");
+  });
+
   test("replays only an identical completed Turn command", async () => {
     const storage = new MemoryStorage();
     const original = {
