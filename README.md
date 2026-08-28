@@ -63,7 +63,7 @@ GitHub Actions runs these checks on pushes to `main` and on pull requests. Depen
 
 ## Releases
 
-Pushing a semantic-version tag such as `v0.1.0` validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, and creates a GitHub release with generated notes. Application workspaces remain private.
+Pushing a valid SemVer tag such as `v0.1.0`, `v0.1.0-rc.1`, or `v0.1.0+build.1` validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, and creates a GitHub release with generated notes. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
 
 For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
 

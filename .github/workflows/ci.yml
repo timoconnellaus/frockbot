@@ -171,6 +171,23 @@ jobs:
         working-directory: apps/cloudflare
         run: bun run artifact:build
 
+      - name: Configure application artifact
+        id: artifact
+        working-directory: apps/cloudflare
+        run: |
+          artifact_hash="$(sha256sum dist/artifacts/foundation-v1.mjs | cut -d ' ' -f 1)"
+          echo "hash=$artifact_hash" >> "$GITHUB_OUTPUT"
+          ARTIFACT_HASH="$artifact_hash" node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'wrangler.jsonc';
+          const placeholder = 'foundation-v1';
+          const source = fs.readFileSync(file, 'utf8');
+          if (!source.includes(placeholder)) {
+            throw new Error(`${file} no longer contains the default application hash ${placeholder}`);
+          }
+          fs.writeFileSync(file, source.replaceAll(placeholder, process.env.ARTIFACT_HASH));
+          NODE
+
       - name: Apply D1 migrations
         working-directory: apps/cloudflare
         env:
@@ -185,7 +202,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
           bunx wrangler r2 object put
-          frockbot-application-artifacts/applications/foundation-v1.mjs
+          frockbot-application-artifacts/applications/${{ steps.artifact.outputs.hash }}.mjs
           --file dist/artifacts/foundation-v1.mjs
           --remote
 
