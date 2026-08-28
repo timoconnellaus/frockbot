@@ -33,7 +33,7 @@ These rules govern production features and architecture. Treat them as invariant
 - Every model provider is a runtime Plugin behind the shared LLM interface. Provider-specific authentication, request translation, streaming normalization, usage reporting, and errors stay inside that Plugin.
 - Provider and model configuration is durable cloud configuration scoped to its User or Bot.
 - Secrets remain server-side and cross interfaces only as opaque references when necessary.
-- Durable Object Agent loops communicate with Sprites directly. Human takeover uses an authenticated backend protocol and a durable, expiring lease.
+- Durable Object Agent loops communicate with Computers directly through the provider-neutral Computer interface. Human takeover uses an authenticated backend protocol and a durable, expiring lease.
 - The Agent loop contains product-neutral orchestration and does not branch on individual providers or client platforms.
 
 ## Explicit seams
@@ -82,7 +82,7 @@ Add automated checks for constitutional rules whenever they can be enforced mech
 - cancellation is explicit and durable;
 - browser and native shells use the same backend execution path;
 - provider Plugins are replaceable without Agent-loop changes;
-- Sprite tools operate without a desktop client;
+- Computer tools operate without a desktop client;
 - client bundles and protocols contain no secrets;
 - core runtime code has no Electron dependency.
 
