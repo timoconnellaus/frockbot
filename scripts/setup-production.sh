@@ -241,7 +241,7 @@ set_production_secret GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
 stage "GitHub: verify production configuration"
 say "The repository already has the account ID, auth secret, app URL, and D1 ID."
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  step "Checking environment secrets in $GITHUB_REPOSITORY…"
+  step "Checking environment secrets in ${GITHUB_REPOSITORY}…"
   gh secret list --repo "$GITHUB_REPOSITORY" --env "$GITHUB_ENVIRONMENT"
   step "Checking environment variables…"
   gh api "/repos/$GITHUB_REPOSITORY/environments/$GITHUB_ENVIRONMENT/variables" \

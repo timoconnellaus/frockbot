@@ -113,6 +113,8 @@ FROCKBOT_SMOKE_PROMPT='/echo FrockBot is ready.' \
   bun run --filter @frockbot/desktop start
 ```
 
+`bun run --filter @frockbot/desktop package` builds unsigned installers (DMG, NSIS, AppImage) into `apps/desktop/release/`. `bun run icons:generate` regenerates the desktop, Android, and iOS app icons from the canonical `assets/marketing/app-icon/frockbot-icon-1024.png`; it requires ImageMagick 7 and macOS `iconutil`.
+
 ## Structure
 
 ```text
@@ -221,4 +223,4 @@ Cordis contexts provide composition and lifecycle ownership, not security isolat
 - transcript files in the Sprite are derived mirrors, while cloud memory remains canonical in R2/Vectorize;
 - automation folders and the routines panel are presentational until an automation runtime is implemented;
 - the manifest-driven package catalog works for built-in packages, but external package discovery and download are not implemented;
-- application packaging and code signing are not configured.
+- packaged applications are not code signed.

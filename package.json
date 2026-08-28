@@ -12,6 +12,7 @@
     "build:cloudflare": "bun run --filter @frockbot/cloudflare build",
     "build:marketing": "bun run --filter @frockbot/marketing build",
     "build:mobile": "bun run build:webui && bun run --filter @frockbot/mobile build",
+    "icons:generate": "./scripts/generate-app-icons.sh",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev:cloudflare:electron": "bun run --filter @frockbot/cloudflare dev:electron",
     "dev": "bun run build:webui && bun run build:agents && bun run --filter @frockbot/desktop dev",
