@@ -516,12 +516,17 @@ describe("Cloudflare user application gateway", () => {
     expect(loader.ids).toEqual([]);
   });
 
-  test("rejects an invalid decoded Bot settings identity at the gateway seam", async () => {
-    const { gateway } = createTestGateway();
-    const response = await gateway(
-      request("/api/bots/invalid%2Fbot/settings", "alice"),
-    );
-    expect(response.status).toBe(400);
+  test("rejects invalid encoded Bot settings paths before configuration lookup", async () => {
+    const { gateway, configurationRoutes } = createTestGateway();
+    for (const botId of ["invalid%2Fbot", "%"]) {
+      for (const method of ["GET", "POST"]) {
+        const response = await gateway(
+          request(`/api/bots/${botId}/settings`, "alice", { method }),
+        );
+        expect(response.status).toBe(400);
+      }
+    }
+    expect(configurationRoutes).toEqual([]);
   });
 
   test("assigns a Connection only through an authenticated Bot command receipt", async () => {

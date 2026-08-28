@@ -31,6 +31,19 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
+function decodeBotPathSegment(value: string): string {
+  let botId: string;
+  try {
+    botId = decodeURIComponent(value);
+  } catch {
+    throw new ConfigurationDecodeError("invalid bot id");
+  }
+  if (!ID_PATTERN.test(botId)) {
+    throw new ConfigurationDecodeError("invalid bot id");
+  }
+  return botId;
+}
+
 interface DevelopmentIdentity {
   userId?: string;
   persist: boolean;
@@ -135,6 +148,9 @@ export function createGateway(dependencies: GatewayDependencies) {
     const isUserSettings = url.pathname === "/api/settings";
     if (isUserSettings || botSettingsMatch) {
       try {
+        const pathBotId = botSettingsMatch
+          ? decodeBotPathSegment(botSettingsMatch[1])
+          : undefined;
         if (request.method === "GET") {
           if (!botSettingsMatch) {
             return Response.json(
@@ -146,7 +162,7 @@ export function createGateway(dependencies: GatewayDependencies) {
           const query = decodeConfigurationQueryV1({
             schemaVersion: 1,
             type: "bot/get",
-            botId: decodeURIComponent(botSettingsMatch[1]),
+            botId: pathBotId,
           });
           if (query.type !== "bot/get") {
             throw new ConfigurationDecodeError(
@@ -170,7 +186,7 @@ export function createGateway(dependencies: GatewayDependencies) {
         if (
           botSettingsMatch &&
           "botId" in command &&
-          command.botId !== decodeURIComponent(botSettingsMatch[1])
+          command.botId !== pathBotId
         ) {
           return jsonError(400, "Bot command does not match the request path");
         }

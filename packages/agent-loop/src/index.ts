@@ -184,6 +184,8 @@ class LoopAgent implements Agent {
   async #resumeTurn(signal: AbortSignal): Promise<void> {
     let openTurn: number | undefined;
     let latestStep = 0;
+    let latestStepStatus: "none" | "open" | "ended" = "none";
+    let latestStepOutcome: StepOutcome | undefined;
     let unresolvedRequest: NormalizedModelRequest | undefined;
     let definitiveNoEffect:
       Extract<SessionEvent, { type: "model/effect-not-started" }> | undefined;
@@ -191,6 +193,8 @@ class LoopAgent implements Agent {
       if (event.type === "turn/start") {
         openTurn = event.turn;
         latestStep = 0;
+        latestStepStatus = "none";
+        latestStepOutcome = undefined;
         unresolvedRequest = undefined;
         definitiveNoEffect = undefined;
       }
@@ -198,6 +202,16 @@ class LoopAgent implements Agent {
         openTurn = undefined;
       if (event.type === "step/start" && event.turn === openTurn) {
         latestStep = Math.max(latestStep, event.step);
+        latestStepStatus = "open";
+        latestStepOutcome = undefined;
+      }
+      if (
+        event.type === "step/end" &&
+        event.turn === openTurn &&
+        event.step === latestStep
+      ) {
+        latestStepStatus = "ended";
+        latestStepOutcome = event.outcome;
       }
       if (event.type === "model/request" && event.turn === openTurn) {
         unresolvedRequest = event.request;
@@ -252,7 +266,7 @@ class LoopAgent implements Agent {
     let turnOutcome: StepOutcome = "interrupted";
     let reconciliationRequired = false;
     try {
-      let nextStep = latestStep + 1;
+      let nextStep = latestStep === 0 ? 1 : latestStep + 1;
       if (unresolvedRequest) {
         openStep = latestStep;
         if (definitiveNoEffect) {
@@ -323,7 +337,7 @@ class LoopAgent implements Agent {
         });
         openStep = undefined;
         nextStep = latestStep + 1;
-      } else if (latestAssistant) {
+      } else if (latestStepStatus === "open" && latestAssistant) {
         openStep = latestStep;
         if (latestAssistant.toolCalls.length === 0) {
           this.session.append({
@@ -369,11 +383,24 @@ class LoopAgent implements Agent {
         });
         openStep = undefined;
         nextStep = latestStep + 1;
+      } else if (latestStepStatus === "ended") {
+        turnOutcome = latestStepOutcome ?? "interrupted";
+        if (
+          turnOutcome !== "completed" ||
+          !latestAssistant ||
+          latestAssistant.toolCalls.length === 0
+        ) {
+          return;
+        }
+      } else if (latestStepStatus === "open") {
+        nextStep = latestStep;
       }
       for (let step = nextStep; step <= this.#maxSteps; step += 1) {
         signal.throwIfAborted();
         openStep = step;
-        this.session.append({ type: "step/start", turn: openTurn, step });
+        if (!(latestStepStatus === "open" && step === latestStep)) {
+          this.session.append({ type: "step/start", turn: openTurn, step });
+        }
         const response = await this.#requestModel(openTurn, step, signal);
         this.session.append({
           type: "assistant/message",

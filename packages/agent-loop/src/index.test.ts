@@ -1212,4 +1212,150 @@ describe("AgentLoop", () => {
       outcome: "completed",
     });
   });
+
+  test("finishes a turn without duplicating its durable step end", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "ended-text-request",
+          provider: "resume-ended-text",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "ended-text-request",
+        text: "Already durable.",
+        toolCalls: [],
+      },
+      { type: "step/end", turn: 1, step: 1, outcome: "completed" },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const provider: LlmProvider = {
+      id: "resume-ended-text",
+      async *stream() {
+        throw new Error("resume must not create another model request");
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      "resume-ended-text": initial,
+    });
+    const handle = await root.agents.create({
+      botId: "resume-bot",
+      sessionId: "resume-ended-text",
+      provider: "resume-ended-text",
+      model: "test-model",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.filter(
+        (event) =>
+          event.type === "step/end" && event.turn === 1 && event.step === 1,
+      ),
+    ).toHaveLength(1);
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "turn/end" && event.turn === 1,
+      ),
+    ).toEqual([expect.objectContaining({ outcome: "completed" })]);
+  });
+
+  test("resumes inside a durable step start awaiting its model request", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const call = {
+      id: "completed-call",
+      name: "echo",
+      input: { value: "completed" },
+    };
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "first-request",
+          provider: "resume-open-step",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "first-request",
+        text: "",
+        toolCalls: [call],
+      },
+      { type: "tool/call", turn: 1, step: 1, call },
+      {
+        type: "tool/result",
+        turn: 1,
+        step: 1,
+        callId: call.id,
+        name: call.name,
+        content: "completed",
+        isError: false,
+        status: "completed",
+      },
+      { type: "step/end", turn: 1, step: 1, outcome: "completed" },
+      { type: "step/start", turn: 1, step: 2 },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    let modelRequests = 0;
+    const provider: LlmProvider = {
+      id: "resume-open-step",
+      async *stream(request) {
+        modelRequests += 1;
+        expect(request.requestId).toBeTruthy();
+        yield { type: "text-delta", text: "Finished after recovery." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      "resume-open-step": initial,
+    });
+    const handle = await root.agents.create({
+      botId: "resume-bot",
+      sessionId: "resume-open-step",
+      provider: "resume-open-step",
+      model: "test-model",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(modelRequests).toBe(1);
+    expect(
+      handle.agent.session.events.filter(
+        (event) =>
+          event.type === "step/start" && event.turn === 1 && event.step === 2,
+      ),
+    ).toHaveLength(1);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({ type: "model/request", turn: 1, step: 2 }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
 });
