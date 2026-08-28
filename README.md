@@ -133,7 +133,7 @@ packages/
   provider-openai-compatible/  Streaming production model adapter
   webui-shell/      FrockBot Cordis WebUI/Vue client plugin
 docs/
-  architecture.md   Accepted Cordis-first target architecture
+  architecture.md   Current system shape
   adr/              Architectural decisions
   research/         Primary-source compatibility research
 ```
