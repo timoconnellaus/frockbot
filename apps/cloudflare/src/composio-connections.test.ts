@@ -484,7 +484,6 @@ describe("ComposioConnectionCoordinator", () => {
       safeMetadata: {
         connectedAccountId: "ca_123",
         toolkitSlug: "gmail",
-        targetBotId: "primary",
       },
     });
 
@@ -551,7 +550,6 @@ describe("ComposioConnectionCoordinator", () => {
     expect(reconciled.redirectUrl).toContain("connected_account_id=ca_123");
     expect(store.connections.get("connection-1")?.safeMetadata).toMatchObject({
       connectedAccountId: "ca_123",
-      targetBotId: "primary",
     });
   });
 
@@ -659,7 +657,6 @@ describe("ComposioConnectionCoordinator", () => {
       state: "ready",
       safeMetadata: {
         connectedAccountId: "ca_123",
-        targetBotId: "primary",
       },
     });
     const coordinator = new ComposioConnectionCoordinator({
@@ -807,20 +804,11 @@ describe("ComposioConnectionCoordinator", () => {
           }),
         ),
     });
-    const assignments: Array<{
-      userId: string;
-      botId: string;
-      connectionId: string;
-    }> = [];
     const coordinator = new ComposioConnectionCoordinator({
       client,
       store,
       callbackBaseUrl: "https://bot.frockbot.com",
       connectionTypes: {},
-      assignBot: (userId, botId, connectionId) => {
-        assignments.push({ userId, botId, connectionId });
-        return Promise.resolve();
-      },
     });
 
     await coordinator.complete("user-1", {
@@ -832,9 +820,9 @@ describe("ComposioConnectionCoordinator", () => {
       state: "ready",
       safeMetadata: { toolkitSlug: "gmail", providerAlias: "personal" },
     });
-    expect(assignments).toEqual([
-      { userId: "user-1", botId: "primary", connectionId: "connection-1" },
-    ]);
+    expect(
+      store.connections.get("connection-1")?.safeMetadata.assignmentGeneration,
+    ).toBeUndefined();
 
     await expect(
       coordinator.fail("user-1", "connection-1", "delayed failure", "state-1"),
@@ -911,7 +899,7 @@ describe("ComposioConnectionCoordinator", () => {
     expect(providerLookups).toBe(1);
   });
 
-  test("accepts callback state only once during concurrent completion", async () => {
+  test("atomically makes concurrent callbacks ready without assignment", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
       connectionId: "connection-1",
@@ -925,7 +913,6 @@ describe("ComposioConnectionCoordinator", () => {
         authorizationStateId: "state-1",
         authorizationStateExpiresAt: Date.now() + 60_000,
         connectedAccountId: "ca_123",
-        targetBotId: "primary",
       },
     });
     const client = new ComposioClient({
@@ -943,30 +930,11 @@ describe("ComposioConnectionCoordinator", () => {
           }),
         ),
     });
-    let releaseAssignment!: () => void;
-    let assignmentStarted!: () => void;
-    const assignmentGate = new Promise<void>((resolve) => {
-      releaseAssignment = resolve;
-    });
-    const started = new Promise<void>((resolve) => {
-      assignmentStarted = resolve;
-    });
-    const assignmentLeases = new Set<string>();
     const coordinator = new ComposioConnectionCoordinator({
       client,
       store,
       callbackBaseUrl: "https://bot.frockbot.com",
       connectionTypes: {},
-      assignBot: (_userId, _botId, _connectionId, leaseId) => {
-        if (!assignmentLeases.has(leaseId)) {
-          assignmentLeases.add(leaseId);
-          assignmentStarted();
-        }
-        return assignmentGate;
-      },
-      markBotUnavailable: () => {
-        throw new Error("valid assignment must not be compensated");
-      },
     });
 
     const first = coordinator.complete("user-1", {
@@ -974,19 +942,16 @@ describe("ComposioConnectionCoordinator", () => {
       connectedAccountId: "ca_123",
       authorizationStateId: "state-1",
     });
-    await started;
     const second = coordinator.complete("user-1", {
       connectionId: "connection-1",
       connectedAccountId: "ca_123",
       authorizationStateId: "state-1",
     });
-    releaseAssignment();
     await expect(Promise.all([first, second])).resolves.toEqual([
       expect.objectContaining({ status: "ready" }),
       expect.objectContaining({ status: "ready" }),
     ]);
 
-    expect(assignmentLeases.size).toBe(1);
     expect(store.connections.get("connection-1")?.state).toBe("ready");
   });
 
@@ -1091,7 +1056,6 @@ describe("ComposioConnectionCoordinator", () => {
         assignmentLeaseExpiresAt: Date.now() - 1,
       },
     });
-    let assignmentAttempt = 0;
     const coordinator = new ComposioConnectionCoordinator({
       client: new ComposioClient({
         apiKey: "secret",
@@ -1100,10 +1064,6 @@ describe("ComposioConnectionCoordinator", () => {
       store,
       callbackBaseUrl: "https://bot.frockbot.com",
       connectionTypes: {},
-      assignBot: () => {
-        assignmentAttempt += 1;
-        return Promise.resolve();
-      },
     });
 
     const result = await coordinator.complete("user-1", {
@@ -1111,127 +1071,6 @@ describe("ComposioConnectionCoordinator", () => {
       connectedAccountId: "ca_123",
     });
     expect(result.status).toBe("pending");
-    expect(assignmentAttempt).toBe(0);
-  });
-
-  test("resumes an admitted callback phase after coordinator eviction", async () => {
-    const store = new MemoryConnectionStore();
-    await store.startConnection("user-1", {
-      connectionId: "connection-1",
-      packageId: "composio",
-      connectionTypeId: "gmail",
-      displayName: "Gmail",
-    });
-    await store.updateConnection("user-1", "connection-1", {
-      state: "authorizing",
-      safeMetadata: {
-        authorizationStateId: "state-1",
-        authorizationStateExpiresAt: Date.now() + 60_000,
-        connectedAccountId: "ca_123",
-        targetBotId: "primary",
-      },
-    });
-    await expect(
-      store.admitConnectionCallback("user-1", "connection-1", {
-        authorizationStateId: "state-1",
-        connectedAccountId: "ca_123",
-        leaseId: "durable-lease",
-        verifiedMetadata: {
-          authorizationStateId: "state-1",
-          authorizationStateExpiresAt: Date.now() + 60_000,
-          connectedAccountId: "ca_123",
-          targetBotId: "primary",
-          toolkitSlug: "gmail",
-        },
-      }),
-    ).resolves.toMatchObject({ phase: "acquired" });
-    const admitted = store.connections.get("connection-1");
-    if (!admitted) throw new Error("callback phase was not admitted");
-    await store.updateConnection("user-1", "connection-1", {
-      state: admitted.state,
-      safeMetadata: {
-        ...admitted.safeMetadata,
-        authorizationStateExpiresAt: Date.now() - 1,
-      },
-    });
-    const leaseIds: string[] = [];
-    const coordinator = new ComposioConnectionCoordinator({
-      client: new ComposioClient({
-        apiKey: "secret",
-        fetch: () => Promise.reject(new Error("provider lookup not expected")),
-      }),
-      store,
-      callbackBaseUrl: "https://bot.frockbot.com",
-      connectionTypes: {},
-      assignBot: (_userId, _botId, _connectionId, leaseId) => {
-        leaseIds.push(leaseId);
-        return Promise.resolve();
-      },
-    });
-
-    await coordinator.complete("user-1", {
-      connectionId: "connection-1",
-      connectedAccountId: "ca_123",
-      authorizationStateId: "state-1",
-    });
-
-    expect(leaseIds).toEqual(["durable-lease"]);
-    expect(store.connections.get("connection-1")?.state).toBe("ready");
-  });
-
-  test("persists compensation before repairing a lost assignment race", async () => {
-    const store = new MemoryConnectionStore();
-    await store.startConnection("user-1", {
-      connectionId: "connection-1",
-      packageId: "composio",
-      connectionTypeId: "gmail",
-      displayName: "Gmail",
-    });
-    await store.updateConnection("user-1", "connection-1", {
-      state: "authorizing",
-      safeMetadata: {
-        connectedAccountId: "ca_123",
-        targetBotId: "primary",
-      },
-    });
-    const coordinator = new ComposioConnectionCoordinator({
-      client: new ComposioClient({
-        apiKey: "secret",
-        fetch: () =>
-          Promise.resolve(
-            Response.json({
-              items: [
-                {
-                  id: "ca_123",
-                  status: "ACTIVE",
-                  toolkit: { slug: "gmail" },
-                },
-              ],
-            }),
-          ),
-      }),
-      store,
-      callbackBaseUrl: "https://bot.frockbot.com",
-      connectionTypes: {},
-      assignBot: async () => {
-        await store.updateConnection("user-1", "connection-1", {
-          state: "revoking",
-        });
-      },
-      markBotUnavailable: () =>
-        Promise.reject(new Error("Bot RPC unavailable")),
-    });
-
-    await expect(
-      coordinator.complete("user-1", {
-        connectionId: "connection-1",
-        connectedAccountId: "ca_123",
-      }),
-    ).rejects.toThrow("Bot RPC unavailable");
-    expect(
-      store.connections.get("connection-1")?.safeMetadata
-        .assignmentCompensationPending,
-    ).toBe(true);
   });
 
   test("does not resurrect a connection when revocation wins the callback race", async () => {
@@ -1268,16 +1107,11 @@ describe("ComposioConnectionCoordinator", () => {
         return lookup;
       },
     });
-    let assignments = 0;
     const coordinator = new ComposioConnectionCoordinator({
       client,
       store,
       callbackBaseUrl: "https://bot.frockbot.com",
       connectionTypes: {},
-      assignBot: () => {
-        assignments += 1;
-        return Promise.resolve();
-      },
     });
 
     const completion = coordinator.complete("user-1", {
@@ -1300,7 +1134,6 @@ describe("ComposioConnectionCoordinator", () => {
 
     await expect(completion).rejects.toThrow("state changed");
     expect(store.connections.get("connection-1")?.state).toBe("revoked");
-    expect(assignments).toBe(0);
   });
 
   test("invalidates every Bot that depends on a revoked Connection", async () => {

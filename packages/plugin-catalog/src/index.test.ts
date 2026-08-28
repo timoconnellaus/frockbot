@@ -98,7 +98,7 @@ describe("PackageCatalog", () => {
         },
         permissions: [],
       }).contributions.backend,
-    ).toEqual({ entry: "./backend", host: "bot" });
+    ).toEqual([{ entry: "./backend", host: "bot" }]);
   });
 
   test("decodes the reference package manifest", async () => {
@@ -257,10 +257,9 @@ describe("decodeFrockBotManifest", () => {
       permissions: [],
       configuration: {},
     });
-    expect(decoded.contributions.backend).toEqual({
-      entry: "./backend",
-      host: "gateway",
-    });
+    expect(decoded.contributions.backend).toEqual([
+      { entry: "./backend", host: "gateway" },
+    ]);
     expect(declaredContributionKinds(decoded)).toEqual(["backend"]);
   });
 

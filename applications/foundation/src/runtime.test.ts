@@ -55,11 +55,14 @@ describe("foundation application", () => {
     expect(
       first.packages.find((pkg) => pkg.id === "shell")?.manifest.contributions
         .backend,
-    ).toEqual({ entry: "./backend", host: "bot" });
+    ).toEqual([{ entry: "./backend", host: "bot" }]);
     expect(
       first.packages.find((pkg) => pkg.id === "composio")?.manifest
         .contributions.backend,
-    ).toEqual({ entry: "./backend", host: "gateway" });
+    ).toEqual([
+      { entry: "./backend", host: "gateway" },
+      { entry: "./user-configuration", host: "user" },
+    ]);
   });
 
   test("exposes only compiled runtime packages to the runtime host", async () => {
@@ -83,17 +86,29 @@ describe("foundation application", () => {
       FROCKBOT_AUTHORIZATION_STATE_SECRET: "state-secret",
     };
     const backend = createFoundationBackendContributions(plan, {
+      backendHost: "gateway",
       callbackBaseUrl: "https://bot.frockbot.com",
       readSecret: (name) => secrets[name],
       storeFor: () => {
         throw new Error("not used while composing");
       },
-      assignCapability: () => Promise.resolve(),
       markConnectionUnavailable: () => Promise.resolve("applied"),
     });
     expect(backend.map((contribution) => contribution.packageId)).toEqual([
       "composio",
     ]);
+    const botBackend = createFoundationBackendContributions(plan, {
+      backendHost: "bot",
+      mount: (specifier) => ({ specifier, executeConfiguration() {} }),
+    });
+    const userBackend = createFoundationBackendContributions(plan, {
+      backendHost: "user",
+      mount: (specifier) => ({ specifier, startConnection() {} }),
+    });
+    expect(botBackend).toHaveLength(1);
+    expect(userBackend).toHaveLength(1);
+    expect(typeof botBackend[0]?.executeConfiguration).toBe("function");
+    expect(typeof userBackend[0]?.startConnection).toBe("function");
     expect(
       createFoundationHostedRuntimePackages(plan, {
         userId: "user-1",

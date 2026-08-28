@@ -1,4 +1,3 @@
-import { DurableObject } from "cloudflare:workers";
 import {
   ConfigurationConflictError,
   type ConfigurationCommandV1,
@@ -70,8 +69,13 @@ function revocationCompensations(
   });
 }
 
-interface UserConfigurationEnv {
+export interface UserConfigurationEnv {
   BOT_STATES: DurableObjectNamespace;
+}
+
+export interface ComposioUserBackendHost {
+  state: DurableObjectState;
+  env: UserConfigurationEnv;
 }
 
 export interface StartConnectionInput {
@@ -194,7 +198,14 @@ function applyUserCommand(
   }
 }
 
-export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
+export class ComposioUserBackendContribution {
+  readonly ctx: DurableObjectState;
+  readonly env: UserConfigurationEnv;
+
+  constructor(host: ComposioUserBackendHost) {
+    this.ctx = host.state;
+    this.env = host.env;
+  }
   async read(userId: string): Promise<UserSettingsViewV1> {
     await this.assertIdentity(userId);
     return (
@@ -336,7 +347,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         );
         if (
           !connection ||
-          update.state !== "failed" ||
           connection.safeMetadata.authorizationStateId !==
             update.authorizationStateId
         ) {
@@ -369,7 +379,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         }
         const nextConnection = {
           ...connection,
-          state: "failed" as const,
+          state: update.state,
           safeMetadata: {
             ...(update.safeMetadata ?? connection.safeMetadata),
             authorizationStateConsumed: true,
@@ -1202,4 +1212,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     }
     if (!existing) await this.ctx.storage.put(IDENTITY_KEY, userId);
   }
+}
+
+export function createComposioUserBackendContribution(
+  host: ComposioUserBackendHost,
+): ComposioUserBackendContribution {
+  return new ComposioUserBackendContribution(host);
 }

@@ -1,4 +1,3 @@
-import { DurableObject } from "cloudflare:workers";
 import type { SessionEvent } from "@frockbot/agent-core";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
@@ -16,7 +15,6 @@ import {
 import { createFoundationAssignedRuntimePackages } from "@frockbot/application-foundation/runtime";
 import { createFoundationHostedRuntimePackages } from "@frockbot/application-foundation/runtime";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
-import type { UserConfiguration } from "@frockbot/plugin-composio/user-configuration";
 import {
   settleAssignmentSaga,
   type StoredAssignmentSaga,
@@ -57,9 +55,14 @@ export interface BotStateEnv {
   MEMORY_FILES: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
-  USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
+  USER_CONFIGURATIONS: DurableObjectNamespace;
   COMPOSIO_API_KEY?: string;
   SPRITES_TOKEN?: string;
+}
+
+export interface ShellBotBackendHost {
+  state: DurableObjectState;
+  env: BotStateEnv;
 }
 
 function parseStoredJson<T>(body: string): Promise<T> {
@@ -126,12 +129,19 @@ function memoryPluginConfig(
   };
 }
 
-export class BotState extends DurableObject<BotStateEnv> {
+export class ShellBotBackendContribution {
+  readonly ctx: DurableObjectState;
+  readonly env: BotStateEnv;
   private executingRunId: string | undefined;
   private readonly assignmentActivities = new Map<
     string,
     Promise<OperationReceiptV1>
   >();
+
+  constructor(host: ShellBotBackendHost) {
+    this.ctx = host.state;
+    this.env = host.env;
+  }
 
   async getSettings(identity: BotIdentity): Promise<BotSettingsViewV1> {
     return this.ensureBotSettings(identity);
@@ -1224,4 +1234,10 @@ export class BotState extends DurableObject<BotStateEnv> {
       recovery.settings,
     );
   }
+}
+
+export function createShellBotBackendContribution(
+  host: ShellBotBackendHost,
+): ShellBotBackendContribution {
+  return new ShellBotBackendContribution(host);
 }

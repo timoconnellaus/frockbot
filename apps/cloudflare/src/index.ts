@@ -227,35 +227,13 @@ export default {
     const backendContributions = createFoundationBackendContributions(
       application,
       {
+        backendHost: "gateway",
         callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
         readSecret: (name) => {
           const value = (env as unknown as Record<string, unknown>)[name];
           return typeof value === "string" ? value : undefined;
         },
         storeFor: (userId) => userConfigurationStub(env, userId),
-        assignCapability: async (assignment) => {
-          const bot = botStateStub(env, assignment.userId, assignment.botId);
-          const settings = await bot.getSettings({
-            userId: assignment.userId,
-            botId: assignment.botId,
-          });
-          await bot.executeConfiguration(
-            { userId: assignment.userId, botId: assignment.botId },
-            {
-              schemaVersion: 1,
-              type: "bot/assign-capability",
-              commandId: assignment.generation,
-              botId: assignment.botId,
-              expectedRevision: settings.revision,
-              assignment: {
-                assignmentId: assignment.assignmentId,
-                packageId: assignment.packageId,
-                capabilityId: assignment.capabilityId,
-                connectionId: assignment.connectionId,
-              },
-            },
-          );
-        },
         markConnectionUnavailable: (
           userId,
           botId,

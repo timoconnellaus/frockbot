@@ -39,12 +39,6 @@ export interface ComposioBackendConfig {
   connectionTypes: Record<string, ComposioConnectionTypeConfig>;
   authorizationStateSecret: string;
   storeFor(userId: string): ComposioConnectionStore;
-  assignBot?: (
-    userId: string,
-    botId: string,
-    connectionId: string,
-    leaseId: string,
-  ) => Promise<void>;
   markBotUnavailable?: (
     userId: string,
     botId: string,
@@ -57,15 +51,6 @@ export interface ComposioBackendHost {
   callbackBaseUrl: string;
   readSecret(name: string): string | undefined;
   storeFor(userId: string): ComposioConnectionStore;
-  assignCapability(input: {
-    userId: string;
-    botId: string;
-    assignmentId: string;
-    packageId: string;
-    capabilityId: string;
-    connectionId: string;
-    generation: string;
-  }): Promise<void>;
   markConnectionUnavailable(
     userId: string,
     botId: string,
@@ -97,16 +82,6 @@ export function createConfiguredComposioBackendContribution(
         toolkitSlug: "gmail",
       },
     },
-    assignBot: (userId, botId, connectionId, leaseId) =>
-      host.assignCapability({
-        userId,
-        botId,
-        assignmentId: `composio-${connectionId}`,
-        packageId: "composio",
-        capabilityId: "gmail-tools",
-        connectionId,
-        generation: leaseId,
-      }),
     markBotUnavailable: host.markConnectionUnavailable,
   });
 }
@@ -228,7 +203,6 @@ function coordinator(
     store: config.storeFor(userId),
     callbackBaseUrl: config.callbackBaseUrl,
     connectionTypes: config.connectionTypes,
-    assignBot: config.assignBot,
     markBotUnavailable: config.markBotUnavailable,
   });
 }

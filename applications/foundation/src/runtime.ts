@@ -78,13 +78,6 @@ const runtimeContributions = new Map([
   ["@frockbot/plugin-clock/agent", clockRuntimePlugin],
 ]);
 
-const backendContributionFactories = new Map([
-  [
-    "@frockbot/plugin-composio/backend",
-    createConfiguredComposioBackendContribution,
-  ],
-]);
-
 const assignedRuntimeContributionFactories = new Map([
   [
     "@frockbot/plugin-composio/agent",
@@ -122,24 +115,43 @@ function contributionSpecifier(specifier: string, entry: string): string {
   return `${specifier}${entry.slice(1)}`;
 }
 
+export interface FoundationMountedBackendHost<T> {
+  backendHost: "bot" | "user";
+  mount(specifier: string): T;
+}
+
 export function createFoundationBackendContributions(
   plan: ApplicationPlan,
-  host: ComposioBackendHost,
-): BackendRouteContribution[] {
+  host: { backendHost: "gateway" } & ComposioBackendHost,
+): BackendRouteContribution[];
+export function createFoundationBackendContributions<T>(
+  plan: ApplicationPlan,
+  host: FoundationMountedBackendHost<T> & { backendHost: "bot" },
+): T[];
+export function createFoundationBackendContributions<T>(
+  plan: ApplicationPlan,
+  host: FoundationMountedBackendHost<T> & { backendHost: "user" },
+): T[];
+export function createFoundationBackendContributions<T>(
+  plan: ApplicationPlan,
+  host:
+    | ({ backendHost: "gateway" } & ComposioBackendHost)
+    | FoundationMountedBackendHost<T>,
+): Array<BackendRouteContribution | T> {
   return plan.packages.flatMap((pkg) => {
-    const backend = pkg.manifest.contributions.backend;
-    if (
-      !backend ||
-      backend.host !== "gateway" ||
-      !plan.contributions.backend.includes(pkg.id)
-    )
-      return [];
-    const specifier = contributionSpecifier(pkg.specifier, backend.entry);
-    const factory = backendContributionFactories.get(specifier);
-    if (!factory) {
+    if (!plan.contributions.backend.includes(pkg.id)) return [];
+    return (pkg.manifest.contributions.backend ?? []).flatMap((backend) => {
+      if (backend.host !== host.backendHost) return [];
+      const specifier = contributionSpecifier(pkg.specifier, backend.entry);
+      if (
+        host.backendHost === "gateway" &&
+        specifier === "@frockbot/plugin-composio/backend"
+      ) {
+        return [createConfiguredComposioBackendContribution(host)];
+      }
+      if (host.backendHost !== "gateway") return [host.mount(specifier)];
       throw new Error(`unknown foundation backend contribution: ${specifier}`);
-    }
-    return [factory(host)];
+    });
   });
 }
 

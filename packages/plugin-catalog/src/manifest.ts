@@ -71,7 +71,7 @@ export interface FrockBotManifest {
   compatibility: { frockbot: string };
   dependencies: Record<string, string>;
   contributions: {
-    backend?: BackendContribution;
+    backend?: BackendContribution[];
     runtime?: RuntimeContribution;
     client?: ClientContribution;
     desktop?: DesktopContribution;
@@ -218,20 +218,27 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
   }
   const contributions: FrockBotManifest["contributions"] = {};
   if (value.schemaVersion === 3 && value.contributions.backend !== undefined) {
-    if (!isRecord(value.contributions.backend)) {
-      throw new Error("manifest backend contribution must be an object");
+    const backend = Array.isArray(value.contributions.backend)
+      ? value.contributions.backend
+      : [value.contributions.backend];
+    if (backend.length === 0 || !backend.every(isRecord)) {
+      throw new Error(
+        "manifest backend contributions must contain objects",
+      );
     }
-    if (
-      value.contributions.backend.host !== "gateway" &&
-      value.contributions.backend.host !== "bot" &&
-      value.contributions.backend.host !== "user"
-    ) {
-      throw new Error("manifest backend host is invalid");
-    }
-    contributions.backend = {
-      entry: relativeEntry(value.contributions.backend, "entry"),
-      host: value.contributions.backend.host,
-    };
+    contributions.backend = backend.map((contribution) => {
+      if (
+        contribution.host !== "gateway" &&
+        contribution.host !== "bot" &&
+        contribution.host !== "user"
+      ) {
+        throw new Error("manifest backend host is invalid");
+      }
+      return {
+        entry: relativeEntry(contribution, "entry"),
+        host: contribution.host,
+      };
+    });
   }
   if (value.contributions.runtime !== undefined) {
     if (!isRecord(value.contributions.runtime)) {

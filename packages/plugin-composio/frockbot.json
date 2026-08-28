@@ -5,7 +5,10 @@
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {
-    "backend": { "entry": "./backend", "host": "gateway" },
+    "backend": [
+      { "entry": "./backend", "host": "gateway" },
+      { "entry": "./user-configuration", "host": "user" }
+    ],
     "runtime": { "entry": "./agent" }
   },
   "permissions": ["connections:manage", "tools:execute"],

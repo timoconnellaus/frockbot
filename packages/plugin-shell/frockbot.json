@@ -7,10 +7,12 @@
     "frockbot": ">=0.0.1"
   },
   "contributions": {
-    "backend": {
-      "entry": "./backend",
-      "host": "bot"
-    },
+    "backend": [
+      {
+        "entry": "./backend",
+        "host": "bot"
+      }
+    ],
     "client": {
       "entry": "./client",
       "mounts": [

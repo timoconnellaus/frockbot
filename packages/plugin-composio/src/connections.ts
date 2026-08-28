@@ -124,12 +124,6 @@ export interface ComposioConnectionCoordinatorConfig {
   store: ComposioConnectionStore;
   callbackBaseUrl: string;
   connectionTypes: Record<string, ComposioConnectionTypeConfig>;
-  assignBot?: (
-    userId: string,
-    botId: string,
-    connectionId: string,
-    leaseId: string,
-  ) => Promise<void>;
   markBotUnavailable?: (
     userId: string,
     botId: string,
@@ -202,7 +196,6 @@ export class ComposioConnectionCoordinator {
       connectionTypeId: input.connectionTypeId,
       displayName: input.alias?.trim() || type.displayName,
       safeMetadata: {
-        targetBotId: input.botId,
         toolkitSlug: type.toolkitSlug,
         providerAlias: connectionId,
         returnTarget: input.returnTarget ?? "browser",
@@ -541,7 +534,7 @@ export class ComposioConnectionCoordinator {
       authorizationStateId?: string;
     },
   ): Promise<ConnectionCompletionResult> {
-    let connection = await this.config.store.getConnection(
+    const connection = await this.config.store.getConnection(
       userId,
       input.connectionId,
     );
@@ -559,6 +552,10 @@ export class ComposioConnectionCoordinator {
     const authorizationStateId =
       input.authorizationStateId ??
       (connection.safeMetadata.authorizationStateId as string);
+    if (connection.safeMetadata.authorizationStateConsumed === true) {
+      const durable = durableCompletionResult(connection);
+      if (durable) return durable;
+    }
     const expectedAccountId = connection.safeMetadata.connectedAccountId;
     if (expectedAccountId !== input.connectedAccountId) {
       throw new Error(
@@ -592,56 +589,14 @@ export class ComposioConnectionCoordinator {
       };
     }
 
-    const claim = await this.config.store.admitConnectionCallback(
+    const finished = await this.config.store.finishConnectionAuthorization(
       userId,
       input.connectionId,
       {
+        state: "ready",
+        safeMetadata: verifiedMetadata,
         authorizationStateId,
-        connectedAccountId: input.connectedAccountId,
-        leaseId: crypto.randomUUID(),
-        verifiedMetadata,
       },
-    );
-    if (claim.phase === "done") {
-      return (
-        durableCompletionResult(claim.connection) ?? {
-          returnTarget,
-          status: "ready",
-          nativeReturnNonce,
-        }
-      );
-    }
-    if (claim.phase === "pending") {
-      return { returnTarget, status: "pending", nativeReturnNonce };
-    }
-    if (claim.phase === "invalid" || !claim.leaseId) {
-      throw new Error("Connection state changed during callback verification");
-    }
-    connection = claim.connection;
-    const leaseId = claim.leaseId;
-    const targetBotId = connection.safeMetadata.targetBotId;
-    if (typeof targetBotId === "string" && this.config.assignBot) {
-      try {
-        await this.config.assignBot(
-          userId,
-          targetBotId,
-          input.connectionId,
-          leaseId,
-        );
-      } catch (error) {
-        await this.compensateAssignment(
-          userId,
-          input.connectionId,
-          targetBotId,
-          leaseId,
-        );
-        throw error;
-      }
-    }
-    const finished = await this.config.store.finishConnectionAssignment(
-      userId,
-      input.connectionId,
-      leaseId,
     );
     if (finished) {
       return { returnTarget, status: "ready", nativeReturnNonce };
@@ -654,42 +609,6 @@ export class ComposioConnectionCoordinator {
     if (current?.state === "ready") {
       return { returnTarget, status: "ready", nativeReturnNonce };
     }
-    if (typeof targetBotId === "string") {
-      await this.compensateAssignment(
-        userId,
-        input.connectionId,
-        targetBotId,
-        leaseId,
-      );
-    }
-    throw new Error("Connection state changed during Bot assignment");
-  }
-
-  private async compensateAssignment(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    leaseId: string,
-  ): Promise<void> {
-    const compensationClaimed =
-      await this.config.store.requireAssignmentCompensation(
-        userId,
-        connectionId,
-        leaseId,
-      );
-    if (!compensationClaimed || !this.config.markBotUnavailable) return;
-    const result = await this.config.markBotUnavailable(
-      userId,
-      botId,
-      connectionId,
-      { id: leaseId, expectedGeneration: leaseId },
-    );
-    if (isSettledBotCompensation(result)) {
-      await this.config.store.recordAssignmentCompensated(
-        userId,
-        connectionId,
-        leaseId,
-      );
-    }
+    throw new Error("Connection state changed during authorization completion");
   }
 }
