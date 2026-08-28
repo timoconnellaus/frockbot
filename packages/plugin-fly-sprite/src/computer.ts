@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { APIError, SpritesClient } from "@fly/sprites";
+import { ComputerError } from "@frockbot/computer-core";
 
 const DESKTOP_SERVICE = "frockbot-viewer-gateway";
 const HOME_ROOT = "/home/box";
@@ -11,6 +12,7 @@ const CONTROL_SCRIPT = `${RUNTIME_ROOT}/control.sh`;
 const ENSURE_AGENT_SCRIPT = `${RUNTIME_ROOT}/ensure-agent.sh`;
 const MAX_OUTPUT = 30_000;
 const MAX_STORAGE_OUTPUT = 100_000;
+const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 const LEASE_MAX_AGE_SECONDS = 90;
 
 export interface ComputerBotIdentity {
@@ -218,6 +220,13 @@ EOF
 export interface SpriteExecResult {
   stdout: string | Buffer;
   stderr: string | Buffer;
+}
+
+export interface SpriteAgentExecResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  outputTruncated: boolean;
 }
 
 export interface SpriteServiceStream extends AsyncIterable<unknown> {}
@@ -434,6 +443,14 @@ export class FlySpriteAgentComputer {
     return this.computer.runForAgent(this.layout, command, signal);
   }
 
+  exec(
+    command: string,
+    signal: AbortSignal,
+    limits: { timeoutMs?: number; maxOutputBytes?: number } = {},
+  ): Promise<SpriteAgentExecResult> {
+    return this.computer.execForAgent(this.layout, command, signal, limits);
+  }
+
   runStorage(command: string, signal: AbortSignal): Promise<string> {
     return this.computer.runStorageForAgent(this.layout, command, signal);
   }
@@ -533,6 +550,49 @@ export class FlySpriteComputer {
     }
   }
 
+  async execForAgent(
+    layout: AgentLayout,
+    command: string,
+    signal: AbortSignal,
+    limits: { timeoutMs?: number; maxOutputBytes?: number } = {},
+  ): Promise<SpriteAgentExecResult> {
+    const sprite = await this.readySprite(layout, signal);
+    const guarded = [
+      this.agentControlGuard(layout),
+      `export HOME=${HOME_ROOT}`,
+      `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
+      `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
+      `cd ${shellQuote(layout.workspaceDir)}`,
+      `bash -c ${shellQuote(command)}`,
+      `printf '\\n%s%s\\n' ${shellQuote(EXEC_EXIT_MARKER)} "$?"`,
+    ].join("\n");
+    const maxOutput = Math.max(
+      1,
+      Math.min(limits.maxOutputBytes ?? MAX_OUTPUT, MAX_OUTPUT),
+    );
+    let result: SpriteExecResult;
+    try {
+      result = await sprite.execFileHTTP("bash", ["-lc", guarded], {
+        signal,
+        timeout: Math.max(1, Math.min(limits.timeoutMs ?? 120_000, 120_000)),
+        maxBuffer: MAX_OUTPUT * 2,
+      });
+    } catch (error) {
+      throw new Error(`Sprite command failed: ${errorText(error)}`);
+    }
+    const raw = outputText(result.stdout);
+    const match = new RegExp(`\\n?${EXEC_EXIT_MARKER}(\\d+)\\n?$`).exec(raw);
+    const stdout = match ? raw.slice(0, match.index) : raw;
+    const stderr = outputText(result.stderr);
+    return {
+      exitCode: match ? Number(match[1]) : null,
+      stdout: stdout.slice(0, maxOutput),
+      stderr: stderr.slice(0, maxOutput),
+      outputTruncated:
+        !match || stdout.length > maxOutput || stderr.length > maxOutput,
+    };
+  }
+
   async runStorageForAgent(
     layout: AgentLayout,
     command: string,
@@ -546,25 +606,24 @@ export class FlySpriteComputer {
       `cd ${shellQuote(layout.workspaceDir)}`,
       command,
     ].join("\n");
+    let result: SpriteExecResult;
     try {
-      const result = await sprite.execFileHTTP(
-        "bash",
-        ["-lc", storageCommand],
-        {
-          signal,
-          timeout: 120_000,
-          maxBuffer: MAX_STORAGE_OUTPUT * 2,
-        },
-      );
-      return clipped(
-        [outputText(result.stdout), outputText(result.stderr)]
-          .filter(Boolean)
-          .join("\n"),
-        MAX_STORAGE_OUTPUT,
-      );
+      result = await sprite.execFileHTTP("bash", ["-lc", storageCommand], {
+        signal,
+        timeout: 120_000,
+        maxBuffer: MAX_STORAGE_OUTPUT * 2,
+      });
     } catch (error) {
       throw new Error(`Sprite storage operation failed: ${errorText(error)}`);
     }
+    const stdout = outputText(result.stdout);
+    if (stdout.length > MAX_STORAGE_OUTPUT) {
+      throw new ComputerError(
+        "limit-exceeded",
+        "Sprite storage output exceeded the maximum size",
+      );
+    }
+    return stdout;
   }
 
   async browserForAgent(
