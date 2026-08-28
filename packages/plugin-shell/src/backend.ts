@@ -1322,14 +1322,38 @@ export class ShellBotBackendContribution {
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
       const plan = planBotRunRecovery(run, latest);
       if (plan.kind === "complete") {
-        await transaction.put({
-          [key]: {
-            ...run,
-            status: "completed",
-            responseText: plan.responseText,
-          } satisfies StoredRun,
-        });
-        await transaction.delete(ACTIVE_RUN_KEY);
+        if (!run.configurationSnapshot) {
+          throw new Error(`run "${run.runId}" has no configuration snapshot`);
+        }
+        if (run.previousEventCount === undefined) {
+          throw new Error(`run "${run.runId}" has no previous event count`);
+        }
+        const result = {
+          runId: run.runId,
+          text: plan.responseText,
+          events: run.events,
+        } satisfies BotTurnResult;
+        const completed = run.configurationSnapshot.notifications.enabled
+          ? {
+              ...result,
+              notification: this.createNotification(
+                run.configurationSnapshot,
+                result,
+              ),
+            }
+          : result;
+        await completeStoredRun(
+          transaction,
+          {
+            run: key,
+            activeRun: ACTIVE_RUN_KEY,
+            latestEvents: LATEST_EVENTS_KEY,
+            notificationPrefix: NOTIFICATION_PREFIX,
+          },
+          run.runId,
+          latest.slice(0, run.previousEventCount),
+          completed,
+        );
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
