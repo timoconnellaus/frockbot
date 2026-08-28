@@ -210,7 +210,6 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--ink);
   }
   .svg-sprite {
     display: none;
@@ -225,6 +224,7 @@
     width: 40px;
     height: 40px;
     border-radius: 50%;
+    color: var(--ink);
     transition:
       color 180ms ease,
       background 180ms ease;
@@ -838,6 +838,10 @@
   .footer-links a:hover {
     color: var(--pink-dark);
   }
+  .footer-links .github-logo-link svg {
+    width: 18px;
+    height: 18px;
+  }
 
   .legal-page {
     background: var(--cream);
@@ -1082,6 +1086,7 @@
       width: 100%;
       height: auto;
       min-height: 44px;
+      justify-content: flex-start;
       border-radius: 14px;
     }
     .site-nav .button {

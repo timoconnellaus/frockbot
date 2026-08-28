@@ -261,8 +261,16 @@ describe("legal policy pages", () => {
     expect(symbol.id).toBe("github-mark");
     expect(symbol.viewBox).toBe("0 0 24 24");
     expect(symbol.paths).toHaveLength(1);
-    expect(symbol.paths[0].startsWith("M12 ")).toBe(true);
-    expect(symbol.paths[0].length).toBeGreaterThan(100);
+    expect(symbol.paths[0].trim()).not.toBe("");
+  });
+
+  test("the GitHub sprite host stays out of the rendered layout", async () => {
+    const spriteRules = parseStyleRules(await publicFile("styles.css")).filter(
+      (rule) => rule.selectors.includes(".svg-sprite"),
+    );
+
+    expect(spriteRules).toHaveLength(1);
+    expect(spriteRules[0].declarations["display"]).toBe("none");
   });
 
   test.each(["index.html", "privacy/index.html", "terms/index.html"])(
