@@ -123,7 +123,7 @@ Cordis services expose context-specific proxy objects that inherit from the prov
 
 **System-prompt registry** accepts scoped prompt sections, variables, and tool-schema presentation. It assembles a prompt for one proposed step.
 
-**LLM registry** selects a provider adapter and streams normalized response chunks. Provider SDK choice is internal to each adapter and does not enter the agent-loop interface. The first production adapter, `@frockbot/provider-openai-compatible`, normalizes messages and tools, parses streamed SSE text and fragmented tool calls, bounds HTTP errors, and receives credentials only inside the utility process.
+**LLM registry** selects a provider adapter and streams normalized response chunks. A separate optional reconciliation capability retrieves an original result by its durable provider effect ID; adapters without a provider-guaranteed retrieval path return reconciliation unavailable. Provider SDK choice is internal to each adapter and does not enter the agent-loop interface. The generic `@frockbot/provider-openai-compatible` adapter normalizes messages and tools, parses streamed SSE text and fragmented tool calls, bounds HTTP errors, and receives credentials only inside the utility process, but does not claim idempotency or repeat an uncertain request.
 
 **Tool registry** owns tool definitions, per-agent visibility, input decoding, execution policy, and result finalization.
 
@@ -213,9 +213,9 @@ input/queued wakes agent
   → return to idle
 ```
 
-Every started step receives exactly one `step/end` before another step starts. Every started turn receives exactly one `turn/end`. Atomic session batches and `finally` paths enforce the pairing during ordinary errors and cancellation.
+Every started step receives exactly one `step/end` before another step starts, and every started turn receives exactly one `turn/end`, except while an uncertain provider effect is durably `model/reconciliation-required`. That state deliberately keeps the current step and turn open until provider-bound retrieval succeeds. Atomic session batches and `finally` paths enforce terminal pairing during ordinary errors and cancellation.
 
-Bot Durable Objects persist the admitted configuration snapshot and execution phase with each run. Recovery restarts only work that has not recorded an external effect intent, finalizes already-durable completion, and moves uncertain model or tool outcomes into durable reconciliation instead of duplicating the effect.
+Bot Durable Objects persist the admitted configuration snapshot and execution phase with each run. Recovery restarts only work that has not recorded an external effect intent, finalizes already-durable completion, and moves uncertain model or tool outcomes into durable reconciliation instead of duplicating the effect. If the selected provider cannot retrieve the original model effect, the run remains active, scheduled, and visibly `reconciliation-required`; recovery never calls the provider's streaming creation path again.
 
 The Durable Object bindings remain authority, transactional storage, and scheduler hosts. The shell's declared Bot backend Contribution owns admission, configuration, recovery, and runtime composition; Composio's declared backend Contribution owns the User Connection state machine and provider orchestration. Hosted Bot runtimes mount the declared Fly provider and provider-neutral Computer consumer before assigned Connection runtime Contributions, so browser and native shells observe one backend execution path.
 

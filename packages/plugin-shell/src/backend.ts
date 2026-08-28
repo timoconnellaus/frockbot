@@ -23,8 +23,15 @@ import {
   settleAssignmentSaga,
   type StoredAssignmentSaga,
 } from "./backend-assignment.js";
-import { completeStoredRun, failStoredRun } from "./backend-completion.js";
-import { executeBotTurn } from "./backend-runner.js";
+import {
+  completeStoredRun,
+  failStoredRun,
+  requireStoredRunReconciliation,
+} from "./backend-completion.js";
+import {
+  BotTurnReconciliationRequiredError,
+  executeBotTurn,
+} from "./backend-runner.js";
 import { eventsForFailedRun, planBotRunRecovery } from "./backend-recovery.js";
 import type {
   BotNotificationIntent,
@@ -783,6 +790,25 @@ export class ShellBotBackendContribution {
       const events = durableRun?.events ?? run.events;
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
+      if (error instanceof BotTurnReconciliationRequiredError) {
+        await this.ctx.storage.transaction(async (transaction) => {
+          await requireStoredRunReconciliation(
+            transaction,
+            {
+              run: `${RUN_PREFIX}${run.runId}`,
+              activeRun: ACTIVE_RUN_KEY,
+              latestEvents: LATEST_EVENTS_KEY,
+              notificationPrefix: NOTIFICATION_PREFIX,
+            },
+            run.runId,
+            previous,
+            events,
+            message,
+          );
+          await this.refreshRecoveryAlarm(transaction);
+        });
+        throw new Error(message);
+      }
       await this.failRun(run.runId, previous, events, message);
       throw new Error(message);
     } finally {

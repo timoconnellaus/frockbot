@@ -28,10 +28,27 @@ async function* foundationStream(
   yield { type: "finish", reason: "completed" };
 }
 
+async function foundationReconciliation(
+  request: Parameters<LlmProvider["stream"]>[0],
+  signal: AbortSignal,
+): Promise<LlmStreamEvent[]> {
+  const events: LlmStreamEvent[] = [];
+  for await (const event of foundationStream(request, signal)) {
+    events.push(event);
+  }
+  return events;
+}
+
 export const foundationProvider: LlmProvider = {
   id: FOUNDATION_PROVIDER,
   stream: foundationStream,
-  reconcile: foundationStream,
+  reconciliation: {
+    retrieve: async (effect, signal) =>
+      ({
+        status: "recovered",
+        events: await foundationReconciliation(effect.request, signal),
+      }) as const,
+  },
 };
 
 export const foundationProviderPlugin: Plugin.Function = (ctx) =>

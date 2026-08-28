@@ -4,6 +4,7 @@ import type { BotTurnResult, StoredRun } from "./backend-contracts.js";
 import {
   completeStoredRun,
   failStoredRun,
+  requireStoredRunReconciliation,
   type RunTerminalKeys,
   type RunTerminalStorage,
 } from "./backend-completion.js";
@@ -135,5 +136,42 @@ describe("Bot run terminal persistence", () => {
 
     expect(storage.values.get(keys.run)).toMatchObject({ status: "completed" });
     expect(storage.values.has("notification:notification-run-1")).toBe(true);
+  });
+
+  test("keeps an unretrievable effect active and reconciliation-required", async () => {
+    const storage = new MemoryRunStorage();
+    const request = {
+      type: "model/request" as const,
+      seq: 0,
+      timestamp: "2026-08-28T00:00:00.000Z",
+      turn: 1,
+      step: 1,
+      request: {
+        requestId: "effect-1",
+        provider: "openai-compatible",
+        model: "model-1",
+        system: "",
+        messages: [],
+        tools: [],
+      },
+    } satisfies SessionEvent;
+    storage.values.set(keys.run, { ...storedRun(), events: [request] });
+
+    await requireStoredRunReconciliation(
+      storage,
+      keys,
+      "run-1",
+      [],
+      [request],
+      "provider-bound retrieval unavailable",
+    );
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "reconciliation-required",
+      phase: "reconciliation-required",
+      failure: "provider-bound retrieval unavailable",
+    });
+    expect(storage.values.get(keys.activeRun)).toBe("run-1");
+    expect(storage.values.get(keys.latestEvents)).toEqual([request]);
   });
 });

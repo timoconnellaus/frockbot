@@ -169,7 +169,6 @@ export class OpenAICompatibleProvider implements LlmProvider {
     const fetcher = this.config.fetch ?? fetch;
     const headers: Record<string, string> = {
       "content-type": "application/json",
-      "idempotency-key": request.requestId,
       ...this.config.headers,
     };
     if (this.config.apiKey)
@@ -229,13 +228,6 @@ export class OpenAICompatibleProvider implements LlmProvider {
             ? "max-tokens"
             : "completed",
     };
-  }
-
-  reconcile(
-    request: NormalizedModelRequest,
-    signal: AbortSignal,
-  ): AsyncIterable<LlmStreamEvent> {
-    return this.stream(request, signal);
   }
 }
 

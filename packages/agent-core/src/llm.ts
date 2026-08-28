@@ -1,16 +1,35 @@
 import { type Context, Service } from "cordis";
 import type { LlmStreamEvent, NormalizedModelRequest } from "./types.js";
 
+export interface DurableModelEffect {
+  providerEffectId: string;
+  request: NormalizedModelRequest;
+}
+
+export type LlmReconciliationOutcome =
+  | {
+      status: "recovered";
+      events: readonly LlmStreamEvent[];
+    }
+  | {
+      status: "unavailable";
+      reason: string;
+    };
+
+export interface LlmReconciliationCapability {
+  retrieve(
+    effect: DurableModelEffect,
+    signal: AbortSignal,
+  ): Promise<LlmReconciliationOutcome>;
+}
+
 export interface LlmProvider {
   id: string;
   stream(
     request: NormalizedModelRequest,
     signal: AbortSignal,
   ): AsyncIterable<LlmStreamEvent>;
-  reconcile?(
-    request: NormalizedModelRequest,
-    signal: AbortSignal,
-  ): AsyncIterable<LlmStreamEvent>;
+  reconciliation?: LlmReconciliationCapability;
 }
 
 declare module "cordis" {
@@ -66,18 +85,37 @@ export class LlmRegistry extends Service {
     );
   }
 
-  reconcile(
+  async reconcile(
     request: NormalizedModelRequest,
     signal: AbortSignal,
-  ): AsyncIterable<LlmStreamEvent> {
+  ): Promise<LlmReconciliationOutcome> {
     const provider = this.providers.get(request.provider);
-    if (!provider)
-      throw new Error(`LLM provider "${request.provider}" is unavailable`);
-    if (!provider.reconcile) {
-      throw new Error(
-        `LLM provider "${request.provider}" cannot reconcile durable requests`,
-      );
+    if (!provider) {
+      return {
+        status: "unavailable",
+        reason: `LLM provider "${request.provider}" is unavailable`,
+      };
     }
-    return provider.reconcile(request, signal);
+    if (!provider.reconciliation) {
+      return {
+        status: "unavailable",
+        reason: `LLM provider "${request.provider}" does not support provider-bound retrieval`,
+      };
+    }
+    try {
+      return await provider.reconciliation.retrieve(
+        { providerEffectId: request.requestId, request },
+        signal,
+      );
+    } catch (error) {
+      signal.throwIfAborted();
+      return {
+        status: "unavailable",
+        reason:
+          error instanceof Error
+            ? error.message
+            : "Provider-bound retrieval failed",
+      };
+    }
   }
 }

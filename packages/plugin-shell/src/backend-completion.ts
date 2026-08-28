@@ -67,3 +67,27 @@ export async function failStoredRun(
   }
   return "failed";
 }
+
+export async function requireStoredRunReconciliation(
+  storage: RunTerminalStorage,
+  keys: RunTerminalKeys,
+  runId: string,
+  previous: readonly SessionEvent[],
+  events: readonly SessionEvent[],
+  failure: string,
+): Promise<void> {
+  const activeRunId = await storage.get<string>(keys.activeRun);
+  if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
+  const run = await storage.get<StoredRun>(keys.run);
+  if (!run) throw new Error(`run "${runId}" was not accepted`);
+  await storage.put({
+    [keys.run]: {
+      ...run,
+      events: structuredClone([...events]),
+      status: "reconciliation-required",
+      phase: "reconciliation-required",
+      failure,
+    } satisfies StoredRun,
+    [keys.latestEvents]: structuredClone([...previous, ...events]),
+  });
+}

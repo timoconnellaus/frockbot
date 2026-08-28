@@ -32,6 +32,10 @@ interface ModelResponse {
   toolCalls: ToolCall[];
 }
 
+type ModelReconciliation =
+  | { status: "recovered"; response: ModelResponse }
+  | { status: "unavailable"; reason: string };
+
 class LoopAgent implements Agent {
   readonly id: string;
   readonly botId: string;
@@ -218,16 +222,36 @@ class LoopAgent implements Agent {
     );
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
+    let reconciliationRequired = false;
     try {
       let nextStep = latestStep + 1;
       if (unresolvedRequest) {
         openStep = latestStep;
-        const response = await this.#reconcileModel(
+        const reconciliation = await this.#reconcileModel(
           unresolvedRequest,
           openTurn,
           latestStep,
           signal,
         );
+        if (reconciliation.status === "unavailable") {
+          const existing = this.session.events.findLast(
+            (event) =>
+              event.type === "model/reconciliation-required" &&
+              event.requestId === unresolvedRequest.requestId,
+          );
+          if (existing?.reason !== reconciliation.reason) {
+            this.session.append({
+              type: "model/reconciliation-required",
+              turn: openTurn,
+              step: latestStep,
+              requestId: unresolvedRequest.requestId,
+              reason: reconciliation.reason,
+            });
+          }
+          reconciliationRequired = true;
+          return;
+        }
+        const { response } = reconciliation;
         this.session.append({
           type: "assistant/message",
           turn: openTurn,
@@ -352,19 +376,21 @@ class LoopAgent implements Agent {
         this.#ctx.emit("agent/error", this, error);
       }
     } finally {
-      if (openStep !== undefined) {
+      if (!reconciliationRequired) {
+        if (openStep !== undefined) {
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step: openStep,
+            outcome: turnOutcome,
+          });
+        }
         this.session.append({
-          type: "step/end",
+          type: "turn/end",
           turn: openTurn,
-          step: openStep,
           outcome: turnOutcome,
         });
       }
-      this.session.append({
-        type: "turn/end",
-        turn: openTurn,
-        outcome: turnOutcome,
-      });
       await this.session.flush();
       await this.#ctx.serial("agent/turn-stopping", this, openTurn);
     }
@@ -544,10 +570,12 @@ class LoopAgent implements Agent {
     turn: number,
     step: number,
     signal: AbortSignal,
-  ): Promise<ModelResponse> {
+  ): Promise<ModelReconciliation> {
+    const reconciliation = await this.#ctx.llm.reconcile(request, signal);
+    if (reconciliation.status === "unavailable") return reconciliation;
     let text = "";
     const toolCalls: ToolCall[] = [];
-    for await (const event of this.#ctx.llm.reconcile(request, signal)) {
+    for (const event of reconciliation.events) {
       signal.throwIfAborted();
       this.#applyStreamEvent(
         event,
@@ -560,7 +588,10 @@ class LoopAgent implements Agent {
         },
       );
     }
-    return { request, text, toolCalls };
+    return {
+      status: "recovered",
+      response: { request, text, toolCalls },
+    };
   }
 
   #applyStreamEvent(

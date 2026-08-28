@@ -33,6 +33,16 @@ export class BotTurnExecutionError extends Error {
   }
 }
 
+export class BotTurnReconciliationRequiredError extends Error {
+  constructor(
+    message: string,
+    readonly events: SessionEvent[],
+  ) {
+    super(message);
+    this.name = "BotTurnReconciliationRequiredError";
+  }
+}
+
 export interface ExecuteBotTurnOptions {
   botId: string;
   command: BotTurnCommand;
@@ -73,8 +83,24 @@ export async function executeBotTurn(
     else runtime.agent.agent.send(command.text);
     await runtime.agent.agent.whenIdle();
     const events = [...runtime.agent.agent.session.events];
-    const terminalTurn = events.findLast((event) => event.type === "turn/end");
+    const currentTurn = events.findLast(
+      (event) => event.type === "turn/start",
+    )?.turn;
+    const terminalTurn = events.findLast(
+      (event) => event.type === "turn/end" && event.turn === currentTurn,
+    );
     if (!terminalTurn) {
+      const reconciliation = events.findLast(
+        (event) =>
+          event.type === "model/reconciliation-required" &&
+          event.turn === currentTurn,
+      );
+      if (reconciliation?.type === "model/reconciliation-required") {
+        throw new BotTurnReconciliationRequiredError(
+          reconciliation.reason,
+          appendedSessionEvents(previousEvents, events),
+        );
+      }
       throw new BotTurnExecutionError(
         "Bot turn did not reach a durable terminal state",
         appendedSessionEvents(previousEvents, events),
@@ -93,7 +119,12 @@ export async function executeBotTurn(
       events: appendedSessionEvents(previousEvents, events),
     };
   } catch (error) {
-    if (error instanceof BotTurnExecutionError) throw error;
+    if (
+      error instanceof BotTurnExecutionError ||
+      error instanceof BotTurnReconciliationRequiredError
+    ) {
+      throw error;
+    }
     const events = [...runtime.agent.agent.session.events];
     throw new BotTurnExecutionError(
       error instanceof Error ? error.message : "Bot turn failed",

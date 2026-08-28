@@ -63,6 +63,12 @@ export interface SessionEventMap {
     step: number;
     request: NormalizedModelRequest;
   };
+  "model/reconciliation-required": {
+    turn: number;
+    step: number;
+    requestId: string;
+    reason: string;
+  };
   "assistant/chunk": {
     turn: number;
     step: number;

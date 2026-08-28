@@ -2,8 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   AgentRegistry,
   type AgentOptions,
+  type LlmReconciliationOutcome,
   LlmRegistry,
   type LlmProvider,
+  type LlmStreamEvent,
   type PersistSessionEvents,
   type SessionEvent,
   SessionStore,
@@ -15,6 +17,15 @@ import { Context, type Plugin } from "cordis";
 import { AgentLoop } from "./index.js";
 
 const roots: Context[] = [];
+
+function recovered(
+  ...events: LlmStreamEvent[]
+): Promise<LlmReconciliationOutcome> {
+  return Promise.resolve({
+    status: "recovered",
+    events,
+  });
+}
 
 async function mountRuntime(
   provider: LlmProvider,
@@ -82,10 +93,14 @@ describe("AgentLoop", () => {
         streams += 1;
         yield { type: "finish", reason: "completed" };
       },
-      async *reconcile(request) {
-        reconciled.push(request.requestId);
-        yield { type: "text-delta", text: "Recovered response" };
-        yield { type: "finish", reason: "completed" };
+      reconciliation: {
+        retrieve(effect) {
+          reconciled.push(effect.providerEffectId);
+          return recovered(
+            { type: "text-delta", text: "Recovered response" },
+            { type: "finish", reason: "completed" },
+          );
+        },
       },
     };
     const initial = [
@@ -150,6 +165,85 @@ describe("AgentLoop", () => {
       type: "turn/end",
       outcome: "completed",
     });
+  });
+
+  test("keeps an unretrievable provider effect open without repeating it", async () => {
+    let streams = 0;
+    const provider: LlmProvider = {
+      id: "unretrievable",
+      async *stream() {
+        streams += 1;
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const initial = [
+      {
+        type: "session/created" as const,
+        createdAt: "2026-08-28T00:00:00.000Z",
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+      },
+      {
+        type: "turn/start" as const,
+        turn: 1,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:01.000Z",
+      },
+      {
+        type: "step/start" as const,
+        turn: 1,
+        step: 1,
+        seq: 2,
+        timestamp: "2026-08-28T00:00:01.000Z",
+      },
+      {
+        type: "model/request" as const,
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "unretrievable-effect-1",
+          provider: "unretrievable",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+        seq: 3,
+        timestamp: "2026-08-28T00:00:01.000Z",
+      },
+    ] satisfies SessionEvent[];
+    const root = await mountRuntime(provider, undefined, undefined, {
+      unretrievable: initial,
+    });
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "unretrievable",
+      provider: "unretrievable",
+      model: "model-1",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(streams).toBe(0);
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/reconciliation-required",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        requestId: "unretrievable-effect-1",
+        reason:
+          'LLM provider "unretrievable" does not support provider-bound retrieval',
+      }),
+    ]);
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "step/end" || event.type === "turn/end",
+      ),
+    ).toBe(false);
   });
 
   test("streams, journals a tool before execution, and repeats the model step", async () => {
@@ -439,10 +533,14 @@ describe("AgentLoop", () => {
       async *stream() {
         throw new Error("resume must not create a new model request");
       },
-      async *reconcile(request) {
-        expect(request.requestId).toBe("uncertain-request");
-        yield { type: "text-delta", text: "Resumed safely." };
-        yield { type: "finish", reason: "completed" };
+      reconciliation: {
+        retrieve(effect) {
+          expect(effect.providerEffectId).toBe("uncertain-request");
+          return recovered(
+            { type: "text-delta", text: "Resumed safely." },
+            { type: "finish", reason: "completed" },
+          );
+        },
       },
     };
     const root = await mountRuntime(provider, undefined, undefined, {
@@ -526,9 +624,6 @@ describe("AgentLoop", () => {
         });
         yield { type: "text-delta", text: "Finished after recovery." };
         yield { type: "finish", reason: "completed" };
-      },
-      async *reconcile() {
-        throw new Error("completed model effects must not be reconciled");
       },
     };
     const root = await mountRuntime(
