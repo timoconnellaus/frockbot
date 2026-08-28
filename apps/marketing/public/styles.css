@@ -206,6 +206,37 @@
   .site-nav > a:focus-visible::after {
     transform: scaleX(1);
   }
+  .github-logo-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .svg-sprite {
+    display: none;
+  }
+  .github-logo-link svg {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+  }
+  .site-nav > a.github-logo-link {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    color: var(--ink);
+    transition:
+      color 180ms ease,
+      background 180ms ease;
+  }
+  .site-nav > a.github-logo-link::after {
+    display: none;
+  }
+  .site-nav > a.github-logo-link:hover,
+  .site-nav > a.github-logo-link:focus-visible {
+    background: var(--blush);
+    color: var(--pink-dark);
+  }
   .menu-button {
     display: none;
     width: 44px;
@@ -807,6 +838,10 @@
   .footer-links a:hover {
     color: var(--pink-dark);
   }
+  .footer-links .github-logo-link svg {
+    width: 18px;
+    height: 18px;
+  }
 
   .legal-page {
     background: var(--cream);
@@ -1046,6 +1081,13 @@
     }
     .site-nav > a {
       padding: 12px;
+    }
+    .site-nav > a.github-logo-link {
+      width: 100%;
+      height: auto;
+      min-height: 44px;
+      justify-content: flex-start;
+      border-radius: 14px;
     }
     .site-nav .button {
       margin-top: 4px;
