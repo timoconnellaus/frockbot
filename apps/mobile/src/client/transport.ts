@@ -57,14 +57,26 @@ function decodeTurnEvent(value: unknown): TurnEvent {
   const event: TurnEvent = {
     type: requiredString(source, "type", "turn event"),
   };
-  if (source.call !== undefined) {
+  if (
+    source.type === "tool/call" &&
+    source.occurrenceId !== undefined &&
+    source.name !== undefined
+  ) {
+    event.call = {
+      id: requiredString(source, "occurrenceId", "turn event"),
+      name: requiredString(source, "name", "turn event"),
+    };
+  } else if (source.call !== undefined) {
     const call = record(source.call, "tool call");
     event.call = {
       id: requiredString(call, "id", "tool call"),
       name: requiredString(call, "name", "tool call"),
     };
   }
-  event.callId = optionalString(source, "callId", "turn event");
+  event.callId =
+    source.type === "tool/result" && source.occurrenceId !== undefined
+      ? requiredString(source, "occurrenceId", "turn event")
+      : optionalString(source, "callId", "turn event");
   event.content = optionalString(source, "content", "turn event");
   if (source.isError !== undefined) {
     if (typeof source.isError !== "boolean") {

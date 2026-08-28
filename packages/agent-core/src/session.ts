@@ -4,7 +4,49 @@ import type {
   SessionEvent,
   SessionEventEnvelope,
   SessionEventInput,
+  ToolCall,
 } from "./types.js";
+import { toolCallOccurrences, toolIntentMatches } from "./types.js";
+
+function expectedToolCalls(
+  events: readonly SessionEvent[],
+): Map<string, ToolCall> {
+  const expected = new Map<string, ToolCall>();
+  for (const event of events) {
+    if (event.type !== "assistant/message") continue;
+    for (const occurrence of toolCallOccurrences(
+      event.turn,
+      event.step,
+      event.toolCalls,
+    )) {
+      if (expected.has(occurrence.occurrenceId)) {
+        throw new Error(
+          `tool occurrence "${occurrence.occurrenceId}" has multiple assistant calls`,
+        );
+      }
+      expected.set(occurrence.occurrenceId, occurrence.call);
+    }
+  }
+  return expected;
+}
+
+function requireMatchingToolCall(
+  expected: ReadonlyMap<string, ToolCall>,
+  event: Extract<SessionEvent, { type: "tool/call" | "tool/result" }>,
+): ToolCall {
+  const call = expected.get(event.occurrenceId);
+  if (!call || call.name !== event.name) {
+    throw new Error(
+      `tool occurrence "${event.occurrenceId}" does not match an assistant call`,
+    );
+  }
+  if (event.type === "tool/call" && !toolIntentMatches(call, event)) {
+    throw new Error(
+      `tool occurrence "${event.occurrenceId}" input does not match its assistant call`,
+    );
+  }
+  return call;
+}
 
 declare module "cordis" {
   interface Context {
@@ -90,6 +132,7 @@ export class Session {
 
   deriveMessages(): LlmMessage[] {
     const messages: LlmMessage[] = [];
+    const expected = expectedToolCalls(this.#events);
     for (const event of this.#events) {
       if (event.type === "user/message") {
         messages.push({ role: "user", content: event.text });
@@ -100,9 +143,10 @@ export class Session {
           toolCalls: event.toolCalls,
         });
       } else if (event.type === "tool/result") {
+        const call = requireMatchingToolCall(expected, event);
         messages.push({
           role: "tool",
-          callId: event.callId,
+          callId: call.id,
           name: event.name,
           content: event.content,
           isError: event.isError,
@@ -139,6 +183,8 @@ export class Session {
       Extract<SessionEvent, { type: "tool/call" }>
     >();
     const unresolvedModelRequests = new Set<string>();
+    const expected = expectedToolCalls(this.#events);
+    const completedOccurrences = new Set<string>();
 
     for (const event of this.#events) {
       if (event.type === "turn/start") openTurn = event.turn;
@@ -155,8 +201,27 @@ export class Session {
       ) {
         openStep = undefined;
       }
-      if (event.type === "tool/call") calls.set(event.call.id, event);
-      if (event.type === "tool/result") calls.delete(event.callId);
+      if (event.type === "tool/call") {
+        requireMatchingToolCall(expected, event);
+        if (
+          calls.has(event.occurrenceId) ||
+          completedOccurrences.has(event.occurrenceId)
+        ) {
+          throw new Error(
+            `tool occurrence "${event.occurrenceId}" has duplicate intent`,
+          );
+        }
+        calls.set(event.occurrenceId, event);
+      }
+      if (event.type === "tool/result") {
+        requireMatchingToolCall(expected, event);
+        if (!calls.delete(event.occurrenceId)) {
+          throw new Error(
+            `tool occurrence "${event.occurrenceId}" has a result without intent`,
+          );
+        }
+        completedOccurrences.add(event.occurrenceId);
+      }
       if (event.type === "model/request") {
         unresolvedModelRequests.add(event.request.requestId);
       }
@@ -174,8 +239,8 @@ export class Session {
         type: "tool/result",
         turn: event.turn,
         step: event.step,
-        callId: event.call.id,
-        name: event.call.name,
+        occurrenceId: event.occurrenceId,
+        name: event.name,
         content: "Interrupted before a durable result was recorded.",
         isError: true,
         status: "interrupted",

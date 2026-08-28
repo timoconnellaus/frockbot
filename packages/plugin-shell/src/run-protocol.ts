@@ -112,42 +112,41 @@ interface ToolInteractionV1 {
   result?: ClientToolResultV1;
 }
 
-function interactionContext(turn: number, step: number): string {
-  return `${turn}:${step}`;
-}
-
 function toolInteractions(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
 ): ToolInteractionV1[] {
   const interactions: ToolInteractionV1[] = [];
-  const pending = new Map<string, Map<string, ToolInteractionV1[]>>();
+  const byOccurrence = new Map<string, ToolInteractionV1>();
   for (const event of events) {
     if (event.type === "tool/call") {
+      if (byOccurrence.has(event.occurrenceId)) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" has duplicate intent`,
+        );
+      }
       const alias = `tool-${interactions.length + 1}`;
       const interaction: ToolInteractionV1 = {
         call: {
           type: "tool/call",
           call: {
             id: alias,
-            name: truncateWireString(event.call.name, MAX_EVENT_NAME_BYTES),
+            name: truncateWireString(event.name, MAX_EVENT_NAME_BYTES),
           },
         },
       };
       interactions.push(interaction);
-      const context = interactionContext(event.turn, event.step);
-      const callsById = pending.get(context) ?? new Map();
-      const occurrences = callsById.get(event.call.id) ?? [];
-      occurrences.push(interaction);
-      callsById.set(event.call.id, occurrences);
-      pending.set(context, callsById);
+      byOccurrence.set(event.occurrenceId, interaction);
     } else if (event.type === "tool/result") {
-      const context = interactionContext(event.turn, event.step);
-      const occurrences = pending.get(context)?.get(event.callId);
-      const interaction = occurrences?.find((candidate) => !candidate.result);
+      const interaction = byOccurrence.get(event.occurrenceId);
       if (!interaction) {
         throw new Error(
-          `tool result has no matching call in turn ${event.turn} step ${event.step}`,
+          `tool result has no matching occurrence "${event.occurrenceId}"`,
+        );
+      }
+      if (interaction.result) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" has duplicate results`,
         );
       }
       interaction.result = {

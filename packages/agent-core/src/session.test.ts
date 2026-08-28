@@ -139,10 +139,20 @@ describe("SessionStore", () => {
       { type: "input/admitted", messageId: "message-1", turn: 1 },
       { type: "step/start", turn: 1, step: 1 },
       {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "",
+        toolCalls: [{ id: "call-1", name: "write", input: { value: "x" } }],
+      },
+      {
         type: "tool/call",
         turn: 1,
         step: 1,
-        call: { id: "call-1", name: "write", input: { value: "x" } },
+        occurrenceId: "tool:1:1:0",
+        name: "write",
+        input: { value: "x" },
       },
     ]);
 
@@ -154,7 +164,15 @@ describe("SessionStore", () => {
     ]);
     expect(
       repaired.find((event) => event.type === "tool/result"),
-    ).toMatchObject({ status: "interrupted", isError: true });
+    ).toMatchObject({
+      occurrenceId: "tool:1:1:0",
+      status: "interrupted",
+      isError: true,
+    });
+    expect(session.deriveMessages().at(-1)).toMatchObject({
+      role: "tool",
+      callId: "call-1",
+    });
     expect(session.reconcileInterrupted()).toEqual([]);
   });
 

@@ -73,8 +73,12 @@ export function planBotRunRecovery(
   if (modelState.status === "completed") {
     const unresolvedToolCalls = new Set<string>();
     for (const event of run.events) {
-      if (event.type === "tool/call") unresolvedToolCalls.add(event.call.id);
-      if (event.type === "tool/result") unresolvedToolCalls.delete(event.callId);
+      if (event.type === "tool/call") {
+        unresolvedToolCalls.add(event.occurrenceId);
+      }
+      if (event.type === "tool/result") {
+        unresolvedToolCalls.delete(event.occurrenceId);
+      }
     }
     if (unresolvedToolCalls.size === 0) return { kind: "resume" };
   }

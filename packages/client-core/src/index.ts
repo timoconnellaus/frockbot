@@ -123,14 +123,25 @@ function decodeTurnEvent(value: unknown): ClientTurnEvent {
   const decoded: ClientTurnEvent = {
     type: responseString(event, "type", "turn event"),
   };
-  if (event.call !== undefined) {
+  if (
+    event.type === "tool/call" &&
+    event.occurrenceId !== undefined &&
+    event.name !== undefined
+  ) {
+    decoded.call = {
+      id: responseString(event, "occurrenceId", "turn event"),
+      name: responseString(event, "name", "turn event"),
+    };
+  } else if (event.call !== undefined) {
     const call = responseRecord(event.call, "tool call");
     decoded.call = {
       id: responseString(call, "id", "tool call"),
       name: responseString(call, "name", "tool call"),
     };
   }
-  if (event.callId !== undefined) {
+  if (event.type === "tool/result" && event.occurrenceId !== undefined) {
+    decoded.callId = responseString(event, "occurrenceId", "turn event");
+  } else if (event.callId !== undefined) {
     decoded.callId = responseString(event, "callId", "turn event");
   }
   if (event.content !== undefined) {
@@ -263,10 +274,7 @@ export function decodeStartConnectionResult(
       ...(nativeReturnNonce ? { nativeReturnNonce } : {}),
     };
   }
-  if (
-    value.status !== undefined &&
-    value.status !== "authorization-required"
-  ) {
+  if (value.status !== undefined && value.status !== "authorization-required") {
     throw new Error("Connection result.status is invalid");
   }
   return {

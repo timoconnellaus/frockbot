@@ -21,10 +21,15 @@ describe("decodeTurnResponse", () => {
         runId: "run-1",
         text: "hello",
         events: [
-          { type: "tool/call", call: { id: "call-1", name: "echo" } },
+          {
+            type: "tool/call",
+            occurrenceId: "tool:1:1:0",
+            name: "echo",
+            input: { value: "hi" },
+          },
           {
             type: "tool/result",
-            callId: "call-1",
+            occurrenceId: "tool:1:1:0",
             content: "hi",
             isError: false,
           },
@@ -36,13 +41,13 @@ describe("decodeTurnResponse", () => {
       events: [
         {
           type: "tool/call",
-          call: { id: "call-1", name: "echo" },
+          call: { id: "tool:1:1:0", name: "echo" },
           callId: undefined,
           content: undefined,
         },
         {
           type: "tool/result",
-          callId: "call-1",
+          callId: "tool:1:1:0",
           content: "hi",
           isError: false,
         },

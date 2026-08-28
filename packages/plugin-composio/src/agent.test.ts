@@ -115,10 +115,32 @@ describe("Composio router Plugin", () => {
         createdAt: timestamp,
       },
       {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "search-request",
+        text: "",
+        toolCalls: [
+          {
+            id: "search-before-eviction",
+            name: "composio_search_tools",
+            input: {},
+          },
+        ],
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "composio_search_tools",
+        input: {},
+      },
+      {
         type: "tool/result",
         turn: 1,
         step: 1,
-        callId: "search-before-eviction",
+        occurrenceId: "tool:1:1:0",
         name: "composio_search_tools",
         content: JSON.stringify([
           {

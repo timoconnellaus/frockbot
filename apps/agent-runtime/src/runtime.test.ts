@@ -89,7 +89,7 @@ describe("foundation Cordis runtime", () => {
       runtime.agent.agent.session.events.find(
         (event) => event.type === "tool/call",
       ),
-    ).toMatchObject({ call: { name: "current_time" } });
+    ).toMatchObject({ name: "current_time" });
     expect(runtime.agent.agent.session.deriveMessages().at(-1)).toMatchObject({
       role: "assistant",
     });

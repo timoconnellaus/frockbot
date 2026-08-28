@@ -4,6 +4,58 @@ export interface ToolCall {
   input: unknown;
 }
 
+export interface ToolCallOccurrence {
+  occurrenceId: string;
+  turn: number;
+  step: number;
+  ordinal: number;
+  call: ToolCall;
+}
+
+export function toolOccurrenceId(
+  turn: number,
+  step: number,
+  ordinal: number,
+): string {
+  if (
+    !Number.isSafeInteger(turn) ||
+    turn <= 0 ||
+    !Number.isSafeInteger(step) ||
+    step <= 0 ||
+    !Number.isSafeInteger(ordinal) ||
+    ordinal < 0
+  ) {
+    throw new Error("tool occurrence coordinates are invalid");
+  }
+  return `tool:${turn}:${step}:${ordinal}`;
+}
+
+export function toolCallOccurrences(
+  turn: number,
+  step: number,
+  calls: readonly ToolCall[],
+): ToolCallOccurrence[] {
+  return calls.map((call, ordinal) => ({
+    occurrenceId: toolOccurrenceId(turn, step, ordinal),
+    turn,
+    step,
+    ordinal,
+    call,
+  }));
+}
+
+export function toolIntentMatches(
+  call: ToolCall,
+  intent: { name: string; input: unknown },
+): boolean {
+  if (call.name !== intent.name) return false;
+  try {
+    return JSON.stringify(call.input) === JSON.stringify(intent.input);
+  } catch {
+    return false;
+  }
+}
+
 export interface ToolSchema {
   name: string;
   description: string;
@@ -88,11 +140,17 @@ export interface SessionEventMap {
     text: string;
     toolCalls: ToolCall[];
   };
-  "tool/call": { turn: number; step: number; call: ToolCall };
+  "tool/call": {
+    turn: number;
+    step: number;
+    occurrenceId: string;
+    name: string;
+    input: unknown;
+  };
   "tool/result": {
     turn: number;
     step: number;
-    callId: string;
+    occurrenceId: string;
     name: string;
     content: string;
     isError: boolean;

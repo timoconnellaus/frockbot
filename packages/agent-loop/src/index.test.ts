@@ -281,14 +281,16 @@ describe("AgentLoop", () => {
     expect(
       handle.agent.session.events.filter(
         (event) =>
-          event.type === "tool/call" && event.call.id === "recovered-call",
+          event.type === "tool/call" &&
+          event.occurrenceId === "tool:1:1:0" &&
+          event.name === "echo",
       ),
     ).toHaveLength(1);
     expect(
       handle.agent.session.events.filter(
         (event) =>
           event.type === "tool/result" &&
-          event.callId === "recovered-call" &&
+          event.occurrenceId === "tool:1:1:0" &&
           event.content === "mixed",
       ),
     ).toHaveLength(1);
@@ -758,9 +760,27 @@ describe("AgentLoop", () => {
             type: "tool-call",
             call: { id: "call-1", name: "echo", input: { value: "hello" } },
           };
+          yield {
+            type: "tool-call",
+            call: {
+              id: "call-1",
+              name: "echo",
+              input: { value: "goodbye" },
+            },
+          };
           yield { type: "finish", reason: "tool-calls" };
           return;
         }
+        expect(
+          request.messages.flatMap((message) =>
+            message.role === "tool"
+              ? [{ callId: message.callId, content: message.content }]
+              : [],
+          ),
+        ).toEqual([
+          { callId: "call-1", content: "hello" },
+          { callId: "call-1", content: "goodbye" },
+        ]);
         const result = request.messages.findLast(
           (message) => message.role === "tool",
         );
@@ -853,6 +873,20 @@ describe("AgentLoop", () => {
     );
     expect(events.filter((event) => event.type === "turn/end")).toHaveLength(1);
     expect(
+      events.flatMap((event) =>
+        event.type === "tool/call" || event.type === "tool/result"
+          ? [event.occurrenceId]
+          : [],
+      ),
+    ).toEqual(["tool:1:1:0", "tool:1:1:0", "tool:1:1:1", "tool:1:1:1"]);
+    expect(
+      JSON.stringify(
+        events.filter(
+          (event) => event.type === "tool/call" || event.type === "tool/result",
+        ),
+      ),
+    ).not.toContain("call-1");
+    expect(
       events.find((event) => event.type === "model/request"),
     ).toMatchObject({
       request: {
@@ -868,7 +902,7 @@ describe("AgentLoop", () => {
     });
     expect(handle.agent.session.deriveMessages().at(-1)).toMatchObject({
       role: "assistant",
-      content: "Tool returned hello.",
+      content: "Tool returned goodbye.",
     });
 
     const session = handle.agent.session;
@@ -975,7 +1009,7 @@ describe("AgentLoop", () => {
     expect(handle.agent.session.events).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
-        callId: "call-failed",
+        occurrenceId: "tool:1:1:0",
         content: "provider revoked",
         isError: true,
       }),
@@ -1147,11 +1181,214 @@ describe("AgentLoop", () => {
     expect(toolExecutions).toBe(1);
     expect(modelRequests).toBe(1);
     expect(handle.agent.session.events).toContainEqual(
-      expect.objectContaining({ type: "tool/call", call }),
+      expect.objectContaining({
+        type: "tool/call",
+        occurrenceId: "tool:1:1:0",
+        name: call.name,
+        input: call.input,
+      }),
     );
     expect(handle.agent.session.events.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
+    });
+  });
+
+  test("recovers duplicate provider call ids by durable occurrence", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const first = {
+      id: "duplicate-provider-id",
+      name: "echo",
+      input: { value: "first" },
+    };
+    const second = {
+      id: "duplicate-provider-id",
+      name: "echo",
+      input: { value: "second" },
+    };
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "duplicate-request",
+          provider: "duplicate-tools",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "duplicate-request",
+        text: "",
+        toolCalls: [first, second],
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: first.name,
+        input: first.input,
+      },
+      {
+        type: "tool/result",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: first.name,
+        content: "first",
+        isError: false,
+        status: "completed",
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const executions: string[] = [];
+    let followUpRequests = 0;
+    const provider: LlmProvider = {
+      id: "duplicate-tools",
+      async *stream(request) {
+        followUpRequests += 1;
+        expect(
+          request.messages.flatMap((message) =>
+            message.role === "tool"
+              ? [{ callId: message.callId, content: message.content }]
+              : [],
+          ),
+        ).toEqual([
+          { callId: "duplicate-provider-id", content: "first" },
+          { callId: "duplicate-provider-id", content: "second" },
+        ]);
+        yield { type: "text-delta", text: "Both completed." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(
+      provider,
+      {
+        name: "echo",
+        description: "Echo a value.",
+        inputSchema: { type: "object" },
+        execute(input) {
+          const value = (input as { value: string }).value;
+          executions.push(value);
+          return Promise.resolve({ content: value, isError: false });
+        },
+      },
+      undefined,
+      { "duplicate-tools": initial },
+    );
+    const handle = await root.agents.create({
+      botId: "resume-bot",
+      sessionId: "duplicate-tools",
+      provider: "duplicate-tools",
+      model: "test-model",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(executions).toEqual(["second"]);
+    expect(followUpRequests).toBe(1);
+    const journal = handle.agent.session.events.filter(
+      (event) => event.type === "tool/call" || event.type === "tool/result",
+    );
+    expect(journal.map((event) => event.occurrenceId)).toEqual([
+      "tool:1:1:0",
+      "tool:1:1:0",
+      "tool:1:1:1",
+      "tool:1:1:1",
+    ]);
+    expect(JSON.stringify(journal)).not.toContain("duplicate-provider-id");
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+
+  test("fails closed on a mismatched durable tool occurrence", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const call = {
+      id: "provider-call",
+      name: "echo",
+      input: { value: "unsafe" },
+    };
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "mismatched-request",
+          provider: "mismatched-tools",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "mismatched-request",
+        text: "",
+        toolCalls: [call],
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:1",
+        name: call.name,
+        input: call.input,
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    let executions = 0;
+    const provider: LlmProvider = {
+      id: "mismatched-tools",
+      async *stream() {
+        throw new Error("structural mismatch must not request the model");
+      },
+    };
+    const root = await mountRuntime(
+      provider,
+      {
+        name: "echo",
+        description: "Echo a value.",
+        inputSchema: { type: "object" },
+        execute() {
+          executions += 1;
+          return Promise.resolve({ content: "unsafe", isError: false });
+        },
+      },
+      undefined,
+      { "mismatched-tools": initial },
+    );
+    const handle = await root.agents.create({
+      botId: "resume-bot",
+      sessionId: "mismatched-tools",
+      provider: "mismatched-tools",
+      model: "test-model",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(executions).toBe(0);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "model-error",
     });
   });
 
@@ -1306,12 +1543,19 @@ describe("AgentLoop", () => {
         text: "",
         toolCalls: [call],
       },
-      { type: "tool/call", turn: 1, step: 1, call },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: call.name,
+        input: call.input,
+      },
       {
         type: "tool/result",
         turn: 1,
         step: 1,
-        callId: call.id,
+        occurrenceId: "tool:1:1:0",
         name: call.name,
         content: "completed",
         isError: false,

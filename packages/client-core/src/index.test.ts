@@ -60,9 +60,27 @@ describe("hosted response decoders", () => {
       decodeClientTurnResponse({
         runId: "run-1",
         text: "done",
-        events: [{ type: "tool/result", callId: "call-1", isError: false }],
+        events: [
+          {
+            type: "tool/call",
+            occurrenceId: "tool:1:1:0",
+            name: "echo",
+            input: { value: "done" },
+          },
+          {
+            type: "tool/result",
+            occurrenceId: "tool:1:1:0",
+            isError: false,
+          },
+        ],
       }),
-    ).toMatchObject({ runId: "run-1", events: [{ callId: "call-1" }] });
+    ).toMatchObject({
+      runId: "run-1",
+      events: [
+        { call: { id: "tool:1:1:0", name: "echo" } },
+        { callId: "tool:1:1:0" },
+      ],
+    });
     expect(
       decodeNotificationList({
         notifications: [

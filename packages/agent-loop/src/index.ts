@@ -13,7 +13,10 @@ import {
   type SessionEvent,
   type StepOutcome,
   type ToolCall,
+  type ToolCallOccurrence,
   type ToolExecutionResult,
+  toolCallOccurrences,
+  toolIntentMatches,
 } from "@frockbot/agent-core";
 import { type Context, Service } from "cordis";
 
@@ -51,6 +54,57 @@ function modelFailureMessage(error: unknown): string {
   return error instanceof Error && error.message
     ? error.message
     : "Model provider response was lost";
+}
+
+function durableToolJournal(
+  events: readonly SessionEvent[],
+  turn: number,
+  step: number,
+  occurrences: readonly ToolCallOccurrence[],
+): {
+  intents: Map<string, Extract<SessionEvent, { type: "tool/call" }>>;
+  results: Set<string>;
+} {
+  const expected = new Map(
+    occurrences.map((occurrence) => [occurrence.occurrenceId, occurrence]),
+  );
+  const intents = new Map<
+    string,
+    Extract<SessionEvent, { type: "tool/call" }>
+  >();
+  const results = new Set<string>();
+  for (const event of events) {
+    if (event.type !== "tool/call" && event.type !== "tool/result") continue;
+    if (event.turn !== turn || event.step !== step) continue;
+    if (event.type === "tool/call") {
+      const occurrence = expected.get(event.occurrenceId);
+      if (!occurrence || !toolIntentMatches(occurrence.call, event)) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" intent does not match its assistant call`,
+        );
+      }
+      if (intents.has(event.occurrenceId) || results.has(event.occurrenceId)) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" has duplicate intent`,
+        );
+      }
+      intents.set(event.occurrenceId, event);
+    } else if (event.type === "tool/result") {
+      const occurrence = expected.get(event.occurrenceId);
+      if (!occurrence || occurrence.call.name !== event.name) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" result does not match its assistant call`,
+        );
+      }
+      if (!intents.has(event.occurrenceId) || results.has(event.occurrenceId)) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" has a result without one intent`,
+        );
+      }
+      results.add(event.occurrenceId);
+    }
+  }
+  return { intents, results };
 }
 
 class LoopAgent implements Agent {
@@ -244,24 +298,6 @@ class LoopAgent implements Agent {
         latestAssistant = event;
       }
     }
-    const journaledCalls = new Map(
-      this.session.events.flatMap((event) =>
-        event.type === "tool/call" &&
-        event.turn === openTurn &&
-        event.step === latestStep
-          ? [[event.call.id, event] as const]
-          : [],
-      ),
-    );
-    const durableResults = new Set(
-      this.session.events.flatMap((event) =>
-        event.type === "tool/result" &&
-        event.turn === openTurn &&
-        event.step === latestStep
-          ? [event.callId]
-          : [],
-      ),
-    );
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
     let reconciliationRequired = false;
@@ -324,9 +360,7 @@ class LoopAgent implements Agent {
           return;
         }
         await this.#executeTools(
-          openTurn,
-          latestStep,
-          response.toolCalls,
+          toolCallOccurrences(openTurn, latestStep, response.toolCalls),
           signal,
         );
         this.session.append({
@@ -350,15 +384,28 @@ class LoopAgent implements Agent {
           turnOutcome = "completed";
           return;
         }
-        for (const call of latestAssistant.toolCalls) {
-          const journaled = journaledCalls.get(call.id);
-          if (journaled && !durableResults.has(call.id)) {
+        const occurrences = toolCallOccurrences(
+          openTurn,
+          latestStep,
+          latestAssistant.toolCalls,
+        );
+        const journal = durableToolJournal(
+          this.session.events,
+          openTurn,
+          latestStep,
+          occurrences,
+        );
+        for (const occurrence of occurrences) {
+          if (
+            journal.intents.has(occurrence.occurrenceId) &&
+            !journal.results.has(occurrence.occurrenceId)
+          ) {
             this.session.append({
               type: "tool/result",
               turn: openTurn,
               step: latestStep,
-              callId: call.id,
-              name: call.name,
+              occurrenceId: occurrence.occurrenceId,
+              name: occurrence.call.name,
               content: "Interrupted before a durable result was recorded.",
               isError: true,
               status: "interrupted",
@@ -367,11 +414,10 @@ class LoopAgent implements Agent {
         }
         await this.session.flush();
         await this.#executeTools(
-          openTurn,
-          latestStep,
-          latestAssistant.toolCalls.filter(
-            (call) =>
-              !journaledCalls.has(call.id) && !durableResults.has(call.id),
+          occurrences.filter(
+            (occurrence) =>
+              !journal.intents.has(occurrence.occurrenceId) &&
+              !journal.results.has(occurrence.occurrenceId),
           ),
           signal,
         );
@@ -422,7 +468,10 @@ class LoopAgent implements Agent {
           turnOutcome = "completed";
           return;
         }
-        await this.#executeTools(openTurn, step, response.toolCalls, signal);
+        await this.#executeTools(
+          toolCallOccurrences(openTurn, step, response.toolCalls),
+          signal,
+        );
         this.session.append({
           type: "step/end",
           turn: openTurn,
@@ -530,7 +579,10 @@ class LoopAgent implements Agent {
           return;
         }
 
-        await this.#executeTools(turn, step, response.toolCalls, signal);
+        await this.#executeTools(
+          toolCallOccurrences(turn, step, response.toolCalls),
+          signal,
+        );
         this.session.append({
           type: "step/end",
           turn,
@@ -765,13 +817,12 @@ class LoopAgent implements Agent {
   }
 
   async #executeTools(
-    turn: number,
-    step: number,
-    calls: ToolCall[],
+    occurrences: readonly ToolCallOccurrence[],
     signal: AbortSignal,
   ): Promise<void> {
-    for (const call of calls) {
+    for (const occurrence of occurrences) {
       signal.throwIfAborted();
+      const { call, occurrenceId, turn, step } = occurrence;
       const context = {
         botId: this.botId,
         agentId: this.id,
@@ -779,7 +830,14 @@ class LoopAgent implements Agent {
         signal,
       };
       const preparation = await this.#ctx.tools.prepare(call, context);
-      this.session.append({ type: "tool/call", turn, step, call });
+      this.session.append({
+        type: "tool/call",
+        turn,
+        step,
+        occurrenceId,
+        name: call.name,
+        input: call.input,
+      });
       await this.session.flush();
       let result: ToolExecutionResult;
       if (preparation.kind === "denied") {
@@ -801,7 +859,7 @@ class LoopAgent implements Agent {
         type: "tool/result",
         turn,
         step,
-        callId: call.id,
+        occurrenceId,
         name: call.name,
         content: result.content,
         isError: result.isError,

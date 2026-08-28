@@ -23,7 +23,9 @@ function toolEvents(count: number): SessionEvent[] {
       timestamp,
       turn: 1,
       step: 1,
-      call: { id: `call-${index}`, name: "lookup", input: {} },
+      occurrenceId: `tool:1:1:${index}`,
+      name: "lookup",
+      input: {},
     }),
     event({
       type: "tool/result",
@@ -31,7 +33,7 @@ function toolEvents(count: number): SessionEvent[] {
       timestamp,
       turn: 1,
       step: 1,
-      callId: `call-${index}`,
+      occurrenceId: `tool:1:1:${index}`,
       name: "lookup",
       content: `result-${index}`,
       isError: false,
@@ -87,11 +89,9 @@ describe("client run protocol v1", () => {
           timestamp,
           turn: 1,
           step: 1,
-          call: {
-            id: "call-1",
-            name: "calendar_lookup",
-            input: { accessToken: "tool-input-secret" },
-          },
+          occurrenceId: "tool:1:1:0",
+          name: "calendar_lookup",
+          input: { accessToken: "tool-input-secret" },
         }),
         event({
           type: "tool/result",
@@ -99,7 +99,7 @@ describe("client run protocol v1", () => {
           timestamp,
           turn: 1,
           step: 1,
-          callId: "call-1",
+          occurrenceId: "tool:1:1:0",
           name: "calendar_lookup",
           content: "visible result",
           isError: false,
@@ -323,14 +323,14 @@ describe("client run protocol v1", () => {
     const result = toolEvents(1)[1]!;
 
     expect(() => projectClientRunListV1([storedRun([result])])).toThrow(
-      "tool result has no matching call in turn 1 step 1",
+      'tool result has no matching occurrence "tool:1:1:0"',
     );
     expect(() => projectClientRunListV1([storedRun([call])])).toThrow(
       'terminal run has no result for tool call "tool-1"',
     );
     expect(() =>
       projectClientRunListV1([storedRun([call, call, result])]),
-    ).toThrow('terminal run has no result for tool call "tool-2"');
+    ).toThrow('tool occurrence "tool:1:1:0" has duplicate intent');
   });
 
   test("retains pending calls only for nonterminal runs", () => {
@@ -354,12 +354,17 @@ describe("client run protocol v1", () => {
     const providerId = "provider-call-".repeat(100);
     const events = [
       event({
-        type: "tool/call",
+        type: "assistant/message",
         seq: 0,
         timestamp,
         turn: 1,
         step: 1,
-        call: { id: providerId, name: "first", input: {} },
+        requestId: "request-1",
+        text: "",
+        toolCalls: [
+          { id: providerId, name: "first", input: {} },
+          { id: providerId, name: "second", input: {} },
+        ],
       }),
       event({
         type: "tool/call",
@@ -367,19 +372,19 @@ describe("client run protocol v1", () => {
         timestamp,
         turn: 1,
         step: 1,
-        call: { id: providerId, name: "second", input: {} },
+        occurrenceId: "tool:1:1:0",
+        name: "first",
+        input: {},
       }),
       event({
-        type: "tool/result",
+        type: "tool/call",
         seq: 2,
         timestamp,
         turn: 1,
         step: 1,
-        callId: providerId,
-        name: "first",
-        content: "first-result",
-        isError: false,
-        status: "completed",
+        occurrenceId: "tool:1:1:1",
+        name: "second",
+        input: {},
       }),
       event({
         type: "tool/result",
@@ -387,27 +392,51 @@ describe("client run protocol v1", () => {
         timestamp,
         turn: 1,
         step: 1,
-        callId: providerId,
+        occurrenceId: "tool:1:1:0",
+        name: "first",
+        content: "first-result",
+        isError: false,
+        status: "completed",
+      }),
+      event({
+        type: "tool/result",
+        seq: 4,
+        timestamp,
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:1",
         name: "second",
         content: "second-result",
         isError: false,
         status: "completed",
       }),
       event({
-        type: "tool/call",
-        seq: 4,
-        timestamp,
-        turn: 1,
-        step: 2,
-        call: { id: providerId, name: "third", input: {} },
-      }),
-      event({
-        type: "tool/result",
+        type: "assistant/message",
         seq: 5,
         timestamp,
         turn: 1,
         step: 2,
-        callId: providerId,
+        requestId: "request-2",
+        text: "",
+        toolCalls: [{ id: providerId, name: "third", input: {} }],
+      }),
+      event({
+        type: "tool/call",
+        seq: 6,
+        timestamp,
+        turn: 1,
+        step: 2,
+        occurrenceId: "tool:1:2:0",
+        name: "third",
+        input: {},
+      }),
+      event({
+        type: "tool/result",
+        seq: 7,
+        timestamp,
+        turn: 1,
+        step: 2,
+        occurrenceId: "tool:1:2:0",
         name: "third",
         content: "third-result",
         isError: false,
@@ -441,7 +470,9 @@ describe("client run protocol v1", () => {
         isError: false,
       },
     ]);
-    expect(stored.events[0]).toMatchObject({ call: { id: providerId } });
+    expect(stored.events[0]).toMatchObject({
+      toolCalls: [{ id: providerId }, { id: providerId }],
+    });
     expect(JSON.stringify(projected)).not.toContain(providerId);
   });
 });

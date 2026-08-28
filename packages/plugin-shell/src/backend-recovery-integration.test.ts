@@ -401,11 +401,9 @@ describe("Bot recovery", () => {
         timestamp: "2026-08-28T00:00:02.000Z",
         turn: 1,
         step: 1,
-        call: {
-          id: "uncertain-call",
-          name: "echo",
-          input: { value: "hello" },
-        },
+        occurrenceId: "tool:1:1:0",
+        name: "echo",
+        input: { value: "hello" },
       },
     ] satisfies SessionEvent[];
     const run = {
