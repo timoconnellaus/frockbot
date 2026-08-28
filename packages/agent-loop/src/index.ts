@@ -276,7 +276,10 @@ class LoopAgent implements Agent {
               event.type === "model/reconciliation-required" &&
               event.requestId === unresolvedRequest.requestId,
           );
-          if (existing?.reason !== reconciliation.reason) {
+          if (
+            existing?.type !== "model/reconciliation-required" ||
+            existing.reason !== reconciliation.reason
+          ) {
             this.session.append({
               type: "model/reconciliation-required",
               turn: openTurn,
@@ -825,7 +828,13 @@ class LoopAgent implements Agent {
         event.turn === turn &&
         event.step === step,
     );
-    if (!assistant || assistant.toolCalls.length === 0) return;
+    if (
+      !assistant ||
+      assistant.type !== "assistant/message" ||
+      assistant.toolCalls.length === 0
+    ) {
+      return;
+    }
 
     const journal = validateToolOccurrenceJournal(this.session.events);
     for (const occurrence of toolCallOccurrences(

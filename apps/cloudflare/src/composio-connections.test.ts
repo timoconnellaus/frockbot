@@ -163,8 +163,7 @@ class MemoryConnectionStore implements ComposioConnectionStore {
             status: "ready",
             ...(typeof current.safeMetadata.nativeReturnNonce === "string"
               ? {
-                  nativeReturnNonce:
-                    current.safeMetadata.nativeReturnNonce,
+                  nativeReturnNonce: current.safeMetadata.nativeReturnNonce,
                 }
               : {}),
           },
@@ -177,9 +176,9 @@ class MemoryConnectionStore implements ComposioConnectionStore {
       safeMetadata:
         update.state === "ready"
           ? { ...safeMetadata, authorizationStateConsumed: true }
-          : update.authorizationStateId !== undefined
-            ? { ...safeMetadata, authorizationStateConsumed: true }
-          : safeMetadata,
+          : update.authorizationStateId === undefined
+            ? safeMetadata
+            : { ...safeMetadata, authorizationStateConsumed: true },
     });
     return Promise.resolve(true);
   }

@@ -83,7 +83,7 @@ export async function requestTurn(
 ): Promise<TurnResponse> {
   const response = await fetcher(turnsPath(botId), {
     method: "POST",
-    body: JSON.stringify({ text, commandId }),
+    body: JSON.stringify({ schemaVersion: 1, text, commandId }),
     signal,
   });
   return decodeTurnResponse(await decodeBody(response));
@@ -111,6 +111,27 @@ export async function lookupRun(
   const lookup = decodeClientRunLookupV1(await decodeBody(response));
   if (lookup.state !== "not-admitted" && lookup.run.runId !== commandId) {
     throw new Error("run lookup response does not match the command id");
+  }
+  return lookup;
+}
+
+export async function fenceRunAdmission(
+  fetcher: Fetcher,
+  botId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<ClientRunLookup> {
+  const response = await fetcher(
+    `${turnsPath(botId)}/${encodeURIComponent(commandId)}/fence`,
+    {
+      method: "POST",
+      body: JSON.stringify({ schemaVersion: 1, action: "fence-admission" }),
+      signal,
+    },
+  );
+  const lookup = decodeClientRunLookupV1(await decodeBody(response));
+  if (lookup.state !== "not-admitted" && lookup.run.runId !== commandId) {
+    throw new Error("run admission fence does not match the command id");
   }
   return lookup;
 }

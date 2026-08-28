@@ -292,18 +292,13 @@ export class ComposioConnectionCoordinator {
       input.commandId,
     );
     if (!existing) return undefined;
-    if (
-      existing.safeMetadata.startCommandFingerprint !== commandFingerprint
-    ) {
+    if (existing.safeMetadata.startCommandFingerprint !== commandFingerprint) {
       throw new Error(
         `Connection command idempotency key "${input.commandId}" was reused for a different command`,
       );
     }
     if (existing.state !== "ready") return undefined;
-    const replay = decodeConnectionStartReplayV1(
-      existing,
-      commandFingerprint,
-    );
+    const replay = decodeConnectionStartReplayV1(existing, commandFingerprint);
     if (!replay) {
       throw new Error("Connection command replay snapshot is invalid");
     }
@@ -527,10 +522,7 @@ export class ComposioConnectionCoordinator {
           );
         }
         const disposition = linkReconciliationDisposition(reconciliation);
-        if (
-          !revocationRequested &&
-          disposition === "failed"
-        ) {
+        if (!revocationRequested && disposition === "failed") {
           const finished =
             await this.config.store.finishConnectionAuthorization(
               userId,
@@ -551,11 +543,7 @@ export class ComposioConnectionCoordinator {
         }
         if (disposition === "pending") {
           if (safeMetadata) {
-            return this.retirePendingLink(
-              userId,
-              connectionId,
-              safeMetadata,
-            );
+            return this.retirePendingLink(userId, connectionId, safeMetadata);
           }
         }
         if (disposition === "ready" && safeMetadata) {

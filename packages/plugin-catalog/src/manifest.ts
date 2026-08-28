@@ -23,7 +23,7 @@ export interface ClientContribution {
 
 export interface DesktopContribution {
   entry: string;
-  execution: "sandboxed-renderer" | "trusted-main-legacy";
+  execution: "sandboxed-renderer" | "trusted-main" | "trusted-main-legacy";
   commands: string[];
 }
 
@@ -312,14 +312,17 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     if (!isRecord(desktop)) {
       throw new Error("manifest desktop contribution must be an object");
     }
-    if (desktop.execution !== "sandboxed-renderer") {
+    if (
+      desktop.execution !== "sandboxed-renderer" &&
+      desktop.execution !== "trusted-main"
+    ) {
       throw new Error(
-        'manifest desktop execution must be "sandboxed-renderer"',
+        'manifest desktop execution must be "sandboxed-renderer" or "trusted-main"',
       );
     }
     contributions.desktop = {
       entry: relativeEntry(desktop, "entry"),
-      execution: "sandboxed-renderer",
+      execution: desktop.execution,
       commands: optionalStringArray(desktop, "commands"),
     };
   }

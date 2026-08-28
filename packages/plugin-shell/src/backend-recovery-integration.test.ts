@@ -784,6 +784,69 @@ describe("Bot recovery", () => {
     ]);
   });
 
+  test("authoritatively fences delayed Turn admission", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(
+      contribution.fenceRunAdmission({
+        schemaVersion: 1,
+        runId: "command-fenced",
+      }),
+    ).resolves.toEqual({ schemaVersion: 1, state: "not-admitted" });
+    expect(
+      await storage.get<boolean>("run-admission-fence:command-fenced"),
+    ).toBe(true);
+
+    await expect(
+      contribution.run({
+        userId: "user-1",
+        botId: "primary",
+        runId: "command-fenced",
+        sessionId: "user-1:primary",
+        acceptedAt: "2026-08-29T00:00:00.000Z",
+        text: "must not execute",
+      }),
+    ).rejects.toThrow('run "command-fenced" admission was fenced');
+    expect(await storage.get("run:command-fenced")).toBeUndefined();
+  });
+
+  test("returns admitted state when admission wins the fence transaction", async () => {
+    const storage = new MemoryStorage();
+    const running = {
+      runId: "command-running",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-29T00:00:00.000Z",
+      input: "continue",
+      events: [],
+      status: "running",
+      phase: "executing",
+    } satisfies StoredRun;
+    await storage.put("run:command-running", running);
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(
+      contribution.fenceRunAdmission({
+        schemaVersion: 1,
+        runId: "command-running",
+      }),
+    ).resolves.toMatchObject({
+      schemaVersion: 1,
+      state: "running",
+      run: { runId: "command-running" },
+    });
+    expect(
+      await storage.get("run-admission-fence:command-running"),
+    ).toBeUndefined();
+  });
+
   test("pages large run history with bounded indexed reads and wire bytes", async () => {
     const storage = new MemoryStorage();
     const baseTime = Date.parse("2026-08-28T00:00:00.000Z");

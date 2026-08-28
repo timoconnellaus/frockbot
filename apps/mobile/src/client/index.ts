@@ -48,7 +48,12 @@ import { mobileContributions } from "./contributions.ts";
 import { createContributionSlot } from "./ContributionSlot.ts";
 import "./mobile.css";
 import MobileAuthGate from "./MobileAuthGate.vue";
-import { lookupRun, requestTurn, toolsFrom } from "./transport.ts";
+import {
+  fenceRunAdmission,
+  lookupRun,
+  requestTurn,
+  toolsFrom,
+} from "./transport.ts";
 import {
   admitMobileTurn,
   projectMobileTurnAdmissionLookup,
@@ -353,6 +358,12 @@ const web: Ref<FrockBotWebData> = ref({
               projectionToken.botId,
               pendingRunId,
             ),
+          fence: () =>
+            fenceRunAdmission(
+              auth.authorizedFetch,
+              projectionToken.botId,
+              pendingRunId,
+            ),
           observe: (observed) => {
             const current = botProjection.currentToken();
             if (current.botId !== projectionToken.botId) return;
@@ -433,7 +444,7 @@ const web: Ref<FrockBotWebData> = ref({
         `/api/bots/${encodeURIComponent(projectionToken.botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
         {
           method: "POST",
-          body: JSON.stringify({ action: "resume" }),
+          body: JSON.stringify({ schemaVersion: 1, action: "resume" }),
         },
       );
       const value: unknown = await response.json();
@@ -502,7 +513,11 @@ botProjection = new MobileBotProjectionController(botId.value, {
       `/api/bots/${encodeURIComponent(selectedBotId)}/notifications`,
       {
         method: "POST",
-        body: JSON.stringify({ notificationId }),
+        body: JSON.stringify({
+          schemaVersion: 1,
+          action: "acknowledge",
+          notificationId,
+        }),
       },
     );
     const value: unknown = await response.json();

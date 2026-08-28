@@ -140,7 +140,11 @@ export class ComposioClient {
         ...value.items.map((candidate) => connectedAccountSummary(candidate)),
       );
       const nextCursor = value.next_cursor;
-      if (nextCursor === undefined || nextCursor === null || nextCursor === "") {
+      if (
+        nextCursor === undefined ||
+        nextCursor === null ||
+        nextCursor === ""
+      ) {
         return accounts;
       }
       if (typeof nextCursor !== "string" || seenCursors.has(nextCursor)) {

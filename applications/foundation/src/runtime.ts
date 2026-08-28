@@ -138,21 +138,27 @@ export function createFoundationBackendContributions<T>(
     | ({ backendHost: "gateway" } & ComposioBackendHost)
     | FoundationMountedBackendHost<T>,
 ): Array<BackendRouteContribution | T> {
-  return plan.packages.flatMap((pkg) => {
-    if (!plan.contributions.backend.includes(pkg.id)) return [];
-    return (pkg.manifest.contributions.backend ?? []).flatMap((backend) => {
-      if (backend.host !== host.backendHost) return [];
+  const contributions: Array<BackendRouteContribution | T> = [];
+  for (const pkg of plan.packages) {
+    if (!plan.contributions.backend.includes(pkg.id)) continue;
+    for (const backend of pkg.manifest.contributions.backend ?? []) {
+      if (backend.host !== host.backendHost) continue;
       const specifier = contributionSpecifier(pkg.specifier, backend.entry);
       if (
         host.backendHost === "gateway" &&
         specifier === "@frockbot/plugin-composio/backend"
       ) {
-        return [createConfiguredComposioBackendContribution(host)];
+        contributions.push(createConfiguredComposioBackendContribution(host));
+      } else if (host.backendHost === "gateway") {
+        throw new Error(
+          `unknown foundation backend contribution: ${specifier}`,
+        );
+      } else {
+        contributions.push(host.mount(specifier));
       }
-      if (host.backendHost !== "gateway") return [host.mount(specifier)];
-      throw new Error(`unknown foundation backend contribution: ${specifier}`);
-    });
-  });
+    }
+  }
+  return contributions;
 }
 
 export interface FoundationAssignedRuntimePackage {

@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
-import type { StoredRun } from "./contracts.js";
+import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { eventsForFailedRun, planBotRunRecovery } from "./bot-recovery.js";
 
 function run(events: SessionEvent[]): StoredRun {
   return {
     runId: "run-1",
+    commandFingerprint: "run-1-fingerprint",
     sessionId: "user:primary",
     acceptedAt: "2026-08-28T00:00:00.000Z",
     input: "hello",

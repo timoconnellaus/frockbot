@@ -89,6 +89,10 @@ export class BotState extends DurableObject<BotStateEnv> {
     return (await this.contribution()).lookupRun(input);
   }
 
+  async fenceRunAdmission(input: unknown) {
+    return (await this.contribution()).fenceRunAdmission(input);
+  }
+
   async alarm(): Promise<void> {
     await (await this.contribution()).alarm();
   }

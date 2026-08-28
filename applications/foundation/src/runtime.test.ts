@@ -44,6 +44,7 @@ describe("foundation application", () => {
       ],
       client: ["auth", "clock", "computer", "shell"],
       desktop: [
+        "auth",
         "clock",
         "desktop-clipboard",
         "desktop-directory-picker",

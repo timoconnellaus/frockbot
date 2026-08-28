@@ -36,8 +36,7 @@ function createController(
 ): MobileBotProjectionController {
   return new MobileBotProjectionController("default", {
     state: () => state,
-    loadSettings: (botId) =>
-      Promise.resolve(initializeBotSettingsV1(botId)),
+    loadSettings: (botId) => Promise.resolve(initializeBotSettingsV1(botId)),
     listRuns: () => Promise.resolve([]),
     listNotifications: () => Promise.resolve([]),
     deliverNotification: () => Promise.resolve(),

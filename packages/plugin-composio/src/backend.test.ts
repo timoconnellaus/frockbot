@@ -54,8 +54,14 @@ describe("Composio authorization return handoff", () => {
       connectionId: "connection-1",
       nativeReturnNonce: "native-1",
     });
+    const [payload, signature] = state.split(".");
+    if (!payload || !signature) throw new Error("expected signed state parts");
+    const tamperedSignature = `${signature[0] === "a" ? "b" : "a"}${signature.slice(1)}`;
     await expect(
-      decodeAuthorizationState(`${state.slice(0, -1)}x`, "state-secret"),
+      decodeAuthorizationState(
+        `${payload}.${tamperedSignature}`,
+        "state-secret",
+      ),
     ).rejects.toThrow("invalid");
   });
 });
@@ -94,9 +100,8 @@ describe("Composio revoke route", () => {
       );
       expect(response?.status).toBe(400);
       if (!response) throw new Error("Composio revoke route was not handled");
-      expect(await response.json()).toEqual({
-        error: "connectionId is invalid",
-      });
+      const body: unknown = await response.json();
+      expect(body).toEqual({ error: "connectionId is invalid" });
     }
     expect(storeLookups).toBe(0);
   });
@@ -136,7 +141,8 @@ describe("Composio revoke route", () => {
 
     expect(response?.status).toBe(200);
     if (!response) throw new Error("Composio revoke route was not handled");
-    expect(await response.json()).toEqual({ status: "revoked" });
+    const body: unknown = await response.json();
+    expect(body).toEqual({ status: "revoked" });
     expect(claimedConnectionId).toBe("connection-1");
   });
 });

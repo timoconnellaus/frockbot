@@ -20,7 +20,9 @@
     "@cordisjs/client": "0.8.2",
     "@cordisjs/plugin-loader": "1.0.0-rc.5",
     "@frockbot/desktop-core": "workspace:*",
+    "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
+    "@frockbot/protocol": "workspace:*",
     "better-auth": "1.7.2",
     "conf": "15.1.0",
     "cordis": "4.0.0-rc.8"
@@ -33,7 +35,10 @@
       "buildResources": "resources",
       "output": "release"
     },
-    "files": ["out/**/*", "package.json"],
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
     "mac": {
       "icon": "resources/icon.icns",
       "target": "dmg"

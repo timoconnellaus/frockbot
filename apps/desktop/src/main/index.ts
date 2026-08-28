@@ -1,14 +1,12 @@
 import type { Context } from "cordis";
 import { app, BrowserWindow } from "electron";
 import { setDevelopmentAppIcon } from "./app-icon.js";
-import { setupDesktopAuth } from "./auth-client.js";
 import { createCordisDesktopHost } from "./cordis-host.js";
 
 let host: Context | undefined;
 let disposing = false;
 
 app.setName("FrockBot");
-setupDesktopAuth();
 
 void app
   .whenReady()

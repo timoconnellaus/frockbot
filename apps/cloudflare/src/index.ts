@@ -65,6 +65,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
+  fenceRunAdmission(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
   reconcileRun(
@@ -120,6 +121,17 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     );
   }
 
+  async fenceRunAdmission(
+    botId: string,
+    query: ClientRunLookupQueryV1,
+  ): Promise<ClientRunLookupV1> {
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      botId,
+    ).fenceRunAdmission(query);
+  }
+
   async listNotifications(botId: string): Promise<BotNotificationIntent[]> {
     return botStateStub(
       this.env,
@@ -172,6 +184,7 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
       backendHost: "gateway",
       callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
       readSecret: (name) => {
+        // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
         const value = (env as unknown as Record<string, unknown>)[name];
         return typeof value === "string" ? value : undefined;
       },

@@ -88,9 +88,31 @@ export interface ClientRunListQueryV1 {
   before?: string;
 }
 
+export interface ClientTurnCommandV1 {
+  schemaVersion: 1;
+  commandId: string;
+  text: string;
+}
+
+export interface ClientNotificationAcknowledgementCommandV1 {
+  schemaVersion: 1;
+  action: "acknowledge";
+  notificationId: string;
+}
+
+export interface ClientRunReconciliationCommandV1 {
+  schemaVersion: 1;
+  action: "resume";
+}
+
 export interface ClientRunLookupQueryV1 {
   schemaVersion: 1;
   runId: string;
+}
+
+export interface ClientRunAdmissionFenceCommandV1 {
+  schemaVersion: 1;
+  action: "fence-admission";
 }
 
 export type ClientRunLookupStateV1 =
@@ -759,6 +781,68 @@ export function decodeClientRunListQueryV1(
   return { schemaVersion: 1, ...(before ? { before } : {}) };
 }
 
+export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
+  const command = record(input, "turn command");
+  exactKeys(command, ["schemaVersion", "commandId", "text"], "turn command");
+  if (command.schemaVersion !== 1) {
+    throw new Error("turn command.schemaVersion is invalid");
+  }
+  const commandId = string(
+    command,
+    "commandId",
+    MAX_RUN_ID_LENGTH,
+    "turn command",
+  );
+  if (!RUN_ID_PATTERN.test(commandId)) {
+    throw new Error("turn command.commandId is invalid");
+  }
+  const text = wireString(
+    command,
+    "text",
+    MAX_INPUT_BYTES,
+    "turn command",
+  ).trim();
+  if (!text) throw new Error("turn command.text is required");
+  return { schemaVersion: 1, commandId, text };
+}
+
+export function decodeClientNotificationAcknowledgementCommandV1(
+  input: unknown,
+): ClientNotificationAcknowledgementCommandV1 {
+  const command = record(input, "notification acknowledgement command");
+  exactKeys(
+    command,
+    ["schemaVersion", "action", "notificationId"],
+    "notification acknowledgement command",
+  );
+  if (command.schemaVersion !== 1 || command.action !== "acknowledge") {
+    throw new Error("notification acknowledgement command is invalid");
+  }
+  const notificationId = string(
+    command,
+    "notificationId",
+    MAX_RUN_ID_LENGTH,
+    "notification acknowledgement command",
+  );
+  if (!RUN_ID_PATTERN.test(notificationId)) {
+    throw new Error(
+      "notification acknowledgement command.notificationId is invalid",
+    );
+  }
+  return { schemaVersion: 1, action: "acknowledge", notificationId };
+}
+
+export function decodeClientRunReconciliationCommandV1(
+  input: unknown,
+): ClientRunReconciliationCommandV1 {
+  const command = record(input, "run reconciliation command");
+  exactKeys(command, ["schemaVersion", "action"], "run reconciliation command");
+  if (command.schemaVersion !== 1 || command.action !== "resume") {
+    throw new Error("run reconciliation command is invalid");
+  }
+  return { schemaVersion: 1, action: "resume" };
+}
+
 export function decodeClientRunLookupQueryV1(
   input: unknown,
 ): ClientRunLookupQueryV1 {
@@ -772,6 +856,21 @@ export function decodeClientRunLookupQueryV1(
     throw new Error("run lookup query.runId is invalid");
   }
   return { schemaVersion: 1, runId };
+}
+
+export function decodeClientRunAdmissionFenceCommandV1(
+  input: unknown,
+): ClientRunAdmissionFenceCommandV1 {
+  const command = record(input, "run admission fence command");
+  exactKeys(
+    command,
+    ["schemaVersion", "action"],
+    "run admission fence command",
+  );
+  if (command.schemaVersion !== 1 || command.action !== "fence-admission") {
+    throw new Error("run admission fence command is invalid");
+  }
+  return { schemaVersion: 1, action: "fence-admission" };
 }
 
 export function decodeClientRunLookupV1(input: unknown): ClientRunLookup {

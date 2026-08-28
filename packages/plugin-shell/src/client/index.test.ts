@@ -188,14 +188,18 @@ describe("active durable Turn projection", () => {
       ],
     };
 
-    projectDurableRuns(state, [], [
-      {
-        runId: "run-1",
-        input: "Keep going",
-        events: [],
-        status: "running",
-      },
-    ]);
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-1",
+          input: "Keep going",
+          events: [],
+          status: "running",
+        },
+      ],
+    );
 
     expect(state.activeRunId).toBe("run-1");
     expect(state.error).toBeUndefined();
@@ -216,14 +220,18 @@ describe("active durable Turn projection", () => {
       FrockBotWebData,
       "messages" | "activeRunId" | "activeRun"
     > = { messages: [] };
-    projectDurableRuns(interrupted, [], [
-      {
-        runId: "run-interrupted",
-        input: "Continue",
-        events: [],
-        status: "interrupted",
-      },
-    ]);
+    projectDurableRuns(
+      interrupted,
+      [],
+      [
+        {
+          runId: "run-interrupted",
+          input: "Continue",
+          events: [],
+          status: "interrupted",
+        },
+      ],
+    );
     expect(interrupted.activeRun).toMatchObject({
       status: "interrupted",
       canResume: false,
@@ -234,19 +242,23 @@ describe("active durable Turn projection", () => {
       FrockBotWebData,
       "messages" | "activeRunId" | "activeRun"
     > = { messages: [] };
-    projectDurableRuns(reconciliation, [], [
-      {
-        runId: "run-reconciliation",
-        input: "Continue",
-        events: [],
-        status: "reconciliation-required",
-        failure: "Provider result needs confirmation",
-        recovery: {
-          action: "resume",
-          message: "Provider result needs confirmation",
+    projectDurableRuns(
+      reconciliation,
+      [],
+      [
+        {
+          runId: "run-reconciliation",
+          input: "Continue",
+          events: [],
+          status: "reconciliation-required",
+          failure: "Provider result needs confirmation",
+          recovery: {
+            action: "resume",
+            message: "Provider result needs confirmation",
+          },
         },
-      },
-    ]);
+      ],
+    );
     expect(reconciliation.activeRun).toEqual({
       runId: "run-reconciliation",
       status: "reconciliation-required",
@@ -264,27 +276,35 @@ describe("active durable Turn projection", () => {
       FrockBotWebData,
       "messages" | "activeRunId" | "activeRun"
     > = { messages: [] };
-    projectDurableRuns(state, [], [
-      {
-        runId: "run-1",
-        input: "Continue",
-        events: [],
-        status: "reconciliation-required",
-        recovery: {
-          action: "resume",
-          message: "Provider reconciliation is required",
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-1",
+          input: "Continue",
+          events: [],
+          status: "reconciliation-required",
+          recovery: {
+            action: "resume",
+            message: "Provider reconciliation is required",
+          },
         },
-      },
-    ]);
-    projectDurableRuns(state, [], [
-      {
-        runId: "run-1",
-        input: "Continue",
-        events: [],
-        status: "completed",
-        responseText: "Done",
-      },
-    ]);
+      ],
+    );
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-1",
+          input: "Continue",
+          events: [],
+          status: "completed",
+          responseText: "Done",
+        },
+      ],
+    );
 
     expect(state.activeRunId).toBeUndefined();
     expect(state.activeRun).toBeUndefined();

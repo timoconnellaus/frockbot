@@ -63,6 +63,7 @@ import { botTurnCommandFingerprintV1 } from "./backend-contracts.js";
 
 const RUN_PREFIX = "run:";
 const RUN_INDEX_PREFIX = "run-index:";
+const RUN_ADMISSION_FENCE_PREFIX = "run-admission-fence:";
 const ACTIVE_RUN_KEY = "active-run";
 const LATEST_EVENTS_KEY = "latest-events";
 const IDENTITY_KEY = "identity";
@@ -344,25 +345,23 @@ export class ShellBotBackendContribution {
         };
       }
     }
-    const connectionAssignment =
-      command.type === "bot/assign-capability" &&
-      command.assignment.connectionId
-        ? {
-            connectionId: command.assignment.connectionId,
-            generation: command.commandId,
-            requirement: dependencyRequirement!,
-          }
-        : undefined;
-    const userConfiguration = connectionAssignment
-      ? this.userConfiguration(identity)
-      : undefined;
-    if (!connectionAssignment || !userConfiguration) {
+    if (
+      command.type !== "bot/assign-capability" ||
+      !command.assignment.connectionId ||
+      !dependencyRequirement
+    ) {
       return this.applyConfigurationCommand(
         identity,
         command,
         commandFingerprint,
       );
     }
+    const connectionAssignment = {
+      connectionId: command.assignment.connectionId,
+      generation: command.commandId,
+      requirement: dependencyRequirement,
+    };
+    const userConfiguration = this.userConfiguration(identity);
 
     await this.reconcileStoredAssignmentSaga(
       identity,
@@ -984,6 +983,7 @@ export class ShellBotBackendContribution {
       })),
     });
     const readSecret = (name: string) => {
+      // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
       const value = (this.env as unknown as Record<string, unknown>)[name];
       return typeof value === "string" ? value : undefined;
     };
@@ -1281,6 +1281,25 @@ export class ShellBotBackendContribution {
     return projectClientRunLookupV1(run);
   }
 
+  async fenceRunAdmission(input: unknown): Promise<ClientRunLookupV1> {
+    const query = decodeClientRunLookupQueryV1(input);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const run = await transaction.get<StoredRun>(
+        `${RUN_PREFIX}${query.runId}`,
+      );
+      if (run && run.runId !== query.runId) {
+        throw new Error("stored run does not match its lookup key");
+      }
+      if (!run) {
+        await transaction.put(
+          `${RUN_ADMISSION_FENCE_PREFIX}${query.runId}`,
+          true,
+        );
+      }
+      return projectClientRunLookupV1(run);
+    });
+  }
+
   private initialBotSettings(
     botId: string,
     model?: BotSettingsViewV1["model"],
@@ -1448,6 +1467,10 @@ export class ShellBotBackendContribution {
   private async acceptRun(
     command: OwnedBotTurnCommand,
   ): Promise<{ previous: SessionEvent[]; settings: BotSettingsViewV1 }> {
+    const fenceKey = `${RUN_ADMISSION_FENCE_PREFIX}${command.runId}`;
+    if (await this.ctx.storage.get(fenceKey)) {
+      throw new Error(`run "${command.runId}" admission was fenced`);
+    }
     const context = await this.resolveExecutionContext(command);
     const settings = {
       ...context.settings,
@@ -1468,6 +1491,9 @@ export class ShellBotBackendContribution {
           throw new Error(`run "${command.runId}" already completed`);
         }
         throw new Error(`run "${command.runId}" already exists`);
+      }
+      if (await transaction.get(fenceKey)) {
+        throw new Error(`run "${command.runId}" admission was fenced`);
       }
       const identity = await transaction.get<BotIdentity>(IDENTITY_KEY);
       if (

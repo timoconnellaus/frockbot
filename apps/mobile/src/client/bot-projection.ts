@@ -54,9 +54,7 @@ export class MobileBotProjectionController {
   }
 
   isCurrent(token: MobileBotProjectionToken): boolean {
-    return (
-      token.botId === this.#botId && token.generation === this.#generation
-    );
+    return token.botId === this.#botId && token.generation === this.#generation;
   }
 
   switchBot(botId: string): Promise<void> {

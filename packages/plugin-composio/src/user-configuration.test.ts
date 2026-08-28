@@ -395,9 +395,8 @@ describe("Connection provider reconciliation alarms", () => {
     );
     await makeReconciliationDue(storage);
     await contribution.alarm();
-    const readySettings = await storage.get<UserSettingsViewV1>(
-      "user-configuration",
-    );
+    const readySettings =
+      await storage.get<UserSettingsViewV1>("user-configuration");
     if (!readySettings) throw new Error("user configuration was not stored");
     await storage.put("user-configuration", {
       ...readySettings,
@@ -576,9 +575,8 @@ describe("Connection provider reconciliation alarms", () => {
     );
     const retry = coordinator.start("user-1", command);
     await providerStarted.promise;
-    const settings = await storage.get<UserSettingsViewV1>(
-      "user-configuration",
-    );
+    const settings =
+      await storage.get<UserSettingsViewV1>("user-configuration");
     if (!settings) throw new Error("user configuration was not stored");
     await storage.put("user-configuration", {
       ...settings,
@@ -1090,52 +1088,55 @@ describe("Connection provider reconciliation alarms", () => {
         },
       },
     },
-  ])("preserves concurrent revocation across $name recovery", async ({ result }) => {
-    const storage = new MemoryStorage();
-    const providerStarted = deferred<void>();
-    const providerResult = deferred<ComposioProviderReconciliationResult>();
-    const contribution = createComposioUserBackendContribution(
-      backendHost(storage, () => {
-        providerStarted.resolve();
-        return providerResult.promise;
-      }),
-    );
-    await contribution.startConnection("user-1", {
-      connectionId: "link-command",
-      packageId: "composio",
-      connectionTypeId: "gmail",
-      displayName: "Gmail",
-      safeMetadata: {
-        providerAlias: "link-command",
-        toolkitSlug: "gmail",
-        authorizationStateExpiresAt: Date.now() + 10 * 60_000,
-      },
-    });
-    await contribution.requireConnectionReconciliation(
-      "user-1",
-      "link-command",
-      "link",
-      "Connect Link outcome requires reconciliation",
-    );
-    await makeReconciliationDue(storage);
+  ])(
+    "preserves concurrent revocation across $name recovery",
+    async ({ result }) => {
+      const storage = new MemoryStorage();
+      const providerStarted = deferred<void>();
+      const providerResult = deferred<ComposioProviderReconciliationResult>();
+      const contribution = createComposioUserBackendContribution(
+        backendHost(storage, () => {
+          providerStarted.resolve();
+          return providerResult.promise;
+        }),
+      );
+      await contribution.startConnection("user-1", {
+        connectionId: "link-command",
+        packageId: "composio",
+        connectionTypeId: "gmail",
+        displayName: "Gmail",
+        safeMetadata: {
+          providerAlias: "link-command",
+          toolkitSlug: "gmail",
+          authorizationStateExpiresAt: Date.now() + 10 * 60_000,
+        },
+      });
+      await contribution.requireConnectionReconciliation(
+        "user-1",
+        "link-command",
+        "link",
+        "Connect Link outcome requires reconciliation",
+      );
+      await makeReconciliationDue(storage);
 
-    const alarm = contribution.alarm();
-    await providerStarted.promise;
-    await contribution.claimConnectionRevocation("user-1", "link-command");
-    providerResult.resolve(result);
-    await alarm;
+      const alarm = contribution.alarm();
+      await providerStarted.promise;
+      await contribution.claimConnectionRevocation("user-1", "link-command");
+      providerResult.resolve(result);
+      await alarm;
 
-    expect(
-      await contribution.getConnection("user-1", "link-command"),
-    ).toMatchObject({
-      state: "reconciliation-required",
-      safeMetadata: {
-        reconciliationOperation: "link",
-        revocationRequested: true,
-      },
-    });
-    expect(storage.alarmAt).toBeGreaterThan(Date.now());
-  });
+      expect(
+        await contribution.getConnection("user-1", "link-command"),
+      ).toMatchObject({
+        state: "reconciliation-required",
+        safeMetadata: {
+          reconciliationOperation: "link",
+          revocationRequested: true,
+        },
+      });
+      expect(storage.alarmAt).toBeGreaterThan(Date.now());
+    },
+  );
 
   test("recovers a lost Link response after Durable Object eviction", async () => {
     const storage = new MemoryStorage();
@@ -1414,9 +1415,11 @@ describe("Connection provider reconciliation alarms", () => {
         },
       },
     });
-    expect(storage.alarmAt).toBe(
-      claim.connection.safeMetadata.reconciliationRetryAt,
-    );
+    const retryAt = claim.connection.safeMetadata.reconciliationRetryAt;
+    if (typeof retryAt !== "number") {
+      throw new Error("expected a numeric reconciliation retry deadline");
+    }
+    expect(storage.alarmAt).toBe(retryAt);
     expect(storage.alarmAt).toBeGreaterThan(Date.now());
   });
 

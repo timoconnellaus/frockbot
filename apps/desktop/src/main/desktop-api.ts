@@ -1,25 +1,63 @@
-export { decodeExternalAuthorizationUrl } from "@frockbot/plugin-shell/shared";
+export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const NONCE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
 export interface DesktopApiRequest {
+  schemaVersion: 1;
   path: string;
   method: "GET" | "POST";
   body?: string;
 }
 
 export interface DesktopApiResponse {
+  schemaVersion: 1;
   status: number;
   contentType: string | null;
   body: string;
 }
 
+export interface DesktopExternalAuthorizationRequest {
+  schemaVersion: 1;
+  url: string;
+  nativeReturnNonce: string;
+}
+
+export interface DesktopExternalAuthorizationAcknowledgement {
+  schemaVersion: 1;
+  status: "accepted";
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const keys = Object.keys(value);
+  const allowed = new Set([...required, ...optional]);
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    keys.every((key) => allowed.has(key))
+  );
+}
+
 export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {
-  if (!value || typeof value !== "object") {
-    throw new Error("invalid API response");
-  }
-  const response = value as Partial<DesktopApiResponse>;
+  const response = record(value);
   if (
+    !response ||
+    !hasExactKeys(response, [
+      "schemaVersion",
+      "status",
+      "contentType",
+      "body",
+    ]) ||
+    response.schemaVersion !== 1 ||
     !Number.isInteger(response.status) ||
     (response.status as number) < 100 ||
     (response.status as number) > 599 ||
@@ -30,8 +68,9 @@ export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {
     throw new Error("invalid API response");
   }
   return {
+    schemaVersion: 1,
     status: response.status as number,
-    contentType: response.contentType,
+    contentType: response.contentType as string | null,
     body: response.body,
   };
 }
@@ -48,7 +87,7 @@ const API_ROUTES: Array<{
   },
   {
     pattern:
-      /^\/api\/bots\/[a-zA-Z0-9._-]+\/turns\/[a-zA-Z0-9._-]+\/reconcile$/,
+      /^\/api\/bots\/[a-zA-Z0-9._-]+\/turns\/[a-zA-Z0-9._-]+\/(reconcile|fence)$/,
     methods: new Set(["POST"]),
   },
   {
@@ -63,13 +102,19 @@ const API_ROUTES: Array<{
 ];
 
 export function decodeDesktopApiRequest(value: unknown): DesktopApiRequest {
-  if (!value || typeof value !== "object") {
+  const request = record(value);
+  if (
+    !request ||
+    !hasExactKeys(request, ["schemaVersion", "path", "method"], ["body"]) ||
+    request.schemaVersion !== 1
+  ) {
     throw new Error("invalid API request");
   }
-  const request = value as Partial<DesktopApiRequest>;
   const route =
     typeof request.path === "string"
-      ? API_ROUTES.find((candidate) => candidate.pattern.test(request.path!))
+      ? API_ROUTES.find((candidate) =>
+          candidate.pattern.test(request.path as string),
+        )
       : undefined;
   if (
     !route ||
@@ -82,16 +127,45 @@ export function decodeDesktopApiRequest(value: unknown): DesktopApiRequest {
     throw new Error("invalid API request");
   }
   return {
-    path: request.path!,
+    schemaVersion: 1,
+    path: request.path as string,
     method: request.method,
-    body: request.body,
+    ...(request.body === undefined ? {} : { body: request.body as string }),
+  };
+}
+
+export function decodeDesktopExternalAuthorizationRequest(
+  value: unknown,
+): DesktopExternalAuthorizationRequest {
+  const request = record(value);
+  if (
+    !request ||
+    !hasExactKeys(request, ["schemaVersion", "url", "nativeReturnNonce"]) ||
+    request.schemaVersion !== 1 ||
+    typeof request.url !== "string" ||
+    typeof request.nativeReturnNonce !== "string" ||
+    !NONCE_PATTERN.test(request.nativeReturnNonce)
+  ) {
+    throw new Error("invalid external authorization request");
+  }
+  return {
+    schemaVersion: 1,
+    url: request.url,
+    nativeReturnNonce: request.nativeReturnNonce,
   };
 }
 
 export function decodeExternalAuthorizationAcknowledgement(
   value: unknown,
-): void {
-  if (value !== undefined) {
+): DesktopExternalAuthorizationAcknowledgement {
+  const acknowledgement = record(value);
+  if (
+    !acknowledgement ||
+    !hasExactKeys(acknowledgement, ["schemaVersion", "status"]) ||
+    acknowledgement.schemaVersion !== 1 ||
+    acknowledgement.status !== "accepted"
+  ) {
     throw new Error("invalid external authorization acknowledgement");
   }
+  return { schemaVersion: 1, status: "accepted" };
 }

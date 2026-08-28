@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { isAgentCommand, isAgentEvent, isPromptRequest } from "./index";
+import {
+  decodeExternalAuthorizationUrl,
+  isAgentCommand,
+  isAgentEvent,
+  isPromptRequest,
+} from "./index";
 
 describe("protocol guards", () => {
   test("accepts a non-empty prompt", () => {
@@ -21,5 +26,21 @@ describe("protocol guards", () => {
       isAgentEvent({ type: "text-delta", runId: "run-1", text: "Hi" }),
     ).toBe(true);
     expect(isAgentEvent({ type: "text-delta", runId: "run-1" })).toBe(false);
+  });
+
+  test("admits only bounded HTTPS authorization URLs", () => {
+    expect(
+      decodeExternalAuthorizationUrl("https://connect.example/authorize"),
+    ).toBe("https://connect.example/authorize");
+    for (const value of [
+      "http://connect.example/authorize",
+      "https://user:secret@connect.example/authorize",
+      "https://connect.example/authorize#token",
+      `https://connect.example/${"a".repeat(4_096)}`,
+    ]) {
+      expect(() => decodeExternalAuthorizationUrl(value)).toThrow(
+        "invalid external authorization URL",
+      );
+    }
   });
 });

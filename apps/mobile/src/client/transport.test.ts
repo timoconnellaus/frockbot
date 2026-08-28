@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeRunList,
   decodeTurnResponse,
+  fenceRunAdmission,
   listRuns,
   lookupRun,
   requestTurn,
@@ -179,7 +180,11 @@ describe("gateway requests", () => {
     expect(calls[0]?.path).toBe("/api/bots/my%20bot/turns");
     expect(calls[0]?.init?.method).toBe("POST");
     expect(calls[0]?.init?.body).toBe(
-      JSON.stringify({ text: "hello", commandId: "command-1" }),
+      JSON.stringify({
+        schemaVersion: 1,
+        text: "hello",
+        commandId: "command-1",
+      }),
     );
   });
 
@@ -240,6 +245,35 @@ describe("gateway requests", () => {
     );
     expect(runs).toHaveLength(1);
     expect(runs[0]?.runId).toBe("run-1");
+  });
+
+  test("authoritatively fences absent admission without replaying the Turn", async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = [];
+    const result = await fenceRunAdmission(
+      (path, init) => {
+        calls.push({ path, init });
+        return Promise.resolve(
+          jsonResponse({ schemaVersion: 1, state: "not-admitted" }),
+        );
+      },
+      "my bot",
+      "command-1",
+    );
+
+    expect(result).toEqual({ state: "not-admitted" });
+    expect(calls).toEqual([
+      {
+        path: "/api/bots/my%20bot/turns/command-1/fence",
+        init: {
+          method: "POST",
+          body: JSON.stringify({
+            schemaVersion: 1,
+            action: "fence-admission",
+          }),
+          signal: undefined,
+        },
+      },
+    ]);
   });
 
   test("looks up admission through a read-only run request", async () => {

@@ -187,9 +187,7 @@ export function projectDurableRuns(
   } else {
     const terminalRunIds = new Set(
       runs
-        .filter(
-          (run) => run.status === "completed" || run.status === "failed",
-        )
+        .filter((run) => run.status === "completed" || run.status === "failed")
         .map((run) => run.runId),
     );
     if (state.activeRunId && terminalRunIds.has(state.activeRunId)) {
@@ -210,9 +208,7 @@ export function projectCompletedRuns(
   return projectDurableRuns(
     { messages },
     notifications,
-    runs.filter(
-      (run) => run.status === "completed" || run.status === "failed",
-    ),
+    runs.filter((run) => run.status === "completed" || run.status === "failed"),
   );
 }
 
@@ -548,10 +544,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         ]);
         web.value.pluginCatalog = decodePluginCatalog(manifest);
         const userSettings = settings as UserSettingsViewV1;
-        retireSettledConnectionOperations(
-          connectionOperations,
-          userSettings,
-        );
+        retireSettledConnectionOperations(connectionOperations, userSettings);
         web.value.userSettings = userSettings;
         web.value.settingsError = undefined;
       } catch (error) {

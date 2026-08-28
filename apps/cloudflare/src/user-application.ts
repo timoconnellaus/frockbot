@@ -1,8 +1,13 @@
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
 import {
+  decodeClientNotificationAcknowledgementCommandV1,
+  decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
+  decodeClientRunReconciliationCommandV1,
+  decodeClientTurnCommandV1,
   type ClientRunLookupQueryV1,
+  type ClientTurnCommandV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import type { UserApplicationEnv } from "./contracts.js";
 
@@ -57,29 +62,12 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
-async function readTurnCommand(
-  request: Request,
-): Promise<{ commandId: string; text: string }> {
+async function readTurnCommand(request: Request): Promise<ClientTurnCommandV1> {
   const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (contentLength > MAX_INPUT_LENGTH * 2)
+  if (contentLength > MAX_INPUT_LENGTH * 2) {
     throw new Error("prompt is too large");
-  const value: unknown = await request.json();
-  const text =
-    typeof value === "object" && value !== null && "text" in value
-      ? (value as { text?: unknown }).text
-      : undefined;
-  const commandId =
-    typeof value === "object" && value !== null && "commandId" in value
-      ? (value as { commandId?: unknown }).commandId
-      : undefined;
-  if (typeof text !== "string" || !text.trim()) {
-    throw new Error("prompt text is required");
   }
-  if (text.length > MAX_INPUT_LENGTH) throw new Error("prompt is too large");
-  if (typeof commandId !== "string" || !BOT_ID_PATTERN.test(commandId)) {
-    throw new Error("commandId is invalid");
-  }
-  return { commandId, text: text.trim() };
+  return decodeClientTurnCommandV1(await request.json());
 }
 
 export function createUserApplication() {
@@ -168,20 +156,22 @@ export function createUserApplication() {
       if (request.method !== "POST") {
         return jsonError(405, "method not allowed");
       }
-      const input: unknown = await request.json();
-      const notificationId =
-        typeof input === "object" &&
-        input !== null &&
-        "notificationId" in input &&
-        typeof input.notificationId === "string"
-          ? input.notificationId
-          : undefined;
-      if (!notificationId) {
-        return jsonError(400, "notificationId is required");
+      let command;
+      try {
+        command = decodeClientNotificationAcknowledgementCommandV1(
+          await request.json(),
+        );
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error
+            ? error.message
+            : "invalid notification acknowledgement",
+        );
       }
       await env.BOT_STATE.acknowledgeNotification(
         notificationBotId,
-        notificationId,
+        command.notificationId,
       );
       return Response.json({ status: "acknowledged" });
     }
@@ -193,13 +183,16 @@ export function createUserApplication() {
     const reconcileMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/reconcile$/,
     );
-    if (!turnMatch && !lookupMatch && !reconcileMatch) {
+    const fenceMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/fence$/,
+    );
+    if (!turnMatch && !lookupMatch && !reconcileMatch && !fenceMatch) {
       return jsonError(404, "not found");
     }
     let botId: string;
     try {
       botId = decodeURIComponent(
-        (turnMatch ?? lookupMatch ?? reconcileMatch)![1],
+        (turnMatch ?? lookupMatch ?? reconcileMatch ?? fenceMatch)![1],
       );
     } catch {
       return jsonError(400, "invalid bot id");
@@ -216,14 +209,15 @@ export function createUserApplication() {
         return jsonError(400, "invalid run id");
       }
       if (!BOT_ID_PATTERN.test(runId)) return jsonError(400, "invalid run id");
-      const input: unknown = await request.json();
-      if (
-        !input ||
-        typeof input !== "object" ||
-        !("action" in input) ||
-        input.action !== "resume"
-      ) {
-        return jsonError(400, "reconciliation action is invalid");
+      try {
+        decodeClientRunReconciliationCommandV1(await request.json());
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error
+            ? error.message
+            : "reconciliation action is invalid",
+        );
       }
       try {
         return Response.json(await env.BOT_STATE.reconcileRun(botId, runId));
@@ -231,6 +225,35 @@ export function createUserApplication() {
         return jsonError(
           409,
           error instanceof Error ? error.message : "Reconciliation failed",
+        );
+      }
+    }
+
+    if (fenceMatch) {
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let query: ClientRunLookupQueryV1;
+      try {
+        decodeClientRunAdmissionFenceCommandV1(await request.json());
+        query = decodeClientRunLookupQueryV1({
+          schemaVersion: 1,
+          runId: decodeURIComponent(fenceMatch[2]),
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid admission fence",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.fenceRunAdmission(botId, query),
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "admission fence failed",
         );
       }
     }

@@ -43,9 +43,13 @@ import { createUserApplication } from "./user-application.js";
 class MemoryBotState implements BotStateBinding {
   private readonly runs = new Map<string, StoredRun[]>();
   private readonly sessions = new Map<string, SessionEvent[]>();
+  private readonly admissionFences = new Set<string>();
   readonly notifications = new Map<string, BotNotificationIntent[]>();
 
   async run(botId: string, command: BotTurnCommand): Promise<BotTurnResult> {
+    if (this.admissionFences.has(`${botId}:${command.runId}`)) {
+      throw new Error(`run "${command.runId}" admission was fenced`);
+    }
     const runs = this.runs.get(botId) ?? [];
     const existing = runs.find(
       (candidate) => candidate.runId === command.runId,
@@ -121,6 +125,17 @@ class MemoryBotState implements BotStateBinding {
         ),
       ),
     );
+  }
+
+  fenceRunAdmission(
+    botId: string,
+    query: ClientRunLookupQueryV1,
+  ): Promise<ClientRunLookupV1> {
+    const run = structuredClone(this.runs.get(botId) ?? []).find(
+      (candidate) => candidate.runId === query.runId,
+    );
+    if (!run) this.admissionFences.add(`${botId}:${query.runId}`);
+    return Promise.resolve(projectClientRunLookupV1(run));
   }
 
   storedRuns(botId: string): StoredRun[] {
@@ -650,7 +665,11 @@ describe("Cloudflare user application gateway", () => {
       request("/api/bots/primary/notifications", "alice", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ notificationId: "notification-run-1" }),
+        body: JSON.stringify({
+          schemaVersion: 1,
+          action: "acknowledge",
+          notificationId: "notification-run-1",
+        }),
       }),
     );
     expect(acknowledged.status).toBe(200);
@@ -706,6 +725,7 @@ describe("Cloudflare user application gateway", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          schemaVersion: 1,
           text: "/echo hello workers",
           commandId: "workers-turn-1",
         }),
@@ -747,7 +767,11 @@ describe("Cloudflare user application gateway", () => {
         request("/api/bots/primary/turns", "alice", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: "hello", commandId: "stable-turn-1" }),
+          body: JSON.stringify({
+            schemaVersion: 1,
+            text: "hello",
+            commandId: "stable-turn-1",
+          }),
         }),
       );
 
@@ -769,6 +793,7 @@ describe("Cloudflare user application gateway", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
+            schemaVersion: 1,
             text: `hello ${botId}`,
             commandId: `turn-${botId}`,
           }),
@@ -795,6 +820,7 @@ describe("Cloudflare user application gateway", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          schemaVersion: 1,
           text: "hello",
           commandId: "lookup-turn-1",
         }),
@@ -820,7 +846,11 @@ describe("Cloudflare user application gateway", () => {
       request("/api/bots/primary/turns", "alice", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: "hello", commandId: "wire-turn-1" }),
+        body: JSON.stringify({
+          schemaVersion: 1,
+          text: "hello",
+          commandId: "wire-turn-1",
+        }),
       }),
     );
 
@@ -867,6 +897,7 @@ describe("Cloudflare user application gateway", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
+            schemaVersion: 1,
             text,
             commandId: `turn-${responses.length + 1}`,
           }),
@@ -903,6 +934,7 @@ describe("Cloudflare user application gateway", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
+            schemaVersion: 1,
             text: `hello ${userId}`,
             commandId: `turn-${userId}`,
           }),
@@ -1075,6 +1107,7 @@ describe("Cross-origin access for mobile clients", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
+          schemaVersion: 1,
           text: "/echo hello mobile",
           commandId: "mobile-turn-1",
         }),

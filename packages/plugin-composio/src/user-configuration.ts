@@ -57,8 +57,7 @@ function readyAuthorizationMetadata(
     return { ...safeMetadata, authorizationStateConsumed: true };
   }
   const connectedAccountId = safeMetadata.connectedAccountId;
-  const admittedConnectedAccountId =
-    connection.safeMetadata.connectedAccountId;
+  const admittedConnectedAccountId = connection.safeMetadata.connectedAccountId;
   if (
     typeof connectedAccountId !== "string" ||
     (typeof admittedConnectedAccountId === "string" &&
@@ -75,9 +74,7 @@ function readyAuthorizationMetadata(
       commandFingerprint,
       connectionId: connection.connectionId,
       status: "ready",
-      ...(typeof nativeReturnNonce === "string"
-        ? { nativeReturnNonce }
-        : {}),
+      ...(typeof nativeReturnNonce === "string" ? { nativeReturnNonce } : {}),
     },
   };
 }
@@ -491,12 +488,7 @@ export class ComposioUserBackendContribution {
       return {
         ...connection,
         state: "authorizing",
-        safeMetadata: {
-          ...safeMetadata,
-          ...(connection.safeMetadata.revocationRequested === true
-            ? { revocationRequested: true }
-            : {}),
-        },
+        safeMetadata,
         failure: undefined,
       };
     });
@@ -1710,7 +1702,7 @@ export class ComposioUserBackendContribution {
           }
         }
       } catch {
-        continue;
+        // Durable reconciliation state and its alarm deadline remain stored.
       }
     }
 

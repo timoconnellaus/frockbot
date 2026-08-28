@@ -985,7 +985,7 @@ describe("AgentLoop", () => {
       },
     };
     const executions: string[] = [];
-    let cancel = () => {
+    let cancel: () => void = () => {
       throw new Error("agent is not ready");
     };
     const tool: ToolDefinition = {

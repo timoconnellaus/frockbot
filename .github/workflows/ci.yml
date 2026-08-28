@@ -134,6 +134,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: ${{ vars.COMPOSIO_GMAIL_AUTH_CONFIG_ID }}
+          SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
         shell: bash
         run: |
           missing=()
@@ -146,7 +147,8 @@ jobs:
             GOOGLE_CLIENT_ID \
             GOOGLE_CLIENT_SECRET \
             COMPOSIO_API_KEY \
-            COMPOSIO_GMAIL_AUTH_CONFIG_ID; do
+            COMPOSIO_GMAIL_AUTH_CONFIG_ID \
+            SPRITES_TOKEN; do
             if [[ -z "${!name}" ]]; then missing+=("$name"); fi
           done
 
@@ -225,6 +227,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: ${{ vars.COMPOSIO_GMAIL_AUTH_CONFIG_ID }}
+          SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"
@@ -238,6 +241,7 @@ jobs:
             'GOOGLE_CLIENT_SECRET',
             'COMPOSIO_API_KEY',
             'COMPOSIO_GMAIL_AUTH_CONFIG_ID',
+            'SPRITES_TOKEN',
           ]) {
             console.log(`${name}=${JSON.stringify(process.env[name])}`);
           }

@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld("frockbotDesktop", {
     nativeReturnNonce?: string,
   ): Promise<void> =>
     ipcRenderer
-      .invoke("frockbot:open-external-authorization", url, nativeReturnNonce)
-      .then(decodeExternalAuthorizationAcknowledgement),
+      .invoke("frockbot:open-external-authorization", {
+        schemaVersion: 1,
+        url,
+        nativeReturnNonce,
+      })
+      .then(decodeExternalAuthorizationAcknowledgement)
+      .then(() => undefined),
 });

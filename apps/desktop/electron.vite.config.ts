@@ -7,7 +7,8 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 // main bundle. Third-party dependencies remain external for electron-builder.
 const workspaceMainDependencies = [
   "@frockbot/desktop-core",
-  "@frockbot/plugin-shell",
+  "@frockbot/plugin-auth",
+  "@frockbot/protocol",
 ];
 
 export default defineConfig({

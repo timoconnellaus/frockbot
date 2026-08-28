@@ -1,4 +1,4 @@
-export { decodeExternalAuthorizationUrl } from "@frockbot/client-core";
+export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 import type {
   BotNotificationPolicy,

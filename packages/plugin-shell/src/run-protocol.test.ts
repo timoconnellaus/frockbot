@@ -3,7 +3,11 @@ import type { SessionEvent } from "@frockbot/agent-core";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
 import {
+  decodeClientNotificationAcknowledgementCommandV1,
+  decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
+  decodeClientRunReconciliationCommandV1,
+  decodeClientTurnCommandV1,
   decodeClientRunLookupV1,
   decodeClientTurnV1,
   decodeClientRunPageV1,
@@ -127,6 +131,86 @@ describe("client run protocol v1", () => {
         extra: true,
       }),
     ).toThrow("run lookup query.extra is not allowed");
+  });
+
+  test("strictly decodes hosted Turn, notification, and reconciliation commands", () => {
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "  hello  ",
+      }),
+    ).toEqual({ schemaVersion: 1, commandId: "command-1", text: "hello" });
+    expect(() =>
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        action: "cancel",
+      }),
+    ).toThrow("turn command.action is not allowed");
+    expect(() =>
+      decodeClientTurnCommandV1({
+        schemaVersion: 2,
+        commandId: "command-1",
+        text: "hello",
+      }),
+    ).toThrow("turn command.schemaVersion is invalid");
+
+    expect(
+      decodeClientNotificationAcknowledgementCommandV1({
+        schemaVersion: 1,
+        action: "acknowledge",
+        notificationId: "notification-1",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      action: "acknowledge",
+      notificationId: "notification-1",
+    });
+    expect(() =>
+      decodeClientNotificationAcknowledgementCommandV1({
+        schemaVersion: 1,
+        action: "acknowledge",
+        notificationId: "notification-1",
+        extra: true,
+      }),
+    ).toThrow("notification acknowledgement command.extra is not allowed");
+
+    expect(
+      decodeClientRunReconciliationCommandV1({
+        schemaVersion: 1,
+        action: "resume",
+      }),
+    ).toEqual({ schemaVersion: 1, action: "resume" });
+    expect(() =>
+      decodeClientRunReconciliationCommandV1({
+        schemaVersion: 2,
+        action: "resume",
+      }),
+    ).toThrow("run reconciliation command is invalid");
+  });
+
+  test("strictly decodes authoritative admission fence commands", () => {
+    expect(
+      decodeClientRunAdmissionFenceCommandV1({
+        schemaVersion: 1,
+        action: "fence-admission",
+      }),
+    ).toEqual({ schemaVersion: 1, action: "fence-admission" });
+    expect(() =>
+      decodeClientRunAdmissionFenceCommandV1({
+        schemaVersion: 1,
+        action: "fence-admission",
+        extra: true,
+      }),
+    ).toThrow("run admission fence command.extra is not allowed");
+    expect(() =>
+      decodeClientRunAdmissionFenceCommandV1({
+        schemaVersion: 2,
+        action: "fence-admission",
+      }),
+    ).toThrow("run admission fence command is invalid");
   });
 
   test("projects bounded Turn responses without internal events", () => {

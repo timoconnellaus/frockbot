@@ -37,15 +37,17 @@ async function apiRequest(
   body?: string,
 ): Promise<unknown> {
   const response = window.frockbotDesktop
-    ? await window.frockbotDesktop.request({ path, method, body }).then(
-        (result: DesktopApiResponse) =>
-          new Response(result.body, {
-            status: result.status,
-            headers: result.contentType
-              ? { "content-type": result.contentType }
-              : undefined,
-          }),
-      )
+    ? await window.frockbotDesktop
+        .request({ schemaVersion: 1, path, method, body })
+        .then(
+          (result: DesktopApiResponse) =>
+            new Response(result.body, {
+              status: result.status,
+              headers: result.contentType
+                ? { "content-type": result.contentType }
+                : undefined,
+            }),
+        )
     : await fetch(path, {
         method,
         headers: body ? { "content-type": "application/json" } : undefined,
@@ -82,10 +84,10 @@ const application = new ClientApplication({
   ): Promise<ClientTurnResponse> {
     signal.throwIfAborted();
     const path = `/api/bots/${encodeURIComponent(botId)}/turns`;
-    const body = JSON.stringify({ text, commandId });
+    const body = JSON.stringify({ schemaVersion: 1, text, commandId });
     const response = window.frockbotDesktop
       ? await window.frockbotDesktop
-          .request({ path, method: "POST", body })
+          .request({ schemaVersion: 1, path, method: "POST", body })
           .then(
             (result: DesktopApiResponse) =>
               new Response(result.body, {
@@ -141,7 +143,7 @@ const application = new ClientApplication({
       await apiRequest(
         `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
         "POST",
-        JSON.stringify({ action: "resume" }),
+        JSON.stringify({ schemaVersion: 1, action: "resume" }),
       ),
     );
   },
@@ -150,7 +152,11 @@ const application = new ClientApplication({
       await apiRequest(
         `/api/bots/${encodeURIComponent(botId)}/notifications`,
         "POST",
-        JSON.stringify({ notificationId }),
+        JSON.stringify({
+          schemaVersion: 1,
+          action: "acknowledge",
+          notificationId,
+        }),
       ),
     );
   },

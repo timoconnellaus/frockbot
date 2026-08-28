@@ -108,6 +108,10 @@ export interface BotStateBinding {
     botId: string,
     query: ClientRunLookupQueryV1,
   ): Promise<ClientRunLookupV1>;
+  fenceRunAdmission(
+    botId: string,
+    query: ClientRunLookupQueryV1,
+  ): Promise<ClientRunLookupV1>;
   listNotifications(botId: string): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
   reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;

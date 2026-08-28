@@ -1,8 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import desktopAuthPlugin from "@frockbot/plugin-auth/desktop";
 import { type Context, Context as CordisContext, Service } from "cordis";
 import { app, BrowserWindow } from "electron";
+import { ElectronDesktopAuthCapability } from "./auth-client.js";
 import { startHostedDesktopApplication } from "./hosted-application.js";
 
 interface DesktopWindowConfig {
@@ -159,6 +161,8 @@ export async function createCordisDesktopHost(): Promise<Context> {
     process.env.FROCKBOT_AUTH_BASE_URL,
     async ({ applicationUrl }) => {
       const root = new CordisContext();
+      await root.plugin(ElectronDesktopAuthCapability);
+      await root.plugin(desktopAuthPlugin);
       await root.plugin(DesktopWindowService, { baseUrl: applicationUrl });
       await root.desktopWindows.create();
       return root;

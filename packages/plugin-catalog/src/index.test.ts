@@ -9,6 +9,7 @@ import {
   LocalCordisContributionHost,
   PackageCatalog,
   type PackageDescriptor,
+  type PackageSettingSchema,
   type PreparedContribution,
 } from "./index.js";
 
@@ -391,7 +392,7 @@ describe("decodeFrockBotManifest", () => {
       additionalProperties: false,
       minProperties: 1,
       maxProperties: 3,
-    };
+    } satisfies PackageSettingSchema;
 
     const decoded = decodeFrockBotManifest(v3ManifestWithSchema(schema));
 

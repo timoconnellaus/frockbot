@@ -83,13 +83,13 @@ export async function executeBotTurn(
     else runtime.agent.agent.send(command.text);
     await runtime.agent.agent.whenIdle();
     const events = [...runtime.agent.agent.session.events];
-    const currentTurn = events.findLast(
-      (event) => event.type === "turn/start",
-    )?.turn;
+    const turnStart = events.findLast((event) => event.type === "turn/start");
+    const currentTurn =
+      turnStart?.type === "turn/start" ? turnStart.turn : undefined;
     const terminalTurn = events.findLast(
       (event) => event.type === "turn/end" && event.turn === currentTurn,
     );
-    if (!terminalTurn) {
+    if (!terminalTurn || terminalTurn.type !== "turn/end") {
       const reconciliation = events.findLast(
         (event) =>
           event.type === "model/reconciliation-required" &&

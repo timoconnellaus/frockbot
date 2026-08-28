@@ -7,12 +7,14 @@ interface DesktopAuthUser {
 }
 
 interface DesktopApiRequest {
+  schemaVersion: 1;
   path: string;
   method: "GET" | "POST";
   body?: string;
 }
 
 interface DesktopApiResponse {
+  schemaVersion: 1;
   status: number;
   contentType: string | null;
   body: string;

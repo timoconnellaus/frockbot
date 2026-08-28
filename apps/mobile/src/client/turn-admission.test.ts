@@ -118,6 +118,7 @@ describe("mobile Turn admission", () => {
 
     const result = await reconcileMobileTurnAdmission({
       lookup: () => Promise.resolve(lookups.shift()!),
+      fence: () => Promise.reject(new Error("fence must not be called")),
       observe: (lookup) => observations.push(lookup.state),
       transientFailure: () => {
         throw new Error("lookup must not fail");
@@ -158,6 +159,7 @@ describe("mobile Turn admission", () => {
           ? Promise.reject(new Error(`temporary-${attempts}`))
           : Promise.resolve(terminal);
       },
+      fence: () => Promise.reject(new Error("fence must not be called")),
       observe: () => undefined,
       transientFailure: (error) =>
         failures.push(error instanceof Error ? error.message : "unknown"),
@@ -174,24 +176,94 @@ describe("mobile Turn admission", () => {
     expect(waits).toEqual([10, 20, 20]);
   });
 
-  test("requires repeated read-only confirmation of non-admission", async () => {
-    let attempts = 0;
+  test("uses an authoritative admission fence before reporting non-admission", async () => {
+    let fences = 0;
     const observations: string[] = [];
 
     const result = await reconcileMobileTurnAdmission({
-      lookup: () => {
-        attempts += 1;
+      lookup: () => Promise.resolve({ state: "not-admitted" }),
+      fence: () => {
+        fences += 1;
         return Promise.resolve({ state: "not-admitted" });
       },
       observe: (lookup) => observations.push(lookup.state),
       transientFailure: () => undefined,
       wait: () => Promise.resolve(),
-      notAdmittedConfirmations: 3,
     });
 
     expect(result).toEqual({ state: "not-admitted" });
-    expect(attempts).toBe(3);
+    expect(fences).toBe(1);
     expect(observations).toEqual(["not-admitted"]);
+  });
+
+  test("observes a delayed admission that wins the authoritative fence", async () => {
+    const terminal = {
+      state: "terminal" as const,
+      run: {
+        runId: "command-1",
+        admittedAt: "2026-08-29T00:00:00.000Z",
+        input: "continue",
+        status: "completed" as const,
+        events: [],
+        responseText: "done",
+      },
+    };
+    const observations: string[] = [];
+    const lookups = [{ state: "not-admitted" as const }, terminal];
+    const result = await reconcileMobileTurnAdmission({
+      lookup: () => Promise.resolve(lookups.shift()!),
+      fence: () =>
+        Promise.resolve({
+          state: "running",
+          run: {
+            ...terminal.run,
+            status: "running",
+            responseText: undefined,
+          },
+        }),
+      observe: (lookup) => observations.push(lookup.state),
+      transientFailure: () => undefined,
+      wait: () => Promise.resolve(),
+    });
+
+    expect(result).toEqual(terminal);
+    expect(observations).toEqual(["running", "terminal"]);
+  });
+
+  test("continues observing reconciliation-required admission until terminal", async () => {
+    const reconciling = {
+      state: "reconciliation-required" as const,
+      run: {
+        runId: "command-1",
+        admittedAt: "2026-08-29T00:00:00.000Z",
+        input: "continue",
+        status: "reconciliation-required" as const,
+        events: [],
+        recovery: { action: "resume" as const, message: "Waiting" },
+      },
+    };
+    const terminal = {
+      state: "terminal" as const,
+      run: {
+        ...reconciling.run,
+        status: "failed" as const,
+        recovery: undefined,
+        failure: "could not reconcile",
+      },
+    };
+    const lookups = [reconciling, terminal];
+    const observations: string[] = [];
+
+    const result = await reconcileMobileTurnAdmission({
+      lookup: () => Promise.resolve(lookups.shift()!),
+      fence: () => Promise.resolve({ state: "not-admitted" }),
+      observe: (lookup) => observations.push(lookup.state),
+      transientFailure: () => undefined,
+      wait: () => Promise.resolve(),
+    });
+
+    expect(result).toEqual(terminal);
+    expect(observations).toEqual(["reconciliation-required", "terminal"]);
   });
 
   test("keeps busy state until lookup is terminal or definitively absent", () => {

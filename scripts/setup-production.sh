@@ -200,7 +200,7 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=4
+TOTAL_STAGES=5
 
 GITHUB_REPOSITORY="timoconnellaus/frockbot"
 GITHUB_ENVIRONMENT="production"
@@ -285,6 +285,18 @@ ask_secret COMPOSIO_API_KEY "Paste the Composio project API key:"
 }
 set_production_variable COMPOSIO_GMAIL_AUTH_CONFIG_ID "$COMPOSIO_GMAIL_AUTH_CONFIG_ID"
 set_production_secret COMPOSIO_API_KEY "$COMPOSIO_API_KEY"
+
+stage "Fly: Sprites Computer token"
+say "Provision the server-side credential used by the built-in Fly Computer provider."
+open_url "https://fly.io/dashboard"
+step "Open the organization that owns FrockBot Sprites and create a scoped Sprites access token."
+step "Copy the token. It remains a GitHub production secret and is never sent to clients."
+ask_secret SPRITES_TOKEN "Paste the Fly Sprites token:"
+[[ -n "$SPRITES_TOKEN" ]] || {
+  warn "A Fly Sprites token is required"
+  exit 1
+}
+set_production_secret SPRITES_TOKEN "$SPRITES_TOKEN"
 
 stage "GitHub: verify production configuration"
 say "The repository already has the account ID, auth secret, app URL, and D1 ID."
