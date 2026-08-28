@@ -10,6 +10,65 @@ function assets(response: Response) {
 const publicFile = (path: string) =>
   Bun.file(new URL(`../public/${path}`, import.meta.url)).text();
 
+type StyleRule = {
+  selectors: string[];
+  declarations: Record<string, string>;
+};
+
+function parseDeclarations(block: string) {
+  const declarations: Record<string, string> = {};
+  for (const entry of block.split(";")) {
+    const separator = entry.indexOf(":");
+    if (separator === -1) continue;
+    const property = entry.slice(0, separator).trim().toLowerCase();
+    if (!property) continue;
+    declarations[property] = entry.slice(separator + 1).trim();
+  }
+  return declarations;
+}
+
+function headerBrandImageAttributes(page: string) {
+  const lockup = page.slice(page.indexOf('<a class="brand"'));
+  const start = lockup.indexOf("<img");
+  const image = lockup.slice(start, lockup.indexOf(">", start));
+  const attributes: Record<string, string> = {};
+  for (const [, name, value] of image.matchAll(/([a-zA-Z-]+)="([^"]*)"/g)) {
+    attributes[name.toLowerCase()] = value;
+  }
+  return attributes;
+}
+
+function parseStyleRules(source: string): StyleRule[] {
+  const rules: StyleRule[] = [];
+  const preludes: string[] = [];
+  let buffer = "";
+
+  for (const character of source.replace(/\/\*[\s\S]*?\*\//g, "")) {
+    if (character === "{") {
+      preludes.push(buffer.trim());
+      buffer = "";
+      continue;
+    }
+    if (character === "}") {
+      const prelude = preludes.pop() ?? "";
+      if (!prelude.startsWith("@") && buffer.trim()) {
+        rules.push({
+          selectors: prelude
+            .split(",")
+            .map((selector) => selector.trim().replace(/\s+/g, " "))
+            .filter(Boolean),
+          declarations: parseDeclarations(buffer),
+        });
+      }
+      buffer = "";
+      continue;
+    }
+    buffer += character;
+  }
+
+  return rules;
+}
+
 describe("marketing worker", () => {
   test("redirects www to the apex domain and preserves the request target", async () => {
     const request = new Request("http://www.frockbot.com/features?from=nav");
@@ -101,8 +160,32 @@ describe("legal policy pages", () => {
       const page = await publicFile(path);
       expect(page).toContain('src="/assets/app-icon.png"');
       expect(page).toContain('Frock<span class="brand-accent">Bot</span>');
+
+      const headerBrandImage = headerBrandImageAttributes(page);
+      expect(headerBrandImage["src"]).toBe("/assets/app-icon.png");
+      expect(headerBrandImage["width"]).toBe("48");
+      expect(headerBrandImage["height"]).toBe("48");
     },
   );
+
+  test("brand artwork preserves the full app icon edges", async () => {
+    const brandImageRules = parseStyleRules(
+      await publicFile("styles.css"),
+    ).filter((rule) => rule.selectors.includes(".brand img"));
+
+    expect(brandImageRules.length).toBeGreaterThan(0);
+
+    const merged: Record<string, string> = {};
+    for (const rule of brandImageRules) {
+      Object.assign(merged, rule.declarations);
+      expect(rule.declarations["border-radius"]).toBeUndefined();
+      expect(rule.declarations["clip-path"]).toBeUndefined();
+    }
+
+    expect(merged["object-fit"]).toBe("contain");
+    expect(merged["width"]).toBe("42px");
+    expect(merged["height"]).toBe("42px");
+  });
 
   test("privacy policy covers the evidenced data flows and reciprocal navigation", async () => {
     const privacy = await publicFile("privacy/index.html");
