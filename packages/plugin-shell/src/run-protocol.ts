@@ -25,6 +25,10 @@ export type ClientRunStatusV1 =
 
 export type ClientRunEventV1 =
   | {
+      type: "run/events-truncated";
+      omittedInteractions: number;
+    }
+  | {
       type: "tool/call";
       call: { id: string; name: string };
     }
@@ -64,28 +68,110 @@ function truncate(value: string, maximum: number): string {
   return value.length <= maximum ? value : value.slice(0, maximum);
 }
 
-function visibleEvents(events: readonly SessionEvent[]): ClientRunEventV1[] {
-  const visible: ClientRunEventV1[] = [];
+function eventId(value: string, label: string): string {
+  if (value.length === 0 || value.length > MAX_EVENT_ID_LENGTH) {
+    throw new Error(`${label} must be a bounded non-empty string`);
+  }
+  return value;
+}
+
+type ClientToolCallV1 = Extract<ClientRunEventV1, { type: "tool/call" }>;
+type ClientToolResultV1 = Extract<ClientRunEventV1, { type: "tool/result" }>;
+
+interface ToolInteractionV1 {
+  call: ClientToolCallV1;
+  result?: ClientToolResultV1;
+}
+
+function toolInteractions(
+  events: readonly SessionEvent[],
+  status: ClientRunStatusV1,
+): ToolInteractionV1[] {
+  const interactions = new Map<string, ToolInteractionV1>();
   for (const event of events) {
     if (event.type === "tool/call") {
-      visible.push({
-        type: "tool/call",
+      const id = eventId(event.call.id, "tool call id");
+      if (interactions.has(id)) {
+        throw new Error(`tool interaction "${id}" has a duplicate call`);
+      }
+      interactions.set(id, {
         call: {
-          id: truncate(event.call.id, MAX_EVENT_ID_LENGTH),
-          name: truncate(event.call.name, MAX_EVENT_NAME_LENGTH),
+          type: "tool/call",
+          call: {
+            id,
+            name: truncate(event.call.name, MAX_EVENT_NAME_LENGTH),
+          },
         },
       });
     } else if (event.type === "tool/result") {
-      visible.push({
+      const id = eventId(event.callId, "tool result call id");
+      const interaction = interactions.get(id);
+      if (!interaction) {
+        throw new Error(`tool result "${id}" has no matching call`);
+      }
+      if (interaction.result) {
+        throw new Error(`tool interaction "${id}" has duplicate results`);
+      }
+      interaction.result = {
         type: "tool/result",
-        callId: truncate(event.callId, MAX_EVENT_ID_LENGTH),
+        callId: id,
         content: truncate(event.content, MAX_EVENT_CONTENT_LENGTH),
         isError: event.isError,
-      });
+      };
     }
-    if (visible.length === MAX_VISIBLE_EVENTS) break;
   }
-  return visible;
+  const projected = [...interactions.values()];
+  if (status === "completed" || status === "failed") {
+    const orphaned = projected.find((interaction) => !interaction.result);
+    if (orphaned) {
+      throw new Error(
+        `terminal run has no result for tool call "${orphaned.call.call.id}"`,
+      );
+    }
+  }
+  return projected;
+}
+
+function visibleEvents(
+  events: readonly SessionEvent[],
+  status: ClientRunStatusV1,
+): ClientRunEventV1[] {
+  const interactions = toolInteractions(events, status);
+  const completed = interactions.filter(
+    (interaction): interaction is ToolInteractionV1 & {
+      result: ClientToolResultV1;
+    } => Boolean(interaction.result),
+  );
+  const pending = interactions.filter((interaction) => !interaction.result);
+  const projectedSize = completed.length * 2 + pending.length;
+  if (projectedSize <= MAX_VISIBLE_EVENTS) {
+    return [
+      ...completed.flatMap((interaction) => [
+        interaction.call,
+        interaction.result,
+      ]),
+      ...pending.map((interaction) => interaction.call),
+    ];
+  }
+  if (pending.length >= MAX_VISIBLE_EVENTS) {
+    throw new Error("run has too many pending tool interactions to project");
+  }
+  const retainedCompletedCount = Math.floor(
+    (MAX_VISIBLE_EVENTS - 1 - pending.length) / 2,
+  );
+  const omittedInteractions = completed.length - retainedCompletedCount;
+  const retainedCompleted =
+    retainedCompletedCount === 0
+      ? []
+      : completed.slice(-retainedCompletedCount);
+  return [
+    { type: "run/events-truncated", omittedInteractions },
+    ...retainedCompleted.flatMap((interaction) => [
+      interaction.call,
+      interaction.result,
+    ]),
+    ...pending.map((interaction) => interaction.call),
+  ];
 }
 
 function runStatus(run: StoredRun): ClientRunStatusV1 {
@@ -126,7 +212,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     admittedAt: truncate(run.acceptedAt, MAX_TIMESTAMP_LENGTH),
     input: truncate(run.input, MAX_INPUT_LENGTH),
     status,
-    events: visibleEvents(run.events),
+    events: visibleEvents(run.events, status),
     ...(outcome ? { outcome } : {}),
     ...(recovery ? { recovery } : {}),
   };
@@ -181,8 +267,23 @@ function status(value: unknown): ClientRunStatusV1 {
   return value;
 }
 
-function decodeEvent(value: unknown): ClientTurnEvent {
+function decodeEvent(value: unknown): ClientRunEventV1 {
   const event = record(value, "run event");
+  if (event.type === "run/events-truncated") {
+    exactKeys(event, ["type", "omittedInteractions"], "run event");
+    if (
+      !Number.isSafeInteger(event.omittedInteractions) ||
+      (event.omittedInteractions as number) <= 0
+    ) {
+      throw new Error(
+        "run event.omittedInteractions must be a positive safe integer",
+      );
+    }
+    return {
+      type: "run/events-truncated",
+      omittedInteractions: event.omittedInteractions as number,
+    };
+  }
   if (event.type === "tool/call") {
     exactKeys(event, ["type", "call"], "run event");
     const call = record(event.call, "run event.call");
@@ -190,7 +291,10 @@ function decodeEvent(value: unknown): ClientTurnEvent {
     return {
       type: "tool/call",
       call: {
-        id: string(call, "id", MAX_EVENT_ID_LENGTH, "run event.call"),
+        id: eventId(
+          string(call, "id", MAX_EVENT_ID_LENGTH, "run event.call"),
+          "run event.call.id",
+        ),
         name: string(call, "name", MAX_EVENT_NAME_LENGTH, "run event.call"),
       },
     };
@@ -206,7 +310,10 @@ function decodeEvent(value: unknown): ClientTurnEvent {
     }
     return {
       type: "tool/result",
-      callId: string(event, "callId", MAX_EVENT_ID_LENGTH, "run event"),
+      callId: eventId(
+        string(event, "callId", MAX_EVENT_ID_LENGTH, "run event"),
+        "run event.callId",
+      ),
       content: string(
         event,
         "content",
@@ -217,6 +324,47 @@ function decodeEvent(value: unknown): ClientTurnEvent {
     };
   }
   throw new Error("run event.type is invalid");
+}
+
+function decodeEvents(
+  values: unknown[],
+  runStatus: ClientRunStatusV1,
+): ClientTurnEvent[] {
+  const events = values.map(decodeEvent);
+  let index = 0;
+  if (events[0]?.type === "run/events-truncated") index = 1;
+  if (
+    events
+      .slice(index)
+      .some((event) => event.type === "run/events-truncated")
+  ) {
+    throw new Error("run truncation marker must be the first event");
+  }
+  const callIds = new Set<string>();
+  while (index < events.length) {
+    const call = events[index];
+    if (call?.type !== "tool/call") {
+      throw new Error("run tool result has no matching call");
+    }
+    const id = call.call.id;
+    if (callIds.has(id)) {
+      throw new Error(`run tool call "${id}" is duplicated`);
+    }
+    callIds.add(id);
+    const result = events[index + 1];
+    if (result?.type === "tool/result") {
+      if (result.callId !== id) {
+        throw new Error(`run tool result does not match call "${id}"`);
+      }
+      index += 2;
+      continue;
+    }
+    if (runStatus === "completed" || runStatus === "failed") {
+      throw new Error(`terminal run has no result for tool call "${id}"`);
+    }
+    index += 1;
+  }
+  return events;
 }
 
 function decodeOutcome(
@@ -320,7 +468,7 @@ function decodeRun(value: unknown): ClientRun {
     admittedAt,
     input: string(run, "input", MAX_INPUT_LENGTH, "run"),
     status: runStatus,
-    events: run.events.map(decodeEvent),
+    events: decodeEvents(run.events, runStatus),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
     ...(outcome?.type === "failed" ? { failure: outcome.message } : {}),
     ...(recovery ? { failure: recovery.message, recovery } : {}),

@@ -20,6 +20,7 @@ export interface ClientTurnEvent {
   callId?: string;
   content?: string;
   isError?: boolean;
+  omittedInteractions?: number;
 }
 
 export interface ClientNotificationIntent {
