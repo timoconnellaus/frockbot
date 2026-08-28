@@ -400,6 +400,88 @@ function schemaKeywordError(keyword: string, message: string): Error {
   return new Error(`manifest setting schema "${keyword}" ${message}`);
 }
 
+function invalidSchemaJson(message: string): never {
+  throw new Error(`manifest setting schema ${message}`);
+}
+
+function validateSchemaJsonValue(value: unknown, ancestors: Set<object>): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      invalidSchemaJson("numbers must be finite");
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    invalidSchemaJson("must contain only JSON values");
+  }
+  if (ancestors.has(value)) {
+    invalidSchemaJson("must be acyclic");
+  }
+  ancestors.add(value);
+
+  if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) {
+      invalidSchemaJson("arrays must not inherit custom entries");
+    }
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.some(
+        (key) =>
+          typeof key !== "string" ||
+          (key !== "length" &&
+            (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= value.length)),
+      )
+    ) {
+      invalidSchemaJson("arrays must contain only indexed entries");
+    }
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, index)) {
+        invalidSchemaJson("arrays must be dense");
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+        invalidSchemaJson("arrays must contain plain JSON entries");
+      }
+      validateSchemaJsonValue(descriptor.value, ancestors);
+    }
+    for (const key in value) {
+      if (!Object.hasOwn(value, key)) {
+        invalidSchemaJson("arrays must not inherit entries");
+      }
+    }
+    ancestors.delete(value);
+    return;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    invalidSchemaJson("objects must not inherit custom entries");
+  }
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) {
+      invalidSchemaJson("objects must not inherit entries");
+    }
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") {
+      invalidSchemaJson("objects must use string keys");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+      invalidSchemaJson("objects must contain plain JSON entries");
+    }
+    validateSchemaJsonValue(descriptor.value, ancestors);
+  }
+  ancestors.delete(value);
+}
+
 function schemaString(
   value: Record<string, unknown>,
   keyword: "title" | "description",
@@ -714,14 +796,10 @@ function safeSchema(value: unknown): PackageSettingSchema {
   if (!isRecord(value)) {
     throw new Error("manifest setting schema must be an object");
   }
-  let serialized: string | undefined;
-  try {
-    serialized = JSON.stringify(value);
-  } catch {
-    throw new Error("manifest setting schema must be JSON-serializable");
-  }
+  validateSchemaJsonValue(value, new Set());
+  const serialized = JSON.stringify(value);
   if (serialized === undefined) {
-    throw new Error("manifest setting schema must be JSON-serializable");
+    invalidSchemaJson("must contain only JSON values");
   }
   if (serialized.length > 50_000) {
     throw new Error("manifest setting schema is too large");

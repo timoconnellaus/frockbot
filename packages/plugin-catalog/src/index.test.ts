@@ -522,6 +522,65 @@ describe("decodeFrockBotManifest", () => {
     }
   });
 
+  test("rejects non-JSON and structurally ambiguous schema values", () => {
+    const sparseEnum = new Array(1);
+    const sparseRequired = new Array(1);
+    const arrayWithExtraEntry = ["value"] as unknown[] & { extra?: string };
+    arrayWithExtraEntry.extra = "hidden";
+    const arrayWithOutOfRangeEntry = ["value"] as unknown[] & {
+      [key: string]: unknown;
+    };
+    Object.defineProperty(arrayWithOutOfRangeEntry, "4294967295", {
+      enumerable: true,
+      value: undefined,
+    });
+    const inherited = Object.assign(Object.create({ default: "secret" }), {
+      type: "string",
+    });
+    const inheritedProperties = Object.assign(
+      Object.create({ hidden: { type: "string" } }),
+      { visible: { type: "string" } },
+    );
+    const symbolKey = { type: "string" } as Record<PropertyKey, unknown>;
+    symbolKey[Symbol("hidden")] = "value";
+    const accessor: Record<string, unknown> = {};
+    Object.defineProperty(accessor, "type", {
+      enumerable: true,
+      get: () => "string",
+    });
+    const cyclic: Record<string, unknown> = { type: "array" };
+    cyclic.items = cyclic;
+
+    const invalidSchemas = [
+      { type: undefined },
+      { type: "string", title: undefined },
+      { type: "string", description: Symbol("description") },
+      { type: () => "string" },
+      { type: "string", enum: sparseEnum },
+      { type: "string", enum: [undefined] },
+      { type: "number", enum: [Number.POSITIVE_INFINITY] },
+      { type: "integer", enum: [1n] },
+      { type: "object", properties: { value: undefined } },
+      { type: "object", properties: inheritedProperties },
+      { type: "object", properties: {}, required: sparseRequired },
+      { type: "object", properties: {}, required: [undefined] },
+      { type: "array", items: undefined },
+      { type: "string", enum: arrayWithExtraEntry },
+      { type: "string", enum: arrayWithOutOfRangeEntry },
+      inherited,
+      symbolKey,
+      accessor,
+      cyclic,
+      new Date(),
+    ];
+
+    for (const schema of invalidSchemas) {
+      expect(() =>
+        decodeFrockBotManifest(v3ManifestWithSchema(schema)),
+      ).toThrow();
+    }
+  });
+
   test("rejects excessively deep and large manifest v3 schemas", () => {
     let deeplyNested: Record<string, unknown> = { type: "string" };
     for (let depth = 0; depth < 13; depth += 1) {
