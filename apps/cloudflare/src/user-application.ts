@@ -195,7 +195,8 @@ export function createUserApplication() {
     if (!BOT_ID_PATTERN.test(botId)) return jsonError(400, "invalid bot id");
 
     if (reconcileMatch) {
-      if (request.method !== "POST") return jsonError(405, "method not allowed");
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
       let runId: string;
       try {
         runId = decodeURIComponent(reconcileMatch[2]);

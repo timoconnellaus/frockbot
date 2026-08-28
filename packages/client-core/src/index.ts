@@ -79,7 +79,10 @@ export interface AgentTransport {
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;
   listNotifications?(): Promise<ClientNotificationIntent[]>;
   acknowledgeNotification?(notificationId: string): Promise<void>;
-  openExternalAuthorization?(url: string, nativeReturnNonce?: string): Promise<void>;
+  openExternalAuthorization?(
+    url: string,
+    nativeReturnNonce?: string,
+  ): Promise<void>;
 }
 
 function responseRecord(
@@ -139,7 +142,8 @@ function decodeNotification(value: unknown): ClientNotificationIntent {
     "notification",
   );
   const runId =
-    notification.runId === undefined && notificationId.startsWith("notification-")
+    notification.runId === undefined &&
+    notificationId.startsWith("notification-")
       ? notificationId.slice("notification-".length)
       : responseString(notification, "runId", "notification");
   if (!runId) throw new Error("notification.runId must be a string");
@@ -204,7 +208,8 @@ export function decodeRunList(input: unknown): ClientRun[] {
   }
   return value.runs.map((candidate) => {
     const run = responseRecord(candidate, "run");
-    if (!Array.isArray(run.events)) throw new Error("run.events must be an array");
+    if (!Array.isArray(run.events))
+      throw new Error("run.events must be an array");
     const status = run.status ?? "failed";
     if (
       status !== "running" &&
@@ -215,7 +220,10 @@ export function decodeRunList(input: unknown): ClientRun[] {
     ) {
       throw new Error("run.status is invalid");
     }
-    if (run.responseText !== undefined && typeof run.responseText !== "string") {
+    if (
+      run.responseText !== undefined &&
+      typeof run.responseText !== "string"
+    ) {
       throw new Error("run.responseText must be a string");
     }
     return {

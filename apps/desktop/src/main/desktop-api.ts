@@ -21,7 +21,8 @@ export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {
     !Number.isInteger(response.status) ||
     (response.status as number) < 100 ||
     (response.status as number) > 599 ||
-    (response.contentType !== null && typeof response.contentType !== "string") ||
+    (response.contentType !== null &&
+      typeof response.contentType !== "string") ||
     typeof response.body !== "string"
   ) {
     throw new Error("invalid API response");

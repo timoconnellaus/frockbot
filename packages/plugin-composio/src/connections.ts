@@ -272,7 +272,10 @@ export class ComposioConnectionCoordinator {
         "Connection authorization changed while creating its link",
       );
     }
-    const afterLink = await this.config.store.getConnection(userId, connectionId);
+    const afterLink = await this.config.store.getConnection(
+      userId,
+      connectionId,
+    );
     if (afterLink?.safeMetadata.revocationRequested === true) {
       await this.revoke(userId, connectionId);
       throw new Error("Connection was revoked while creating its link");
@@ -402,7 +405,11 @@ export class ComposioConnectionCoordinator {
         : [];
     if (this.config.markBotUnavailable) {
       for (const candidate of compensations) {
-        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        if (
+          !candidate ||
+          typeof candidate !== "object" ||
+          Array.isArray(candidate)
+        ) {
           return { status: "reconciliation-required" };
         }
         const compensation = candidate as Record<string, unknown>;

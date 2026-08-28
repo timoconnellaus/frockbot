@@ -196,7 +196,10 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     compensationId: string,
   ): Promise<boolean> {
     const current = this.connections.get(connectionId);
-    if (current && Array.isArray(current.safeMetadata.assignmentCompensations)) {
+    if (
+      current &&
+      Array.isArray(current.safeMetadata.assignmentCompensations)
+    ) {
       const remaining = current.safeMetadata.assignmentCompensations.filter(
         (candidate) =>
           !candidate ||
@@ -204,7 +207,9 @@ class MemoryConnectionStore implements ComposioConnectionStore {
           Array.isArray(candidate) ||
           (candidate as Record<string, unknown>).id !== compensationId,
       );
-      if (remaining.length === current.safeMetadata.assignmentCompensations.length) {
+      if (
+        remaining.length === current.safeMetadata.assignmentCompensations.length
+      ) {
         return Promise.resolve(false);
       }
       this.connections.set(connectionId, {

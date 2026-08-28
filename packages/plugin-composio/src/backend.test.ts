@@ -43,13 +43,13 @@ describe("Composio authorization return handoff", () => {
       },
       "state-secret",
     );
-    await expect(decodeAuthorizationState(state, "state-secret")).resolves.toMatchObject(
-      {
-        userId: "user-1",
-        connectionId: "connection-1",
-        nativeReturnNonce: "native-1",
-      },
-    );
+    await expect(
+      decodeAuthorizationState(state, "state-secret"),
+    ).resolves.toMatchObject({
+      userId: "user-1",
+      connectionId: "connection-1",
+      nativeReturnNonce: "native-1",
+    });
     await expect(
       decodeAuthorizationState(`${state.slice(0, -1)}x`, "state-secret"),
     ).rejects.toThrow("invalid");

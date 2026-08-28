@@ -56,7 +56,10 @@ export function createConfiguredComposioRuntimeContribution(config: {
     const connection = await config.authorizeConnection();
     const connectedAccountId = connection.safeMetadata.connectedAccountId;
     const toolkitSlug = connection.safeMetadata.toolkitSlug;
-    if (typeof connectedAccountId !== "string" || typeof toolkitSlug !== "string") {
+    if (
+      typeof connectedAccountId !== "string" ||
+      typeof toolkitSlug !== "string"
+    ) {
       throw new Error("Composio effect is no longer authorized");
     }
     return { connectedAccountId, toolkitSlug };

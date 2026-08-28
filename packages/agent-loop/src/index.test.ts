@@ -281,7 +281,10 @@ describe("AgentLoop", () => {
         );
         yield {
           type: "text-delta",
-          text: result?.role === "tool" && result.isError ? "Recovered." : "Missing error.",
+          text:
+            result?.role === "tool" && result.isError
+              ? "Recovered."
+              : "Missing error.",
         };
         yield { type: "finish", reason: "completed" };
       },
@@ -373,10 +376,14 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(
-      handle.agent.session.events.filter((event) => event.type === "input/admitted"),
+      handle.agent.session.events.filter(
+        (event) => event.type === "input/admitted",
+      ),
     ).toHaveLength(1);
     expect(
-      handle.agent.session.events.filter((event) => event.type === "model/request"),
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/request",
+      ),
     ).toHaveLength(2);
     expect(handle.agent.session.events.at(-1)).toMatchObject({
       type: "turn/end",

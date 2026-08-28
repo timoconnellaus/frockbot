@@ -382,7 +382,10 @@ export class BotState extends DurableObject<BotStateEnv> {
     this.executingRunId = run.runId;
     const previous = latest.slice(0, run.previousEventCount ?? 0);
     try {
-      const agentPackages = await this.assignedAgentPackages(identity, settings);
+      const agentPackages = await this.assignedAgentPackages(
+        identity,
+        settings,
+      );
       const promptParts = [
         `You are ${settings.profile.name}.`,
         settings.profile.label,
@@ -425,7 +428,8 @@ export class BotState extends DurableObject<BotStateEnv> {
         `${RUN_PREFIX}${run.runId}`,
       );
       const events = durableRun?.events ?? run.events;
-      const message = error instanceof Error ? error.message : "Bot turn failed";
+      const message =
+        error instanceof Error ? error.message : "Bot turn failed";
       await this.failRun(run.runId, previous, events, message);
       throw new Error(message);
     } finally {
@@ -449,15 +453,21 @@ export class BotState extends DurableObject<BotStateEnv> {
         connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
       })),
     });
-    return createFoundationAssignedRuntimePackages(application, settings, plan, {
-      userId: identity.userId,
-      readSecret: (name) => {
-        const value = (this.env as unknown as Record<string, unknown>)[name];
-        return typeof value === "string" ? value : undefined;
+    return createFoundationAssignedRuntimePackages(
+      application,
+      settings,
+      plan,
+      {
+        userId: identity.userId,
+        readSecret: (name) => {
+          // SAFETY: Worker secrets are dynamically named string bindings that Env cannot enumerate.
+          const value = (this.env as unknown as Record<string, unknown>)[name];
+          return typeof value === "string" ? value : undefined;
+        },
+        authorizeConnection: (assignment) =>
+          this.authorizeAssignedEffect(identity, assignment),
       },
-      authorizeConnection: (assignment) =>
-        this.authorizeAssignedEffect(identity, assignment),
-    });
+    );
   }
 
   private async authorizeAssignedEffect(
@@ -591,6 +601,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     ): Promise<boolean>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     return this.env.USER_CONFIGURATIONS.get(id) as unknown as {
       read(userId: string): Promise<UserSettingsViewV1>;
       getConnection(

@@ -93,7 +93,9 @@ async function deliverMobileNotifications(): Promise<void> {
   }
   const runs = decodeRunList(runsValue);
   for (const notification of notifications) {
-    const run = runs.find((candidate) => candidate.runId === notification.runId);
+    const run = runs.find(
+      (candidate) => candidate.runId === notification.runId,
+    );
     if (!run || run.status !== "completed") continue;
     if (!web.value.messages.some((message) => message.runId === run.runId)) {
       web.value.messages.push(

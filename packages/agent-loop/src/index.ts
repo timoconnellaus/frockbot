@@ -80,8 +80,13 @@ class LoopAgent implements Agent {
   }
 
   resume(): void {
-    if (this.#disposeRequested) throw new Error(`agent "${this.id}" is disposing`);
-    if (this.#status !== "idle" || this.#inbox.length > 0 || this.#resumeRequested) {
+    if (this.#disposeRequested)
+      throw new Error(`agent "${this.id}" is disposing`);
+    if (
+      this.#status !== "idle" ||
+      this.#inbox.length > 0 ||
+      this.#resumeRequested
+    ) {
       throw new Error(`agent "${this.id}" cannot resume while active`);
     }
     this.#resumeRequested = true;
@@ -130,8 +135,7 @@ class LoopAgent implements Agent {
     if (
       this.#disposeRequested ||
       this.#status !== "idle" ||
-      this.#inbox.length === 0 &&
-      !this.#resumeRequested
+      (this.#inbox.length === 0 && !this.#resumeRequested)
     ) {
       return;
     }
@@ -160,20 +164,18 @@ class LoopAgent implements Agent {
     let latestStep = 0;
     for (const event of this.session.events) {
       if (event.type === "turn/start") openTurn = event.turn;
-      if (event.type === "turn/end" && event.turn === openTurn) openTurn = undefined;
+      if (event.type === "turn/end" && event.turn === openTurn)
+        openTurn = undefined;
       if (event.type === "step/start" && event.turn === openTurn) {
         latestStep = Math.max(latestStep, event.step);
       }
     }
-    if (openTurn === undefined) throw new Error("session has no resumable turn");
+    if (openTurn === undefined)
+      throw new Error("session has no resumable turn");
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
     try {
-      for (
-        let step = latestStep + 1;
-        step <= this.#maxSteps;
-        step += 1
-      ) {
+      for (let step = latestStep + 1; step <= this.#maxSteps; step += 1) {
         signal.throwIfAborted();
         openStep = step;
         this.session.append({ type: "step/start", turn: openTurn, step });
@@ -224,7 +226,11 @@ class LoopAgent implements Agent {
           outcome: turnOutcome,
         });
       }
-      this.session.append({ type: "turn/end", turn: openTurn, outcome: turnOutcome });
+      this.session.append({
+        type: "turn/end",
+        turn: openTurn,
+        outcome: turnOutcome,
+      });
       await this.session.flush();
       await this.#ctx.serial("agent/turn-stopping", this, openTurn);
     }

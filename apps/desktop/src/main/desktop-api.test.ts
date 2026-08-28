@@ -40,10 +40,18 @@ describe("desktop hosted protocol", () => {
 
   test("decodes response envelopes before exposing them to the renderer", () => {
     expect(
-      decodeDesktopApiResponse({ status: 200, contentType: "application/json", body: "{}" }),
+      decodeDesktopApiResponse({
+        status: 200,
+        contentType: "application/json",
+        body: "{}",
+      }),
     ).toEqual({ status: 200, contentType: "application/json", body: "{}" });
     expect(() =>
-      decodeDesktopApiResponse({ status: "200", contentType: null, body: "{}" }),
+      decodeDesktopApiResponse({
+        status: "200",
+        contentType: null,
+        body: "{}",
+      }),
     ).toThrow("invalid API response");
   });
 

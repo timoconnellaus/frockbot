@@ -53,7 +53,9 @@ export function projectCompletedRuns(
 ): Set<string> {
   const projected = new Set<string>();
   for (const notification of notifications) {
-    const run = runs.find((candidate) => candidate.runId === notification.runId);
+    const run = runs.find(
+      (candidate) => candidate.runId === notification.runId,
+    );
     if (!run || run.status !== "completed") continue;
     if (!messages.some((message) => message.runId === run.runId)) {
       messages.push(
@@ -164,7 +166,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       return;
     }
     const notifications = await ctx.transport.listNotifications();
-    const runs = notifications.length > 0 ? await ctx.transport.listRuns?.() : [];
+    const runs =
+      notifications.length > 0 ? await ctx.transport.listRuns?.() : [];
     const projected = projectCompletedRuns(
       web.value.messages,
       notifications,

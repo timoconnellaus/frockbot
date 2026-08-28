@@ -64,9 +64,9 @@ describe("Connection operation reconciliation", () => {
     });
     if (!provided) throw new Error("shell data was not provided");
 
-    await expect(provided.value.startConnection("composio", "gmail")).rejects.toThrow(
-      "response lost",
-    );
+    await expect(
+      provided.value.startConnection("composio", "gmail"),
+    ).rejects.toThrow("response lost");
     await provided.value.startConnection("composio", "gmail");
 
     expect(commandIds).toHaveLength(2);

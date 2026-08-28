@@ -142,7 +142,8 @@ export function setupDesktopAuth(): void {
           if (status === "ready") resolve();
           else if (status === "pending") {
             reject(new Error("Connection authorization is still completing"));
-          } else reject(new Error("Connection authorization was not completed"));
+          } else
+            reject(new Error("Connection authorization was not completed"));
         };
         const timeout = setTimeout(() => {
           pendingAuthorizationReturns.delete(nativeReturnNonce);

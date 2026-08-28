@@ -77,12 +77,10 @@ export function createConfiguredComposioBackendContribution(
   host: ComposioBackendHost,
 ): BackendRouteContribution {
   const apiKey = host.readSecret("COMPOSIO_API_KEY");
-  const gmailAuthConfigId = host.readSecret(
-    "COMPOSIO_GMAIL_AUTH_CONFIG_ID",
-  );
-  const authorizationStateSecret = host.readSecret(
-    "FROCKBOT_AUTHORIZATION_STATE_SECRET",
-  ) ?? host.readSecret("BETTER_AUTH_SECRET");
+  const gmailAuthConfigId = host.readSecret("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
+  const authorizationStateSecret =
+    host.readSecret("FROCKBOT_AUTHORIZATION_STATE_SECRET") ??
+    host.readSecret("BETTER_AUTH_SECRET");
   if (!apiKey || !gmailAuthConfigId || !authorizationStateSecret) {
     throw new Error("Composio backend Contribution is not configured");
   }
@@ -178,7 +176,12 @@ export async function decodeAuthorizationState(
   ) {
     throw new Error("Composio authorization state is invalid");
   }
-  const decoded: unknown = JSON.parse(new TextDecoder().decode(payload));
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(new TextDecoder().decode(payload));
+  } catch {
+    throw new Error("Composio authorization state is invalid");
+  }
   if (!decoded || typeof decoded !== "object") {
     throw new Error("Composio authorization state is invalid");
   }
@@ -257,7 +260,8 @@ export function createComposioBackendContribution(
       let callbackState: AuthorizationState | undefined;
       if (isCallback) {
         const encodedState = url.searchParams.get("state");
-        if (!encodedState) return jsonError(400, "Composio callback state is required");
+        if (!encodedState)
+          return jsonError(400, "Composio callback state is required");
         try {
           callbackState = await decodeAuthorizationState(
             encodedState,

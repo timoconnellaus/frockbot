@@ -193,6 +193,7 @@ function fakeAgent(): Agent {
     session: undefined as never,
     status: "idle",
     send: () => "message",
+    resume: () => undefined,
     cancel: () => undefined,
     whenIdle: () => Promise.resolve(),
   };

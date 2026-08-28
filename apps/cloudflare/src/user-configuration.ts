@@ -17,12 +17,18 @@ function revocationCompensations(
   connection: UserSettingsViewV1["connections"][number],
   activeGeneration?: string,
 ): Array<{ botId: string; id: string; expectedGeneration: string }> {
-  const dependencies = Array.isArray(connection.safeMetadata.dependentAssignments)
+  const dependencies = Array.isArray(
+    connection.safeMetadata.dependentAssignments,
+  )
     ? connection.safeMetadata.dependentAssignments
     : [];
   const byBot = new Map<string, string>();
   for (const candidate of dependencies) {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
       continue;
     }
     const dependency = candidate as Record<string, unknown>;
@@ -308,10 +314,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       const operation = connection.safeMetadata.reconciliationOperation;
       if (
         connection.safeMetadata.revocationRequested === true ||
-        connection.state !== "authorizing" &&
-        !(
-          connection.state === "reconciliation-required" && operation === "link"
-        )
+        (connection.state !== "authorizing" &&
+          !(
+            connection.state === "reconciliation-required" &&
+            operation === "link"
+          ))
       ) {
         return undefined;
       }
@@ -332,14 +339,16 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     await this.assertIdentity(userId);
     return this.ctx.storage.transaction(async (transaction) => {
       const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ?? initialState();
+        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
+        initialState();
       const connection = current.connections.find(
         (item) => item.connectionId === connectionId,
       );
       if (
         !connection ||
         connection.safeMetadata.authorizationStateId !== authorizationStateId ||
-        typeof connection.safeMetadata.authorizationStateExpiresAt !== "number" ||
+        typeof connection.safeMetadata.authorizationStateExpiresAt !==
+          "number" ||
         connection.safeMetadata.authorizationStateExpiresAt <= Date.now()
       ) {
         return "invalid";
@@ -502,13 +511,14 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   ): Promise<boolean> {
     return this.transitionConnection(userId, connectionId, (connection) => {
       if (Array.isArray(connection.safeMetadata.assignmentCompensations)) {
-        const remaining = connection.safeMetadata.assignmentCompensations.filter(
-          (candidate) =>
-            !candidate ||
-            typeof candidate !== "object" ||
-            Array.isArray(candidate) ||
-            (candidate as Record<string, unknown>).id !== compensationId,
-        );
+        const remaining =
+          connection.safeMetadata.assignmentCompensations.filter(
+            (candidate) =>
+              !candidate ||
+              typeof candidate !== "object" ||
+              Array.isArray(candidate) ||
+              (candidate as Record<string, unknown>).id !== compensationId,
+          );
         if (
           remaining.length ===
           connection.safeMetadata.assignmentCompensations.length
@@ -564,7 +574,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       if (connection.state === "revoking" || connection.state === "revoked") {
         return undefined;
       }
-      const existing = Array.isArray(connection.safeMetadata.dependentAssignments)
+      const existing = Array.isArray(
+        connection.safeMetadata.dependentAssignments,
+      )
         ? connection.safeMetadata.dependentAssignments.filter(
             (candidate) =>
               candidate &&

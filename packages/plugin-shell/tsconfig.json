@@ -12,7 +12,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["node", "vite/client"]
+    "types": ["bun", "node", "vite/client"]
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
 }
