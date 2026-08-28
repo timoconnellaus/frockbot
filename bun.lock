@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "frockbot",
+      "devDependencies": {
+        "@types/bun": "1.3.6",
+      },
     },
     "applications/foundation": {
       "name": "@frockbot/application-foundation",

@@ -15,7 +15,12 @@ import {
   type SpriteServiceStream,
   type SpritesClientHandle,
 } from "./computer.ts";
-import { FlySpriteComputerProvider } from "./provider.ts";
+import { configuredFlyBotId } from "./host.ts";
+import {
+  FlySpriteComputerProvider,
+  flySpriteNameForTarget,
+  flySpriteNameForUserStorage,
+} from "./provider.ts";
 
 class FakeStream implements SpriteServiceStream {
   async *[Symbol.asyncIterator](): AsyncIterator<unknown> {
@@ -55,7 +60,7 @@ class FakeSprite implements SpriteHandle {
     const guardedKey = /control\.sh assert-agent '([^']+)'/.exec(shell)?.[1];
     if (guardedKey) {
       const lease = this.leases.get(guardedKey);
-      if (lease?.fresh) {
+      if (lease?.fresh && shell.includes("|| exit $?")) {
         return Promise.reject(
           new Error("The user is controlling this agent's computer"),
         );
@@ -78,6 +83,22 @@ class FakeSprite implements SpriteHandle {
       return Promise.resolve({
         stdout: "__DELETED__\n",
         stderr: "bash: /etc/profile: noise\n",
+      });
+    }
+    if (shell.includes('find "$ROOT"')) {
+      const offset = Number(/OFFSET=(\d+)/.exec(shell)?.[1] ?? 0);
+      const limit = Number(/LIMIT=(\d+)/.exec(shell)?.[1] ?? 100);
+      const lines = Array.from({ length: 205 }, (_, index) =>
+        [
+          `memory-${String(index).padStart(3, "0")}.md`,
+          `version-${index}`,
+          "7",
+          "1700000000",
+        ].join("\t"),
+      );
+      return Promise.resolve({
+        stdout: `${lines.slice(offset, offset + limit + 1).join("\n")}\n`,
+        stderr: "",
       });
     }
     if (shell.includes('mv "$TMP" "$TARGET"')) {
@@ -227,6 +248,18 @@ describe("Fly Sprite computer", () => {
     expect(
       flySpriteNameForBot("general", `f${"x".repeat(62)}`).length,
     ).toBeLessThanOrEqual(63);
+    expect(
+      flySpriteNameForTarget({ userId: "owner:a", botId: "health" }),
+    ).not.toBe(
+      flySpriteNameForTarget({ userId: "owner", botId: "a:health" }),
+    );
+    expect(
+      flySpriteNameForTarget({ userId: "user", botId: "owner" }),
+    ).not.toBe(flySpriteNameForUserStorage("owner"));
+    expect(configuredFlyBotId({ FROCKBOT_BOT_ID: "  bot-7  " })).toBe(
+      "bot-7",
+    );
+    expect(configuredFlyBotId({})).toBe("barebones");
   });
 
   test("provisions Bot workspaces and one token-routed noVNC gateway", async () => {
@@ -443,6 +476,40 @@ describe("Fly Sprite computer", () => {
 
     expect(client.sprite.services).toEqual([]);
     expect(client.sprite.auth).toBeUndefined();
+  });
+
+  test("paginates workspace listings before provider output limits", async () => {
+    const client = new FakeClient();
+    const computer = await new FlySpriteComputerProvider(
+      new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
+    ).open(
+      { userId: "owner", botId: "health" },
+      { providerId: "fly-sprite", generation: 1 },
+    );
+    const directory = await computer.workspace?.openDirectory({
+      namespace: "memory",
+      scope: "bot",
+      durability: "durable",
+    });
+
+    const first = await directory?.listFiles({ limit: 100, signal: signal() });
+    const second = await directory?.listFiles({
+      limit: 100,
+      cursor: first?.cursor,
+      signal: signal(),
+    });
+    const third = await directory?.listFiles({
+      limit: 100,
+      cursor: second?.cursor,
+      signal: signal(),
+    });
+
+    expect(first?.files).toHaveLength(100);
+    expect(first?.cursor).toBe("100");
+    expect(second?.files[0]?.path).toBe("memory-100.md");
+    expect(second?.cursor).toBe("200");
+    expect(third?.files).toHaveLength(5);
+    expect(third?.cursor).toBeUndefined();
   });
 
   test("adapts Fly execution through the provider-neutral Computer interface", async () => {

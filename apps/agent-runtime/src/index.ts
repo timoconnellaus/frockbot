@@ -65,6 +65,7 @@ function desktopMemoryConfig(botId: string): MemoryPluginConfig {
   return {
     ownerId: userId,
     botId,
+    inject: ["computers"],
     createDocuments: async (ctx) => {
       const target = { userId, botId };
       if (!ctx.computers.assignment(target)) {

@@ -11,7 +11,7 @@ const WORKSPACES_ROOT = "/workspaces";
 const CONTROL_SCRIPT = `${RUNTIME_ROOT}/control.sh`;
 const ENSURE_AGENT_SCRIPT = `${RUNTIME_ROOT}/ensure-agent.sh`;
 const MAX_OUTPUT = 30_000;
-const MAX_STORAGE_OUTPUT = 100_000;
+const MAX_STORAGE_OUTPUT = 500_000;
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 const LEASE_MAX_AGE_SECONDS = 90;
 
@@ -535,7 +535,7 @@ export class FlySpriteComputer {
       command,
     ].join("\n");
     try {
-      const result = await sprite.execFileHTTP("bash", ["-lc", guarded], {
+      const result = await sprite.execFileHTTP("bash", ["-c", guarded], {
         signal,
         timeout: 120_000,
         maxBuffer: MAX_OUTPUT * 2,
@@ -572,7 +572,7 @@ export class FlySpriteComputer {
     );
     let result: SpriteExecResult;
     try {
-      result = await sprite.execFileHTTP("bash", ["-lc", guarded], {
+      result = await sprite.execFileHTTP("bash", ["-c", guarded], {
         signal,
         timeout: Math.max(1, Math.min(limits.timeoutMs ?? 120_000, 120_000)),
         maxBuffer: MAX_OUTPUT * 2,
@@ -608,7 +608,7 @@ export class FlySpriteComputer {
     ].join("\n");
     let result: SpriteExecResult;
     try {
-      result = await sprite.execFileHTTP("bash", ["-lc", storageCommand], {
+      result = await sprite.execFileHTTP("bash", ["-c", storageCommand], {
         signal,
         timeout: 120_000,
         maxBuffer: MAX_STORAGE_OUTPUT * 2,
@@ -639,7 +639,7 @@ export class FlySpriteComputer {
       `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)}`,
     ].join("\n");
     try {
-      const result = await sprite.execFileHTTP("bash", ["-lc", command], {
+      const result = await sprite.execFileHTTP("bash", ["-c", command], {
         signal,
         timeout: 45_000,
         maxBuffer: MAX_OUTPUT * 2,
@@ -810,7 +810,7 @@ export class FlySpriteComputer {
   }
 
   private agentControlGuard(layout: AgentLayout): string {
-    return `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS}`;
+    return `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`;
   }
 
   private async findOrCreate(): Promise<SpriteHandle> {

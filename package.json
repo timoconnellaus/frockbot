@@ -20,5 +20,8 @@
     "proof:cordis": "bun run --filter @frockbot/cordis-poc typecheck && bun run --filter @frockbot/cordis-poc test && bun run --filter @frockbot/agent-runtime build && bun run --filter @frockbot/cordis-poc smoke",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.6"
   }
 }

@@ -259,34 +259,7 @@ class FlyComputerDirectory implements ComputerDirectory {
     } = {},
   ) {
     const prefix = options.prefix ? normalizeComputerPath(options.prefix) : "";
-    const output = await this.runStorage(
-      [
-        `ROOT=${shellQuote(this.root)}`,
-        'mkdir -p "$ROOT"',
-        'find "$ROOT" -type f ! -path "$ROOT/.frockbot-locks/*" -print0 | sort -z | while IFS= read -r -d "" FILE; do REL=${FILE#"$ROOT"/}; HASH=$(sha256sum "$FILE" | cut -d" " -f1); printf "%s\\t%s\\t%s\\t%s\\n" "$REL" "$HASH" "$(stat -c %s "$FILE")" "$(stat -c %Y "$FILE")"; done',
-      ].join("\n"),
-      options.signal,
-    );
-    const files: ComputerFileInfo[] = output
-      ? output.split("\n").flatMap((line) => {
-          const [path, version, sizeText, modifiedText] = line.split("\t");
-          if (
-            !path ||
-            (prefix && path !== prefix && !path.startsWith(`${prefix}/`))
-          ) {
-            return [];
-          }
-          return [
-            {
-              path,
-              version: version ?? "",
-              size: Number(sizeText),
-              modifiedAt: new Date(Number(modifiedText) * 1000).toISOString(),
-            },
-          ];
-        })
-      : [];
-    const limit = Math.max(1, Math.min(options.limit ?? 1000, 1000));
+    const limit = Math.max(1, Math.min(options.limit ?? 100, 100));
     const offset = options.cursor ? Number(options.cursor) : 0;
     if (!Number.isSafeInteger(offset) || offset < 0) {
       throw new ComputerError(
@@ -294,10 +267,55 @@ class FlyComputerDirectory implements ComputerDirectory {
         "Invalid Computer file cursor",
       );
     }
-    const nextOffset = offset + limit;
+    const output = await this.runStorage(
+      [
+        `ROOT=${shellQuote(this.root)}`,
+        `PREFIX=${shellQuote(prefix)}`,
+        `OFFSET=${offset}`,
+        `LIMIT=${limit}`,
+        'mkdir -p "$ROOT"',
+        "INDEX=0",
+        "EMITTED=0",
+        'find "$ROOT" -type f ! -path "$ROOT/.frockbot-locks/*" -print0 | sort -z | while IFS= read -r -d "" FILE; do',
+        '  REL=${FILE#"$ROOT"/}',
+        '  if [ -n "$PREFIX" ]; then case "$REL" in "$PREFIX"|"$PREFIX"/*) ;; *) continue ;; esac; fi',
+        '  if [ "$INDEX" -lt "$OFFSET" ]; then INDEX=$((INDEX + 1)); continue; fi',
+        '  HASH=$(sha256sum "$FILE" | cut -d" " -f1)',
+        '  printf "%s\\t%s\\t%s\\t%s\\n" "$REL" "$HASH" "$(stat -c %s "$FILE")" "$(stat -c %Y "$FILE")"',
+        "  EMITTED=$((EMITTED + 1))",
+        '  if [ "$EMITTED" -gt "$LIMIT" ]; then break; fi',
+        "done",
+      ].join("\n"),
+      options.signal,
+    );
+    const files: ComputerFileInfo[] = output
+      ? output.split("\n").map((line) => {
+          const [path, version, sizeText, modifiedText] = line.split("\t");
+          const size = Number(sizeText);
+          const modifiedSeconds = Number(modifiedText);
+          if (
+            !path ||
+            !version ||
+            !Number.isFinite(size) ||
+            !Number.isFinite(modifiedSeconds)
+          ) {
+            throw new ComputerError(
+              "provider-failure",
+              "Invalid Fly file listing response",
+            );
+          }
+          return {
+            path,
+            version,
+            size,
+            modifiedAt: new Date(modifiedSeconds * 1000).toISOString(),
+          };
+        })
+      : [];
+    const hasMore = files.length > limit;
     return {
-      files: files.slice(offset, nextOffset),
-      cursor: nextOffset < files.length ? String(nextOffset) : undefined,
+      files: files.slice(0, limit),
+      cursor: hasMore ? String(offset + limit) : undefined,
     };
   }
 }
@@ -380,6 +398,16 @@ interface FlyComputerPair {
   user: FlySpriteComputer;
 }
 
+export function flySpriteNameForTarget(target: ComputerTarget): string {
+  return flySpriteNameForBot(
+    JSON.stringify(["bot", target.userId, target.botId]),
+  );
+}
+
+export function flySpriteNameForUserStorage(userId: string): string {
+  return flySpriteNameForBot(JSON.stringify(["user", userId]));
+}
+
 /** Provider adapter that keeps Fly-specific lifecycle behind Computer core. */
 export class FlySpriteComputerProvider implements ComputerProvider {
   readonly id = "fly-sprite";
@@ -399,14 +427,14 @@ export class FlySpriteComputerProvider implements ComputerProvider {
         if (!user) {
           user = new FlySpriteComputer({
             respectHumanControl: false,
-            spriteName: flySpriteNameForBot(`user:${target.userId}`),
+            spriteName: flySpriteNameForUserStorage(target.userId),
           });
           this.userComputers.set(target.userId, user);
         }
         pair = {
           bot: new FlySpriteComputer({
             respectHumanControl: true,
-            spriteName: flySpriteNameForBot(`${target.userId}:${target.botId}`),
+            spriteName: flySpriteNameForTarget(target),
           }),
           user,
         };
@@ -424,7 +452,7 @@ export class FlySpriteComputerProvider implements ComputerProvider {
     return Promise.resolve(
       handle(
         pair.bot.bot(target.botId),
-        pair.user.bot(`user:${target.userId}`),
+        pair.user.bot(JSON.stringify(["user", target.userId])),
         assignment,
       ),
     );

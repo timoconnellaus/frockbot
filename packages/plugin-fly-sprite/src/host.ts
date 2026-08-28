@@ -1,12 +1,20 @@
 import type { Entry } from "@cordisjs/plugin-webui";
+import type { ComputerState } from "@frockbot/plugin-computer/shared";
 import type { Context, Plugin } from "cordis";
 import {
   type ComputerBotIdentity,
   type FlySpriteAgentComputer,
   FlySpriteComputer,
-  flySpriteNameForBot,
 } from "./computer.ts";
-import type { ComputerState } from "../../plugin-computer/src/shared.ts";
+import { flySpriteNameForTarget } from "./provider.ts";
+
+export function configuredFlyBotId(
+  environment: { FROCKBOT_BOT_ID?: string } = process.env as {
+    FROCKBOT_BOT_ID?: string;
+  },
+): string {
+  return environment.FROCKBOT_BOT_ID?.trim() || "barebones";
+}
 
 class FlySpriteHostController {
   private readonly computer: FlySpriteAgentComputer;
@@ -167,10 +175,7 @@ class FlySpriteHostController {
 export function createFlySpriteHostPlugin(
   computer: FlySpriteComputer,
   identity: ComputerBotIdentity = {
-    id:
-      process.env.FROCKBOT_BOT_ID?.trim() ||
-      process.env.FROCKBOT_AGENT_ID?.trim() ||
-      "barebones",
+    id: configuredFlyBotId(),
     name: process.env.FROCKBOT_AGENT_NAME?.trim() || "Barebones",
   },
 ): Plugin.Function {
@@ -183,10 +188,7 @@ export function createFlySpriteHostPlugin(
 }
 
 const defaultUserId = process.env.FROCKBOT_USER_ID?.trim() || "local-user";
-const defaultBotId =
-  process.env.FROCKBOT_BOT_ID?.trim() ||
-  process.env.FROCKBOT_AGENT_ID?.trim() ||
-  "barebones";
+const defaultBotId = configuredFlyBotId();
 
 const selectedProvider =
   process.env.FROCKBOT_COMPUTER_PROVIDER?.trim() || "fly-sprite";
@@ -196,7 +198,10 @@ export const flySpriteHostPlugin: Plugin.Function =
     ? createFlySpriteHostPlugin(
         new FlySpriteComputer({
           respectHumanControl: true,
-          spriteName: flySpriteNameForBot(`${defaultUserId}:${defaultBotId}`),
+          spriteName: flySpriteNameForTarget({
+            userId: defaultUserId,
+            botId: defaultBotId,
+          }),
         }),
         {
           id: defaultBotId,
