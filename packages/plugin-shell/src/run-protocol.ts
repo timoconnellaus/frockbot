@@ -1,20 +1,22 @@
 import type { SessionEvent } from "@frockbot/agent-core";
-import type {
-  ClientRun,
-  ClientTurnEvent,
-} from "@frockbot/client-core";
+import type { ClientRun, ClientTurnEvent } from "@frockbot/client-core";
 import type { StoredRun } from "./backend-contracts.js";
 
 const MAX_RUN_ID_LENGTH = 128;
 const MAX_TIMESTAMP_LENGTH = 64;
-const MAX_INPUT_LENGTH = 32_000;
-const MAX_OUTCOME_LENGTH = 256_000;
-const MAX_FAILURE_LENGTH = 8_000;
+const MAX_INPUT_BYTES = 32_000;
+const MAX_OUTCOME_BYTES = 64_000;
+const MAX_FAILURE_BYTES = 8_000;
 const MAX_VISIBLE_EVENTS = 512;
 const MAX_EVENT_ID_LENGTH = 256;
-const MAX_EVENT_NAME_LENGTH = 256;
-const MAX_EVENT_CONTENT_LENGTH = 32_000;
+const MAX_EVENT_NAME_BYTES = 256;
+const MAX_EVENT_CONTENT_BYTES = 32_000;
+const MAX_VISIBLE_EVENT_BYTES = 128_000;
+const MAX_CURSOR_LENGTH = 320;
 const RUN_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
+export const CLIENT_RUN_PAGE_LIMIT = 32;
+export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
 export type ClientRunStatusV1 =
   | "running"
@@ -40,8 +42,7 @@ export type ClientRunEventV1 =
     };
 
 export type ClientRunOutcomeV1 =
-  | { type: "completed"; text: string }
-  | { type: "failed"; message: string };
+  { type: "completed"; text: string } | { type: "failed"; message: string };
 
 export interface ClientRunRecoveryV1 {
   action: "resume";
@@ -59,16 +60,44 @@ export interface ClientRunV1 {
   recovery?: ClientRunRecoveryV1;
 }
 
+export interface ClientRunPageV1 {
+  truncated: boolean;
+  nextCursor?: string;
+}
+
 export interface ClientRunListV1 {
   schemaVersion: 1;
   runs: ClientRunV1[];
+  page: ClientRunPageV1;
+}
+
+export interface ClientRunListQueryV1 {
+  schemaVersion: 1;
+  before?: string;
 }
 
 function truncate(value: string, maximum: number): string {
   return value.length <= maximum ? value : value.slice(0, maximum);
 }
 
-function eventId(value: string, label: string): string {
+function wireBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function truncateWireString(value: string, maximumBytes: number): string {
+  if (wireBytes(value) <= maximumBytes) return value;
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (wireBytes(value.slice(0, middle)) <= maximumBytes) low = middle;
+    else high = middle - 1;
+  }
+  const bounded = value.slice(0, low);
+  return /[\uD800-\uDBFF]$/.test(bounded) ? bounded.slice(0, -1) : bounded;
+}
+
+function publicEventId(value: string, label: string): string {
   if (value.length === 0 || value.length > MAX_EVENT_ID_LENGTH) {
     throw new Error(`${label} must be a bounded non-empty string`);
   }
@@ -83,53 +112,61 @@ interface ToolInteractionV1 {
   result?: ClientToolResultV1;
 }
 
+function interactionContext(turn: number, step: number): string {
+  return `${turn}:${step}`;
+}
+
 function toolInteractions(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
 ): ToolInteractionV1[] {
-  const interactions = new Map<string, ToolInteractionV1>();
+  const interactions: ToolInteractionV1[] = [];
+  const pending = new Map<string, Map<string, ToolInteractionV1[]>>();
   for (const event of events) {
     if (event.type === "tool/call") {
-      const id = eventId(event.call.id, "tool call id");
-      if (interactions.has(id)) {
-        throw new Error(`tool interaction "${id}" has a duplicate call`);
-      }
-      interactions.set(id, {
+      const alias = `tool-${interactions.length + 1}`;
+      const interaction: ToolInteractionV1 = {
         call: {
           type: "tool/call",
           call: {
-            id,
-            name: truncate(event.call.name, MAX_EVENT_NAME_LENGTH),
+            id: alias,
+            name: truncateWireString(event.call.name, MAX_EVENT_NAME_BYTES),
           },
         },
-      });
+      };
+      interactions.push(interaction);
+      const context = interactionContext(event.turn, event.step);
+      const callsById = pending.get(context) ?? new Map();
+      const occurrences = callsById.get(event.call.id) ?? [];
+      occurrences.push(interaction);
+      callsById.set(event.call.id, occurrences);
+      pending.set(context, callsById);
     } else if (event.type === "tool/result") {
-      const id = eventId(event.callId, "tool result call id");
-      const interaction = interactions.get(id);
+      const context = interactionContext(event.turn, event.step);
+      const occurrences = pending.get(context)?.get(event.callId);
+      const interaction = occurrences?.find((candidate) => !candidate.result);
       if (!interaction) {
-        throw new Error(`tool result "${id}" has no matching call`);
-      }
-      if (interaction.result) {
-        throw new Error(`tool interaction "${id}" has duplicate results`);
+        throw new Error(
+          `tool result has no matching call in turn ${event.turn} step ${event.step}`,
+        );
       }
       interaction.result = {
         type: "tool/result",
-        callId: id,
-        content: truncate(event.content, MAX_EVENT_CONTENT_LENGTH),
+        callId: interaction.call.call.id,
+        content: truncateWireString(event.content, MAX_EVENT_CONTENT_BYTES),
         isError: event.isError,
       };
     }
   }
-  const projected = [...interactions.values()];
   if (status === "completed" || status === "failed") {
-    const orphaned = projected.find((interaction) => !interaction.result);
+    const orphaned = interactions.find((interaction) => !interaction.result);
     if (orphaned) {
       throw new Error(
         `terminal run has no result for tool call "${orphaned.call.call.id}"`,
       );
     }
   }
-  return projected;
+  return interactions;
 }
 
 function visibleEvents(
@@ -138,40 +175,62 @@ function visibleEvents(
 ): ClientRunEventV1[] {
   const interactions = toolInteractions(events, status);
   const completed = interactions.filter(
-    (interaction): interaction is ToolInteractionV1 & {
+    (
+      interaction,
+    ): interaction is ToolInteractionV1 & {
       result: ClientToolResultV1;
     } => Boolean(interaction.result),
   );
   const pending = interactions.filter((interaction) => !interaction.result);
   const projectedSize = completed.length * 2 + pending.length;
-  if (projectedSize <= MAX_VISIBLE_EVENTS) {
-    return [
-      ...completed.flatMap((interaction) => [
-        interaction.call,
-        interaction.result,
-      ]),
-      ...pending.map((interaction) => interaction.call),
-    ];
-  }
-  if (pending.length >= MAX_VISIBLE_EVENTS) {
-    throw new Error("run has too many pending tool interactions to project");
-  }
-  const retainedCompletedCount = Math.floor(
-    (MAX_VISIBLE_EVENTS - 1 - pending.length) / 2,
-  );
-  const omittedInteractions = completed.length - retainedCompletedCount;
-  const retainedCompleted =
-    retainedCompletedCount === 0
-      ? []
-      : completed.slice(-retainedCompletedCount);
-  return [
-    { type: "run/events-truncated", omittedInteractions },
-    ...retainedCompleted.flatMap((interaction) => [
+  const completeProjection = [
+    ...completed.flatMap((interaction) => [
       interaction.call,
       interaction.result,
     ]),
     ...pending.map((interaction) => interaction.call),
   ];
+  if (
+    projectedSize <= MAX_VISIBLE_EVENTS &&
+    wireBytes(completeProjection) <= MAX_VISIBLE_EVENT_BYTES
+  ) {
+    return completeProjection;
+  }
+  if (pending.length >= MAX_VISIBLE_EVENTS) {
+    throw new Error("run has too many pending tool interactions to project");
+  }
+  let retainedCompletedCount = Math.min(
+    completed.length,
+    Math.floor((MAX_VISIBLE_EVENTS - 1 - pending.length) / 2),
+  );
+  let omittedInteractions = completed.length - retainedCompletedCount;
+  const buildProjection = (): ClientRunEventV1[] => {
+    const retainedCompleted =
+      retainedCompletedCount === 0
+        ? []
+        : completed.slice(-retainedCompletedCount);
+    return [
+      { type: "run/events-truncated", omittedInteractions },
+      ...retainedCompleted.flatMap((interaction) => [
+        interaction.call,
+        interaction.result,
+      ]),
+      ...pending.map((interaction) => interaction.call),
+    ];
+  };
+  let projection = buildProjection();
+  while (
+    retainedCompletedCount > 0 &&
+    wireBytes(projection) > MAX_VISIBLE_EVENT_BYTES
+  ) {
+    retainedCompletedCount -= 1;
+    omittedInteractions += 1;
+    projection = buildProjection();
+  }
+  if (wireBytes(projection) > MAX_VISIBLE_EVENT_BYTES) {
+    throw new Error("pending tool interactions exceed the wire byte limit");
+  }
+  return projection;
 }
 
 function runStatus(run: StoredRun): ClientRunStatusV1 {
@@ -184,14 +243,14 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     status === "completed"
       ? ({
           type: "completed",
-          text: truncate(run.responseText ?? "", MAX_OUTCOME_LENGTH),
+          text: truncateWireString(run.responseText ?? "", MAX_OUTCOME_BYTES),
         } satisfies ClientRunOutcomeV1)
       : status === "failed"
         ? ({
             type: "failed",
-            message: truncate(
+            message: truncateWireString(
               run.failure ?? "Agent request failed.",
-              MAX_FAILURE_LENGTH,
+              MAX_FAILURE_BYTES,
             ),
           } satisfies ClientRunOutcomeV1)
         : undefined;
@@ -199,10 +258,10 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     status === "reconciliation-required"
       ? ({
           action: "resume",
-          message: truncate(
+          message: truncateWireString(
             run.failure ??
               "Provider reconciliation is required before this Turn can continue.",
-            MAX_FAILURE_LENGTH,
+            MAX_FAILURE_BYTES,
           ),
         } satisfies ClientRunRecoveryV1)
       : undefined;
@@ -210,7 +269,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     schemaVersion: 1,
     runId: truncate(run.runId, MAX_RUN_ID_LENGTH),
     admittedAt: truncate(run.acceptedAt, MAX_TIMESTAMP_LENGTH),
-    input: truncate(run.input, MAX_INPUT_LENGTH),
+    input: truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
     events: visibleEvents(run.events, status),
     ...(outcome ? { outcome } : {}),
@@ -221,7 +280,20 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
 export function projectClientRunListV1(
   runs: readonly StoredRun[],
 ): ClientRunListV1 {
-  return { schemaVersion: 1, runs: runs.map(projectClientRunV1) };
+  return createClientRunListV1(runs.map(projectClientRunV1), {
+    truncated: false,
+  });
+}
+
+export function createClientRunListV1(
+  runs: ClientRunV1[],
+  page: ClientRunPageV1,
+): ClientRunListV1 {
+  return { schemaVersion: 1, runs, page };
+}
+
+export function clientRunListWireBytes(value: ClientRunListV1): number {
+  return wireBytes(value);
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -250,6 +322,19 @@ function string(
   const field = value[key];
   if (typeof field !== "string" || field.length > maximum) {
     throw new Error(`${label}.${key} must be a bounded string`);
+  }
+  return field;
+}
+
+function wireString(
+  value: Record<string, unknown>,
+  key: string,
+  maximumBytes: number,
+  label: string,
+): string {
+  const field = value[key];
+  if (typeof field !== "string" || wireBytes(field) > maximumBytes) {
+    throw new Error(`${label}.${key} must be a wire-bounded string`);
   }
   return field;
 }
@@ -291,33 +376,29 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
     return {
       type: "tool/call",
       call: {
-        id: eventId(
+        id: publicEventId(
           string(call, "id", MAX_EVENT_ID_LENGTH, "run event.call"),
           "run event.call.id",
         ),
-        name: string(call, "name", MAX_EVENT_NAME_LENGTH, "run event.call"),
+        name: wireString(call, "name", MAX_EVENT_NAME_BYTES, "run event.call"),
       },
     };
   }
   if (event.type === "tool/result") {
-    exactKeys(
-      event,
-      ["type", "callId", "content", "isError"],
-      "run event",
-    );
+    exactKeys(event, ["type", "callId", "content", "isError"], "run event");
     if (typeof event.isError !== "boolean") {
       throw new Error("run event.isError must be a boolean");
     }
     return {
       type: "tool/result",
-      callId: eventId(
+      callId: publicEventId(
         string(event, "callId", MAX_EVENT_ID_LENGTH, "run event"),
         "run event.callId",
       ),
-      content: string(
+      content: wireString(
         event,
         "content",
-        MAX_EVENT_CONTENT_LENGTH,
+        MAX_EVENT_CONTENT_BYTES,
         "run event",
       ),
       isError: event.isError,
@@ -334,9 +415,7 @@ function decodeEvents(
   let index = 0;
   if (events[0]?.type === "run/events-truncated") index = 1;
   if (
-    events
-      .slice(index)
-      .some((event) => event.type === "run/events-truncated")
+    events.slice(index).some((event) => event.type === "run/events-truncated")
   ) {
     throw new Error("run truncation marker must be the first event");
   }
@@ -382,19 +461,14 @@ function decodeOutcome(
     exactKeys(outcome, ["type", "text"], "run.outcome");
     return {
       type: "completed",
-      text: string(outcome, "text", MAX_OUTCOME_LENGTH, "run.outcome"),
+      text: wireString(outcome, "text", MAX_OUTCOME_BYTES, "run.outcome"),
     };
   }
   if (outcome.type === "failed" && runStatus === "failed") {
     exactKeys(outcome, ["type", "message"], "run.outcome");
     return {
       type: "failed",
-      message: string(
-        outcome,
-        "message",
-        MAX_FAILURE_LENGTH,
-        "run.outcome",
-      ),
+      message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
     };
   }
   throw new Error("run.outcome does not match run.status");
@@ -420,12 +494,7 @@ function decodeRecovery(
   }
   return {
     action: "resume",
-    message: string(
-      recovery,
-      "message",
-      MAX_FAILURE_LENGTH,
-      "run.recovery",
-    ),
+    message: wireString(recovery, "message", MAX_FAILURE_BYTES, "run.recovery"),
   };
 }
 
@@ -448,12 +517,7 @@ function decodeRun(value: unknown): ClientRun {
   if (run.schemaVersion !== 1) throw new Error("run.schemaVersion is invalid");
   const runId = string(run, "runId", MAX_RUN_ID_LENGTH, "run");
   if (!RUN_ID_PATTERN.test(runId)) throw new Error("run.runId is invalid");
-  const admittedAt = string(
-    run,
-    "admittedAt",
-    MAX_TIMESTAMP_LENGTH,
-    "run",
-  );
+  const admittedAt = string(run, "admittedAt", MAX_TIMESTAMP_LENGTH, "run");
   if (!Number.isFinite(Date.parse(admittedAt))) {
     throw new Error("run.admittedAt is invalid");
   }
@@ -466,7 +530,7 @@ function decodeRun(value: unknown): ClientRun {
   return {
     runId,
     admittedAt,
-    input: string(run, "input", MAX_INPUT_LENGTH, "run"),
+    input: wireString(run, "input", MAX_INPUT_BYTES, "run"),
     status: runStatus,
     events: decodeEvents(run.events, runStatus),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
@@ -475,14 +539,71 @@ function decodeRun(value: unknown): ClientRun {
   };
 }
 
-export function decodeClientRunListV1(input: unknown): ClientRun[] {
+function decodePage(value: unknown): ClientRunPageV1 {
+  const page = record(value, "run list.page");
+  exactKeys(page, ["truncated", "nextCursor"], "run list.page");
+  if (typeof page.truncated !== "boolean") {
+    throw new Error("run list.page.truncated must be a boolean");
+  }
+  const nextCursor =
+    page.nextCursor === undefined
+      ? undefined
+      : string(page, "nextCursor", MAX_CURSOR_LENGTH, "run list.page");
+  if (page.truncated && !nextCursor) {
+    throw new Error("truncated run list requires a next cursor");
+  }
+  if (!page.truncated && nextCursor !== undefined) {
+    throw new Error("complete run list must not include a next cursor");
+  }
+  return {
+    truncated: page.truncated,
+    ...(nextCursor ? { nextCursor } : {}),
+  };
+}
+
+export function decodeClientRunListQueryV1(
+  input: unknown,
+): ClientRunListQueryV1 {
+  const query = record(input, "run list query");
+  exactKeys(query, ["schemaVersion", "before"], "run list query");
+  if (query.schemaVersion !== 1) {
+    throw new Error("run list query.schemaVersion is invalid");
+  }
+  const before =
+    query.before === undefined
+      ? undefined
+      : string(query, "before", MAX_CURSOR_LENGTH, "run list query");
+  if (before !== undefined && before.length === 0) {
+    throw new Error("run list query.before must not be empty");
+  }
+  return { schemaVersion: 1, ...(before ? { before } : {}) };
+}
+
+export function decodeClientRunPageV1(input: unknown): {
+  runs: ClientRun[];
+  page: ClientRunPageV1;
+} {
   const list = record(input, "run list");
-  exactKeys(list, ["schemaVersion", "runs"], "run list");
+  exactKeys(list, ["schemaVersion", "runs", "page"], "run list");
   if (list.schemaVersion !== 1) {
     throw new Error("run list.schemaVersion is invalid");
   }
   if (!Array.isArray(list.runs)) {
     throw new Error("run list.runs must be an array");
   }
-  return list.runs.map(decodeRun);
+  if (list.runs.length > CLIENT_RUN_PAGE_LIMIT) {
+    throw new Error("run list.runs exceeds the page limit");
+  }
+  if (wireBytes(input) > CLIENT_RUN_LIST_MAX_BYTES) {
+    throw new Error("run list exceeds the wire byte limit");
+  }
+  const decoded = {
+    runs: list.runs.map(decodeRun),
+    page: decodePage(list.page),
+  };
+  return decoded;
+}
+
+export function decodeClientRunListV1(input: unknown): ClientRun[] {
+  return decodeClientRunPageV1(input).runs;
 }

@@ -9,7 +9,10 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
-import type { ClientRunListV1 } from "@frockbot/plugin-shell/run-protocol";
+import type {
+  ClientRunListQueryV1,
+  ClientRunListV1,
+} from "@frockbot/plugin-shell/run-protocol";
 
 export interface BackendRouteContribution {
   packageId: string;
@@ -99,7 +102,10 @@ export interface BotTurnResult {
 
 export interface BotStateBinding {
   run(botId: string, command: BotTurnCommand): Promise<BotTurnResult>;
-  listRuns(botId: string): Promise<ClientRunListV1>;
+  listRuns(
+    botId: string,
+    query: ClientRunListQueryV1,
+  ): Promise<ClientRunListV1>;
   listNotifications(botId: string): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
   reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;

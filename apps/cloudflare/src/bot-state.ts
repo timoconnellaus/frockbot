@@ -81,8 +81,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     return (await this.contribution()).acknowledgeNotification(...args);
   }
 
-  async listRuns() {
-    return (await this.contribution()).listRuns();
+  async listRuns(input: unknown) {
+    return (await this.contribution()).listRuns(input);
   }
 
   async alarm(): Promise<void> {

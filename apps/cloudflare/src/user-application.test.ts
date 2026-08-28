@@ -54,7 +54,12 @@ describe("user application Bot seam", () => {
         calls.push({ botId, text: command.text });
         return Promise.resolve(result);
       },
-      listRuns: () => Promise.resolve({ schemaVersion: 1, runs: [] }),
+      listRuns: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          runs: [],
+          page: { truncated: false },
+        }),
       listNotifications: () => Promise.resolve([]),
       acknowledgeNotification: () => Promise.resolve(),
       reconcileRun: () => Promise.resolve(result),
@@ -76,5 +81,29 @@ describe("user application Bot seam", () => {
     expect(response.status).toBe(200);
     expect((await response.json()) as BotTurnResult).toEqual(result);
     expect(calls).toEqual([{ botId: "primary", text: "hello" }]);
+  });
+
+  test("strictly decodes run-list pagination queries", async () => {
+    const botState = {
+      listRuns: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          runs: [],
+          page: { truncated: false },
+        }),
+    } as unknown as BotStateBinding;
+    const env: UserApplicationEnv = {
+      BOT_STATE: botState,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const fetchUserApplication = createUserApplication();
+
+    for (const suffix of ["?before=", "?before=a&before=b", "?cursor=a"]) {
+      const response = await fetchUserApplication(
+        new Request(`https://frockbot.test/api/bots/primary/turns${suffix}`),
+        env,
+      );
+      expect(response.status).toBe(400);
+    }
   });
 });

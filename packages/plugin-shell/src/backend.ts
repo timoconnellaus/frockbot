@@ -39,8 +39,14 @@ import {
   planBotRunRecovery,
 } from "./backend-recovery.js";
 import {
-  projectClientRunListV1,
+  CLIENT_RUN_LIST_MAX_BYTES,
+  CLIENT_RUN_PAGE_LIMIT,
+  clientRunListWireBytes,
+  createClientRunListV1,
+  decodeClientRunListQueryV1,
+  projectClientRunV1,
   type ClientRunListV1,
+  type ClientRunV1,
 } from "./run-protocol.js";
 import type {
   BotNotificationIntent,
@@ -51,6 +57,7 @@ import type {
 import { botTurnCommandFingerprintV1 } from "./backend-contracts.js";
 
 const RUN_PREFIX = "run:";
+const RUN_INDEX_PREFIX = "run-index:";
 const ACTIVE_RUN_KEY = "active-run";
 const LATEST_EVENTS_KEY = "latest-events";
 const IDENTITY_KEY = "identity";
@@ -64,6 +71,10 @@ const LEGACY_ASSIGNMENT_GENERATION = "legacy:any";
 const NOTIFICATION_PREFIX = "notification:";
 const RECOVERY_ALARM_DELAY_MS = 60_000;
 const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
+
+function runIndexKey(acceptedAt: string, runId: string): string {
+  return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;
+}
 
 interface BotIdentity {
   userId: string;
@@ -1139,18 +1150,115 @@ export class ShellBotBackendContribution {
     await this.recoverActiveRun();
   }
 
-  async listRuns(): Promise<ClientRunListV1> {
+  async listRuns(
+    input: unknown = { schemaVersion: 1 },
+  ): Promise<ClientRunListV1> {
+    const query = decodeClientRunListQueryV1(input);
     await this.recoverActiveRun();
-    const entries = await this.ctx.storage.list<StoredRun>({
-      prefix: RUN_PREFIX,
+    const activeRunId = query.before
+      ? undefined
+      : await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
+    const indexEntries = await this.ctx.storage.list<string>({
+      prefix: RUN_INDEX_PREFIX,
+      reverse: true,
+      limit: CLIENT_RUN_PAGE_LIMIT + 1,
+      ...(query.before?.startsWith(RUN_INDEX_PREFIX)
+        ? { end: query.before }
+        : {}),
     });
-    return projectClientRunListV1(
-      [...entries.values()].sort(
-        (left, right) =>
-          left.acceptedAt.localeCompare(right.acceptedAt) ||
-          left.runId.localeCompare(right.runId),
-      ),
+    let candidates: Array<{
+      cursor: string;
+      runId: string;
+      run?: StoredRun;
+    }> = [...indexEntries].map(([cursor, runId]) => ({ cursor, runId }));
+    if (
+      candidates.length === 0 &&
+      (!query.before || query.before.startsWith(RUN_PREFIX))
+    ) {
+      const legacyEntries = await this.ctx.storage.list<StoredRun>({
+        prefix: RUN_PREFIX,
+        reverse: true,
+        limit: CLIENT_RUN_PAGE_LIMIT + 1,
+        ...(query.before ? { end: query.before } : {}),
+      });
+      candidates = [...legacyEntries].map(([cursor, run]) => ({
+        cursor,
+        runId: run.runId,
+        run,
+      }));
+    }
+
+    const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
+    if (activeRunId) {
+      const active = await this.ctx.storage.get<StoredRun>(
+        `${RUN_PREFIX}${activeRunId}`,
+      );
+      if (active)
+        selected.set(active.runId, { run: projectClientRunV1(active) });
+    }
+    const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
+    let stoppedEarly = false;
+    for (const candidate of available) {
+      if (selected.has(candidate.runId)) {
+        const current = selected.get(candidate.runId)!;
+        selected.set(candidate.runId, { ...current, cursor: candidate.cursor });
+        continue;
+      }
+      const stored =
+        candidate.run ??
+        (await this.ctx.storage.get<StoredRun>(
+          `${RUN_PREFIX}${candidate.runId}`,
+        ));
+      if (!stored) continue;
+      const projected = projectClientRunV1(stored);
+      const tentative = [
+        ...selected.values(),
+        { cursor: candidate.cursor, run: projected },
+      ];
+      const ordered = tentative
+        .map((entry) => entry.run)
+        .sort(
+          (left, right) =>
+            left.admittedAt.localeCompare(right.admittedAt) ||
+            left.runId.localeCompare(right.runId),
+        );
+      const tentativePage = createClientRunListV1(ordered, {
+        truncated: true,
+        nextCursor: candidate.cursor,
+      });
+      const isNewestTerminal =
+        ![...selected.values()].some(
+          (entry) =>
+            entry.run.status === "completed" || entry.run.status === "failed",
+        ) &&
+        (projected.status === "completed" || projected.status === "failed");
+      if (
+        selected.size >= CLIENT_RUN_PAGE_LIMIT ||
+        (!isNewestTerminal &&
+          clientRunListWireBytes(tentativePage) > CLIENT_RUN_LIST_MAX_BYTES)
+      ) {
+        stoppedEarly = true;
+        break;
+      }
+      selected.set(stored.runId, { cursor: candidate.cursor, run: projected });
+    }
+    const orderedEntries = [...selected.values()].sort(
+      (left, right) =>
+        left.run.admittedAt.localeCompare(right.run.admittedAt) ||
+        left.run.runId.localeCompare(right.run.runId),
     );
+    const oldestCursor = orderedEntries.find((entry) => entry.cursor)?.cursor;
+    const truncated = stoppedEarly || candidates.length > CLIENT_RUN_PAGE_LIMIT;
+    const page = createClientRunListV1(
+      orderedEntries.map((entry) => entry.run),
+      truncated && oldestCursor
+        ? { truncated: true, nextCursor: oldestCursor }
+        : { truncated: false },
+    );
+    if (clientRunListWireBytes(page) > CLIENT_RUN_LIST_MAX_BYTES) {
+      throw new Error("required run projections exceed the wire byte limit");
+    }
+    return page;
   }
 
   private initialBotSettings(
@@ -1369,6 +1477,7 @@ export class ShellBotBackendContribution {
           configurationSnapshot: structuredClone(admittedSettings),
           previousEventCount: latestEvents.length,
         } satisfies StoredRun,
+        [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
         [ACTIVE_RUN_KEY]: command.runId,
         [IDENTITY_KEY]: identity ?? {
           userId: command.userId,

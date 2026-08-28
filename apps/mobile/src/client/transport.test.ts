@@ -96,6 +96,7 @@ describe("decodeRunList", () => {
             outcome: { type: "completed", text: "done" },
           },
         ],
+        page: { truncated: false },
       }),
     ).toEqual([
       {
@@ -114,7 +115,11 @@ describe("decodeRunList", () => {
       "run list.schemaVersion is invalid",
     );
     expect(() =>
-      decodeRunList({ schemaVersion: 1, runs: [{ runId: "run-1" }] }),
+      decodeRunList({
+        schemaVersion: 1,
+        runs: [{ runId: "run-1" }],
+        page: { truncated: false },
+      }),
     ).toThrow("run.schemaVersion is invalid");
   });
 });
@@ -215,6 +220,7 @@ describe("gateway requests", () => {
                 outcome: { type: "completed", text: "done" },
               },
             ],
+            page: { truncated: false },
           }),
         ),
       "default",

@@ -14,6 +14,7 @@ import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import {
   decodeClientRunListV1,
   projectClientRunListV1,
+  type ClientRunListQueryV1,
   type ClientRunListV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import type {
@@ -94,11 +95,12 @@ class MemoryBotState implements BotStateBinding {
     }
   }
 
-  listRuns(botId: string): Promise<ClientRunListV1> {
+  listRuns(
+    botId: string,
+    _query: ClientRunListQueryV1,
+  ): Promise<ClientRunListV1> {
     return Promise.resolve(
-      projectClientRunListV1(
-        structuredClone(this.runs.get(botId) ?? []),
-      ),
+      projectClientRunListV1(structuredClone(this.runs.get(botId) ?? [])),
     );
   }
 
@@ -715,9 +717,10 @@ describe("Cloudflare user application gateway", () => {
     const second = await turn();
 
     expect(await first.json()).toEqual(await second.json());
-    expect((await states.get("alice")?.listRuns("primary"))?.runs).toHaveLength(
-      1,
-    );
+    expect(
+      (await states.get("alice")?.listRuns("primary", { schemaVersion: 1 }))
+        ?.runs,
+    ).toHaveLength(1);
   });
 
   test("shares the user deployment while isolating bot state", async () => {
@@ -757,14 +760,17 @@ describe("Cloudflare user application gateway", () => {
       }),
     );
 
-    const response = await gateway(
-      request("/api/bots/primary/turns", "alice"),
-    );
+    const response = await gateway(request("/api/bots/primary/turns", "alice"));
     const value = (await response.json()) as Record<string, unknown>;
     const runs = value.runs as Array<Record<string, unknown>>;
 
-    expect(Object.keys(value).sort()).toEqual(["runs", "schemaVersion"]);
+    expect(Object.keys(value).sort()).toEqual([
+      "page",
+      "runs",
+      "schemaVersion",
+    ]);
     expect(value.schemaVersion).toBe(1);
+    expect(value.page).toEqual({ truncated: false });
     expect(Object.keys(runs[0] ?? {}).sort()).toEqual([
       "admittedAt",
       "events",
@@ -819,10 +825,7 @@ describe("Cloudflare user application gateway", () => {
     );
     const runs = decodeClientRunListV1(await history.json());
     expect(runs).toHaveLength(2);
-    expect(runs.map((run) => run.input)).toEqual([
-      "first turn",
-      "second turn",
-    ]);
+    expect(runs.map((run) => run.input)).toEqual(["first turn", "second turn"]);
     expect(runs.every((run) => run.status === "completed")).toBe(true);
   });
 

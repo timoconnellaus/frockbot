@@ -3,7 +3,9 @@ import type { SessionEvent } from "@frockbot/agent-core";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
 import {
+  decodeClientRunPageV1,
   decodeClientRunListV1,
+  decodeClientRunListQueryV1,
   projectClientRunListV1,
 } from "./run-protocol.js";
 
@@ -130,11 +132,11 @@ describe("client run protocol v1", () => {
           events: [
             {
               type: "tool/call",
-              call: { id: "call-1", name: "calendar_lookup" },
+              call: { id: "tool-1", name: "calendar_lookup" },
             },
             {
               type: "tool/result",
-              callId: "call-1",
+              callId: "tool-1",
               content: "visible result",
               isError: false,
             },
@@ -145,6 +147,7 @@ describe("client run protocol v1", () => {
           },
         },
       ],
+      page: { truncated: false },
     });
     expect(decodeClientRunListV1(structuredClone(projected))).toEqual([
       {
@@ -196,6 +199,7 @@ describe("client run protocol v1", () => {
       decodeClientRunListV1({
         schemaVersion: 1,
         runs: [{ ...completed, commandFingerprint: "secret" }],
+        page: { truncated: false },
       }),
     ).toThrow("run.commandFingerprint is not allowed");
     expect(() =>
@@ -207,6 +211,7 @@ describe("client run protocol v1", () => {
             status: "failed",
           },
         ],
+        page: { truncated: false },
       }),
     ).toThrow("run.outcome does not match run.status");
     expect(() =>
@@ -218,8 +223,19 @@ describe("client run protocol v1", () => {
             events: [{ type: "model/request" }],
           },
         ],
+        page: { truncated: false },
       }),
     ).toThrow("run event.type is invalid");
+    expect(() =>
+      decodeClientRunPageV1({
+        schemaVersion: 1,
+        runs: [],
+        page: { truncated: true },
+      }),
+    ).toThrow("truncated run list requires a next cursor");
+    expect(() =>
+      decodeClientRunListQueryV1({ schemaVersion: 1, before: "" }),
+    ).toThrow("run list query.before must not be empty");
   });
 
   test("bounds projected visible history and messages", () => {
@@ -228,15 +244,17 @@ describe("client run protocol v1", () => {
       commandFingerprint: "fingerprint",
       sessionId: "user:primary",
       acceptedAt: timestamp,
-      input: "i".repeat(40_000),
+      input: "🧪".repeat(40_000),
       events: toolEvents(300),
       status: "failed",
-      failure: "f".repeat(10_000),
+      failure: "💥".repeat(10_000),
     };
 
     const projected = projectClientRunListV1([stored]).runs[0];
 
-    expect(projected?.input).toHaveLength(32_000);
+    expect(
+      new TextEncoder().encode(JSON.stringify(projected?.input)).length,
+    ).toBeLessThanOrEqual(32_000);
     expect(projected?.events).toHaveLength(511);
     expect(projected?.events[0]).toEqual({
       type: "run/events-truncated",
@@ -244,35 +262,35 @@ describe("client run protocol v1", () => {
     });
     expect(projected?.events[1]).toMatchObject({
       type: "tool/call",
-      call: { id: "call-45" },
+      call: { id: "tool-46" },
     });
     expect(projected?.events.at(-1)).toMatchObject({
       type: "tool/result",
-      callId: "call-299",
+      callId: "tool-300",
     });
-    expect(
+    const failure =
       projected?.outcome?.type === "failed"
         ? projected.outcome.message
-        : undefined,
-    ).toHaveLength(8_000);
+        : undefined;
+    expect(
+      new TextEncoder().encode(JSON.stringify(failure)).length,
+    ).toBeLessThanOrEqual(8_000);
   });
 
   test("uses the full boundary without splitting an interaction", () => {
-    const atBoundary = projectClientRunListV1([
-      storedRun(toolEvents(256)),
-    ]).runs[0];
-    const overBoundary = projectClientRunListV1([
-      storedRun(toolEvents(257)),
-    ]).runs[0];
+    const atBoundary = projectClientRunListV1([storedRun(toolEvents(256))])
+      .runs[0];
+    const overBoundary = projectClientRunListV1([storedRun(toolEvents(257))])
+      .runs[0];
 
     expect(atBoundary?.events).toHaveLength(512);
     expect(atBoundary?.events[0]).toMatchObject({
       type: "tool/call",
-      call: { id: "call-0" },
+      call: { id: "tool-1" },
     });
     expect(atBoundary?.events.at(-1)).toMatchObject({
       type: "tool/result",
-      callId: "call-255",
+      callId: "tool-256",
     });
     expect(overBoundary?.events).toHaveLength(511);
     expect(overBoundary?.events[0]).toEqual({
@@ -281,16 +299,19 @@ describe("client run protocol v1", () => {
     });
     expect(overBoundary?.events[1]).toMatchObject({
       type: "tool/call",
-      call: { id: "call-2" },
+      call: { id: "tool-3" },
     });
     expect(overBoundary?.events.at(-1)).toMatchObject({
       type: "tool/result",
-      callId: "call-256",
+      callId: "tool-257",
     });
     expect(overBoundary?.outcome).toEqual({ type: "completed", text: "done" });
     expect(
-      decodeClientRunListV1({ schemaVersion: 1, runs: [overBoundary] })[0]
-        ?.events[0],
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [overBoundary],
+        page: { truncated: false },
+      })[0]?.events[0],
     ).toEqual({
       type: "run/events-truncated",
       omittedInteractions: 2,
@@ -302,29 +323,125 @@ describe("client run protocol v1", () => {
     const result = toolEvents(1)[1]!;
 
     expect(() => projectClientRunListV1([storedRun([result])])).toThrow(
-      'tool result "call-0" has no matching call',
+      "tool result has no matching call in turn 1 step 1",
     );
     expect(() => projectClientRunListV1([storedRun([call])])).toThrow(
-      'terminal run has no result for tool call "call-0"',
+      'terminal run has no result for tool call "tool-1"',
     );
     expect(() =>
       projectClientRunListV1([storedRun([call, call, result])]),
-    ).toThrow('tool interaction "call-0" has a duplicate call');
+    ).toThrow('terminal run has no result for tool call "tool-2"');
   });
 
   test("retains pending calls only for nonterminal runs", () => {
     const call = toolEvents(1)[0]!;
-    const projected = projectClientRunListV1([
-      storedRun([call], "running"),
-    ]).runs[0];
+    const projected = projectClientRunListV1([storedRun([call], "running")])
+      .runs[0];
 
     expect(projected?.events).toEqual([
-      { type: "tool/call", call: { id: "call-0", name: "lookup" } },
+      { type: "tool/call", call: { id: "tool-1", name: "lookup" } },
     ]);
     expect(
-      decodeClientRunListV1({ schemaVersion: 1, runs: [projected] }),
-    ).toMatchObject([
-      { status: "running", events: [{ type: "tool/call" }] },
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      }),
+    ).toMatchObject([{ status: "running", events: [{ type: "tool/call" }] }]);
+  });
+
+  test("aliases repeated and oversized provider call identifiers", () => {
+    const providerId = "provider-call-".repeat(100);
+    const events = [
+      event({
+        type: "tool/call",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        call: { id: providerId, name: "first", input: {} },
+      }),
+      event({
+        type: "tool/call",
+        seq: 1,
+        timestamp,
+        turn: 1,
+        step: 1,
+        call: { id: providerId, name: "second", input: {} },
+      }),
+      event({
+        type: "tool/result",
+        seq: 2,
+        timestamp,
+        turn: 1,
+        step: 1,
+        callId: providerId,
+        name: "first",
+        content: "first-result",
+        isError: false,
+        status: "completed",
+      }),
+      event({
+        type: "tool/result",
+        seq: 3,
+        timestamp,
+        turn: 1,
+        step: 1,
+        callId: providerId,
+        name: "second",
+        content: "second-result",
+        isError: false,
+        status: "completed",
+      }),
+      event({
+        type: "tool/call",
+        seq: 4,
+        timestamp,
+        turn: 1,
+        step: 2,
+        call: { id: providerId, name: "third", input: {} },
+      }),
+      event({
+        type: "tool/result",
+        seq: 5,
+        timestamp,
+        turn: 1,
+        step: 2,
+        callId: providerId,
+        name: "third",
+        content: "third-result",
+        isError: false,
+        status: "completed",
+      }),
+    ] satisfies SessionEvent[];
+
+    const stored = storedRun(events);
+    const projected = projectClientRunListV1([stored]);
+
+    expect(projected.runs[0]?.events).toEqual([
+      { type: "tool/call", call: { id: "tool-1", name: "first" } },
+      {
+        type: "tool/result",
+        callId: "tool-1",
+        content: "first-result",
+        isError: false,
+      },
+      { type: "tool/call", call: { id: "tool-2", name: "second" } },
+      {
+        type: "tool/result",
+        callId: "tool-2",
+        content: "second-result",
+        isError: false,
+      },
+      { type: "tool/call", call: { id: "tool-3", name: "third" } },
+      {
+        type: "tool/result",
+        callId: "tool-3",
+        content: "third-result",
+        isError: false,
+      },
     ]);
+    expect(stored.events[0]).toMatchObject({ call: { id: providerId } });
+    expect(JSON.stringify(projected)).not.toContain(providerId);
   });
 });

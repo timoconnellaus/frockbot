@@ -7,12 +7,25 @@ import {
   type StoredRun,
 } from "./backend-contracts.js";
 import { planBotRunRecovery } from "./backend-recovery.js";
+import {
+  CLIENT_RUN_LIST_MAX_BYTES,
+  CLIENT_RUN_PAGE_LIMIT,
+  clientRunListWireBytes,
+} from "./run-protocol.js";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
+  readonly listRequests: Array<{
+    prefix?: string;
+    end?: string;
+    reverse?: boolean;
+    limit?: number;
+  }> = [];
+  readonly gets: string[] = [];
   alarmAt: number | undefined;
 
   get<T>(key: string): Promise<T | undefined> {
+    this.gets.push(key);
     return Promise.resolve(this.values.get(key) as T | undefined);
   }
 
@@ -30,13 +43,23 @@ class MemoryStorage {
     return Promise.resolve(this.values.delete(key));
   }
 
-  list<T>(options: { prefix?: string }): Promise<Map<string, T>> {
+  list<T>(options: {
+    prefix?: string;
+    end?: string;
+    reverse?: boolean;
+    limit?: number;
+  }): Promise<Map<string, T>> {
+    this.listRequests.push(options);
+    const entries = [...this.values.entries()]
+      .filter(
+        ([key]) =>
+          key.startsWith(options.prefix ?? "") &&
+          (options.end === undefined || key < options.end),
+      )
+      .sort(([left], [right]) => left.localeCompare(right));
+    if (options.reverse) entries.reverse();
     return Promise.resolve(
-      new Map(
-        [...this.values.entries()].filter(([key]) =>
-          key.startsWith(options.prefix ?? ""),
-        ) as Array<[string, T]>,
-      ),
+      new Map(entries.slice(0, options.limit) as Array<[string, T]>),
     );
   }
 
@@ -128,6 +151,7 @@ describe("Bot recovery", () => {
           outcome: { type: "completed", text: "Durable reply" },
         }),
       ],
+      page: { truncated: false },
     });
     const notifications = await recovered.listNotifications();
     expect(notifications).toEqual([
@@ -219,6 +243,7 @@ describe("Bot recovery", () => {
           recovery: expect.objectContaining({ action: "resume" }),
         }),
       ],
+      page: { truncated: false },
     });
     expect(storage.values.get("active-run")).toBe("run-lost-marker");
     expect(typeof storage.alarmAt).toBe("number");
@@ -512,5 +537,79 @@ describe("Bot recovery", () => {
     );
     expect([...storage.values.entries()]).toEqual(before);
     expect(storage.alarmAt).toBe(alarmBefore);
+  });
+
+  test("pages large run history with bounded indexed reads and wire bytes", async () => {
+    const storage = new MemoryStorage();
+    const baseTime = Date.parse("2026-08-28T00:00:00.000Z");
+    for (let index = 0; index < 100; index += 1) {
+      const runId = `run-${index.toString().padStart(3, "0")}`;
+      const acceptedAt = new Date(baseTime + index * 1_000).toISOString();
+      const active = index === 99;
+      const run = {
+        runId,
+        commandFingerprint: `fingerprint-${index}`,
+        sessionId: "user:primary",
+        acceptedAt,
+        input: "🧪".repeat(40_000),
+        events: [],
+        status: active ? "reconciliation-required" : "completed",
+        ...(active
+          ? { failure: "Provider confirmation required" }
+          : { responseText: "📦".repeat(80_000) }),
+      } satisfies StoredRun;
+      await storage.put({
+        [`run:${runId}`]: run,
+        [`run-index:${acceptedAt}:${runId}`]: runId,
+      });
+    }
+    await storage.put("active-run", "run-099");
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    storage.gets.length = 0;
+    storage.listRequests.length = 0;
+
+    const first = await contribution.listRuns({ schemaVersion: 1 });
+
+    expect(first.runs.length).toBeLessThanOrEqual(CLIENT_RUN_PAGE_LIMIT);
+    expect(first.runs.map((run) => run.runId)).toContain("run-099");
+    expect(first.runs.map((run) => run.runId)).toContain("run-098");
+    expect(first.page).toMatchObject({ truncated: true });
+    expect(clientRunListWireBytes(first)).toBeLessThanOrEqual(
+      CLIENT_RUN_LIST_MAX_BYTES,
+    );
+    expect(
+      storage.listRequests.find((request) => request.prefix === "run-index:"),
+    ).toMatchObject({
+      reverse: true,
+      limit: CLIENT_RUN_PAGE_LIMIT + 1,
+    });
+    expect(
+      storage.listRequests.some((request) => request.prefix === "run:"),
+    ).toBe(false);
+    expect(
+      storage.gets.filter((key) => key.startsWith("run:")).length,
+    ).toBeLessThan(CLIENT_RUN_PAGE_LIMIT);
+
+    const nextCursor = first.page.nextCursor;
+    if (!nextCursor) throw new Error("expected a paginated run cursor");
+    const second = await contribution.listRuns({
+      schemaVersion: 1,
+      before: nextCursor,
+    });
+    expect(second.runs.map((run) => run.runId)).not.toContain("run-099");
+    expect(second.runs.map((run) => run.runId)).not.toContain("run-098");
+    expect(clientRunListWireBytes(second)).toBeLessThanOrEqual(
+      CLIENT_RUN_LIST_MAX_BYTES,
+    );
+    expect(
+      second.runs.every(
+        (run, index) =>
+          index === 0 ||
+          second.runs[index - 1]!.admittedAt.localeCompare(run.admittedAt) <= 0,
+      ),
+    ).toBe(true);
   });
 });

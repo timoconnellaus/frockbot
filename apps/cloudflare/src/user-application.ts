@@ -1,4 +1,5 @@
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
+import { decodeClientRunListQueryV1 } from "@frockbot/plugin-shell/run-protocol";
 import type { UserApplicationEnv } from "./contracts.js";
 
 const BOT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
@@ -224,7 +225,27 @@ export function createUserApplication() {
     }
 
     if (request.method === "GET") {
-      return Response.json(await env.BOT_STATE.listRuns(botId));
+      let query;
+      try {
+        const queryKeys = [...url.searchParams.keys()];
+        if (
+          queryKeys.some((key) => key !== "before") ||
+          url.searchParams.getAll("before").length > 1
+        ) {
+          throw new Error("run list query is invalid");
+        }
+        const before = url.searchParams.get("before");
+        query = decodeClientRunListQueryV1({
+          schemaVersion: 1,
+          ...(before !== null ? { before } : {}),
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid run page",
+        );
+      }
+      return Response.json(await env.BOT_STATE.listRuns(botId, query));
     }
     if (request.method !== "POST") return jsonError(405, "method not allowed");
 
