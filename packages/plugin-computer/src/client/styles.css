@@ -16,7 +16,7 @@
 }
 
 .computer-heading strong {
-  color: #d3d3d3;
+  color: #1e1d27;
   font-size: 13px;
   font-weight: 580;
 }
@@ -25,7 +25,7 @@
   overflow: hidden;
   max-width: 165px;
   margin-top: 2px;
-  color: #737373;
+  color: #6d6974;
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -34,32 +34,32 @@
 .computer-status {
   flex: 0 0 auto;
   padding: 3px 7px;
-  border: 1px solid #333;
+  border: 1px solid #e7e0d9;
   border-radius: 999px;
-  color: #858585;
-  background: #151515;
+  color: #6d6974;
+  background: #faf7f2;
   font-size: 9px;
   line-height: 1;
   text-transform: capitalize;
 }
 
 .computer-status.status-ready {
-  border-color: #24513e;
-  color: #64c99b;
-  background: #10251c;
+  border-color: #bfe0d0;
+  color: #2f7c5c;
+  background: #eef7f2;
 }
 
 .computer-status.status-human-control {
-  border-color: #2b5f92;
-  color: #87c5ff;
-  background: #102235;
+  border-color: #b6d2ec;
+  color: #1b4a73;
+  background: #eaf2fb;
 }
 
 .computer-status.status-error,
 .computer-status.status-unconfigured {
-  border-color: #5c3034;
-  color: #e28b92;
-  background: #2a1719;
+  border-color: #f0c2c6;
+  color: #a8323d;
+  background: #fdecee;
 }
 
 .computer-screen {
@@ -67,10 +67,10 @@
   overflow: hidden;
   width: 100%;
   aspect-ratio: 16 / 10;
-  border: 1px solid #2c2c2c;
+  border: 1px solid #e7e0d9;
   border-radius: 7px;
-  background: #111;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 2%);
+  background: #faf7f2;
+  box-shadow: inset 0 0 0 1px rgb(30 29 39 / 3%);
 }
 
 .computer-screen-thumbnail {
@@ -82,7 +82,7 @@
 
 .computer-screen-thumbnail:hover,
 .computer-screen-thumbnail:focus-visible {
-  border-color: #4a4a4a;
+  border-color: #d9d0c9;
   outline: none;
   transform: translateY(-1px);
 }
@@ -91,7 +91,7 @@
   width: 100%;
   height: 100%;
   border: 0;
-  background: #171717;
+  background: #fff;
   pointer-events: none;
 }
 
@@ -121,8 +121,8 @@
 
 .computer-placeholder {
   background:
-    linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px), #121212;
+    linear-gradient(rgb(30 29 39 / 4%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(30 29 39 / 4%) 1px, transparent 1px), #faf7f2;
   background-size: 18px 18px;
 }
 
@@ -133,14 +133,14 @@
   place-items: center;
   margin-bottom: 8px;
   border-radius: 8px;
-  color: #90c9ff;
-  background: #142b42;
+  color: #1b4a73;
+  background: #eaf2fb;
   font-size: 13px;
 }
 
 .computer-placeholder strong,
 .control-shield strong {
-  color: #c8c8c8;
+  color: #1e1d27;
   font-size: 11px;
   font-weight: 550;
 }
@@ -149,7 +149,7 @@
 .control-shield p {
   max-width: 210px;
   margin: 5px 0 10px;
-  color: #767676;
+  color: #6d6974;
   font-size: 10px;
   line-height: 1.4;
 }
@@ -158,18 +158,18 @@
 .control-shield button,
 .computer-footer button {
   padding: 5px 10px;
-  border: 1px solid #3e3e3e;
+  border: 1px solid #e7e0d9;
   border-radius: 6px;
-  color: #d8d8d8;
-  background: #292929;
+  color: #1e1d27;
+  background: #fff;
   font-size: 10px;
   cursor: pointer;
 }
 
 .computer-placeholder button:hover,
 .control-shield button:hover {
-  border-color: #575757;
-  background: #333;
+  border-color: #d9d0c9;
+  background: #faf7f2;
 }
 
 .computer-placeholder button:disabled,
@@ -180,7 +180,7 @@
 }
 
 .control-shield {
-  background: rgb(7 7 7 / 78%);
+  background: rgb(250 247 242 / 82%);
   backdrop-filter: blur(2px);
 }
 
@@ -188,10 +188,10 @@
   display: grid;
   justify-items: center;
   padding: 13px 15px;
-  border: 1px solid #303030;
+  border: 1px solid #e7e0d9;
   border-radius: 9px;
-  background: rgb(20 20 20 / 92%);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 35%);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 8px 28px rgb(38 21 28 / 14%);
 }
 
 .computer-footer {
@@ -205,7 +205,7 @@
   overflow: hidden;
   flex: 1;
   margin: 0;
-  color: #6f6f6f;
+  color: #6d6974;
   font-size: 9px;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -214,9 +214,9 @@
 
 .computer-footer .release-button {
   flex: 0 0 auto;
-  border-color: #2f6699;
-  color: #b8dcff;
-  background: #17324b;
+  border-color: #b6d2ec;
+  color: #1b4a73;
+  background: #eaf2fb;
 }
 
 .computer-overlay {
@@ -369,6 +369,79 @@
 .computer-screen-expanded .control-shield button {
   padding: 8px 14px;
   font-size: 12px;
+}
+
+.computer-overlay .computer-status {
+  border-color: #333;
+  color: #858585;
+  background: #151515;
+}
+
+.computer-overlay .computer-status.status-ready {
+  border-color: #24513e;
+  color: #64c99b;
+  background: #10251c;
+}
+
+.computer-overlay .computer-status.status-human-control {
+  border-color: #2b5f92;
+  color: #87c5ff;
+  background: #102235;
+}
+
+.computer-overlay .computer-status.status-error,
+.computer-overlay .computer-status.status-unconfigured {
+  border-color: #5c3034;
+  color: #e28b92;
+  background: #2a1719;
+}
+
+.computer-overlay .computer-placeholder {
+  background:
+    linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px), #121212;
+}
+
+.computer-overlay .computer-mark {
+  color: #90c9ff;
+  background: #142b42;
+}
+
+.computer-overlay .computer-placeholder strong,
+.computer-overlay .control-shield strong {
+  color: #c8c8c8;
+}
+
+.computer-overlay .computer-placeholder p,
+.computer-overlay .control-shield p {
+  color: #767676;
+}
+
+.computer-overlay .computer-placeholder button,
+.computer-overlay .control-shield button {
+  border-color: #3e3e3e;
+  color: #d8d8d8;
+  background: #292929;
+}
+
+.computer-overlay .computer-placeholder button:hover,
+.computer-overlay .control-shield button:hover {
+  border-color: #575757;
+  background: #333;
+}
+
+.computer-overlay .control-shield {
+  background: rgb(7 7 7 / 78%);
+}
+
+.computer-overlay .control-shield > div {
+  border-color: #303030;
+  background: rgb(20 20 20 / 92%);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 35%);
+}
+
+.computer-overlay .computer-screen iframe {
+  background: #171717;
 }
 
 @media (max-width: 700px) {

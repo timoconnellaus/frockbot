@@ -1,3 +1,4 @@
+import "@frockbot/client-core/fonts.css";
 import "@frockbot/plugin-clock/client/styles.css";
 import {
   clockWebDataKey,

@@ -127,15 +127,16 @@ apps/
 packages/
   agent-core/       Session, LLM, prompt, tool, and agent Cordis services
   agent-loop/       Concrete event-sourced custom agent-loop plugin
+  client-core/      Shared client runtime helpers and brand typography stylesheet
   computer-core/    Provider registry and capability interfaces for Computers
   plugin-catalog/   Manifest decoding, scoped activation, and rollback
   plugin-clock/     Reference package with agent, host, and WebUI contributions
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
   plugin-memory/    Computer-workspace or R2-backed durable Markdown memory
+  plugin-shell/     FrockBot Cordis WebUI/Vue client plugin
   protocol/         Commands and events shared across process seams
   provider-openai-compatible/  Streaming production model adapter
-  webui-shell/      FrockBot Cordis WebUI/Vue client plugin
 docs/
   architecture.md   Current system shape
   adr/              Architectural decisions

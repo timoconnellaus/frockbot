@@ -2,6 +2,7 @@
 
 import type { ClientPlugin, ClientPluginContext } from "@frockbot/client-core";
 import AuthGate from "./AuthGate.vue";
+import "@frockbot/client-core/fonts.css";
 import "./styles.css";
 
 export const authClientPlugin: ClientPlugin = (ctx: ClientPluginContext) =>

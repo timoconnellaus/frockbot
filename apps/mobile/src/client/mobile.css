@@ -3,18 +3,30 @@
   --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
   --mobile-safe-left: env(safe-area-inset-left, 0px);
   --mobile-safe-right: env(safe-area-inset-right, 0px);
-  color-scheme: dark;
+  --frock-ink: #1e1d27;
+  --frock-pink: #ec386b;
+  --frock-pink-dark: #d92d5f;
+  --frock-blush: #fce2ea;
+  --frock-cream: #faf7f2;
+  --frock-paper: #fff;
+  --frock-muted: #6d6974;
+  --frock-line: #e7e0d9;
+  color-scheme: light;
 }
 
 html,
 body {
   height: 100%;
   margin: 0;
-  background: #050505;
-  color: #ededed;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overscroll-behavior: none;
+  color: var(--frock-ink);
+  background: var(--frock-paper);
+  font-family:
+    Manrope,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
 }
 
 #app {
@@ -27,24 +39,28 @@ body {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   padding: var(--mobile-safe-top) var(--mobile-safe-right)
     var(--mobile-safe-bottom) var(--mobile-safe-left);
+  background: var(--frock-paper);
 }
 
 .mobile-topbar {
   display: flex;
+  min-height: 58px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid #222;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--frock-line);
+  background: var(--frock-paper);
   font-size: 15px;
+  font-weight: 700;
 }
 
 .mobile-icon {
   min-width: 40px;
   min-height: 40px;
-  border: 1px solid #2c2c2c;
-  border-radius: 10px;
-  color: #ededed;
-  background: #161616;
+  border: 1px solid var(--frock-line);
+  border-radius: 50%;
+  color: var(--frock-pink-dark);
+  background: var(--frock-blush);
   font-size: 17px;
 }
 
@@ -52,8 +68,8 @@ body {
   display: grid;
   gap: 10px;
   padding: 12px 16px;
-  border-bottom: 1px solid #222;
-  background: #0d0d0d;
+  border-bottom: 1px solid var(--frock-line);
+  background: var(--frock-cream);
 }
 
 .mobile-settings-actions {
@@ -71,6 +87,17 @@ body {
   height: 100%;
 }
 
+.mobile-surface .app-shell,
+.mobile-surface .app-shell.panel-open {
+  display: block;
+}
+
+.mobile-surface .workspace {
+  width: 100%;
+  height: 100%;
+  border-right: 0;
+}
+
 .mobile-surface .sidebar,
 .mobile-surface .right-panel,
 .mobile-surface .window-controls {
@@ -82,11 +109,12 @@ body {
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  border-top: 1px solid #222;
+  border-top: 1px solid var(--frock-line);
+  background: var(--frock-cream);
 }
 
 .mobile-status {
-  color: #9a9a9a;
+  color: var(--frock-muted);
   font-size: 12px;
 }
 
@@ -99,90 +127,111 @@ body {
     calc(var(--mobile-safe-left) + 20px);
   overflow-y: auto;
   background:
-    radial-gradient(circle at 50% 18%, rgb(41 135 239 / 14%), transparent 38%),
-    #050505;
+    radial-gradient(circle at 50% 18%, rgb(252 226 234 / 88%), transparent 38%),
+    var(--frock-cream);
 }
 
 .mobile-auth-card {
   display: grid;
   width: min(100%, 420px);
   gap: 14px;
-  padding: 24px;
-  border: 1px solid #262626;
-  border-radius: 18px;
-  background: #111;
+  padding: 26px;
+  border: 1px solid var(--frock-line);
+  border-radius: 24px;
+  background: var(--frock-paper);
+  box-shadow: 0 24px 60px rgb(38 21 28 / 10%);
   text-align: left;
 }
 
 .mobile-auth-mark {
   display: grid;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   place-items: center;
-  border-radius: 12px;
-  color: #0b1827;
-  background: #2987ef;
+  border-radius: 15px;
+  color: var(--frock-pink-dark);
+  background: var(--frock-blush);
   font-size: 22px;
   font-weight: 700;
 }
 
 .mobile-auth-eyebrow {
   margin: 0;
-  color: #7eaff0;
+  color: var(--frock-pink-dark);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .mobile-auth-card h1 {
   margin: 0;
-  font-size: 22px;
-  font-weight: 620;
+  font-family: "Archivo Black", Manrope, sans-serif;
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: -0.04em;
 }
 
 .mobile-field {
   display: grid;
   gap: 6px;
+  color: var(--frock-muted);
   font-size: 12px;
-  color: #9a9a9a;
 }
 
 .mobile-field input {
-  min-height: 44px;
-  padding: 0 12px;
-  border: 1px solid #333;
-  border-radius: 10px;
-  color: #ededed;
-  background: #191919;
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid var(--frock-line);
+  border-radius: 12px;
+  color: var(--frock-ink);
+  background: var(--frock-cream);
   font-size: 16px;
+}
+
+.mobile-field input:focus-visible,
+.mobile-primary:focus-visible,
+.mobile-secondary:focus-visible,
+.mobile-icon:focus-visible {
+  outline: 3px solid rgb(236 56 107 / 28%);
+  outline-offset: 2px;
 }
 
 .mobile-primary,
 .mobile-secondary {
   display: flex;
-  min-height: 44px;
+  min-height: 46px;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 0 14px;
-  border: 1px solid #3a3a3a;
-  border-radius: 10px;
-  color: #ededed;
-  background: #232323;
+  padding: 0 15px;
+  border: 1px solid var(--frock-line);
+  border-radius: 999px;
+  color: var(--frock-ink);
+  background: var(--frock-paper);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .mobile-primary {
-  border-color: #2987ef;
-  background: #12365d;
+  border-color: var(--frock-pink);
+  color: #fff;
+  background: var(--frock-pink);
+  box-shadow: 0 10px 24px rgb(236 56 107 / 18%);
 }
 
 .mobile-primary:disabled,
 .mobile-secondary:disabled {
-  color: #7c7c7c;
+  box-shadow: none;
   opacity: 0.7;
+}
+
+.mobile-secondary:disabled {
+  color: #9d969f;
+}
+
+.mobile-primary:disabled {
+  color: #fff;
 }
 
 .mobile-google {
@@ -190,6 +239,7 @@ body {
   width: 22px;
   height: 22px;
   place-items: center;
+  border: 1px solid var(--frock-line);
   border-radius: 50%;
   color: #4285f4;
   background: #fff;
@@ -198,13 +248,14 @@ body {
 }
 
 .mobile-details {
-  border: 1px solid #262626;
-  border-radius: 10px;
-  padding: 10px 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--frock-line);
+  border-radius: 12px;
+  background: var(--frock-cream);
 }
 
 .mobile-details summary {
-  color: #9a9a9a;
+  color: var(--frock-muted);
   font-size: 13px;
 }
 
@@ -217,13 +268,13 @@ body {
 .mobile-notice,
 .mobile-auth-loading {
   margin: 8px 0 0;
-  color: #9a9a9a;
+  color: var(--frock-muted);
   font-size: 12px;
   line-height: 1.5;
 }
 
 .mobile-error {
   margin: 0;
-  color: #ff7580;
+  color: #a83241;
   font-size: 13px;
 }
