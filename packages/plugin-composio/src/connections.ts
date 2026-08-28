@@ -246,6 +246,26 @@ export class ComposioConnectionCoordinator {
       alias,
       returnTarget,
     });
+    const authorizationStateExpiresAt =
+      input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000;
+    const terminalCallbackUrl = new URL(
+      "/api/plugins/composio/callback",
+      this.config.callbackBaseUrl,
+    );
+    terminalCallbackUrl.searchParams.set(
+      "state",
+      input.callbackState ?? connectionId,
+    );
+    const connectionStartReplayContext = {
+      schemaVersion: 1,
+      commandFingerprint,
+      connectionId,
+      callbackUrl: terminalCallbackUrl.toString(),
+      expiresAt: new Date(authorizationStateExpiresAt).toISOString(),
+      ...(input.nativeReturnNonce
+        ? { nativeReturnNonce: input.nativeReturnNonce }
+        : {}),
+    };
     const stored = await this.config.store.getConnection(userId, connectionId);
     let type: ComposioConnectionTypeConfig | undefined;
     let claimed = false;
@@ -265,9 +285,9 @@ export class ComposioConnectionCoordinator {
           providerAlias: connectionId,
           returnTarget,
           startCommandFingerprint: commandFingerprint,
+          connectionStartReplayContext,
           authorizationStateId: input.authorizationStateId ?? connectionId,
-          authorizationStateExpiresAt:
-            input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
+          authorizationStateExpiresAt,
           ...(input.nativeReturnNonce
             ? { nativeReturnNonce: input.nativeReturnNonce }
             : {}),
@@ -466,24 +486,6 @@ export class ComposioConnectionCoordinator {
           }
         }
         if (reconciliation.status === "active" && safeMetadata) {
-          const account = reconciliation.account;
-          const callbackUrl = new URL(
-            "/api/plugins/composio/callback",
-            this.config.callbackBaseUrl,
-          );
-          callbackUrl.searchParams.set(
-            "state",
-            input.callbackState ?? connectionId,
-          );
-          callbackUrl.searchParams.set("connected_account_id", account.id);
-          const result = {
-            connectionId,
-            redirectUrl: callbackUrl.toString(),
-            expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-            ...(input.nativeReturnNonce
-              ? { nativeReturnNonce: input.nativeReturnNonce }
-              : {}),
-          } satisfies StartConnectionResult;
           const finished =
             await this.config.store.finishConnectionAuthorization(
               userId,
@@ -493,16 +495,6 @@ export class ComposioConnectionCoordinator {
                 safeMetadata: {
                   ...safeMetadata,
                   authorizationStateConsumed: true,
-                  connectionStartReplay: {
-                    schemaVersion: 1,
-                    commandFingerprint,
-                    connectionId: result.connectionId,
-                    redirectUrl: result.redirectUrl,
-                    expiresAt: result.expiresAt,
-                    ...(result.nativeReturnNonce
-                      ? { nativeReturnNonce: result.nativeReturnNonce }
-                      : {}),
-                  },
                 },
               },
             );
@@ -511,7 +503,17 @@ export class ComposioConnectionCoordinator {
               "Connection authorization changed during reconciliation",
             );
           }
-          return result;
+          const ready = await this.config.store.getConnection(
+            userId,
+            connectionId,
+          );
+          const replay = ready
+            ? decodeConnectionStartReplayV1(ready, commandFingerprint)
+            : undefined;
+          if (!replay) {
+            throw new Error("Connection command replay snapshot is invalid");
+          }
+          return replay;
         }
       }
       throw new Error("Connection authorization requires reconciliation");
@@ -541,13 +543,13 @@ export class ComposioConnectionCoordinator {
         returnTarget,
         providerAlias: connectionId,
         startCommandFingerprint: commandFingerprint,
+        connectionStartReplayContext,
         connectedAccountId: link.connectedAccountId,
         redirectUrl: link.redirectUrl,
         toolkitSlug: type.toolkitSlug,
         expiresAt: link.expiresAt,
         authorizationStateId: input.authorizationStateId ?? connectionId,
-        authorizationStateExpiresAt:
-          input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000,
+        authorizationStateExpiresAt,
         ...(input.nativeReturnNonce
           ? { nativeReturnNonce: input.nativeReturnNonce }
           : {}),

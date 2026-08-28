@@ -47,6 +47,55 @@ function requireMatchingConfigurationReceipt(
   return stored.receipt;
 }
 
+function readyAuthorizationMetadata(
+  connection: UserSettingsViewV1["connections"][number],
+  safeMetadata: UserSettingsViewV1["connections"][number]["safeMetadata"],
+): UserSettingsViewV1["connections"][number]["safeMetadata"] | undefined {
+  const commandFingerprint = connection.safeMetadata.startCommandFingerprint;
+  if (typeof commandFingerprint !== "string") {
+    return { ...safeMetadata, authorizationStateConsumed: true };
+  }
+  const context = connection.safeMetadata.connectionStartReplayContext;
+  const connectedAccountId = safeMetadata.connectedAccountId;
+  if (
+    typeof context !== "object" ||
+    context === null ||
+    Array.isArray(context) ||
+    context.schemaVersion !== 1 ||
+    context.commandFingerprint !== commandFingerprint ||
+    context.connectionId !== connection.connectionId ||
+    typeof context.callbackUrl !== "string" ||
+    typeof context.expiresAt !== "string" ||
+    !Number.isFinite(Date.parse(context.expiresAt)) ||
+    typeof connectedAccountId !== "string" ||
+    (context.nativeReturnNonce !== undefined &&
+      typeof context.nativeReturnNonce !== "string")
+  ) {
+    return undefined;
+  }
+  let redirectUrl: URL;
+  try {
+    redirectUrl = new URL(context.callbackUrl);
+  } catch {
+    return undefined;
+  }
+  redirectUrl.searchParams.set("connected_account_id", connectedAccountId);
+  return {
+    ...safeMetadata,
+    authorizationStateConsumed: true,
+    connectionStartReplay: {
+      schemaVersion: 1,
+      commandFingerprint,
+      connectionId: connection.connectionId,
+      redirectUrl: redirectUrl.toString(),
+      expiresAt: context.expiresAt,
+      ...(context.nativeReturnNonce
+        ? { nativeReturnNonce: context.nativeReturnNonce }
+        : {}),
+    },
+  };
+}
+
 export function deriveRevocationCompensations(
   connection: UserSettingsViewV1["connections"][number],
 ): Array<{ botId: string; id: string; expectedGeneration: string }> {
@@ -512,13 +561,18 @@ export class ComposioUserBackendContribution {
         ) {
           return false;
         }
+        const safeMetadata =
+          update.state === "ready"
+            ? readyAuthorizationMetadata(
+                connection,
+                update.safeMetadata ?? connection.safeMetadata,
+              )
+            : (update.safeMetadata ?? connection.safeMetadata);
+        if (!safeMetadata) return false;
         const nextConnection = {
           ...connection,
           state: update.state,
-          safeMetadata: {
-            ...(update.safeMetadata ?? connection.safeMetadata),
-            authorizationStateConsumed: true,
-          },
+          safeMetadata,
           failure: update.failure,
         };
         const next = {
@@ -547,10 +601,18 @@ export class ComposioUserBackendContribution {
       ) {
         return undefined;
       }
+      const safeMetadata =
+        update.state === "ready"
+          ? readyAuthorizationMetadata(
+              connection,
+              update.safeMetadata ?? connection.safeMetadata,
+            )
+          : (update.safeMetadata ?? connection.safeMetadata);
+      if (!safeMetadata) return undefined;
       return {
         ...connection,
         state: update.state,
-        safeMetadata: update.safeMetadata ?? connection.safeMetadata,
+        safeMetadata,
         failure: update.failure,
       };
     });

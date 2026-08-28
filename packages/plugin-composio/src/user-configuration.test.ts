@@ -327,6 +327,90 @@ describe("Connection dependency admission", () => {
 });
 
 describe("Connection provider reconciliation alarms", () => {
+  test("replays terminal start success after alarm reconciliation", async () => {
+    const storage = new MemoryStorage();
+    let alarmReads = 0;
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage, () => {
+        alarmReads += 1;
+        return Promise.resolve({
+          status: "active",
+          account: {
+            id: "account-1",
+            status: "ACTIVE",
+            toolkitSlug: "gmail",
+            alias: "link-command",
+          },
+        });
+      }),
+    );
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-composio",
+        expectedRevision: 0,
+        packageId: "composio",
+        version: "0.0.1",
+      },
+    });
+    let createCalls = 0;
+    let coordinatorReads = 0;
+    const client = new ComposioClient({
+      apiKey: "secret",
+      fetch: (_input, init) => {
+        if (init?.method === "POST") {
+          createCalls += 1;
+          return Promise.reject(new Error("Link response was lost"));
+        }
+        coordinatorReads += 1;
+        return Promise.reject(new Error("Coordinator provider read attempted"));
+      },
+    });
+    const coordinator = new ComposioConnectionCoordinator({
+      client,
+      store: contribution,
+      callbackBaseUrl: "https://app.example.com",
+      connectionTypes: {
+        gmail: {
+          authConfigId: "gmail-auth",
+          displayName: "Gmail",
+          toolkitSlug: "gmail",
+        },
+      },
+    });
+    const authorizationStateExpiresAt = Date.now() + 10 * 60_000;
+    const command = {
+      commandId: "link-command",
+      connectionTypeId: "gmail",
+      callbackState: "signed-state",
+      authorizationStateId: "authorization-state",
+      authorizationStateExpiresAt,
+    };
+
+    await expect(coordinator.start("user-1", command)).rejects.toThrow(
+      "Link response was lost",
+    );
+    await makeReconciliationDue(storage);
+    await contribution.alarm();
+    const recovered = await coordinator.start("user-1", command);
+    const replayed = await coordinator.start("user-1", command);
+
+    expect(replayed).toEqual(recovered);
+    expect(recovered).toMatchObject({
+      connectionId: "link-command",
+      expiresAt: new Date(authorizationStateExpiresAt).toISOString(),
+    });
+    expect(recovered.redirectUrl).toBe(
+      "https://app.example.com/api/plugins/composio/callback?state=signed-state&connected_account_id=account-1",
+    );
+    expect(createCalls).toBe(1);
+    expect(alarmReads).toBe(1);
+    expect(coordinatorReads).toBe(0);
+  });
+
   test("terminalizes recovered ACTIVE state before exposing its response", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution(
