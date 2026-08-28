@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
 import type { StoredRun } from "./contracts.js";
-import { planBotRunRecovery } from "./bot-recovery.js";
+import { eventsForFailedRun, planBotRunRecovery } from "./bot-recovery.js";
 
 function run(events: SessionEvent[]): StoredRun {
   return {
@@ -93,5 +93,27 @@ describe("Bot run recovery", () => {
       kind: "fail",
       failure: "Bot turn ended with outcome model-error",
     });
+  });
+
+  test("preserves durable events when a post-execution operation fails", () => {
+    const assistant = {
+      type: "assistant/message" as const,
+      seq: 0,
+      timestamp: "2026-08-28T00:00:00.000Z",
+      turn: 1,
+      step: 1,
+      requestId: "request-1",
+      text: "Durable reply",
+      toolCalls: [],
+    };
+    const durableRun = run([assistant]);
+
+    const events = eventsForFailedRun(
+      durableRun,
+      new Error("notification storage unavailable"),
+    );
+
+    expect(events).toEqual([assistant]);
+    expect(events).not.toBe(durableRun.events);
   });
 });

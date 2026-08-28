@@ -44,6 +44,20 @@ export interface ComposioConnectionStore {
     connectionId: string,
     authorizationStateId: string,
   ): Promise<"claimed" | "duplicate" | "invalid">;
+  admitConnectionCallback(
+    userId: string,
+    connectionId: string,
+    input: {
+      authorizationStateId: string;
+      connectedAccountId: string;
+      leaseId: string;
+      verifiedMetadata?: ConnectionView["safeMetadata"];
+    },
+  ): Promise<{
+    phase: "acquired" | "resumable" | "pending" | "done" | "invalid";
+    connection: ConnectionView;
+    leaseId?: string;
+  }>;
   claimConnectionAssignment(
     userId: string,
     connectionId: string,
@@ -572,33 +586,17 @@ export class ComposioConnectionCoordinator {
       typeof connection.safeMetadata.nativeReturnNonce === "string"
         ? connection.safeMetadata.nativeReturnNonce
         : undefined;
-    const stateClaim = await this.config.store.consumeAuthorizationState(
-      userId,
-      input.connectionId,
+    const authorizationStateId =
       input.authorizationStateId ??
-        (connection.safeMetadata.authorizationStateId as string),
-    );
-    if (stateClaim === "duplicate") {
-      const current = await this.config.store.getConnection(
-        userId,
-        input.connectionId,
-      );
-      const durable = current ? durableCompletionResult(current) : undefined;
-      if (durable) return durable;
-    }
-    if (stateClaim !== "claimed") {
+      (connection.safeMetadata.authorizationStateId as string);
+    const expectedAccountId = connection.safeMetadata.connectedAccountId;
+    if (expectedAccountId !== input.connectedAccountId) {
       throw new Error(
-        stateClaim === "duplicate"
-          ? "Composio authorization state was already consumed"
-          : "Composio authorization state is invalid or expired",
+        "Composio callback does not match the admitted Connection",
       );
     }
-    if (connection.state === "ready") {
-      return { returnTarget, status: "ready", nativeReturnNonce };
-    }
-
     let verifiedMetadata: ConnectionView["safeMetadata"] | undefined;
-    if (connection.safeMetadata.reconciliationOperation !== "assignment") {
+    if (connection.safeMetadata.authorizationStateConsumed !== true) {
       if (
         connection.state !== "authorizing" &&
         !(
@@ -608,12 +606,6 @@ export class ComposioConnectionCoordinator {
       ) {
         throw new Error(
           "Composio Connection cannot complete from its current state",
-        );
-      }
-      const expectedAccountId = connection.safeMetadata.connectedAccountId;
-      if (expectedAccountId !== input.connectedAccountId) {
-        throw new Error(
-          "Composio callback does not match the admitted Connection",
         );
       }
       const accounts = await this.config.client.listConnectedAccounts(userId);
@@ -630,25 +622,33 @@ export class ComposioConnectionCoordinator {
       };
     }
 
-    const leaseId = crypto.randomUUID();
-    const claim = await this.config.store.claimConnectionAssignment(
+    const claim = await this.config.store.admitConnectionCallback(
       userId,
       input.connectionId,
-      leaseId,
-      verifiedMetadata,
+      {
+        authorizationStateId,
+        connectedAccountId: input.connectedAccountId,
+        leaseId: crypto.randomUUID(),
+        verifiedMetadata,
+      },
     );
     if (claim.phase === "done") {
-      return { returnTarget, status: "ready", nativeReturnNonce };
+      return (
+        durableCompletionResult(claim.connection) ?? {
+          returnTarget,
+          status: "ready",
+          nativeReturnNonce,
+        }
+      );
     }
     if (claim.phase === "pending") {
-      if (
-        claim.connection.safeMetadata.reconciliationOperation === "assignment"
-      ) {
-        return { returnTarget, status: "pending", nativeReturnNonce };
-      }
+      return { returnTarget, status: "pending", nativeReturnNonce };
+    }
+    if (claim.phase === "invalid" || !claim.leaseId) {
       throw new Error("Connection state changed during callback verification");
     }
     connection = claim.connection;
+    const leaseId = claim.leaseId;
     const targetBotId = connection.safeMetadata.targetBotId;
     if (typeof targetBotId === "string" && this.config.assignBot) {
       try {

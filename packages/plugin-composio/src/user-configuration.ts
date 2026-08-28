@@ -383,6 +383,109 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     });
   }
 
+  async admitConnectionCallback(
+    userId: string,
+    connectionId: string,
+    input: {
+      authorizationStateId: string;
+      connectedAccountId: string;
+      leaseId: string;
+      verifiedMetadata?: UserSettingsViewV1["connections"][number]["safeMetadata"];
+    },
+  ): Promise<{
+    phase: "acquired" | "resumable" | "pending" | "done" | "invalid";
+    connection: UserSettingsViewV1["connections"][number];
+    leaseId?: string;
+  }> {
+    await this.assertIdentity(userId);
+    return this.ctx.storage.transaction(async (transaction) => {
+      const current =
+        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
+        initialState();
+      const connection = current.connections.find(
+        (item) => item.connectionId === connectionId,
+      );
+      if (!connection) {
+        throw new Error(`Connection "${connectionId}" was not admitted`);
+      }
+      const now = Date.now();
+      if (
+        connection.safeMetadata.authorizationStateId !==
+          input.authorizationStateId ||
+        connection.safeMetadata.connectedAccountId !== input.connectedAccountId
+      ) {
+        return { phase: "invalid" as const, connection };
+      }
+      if (connection.safeMetadata.authorizationStateConsumed === true) {
+        if (connection.state === "ready") {
+          return { phase: "done" as const, connection };
+        }
+        const existingLeaseId = connection.safeMetadata.assignmentLeaseId;
+        if (
+          connection.state === "reconciliation-required" &&
+          connection.safeMetadata.reconciliationOperation === "assignment" &&
+          typeof existingLeaseId === "string" &&
+          typeof connection.safeMetadata.assignmentLeaseExpiresAt ===
+            "number" &&
+          connection.safeMetadata.assignmentLeaseExpiresAt > now &&
+          connection.safeMetadata.assignmentCompensationPending !== true &&
+          connection.safeMetadata.revocationRequested !== true
+        ) {
+          return {
+            phase: "resumable" as const,
+            connection,
+            leaseId: existingLeaseId,
+          };
+        }
+        return { phase: "pending" as const, connection };
+      }
+      if (
+        typeof connection.safeMetadata.authorizationStateExpiresAt !==
+          "number" ||
+        connection.safeMetadata.authorizationStateExpiresAt <= now
+      ) {
+        return { phase: "invalid" as const, connection };
+      }
+      if (
+        connection.safeMetadata.revocationRequested === true ||
+        (connection.state !== "authorizing" &&
+          !(
+            connection.state === "reconciliation-required" &&
+            connection.safeMetadata.reconciliationOperation === "link"
+          ))
+      ) {
+        return { phase: "invalid" as const, connection };
+      }
+      const expiresAt = now + CONNECTION_EFFECT_ALARM_MS;
+      const claimed = {
+        ...connection,
+        state: "reconciliation-required" as const,
+        safeMetadata: {
+          ...(input.verifiedMetadata ?? connection.safeMetadata),
+          authorizationStateConsumed: true,
+          reconciliationOperation: "assignment",
+          assignmentLeaseId: input.leaseId,
+          assignmentLeaseExpiresAt: expiresAt,
+        },
+        failure: "Bot assignment is pending",
+      };
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        connections: current.connections.map((item) =>
+          item.connectionId === connectionId ? claimed : item,
+        ),
+      } satisfies UserSettingsViewV1;
+      await transaction.put(STATE_KEY, next);
+      await transaction.setAlarm(nextConnectionAlarm(next) ?? expiresAt);
+      return {
+        phase: "acquired" as const,
+        connection: claimed,
+        leaseId: input.leaseId,
+      };
+    });
+  }
+
   async claimConnectionAssignment(
     userId: string,
     connectionId: string,

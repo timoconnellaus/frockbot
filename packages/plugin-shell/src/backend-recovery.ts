@@ -1,4 +1,5 @@
 import { Session, type SessionEvent } from "@frockbot/agent-core";
+import { BotTurnExecutionError } from "./backend-runner.js";
 import type { StoredRun } from "./backend-contracts.js";
 
 export type BotRunRecoveryPlan =
@@ -41,4 +42,14 @@ export function planBotRunRecovery(
   }
   const session = new Session(run.sessionId, () => {}, latest);
   return { kind: "reconcile", repairs: session.reconcileForResume() };
+}
+
+export function eventsForFailedRun(
+  durableRun: StoredRun | undefined,
+  error: unknown,
+): SessionEvent[] {
+  if (durableRun) return structuredClone(durableRun.events);
+  return error instanceof BotTurnExecutionError
+    ? structuredClone(error.events)
+    : [];
 }
