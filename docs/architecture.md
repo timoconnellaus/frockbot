@@ -64,7 +64,7 @@ Sandboxed Electron renderer
 └─────────────────────────────────────────────────────────┘
 ```
 
-The WebUI server binds to loopback on an ephemeral port. The desktop window receives an unguessable per-launch credential, and both HTTP and WebSocket admission validate it. The server rejects arbitrary origins. Production CSP allows only the application origin and its authenticated WebSocket endpoint.
+The WebUI server binds to loopback on an ephemeral port. The desktop window receives an unguessable per-launch credential, and both HTTP and WebSocket admission validate it. The server rejects arbitrary origins. Production CSP allows only the application origin, its authenticated WebSocket endpoint, and `data:` fonts for the brand typefaces inlined into the client bundle.
 
 ## Boot kernel
 
@@ -133,7 +133,7 @@ Cordis services expose context-specific proxy objects that inherit from the prov
 
 ### WebUI
 
-The browser uses the Cordis WebUI client root and Vue. First-party and reviewed UI contributions mount as ordinary client plugins. The FrockBot shell provides stable slots and routes; feature plugins register into them rather than editing the shell.
+The browser uses the Cordis WebUI client root and Vue. First-party and reviewed UI contributions mount as ordinary client plugins. The FrockBot shell provides stable slots and routes; feature plugins register into them rather than editing the shell. Brand typography is shared as one same-origin stylesheet, `@frockbot/client-core/fonts.css`, imported by every client entrypoint so hosted, desktop, and mobile shells render the same faces without an external font request.
 
 Direct client plugins are trusted same-origin code. Untrusted or generated rich UI cannot be imported into the WebUI context. It must use a FrockBot sandbox-view contribution rendered in a separately permissioned frame with a narrow message protocol.
 

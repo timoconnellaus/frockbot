@@ -1,3 +1,8 @@
+/* Brand typefaces for every client shell. The faces are inlined as data URIs
+   rather than fetched from a font CDN because the hosted and desktop CSPs
+   restrict style and font sources to 'self' (plus data:), and because the
+   desktop host and the Capacitor mobile shell each serve static assets
+   differently. Source binaries: apps/marketing/public/assets/fonts. */
 @font-face {
   font-family: Manrope;
   font-style: normal;
