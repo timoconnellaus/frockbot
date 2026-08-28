@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Archivo+Black&family=DM+Serif+Display:ital@0;1&family=Manrope:wght@400;500;600;700&display=swap");
-
 * {
   box-sizing: border-box;
 }
@@ -88,8 +86,8 @@ summary:focus-visible {
 
 .window-controls {
   display: flex;
-  height: 34px;
-  align-items: center;
+  height: 50px;
+  align-items: flex-end;
   padding-left: 4px;
   -webkit-app-region: drag;
 }
@@ -104,7 +102,7 @@ summary:focus-visible {
 
 .new-bot {
   position: absolute;
-  top: 13px;
+  top: 35px;
   right: 16px;
   display: grid;
   width: 30px;
@@ -165,9 +163,13 @@ summary:focus-visible {
 }
 
 .bot-list::before {
+  position: sticky;
+  z-index: 1;
+  top: 0;
   display: block;
-  margin: 0 9px 8px;
+  padding: 0 9px 8px;
   color: var(--frock-pink-dark);
+  background: var(--frock-cream);
   content: "YOUR FLOCK";
   font-size: 9px;
   font-weight: 800;
@@ -567,7 +569,11 @@ summary:focus-visible {
   border-top: 1px solid var(--frock-line);
   color: var(--frock-ink);
   background: var(--frock-paper);
-  font: 12px / 1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    12px / 1.45 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   white-space: pre-wrap;
 }
 

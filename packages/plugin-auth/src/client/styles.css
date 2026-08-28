@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Archivo+Black&family=Manrope:wght@400;500;600;700&display=swap");
-
 .auth-screen {
   display: grid;
   width: 100%;
@@ -10,7 +8,13 @@
   background:
     radial-gradient(circle at 50% 20%, rgb(252 226 234 / 82%), transparent 34%),
     #faf7f2;
-  font-family: Manrope, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Manrope,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
 }
 
 .auth-card {
@@ -80,7 +84,10 @@
   background: #fff;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    border-color 180ms ease;
 }
 
 .dev-button {
@@ -110,9 +117,17 @@
 
 .google-button:disabled,
 .dev-button:disabled {
-  color: #9d969f;
   box-shadow: none;
   cursor: wait;
+}
+
+.google-button:disabled {
+  color: #9d969f;
+}
+
+.dev-button:disabled {
+  color: #fff;
+  opacity: 0.62;
 }
 
 .google-g {

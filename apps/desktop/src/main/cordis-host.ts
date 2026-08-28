@@ -45,7 +45,7 @@ class DesktopWindowService extends Service {
       height: 859,
       minWidth: 980,
       minHeight: 620,
-      backgroundColor: "#050505",
+      backgroundColor: "#faf7f2",
       show: false,
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
       webPreferences: {
@@ -186,7 +186,7 @@ function createAdmissionPlugin(
     const httpAdmission = ctx.server.use(async (request, response, next) => {
       response.headers.set(
         "content-security-policy",
-        "default-src 'self'; script-src 'self' 'sha256-Vy96PtZRI7fYqJ2gNVKETLELTSMNWTVyT22r0v1TlLQ='; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; img-src 'self' data:; frame-src https://*.sprites.app",
+        "default-src 'self'; script-src 'self' 'sha256-Vy96PtZRI7fYqJ2gNVKETLELTSMNWTVyT22r0v1TlLQ='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ws:; img-src 'self' data:; frame-src https://*.sprites.app",
       );
       const origin = request.headers.get("origin");
       if (origin && origin !== baseUrl) {

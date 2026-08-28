@@ -10,6 +10,7 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
+import "@frockbot/client-core/fonts.css";
 import "./styles.css";
 
 function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {

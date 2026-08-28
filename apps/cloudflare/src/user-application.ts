@@ -46,7 +46,7 @@ function withSecurityHeaders(response: Response): Response {
   secured.headers.set("referrer-policy", "no-referrer");
   secured.headers.set(
     "content-security-policy",
-    "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
   );
   return secured;
 }
