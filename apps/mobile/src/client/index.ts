@@ -28,7 +28,7 @@ import {
   type WebChatMessage,
 } from "@frockbot/plugin-shell/shared";
 import { decodePluginCatalog } from "@frockbot/plugin-shell/client";
-import { createApp, ref, type Ref } from "vue";
+import { createApp, ref, watch, type Ref } from "vue";
 import { createMobileHost, type MobileHost } from "../host/index.ts";
 import { createCapacitorAdapters } from "../host/capacitor-adapters.ts";
 import {
@@ -38,6 +38,7 @@ import {
   mobileHostKey,
 } from "./app-context.ts";
 import { createAuthSession } from "./auth.ts";
+import { MobileBotProjectionController } from "./bot-projection.ts";
 import { createDevicePreferenceStore } from "./capacitor-preferences.ts";
 import { SHOW_NOTIFICATION_COMMAND } from "./commands.ts";
 import { mobileContributions } from "./contributions.ts";
@@ -68,80 +69,13 @@ const auth = createAuthSession({
 const botId = ref("default");
 let activeRequest: AbortController | undefined;
 let host: MobileHost | undefined;
+let botProjection: MobileBotProjectionController;
 
 function replaceMessage(runId: string, replacement: WebChatMessage): void {
   const index = web.value.messages.findIndex(
     (message) => message.runId === runId && message.role === "assistant",
   );
   if (index >= 0) web.value.messages[index] = replacement;
-}
-
-async function deliverMobileNotifications(): Promise<void> {
-  const response = await auth.authorizedFetch(
-    `/api/bots/${encodeURIComponent(botId.value)}/notifications`,
-  );
-  const value: unknown = await response.json();
-  if (!response.ok)
-    throw new Error(responseError(value, "Could not load notifications"));
-  const notifications = decodeNotificationList(value);
-  const runsResponse = await auth.authorizedFetch(
-    `/api/bots/${encodeURIComponent(botId.value)}/turns`,
-  );
-  const runsValue: unknown = await runsResponse.json();
-  if (!runsResponse.ok) {
-    throw new Error(responseError(runsValue, "Could not load completed Turns"));
-  }
-  const runs = decodeRunList(runsValue);
-  for (const notification of notifications) {
-    const run = runs.find(
-      (candidate) => candidate.runId === notification.runId,
-    );
-    if (!run || run.status !== "completed") continue;
-    if (!web.value.messages.some((message) => message.runId === run.runId)) {
-      web.value.messages.push(
-        {
-          id: `${run.runId}:user`,
-          runId: run.runId,
-          role: "user",
-          text: run.input,
-          status: "completed",
-          tools: [],
-        },
-        {
-          id: `${run.runId}:assistant`,
-          runId: run.runId,
-          role: "assistant",
-          text: run.responseText ?? notification.body,
-          status: "completed",
-          tools: toolsFrom(run.events),
-        },
-      );
-    }
-    if (document.hidden) {
-      if (!host) continue;
-      await host.invoke(SHOW_NOTIFICATION_COMMAND, {
-        title: notification.title,
-        body: notification.body,
-      });
-    }
-    const acknowledgement = await auth.authorizedFetch(
-      `/api/bots/${encodeURIComponent(botId.value)}/notifications`,
-      {
-        method: "POST",
-        body: JSON.stringify({ notificationId: notification.notificationId }),
-      },
-    );
-    const acknowledgementValue: unknown = await acknowledgement.json();
-    if (!acknowledgement.ok) {
-      throw new Error(
-        responseError(
-          acknowledgementValue,
-          "Could not acknowledge notification",
-        ),
-      );
-    }
-    decodeAcknowledgement(acknowledgementValue);
-  }
 }
 
 function responseError(value: unknown, fallback: string): string {
@@ -161,20 +95,7 @@ const web: Ref<FrockBotWebData> = ref({
   messages: [],
   pluginCatalog: [],
   async loadBotSettings(): Promise<void> {
-    try {
-      const response = await auth.authorizedFetch(
-        `/api/bots/${encodeURIComponent(botId.value)}/settings`,
-      );
-      const value: unknown = await response.json();
-      if (!response.ok)
-        throw new Error(responseError(value, "Settings failed"));
-      web.value.botSettings = decodeBotSettingsViewV1(value);
-      web.value.settingsError = undefined;
-      await deliverMobileNotifications();
-    } catch (error) {
-      web.value.settingsError =
-        error instanceof Error ? error.message : "Could not load settings";
-    }
+    await botProjection.reload(botId.value);
   },
   async saveBotProfile(profile: BotProfile): Promise<void> {
     const current = web.value.botSettings;
@@ -324,6 +245,7 @@ const web: Ref<FrockBotWebData> = ref({
   },
   async sendPrompt(text: string): Promise<SendPromptResult> {
     if (web.value.activeRunId) return { accepted: false, error: "busy" };
+    const projectionToken = botProjection.currentToken();
     const pendingRunId = crypto.randomUUID();
     web.value.activeRunId = pendingRunId;
     web.value.error = undefined;
@@ -345,16 +267,23 @@ const web: Ref<FrockBotWebData> = ref({
         tools: [],
       },
     );
-    activeRequest = new AbortController();
+    const request = new AbortController();
+    activeRequest = request;
     try {
       if (!web.value.botSettings) await web.value.loadBotSettings();
+      if (!botProjection.isCurrent(projectionToken)) {
+        return { accepted: true, runId: pendingRunId };
+      }
       const result = await requestTurn(
         auth.authorizedFetch,
-        botId.value,
+        projectionToken.botId,
         text,
         pendingRunId,
-        activeRequest.signal,
+        request.signal,
       );
+      if (!botProjection.isCurrent(projectionToken)) {
+        return { accepted: true, runId: result.runId };
+      }
       for (const message of web.value.messages) {
         if (message.runId === pendingRunId) message.runId = result.runId;
       }
@@ -366,16 +295,12 @@ const web: Ref<FrockBotWebData> = ref({
         status: "completed",
         tools: toolsFrom(result.events),
       });
-      try {
-        await deliverMobileNotifications();
-      } catch (error) {
-        web.value.settingsError =
-          error instanceof Error
-            ? error.message
-            : "Notification delivery failed";
-      }
+      await botProjection.refreshHistory(projectionToken);
       return { accepted: true, runId: result.runId };
     } catch (error) {
+      if (!botProjection.isCurrent(projectionToken)) {
+        return { accepted: true, runId: pendingRunId };
+      }
       const aborted =
         error instanceof DOMException && error.name === "AbortError";
       replaceMessage(pendingRunId, {
@@ -393,8 +318,13 @@ const web: Ref<FrockBotWebData> = ref({
           : "Agent request failed";
       return { accepted: true, runId: pendingRunId };
     } finally {
-      activeRequest = undefined;
-      web.value.activeRunId = undefined;
+      if (activeRequest === request) activeRequest = undefined;
+      if (
+        botProjection.isCurrent(projectionToken) &&
+        web.value.activeRunId === pendingRunId
+      ) {
+        web.value.activeRunId = undefined;
+      }
     }
   },
   abort(): Promise<void> {
@@ -407,6 +337,69 @@ const web: Ref<FrockBotWebData> = ref({
     return Promise.resolve();
   },
 });
+
+botProjection = new MobileBotProjectionController(botId.value, {
+  state: () => web.value,
+  async loadSettings(selectedBotId) {
+    const response = await auth.authorizedFetch(
+      `/api/bots/${encodeURIComponent(selectedBotId)}/settings`,
+    );
+    const value: unknown = await response.json();
+    if (!response.ok) throw new Error(responseError(value, "Settings failed"));
+    return decodeBotSettingsViewV1(value);
+  },
+  async listRuns(selectedBotId) {
+    const response = await auth.authorizedFetch(
+      `/api/bots/${encodeURIComponent(selectedBotId)}/turns`,
+    );
+    const value: unknown = await response.json();
+    if (!response.ok) {
+      throw new Error(responseError(value, "Could not load completed Turns"));
+    }
+    return decodeRunList(value);
+  },
+  async listNotifications(selectedBotId) {
+    const response = await auth.authorizedFetch(
+      `/api/bots/${encodeURIComponent(selectedBotId)}/notifications`,
+    );
+    const value: unknown = await response.json();
+    if (!response.ok) {
+      throw new Error(responseError(value, "Could not load notifications"));
+    }
+    return decodeNotificationList(value);
+  },
+  async deliverNotification(notification) {
+    if (!document.hidden || !host) return;
+    await host.invoke(SHOW_NOTIFICATION_COMMAND, {
+      title: notification.title,
+      body: notification.body,
+    });
+  },
+  async acknowledgeNotification(selectedBotId, notificationId) {
+    const response = await auth.authorizedFetch(
+      `/api/bots/${encodeURIComponent(selectedBotId)}/notifications`,
+      {
+        method: "POST",
+        body: JSON.stringify({ notificationId }),
+      },
+    );
+    const value: unknown = await response.json();
+    if (!response.ok) {
+      throw new Error(responseError(value, "Could not acknowledge notification"));
+    }
+    decodeAcknowledgement(value);
+  },
+});
+
+watch(
+  botId,
+  (selectedBotId) => {
+    activeRequest?.abort();
+    activeRequest = undefined;
+    void botProjection.switchBot(selectedBotId);
+  },
+  { flush: "sync" },
+);
 
 const clock: Ref<ClockWebData> = ref({
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
