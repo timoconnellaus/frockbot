@@ -104,10 +104,21 @@ class FlyComputerDirectory implements ComputerDirectory {
     return `${this.root}/${normalizeComputerPath(path)}`;
   }
 
+  private async runStorage(
+    command: string,
+    signal: AbortSignal | undefined,
+  ): Promise<string> {
+    const output = await this.computer.runStorage(
+      command,
+      signal ?? new AbortController().signal,
+    );
+    return output.trim();
+  }
+
   async readFile(path: string, options: ComputerOperationOptions = {}) {
     const normalized = normalizeComputerPath(path);
     const target = this.target(normalized);
-    const output = await this.computer.runStorage(
+    const output = await this.runStorage(
       [
         `TARGET=${shellQuote(target)}`,
         'if [ ! -f "$TARGET" ]; then echo __MISSING__; exit 0; fi',
@@ -118,7 +129,7 @@ class FlyComputerDirectory implements ComputerDirectory {
         'stat -c %Y "$TARGET"',
         'base64 -w0 "$TARGET"',
       ].join("\n"),
-      options.signal ?? new AbortController().signal,
+      options.signal,
     );
     if (output === "__MISSING__") return null;
     if (output === "__TOO_LARGE__") {
@@ -163,7 +174,7 @@ class FlyComputerDirectory implements ComputerDirectory {
         : typeof expected === "string"
           ? `if [ ! -f "$TARGET" ] || [ "$(sha256sum "$TARGET" | cut -d' ' -f1)" != ${shellQuote(expected)} ]; then echo __CONFLICT__; exit 0; fi`
           : "";
-    const output = await this.computer.runStorage(
+    const output = await this.runStorage(
       [
         "set -eu",
         `ROOT=${shellQuote(this.root)}`,
@@ -183,7 +194,7 @@ class FlyComputerDirectory implements ComputerDirectory {
       ]
         .filter(Boolean)
         .join("\n"),
-      options.signal ?? new AbortController().signal,
+      options.signal,
     );
     if (output === "__CONFLICT__") {
       throw new ComputerError(
@@ -211,7 +222,7 @@ class FlyComputerDirectory implements ComputerDirectory {
     const normalized = normalizeComputerPath(path);
     const target = this.target(normalized);
     const expected = options.ifVersion;
-    const output = await this.computer.runStorage(
+    const output = await this.runStorage(
       [
         "set -eu",
         `ROOT=${shellQuote(this.root)}`,
@@ -229,7 +240,7 @@ class FlyComputerDirectory implements ComputerDirectory {
       ]
         .filter(Boolean)
         .join("\n"),
-      options.signal ?? new AbortController().signal,
+      options.signal,
     );
     if (output === "__CONFLICT__") {
       throw new ComputerError(
@@ -248,18 +259,23 @@ class FlyComputerDirectory implements ComputerDirectory {
     } = {},
   ) {
     const prefix = options.prefix ? normalizeComputerPath(options.prefix) : "";
-    const output = await this.computer.runStorage(
+    const output = await this.runStorage(
       [
         `ROOT=${shellQuote(this.root)}`,
         'mkdir -p "$ROOT"',
         'find "$ROOT" -type f ! -path "$ROOT/.frockbot-locks/*" -print0 | sort -z | while IFS= read -r -d "" FILE; do REL=${FILE#"$ROOT"/}; HASH=$(sha256sum "$FILE" | cut -d" " -f1); printf "%s\\t%s\\t%s\\t%s\\n" "$REL" "$HASH" "$(stat -c %s "$FILE")" "$(stat -c %Y "$FILE")"; done',
       ].join("\n"),
-      options.signal ?? new AbortController().signal,
+      options.signal,
     );
     const files: ComputerFileInfo[] = output
       ? output.split("\n").flatMap((line) => {
           const [path, version, sizeText, modifiedText] = line.split("\t");
-          if (!path || (prefix && !path.startsWith(prefix))) return [];
+          if (
+            !path ||
+            (prefix && path !== prefix && !path.startsWith(`${prefix}/`))
+          ) {
+            return [];
+          }
           return [
             {
               path,
@@ -319,17 +335,32 @@ function handle(
     assignment,
     workspace: new FlyComputerWorkspace(botComputer, userComputer),
     exec: {
-      execute: async (request, options) => ({
-        exitCode: 0,
-        stdout: encoder.encode(
-          await botComputer.run(
-            commandFor(request.executable, request.args),
-            options?.signal ?? new AbortController().signal,
-          ),
-        ),
-        stderr: new Uint8Array(),
-        outputTruncated: false,
-      }),
+      execute: async (request, options) => {
+        if (
+          request.cwd !== undefined ||
+          request.env !== undefined ||
+          request.stdin !== undefined
+        ) {
+          throw new ComputerError(
+            "invalid-request",
+            "The Fly Computer provider does not support cwd, env, or stdin",
+          );
+        }
+        const result = await botComputer.exec(
+          commandFor(request.executable, request.args),
+          options?.signal ?? new AbortController().signal,
+          {
+            timeoutMs: request.timeoutMs,
+            maxOutputBytes: request.maxOutputBytes,
+          },
+        );
+        return {
+          exitCode: result.exitCode,
+          stdout: encoder.encode(result.stdout),
+          stderr: encoder.encode(result.stderr),
+          outputTruncated: result.outputTruncated,
+        };
+      },
     },
     browser: {
       perform: async (action, options) =>

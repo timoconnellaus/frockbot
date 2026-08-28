@@ -62,8 +62,23 @@ class FakeSprite implements SpriteHandle {
       }
       this.leases.delete(guardedKey);
     }
+    if (shell.includes("__FROCKBOT_EXIT__")) {
+      const stdout = shell.includes("exit 7")
+        ? "boom\n__FROCKBOT_EXIT__7\n"
+        : "\n__FROCKBOT_EXIT__0\n";
+      return Promise.resolve({ stdout, stderr: "warning noise\n" });
+    }
     if (shell.includes("echo tool-output")) {
       return Promise.resolve({ stdout: "tool-output\n", stderr: "" });
+    }
+    if (shell.includes("missing.md")) {
+      return Promise.resolve({ stdout: "__MISSING__\n", stderr: "" });
+    }
+    if (shell.includes('rm -f "$TARGET"')) {
+      return Promise.resolve({
+        stdout: "__DELETED__\n",
+        stderr: "bash: /etc/profile: noise\n",
+      });
     }
     if (shell.includes('mv "$TMP" "$TARGET"')) {
       return Promise.resolve({
@@ -448,9 +463,27 @@ describe("Fly Sprite computer", () => {
 
     expect(result?.exitCode).toBe(0);
     expect(new TextDecoder().decode(result?.stdout)).toBe("");
+    expect(new TextDecoder().decode(result?.stderr)).toBe("warning noise\n");
+    expect(result?.outputTruncated).toBe(false);
     expect(
-      client.sprite.commands.some(({ args }) => args.at(-1)?.includes("\npwd")),
+      client.sprite.commands.some(({ args }) =>
+        args.at(-1)?.includes("bash -c 'pwd'"),
+      ),
     ).toBe(true);
+
+    const failed = await computer.exec?.execute(
+      { executable: "/bin/bash", args: ["-lc", "echo boom; exit 7"] },
+      { signal: signal() },
+    );
+    expect(failed?.exitCode).toBe(7);
+    expect(new TextDecoder().decode(failed?.stdout)).toBe("boom");
+
+    await expect(
+      computer.exec?.execute(
+        { executable: "env", cwd: "/tmp" },
+        { signal: signal() },
+      ),
+    ).rejects.toThrow("does not support cwd");
     await expect(
       computer.browser?.perform({ type: "snapshot" }, { signal: signal() }),
     ).resolves.toMatchObject({
@@ -474,6 +507,12 @@ describe("Fly Sprite computer", () => {
 
     expect(written).toMatchObject({ path: "profile.md", version: "version-1" });
     expect(new TextDecoder().decode(stored?.bytes)).toBe("remember");
+    await expect(
+      directory?.readFile("missing.md", { signal: signal() }),
+    ).resolves.toBeNull();
+    await expect(
+      directory?.deleteFile("profile.md", { signal: signal() }),
+    ).resolves.toBe(true);
     expect(
       client.sprite.commands.some(({ args }) =>
         args
