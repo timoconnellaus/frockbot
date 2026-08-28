@@ -33,11 +33,40 @@ export interface MobileContribution {
 
 export type SettingScope = "user" | "bot";
 
+export type PackageSettingSchemaType =
+  "object" | "array" | "string" | "number" | "integer" | "boolean" | "null";
+
+export type PackageSettingSchemaValue = string | number | boolean | null;
+
+export interface PackageSettingSchema {
+  type?: PackageSettingSchemaType;
+  title?: string;
+  description?: string;
+  enum?: PackageSettingSchemaValue[];
+  const?: PackageSettingSchemaValue;
+  properties?: Record<string, PackageSettingSchema>;
+  required?: string[];
+  additionalProperties?: boolean;
+  items?: PackageSettingSchema;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  multipleOf?: number;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  minProperties?: number;
+  maxProperties?: number;
+}
+
 export interface PackageSettingDefinition {
   id: string;
   schemaVersion: number;
   scopes: SettingScope[];
-  schema: Record<string, unknown>;
+  schema: PackageSettingSchema;
 }
 
 export interface ConnectionTypeDefinition {
@@ -222,9 +251,7 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
       ? value.contributions.backend
       : [value.contributions.backend];
     if (backend.length === 0 || !backend.every(isRecord)) {
-      throw new Error(
-        "manifest backend contributions must contain objects",
-      );
+      throw new Error("manifest backend contributions must contain objects");
     }
     contributions.backend = backend.map((contribution) => {
       if (
@@ -335,27 +362,371 @@ function definitionId(value: Record<string, unknown>): string {
   return id;
 }
 
-function safeSchema(value: unknown, depth = 0): Record<string, unknown> {
-  if (!isRecord(value))
+const PACKAGE_SETTING_SCHEMA_TYPES = new Set<PackageSettingSchemaType>([
+  "object",
+  "array",
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "null",
+]);
+
+const PACKAGE_SETTING_SCHEMA_KEYWORDS = new Set([
+  "type",
+  "title",
+  "description",
+  "enum",
+  "const",
+  "properties",
+  "required",
+  "additionalProperties",
+  "items",
+  "minLength",
+  "maxLength",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+  "minProperties",
+  "maxProperties",
+]);
+
+function schemaKeywordError(keyword: string, message: string): Error {
+  return new Error(`manifest setting schema "${keyword}" ${message}`);
+}
+
+function schemaString(
+  value: Record<string, unknown>,
+  keyword: "title" | "description",
+): string | undefined {
+  const candidate = value[keyword];
+  if (candidate === undefined) return undefined;
+  if (typeof candidate !== "string") {
+    throw schemaKeywordError(keyword, "must be a string");
+  }
+  return candidate;
+}
+
+function schemaNonNegativeInteger(
+  value: Record<string, unknown>,
+  keyword:
+    | "minLength"
+    | "maxLength"
+    | "minItems"
+    | "maxItems"
+    | "minProperties"
+    | "maxProperties",
+): number | undefined {
+  const candidate = value[keyword];
+  if (candidate === undefined) return undefined;
+  if (!Number.isSafeInteger(candidate) || (candidate as number) < 0) {
+    throw schemaKeywordError(keyword, "must be a non-negative integer");
+  }
+  return candidate as number;
+}
+
+function schemaFiniteNumber(
+  value: Record<string, unknown>,
+  keyword:
+    | "minimum"
+    | "maximum"
+    | "exclusiveMinimum"
+    | "exclusiveMaximum"
+    | "multipleOf",
+): number | undefined {
+  const candidate = value[keyword];
+  if (candidate === undefined) return undefined;
+  if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
+    throw schemaKeywordError(keyword, "must be a finite number");
+  }
+  if (keyword === "multipleOf" && candidate <= 0) {
+    throw schemaKeywordError(keyword, "must be greater than zero");
+  }
+  return candidate;
+}
+
+function schemaValue(
+  value: unknown,
+  keyword: "enum" | "const",
+): PackageSettingSchemaValue {
+  if (
+    value !== null &&
+    typeof value !== "string" &&
+    typeof value !== "boolean" &&
+    (typeof value !== "number" || !Number.isFinite(value))
+  ) {
+    throw schemaKeywordError(keyword, "must contain only primitive values");
+  }
+  return value as PackageSettingSchemaValue;
+}
+
+function schemaValueMatchesType(
+  value: PackageSettingSchemaValue,
+  type: PackageSettingSchemaType,
+): boolean {
+  if (type === "null") return value === null;
+  if (type === "integer") return Number.isSafeInteger(value);
+  if (type === "number") return typeof value === "number";
+  if (type === "object" || type === "array") return false;
+  return typeof value === type;
+}
+
+function decodeSafeSchema(value: unknown, depth: number): PackageSettingSchema {
+  if (!isRecord(value)) {
     throw new Error("manifest setting schema must be an object");
-  if (depth > 12)
+  }
+  if (depth > 12) {
     throw new Error("manifest setting schema is too deeply nested");
-  for (const [key, nested] of Object.entries(value)) {
-    if (key === "$ref") {
-      throw new Error("remote schema references are not supported");
+  }
+  const source = Object.fromEntries(Object.entries(value));
+  for (const keyword of Object.keys(source)) {
+    if (keyword === "default") {
+      throw schemaKeywordError(keyword, "is not supported");
     }
-    if (Array.isArray(nested)) {
-      for (const item of nested) {
-        if (isRecord(item)) safeSchema(item, depth + 1);
-      }
-    } else if (isRecord(nested)) {
-      safeSchema(nested, depth + 1);
+    if (keyword === "format") {
+      throw schemaKeywordError(keyword, "is not supported");
+    }
+    if (keyword.startsWith("$")) {
+      throw schemaKeywordError(keyword, "is not supported");
+    }
+    if (!PACKAGE_SETTING_SCHEMA_KEYWORDS.has(keyword)) {
+      throw schemaKeywordError(keyword, "is not supported");
     }
   }
-  if (JSON.stringify(value).length > 50_000) {
+
+  const schema: PackageSettingSchema = {};
+  const rawType = source.type;
+  if (rawType !== undefined) {
+    if (
+      typeof rawType !== "string" ||
+      !PACKAGE_SETTING_SCHEMA_TYPES.has(rawType as PackageSettingSchemaType)
+    ) {
+      throw schemaKeywordError("type", "is unsupported");
+    }
+    schema.type = rawType as PackageSettingSchemaType;
+  }
+  const title = schemaString(source, "title");
+  if (title !== undefined) schema.title = title;
+  const description = schemaString(source, "description");
+  if (description !== undefined) schema.description = description;
+
+  if (source.enum !== undefined) {
+    if (!Array.isArray(source.enum) || source.enum.length === 0) {
+      throw schemaKeywordError("enum", "must be a non-empty array");
+    }
+    schema.enum = source.enum.map((candidate) =>
+      schemaValue(candidate, "enum"),
+    );
+    if (
+      new Set(schema.enum.map((candidate) => JSON.stringify(candidate)))
+        .size !== schema.enum.length
+    ) {
+      throw schemaKeywordError("enum", "must contain unique values");
+    }
+  }
+  if (Object.hasOwn(source, "const")) {
+    schema.const = schemaValue(source.const, "const");
+  }
+  if (
+    schema.type &&
+    schema.enum?.some((item) => !schemaValueMatchesType(item, schema.type!))
+  ) {
+    throw schemaKeywordError("enum", "values must match type");
+  }
+  if (
+    schema.type &&
+    Object.hasOwn(schema, "const") &&
+    !schemaValueMatchesType(schema.const!, schema.type)
+  ) {
+    throw schemaKeywordError("const", "must match type");
+  }
+
+  if (source.properties !== undefined) {
+    if (!isRecord(source.properties)) {
+      throw schemaKeywordError("properties", "must be an object");
+    }
+    schema.properties = Object.fromEntries(
+      Object.entries(source.properties).map(([name, nested]) => {
+        if (!name) {
+          throw schemaKeywordError(
+            "properties",
+            "must use non-empty property names",
+          );
+        }
+        return [name, decodeSafeSchema(nested, depth + 1)];
+      }),
+    );
+  }
+  if (source.required !== undefined) {
+    if (
+      !Array.isArray(source.required) ||
+      !source.required.every(
+        (item) => typeof item === "string" && item.length > 0,
+      )
+    ) {
+      throw schemaKeywordError(
+        "required",
+        "must contain non-empty property names",
+      );
+    }
+    schema.required = [...source.required];
+    if (new Set(schema.required).size !== schema.required.length) {
+      throw schemaKeywordError("required", "must contain unique names");
+    }
+    if (
+      !schema.properties ||
+      schema.required.some((name) => !Object.hasOwn(schema.properties!, name))
+    ) {
+      throw schemaKeywordError("required", "must name declared properties");
+    }
+  }
+  if (source.additionalProperties !== undefined) {
+    if (typeof source.additionalProperties !== "boolean") {
+      throw schemaKeywordError("additionalProperties", "must be a boolean");
+    }
+    schema.additionalProperties = source.additionalProperties;
+  }
+  if (source.items !== undefined) {
+    schema.items = decodeSafeSchema(source.items, depth + 1);
+  }
+
+  for (const keyword of [
+    "minLength",
+    "maxLength",
+    "minItems",
+    "maxItems",
+    "minProperties",
+    "maxProperties",
+  ] as const) {
+    const candidate = schemaNonNegativeInteger(source, keyword);
+    if (candidate !== undefined) schema[keyword] = candidate;
+  }
+  for (const keyword of [
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "multipleOf",
+  ] as const) {
+    const candidate = schemaFiniteNumber(source, keyword);
+    if (candidate !== undefined) schema[keyword] = candidate;
+  }
+  if (source.uniqueItems !== undefined) {
+    if (typeof source.uniqueItems !== "boolean") {
+      throw schemaKeywordError("uniqueItems", "must be a boolean");
+    }
+    schema.uniqueItems = source.uniqueItems;
+  }
+
+  const objectKeywords = [
+    schema.properties,
+    schema.required,
+    schema.additionalProperties,
+    schema.minProperties,
+    schema.maxProperties,
+  ];
+  const arrayKeywords = [
+    schema.items,
+    schema.minItems,
+    schema.maxItems,
+    schema.uniqueItems,
+  ];
+  const stringKeywords = [schema.minLength, schema.maxLength];
+  const numberKeywords = [
+    schema.minimum,
+    schema.maximum,
+    schema.exclusiveMinimum,
+    schema.exclusiveMaximum,
+    schema.multipleOf,
+  ];
+  if (
+    objectKeywords.some((item) => item !== undefined) &&
+    schema.type !== "object"
+  ) {
+    throw new Error(
+      "manifest setting schema object keywords require object type",
+    );
+  }
+  if (
+    arrayKeywords.some((item) => item !== undefined) &&
+    schema.type !== "array"
+  ) {
+    throw new Error(
+      "manifest setting schema array keywords require array type",
+    );
+  }
+  if (
+    stringKeywords.some((item) => item !== undefined) &&
+    schema.type !== "string"
+  ) {
+    throw new Error(
+      "manifest setting schema string keywords require string type",
+    );
+  }
+  if (
+    numberKeywords.some((item) => item !== undefined) &&
+    schema.type !== "number" &&
+    schema.type !== "integer"
+  ) {
+    throw new Error(
+      "manifest setting schema number keywords require numeric type",
+    );
+  }
+  if (
+    schema.minLength !== undefined &&
+    schema.maxLength !== undefined &&
+    schema.minLength > schema.maxLength
+  ) {
+    throw new Error("manifest setting schema minLength exceeds maxLength");
+  }
+  if (
+    schema.minItems !== undefined &&
+    schema.maxItems !== undefined &&
+    schema.minItems > schema.maxItems
+  ) {
+    throw new Error("manifest setting schema minItems exceeds maxItems");
+  }
+  if (
+    schema.minProperties !== undefined &&
+    schema.maxProperties !== undefined &&
+    schema.minProperties > schema.maxProperties
+  ) {
+    throw new Error(
+      "manifest setting schema minProperties exceeds maxProperties",
+    );
+  }
+  if (
+    schema.minimum !== undefined &&
+    schema.maximum !== undefined &&
+    schema.minimum > schema.maximum
+  ) {
+    throw new Error("manifest setting schema minimum exceeds maximum");
+  }
+  return schema;
+}
+
+function safeSchema(value: unknown): PackageSettingSchema {
+  if (!isRecord(value)) {
+    throw new Error("manifest setting schema must be an object");
+  }
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new Error("manifest setting schema must be JSON-serializable");
+  }
+  if (serialized === undefined) {
+    throw new Error("manifest setting schema must be JSON-serializable");
+  }
+  if (serialized.length > 50_000) {
     throw new Error("manifest setting schema is too large");
   }
-  return structuredClone(value);
+  return decodeSafeSchema(value, 0);
 }
 
 function decodeConfiguration(value: unknown): PackageConfiguration {

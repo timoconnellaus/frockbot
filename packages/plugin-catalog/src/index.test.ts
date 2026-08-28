@@ -36,6 +36,27 @@ function manifest(id = "fixture") {
   };
 }
 
+function v3ManifestWithSchema(schema: unknown) {
+  return {
+    schemaVersion: 3,
+    id: "schema-fixture",
+    displayName: "Schema Fixture",
+    version: "1.0.0",
+    compatibility: { frockbot: "*" },
+    contributions: { runtime: { entry: "./runtime" } },
+    configuration: {
+      settings: [
+        {
+          id: "preferences",
+          schemaVersion: 1,
+          scopes: ["user"],
+          schema,
+        },
+      ],
+    },
+  };
+}
+
 class FakeHost implements ContributionHost {
   readonly kind: ContributionKind;
   private log: string[];
@@ -340,27 +361,183 @@ describe("decodeFrockBotManifest", () => {
     });
   });
 
-  test("rejects remote schema references in manifest v3", () => {
-    expect(() =>
-      decodeFrockBotManifest({
-        schemaVersion: 3,
-        id: "unsafe",
-        displayName: "Unsafe",
-        version: "1.0.0",
-        compatibility: { frockbot: "*" },
-        contributions: { runtime: { entry: "./runtime" } },
-        configuration: {
-          settings: [
-            {
-              id: "unsafe",
-              schemaVersion: 1,
-              scopes: ["user"],
-              schema: { $ref: "https://attacker.test/schema.json" },
-            },
-          ],
+  test("recursively decodes the supported manifest v3 schema subset", () => {
+    const schema = {
+      type: "object",
+      title: "Preferences",
+      description: "Bounded provider preferences",
+      properties: {
+        endpoint: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          enum: ["primary", "secondary"],
         },
-      }),
-    ).toThrow("remote schema references are not supported");
+        retries: {
+          type: "integer",
+          minimum: 0,
+          maximum: 5,
+          multipleOf: 1,
+        },
+        flags: {
+          type: "array",
+          items: { type: "boolean", const: true },
+          minItems: 0,
+          maxItems: 3,
+          uniqueItems: true,
+        },
+      },
+      required: ["endpoint"],
+      additionalProperties: false,
+      minProperties: 1,
+      maxProperties: 3,
+    };
+
+    const decoded = decodeFrockBotManifest(v3ManifestWithSchema(schema));
+
+    expect(decoded.configuration?.settings[0]?.schema).toEqual(schema);
+    expect(decoded.configuration?.settings[0]?.schema).not.toBe(schema);
+    expect(
+      decoded.configuration?.settings[0]?.schema.properties?.flags,
+    ).not.toBe(schema.properties.flags);
+  });
+
+  test("rejects references, defaults, formats, and unknown schema keywords", () => {
+    const forbidden = [
+      "$schema",
+      "$id",
+      "$anchor",
+      "$dynamicAnchor",
+      "$ref",
+      "$dynamicRef",
+      "$defs",
+      "definitions",
+      "default",
+      "format",
+      "pattern",
+      "contentEncoding",
+      "contentMediaType",
+      "contentSchema",
+      "examples",
+      "deprecated",
+      "readOnly",
+      "writeOnly",
+      "allOf",
+      "anyOf",
+      "oneOf",
+      "not",
+      "if",
+      "then",
+      "else",
+      "prefixItems",
+      "contains",
+      "patternProperties",
+      "propertyNames",
+      "dependentRequired",
+      "dependentSchemas",
+      "unevaluatedProperties",
+      "minContains",
+      "maxContains",
+      "unevaluatedItems",
+      "unknownKeyword",
+    ];
+
+    for (const keyword of forbidden) {
+      expect(() =>
+        decodeFrockBotManifest(
+          v3ManifestWithSchema({ type: "string", [keyword]: "forbidden" }),
+        ),
+      ).toThrow(`manifest setting schema "${keyword}" is not supported`);
+    }
+
+    expect(() =>
+      decodeFrockBotManifest(
+        v3ManifestWithSchema({
+          type: "object",
+          properties: {
+            nested: { type: "string", default: "secret" },
+          },
+        }),
+      ),
+    ).toThrow('manifest setting schema "default" is not supported');
+    expect(() =>
+      decodeFrockBotManifest(
+        v3ManifestWithSchema({
+          type: "array",
+          items: { type: "string", format: "password" },
+        }),
+      ),
+    ).toThrow('manifest setting schema "format" is not supported');
+  });
+
+  test("rejects malformed supported schema keyword values", () => {
+    const malformed = [
+      null,
+      [],
+      "schema",
+      { type: ["string"] },
+      { type: "string", title: 1 },
+      { type: "string", description: false },
+      { type: "string", enum: [] },
+      { type: "string", enum: ["duplicate", "duplicate"] },
+      { type: "string", enum: [1] },
+      { type: "string", const: {} },
+      { type: "string", const: 1 },
+      { type: "object", properties: [] },
+      { type: "object", properties: { nested: "invalid" } },
+      { type: "object", properties: { "": { type: "string" } } },
+      { type: "object", properties: {}, required: "name" },
+      {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name", "name"],
+      },
+      { type: "object", properties: {}, required: ["missing"] },
+      { type: "object", additionalProperties: {} },
+      { type: "array", items: [] },
+      { type: "string", minLength: -1 },
+      { type: "string", maxLength: 1.5 },
+      { type: "number", minimum: Number.NaN },
+      { type: "number", maximum: "five" },
+      { type: "number", multipleOf: 0 },
+      { type: "array", minItems: -1 },
+      { type: "array", maxItems: 1.5 },
+      { type: "array", uniqueItems: "yes" },
+      { type: "object", minProperties: -1 },
+      { type: "object", maxProperties: 1.5 },
+      { type: "string", minLength: 2, maxLength: 1 },
+      { type: "array", minItems: 2, maxItems: 1 },
+      { type: "object", minProperties: 2, maxProperties: 1 },
+      { type: "number", minimum: 2, maximum: 1 },
+      { type: "string", minimum: 0 },
+      { type: "array", minLength: 0 },
+      { type: "object", minItems: 0 },
+      { type: "boolean", properties: {} },
+    ];
+
+    for (const schema of malformed) {
+      expect(() =>
+        decodeFrockBotManifest(v3ManifestWithSchema(schema)),
+      ).toThrow();
+    }
+  });
+
+  test("rejects excessively deep and large manifest v3 schemas", () => {
+    let deeplyNested: Record<string, unknown> = { type: "string" };
+    for (let depth = 0; depth < 13; depth += 1) {
+      deeplyNested = { type: "array", items: deeplyNested };
+    }
+    expect(() =>
+      decodeFrockBotManifest(v3ManifestWithSchema(deeplyNested)),
+    ).toThrow("manifest setting schema is too deeply nested");
+    expect(() =>
+      decodeFrockBotManifest(
+        v3ManifestWithSchema({
+          type: "string",
+          description: "x".repeat(50_000),
+        }),
+      ),
+    ).toThrow("manifest setting schema is too large");
   });
 
   test("orders normalized contribution kinds", () => {
