@@ -10,11 +10,12 @@
     "build:webui": "bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
     "build:agents": "bun run build:cordis-agent",
     "build:cloudflare": "bun run --filter @frockbot/cloudflare build",
+    "build:marketing": "bun run --filter @frockbot/marketing build",
     "build:mobile": "bun run build:webui && bun run --filter @frockbot/mobile build",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev:cloudflare:electron": "bun run --filter @frockbot/cloudflare dev:electron",
     "dev": "bun run build:webui && bun run build:agents && bun run --filter @frockbot/desktop dev",
-    "build": "bun run build:webui && bun run build:agents && bun run --filter @frockbot/desktop build && bun run build:cloudflare",
+    "build": "bun run build:webui && bun run build:agents && bun run --filter @frockbot/desktop build && bun run build:cloudflare && bun run build:marketing",
     "proof:cordis": "bun run --filter @frockbot/cordis-poc typecheck && bun run --filter @frockbot/cordis-poc test && bun run --filter @frockbot/agent-runtime build && bun run --filter @frockbot/cordis-poc smoke",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun test"
