@@ -9,6 +9,7 @@ import {
   deriveRevocationCompensations,
 } from "./user-configuration.js";
 import { ComposioClient } from "./composio-client.js";
+import { ComposioConnectionCoordinator } from "./connections.js";
 import { reconcileComposioProviderConnection } from "./provider-reconciliation.js";
 import type {
   ComposioProviderReconciliationRequest,
@@ -18,6 +19,7 @@ import type {
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
   alarmAt: number | undefined;
+  interruptAfterNextPut = false;
 
   get<T>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.values.get(key) as T | undefined);
@@ -29,6 +31,10 @@ class MemoryStorage {
       for (const [entry, item] of Object.entries(key)) {
         this.values.set(entry, structuredClone(item));
       }
+    }
+    if (this.interruptAfterNextPut) {
+      this.interruptAfterNextPut = false;
+      return Promise.reject(new Error("Durable Object interrupted after put"));
     }
     return Promise.resolve();
   }
@@ -77,6 +83,14 @@ async function makeReconciliationDue(storage: MemoryStorage): Promise<void> {
       safeMetadata: { ...item.safeMetadata, reconciliationRetryAt: 0 },
     })),
   } satisfies UserSettingsViewV1);
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }
 
 function connection(
@@ -313,6 +327,202 @@ describe("Connection dependency admission", () => {
 });
 
 describe("Connection provider reconciliation alarms", () => {
+  test("terminalizes recovered ACTIVE state before exposing its response", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-composio",
+        expectedRevision: 0,
+        packageId: "composio",
+        version: "0.0.1",
+      },
+    });
+    let createCalls = 0;
+    const client = new ComposioClient({
+      apiKey: "secret",
+      fetch: (_input, init) => {
+        if (init?.method === "POST") {
+          createCalls += 1;
+          return Promise.reject(new Error("Link response was lost"));
+        }
+        return Promise.resolve(
+          Response.json({
+            items: [
+              {
+                id: "account-1",
+                status: "ACTIVE",
+                alias: "link-command",
+                toolkit: { slug: "gmail" },
+              },
+            ],
+          }),
+        );
+      },
+    });
+    const coordinator = new ComposioConnectionCoordinator({
+      client,
+      store: contribution,
+      callbackBaseUrl: "https://app.example.com",
+      connectionTypes: {
+        gmail: {
+          authConfigId: "gmail-auth",
+          displayName: "Gmail",
+          toolkitSlug: "gmail",
+        },
+      },
+    });
+    const command = {
+      commandId: "link-command",
+      connectionTypeId: "gmail",
+      callbackState: "signed-state",
+      authorizationStateId: "authorization-state",
+      authorizationStateExpiresAt: Date.now() + 10 * 60_000,
+    };
+
+    await expect(coordinator.start("user-1", command)).rejects.toThrow(
+      "Link response was lost",
+    );
+    await coordinator.start("user-1", command);
+
+    expect(createCalls).toBe(1);
+    expect(
+      await contribution.getConnection("user-1", "link-command"),
+    ).toMatchObject({
+      state: "ready",
+      safeMetadata: {
+        connectedAccountId: "account-1",
+        authorizationStateConsumed: true,
+      },
+    });
+  });
+
+  test("survives interruption immediately after recovered ACTIVE commit", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage, () => {
+        storage.interruptAfterNextPut = true;
+        return Promise.resolve({
+          status: "active",
+          account: {
+            id: "account-1",
+            status: "ACTIVE",
+            toolkitSlug: "gmail",
+            alias: "link-command",
+          },
+        });
+      }),
+    );
+    await contribution.startConnection("user-1", {
+      connectionId: "link-command",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+      safeMetadata: {
+        providerAlias: "link-command",
+        toolkitSlug: "gmail",
+        authorizationStateExpiresAt: Date.now() + 10 * 60_000,
+      },
+    });
+    await contribution.requireConnectionReconciliation(
+      "user-1",
+      "link-command",
+      "link",
+      "Connect Link outcome requires reconciliation",
+    );
+    await makeReconciliationDue(storage);
+
+    await contribution.alarm();
+
+    expect(
+      await contribution.getConnection("user-1", "link-command"),
+    ).toMatchObject({
+      state: "ready",
+      safeMetadata: {
+        connectedAccountId: "account-1",
+        authorizationStateConsumed: true,
+      },
+    });
+  });
+
+  test.each([
+    {
+      name: "ACTIVE",
+      result: {
+        status: "active" as const,
+        account: {
+          id: "account-1",
+          status: "ACTIVE",
+          toolkitSlug: "gmail",
+          alias: "link-command",
+        },
+      },
+    },
+    {
+      name: "FAILED",
+      result: {
+        status: "failed" as const,
+        account: {
+          id: "account-1",
+          status: "FAILED",
+          toolkitSlug: "gmail",
+          alias: "link-command",
+        },
+      },
+    },
+  ])("preserves concurrent revocation across $name recovery", async ({ result }) => {
+    const storage = new MemoryStorage();
+    const providerStarted = deferred<void>();
+    const providerResult = deferred<ComposioProviderReconciliationResult>();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage, () => {
+        providerStarted.resolve();
+        return providerResult.promise;
+      }),
+    );
+    await contribution.startConnection("user-1", {
+      connectionId: "link-command",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+      safeMetadata: {
+        providerAlias: "link-command",
+        toolkitSlug: "gmail",
+        authorizationStateExpiresAt: Date.now() + 10 * 60_000,
+      },
+    });
+    await contribution.requireConnectionReconciliation(
+      "user-1",
+      "link-command",
+      "link",
+      "Connect Link outcome requires reconciliation",
+    );
+    await makeReconciliationDue(storage);
+
+    const alarm = contribution.alarm();
+    await providerStarted.promise;
+    await contribution.claimConnectionRevocation("user-1", "link-command");
+    providerResult.resolve(result);
+    await alarm;
+
+    expect(
+      await contribution.getConnection("user-1", "link-command"),
+    ).toMatchObject({
+      state: "reconciliation-required",
+      safeMetadata: {
+        reconciliationOperation: "link",
+        revocationRequested: true,
+      },
+    });
+    expect(storage.alarmAt).toBeGreaterThan(Date.now());
+  });
+
   test("recovers a lost Link response after Durable Object eviction", async () => {
     const storage = new MemoryStorage();
     const admitted = createComposioUserBackendContribution(

@@ -395,14 +395,20 @@ export class ComposioConnectionCoordinator {
           (reconciliation.status === "failed" ||
             reconciliation.status === "revoked")
         ) {
-          await this.config.store.finishConnectionAuthorization(
-            userId,
-            connectionId,
-            {
-              state: "failed",
-              failure: "Connection authorization could not be recovered",
-            },
-          );
+          const finished =
+            await this.config.store.finishConnectionAuthorization(
+              userId,
+              connectionId,
+              {
+                state: "failed",
+                failure: "Connection authorization could not be recovered",
+              },
+            );
+          if (!finished) {
+            throw new Error(
+              "Connection authorization changed during reconciliation",
+            );
+          }
           throw new DefinitiveConnectionOperationError(
             "Connection authorization failed; retry with a new operation",
           );
@@ -421,12 +427,19 @@ export class ComposioConnectionCoordinator {
           }
         }
         if (reconciliation.status === "active" && safeMetadata) {
-          const recorded = await this.config.store.recordConnectLinkResult(
-            userId,
-            connectionId,
-            safeMetadata,
-          );
-          if (!recorded) {
+          const finished =
+            await this.config.store.finishConnectionAuthorization(
+              userId,
+              connectionId,
+              {
+                state: "ready",
+                safeMetadata: {
+                  ...safeMetadata,
+                  authorizationStateConsumed: true,
+                },
+              },
+            );
+          if (!finished) {
             throw new Error(
               "Connection authorization changed during reconciliation",
             );

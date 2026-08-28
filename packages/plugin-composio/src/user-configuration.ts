@@ -538,8 +538,7 @@ export class ComposioUserBackendContribution {
     return this.transitionConnection(userId, connectionId, (connection) => {
       const operation = connection.safeMetadata.reconciliationOperation;
       if (
-        (connection.safeMetadata.revocationRequested === true &&
-          update.state !== "failed") ||
+        connection.safeMetadata.revocationRequested === true ||
         (connection.state !== "authorizing" &&
           !(
             connection.state === "reconciliation-required" &&
@@ -1500,12 +1499,6 @@ export class ComposioUserBackendContribution {
             );
             continue;
           }
-          const recorded = await this.recordConnectLinkResult(
-            userId,
-            connection.connectionId,
-            safeMetadata,
-          );
-          if (!recorded) continue;
           await this.finishConnectionAuthorization(
             userId,
             connection.connectionId,
