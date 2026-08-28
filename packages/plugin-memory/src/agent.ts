@@ -43,6 +43,7 @@ export interface MemoryPluginConfig {
   embed?: EmbedMemory;
   embeddingModel?: string;
   autoRecallResults?: number;
+  inject?: string[];
 }
 
 interface MemoryRuntime {
@@ -423,7 +424,7 @@ export function createMemoryPlugin(
       await storage.dispose?.();
     };
   };
-  plugin.inject = ["tools", "systemPrompt"];
+  plugin.inject = ["tools", "systemPrompt", ...(config.inject ?? [])];
   return plugin;
 }
 

@@ -148,6 +148,7 @@ jobs:
         env:
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
         run: |
+          # shellcheck disable=SC2016
           bun -e '
           import config from "./wrangler.jsonc";
           config.d1_databases[0].database_id = process.env.CLOUDFLARE_D1_DATABASE_ID;

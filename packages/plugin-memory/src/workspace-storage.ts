@@ -1,4 +1,4 @@
-import type { ComputerDirectory } from "../../computer-core/src/core.js";
+import type { ComputerDirectory } from "@frockbot/computer-core";
 import type { DocumentMeta, MemoryDocumentStore } from "./storage.js";
 import type { MemoryScope, MemoryTier } from "./types.js";
 

@@ -1,4 +1,3 @@
-/// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
 import worker, { canonicalUrl, withSecurityHeaders } from "./index";
 
