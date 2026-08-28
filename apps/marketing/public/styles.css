@@ -160,6 +160,9 @@
     gap: 12px;
     flex: none;
   }
+  /* The app icon artwork already carries its own rounded frame; a border-radius or
+     object-fit: cover here crops its outer edges. Guarded by the "brand artwork
+     preserves the full app icon edges" test in apps/marketing/src/index.test.ts. */
   .brand img {
     object-fit: contain;
   }
