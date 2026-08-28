@@ -190,6 +190,35 @@ function connectionStartCommandFingerprintV1(
   })}`;
 }
 
+function decodeConnectionStartReplayV1(
+  connection: ConnectionView,
+  commandFingerprint: string,
+): StartConnectionResult | undefined {
+  const value = connection.safeMetadata.connectionStartReplay;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  if (
+    value.schemaVersion !== 1 ||
+    value.commandFingerprint !== commandFingerprint ||
+    value.connectionId !== connection.connectionId ||
+    typeof value.redirectUrl !== "string" ||
+    typeof value.expiresAt !== "string" ||
+    (value.nativeReturnNonce !== undefined &&
+      typeof value.nativeReturnNonce !== "string")
+  ) {
+    return undefined;
+  }
+  return {
+    connectionId: value.connectionId,
+    redirectUrl: value.redirectUrl,
+    expiresAt: value.expiresAt,
+    ...(value.nativeReturnNonce
+      ? { nativeReturnNonce: value.nativeReturnNonce }
+      : {}),
+  };
+}
+
 export class ComposioConnectionCoordinator {
   constructor(private readonly config: ComposioConnectionCoordinatorConfig) {}
 
@@ -258,6 +287,16 @@ export class ComposioConnectionCoordinator {
       const admittedToolkitSlug = existing.safeMetadata.toolkitSlug;
       if (typeof admittedToolkitSlug !== "string") {
         throw new Error("Connection command snapshot is invalid");
+      }
+      if (existing.state === "ready") {
+        const replay = decodeConnectionStartReplayV1(
+          existing,
+          commandFingerprint,
+        );
+        if (!replay) {
+          throw new Error("Connection command replay snapshot is invalid");
+        }
+        return replay;
       }
       const redirectUrl = existing?.safeMetadata.redirectUrl;
       const expiresAt = existing?.safeMetadata.expiresAt;
@@ -427,23 +466,6 @@ export class ComposioConnectionCoordinator {
           }
         }
         if (reconciliation.status === "active" && safeMetadata) {
-          const finished =
-            await this.config.store.finishConnectionAuthorization(
-              userId,
-              connectionId,
-              {
-                state: "ready",
-                safeMetadata: {
-                  ...safeMetadata,
-                  authorizationStateConsumed: true,
-                },
-              },
-            );
-          if (!finished) {
-            throw new Error(
-              "Connection authorization changed during reconciliation",
-            );
-          }
           const account = reconciliation.account;
           const callbackUrl = new URL(
             "/api/plugins/composio/callback",
@@ -454,12 +476,42 @@ export class ComposioConnectionCoordinator {
             input.callbackState ?? connectionId,
           );
           callbackUrl.searchParams.set("connected_account_id", account.id);
-          return {
+          const result = {
             connectionId,
             redirectUrl: callbackUrl.toString(),
             expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-            nativeReturnNonce: input.nativeReturnNonce,
-          };
+            ...(input.nativeReturnNonce
+              ? { nativeReturnNonce: input.nativeReturnNonce }
+              : {}),
+          } satisfies StartConnectionResult;
+          const finished =
+            await this.config.store.finishConnectionAuthorization(
+              userId,
+              connectionId,
+              {
+                state: "ready",
+                safeMetadata: {
+                  ...safeMetadata,
+                  authorizationStateConsumed: true,
+                  connectionStartReplay: {
+                    schemaVersion: 1,
+                    commandFingerprint,
+                    connectionId: result.connectionId,
+                    redirectUrl: result.redirectUrl,
+                    expiresAt: result.expiresAt,
+                    ...(result.nativeReturnNonce
+                      ? { nativeReturnNonce: result.nativeReturnNonce }
+                      : {}),
+                  },
+                },
+              },
+            );
+          if (!finished) {
+            throw new Error(
+              "Connection authorization changed during reconciliation",
+            );
+          }
+          return result;
         }
       }
       throw new Error("Connection authorization requires reconciliation");

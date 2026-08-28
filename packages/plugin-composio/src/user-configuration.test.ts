@@ -345,6 +345,7 @@ describe("Connection provider reconciliation alarms", () => {
       },
     });
     let createCalls = 0;
+    let providerReads = 0;
     const client = new ComposioClient({
       apiKey: "secret",
       fetch: (_input, init) => {
@@ -352,6 +353,7 @@ describe("Connection provider reconciliation alarms", () => {
           createCalls += 1;
           return Promise.reject(new Error("Link response was lost"));
         }
+        providerReads += 1;
         return Promise.resolve(
           Response.json({
             items: [
@@ -389,9 +391,19 @@ describe("Connection provider reconciliation alarms", () => {
     await expect(coordinator.start("user-1", command)).rejects.toThrow(
       "Link response was lost",
     );
-    await coordinator.start("user-1", command);
+    const recovered = await coordinator.start("user-1", command);
+    const replayed = await coordinator.start("user-1", command);
 
     expect(createCalls).toBe(1);
+    expect(providerReads).toBe(1);
+    expect(replayed).toEqual(recovered);
+    await expect(
+      coordinator.start("user-1", { ...command, alias: "Work" }),
+    ).rejects.toThrow(
+      'Connection command idempotency key "link-command" was reused for a different command',
+    );
+    expect(createCalls).toBe(1);
+    expect(providerReads).toBe(1);
     expect(
       await contribution.getConnection("user-1", "link-command"),
     ).toMatchObject({
