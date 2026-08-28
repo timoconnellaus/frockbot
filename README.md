@@ -113,6 +113,8 @@ FROCKBOT_SMOKE_PROMPT='/echo FrockBot is ready.' \
   bun run --filter @frockbot/desktop start
 ```
 
+`bun run --filter @frockbot/desktop package` builds unsigned installers (DMG, NSIS, AppImage) into `apps/desktop/release/`. `bun run icons:generate` regenerates the desktop, Android, and iOS app icons from the canonical `assets/marketing/app-icon/frockbot-icon-1024.png`; it requires ImageMagick 7 and macOS `iconutil`.
+
 ## Structure
 
 ```text
@@ -135,7 +137,7 @@ packages/
   provider-openai-compatible/  Streaming production model adapter
   webui-shell/      FrockBot Cordis WebUI/Vue client plugin
 docs/
-  architecture.md   Accepted Cordis-first target architecture
+  architecture.md   Current system shape
   adr/              Architectural decisions
   research/         Primary-source compatibility research
 ```
@@ -223,4 +225,4 @@ Cordis contexts provide composition and lifecycle ownership, not security isolat
 - the local derived memory vector index is process-local and rebuilt through canonical-file fallback; cloud Vectorize remains durable;
 - Kubernetes and Cloudflare Containers can now be added as provider Packages, but adapters are not implemented yet;
 - the manifest-driven package catalog works for built-in packages, but external package discovery and download are not implemented;
-- application packaging and code signing are not configured.
+- packaged applications are not code signed.

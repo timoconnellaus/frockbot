@@ -483,6 +483,7 @@ export class FlySpriteComputer {
     string,
     Promise<ComputerConnection>
   >();
+  private readonly storagePromises = new Map<string, Promise<SpriteHandle>>();
 
   constructor(options: FlySpriteComputerOptions = {}) {
     const token = options.token?.trim() || configuredToken();
@@ -778,11 +779,26 @@ export class FlySpriteComputer {
     return this.client.getSprite(this.spriteName);
   }
 
-  private async readyStorageSprite(
+  private readyStorageSprite(
     layout: AgentLayout,
     signal?: AbortSignal,
   ): Promise<SpriteHandle> {
     signal?.throwIfAborted();
+    let promise = this.storagePromises.get(layout.key);
+    if (!promise) {
+      promise = this.provisionStorage(layout, signal).catch((error) => {
+        this.storagePromises.delete(layout.key);
+        throw error;
+      });
+      this.storagePromises.set(layout.key, promise);
+    }
+    return promise;
+  }
+
+  private async provisionStorage(
+    layout: AgentLayout,
+    signal?: AbortSignal,
+  ): Promise<SpriteHandle> {
     const sprite = await this.findOrCreate();
     await sprite.execFileHTTP(
       "mkdir",

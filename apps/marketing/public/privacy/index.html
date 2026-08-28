@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How FrockBot collects, uses, stores, and shares information."
+    />
+    <meta name="theme-color" content="#ec386b" />
+    <link rel="canonical" href="https://frockbot.com/privacy/" />
+    <link rel="icon" href="/assets/favicon.png" />
+    <link rel="apple-touch-icon" href="/assets/app-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>Privacy Policy · FrockBot</title>
+  </head>
+  <body class="legal-page">
+    <a class="skip-link" href="#policy-content">Skip to policy</a>
+    <header class="site-header legal-header">
+      <div class="container nav-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/logo.png" alt="" width="48" height="48" />
+          <span class="brand-name">FrockBot</span>
+          <span class="brand-note">Persistent bots.<br />Impeccable taste.</span>
+        </a>
+        <nav class="legal-nav" aria-label="Policy navigation">
+          <a href="/">Home</a>
+          <a href="/privacy/" aria-current="page">Privacy</a>
+          <a href="/terms/">Terms</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="policy-content">
+      <section class="legal-hero" aria-labelledby="policy-title">
+        <div class="container legal-hero-shell">
+          <div>
+            <p class="eyebrow">The fine print, freshly shorn</p>
+            <h1 id="policy-title">Privacy <em>Policy.</em></h1>
+            <p class="legal-intro">
+              This policy explains what information FrockBot handles, why it is
+              needed, and the choices available to you.
+            </p>
+            <p class="effective-date"><strong>Effective:</strong> 28 August 2026</p>
+          </div>
+          <img
+            src="/assets/app-icon.png"
+            alt="FrockBot sheep wearing raspberry-pink sunglasses"
+            width="180"
+            height="180"
+          />
+        </div>
+      </section>
+
+      <div class="container legal-layout">
+        <aside class="legal-summary" aria-label="Policy summary">
+          <p class="section-label">In a nutshell</p>
+          <p>
+            FrockBot is operated by <strong>Tim O'Connell</strong>. The hosted
+            service keeps bots, sessions, memory, and files so they can remain
+            useful between visits. Optional desktop integrations have their own
+            data flows.
+          </p>
+          <a href="mailto:privacy@frockbot.com">privacy@frockbot.com</a>
+        </aside>
+
+        <article class="legal-copy">
+          <section id="scope">
+            <h2>1. Who this policy covers</h2>
+            <p>
+              This policy applies when you visit frockbot.com, use the hosted
+              FrockBot app at bot.frockbot.com, or use a FrockBot desktop client
+              with those services. “FrockBot”, “we”, and “us” mean the service
+              operated by Tim O'Connell.
+            </p>
+            <p>
+              FrockBot is also open-source software. If you run your own copy,
+              the person operating that copy is responsible for its data
+              practices; this policy does not describe their deployment.
+            </p>
+          </section>
+
+          <section id="information">
+            <h2>2. Information FrockBot handles</h2>
+            <h3>Sign-in and profile information</h3>
+            <p>
+              FrockBot uses Google sign-in. We receive the information needed to
+              identify you and create your FrockBot user, such as your Google
+              account identifier, name, email address, profile image, and sign-in
+              status. Authentication records may include encrypted OAuth tokens,
+              session tokens, sign-in dates, IP address, and user-agent details.
+            </p>
+
+            <h3>Your bots, sessions, memory, and files</h3>
+            <p>
+              The hosted app stores the content you provide and the records it
+              needs to make bots persistent. This can include bot identifiers and
+              configuration, your inputs, ordered session events, model requests
+              and responses, tool calls and results, routines, standing memory,
+              and files you or a bot add to memory. Memory content is split into
+              chunks and converted into numerical embeddings so relevant material
+              can be found later.
+            </p>
+
+            <h3>Technical and support information</h3>
+            <p>
+              We may handle request and device details needed to deliver, secure,
+              and troubleshoot the service, including IP address, browser or app
+              details, timestamps, authentication state, and error or diagnostic
+              information. If you contact us, we handle your contact details and
+              whatever you include in the correspondence.
+            </p>
+          </section>
+
+          <section id="use">
+            <h2>3. How information is used</h2>
+            <p>We use information to:</p>
+            <ul>
+              <li>authenticate you and keep your sessions working;</li>
+              <li>run bots, preserve session history, search memory, and store files;</li>
+              <li>send requested material to models and tools and return their results;</li>
+              <li>operate, secure, debug, and improve FrockBot;</li>
+              <li>respond to questions, privacy requests, and disputes; and</li>
+              <li>comply with applicable law and protect users, FrockBot, and others.</li>
+            </ul>
+          </section>
+
+          <section id="hosting">
+            <h2>4. Hosted FrockBot and Cloudflare</h2>
+            <p>
+              The FrockBot app runs on Cloudflare. Its current hosted architecture
+              uses Cloudflare Workers and Durable Objects to run the app and keep
+              bot session state, D1 to store authentication records, R2 to store
+              persistent memory files and application artefacts, Vectorize to index
+              memory embeddings, and Workers AI to create those embeddings.
+              Cloudflare therefore processes hosted-service information on our
+              behalf as part of providing this infrastructure.
+            </p>
+            <p>
+              These hosted stores are separate from data held by an optional
+              desktop integration. Using the website alone does not give FrockBot
+              access to arbitrary files on your computer.
+            </p>
+          </section>
+
+          <section id="models">
+            <h2>5. AI models and tools</h2>
+            <p>
+              A bot may send information needed for a turn to an AI model provider.
+              Depending on your setup, that can include instructions, relevant
+              session history and memory, your input, tool descriptions, and tool
+              results. A configured OpenAI-compatible provider receives requests at
+              the endpoint selected for that desktop runtime. The provider handles
+              that information under its own terms and privacy practices.
+            </p>
+            <p>
+              In the hosted service, Cloudflare Workers AI receives memory text to
+              produce embeddings used by memory search. Installable packages and
+              tools can introduce additional data flows; review a package and its
+              configuration before enabling it.
+            </p>
+          </section>
+
+          <section id="desktop">
+            <h2>6. Optional desktop and Fly Sprite integration</h2>
+            <p>
+              Desktop FrockBot can optionally be configured with a Fly.io Sprite,
+              a remote persistent computer. When you enable it, the desktop-hosted
+              integration uses the configured Fly Sprites token and sends commands
+              and browser actions to Fly. The Sprite can retain a bot's workspace,
+              files, browser profile, standing memory, and a mirrored session
+              record on its persistent filesystem. Its browser can also communicate
+              with sites you direct it to.
+            </p>
+            <p>
+              Sprite storage is not the same store as hosted R2, Vectorize, or
+              Durable Object data, and the repository does not automatically
+              synchronise those stores. Local desktop settings, selected folders,
+              clipboard content, and notifications are handled by the desktop and
+              its operating-system permissions unless a feature, package, or your
+              instruction sends that information to the hosted service, an AI
+              provider, a Sprite, or another destination.
+            </p>
+          </section>
+
+          <section id="sharing">
+            <h2>7. When information is disclosed</h2>
+            <p>Information may be disclosed:</p>
+            <ul>
+              <li>to Google for sign-in;</li>
+              <li>to Cloudflare for the hosted app and storage described above;</li>
+              <li>to an AI provider or tool when it is used for your bot;</li>
+              <li>to Fly.io when you configure and use the optional Sprite integration;</li>
+              <li>when you direct or authorise the disclosure;</li>
+              <li>when required by law or a valid legal process; or</li>
+              <li>to protect rights, safety, security, and the integrity of the service.</li>
+            </ul>
+            <p>
+              These services may process information outside Australia. Their own
+              terms and privacy practices also apply to their processing.
+            </p>
+          </section>
+
+          <section id="cookies">
+            <h2>8. Cookies and sign-in storage</h2>
+            <p>
+              FrockBot uses cookies or equivalent app storage where needed to keep
+              you signed in, protect authenticated requests, and remember essential
+              app state. Blocking that storage may stop sign-in or other parts of
+              the service from working.
+            </p>
+          </section>
+
+          <section id="retention">
+            <h2>9. Retention and security</h2>
+            <p>
+              We keep information for as long as it is needed to provide and secure
+              FrockBot, maintain persistent bots and sessions, meet legal
+              obligations, and resolve disputes. What is needed depends on the type
+              of information and how the service is used. You can contact us about
+              deletion; we will assess requests under applicable law and any
+              operational or legal requirements.
+            </p>
+            <p>
+              We use technical and organisational safeguards appropriate to the
+              service, including access controls and encryption of stored OAuth
+              tokens. No internet or storage system is completely secure, so we
+              cannot guarantee absolute security.
+            </p>
+          </section>
+
+          <section id="choices">
+            <h2>10. Your choices and privacy rights</h2>
+            <p>
+              You choose what content to give a bot and whether to enable packages,
+              model endpoints, or the Fly Sprite integration. Depending on
+              applicable law, you may have rights to ask for access to or correction
+              of personal information, or to make a privacy complaint. Email us to
+              make a request. We may need to verify your identity before acting.
+            </p>
+          </section>
+
+          <section id="children">
+            <h2>11. Children</h2>
+            <p>
+              FrockBot is not designed for children who cannot lawfully consent to
+              the handling described in this policy. A parent or guardian who
+              believes a child has provided personal information should contact us.
+            </p>
+          </section>
+
+          <section id="changes">
+            <h2>12. Changes to this policy</h2>
+            <p>
+              We may update this policy as FrockBot changes. We will publish the
+              updated version here and change its effective date. Where required,
+              we will provide additional notice or seek consent.
+            </p>
+          </section>
+
+          <section id="contact" class="legal-contact">
+            <p class="section-label">Questions or requests</p>
+            <h2>13. Contact</h2>
+            <p>
+              Contact the operator, Tim O'Connell, at
+              <a href="mailto:privacy@frockbot.com">privacy@frockbot.com</a>.
+            </p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-shell legal-footer-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/logo.png" alt="" width="44" height="44" />
+          <span class="brand-name">FrockBot</span>
+        </a>
+        <div class="footer-links">
+          <a href="/">Home</a>
+          <a href="/privacy/" aria-current="page">Privacy</a>
+          <a href="/terms/">Terms</a>
+          <a href="mailto:privacy@frockbot.com">Contact</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -9,6 +9,7 @@ interface Env {
 const CANONICAL_HOST = "frockbot.com";
 
 const SECURITY_HEADERS = {
+  "cross-origin-opener-policy": "same-origin",
   "content-security-policy": [
     "default-src 'self'",
     "base-uri 'self'",
@@ -23,6 +24,7 @@ const SECURITY_HEADERS = {
   ].join("; "),
   "permissions-policy": "camera=(), microphone=(), geolocation=()",
   "referrer-policy": "strict-origin-when-cross-origin",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
 } as const;
