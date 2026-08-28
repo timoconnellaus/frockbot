@@ -168,7 +168,7 @@ describe("AgentLoop", () => {
     });
   });
 
-  test("reconciles only the unseen suffix of a durable partial stream", async () => {
+  test("reconciles a mixed stream and journals only its unseen text suffix", async () => {
     const timestamp = "2026-08-28T00:00:00.000Z";
     const initial = [
       { type: "session/created", createdAt: timestamp },
@@ -195,21 +195,53 @@ describe("AgentLoop", () => {
         text: "A",
       },
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    let streamedFollowUp = 0;
+    let toolExecutions = 0;
     const provider: LlmProvider = {
       id: "partial-provider",
       async *stream() {
-        throw new Error("recovery must not dispatch another request");
+        streamedFollowUp += 1;
+        yield { type: "text-delta", text: "Finished." };
+        yield { type: "finish", reason: "completed" };
       },
       reconciliation: {
         retrieve: () =>
           recovered(
             { type: "text-delta", text: "A" },
+            {
+              type: "tool-call",
+              call: {
+                id: "recovered-call",
+                name: "echo",
+                input: { value: "mixed" },
+              },
+            },
             { type: "text-delta", text: "B" },
-            { type: "finish", reason: "completed" },
+            { type: "finish", reason: "tool-calls" },
           ),
       },
     };
-    const root = await mountRuntime(provider, undefined, undefined, {
+    const tool: ToolDefinition = {
+      name: "echo",
+      description: "Return a supplied value.",
+      inputSchema: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+      },
+      validate: (input) =>
+        typeof input === "object" &&
+        input !== null &&
+        typeof (input as { value?: unknown }).value === "string",
+      execute(input) {
+        toolExecutions += 1;
+        return Promise.resolve({
+          content: (input as { value: string }).value,
+          isError: false,
+        });
+      },
+    };
+    const root = await mountRuntime(provider, tool, undefined, {
       partial: initial,
     });
     const handle = await root.agents.create({
@@ -224,7 +256,10 @@ describe("AgentLoop", () => {
 
     expect(
       handle.agent.session.events.flatMap((event) =>
-        event.type === "assistant/chunk" ? [event.text] : [],
+        event.type === "assistant/chunk" &&
+        event.requestId === "partial-request"
+          ? [event.text]
+          : [],
       ),
     ).toEqual(["A", "B"]);
     expect(handle.agent.session.events).toContainEqual(
@@ -232,8 +267,31 @@ describe("AgentLoop", () => {
         type: "assistant/message",
         requestId: "partial-request",
         text: "AB",
+        toolCalls: [
+          {
+            id: "recovered-call",
+            name: "echo",
+            input: { value: "mixed" },
+          },
+        ],
       }),
     );
+    expect(toolExecutions).toBe(1);
+    expect(streamedFollowUp).toBe(1);
+    expect(
+      handle.agent.session.events.filter(
+        (event) =>
+          event.type === "tool/call" && event.call.id === "recovered-call",
+      ),
+    ).toHaveLength(1);
+    expect(
+      handle.agent.session.events.filter(
+        (event) =>
+          event.type === "tool/result" &&
+          event.callId === "recovered-call" &&
+          event.content === "mixed",
+      ),
+    ).toHaveLength(1);
   });
 
   test("fails closed when retrieval diverges from a durable partial stream", async () => {
@@ -307,6 +365,96 @@ describe("AgentLoop", () => {
       handle.agent.session.events.some(
         (event) =>
           event.type === "assistant/message" || event.type === "turn/end",
+      ),
+    ).toBe(false);
+  });
+
+  test("fails closed when a mixed recovered stream continues after finish", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "structural-request",
+          provider: "structural-provider",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/chunk",
+        turn: 1,
+        step: 1,
+        requestId: "structural-request",
+        text: "A",
+      },
+      {
+        type: "assistant/chunk",
+        turn: 1,
+        step: 1,
+        requestId: "structural-request",
+        text: "B",
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const provider: LlmProvider = {
+      id: "structural-provider",
+      async *stream() {
+        throw new Error("recovery must not dispatch another request");
+      },
+      reconciliation: {
+        retrieve: () =>
+          recovered(
+            { type: "text-delta", text: "A" },
+            {
+              type: "tool-call",
+              call: {
+                id: "invalid-call",
+                name: "echo",
+                input: { value: "mixed" },
+              },
+            },
+            { type: "finish", reason: "tool-calls" },
+            { type: "text-delta", text: "B" },
+          ),
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      structural: initial,
+    });
+    const handle = await root.agents.create({
+      botId: "structural-bot",
+      sessionId: "structural",
+      provider: "structural-provider",
+      model: "model-1",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.flatMap((event) =>
+        event.type === "assistant/chunk" ? [event.text] : [],
+      ),
+    ).toEqual(["A", "B"]);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "model/reconciliation-required",
+        requestId: "structural-request",
+        reason:
+          'Provider-bound retrieval returned an invalid event structure for request "structural-request"',
+      }),
+    );
+    expect(
+      handle.agent.session.events.some(
+        (event) =>
+          event.type === "assistant/message" || event.type === "tool/call",
       ),
     ).toBe(false);
   });

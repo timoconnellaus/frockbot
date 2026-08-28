@@ -661,20 +661,38 @@ class LoopAgent implements Agent {
         ? [{ type: "text-delta" as const, text: event.text }]
         : [],
     );
+    const recoveredTextDeltas = reconciliation.events.flatMap((event) =>
+      event.type === "text-delta" ? [event] : [],
+    );
     const prefixMatches = durablePrefix.every((event, index) => {
-      const recovered = reconciliation.events[index];
-      return recovered?.type === "text-delta" && recovered.text === event.text;
+      const recovered = recoveredTextDeltas[index];
+      return recovered?.text === event.text;
     });
-    if (!prefixMatches || reconciliation.events.length < durablePrefix.length) {
+    if (!prefixMatches || recoveredTextDeltas.length < durablePrefix.length) {
       return {
         status: "unavailable",
         reason: `Provider-bound retrieval diverged from durable response prefix for request "${request.requestId}"`,
       };
     }
+    const finishIndexes = reconciliation.events.flatMap((event, index) =>
+      event.type === "finish" ? [index] : [],
+    );
+    if (
+      finishIndexes.length !== 1 ||
+      finishIndexes[0] !== reconciliation.events.length - 1
+    ) {
+      return {
+        status: "unavailable",
+        reason: `Provider-bound retrieval returned an invalid event structure for request "${request.requestId}"`,
+      };
+    }
     let text = "";
     const toolCalls: ToolCall[] = [];
-    for (const [index, event] of reconciliation.events.entries()) {
+    let textDeltaIndex = 0;
+    for (const event of reconciliation.events) {
       signal.throwIfAborted();
+      const journalTextDelta =
+        event.type !== "text-delta" || textDeltaIndex >= durablePrefix.length;
       this.#applyStreamEvent(
         event,
         request.requestId,
@@ -684,8 +702,9 @@ class LoopAgent implements Agent {
         (delta) => {
           text += delta;
         },
-        index >= durablePrefix.length,
+        journalTextDelta,
       );
+      if (event.type === "text-delta") textDeltaIndex += 1;
     }
     return {
       status: "recovered",
