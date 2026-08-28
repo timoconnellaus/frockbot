@@ -522,7 +522,7 @@ describe("Connection provider reconciliation alarms", () => {
     expect(coordinatorReads).toBe(1);
   });
 
-  test("rejects ready when authorization expires during provider read", async () => {
+  test("accepts provider-confirmed ACTIVE when callback expires during read", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution(
       backendHost(storage),
@@ -603,12 +603,13 @@ describe("Connection provider reconciliation alarms", () => {
       }),
     );
 
-    await expect(retry).rejects.toThrow(
-      "Connection authorization changed during reconciliation",
-    );
+    await expect(retry).resolves.toEqual({
+      status: "ready",
+      connectionId: "link-command",
+    });
     expect(
       await contribution.getConnection("user-1", "link-command"),
-    ).toMatchObject({ state: "reconciliation-required" });
+    ).toMatchObject({ state: "ready" });
   });
 
   test("terminalizes recovered ACTIVE state before exposing its response", async () => {
@@ -950,7 +951,7 @@ describe("Connection provider reconciliation alarms", () => {
       safeMetadata: {
         providerAlias: "link-command",
         toolkitSlug: "gmail",
-        authorizationStateExpiresAt: Date.now() + 10 * 60_000,
+        authorizationStateExpiresAt: Date.now() - 1,
       },
     });
     await contribution.requireConnectionReconciliation(
@@ -990,7 +991,7 @@ describe("Connection provider reconciliation alarms", () => {
     expect(storage.alarmAt).toBeUndefined();
   });
 
-  test("expires a recorded Link through its durable alarm after eviction", async () => {
+  test("retires provider-absent expired Link through its durable alarm", async () => {
     const storage = new MemoryStorage();
     const admitted = createComposioUserBackendContribution(
       backendHost(storage),
@@ -1031,19 +1032,22 @@ describe("Connection provider reconciliation alarms", () => {
         },
       })),
     } satisfies UserSettingsViewV1);
+    let reads = 0;
     const recovered = createComposioUserBackendContribution(
-      backendHost(storage, () =>
-        Promise.reject(new Error("provider read was not expected")),
-      ),
+      backendHost(storage, () => {
+        reads += 1;
+        return Promise.resolve({ status: "absent" });
+      }),
     );
 
     await recovered.alarm();
 
+    expect(reads).toBe(1);
     expect(
       await recovered.getConnection("user-1", "link-command"),
     ).toMatchObject({
       state: "failed",
-      failure: "Connection authorization expired",
+      failure: "Connection authorization could not be recovered",
       safeMetadata: { authorizationStateConsumed: true },
     });
     expect(storage.alarmAt).toBeUndefined();
@@ -1142,7 +1146,7 @@ describe("Connection provider reconciliation alarms", () => {
     expect(storage.alarmAt).toBeUndefined();
   });
 
-  test("retires expired authorization before accepting an ACTIVE account", async () => {
+  test("accepts an ACTIVE account after callback authorization expires", async () => {
     const storage = new MemoryStorage();
     let reads = 0;
     const contribution = createComposioUserBackendContribution(
@@ -1180,13 +1184,17 @@ describe("Connection provider reconciliation alarms", () => {
 
     await contribution.alarm();
 
-    expect(reads).toBe(0);
+    expect(reads).toBe(1);
     expect(
       await contribution.getConnection("user-1", "link-command"),
     ).toMatchObject({
-      state: "failed",
-      failure: "Connection authorization expired",
+      state: "ready",
+      safeMetadata: {
+        connectedAccountId: "account-1",
+        authorizationStateConsumed: true,
+      },
     });
+    expect(storage.alarmAt).toBeUndefined();
   });
 
   test("dispatches a requested revocation after Link identity recovery", async () => {

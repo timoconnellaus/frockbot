@@ -9,7 +9,10 @@ import type {
   StartConnectionResult,
 } from "./backend-contracts.js";
 import { isSettledBotCompensation } from "./connection-recovery.js";
-import { reconcileComposioProviderConnection } from "./provider-reconciliation.js";
+import {
+  linkReconciliationDisposition,
+  reconcileComposioProviderConnection,
+} from "./provider-reconciliation.js";
 
 export interface ComposioConnectionStore {
   isPackageInstalled(userId: string, packageId: string): Promise<boolean>;
@@ -360,32 +363,14 @@ export class ComposioConnectionCoordinator {
         (!Number.isFinite(expiry) || expiry <= now);
       const revocationRequested =
         existing.safeMetadata.revocationRequested === true;
-      if (
-        existing?.state === "failed" ||
-        existing?.state === "revoked" ||
-        (!revocationRequested &&
-          (authorizationStateExpired || persistedLinkExpired))
-      ) {
-        if (
-          existing?.state === "authorizing" ||
-          (existing?.state === "reconciliation-required" &&
-            existing.safeMetadata.reconciliationOperation === "link")
-        ) {
-          await this.config.store.finishConnectionAuthorization(
-            userId,
-            connectionId,
-            {
-              state: "failed",
-              failure: "Connection authorization expired",
-            },
-          );
-        }
+      if (existing.state === "failed" || existing.state === "revoked") {
         throw new DefinitiveConnectionOperationError(
           "Connection authorization expired; retry with a new operation",
         );
       }
       if (
         existing?.state === "authorizing" &&
+        !authorizationStateExpired &&
         typeof redirectUrl === "string" &&
         typeof expiresAt === "string" &&
         Number.isFinite(expiry) &&
@@ -402,16 +387,39 @@ export class ComposioConnectionCoordinator {
               : undefined,
         };
       }
-      if (
-        existing?.state === "reconciliation-required" &&
-        existing.safeMetadata.reconciliationOperation === "link"
-      ) {
+      const providerAlias = existing.safeMetadata.providerAlias;
+      const linkReconciliationRequired =
+        (existing.state === "reconciliation-required" &&
+          existing.safeMetadata.reconciliationOperation === "link") ||
+        (existing.state === "authorizing" &&
+          (authorizationStateExpired || persistedLinkExpired) &&
+          typeof providerAlias === "string");
+      if (linkReconciliationRequired) {
+        if (typeof providerAlias !== "string") {
+          throw new Error("Connection command snapshot is invalid");
+        }
+        if (existing.state === "authorizing") {
+          const scheduled =
+            await this.config.store.requireConnectionReconciliation(
+              userId,
+              connectionId,
+              "link",
+              "Expired authorization requires provider reconciliation",
+            );
+          if (!scheduled) {
+            const replay = await this.replayStart(userId, input);
+            if (replay) return replay;
+            throw new Error(
+              "Connection authorization changed during reconciliation",
+            );
+          }
+        }
         const reconciliation = await reconcileComposioProviderConnection(
           this.config.client,
           {
             operation: "link",
             userId,
-            providerAlias: connectionId,
+            providerAlias,
             toolkitSlug: admittedToolkitSlug,
           },
         );
@@ -473,10 +481,10 @@ export class ComposioConnectionCoordinator {
             "Connection was revoked during authorization",
           );
         }
+        const disposition = linkReconciliationDisposition(reconciliation);
         if (
           !revocationRequested &&
-          (reconciliation.status === "failed" ||
-            reconciliation.status === "revoked")
+          disposition === "failed"
         ) {
           const finished =
             await this.config.store.finishConnectionAuthorization(
@@ -496,20 +504,22 @@ export class ComposioConnectionCoordinator {
             "Connection authorization failed; retry with a new operation",
           );
         }
-        if (reconciliation.status === "pending" && safeMetadata) {
-          const recorded =
-            await this.config.store.recordLinkReconciliationIdentity(
-              userId,
-              connectionId,
-              safeMetadata,
-            );
-          if (!recorded) {
-            throw new Error(
-              "Connection authorization changed during reconciliation",
-            );
+        if (disposition === "pending") {
+          if (safeMetadata) {
+            const recorded =
+              await this.config.store.recordLinkReconciliationIdentity(
+                userId,
+                connectionId,
+                safeMetadata,
+              );
+            if (!recorded) {
+              throw new Error(
+                "Connection authorization changed during reconciliation",
+              );
+            }
           }
         }
-        if (reconciliation.status === "active" && safeMetadata) {
+        if (disposition === "ready" && safeMetadata) {
           const finished =
             await this.config.store.finishConnectionAuthorization(
               userId,
@@ -539,6 +549,22 @@ export class ComposioConnectionCoordinator {
           }
           return replay;
         }
+      }
+      if (
+        !revocationRequested &&
+        (authorizationStateExpired || persistedLinkExpired)
+      ) {
+        await this.config.store.finishConnectionAuthorization(
+          userId,
+          connectionId,
+          {
+            state: "failed",
+            failure: "Connection authorization expired",
+          },
+        );
+        throw new DefinitiveConnectionOperationError(
+          "Connection authorization expired; retry with a new operation",
+        );
       }
       throw new Error("Connection authorization requires reconciliation");
     }

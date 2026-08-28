@@ -110,11 +110,7 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     const safeMetadata = update.safeMetadata ?? current.safeMetadata;
     const commandFingerprint = current.safeMetadata.startCommandFingerprint;
     if (update.state === "ready" && typeof commandFingerprint === "string") {
-      if (
-        typeof current.safeMetadata.authorizationStateExpiresAt !== "number" ||
-        current.safeMetadata.authorizationStateExpiresAt <= Date.now() ||
-        typeof safeMetadata.connectedAccountId !== "string"
-      ) {
+      if (typeof safeMetadata.connectedAccountId !== "string") {
         return Promise.resolve(false);
       }
       this.updateConnection(_userId, connectionId, {
@@ -780,7 +776,7 @@ describe("ComposioConnectionCoordinator", () => {
     expect(reads).toBe(2);
   });
 
-  test("retires a persisted Link whose callback state expired first", async () => {
+  test("reconciles a persisted Link whose callback state expired first", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
       connectionId: "connection-expired",
@@ -792,6 +788,7 @@ describe("ComposioConnectionCoordinator", () => {
       state: "authorizing",
       safeMetadata: {
         toolkitSlug: "gmail",
+        providerAlias: "connection-expired",
         redirectUrl: "https://connect.example/still-live",
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
         authorizationStateId: "expired-state",
@@ -807,10 +804,25 @@ describe("ComposioConnectionCoordinator", () => {
         })}`,
       },
     });
+    let providerReads = 0;
     const coordinator = new ComposioConnectionCoordinator({
       client: new ComposioClient({
         apiKey: "secret",
-        fetch: () => Promise.reject(new Error("provider not expected")),
+        fetch: () => {
+          providerReads += 1;
+          return Promise.resolve(
+            Response.json({
+              items: [
+                {
+                  id: "ca_expired",
+                  status: "ACTIVE",
+                  toolkit: { slug: "gmail" },
+                  alias: "connection-expired",
+                },
+              ],
+            }),
+          );
+        },
       }),
       store,
       callbackBaseUrl: "https://bot.frockbot.com",
@@ -828,10 +840,12 @@ describe("ComposioConnectionCoordinator", () => {
         commandId: "connection-expired",
         connectionTypeId: "gmail",
       }),
-    ).rejects.toMatchObject({
-      name: "DefinitiveConnectionOperationError",
+    ).resolves.toEqual({
+      status: "ready",
+      connectionId: "connection-expired",
     });
-    expect(store.connections.get("connection-expired")?.state).toBe("failed");
+    expect(providerReads).toBe(1);
+    expect(store.connections.get("connection-expired")?.state).toBe("ready");
   });
 
   test("routes recovered Link identity into a requested revocation", async () => {

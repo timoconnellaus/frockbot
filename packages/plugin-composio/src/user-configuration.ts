@@ -19,9 +19,10 @@ import {
   expireAssignmentLease,
   isSettledBotCompensation,
 } from "./connection-recovery.js";
-import type {
-  ComposioProviderReconciliationRequest,
-  ComposioProviderReconciliationResult,
+import {
+  linkReconciliationDisposition,
+  type ComposioProviderReconciliationRequest,
+  type ComposioProviderReconciliationResult,
 } from "./provider-reconciliation.js";
 
 const STATE_KEY = "user-configuration";
@@ -58,11 +59,7 @@ function readyAuthorizationMetadata(
   const connectedAccountId = safeMetadata.connectedAccountId;
   const admittedConnectedAccountId =
     connection.safeMetadata.connectedAccountId;
-  const authorizationStateExpiresAt =
-    connection.safeMetadata.authorizationStateExpiresAt;
   if (
-    typeof authorizationStateExpiresAt !== "number" ||
-    authorizationStateExpiresAt <= Date.now() ||
     typeof connectedAccountId !== "string" ||
     (typeof admittedConnectedAccountId === "string" &&
       admittedConnectedAccountId !== connectedAccountId)
@@ -166,9 +163,7 @@ function nextConnectionAlarm(settings: UserSettingsViewV1): number | undefined {
     }
     if (
       metadata.revocationRequested !== true &&
-      (connection.state === "authorizing" ||
-        (connection.state === "reconciliation-required" &&
-          metadata.reconciliationOperation === "link"))
+      connection.state === "authorizing"
     ) {
       if (typeof metadata.authorizationStateExpiresAt === "number") {
         values.push(metadata.authorizationStateExpiresAt);
@@ -1279,20 +1274,39 @@ export class ComposioUserBackendContribution {
         }
 
         if (connectionAuthorizationExpired(next, now)) {
-          const {
-            effectDeadlineAt: _,
-            reconciliationRetryAt: __,
-            ...safeMetadata
-          } = next.safeMetadata;
-          next = {
-            ...next,
-            state: "failed",
-            safeMetadata: {
-              ...safeMetadata,
-              authorizationStateConsumed: true,
-            },
-            failure: "Connection authorization expired",
-          };
+          const providerAlias = next.safeMetadata.providerAlias;
+          const toolkitSlug = next.safeMetadata.toolkitSlug;
+          if (
+            typeof providerAlias === "string" &&
+            typeof toolkitSlug === "string"
+          ) {
+            const { effectDeadlineAt: _, ...safeMetadata } = next.safeMetadata;
+            next = {
+              ...next,
+              state: "reconciliation-required",
+              safeMetadata: {
+                ...safeMetadata,
+                reconciliationOperation: "link",
+                reconciliationRetryAt: now,
+              },
+              failure: "Expired authorization requires provider reconciliation",
+            };
+          } else {
+            const {
+              effectDeadlineAt: _,
+              reconciliationRetryAt: __,
+              ...safeMetadata
+            } = next.safeMetadata;
+            next = {
+              ...next,
+              state: "failed",
+              safeMetadata: {
+                ...safeMetadata,
+                authorizationStateConsumed: true,
+              },
+              failure: "Connection authorization expired",
+            };
+          }
           changed = true;
         }
 
@@ -1420,27 +1434,6 @@ export class ComposioUserBackendContribution {
         if (reconciliation.operation === "link") {
           const providerAlias = connection.safeMetadata.providerAlias;
           const toolkitSlug = connection.safeMetadata.toolkitSlug;
-          const authorizationStateExpiresAt =
-            connection.safeMetadata.authorizationStateExpiresAt;
-          if (
-            connection.safeMetadata.revocationRequested !== true &&
-            (typeof authorizationStateExpiresAt !== "number" ||
-              authorizationStateExpiresAt <= Date.now())
-          ) {
-            await this.finishConnectionAuthorization(
-              userId,
-              connection.connectionId,
-              {
-                state: "failed",
-                safeMetadata: {
-                  ...connection.safeMetadata,
-                  authorizationStateConsumed: true,
-                },
-                failure: "Connection authorization expired",
-              },
-            );
-            continue;
-          }
           if (
             typeof providerAlias !== "string" ||
             typeof toolkitSlug !== "string"
@@ -1523,9 +1516,10 @@ export class ComposioUserBackendContribution {
             }
             continue;
           }
+          const disposition = linkReconciliationDisposition(result);
           if (
             connection.safeMetadata.revocationRequested !== true &&
-            (result.status === "failed" || result.status === "revoked")
+            disposition === "failed"
           ) {
             await this.finishConnectionAuthorization(
               userId,
@@ -1541,15 +1535,17 @@ export class ComposioUserBackendContribution {
             );
             continue;
           }
-          if (!safeMetadata) continue;
-          if (result.status === "pending") {
-            await this.recordLinkReconciliationIdentity(
-              userId,
-              connection.connectionId,
-              safeMetadata,
-            );
+          if (disposition === "pending") {
+            if (safeMetadata) {
+              await this.recordLinkReconciliationIdentity(
+                userId,
+                connection.connectionId,
+                safeMetadata,
+              );
+            }
             continue;
           }
+          if (!safeMetadata) continue;
           await this.finishConnectionAuthorization(
             userId,
             connection.connectionId,

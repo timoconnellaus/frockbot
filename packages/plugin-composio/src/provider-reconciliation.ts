@@ -24,6 +24,14 @@ export type ComposioProviderReconciliationResult =
   | { status: "absent" }
   | { status: "pending"; account?: ConnectedAccountSummary };
 
+export function linkReconciliationDisposition(
+  result: ComposioProviderReconciliationResult,
+): "ready" | "pending" | "failed" {
+  if (result.status === "active") return "ready";
+  if (result.status === "pending") return "pending";
+  return "failed";
+}
+
 export async function reconcileComposioProviderConnection(
   client: ComposioClient,
   request: ComposioProviderReconciliationRequest,
