@@ -212,7 +212,11 @@
     justify-content: center;
     color: var(--ink);
   }
+  .svg-sprite {
+    display: none;
+  }
   .github-logo-link svg {
+    flex: none;
     width: 22px;
     height: 22px;
     fill: currentColor;
@@ -1073,6 +1077,12 @@
     }
     .site-nav > a {
       padding: 12px;
+    }
+    .site-nav > a.github-logo-link {
+      width: 100%;
+      height: auto;
+      min-height: 44px;
+      border-radius: 14px;
     }
     .site-nav .button {
       margin-top: 4px;

@@ -69,6 +69,85 @@ function parseStyleRules(source: string): StyleRule[] {
   return rules;
 }
 
+type RepositoryLink = {
+  href: string;
+  ariaLabel: string;
+  text: string;
+  marks: { ariaHidden: string; symbol: string }[];
+};
+
+const REPOSITORY_ANCHOR = 'a[href^="https://github.com/"]';
+
+async function drain(rewriter: HTMLRewriter, html: string) {
+  await rewriter.transform(new Response(html)).text();
+}
+
+async function repositoryLinks(html: string, container: string) {
+  const links: RepositoryLink[] = [];
+  const current = () => links[links.length - 1];
+
+  await drain(
+    new HTMLRewriter()
+      .on(`${container} ${REPOSITORY_ANCHOR}`, {
+        element(element) {
+          links.push({
+            href: element.getAttribute("href") ?? "",
+            ariaLabel: element.getAttribute("aria-label") ?? "",
+            text: "",
+            marks: [],
+          });
+        },
+        text(chunk) {
+          current().text += chunk.text;
+        },
+      })
+      .on(`${container} ${REPOSITORY_ANCHOR} svg`, {
+        element(element) {
+          current().marks.push({
+            ariaHidden: element.getAttribute("aria-hidden") ?? "",
+            symbol: "",
+          });
+        },
+      })
+      .on(`${container} ${REPOSITORY_ANCHOR} use`, {
+        element(element) {
+          const marks = current().marks;
+          marks[marks.length - 1].symbol = element.getAttribute("href") ?? "";
+        },
+      }),
+    html,
+  );
+
+  return links;
+}
+
+async function spriteSymbols(html: string) {
+  const symbols: { id: string; viewBox: string; paths: string[] }[] = [];
+
+  await drain(
+    new HTMLRewriter()
+      .on("symbol", {
+        element(element) {
+          symbols.push({
+            id: element.getAttribute("id") ?? "",
+            viewBox: element.getAttribute("viewbox") ?? "",
+            paths: [],
+          });
+        },
+      })
+      .on("symbol path", {
+        element(element) {
+          symbols[symbols.length - 1].paths.push(
+            element.getAttribute("d") ?? "",
+          );
+        },
+      }),
+    html,
+  );
+
+  return symbols;
+}
+
 describe("marketing worker", () => {
   test("redirects www to the apex domain and preserves the request target", async () => {
     const request = new Request("http://www.frockbot.com/features?from=nav");
@@ -154,13 +233,36 @@ describe("legal policy pages", () => {
     expect(homepage).toContain('href="/terms/"');
   });
 
-  test("uses accessible GitHub logo links in the header and footer", async () => {
-    const homepage = await publicFile("index.html");
-    expect(homepage.match(/class="github-logo-link"/g)).toHaveLength(2);
-    expect(
-      homepage.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g),
-    ).toHaveLength(2);
-    expect(homepage).not.toContain(">GitHub ↗<");
+  test.each([
+    ["header", ".site-header"],
+    ["footer", ".footer"],
+  ])(
+    "the %s links to the repository with a labelled, decorative GitHub mark",
+    async (_region: string, container: string) => {
+      const homepage = await publicFile("index.html");
+      const links = await repositoryLinks(homepage, container);
+
+      expect(links).toHaveLength(1);
+      const [link] = links;
+      expect(link.href).toBe("https://github.com/timoconnellaus/frockbot");
+      expect(link.ariaLabel).toBe("FrockBot source code on GitHub");
+      expect(link.text.trim()).toBe("");
+      expect(link.marks).toEqual([
+        { ariaHidden: "true", symbol: "#github-mark" },
+      ]);
+    },
+  );
+
+  test("the referenced GitHub symbol is defined once with real artwork", async () => {
+    const symbols = await spriteSymbols(await publicFile("index.html"));
+
+    expect(symbols).toHaveLength(1);
+    const [symbol] = symbols;
+    expect(symbol.id).toBe("github-mark");
+    expect(symbol.viewBox).toBe("0 0 24 24");
+    expect(symbol.paths).toHaveLength(1);
+    expect(symbol.paths[0].startsWith("M12 ")).toBe(true);
+    expect(symbol.paths[0].length).toBeGreaterThan(100);
   });
 
   test.each(["index.html", "privacy/index.html", "terms/index.html"])(
