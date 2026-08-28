@@ -159,12 +159,16 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const file = 'wrangler.jsonc';
-          const placeholder = '00000000-0000-0000-0000-000000000000';
-          const source = fs.readFileSync(file, 'utf8');
-          if (!source.includes(placeholder)) {
-            throw new Error(`${file} no longer contains the placeholder database_id ${placeholder}`);
+          const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+          if (!/^[0-9a-fA-F-]{36}$/.test(databaseId)) {
+            throw new Error(`CLOUDFLARE_D1_DATABASE_ID is not a database identifier: ${databaseId}`);
           }
-          fs.writeFileSync(file, source.replaceAll(placeholder, process.env.CLOUDFLARE_D1_DATABASE_ID));
+          const production = /("database_name":\s*"frockbot-auth",\s*"database_id":\s*")[^"]*(")/;
+          const source = fs.readFileSync(file, 'utf8');
+          if (!production.test(source)) {
+            throw new Error(`${file} no longer contains a production frockbot-auth database_id`);
+          }
+          fs.writeFileSync(file, source.replace(production, `$1${databaseId}$2`));
           NODE
 
       - name: Build application artifact
