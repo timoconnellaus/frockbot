@@ -32,7 +32,11 @@ import {
   BotTurnReconciliationRequiredError,
   executeBotTurn,
 } from "./backend-runner.js";
-import { eventsForFailedRun, planBotRunRecovery } from "./backend-recovery.js";
+import {
+  eventsForFailedRun,
+  latestModelRequestJournalState,
+  planBotRunRecovery,
+} from "./backend-recovery.js";
 import type {
   BotNotificationIntent,
   BotTurnCommand,
@@ -724,12 +728,18 @@ export class ShellBotBackendContribution {
       const events = eventsForFailedRun(durableRun, error);
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
-      if (error instanceof BotTurnReconciliationRequiredError) {
+      const modelState = latestModelRequestJournalState(events);
+      if (
+        error instanceof BotTurnReconciliationRequiredError ||
+        modelState.status === "unresolved"
+      ) {
         await this.requireRunReconciliation(
           command.runId,
           previous,
           events,
-          message,
+          modelState.status === "unresolved"
+            ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
+            : message,
         );
         throw new Error(message);
       }
@@ -799,12 +809,18 @@ export class ShellBotBackendContribution {
       const events = durableRun?.events ?? run.events;
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
-      if (error instanceof BotTurnReconciliationRequiredError) {
+      const modelState = latestModelRequestJournalState(events);
+      if (
+        error instanceof BotTurnReconciliationRequiredError ||
+        modelState.status === "unresolved"
+      ) {
         await this.requireRunReconciliation(
           run.runId,
           previous,
           events,
-          message,
+          modelState.status === "unresolved"
+            ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
+            : message,
         );
         throw new Error(message);
       }
@@ -1405,7 +1421,23 @@ export class ShellBotBackendContribution {
           [LATEST_EVENTS_KEY]: plan.previous,
         });
         await this.refreshRecoveryAlarm(transaction);
-        return { run, previous: plan.previous, settings };
+        return {
+          kind: "restart" as const,
+          run,
+          previous: plan.previous,
+          settings,
+        };
+      }
+      if (plan.kind === "resume") {
+        const settings =
+          run.configurationSnapshot ??
+          this.initialBotSettings(durableIdentity?.botId ?? "default");
+        await transaction.put(key, {
+          ...run,
+          phase: "executing",
+        } satisfies StoredRun);
+        await this.refreshRecoveryAlarm(transaction);
+        return { kind: "resume" as const, run, latest, settings };
       }
       await transaction.put({
         [key]: {
@@ -1423,6 +1455,15 @@ export class ShellBotBackendContribution {
     });
     if (!recovery) return;
     if (!durableIdentity) throw new Error("Bot identity is unavailable");
+    if (recovery.kind === "resume") {
+      await this.executeResumedRun(
+        durableIdentity,
+        recovery.run,
+        recovery.latest,
+        recovery.settings,
+      );
+      return;
+    }
     await this.executeAcceptedRun(
       {
         userId: durableIdentity.userId,

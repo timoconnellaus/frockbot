@@ -3,9 +3,11 @@ import type { SessionEvent } from "@frockbot/agent-core";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import { createShellBotBackendContribution } from "./backend.js";
 import type { StoredRun } from "./backend-contracts.js";
+import { planBotRunRecovery } from "./backend-recovery.js";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
+  alarmAt: number | undefined;
 
   get<T>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.values.get(key) as T | undefined);
@@ -39,16 +41,18 @@ class MemoryStorage {
     return callback(this);
   }
 
-  setAlarm(): Promise<void> {
+  setAlarm(scheduledTime: number): Promise<void> {
+    this.alarmAt = scheduledTime;
     return Promise.resolve();
   }
 
   deleteAlarm(): Promise<void> {
+    this.alarmAt = undefined;
     return Promise.resolve();
   }
 }
 
-describe("Bot recovered completion", () => {
+describe("Bot recovery", () => {
   test("atomically restores the admitted notification intent after eviction", async () => {
     const storage = new MemoryStorage();
     const admittedSettings = {
@@ -126,5 +130,111 @@ describe("Bot recovered completion", () => {
     });
     await recoveredAgain.listRuns();
     expect(await recoveredAgain.listNotifications()).toEqual(notifications);
+  });
+
+  test("keeps an unresolved durable request scheduled when its marker was lost", async () => {
+    const storage = new MemoryStorage();
+    const settings = initializeBotSettingsV1("primary");
+    const events = [
+      {
+        type: "turn/start" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "step/start" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+      },
+      {
+        type: "model/request" as const,
+        seq: 2,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "request-with-lost-marker",
+          provider: "provider-1",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+    ] satisfies SessionEvent[];
+    const run = {
+      runId: "run-lost-marker",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "hello",
+      events,
+      status: "running",
+      phase: "executing",
+      configurationSnapshot: settings,
+      previousEventCount: 0,
+    } satisfies StoredRun;
+    await storage.put({
+      "active-run": run.runId,
+      "run:run-lost-marker": run,
+      "latest-events": events,
+    });
+    const recovered = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(recovered.listRuns()).resolves.toEqual([
+      expect.objectContaining({
+        runId: "run-lost-marker",
+        status: "reconciliation-required",
+        phase: "reconciliation-required",
+      }),
+    ]);
+    expect(storage.values.get("active-run")).toBe("run-lost-marker");
+    expect(typeof storage.alarmAt).toBe("number");
+  });
+
+  test("resumes a request whose durable journal proves no effect started", () => {
+    const events = [
+      {
+        type: "model/request" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "request-with-no-effect",
+          provider: "provider-1",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "model/effect-not-started" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        requestId: "request-with-no-effect",
+        reason: "provider rejected before dispatch",
+      },
+    ] satisfies SessionEvent[];
+    const run = {
+      runId: "run-no-effect",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "hello",
+      events,
+      status: "running",
+      phase: "executing",
+      previousEventCount: 0,
+    } satisfies StoredRun;
+
+    expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
   });
 });

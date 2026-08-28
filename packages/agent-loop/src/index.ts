@@ -185,11 +185,14 @@ class LoopAgent implements Agent {
     let openTurn: number | undefined;
     let latestStep = 0;
     let unresolvedRequest: NormalizedModelRequest | undefined;
+    let definitiveNoEffect:
+      Extract<SessionEvent, { type: "model/effect-not-started" }> | undefined;
     for (const event of this.session.events) {
       if (event.type === "turn/start") {
         openTurn = event.turn;
         latestStep = 0;
         unresolvedRequest = undefined;
+        definitiveNoEffect = undefined;
       }
       if (event.type === "turn/end" && event.turn === openTurn)
         openTurn = undefined;
@@ -198,12 +201,20 @@ class LoopAgent implements Agent {
       }
       if (event.type === "model/request" && event.turn === openTurn) {
         unresolvedRequest = event.request;
+        definitiveNoEffect = undefined;
+      }
+      if (
+        event.type === "model/effect-not-started" &&
+        event.requestId === unresolvedRequest?.requestId
+      ) {
+        definitiveNoEffect = event;
       }
       if (
         event.type === "assistant/message" &&
         event.requestId === unresolvedRequest?.requestId
       ) {
         unresolvedRequest = undefined;
+        definitiveNoEffect = undefined;
       }
     }
     if (openTurn === undefined)
@@ -244,6 +255,15 @@ class LoopAgent implements Agent {
       let nextStep = latestStep + 1;
       if (unresolvedRequest) {
         openStep = latestStep;
+        if (definitiveNoEffect) {
+          turnOutcome = "model-error";
+          this.#ctx.emit(
+            "agent/error",
+            this,
+            new LlmEffectNotStartedError(definitiveNoEffect.reason),
+          );
+          return;
+        }
         const reconciliation = await this.#reconcileModel(
           unresolvedRequest,
           openTurn,
@@ -570,6 +590,14 @@ class LoopAgent implements Agent {
             reason,
           );
         }
+        this.session.append({
+          type: "model/effect-not-started",
+          turn,
+          step,
+          requestId: request.requestId,
+          reason: modelFailureMessage(error),
+        });
+        await this.session.flush();
         const action = await this.#ctx.waterfall(
           "agent/request-error",
           this,
@@ -590,18 +618,29 @@ class LoopAgent implements Agent {
   ): Promise<ModelResponse> {
     let text = "";
     const toolCalls: ToolCall[] = [];
-    for await (const event of this.#ctx.llm.stream(request, signal)) {
-      signal.throwIfAborted();
-      this.#applyStreamEvent(
-        event,
-        request.requestId,
-        turn,
-        step,
-        toolCalls,
-        (delta) => {
-          text += delta;
-        },
-      );
+    let receivedProviderEvent = false;
+    try {
+      for await (const event of this.#ctx.llm.stream(request, signal)) {
+        receivedProviderEvent = true;
+        signal.throwIfAborted();
+        this.#applyStreamEvent(
+          event,
+          request.requestId,
+          turn,
+          step,
+          toolCalls,
+          (delta) => {
+            text += delta;
+          },
+        );
+      }
+    } catch (error) {
+      if (receivedProviderEvent && error instanceof LlmEffectNotStartedError) {
+        throw new Error(
+          "Model provider reported no effect after returning response data",
+        );
+      }
+      throw error;
     }
     return { request, text, toolCalls };
   }
@@ -614,9 +653,27 @@ class LoopAgent implements Agent {
   ): Promise<ModelReconciliation> {
     const reconciliation = await this.#ctx.llm.reconcile(request, signal);
     if (reconciliation.status === "unavailable") return reconciliation;
+    const durablePrefix = this.session.events.flatMap((event) =>
+      event.type === "assistant/chunk" &&
+      event.turn === turn &&
+      event.step === step &&
+      event.requestId === request.requestId
+        ? [{ type: "text-delta" as const, text: event.text }]
+        : [],
+    );
+    const prefixMatches = durablePrefix.every((event, index) => {
+      const recovered = reconciliation.events[index];
+      return recovered?.type === "text-delta" && recovered.text === event.text;
+    });
+    if (!prefixMatches || reconciliation.events.length < durablePrefix.length) {
+      return {
+        status: "unavailable",
+        reason: `Provider-bound retrieval diverged from durable response prefix for request "${request.requestId}"`,
+      };
+    }
     let text = "";
     const toolCalls: ToolCall[] = [];
-    for (const event of reconciliation.events) {
+    for (const [index, event] of reconciliation.events.entries()) {
       signal.throwIfAborted();
       this.#applyStreamEvent(
         event,
@@ -627,6 +684,7 @@ class LoopAgent implements Agent {
         (delta) => {
           text += delta;
         },
+        index >= durablePrefix.length,
       );
     }
     return {
@@ -642,16 +700,19 @@ class LoopAgent implements Agent {
     step: number,
     toolCalls: ToolCall[],
     appendText: (text: string) => void,
+    journal = true,
   ): void {
     if (event.type === "text-delta") {
       appendText(event.text);
-      this.session.append({
-        type: "assistant/chunk",
-        turn,
-        step,
-        requestId,
-        text: event.text,
-      });
+      if (journal) {
+        this.session.append({
+          type: "assistant/chunk",
+          turn,
+          step,
+          requestId,
+          text: event.text,
+        });
+      }
     } else if (event.type === "tool-call") {
       toolCalls.push(event.call);
     }

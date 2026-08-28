@@ -168,6 +168,149 @@ describe("AgentLoop", () => {
     });
   });
 
+  test("reconciles only the unseen suffix of a durable partial stream", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "partial-request",
+          provider: "partial-provider",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/chunk",
+        turn: 1,
+        step: 1,
+        requestId: "partial-request",
+        text: "A",
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const provider: LlmProvider = {
+      id: "partial-provider",
+      async *stream() {
+        throw new Error("recovery must not dispatch another request");
+      },
+      reconciliation: {
+        retrieve: () =>
+          recovered(
+            { type: "text-delta", text: "A" },
+            { type: "text-delta", text: "B" },
+            { type: "finish", reason: "completed" },
+          ),
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      partial: initial,
+    });
+    const handle = await root.agents.create({
+      botId: "partial-bot",
+      sessionId: "partial",
+      provider: "partial-provider",
+      model: "model-1",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.flatMap((event) =>
+        event.type === "assistant/chunk" ? [event.text] : [],
+      ),
+    ).toEqual(["A", "B"]);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "assistant/message",
+        requestId: "partial-request",
+        text: "AB",
+      }),
+    );
+  });
+
+  test("fails closed when retrieval diverges from a durable partial stream", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "divergent-request",
+          provider: "divergent-provider",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/chunk",
+        turn: 1,
+        step: 1,
+        requestId: "divergent-request",
+        text: "A",
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const provider: LlmProvider = {
+      id: "divergent-provider",
+      async *stream() {
+        throw new Error("recovery must not dispatch another request");
+      },
+      reconciliation: {
+        retrieve: () =>
+          recovered(
+            { type: "text-delta", text: "X" },
+            { type: "text-delta", text: "B" },
+            { type: "finish", reason: "completed" },
+          ),
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      divergent: initial,
+    });
+    const handle = await root.agents.create({
+      botId: "divergent-bot",
+      sessionId: "divergent",
+      provider: "divergent-provider",
+      model: "model-1",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.flatMap((event) =>
+        event.type === "assistant/chunk" ? [event.text] : [],
+      ),
+    ).toEqual(["A"]);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "model/reconciliation-required",
+        requestId: "divergent-request",
+        reason:
+          'Provider-bound retrieval diverged from durable response prefix for request "divergent-request"',
+      }),
+    );
+    expect(
+      handle.agent.session.events.some(
+        (event) =>
+          event.type === "assistant/message" || event.type === "turn/end",
+      ),
+    ).toBe(false);
+  });
+
   test("keeps an unretrievable provider effect open without repeating it", async () => {
     let streams = 0;
     const provider: LlmProvider = {
@@ -322,6 +465,8 @@ describe("AgentLoop", () => {
   });
 
   test("terminally fails only an explicitly unstarted model effect", async () => {
+    const durableEventTypes: string[] = [];
+    let retryPolicySawDurableNoEffect = false;
     const provider: LlmProvider = {
       id: "pre-effect-failure",
       async *stream() {
@@ -330,7 +475,20 @@ describe("AgentLoop", () => {
         );
       },
     };
-    const root = await mountRuntime(provider);
+    const root = await mountRuntime(
+      provider,
+      undefined,
+      (_sessionId, events) => {
+        durableEventTypes.push(...events.map((event) => event.type));
+        return Promise.resolve();
+      },
+    );
+    root.on("agent/request-error", async (_agent, _error, _signal, next) => {
+      retryPolicySawDurableNoEffect = durableEventTypes.includes(
+        "model/effect-not-started",
+      );
+      return next();
+    });
     const handle = await root.agents.create({
       botId: "bot-pre-effect-failure",
       sessionId: "pre-effect-failure",
@@ -346,6 +504,80 @@ describe("AgentLoop", () => {
         (event) => event.type === "model/reconciliation-required",
       ),
     ).toBe(false);
+    expect(durableEventTypes.indexOf("model/request")).toBeLessThan(
+      durableEventTypes.indexOf("model/effect-not-started"),
+    );
+    expect(durableEventTypes.indexOf("model/effect-not-started")).toBeLessThan(
+      durableEventTypes.indexOf("turn/end"),
+    );
+    expect(retryPolicySawDurableNoEffect).toBe(true);
+    expect(handle.agent.session.events.at(-2)).toMatchObject({
+      type: "step/end",
+      outcome: "model-error",
+    });
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "model-error",
+    });
+  });
+
+  test("recovers a durable no-effect outcome without provider reconciliation", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "no-effect-request",
+          provider: "no-effect-provider",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "model/effect-not-started",
+        turn: 1,
+        step: 1,
+        requestId: "no-effect-request",
+        reason: "provider rejected before dispatch",
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    let streams = 0;
+    let retrievals = 0;
+    const provider: LlmProvider = {
+      id: "no-effect-provider",
+      async *stream() {
+        streams += 1;
+        yield { type: "finish", reason: "completed" };
+      },
+      reconciliation: {
+        retrieve: () => {
+          retrievals += 1;
+          return recovered({ type: "finish", reason: "completed" });
+        },
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      "no-effect": initial,
+    });
+    const handle = await root.agents.create({
+      botId: "no-effect-bot",
+      sessionId: "no-effect",
+      provider: "no-effect-provider",
+      model: "model-1",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(streams).toBe(0);
+    expect(retrievals).toBe(0);
     expect(handle.agent.session.events.at(-2)).toMatchObject({
       type: "step/end",
       outcome: "model-error",

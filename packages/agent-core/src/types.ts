@@ -63,6 +63,12 @@ export interface SessionEventMap {
     step: number;
     request: NormalizedModelRequest;
   };
+  "model/effect-not-started": {
+    turn: number;
+    step: number;
+    requestId: string;
+    reason: string;
+  };
   "model/reconciliation-required": {
     turn: number;
     step: number;
