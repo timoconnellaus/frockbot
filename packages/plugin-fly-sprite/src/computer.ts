@@ -1,29 +1,34 @@
 import { createHash, randomUUID } from "node:crypto";
 import { APIError, SpritesClient } from "@fly/sprites";
+import { ComputerError } from "@frockbot/computer-core";
 
 const DESKTOP_SERVICE = "frockbot-viewer-gateway";
 const HOME_ROOT = "/home/box";
 const DATA_ROOT = `${HOME_ROOT}/agent-data`;
 const RUNTIME_ROOT = `${HOME_ROOT}/.frockbot`;
 const BOTS_ROOT = `${RUNTIME_ROOT}/bots`;
-const WORKSPACE_ROOT = "/workspace";
+const WORKSPACES_ROOT = "/workspaces";
 const CONTROL_SCRIPT = `${RUNTIME_ROOT}/control.sh`;
 const ENSURE_AGENT_SCRIPT = `${RUNTIME_ROOT}/ensure-agent.sh`;
 const MAX_OUTPUT = 30_000;
+const MAX_STORAGE_OUTPUT = 500_000;
+const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 const LEASE_MAX_AGE_SECONDS = 90;
 
-export interface ComputerAgentIdentity {
+export interface ComputerBotIdentity {
   id: string;
   name?: string;
   description?: string;
 }
 
+/** @deprecated Use ComputerBotIdentity. */
+export type ComputerAgentIdentity = ComputerBotIdentity;
+
 interface AgentLayout {
-  identity: ComputerAgentIdentity;
+  identity: ComputerBotIdentity;
   key: string;
   runtimeDir: string;
-  dataDir: string;
-  transcriptDir: string;
+  workspaceDir: string;
   profileJson: string;
 }
 
@@ -59,25 +64,13 @@ ROOT=${RUNTIME_ROOT}
 BOT="$ROOT/bots/$KEY"
 DATA=${DATA_ROOT}
 AGENT_DATA="$DATA/agents/$KEY"
-TRANSCRIPTS="$DATA/agent-transcripts/$KEY"
+WORKSPACE=${WORKSPACES_ROOT}/$KEY
 case "$KEY" in (*[!a-z0-9-]*|'') echo "invalid agent key" >&2; exit 64;; esac
-mkdir -p "$BOT" "$AGENT_DATA/memory/log" "$AGENT_DATA/automations" "$AGENT_DATA/skills" "$TRANSCRIPTS" "$DATA/user-memory" "${HOME_ROOT}/bin" "${HOME_ROOT}/reference" "${HOME_ROOT}/chrome-profiles/$KEY" ${WORKSPACE_ROOT}
+mkdir -p "$BOT" "$AGENT_DATA" "$WORKSPACE" "${HOME_ROOT}/bin" "${HOME_ROOT}/reference" "${HOME_ROOT}/chrome-profiles/$KEY"
 PROFILE_TMP=$(mktemp "$AGENT_DATA/profile.json.XXXXXX")
 printf '%s' "$PROFILE_BASE64" | base64 -d > "$PROFILE_TMP"
 chmod 600 "$PROFILE_TMP"
 mv "$PROFILE_TMP" "$AGENT_DATA/profile.json"
-if [ ! -e "$AGENT_DATA/memory/profile.md" ]; then
-  printf '# Standing memory\n\n' > "$AGENT_DATA/memory/profile.md"
-fi
-if [ ! -e "$DATA/user-memory/profile.md" ]; then
-  printf '# Shared user memory\n\n' > "$DATA/user-memory/profile.md"
-fi
-if [ ! -e "$AGENT_DATA/automations/README.md" ]; then
-  printf '# Automations\n\nThis directory is durable, but files are not executed until an automation runtime is installed.\n' > "$AGENT_DATA/automations/README.md"
-fi
-if [ ! -e "$AGENT_DATA/skills/README.md" ]; then
-  printf '# Skills\n\nDurable skill files for this agent.\n' > "$AGENT_DATA/skills/README.md"
-fi
 exec 9>"$ROOT/registry.lock"
 flock -x 9
 if [ ! -s "$BOT/slot" ]; then
@@ -197,7 +190,7 @@ function installFile(path: string, content: string): string {
 }
 
 const provisionScript = `set -eu
-mkdir -p ${RUNTIME_ROOT} ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/agent-transcripts ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profiles ${WORKSPACE_ROOT}
+mkdir -p ${RUNTIME_ROOT} ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-packages ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profiles ${WORKSPACES_ROOT}
 if ! command -v Xvfb >/dev/null || ! command -v chromium >/dev/null || ! command -v websockify >/dev/null; then
   if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
   $SUDO apt-get update >/tmp/frockbot-provision.log 2>&1
@@ -218,8 +211,8 @@ fi
 cat > ${HOME_ROOT}/reference/README.md <<'EOF'
 # FrockBot computer
 
-/home/box/agent-data is durable application data. /workspace is shared scratch space.
-Each agent has bot-scoped memory, automations, skills, browser profile, desktop, and takeover lease.
+/home/box/agent-data is durable application data. /workspaces contains Bot-private workspaces.
+Each Bot has a workspace, browser profile, desktop, and takeover lease.
 Automations are stored but are not executed unless an automation runtime is installed.
 EOF
 `;
@@ -227,6 +220,13 @@ EOF
 export interface SpriteExecResult {
   stdout: string | Buffer;
   stderr: string | Buffer;
+}
+
+export interface SpriteAgentExecResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  outputTruncated: boolean;
 }
 
 export interface SpriteServiceStream extends AsyncIterable<unknown> {}
@@ -279,7 +279,11 @@ export interface BrowserAction {
 }
 
 export interface ComputerConnection {
+  botId: string;
+  botKey: string;
+  /** @deprecated Use botId. */
   agentId: string;
+  /** @deprecated Use botKey. */
   agentKey: string;
   spriteName: string;
   viewerUrl: string;
@@ -299,13 +303,28 @@ function configuredName(): string {
   return name;
 }
 
+export function flySpriteNameForBot(
+  botId: string,
+  baseName = configuredName(),
+): string {
+  const normalizedBase = baseName.trim();
+  if (!/^[a-z][a-z0-9-]{2,62}$/.test(normalizedBase)) {
+    throw new Error(
+      "Fly Sprite base name must be 3-63 lowercase letters, numbers, or hyphens",
+    );
+  }
+  const suffix = createHash("sha256").update(botId).digest("hex").slice(0, 12);
+  const prefix = normalizedBase.slice(0, 49).replace(/-+$/g, "");
+  return `${prefix}-${suffix}`;
+}
+
 function normalizedIdentity(
-  input: string | ComputerAgentIdentity,
-): ComputerAgentIdentity {
+  input: string | ComputerBotIdentity,
+): ComputerBotIdentity {
   const identity = typeof input === "string" ? { id: input } : input;
   const id = identity.id.trim();
   if (!id || id.length > 200) {
-    throw new Error("computer agent id must contain 1-200 characters");
+    throw new Error("Computer Bot id must contain 1-200 characters");
   }
   return {
     id,
@@ -314,8 +333,8 @@ function normalizedIdentity(
   };
 }
 
-export function computerAgentKey(agentId: string): string {
-  const id = normalizedIdentity(agentId).id;
+export function computerBotKey(botId: string): string {
+  const id = normalizedIdentity(botId).id;
   const slug = id
     .normalize("NFKD")
     .toLowerCase()
@@ -323,19 +342,22 @@ export function computerAgentKey(agentId: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 28);
   const digest = createHash("sha256").update(id).digest("hex").slice(0, 12);
-  return `${slug || "agent"}-${digest}`;
+  return `${slug || "bot"}-${digest}`;
 }
 
-function layoutFor(input: string | ComputerAgentIdentity): AgentLayout {
+/** @deprecated Use computerBotKey. */
+export const computerAgentKey = computerBotKey;
+
+function layoutFor(input: string | ComputerBotIdentity): AgentLayout {
   const identity = normalizedIdentity(input);
-  const key = computerAgentKey(identity.id);
+  const key = computerBotKey(identity.id);
   const name = identity.name ?? identity.id;
   const profileJson = JSON.stringify(
     {
       id: identity.id,
       name,
-      description: identity.description ?? "FrockBot agent",
-      computer: { agentKey: key, sharedHome: HOME_ROOT },
+      description: identity.description ?? "FrockBot Bot",
+      computer: { botKey: key, sharedHome: HOME_ROOT },
     },
     null,
     2,
@@ -344,8 +366,7 @@ function layoutFor(input: string | ComputerAgentIdentity): AgentLayout {
     identity,
     key,
     runtimeDir: `${BOTS_ROOT}/${key}`,
-    dataDir: `${DATA_ROOT}/agents/${key}`,
-    transcriptDir: `${DATA_ROOT}/agent-transcripts/${key}`,
+    workspaceDir: `${WORKSPACES_ROOT}/${key}`,
     profileJson,
   };
 }
@@ -358,9 +379,9 @@ function outputText(value: string | Buffer): string {
   return typeof value === "string" ? value : value.toString();
 }
 
-function clipped(text: string): string {
-  if (text.length <= MAX_OUTPUT) return text;
-  return `${text.slice(0, MAX_OUTPUT)}\n… output truncated`;
+function clipped(text: string, limit = MAX_OUTPUT): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}\n… output truncated`;
 }
 
 function isNotFound(error: unknown): boolean {
@@ -396,7 +417,11 @@ async function settleService(
 }
 
 export class FlySpriteAgentComputer {
+  readonly botId: string;
+  readonly botKey: string;
+  /** @deprecated Use botId. */
   readonly agentId: string;
+  /** @deprecated Use botKey. */
   readonly agentKey: string;
   private readonly computer: FlySpriteComputer;
   private readonly layout: AgentLayout;
@@ -404,8 +429,10 @@ export class FlySpriteAgentComputer {
   constructor(computer: FlySpriteComputer, layout: AgentLayout) {
     this.computer = computer;
     this.layout = layout;
-    this.agentId = layout.identity.id;
-    this.agentKey = layout.key;
+    this.botId = layout.identity.id;
+    this.botKey = layout.key;
+    this.agentId = this.botId;
+    this.agentKey = this.botKey;
   }
 
   ensure(signal?: AbortSignal): Promise<ComputerConnection> {
@@ -414,6 +441,18 @@ export class FlySpriteAgentComputer {
 
   run(command: string, signal: AbortSignal): Promise<string> {
     return this.computer.runForAgent(this.layout, command, signal);
+  }
+
+  exec(
+    command: string,
+    signal: AbortSignal,
+    limits: { timeoutMs?: number; maxOutputBytes?: number } = {},
+  ): Promise<SpriteAgentExecResult> {
+    return this.computer.execForAgent(this.layout, command, signal, limits);
+  }
+
+  runStorage(command: string, signal: AbortSignal): Promise<string> {
+    return this.computer.runStorageForAgent(this.layout, command, signal);
   }
 
   browser(action: BrowserAction, signal: AbortSignal): Promise<string> {
@@ -431,14 +470,6 @@ export class FlySpriteAgentComputer {
   releaseControl(signal?: AbortSignal): Promise<void> {
     return this.computer.releaseForAgent(this.layout, signal);
   }
-
-  readStandingMemory(signal?: AbortSignal): Promise<string> {
-    return this.computer.readStandingMemory(this.layout, signal);
-  }
-
-  writeTranscript(events: unknown, signal?: AbortSignal): Promise<void> {
-    return this.computer.writeTranscript(this.layout, events, signal);
-  }
 }
 
 export class FlySpriteComputer {
@@ -452,6 +483,7 @@ export class FlySpriteComputer {
     string,
     Promise<ComputerConnection>
   >();
+  private readonly storagePromises = new Map<string, Promise<SpriteHandle>>();
 
   constructor(options: FlySpriteComputerOptions = {}) {
     const token = options.token?.trim() || configuredToken();
@@ -462,8 +494,13 @@ export class FlySpriteComputer {
     this.respectHumanControl = options.respectHumanControl ?? true;
   }
 
-  agent(identity: string | ComputerAgentIdentity): FlySpriteAgentComputer {
+  bot(identity: string | ComputerBotIdentity): FlySpriteAgentComputer {
     return new FlySpriteAgentComputer(this, layoutFor(identity));
+  }
+
+  /** @deprecated Use bot(). */
+  agent(identity: string | ComputerBotIdentity): FlySpriteAgentComputer {
+    return this.bot(identity);
   }
 
   async ensureAgent(
@@ -493,13 +530,13 @@ export class FlySpriteComputer {
     const guarded = [
       this.agentControlGuard(layout),
       `export HOME=${HOME_ROOT}`,
-      `export FROCKBOT_AGENT_ID=${shellQuote(layout.identity.id)}`,
-      `export FROCKBOT_AGENT_KEY=${shellQuote(layout.key)}`,
-      `cd ${WORKSPACE_ROOT}`,
+      `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
+      `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
+      `cd ${shellQuote(layout.workspaceDir)}`,
       command,
     ].join("\n");
     try {
-      const result = await sprite.execFileHTTP("bash", ["-lc", guarded], {
+      const result = await sprite.execFileHTTP("bash", ["-c", guarded], {
         signal,
         timeout: 120_000,
         maxBuffer: MAX_OUTPUT * 2,
@@ -512,6 +549,82 @@ export class FlySpriteComputer {
     } catch (error) {
       throw new Error(`Sprite command failed: ${errorText(error)}`);
     }
+  }
+
+  async execForAgent(
+    layout: AgentLayout,
+    command: string,
+    signal: AbortSignal,
+    limits: { timeoutMs?: number; maxOutputBytes?: number } = {},
+  ): Promise<SpriteAgentExecResult> {
+    const sprite = await this.readySprite(layout, signal);
+    const guarded = [
+      this.agentControlGuard(layout),
+      `export HOME=${HOME_ROOT}`,
+      `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
+      `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
+      `cd ${shellQuote(layout.workspaceDir)}`,
+      `bash -c ${shellQuote(command)}`,
+      `printf '\\n%s%s\\n' ${shellQuote(EXEC_EXIT_MARKER)} "$?"`,
+    ].join("\n");
+    const maxOutput = Math.max(
+      1,
+      Math.min(limits.maxOutputBytes ?? MAX_OUTPUT, MAX_OUTPUT),
+    );
+    let result: SpriteExecResult;
+    try {
+      result = await sprite.execFileHTTP("bash", ["-c", guarded], {
+        signal,
+        timeout: Math.max(1, Math.min(limits.timeoutMs ?? 120_000, 120_000)),
+        maxBuffer: MAX_OUTPUT * 2,
+      });
+    } catch (error) {
+      throw new Error(`Sprite command failed: ${errorText(error)}`);
+    }
+    const raw = outputText(result.stdout);
+    const match = new RegExp(`\\n?${EXEC_EXIT_MARKER}(\\d+)\\n?$`).exec(raw);
+    const stdout = match ? raw.slice(0, match.index) : raw;
+    const stderr = outputText(result.stderr);
+    return {
+      exitCode: match ? Number(match[1]) : null,
+      stdout: stdout.slice(0, maxOutput),
+      stderr: stderr.slice(0, maxOutput),
+      outputTruncated:
+        !match || stdout.length > maxOutput || stderr.length > maxOutput,
+    };
+  }
+
+  async runStorageForAgent(
+    layout: AgentLayout,
+    command: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const sprite = await this.readyStorageSprite(layout, signal);
+    const storageCommand = [
+      `export HOME=${HOME_ROOT}`,
+      `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
+      `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
+      `cd ${shellQuote(layout.workspaceDir)}`,
+      command,
+    ].join("\n");
+    let result: SpriteExecResult;
+    try {
+      result = await sprite.execFileHTTP("bash", ["-c", storageCommand], {
+        signal,
+        timeout: 120_000,
+        maxBuffer: MAX_STORAGE_OUTPUT * 2,
+      });
+    } catch (error) {
+      throw new Error(`Sprite storage operation failed: ${errorText(error)}`);
+    }
+    const stdout = outputText(result.stdout);
+    if (stdout.length > MAX_STORAGE_OUTPUT) {
+      throw new ComputerError(
+        "limit-exceeded",
+        "Sprite storage output exceeded the maximum size",
+      );
+    }
+    return stdout;
   }
 
   async browserForAgent(
@@ -527,7 +640,7 @@ export class FlySpriteComputer {
       `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)}`,
     ].join("\n");
     try {
-      const result = await sprite.execFileHTTP("bash", ["-lc", command], {
+      const result = await sprite.execFileHTTP("bash", ["-c", command], {
         signal,
         timeout: 45_000,
         maxBuffer: MAX_OUTPUT * 2,
@@ -570,36 +683,6 @@ export class FlySpriteComputer {
       ["release", layout.key, this.ownerId, String(LEASE_MAX_AGE_SECONDS)],
       { signal, timeout: 15_000 },
     );
-  }
-
-  async readStandingMemory(
-    layout: AgentLayout,
-    signal?: AbortSignal,
-  ): Promise<string> {
-    const sprite = await this.readySprite(layout, signal);
-    const command = `${this.agentControlGuard(layout)}\nprintf '%s\\n' '## Agent standing memory'; cat ${layout.dataDir}/memory/profile.md; printf '%s\\n' '## Shared user memory'; cat ${DATA_ROOT}/user-memory/profile.md`;
-    const result = await sprite.execFileHTTP("bash", ["-lc", command], {
-      signal,
-      timeout: 15_000,
-      maxBuffer: MAX_OUTPUT * 2,
-    });
-    return clipped(outputText(result.stdout).trim());
-  }
-
-  async writeTranscript(
-    layout: AgentLayout,
-    events: unknown,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const sprite = await this.readySprite(layout, signal);
-    const encoded = base64(`${JSON.stringify(events, null, 2)}\n`);
-    const target = `${layout.transcriptDir}/latest.json`;
-    const command = `${this.agentControlGuard(layout)}\nset -eu; TMP=$(mktemp ${shellQuote(`${target}.XXXXXX`)}); printf %s ${shellQuote(encoded)} | base64 -d > "$TMP"; chmod 600 "$TMP"; mv "$TMP" ${shellQuote(target)}`;
-    await sprite.execFileHTTP("bash", ["-lc", command], {
-      signal,
-      timeout: 15_000,
-      maxBuffer: MAX_OUTPUT * 2,
-    });
   }
 
   private async provisionRuntime(signal?: AbortSignal): Promise<SpriteHandle> {
@@ -663,6 +746,8 @@ export class FlySpriteComputer {
       password: outputText(password.stdout).trim(),
     }).toString();
     return {
+      botId: layout.identity.id,
+      botKey: layout.key,
       agentId: layout.identity.id,
       agentKey: layout.key,
       spriteName: this.spriteName,
@@ -694,6 +779,40 @@ export class FlySpriteComputer {
     return this.client.getSprite(this.spriteName);
   }
 
+  private readyStorageSprite(
+    layout: AgentLayout,
+    signal?: AbortSignal,
+  ): Promise<SpriteHandle> {
+    signal?.throwIfAborted();
+    let promise = this.storagePromises.get(layout.key);
+    if (!promise) {
+      promise = this.provisionStorage(layout, signal).catch((error) => {
+        this.storagePromises.delete(layout.key);
+        throw error;
+      });
+      this.storagePromises.set(layout.key, promise);
+    }
+    return promise;
+  }
+
+  private async provisionStorage(
+    layout: AgentLayout,
+    signal?: AbortSignal,
+  ): Promise<SpriteHandle> {
+    const sprite = await this.findOrCreate();
+    await sprite.execFileHTTP(
+      "mkdir",
+      [
+        "-p",
+        layout.workspaceDir,
+        `${DATA_ROOT}/agents/${layout.key}/packages`,
+        `${DATA_ROOT}/user-packages`,
+      ],
+      { signal, timeout: 15_000, maxBuffer: MAX_OUTPUT },
+    );
+    return sprite;
+  }
+
   private assertAgentControl(
     sprite: SpriteHandle,
     layout: AgentLayout,
@@ -707,7 +826,7 @@ export class FlySpriteComputer {
   }
 
   private agentControlGuard(layout: AgentLayout): string {
-    return `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS}`;
+    return `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`;
   }
 
   private async findOrCreate(): Promise<SpriteHandle> {

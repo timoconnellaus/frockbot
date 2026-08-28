@@ -1,6 +1,12 @@
-import { flySpriteRuntimePackage } from "../../../applications/foundation/src/desktop-runtime.js";
+import { desktopComputerRuntimePackages } from "../../../applications/foundation/src/desktop-runtime.js";
 
 // Desktop-only runtime authority is added outside the Worker-safe application.
+import {
+  EphemeralIndexMetaStore,
+  type MemoryPluginConfig,
+  type MemoryVector,
+  WorkspaceMemoryDocumentStore,
+} from "@frockbot/plugin-memory";
 import {
   isAgentCommand,
   type AgentCommand,
@@ -36,6 +42,95 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function cosineSimilarity(left: number[], right: number[]): number {
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+    dot += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+  const denominator = Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude);
+  return denominator ? dot / denominator : 0;
+}
+
+function desktopMemoryConfig(botId: string): MemoryPluginConfig {
+  const userId = process.env.FROCKBOT_USER_ID?.trim() || "local-user";
+  const providerId =
+    process.env.FROCKBOT_COMPUTER_PROVIDER?.trim() || "fly-sprite";
+  const vectors = new Map<string, MemoryVector>();
+  return {
+    ownerId: userId,
+    botId,
+    inject: ["computers"],
+    createDocuments: async (ctx) => {
+      const target = { userId, botId };
+      if (!ctx.computers.assignment(target)) {
+        ctx.computers.assign(target, providerId);
+      }
+      const computer = await ctx.computers.open(target);
+      if (!computer.workspace) {
+        await computer.close();
+        throw new Error("The selected Computer does not provide durable files");
+      }
+      const [agent, global] = await Promise.all([
+        computer.workspace.openDirectory({
+          namespace: "memory/agent",
+          scope: "bot",
+          durability: "durable",
+        }),
+        computer.workspace.openDirectory({
+          namespace: "memory/global",
+          scope: "user",
+          durability: "durable",
+        }),
+      ]);
+      return new EphemeralIndexMetaStore(
+        new WorkspaceMemoryDocumentStore({ agent, global }, () =>
+          computer.close(),
+        ),
+      );
+    },
+    vectorize: {
+      upsert: (entries) => {
+        for (const entry of entries) vectors.set(entry.id, entry);
+        return Promise.resolve();
+      },
+      query: (vector, options) =>
+        Promise.resolve({
+          matches: [...vectors.values()]
+            .filter((entry) => entry.namespace === options.namespace)
+            .map((entry) => ({
+              id: entry.id,
+              score: cosineSimilarity(vector, entry.values),
+              metadata: entry.metadata,
+            }))
+            .sort((left, right) => right.score - left.score)
+            .slice(0, options.topK),
+        }),
+      deleteByIds: (ids) => {
+        for (const id of ids) vectors.delete(id);
+        return Promise.resolve();
+      },
+    },
+    embed: (texts) =>
+      Promise.resolve(
+        texts.map((text) => {
+          const vector = Array.from({ length: 32 }, () => 0);
+          for (const byte of new TextEncoder().encode(text.toLowerCase())) {
+            vector[byte % vector.length] =
+              (vector[byte % vector.length] ?? 0) + 1;
+          }
+          return vector;
+        }),
+      ),
+  };
+}
+
 function modelConfigFromEnvironment(): RuntimeModelConfig | undefined {
   const baseUrl = process.env.FROCKBOT_LLM_BASE_URL?.trim();
   const model = process.env.FROCKBOT_LLM_MODEL?.trim();
@@ -56,10 +151,13 @@ function modelConfigFromEnvironment(): RuntimeModelConfig | undefined {
 async function start(): Promise<void> {
   let runtime: FoundationRuntime;
   try {
+    const botId = process.env.FROCKBOT_BOT_ID?.trim() || "barebones";
     runtime = await createFoundationRuntime(modelConfigFromEnvironment(), {
-      agentId: process.env.FROCKBOT_AGENT_ID?.trim() || "barebones",
+      botId,
+      agentId: process.env.FROCKBOT_AGENT_ID?.trim() || botId,
       sessionId: process.env.FROCKBOT_SESSION_ID?.trim() || "barebones",
-      agentPackages: [flySpriteRuntimePackage],
+      agentPackages: desktopComputerRuntimePackages,
+      memory: desktopMemoryConfig(botId),
     });
   } catch (error) {
     post({ type: "error", phase: "startup", message: errorMessage(error) });

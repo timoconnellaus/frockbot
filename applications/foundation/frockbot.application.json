@@ -37,14 +37,18 @@
       "grants": ["memory:read", "memory:write"]
     },
     {
-      "specifier": "@frockbot/plugin-fly-sprite",
+      "specifier": "@frockbot/plugin-computer",
       "version": "0.0.1",
       "grants": [
         "computer:execute",
         "computer:browser",
-        "network:sprites",
         "webui:remote-frame"
       ]
+    },
+    {
+      "specifier": "@frockbot/plugin-fly-sprite",
+      "version": "0.0.1",
+      "grants": ["network:sprites"]
     },
     {
       "specifier": "@frockbot/plugin-desktop-notifications",

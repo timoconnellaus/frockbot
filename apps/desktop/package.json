@@ -7,7 +7,7 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "build:webui": "bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-fly-sprite build",
+    "build:webui": "bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-computer build",
     "build:agent": "bun run --filter @frockbot/agent-runtime build",
     "dev": "bun run build:webui && electron-vite dev",
     "build": "bun run build:webui && electron-vite build",

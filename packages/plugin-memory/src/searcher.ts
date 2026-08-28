@@ -1,5 +1,5 @@
 import { hashMemoryContent } from "./chunker.js";
-import type { MemoryStorage } from "./storage.js";
+import type { MemoryDocumentStore } from "./storage.js";
 import type {
   EmbedMemory,
   MemoryScope,
@@ -53,7 +53,7 @@ async function vectorSearch(
   queryVector: number[],
   maxResults: number,
   vectorize: MemoryVectorIndex,
-  storage: MemoryStorage,
+  storage: MemoryDocumentStore,
 ): Promise<MemorySearchResult[]> {
   const response = await vectorize.query(queryVector, {
     topK: Math.min(maxResults * 3, 20),
@@ -104,7 +104,7 @@ async function keywordSearch(
   scope: MemoryScope,
   query: string,
   maxResults: number,
-  storage: MemoryStorage,
+  storage: MemoryDocumentStore,
 ): Promise<MemorySearchResult[]> {
   const needle = query.toLowerCase();
   const results: MemorySearchResult[] = [];
@@ -139,7 +139,7 @@ export interface SearchMemoryOptions {
   maxResults: number;
   embed: EmbedMemory;
   vectorize: MemoryVectorIndex;
-  storage: MemoryStorage;
+  storage: MemoryDocumentStore;
 }
 
 function preferAgentOnPathClashes(
@@ -165,7 +165,7 @@ function preferAgentOnPathClashes(
 async function replaceGlobalClashesWithAgentCopies(
   results: MemorySearchResult[],
   scopes: MemoryScope[],
-  storage: MemoryStorage,
+  storage: MemoryDocumentStore,
 ): Promise<MemorySearchResult[]> {
   const agentScope = scopes.find((scope) => scope.tier === "agent");
   if (!agentScope) return results;

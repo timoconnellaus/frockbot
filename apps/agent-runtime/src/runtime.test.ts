@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { flySpriteRuntimePackage } from "../../../applications/foundation/src/desktop-runtime.js";
+import { desktopComputerRuntimePackages } from "../../../applications/foundation/src/desktop-runtime.js";
 import type {
   MemoryBucketObject,
   MemoryPluginConfig,
@@ -12,7 +12,7 @@ const runtimes: FoundationRuntime[] = [];
 
 async function createRuntime(): Promise<FoundationRuntime> {
   const runtime = await createFoundationRuntime(undefined, {
-    agentPackages: [flySpriteRuntimePackage],
+    agentPackages: desktopComputerRuntimePackages,
   });
   runtimes.push(runtime);
   return runtime;
@@ -79,7 +79,7 @@ describe("foundation Cordis runtime", () => {
     ).toStartWith("current_time: ");
   });
 
-  test("loads the Fly Sprite computer tools without requiring a token at startup", async () => {
+  test("loads generic Computer tools and the Fly provider without a token at startup", async () => {
     const runtime = await createRuntime();
 
     expect(runtime.root.tools.schemas().map((tool) => tool.name)).toEqual(
@@ -92,7 +92,7 @@ describe("foundation Cordis runtime", () => {
     const vectors = new Map<string, MemoryVector>();
     const memory: MemoryPluginConfig = {
       ownerId: "alice",
-      agentId: "primary",
+      botId: "primary",
       bucket: {
         get: (key) => {
           const body = objects.get(key);
@@ -157,6 +157,7 @@ describe("foundation Cordis runtime", () => {
       },
     };
     const context = {
+      botId: "primary",
       agentId: "primary",
       sessionId: "alice:primary",
       signal: new AbortController().signal,
