@@ -606,7 +606,9 @@ describe("decodeFrockBotManifest", () => {
 
   test("rejects non-enumerable and symbol fields", () => {
     const nonEnumerableCompatibility = { frockbot: "*" };
-    Object.defineProperty(nonEnumerableCompatibility, "hidden", { value: true });
+    Object.defineProperty(nonEnumerableCompatibility, "hidden", {
+      value: true,
+    });
     const symbolCompatibility = { frockbot: "*" };
     Object.defineProperty(symbolCompatibility, Symbol("unexpected"), {
       value: true,
