@@ -1060,7 +1060,7 @@ describe("ComposioConnectionCoordinator", () => {
     expect(store.connections.get("connection-1")?.state).toBe("revoked");
   });
 
-  test("verifies account ownership and active state before readiness", async () => {
+  test("verifies account ownership, active state, and toolkit before readiness", async () => {
     const store = new MemoryConnectionStore();
     await store.startConnection("user-1", {
       connectionId: "connection-1",
@@ -1074,21 +1074,25 @@ describe("ComposioConnectionCoordinator", () => {
         authorizationStateId: "state-1",
         authorizationStateExpiresAt: Date.now() + 60_000,
         connectedAccountId: "ca_123",
+        toolkitSlug: "gmail",
         targetBotId: "primary",
       },
     });
+    let providerLookups = 0;
     const client = new ComposioClient({
       apiKey: "secret",
-      fetch: () =>
-        Promise.resolve(
+      fetch: () => {
+        providerLookups += 1;
+        return Promise.resolve(
           Response.json({
             id: "ca_123",
             user_id: "user-1",
             status: "ACTIVE",
-            toolkit: { slug: "gmail" },
+            toolkit: { slug: providerLookups === 1 ? "slack" : "gmail" },
             alias: "personal",
           }),
-        ),
+        );
+      },
     });
     const coordinator = new ComposioConnectionCoordinator({
       client,
@@ -1096,6 +1100,14 @@ describe("ComposioConnectionCoordinator", () => {
       callbackBaseUrl: "https://bot.frockbot.com",
       connectionTypes: {},
     });
+
+    await expect(
+      coordinator.complete("user-1", {
+        connectionId: "connection-1",
+        connectedAccountId: "ca_123",
+      }),
+    ).rejects.toThrow("does not match the admitted toolkit");
+    expect(store.connections.get("connection-1")?.state).toBe("authorizing");
 
     await coordinator.complete("user-1", {
       connectionId: "connection-1",
@@ -1130,6 +1142,7 @@ describe("ComposioConnectionCoordinator", () => {
         authorizationStateId: "state-1",
         authorizationStateExpiresAt: Date.now() + 60_000,
         connectedAccountId: "ca_expected",
+        toolkitSlug: "gmail",
       },
     });
     let providerLookups = 0;
@@ -1196,6 +1209,7 @@ describe("ComposioConnectionCoordinator", () => {
         authorizationStateId: "state-1",
         authorizationStateExpiresAt: Date.now() + 60_000,
         connectedAccountId: "ca_123",
+        toolkitSlug: "gmail",
       },
     });
     const client = new ComposioClient({
@@ -1284,6 +1298,7 @@ describe("ComposioConnectionCoordinator", () => {
         authorizationStateId: "state-1",
         authorizationStateExpiresAt: Date.now() + 60_000,
         connectedAccountId: "ca_123",
+        toolkitSlug: "gmail",
       },
     });
     let releaseLookup!: (response: Response) => void;
@@ -1395,6 +1410,7 @@ describe("ComposioConnectionCoordinator", () => {
       state: "authorizing",
       safeMetadata: {
         connectedAccountId: "ca_123",
+        toolkitSlug: "gmail",
         targetBotId: "primary",
       },
     });

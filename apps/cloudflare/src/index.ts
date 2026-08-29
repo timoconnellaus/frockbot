@@ -18,7 +18,6 @@ import type {
   ApplicationArtifactStore,
   BotConfigurationBinding,
   BotNotificationIntent,
-  BotStateBinding,
   BotTurnCommand,
   BotTurnResult,
   UserConfigurationBinding,
@@ -347,35 +346,7 @@ class R2ApplicationArtifacts implements ApplicationArtifactStore {
 }
 
 interface RuntimeExports {
-  UserBotState(options: {
-    props: UserScopedProps;
-  }): RpcBoundary<BotStateBinding>;
-}
-
-function userBotStateBinding(
-  runtimeExports: RuntimeExports,
-  userId: string,
-): BotStateBinding {
-  const rpc = runtimeExports.UserBotState({ props: { userId } });
-  return {
-    run: (botId, command) => rpc.run({ schemaVersion: 1, botId, command }),
-    listRuns: (botId, query) =>
-      rpc.listRuns({ schemaVersion: 1, botId, query }),
-    lookupRun: (botId, query) =>
-      rpc.lookupRun({ schemaVersion: 1, botId, query }),
-    fenceRunAdmission: (botId, query) =>
-      rpc.fenceRunAdmission({ schemaVersion: 1, botId, query }),
-    listNotifications: (botId) =>
-      rpc.listNotifications({ schemaVersion: 1, botId }),
-    acknowledgeNotification: (botId, notificationId) =>
-      rpc.acknowledgeNotification({
-        schemaVersion: 1,
-        botId,
-        notificationId,
-      }),
-    reconcileRun: (botId, runId) =>
-      rpc.reconcileRun({ schemaVersion: 1, botId, runId }),
-  };
+  UserBotState(options: { props: UserScopedProps }): RpcBoundary<UserBotState>;
 }
 
 const createGatewayBackendContributions = createImmutablePlanRequestFactory(
@@ -410,8 +381,8 @@ export default {
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
       auth: gatewayAuth(env),
       applicationHashFor: () => Promise.resolve(env.DEFAULT_APPLICATION_HASH),
-      botStateFor: (userId): BotStateBinding =>
-        userBotStateBinding(runtimeExports, userId),
+      botStateFor: (userId) =>
+        runtimeExports.UserBotState({ props: { userId } }),
       userConfigurationFor: (userId): UserConfigurationBinding =>
         userConfigurationStub(env, userId),
       botConfigurationFor: (userId, botId): BotConfigurationBinding =>

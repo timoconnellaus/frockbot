@@ -154,8 +154,10 @@ export function createUserApplication() {
       if (request.method === "GET") {
         return Response.json({
           schemaVersion: 1,
-          notifications:
-            await env.BOT_STATE.listNotifications(notificationBotId),
+          notifications: await env.BOT_STATE.listNotifications({
+            schemaVersion: 1,
+            botId: notificationBotId,
+          }),
         } satisfies ClientNotificationListV1);
       }
       if (request.method !== "POST") {
@@ -174,10 +176,11 @@ export function createUserApplication() {
             : "invalid notification acknowledgement",
         );
       }
-      await env.BOT_STATE.acknowledgeNotification(
-        notificationBotId,
-        command.notificationId,
-      );
+      await env.BOT_STATE.acknowledgeNotification({
+        schemaVersion: 1,
+        botId: notificationBotId,
+        notificationId: command.notificationId,
+      });
       return Response.json({
         schemaVersion: 1,
         status: "acknowledged",
@@ -228,7 +231,13 @@ export function createUserApplication() {
         );
       }
       try {
-        return Response.json(await env.BOT_STATE.reconcileRun(botId, runId));
+        return Response.json(
+          await env.BOT_STATE.reconcileRun({
+            schemaVersion: 1,
+            botId,
+            runId,
+          }),
+        );
       } catch (error) {
         return jsonError(
           409,
@@ -256,7 +265,11 @@ export function createUserApplication() {
       }
       try {
         return Response.json(
-          await env.BOT_STATE.fenceRunAdmission(botId, query),
+          await env.BOT_STATE.fenceRunAdmission({
+            schemaVersion: 1,
+            botId,
+            query,
+          }),
         );
       } catch (error) {
         return jsonError(
@@ -286,7 +299,9 @@ export function createUserApplication() {
         );
       }
       try {
-        return Response.json(await env.BOT_STATE.lookupRun(botId, query));
+        return Response.json(
+          await env.BOT_STATE.lookupRun({ schemaVersion: 1, botId, query }),
+        );
       } catch (error) {
         return jsonError(
           500,
@@ -316,7 +331,9 @@ export function createUserApplication() {
           error instanceof Error ? error.message : "invalid run page",
         );
       }
-      return Response.json(await env.BOT_STATE.listRuns(botId, query));
+      return Response.json(
+        await env.BOT_STATE.listRuns({ schemaVersion: 1, botId, query }),
+      );
     }
     if (request.method !== "POST") return jsonError(405, "method not allowed");
 
@@ -332,11 +349,15 @@ export function createUserApplication() {
 
     try {
       return Response.json(
-        await env.BOT_STATE.run(botId, {
-          runId: turnCommand.commandId,
-          sessionId: `${env.DEPLOYMENT.userId}:${botId}`,
-          acceptedAt: new Date().toISOString(),
-          text: turnCommand.text,
+        await env.BOT_STATE.run({
+          schemaVersion: 1,
+          botId,
+          command: {
+            runId: turnCommand.commandId,
+            sessionId: `${env.DEPLOYMENT.userId}:${botId}`,
+            acceptedAt: new Date().toISOString(),
+            text: turnCommand.text,
+          },
         }),
       );
     } catch (error) {

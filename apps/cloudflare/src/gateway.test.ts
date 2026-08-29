@@ -32,6 +32,7 @@ import type {
   ConnectionBinding,
   GatewayAuth,
   LoadedWorker,
+  UserBotStateBinding,
   UserConfigurationBinding,
   WorkerCode,
   WorkerLoader,
@@ -176,6 +177,20 @@ class MemoryBotState implements BotStateBinding {
       }),
     );
   }
+}
+
+function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
+  return {
+    run: ({ botId, command }) => state.run(botId, command),
+    listRuns: ({ botId, query }) => state.listRuns(botId, query),
+    lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
+    fenceRunAdmission: ({ botId, query }) =>
+      state.fenceRunAdmission(botId, query),
+    listNotifications: ({ botId }) => state.listNotifications(botId),
+    acknowledgeNotification: ({ botId, notificationId }) =>
+      state.acknowledgeNotification(botId, notificationId),
+    reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
+  };
 }
 
 class MemoryConfiguration
@@ -409,7 +424,7 @@ function createTestGateway(
     botStateFor: (userId) => {
       const state = states.get(userId) ?? new MemoryBotState();
       states.set(userId, state);
-      return state;
+      return rpcBindingFor(state);
     },
     userConfigurationFor: (userId) => {
       configurationRoutes.push(`user:${userId}`);

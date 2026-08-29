@@ -3,8 +3,23 @@ import type {
   BotStateBinding,
   BotTurnResult,
   UserApplicationEnv,
+  UserBotStateBinding,
 } from "./contracts.js";
 import { createUserApplication } from "./user-application.js";
+
+function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
+  return {
+    run: ({ botId, command }) => state.run(botId, command),
+    listRuns: ({ botId, query }) => state.listRuns(botId, query),
+    lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
+    fenceRunAdmission: ({ botId, query }) =>
+      state.fenceRunAdmission(botId, query),
+    listNotifications: ({ botId }) => state.listNotifications(botId),
+    acknowledgeNotification: ({ botId, notificationId }) =>
+      state.acknowledgeNotification(botId, notificationId),
+    reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
+  };
+}
 
 function parseContentSecurityPolicy(
   header: string | null,
@@ -70,7 +85,7 @@ describe("user application Bot seam", () => {
       reconcileRun: () => Promise.resolve(result),
     };
     const env: UserApplicationEnv = {
-      BOT_STATE: botState,
+      BOT_STATE: rpcBindingFor(botState),
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     };
 
@@ -101,7 +116,7 @@ describe("user application Bot seam", () => {
       },
     } as unknown as BotStateBinding;
     const env: UserApplicationEnv = {
-      BOT_STATE: botState,
+      BOT_STATE: rpcBindingFor(botState),
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     };
     const fetchUserApplication = createUserApplication();
@@ -142,7 +157,7 @@ describe("user application Bot seam", () => {
       },
     } as unknown as BotStateBinding;
     const env: UserApplicationEnv = {
-      BOT_STATE: botState,
+      BOT_STATE: rpcBindingFor(botState),
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     };
     const fetchUserApplication = createUserApplication();
@@ -186,7 +201,7 @@ describe("user application Bot seam", () => {
         }),
     } as unknown as BotStateBinding;
     const env: UserApplicationEnv = {
-      BOT_STATE: botState,
+      BOT_STATE: rpcBindingFor(botState),
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     };
     const fetchUserApplication = createUserApplication();
@@ -215,7 +230,7 @@ describe("user application Bot seam", () => {
       },
     } as unknown as BotStateBinding;
     const env: UserApplicationEnv = {
-      BOT_STATE: botState,
+      BOT_STATE: rpcBindingFor(botState),
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     };
 
@@ -257,7 +272,7 @@ describe("user application Bot seam", () => {
       },
     } as unknown as BotStateBinding;
     const env: UserApplicationEnv = {
-      BOT_STATE: botState,
+      BOT_STATE: rpcBindingFor(botState),
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     };
     const fetchUserApplication = createUserApplication();

@@ -119,8 +119,45 @@ export interface MemoryBinding {
   embed(model: string, texts: string[]): Promise<{ data: number[][] }>;
 }
 
+export interface UserBotStateBinding {
+  run(input: {
+    schemaVersion: 1;
+    botId: string;
+    command: BotTurnCommand;
+  }): Promise<BotTurnResult>;
+  listRuns(input: {
+    schemaVersion: 1;
+    botId: string;
+    query: ClientRunListQueryV1;
+  }): Promise<ClientRunListV1>;
+  lookupRun(input: {
+    schemaVersion: 1;
+    botId: string;
+    query: ClientRunLookupQueryV1;
+  }): Promise<ClientRunLookupV1>;
+  fenceRunAdmission(input: {
+    schemaVersion: 1;
+    botId: string;
+    query: ClientRunLookupQueryV1;
+  }): Promise<ClientRunLookupV1>;
+  listNotifications(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<BotNotificationIntent[]>;
+  acknowledgeNotification(input: {
+    schemaVersion: 1;
+    botId: string;
+    notificationId: string;
+  }): Promise<void>;
+  reconcileRun(input: {
+    schemaVersion: 1;
+    botId: string;
+    runId: string;
+  }): Promise<BotTurnResult>;
+}
+
 export interface UserApplicationEnv {
-  BOT_STATE: BotStateBinding;
+  BOT_STATE: UserBotStateBinding;
   DEPLOYMENT: UserApplicationIdentity;
 }
 
@@ -204,7 +241,7 @@ export interface GatewayDependencies {
   artifacts: ApplicationArtifactStore;
   auth: GatewayAuth;
   applicationHashFor(userId: string): Promise<string>;
-  botStateFor(userId: string): BotStateBinding;
+  botStateFor(userId: string): UserBotStateBinding;
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   backendContributions?: readonly BackendRouteContribution[];

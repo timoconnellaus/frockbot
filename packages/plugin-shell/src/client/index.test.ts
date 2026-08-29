@@ -553,6 +553,48 @@ describe("Connection operation reconciliation", () => {
     expect(new Set(nativeReturnNonces).size).toBe(1);
   });
 
+  test("shares one uncertain Connection identity across concurrent tabs", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    const commandIds: string[] = [];
+    const mount = async (): Promise<Ref<FrockBotWebData>> => {
+      let provided: Ref<FrockBotWebData> | undefined;
+      await shellClientPlugin({
+        transport: {
+          turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+          readAuthenticatedUserId: () => Promise.resolve("user-a"),
+          startConnection: (input) => {
+            commandIds.push(input.commandId);
+            return Promise.reject(new Error("response lost"));
+          },
+        },
+        slot: () => () => {},
+        provide: (_key, value) => {
+          provided = value as Ref<FrockBotWebData>;
+          return () => {};
+        },
+      });
+      if (!provided) throw new Error("shell data was not provided");
+      return provided;
+    };
+    const [firstTab, secondTab] = await Promise.all([mount(), mount()]);
+
+    const results = await Promise.allSettled([
+      firstTab.value.startConnection("composio", "gmail"),
+      secondTab.value.startConnection("composio", "gmail"),
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
+    expect(commandIds).toHaveLength(2);
+    expect(new Set(commandIds).size).toBe(1);
+  });
+
   test("does not reuse desktop authorization identity across users", async () => {
     installMemoryStorage();
     Object.defineProperty(globalThis, "window", {

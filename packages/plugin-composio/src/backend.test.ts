@@ -3,11 +3,43 @@ import type { ConnectionView } from "@frockbot/configuration-core";
 import {
   connectionCompletionResponse,
   createComposioBackendContribution,
+  createConfiguredComposioBackendContribution,
   decodeAuthorizationState,
   encodeAuthorizationState,
 } from "./backend.js";
 import type { ComposioClient } from "./composio-client.js";
 import type { ComposioConnectionStore } from "./connections.js";
+
+describe("configured Composio backend", () => {
+  const configuredHost = (secrets: Record<string, string>) => ({
+    callbackBaseUrl: "https://bot.frockbot.com",
+    readSecret: (name: string) => secrets[name],
+    storeFor: () => ({}) as ComposioConnectionStore,
+    markConnectionUnavailable: () => Promise.resolve("applied" as const),
+  });
+
+  test("requires the dedicated authorization-state secret without auth fallback", () => {
+    expect(() =>
+      createConfiguredComposioBackendContribution(
+        configuredHost({
+          COMPOSIO_API_KEY: "api-secret",
+          COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+          BETTER_AUTH_SECRET: "unrelated-auth-secret",
+        }),
+      ),
+    ).toThrow("Composio backend Contribution is not configured");
+
+    expect(
+      createConfiguredComposioBackendContribution(
+        configuredHost({
+          COMPOSIO_API_KEY: "api-secret",
+          COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+          FROCKBOT_AUTHORIZATION_STATE_SECRET: "state-secret",
+        }),
+      ).packageId,
+    ).toBe("composio");
+  });
+});
 
 describe("Composio authorization return handoff", () => {
   test("returns desktop authorization to the fixed native protocol", () => {
