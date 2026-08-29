@@ -1,6 +1,6 @@
 # Shared Fly host compatibility prototype
 
-This local-only prototype proves the versioned boundary selected in [ADR 0003](../../docs/adr/0003-host-fly-computer-in-cloudflare-containers.md): Bot Durable Objects call one logical, shared Computer host; Cloudflare routes each Bot deterministically across a bounded container pool; the container runs the Sprites SDK without owning canonical Bot state.
+This local-only prototype exercises the versioned boundary selected in [ADR 0004](../../docs/adr/0004-host-fly-computer-in-cloudflare-containers.md): Bot Durable Objects call one logical, shared Computer host; Cloudflare routes each Bot deterministically across a bounded container pool; the container runs the Sprites SDK without owning canonical Bot state.
 
 ## Checks
 
@@ -9,7 +9,7 @@ bun run --filter @frockbot/fly-host-prototype typecheck
 bun run --filter @frockbot/fly-host-prototype test
 ```
 
-The opt-in live smoke requires Docker and `SPRITES_TOKEN` in the gitignored `apps/cloudflare/.dev.vars`:
+The opt-in live smoke requires Docker and `SPRITES_TOKEN` in either gitignored `apps/fly-host-prototype/.dev.vars` or `apps/cloudflare/.dev.vars`. The prototype-local file takes precedence:
 
 ```sh
 bun run --filter @frockbot/fly-host-prototype test:live
