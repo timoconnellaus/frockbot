@@ -323,6 +323,12 @@ class MemoryConnectionStore implements ComposioConnectionStore {
   }
 }
 
+const requiredStartState = {
+  callbackState: "signed-callback-state",
+  authorizationStateId: "authorization-state",
+  authorizationStateExpiresAt: Date.now() + 60_000,
+};
+
 describe("ComposioConnectionCoordinator", () => {
   test("records durable intent before creating a hosted Connect Link", async () => {
     const store = new MemoryConnectionStore();
@@ -362,6 +368,7 @@ describe("ComposioConnectionCoordinator", () => {
     });
 
     const result = await coordinator.start("user-1", {
+      ...requiredStartState,
       commandId: "connection-1",
       connectionTypeId: "gmail",
     });
@@ -384,6 +391,7 @@ describe("ComposioConnectionCoordinator", () => {
     ).not.toHaveProperty("targetBotId");
 
     const duplicate = await coordinator.start("user-1", {
+      ...requiredStartState,
       commandId: "connection-1",
       connectionTypeId: "gmail",
     });
@@ -396,6 +404,7 @@ describe("ComposioConnectionCoordinator", () => {
     );
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "gmail",
         alias: "Work",
@@ -405,6 +414,7 @@ describe("ComposioConnectionCoordinator", () => {
     );
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "gmail",
         returnTarget: "desktop",
@@ -414,6 +424,7 @@ describe("ComposioConnectionCoordinator", () => {
     );
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "calendar",
       }),
@@ -478,6 +489,7 @@ describe("ComposioConnectionCoordinator", () => {
 
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "gmail",
       }),
@@ -494,6 +506,7 @@ describe("ComposioConnectionCoordinator", () => {
     );
     await expect(
       replayCoordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "gmail",
         alias: "Work",
@@ -505,6 +518,7 @@ describe("ComposioConnectionCoordinator", () => {
     expect(reconciliationReads).toBe(0);
     expect(store.packagePolicyReads).toBe(1);
     const reconciled = await replayCoordinator.start("user-1", {
+      ...requiredStartState,
       commandId: "connection-1",
       connectionTypeId: "gmail",
     });
@@ -522,6 +536,7 @@ describe("ComposioConnectionCoordinator", () => {
     });
     await expect(
       replayCoordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-2",
         connectionTypeId: "gmail",
       }),
@@ -590,6 +605,7 @@ describe("ComposioConnectionCoordinator", () => {
 
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "gmail",
       }),
@@ -608,6 +624,7 @@ describe("ComposioConnectionCoordinator", () => {
 
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "gmail",
       }),
@@ -678,6 +695,7 @@ describe("ComposioConnectionCoordinator", () => {
 
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-expired",
         connectionTypeId: "gmail",
       }),
@@ -748,6 +766,7 @@ describe("ComposioConnectionCoordinator", () => {
 
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "gmail",
       }),
@@ -812,6 +831,7 @@ describe("ComposioConnectionCoordinator", () => {
 
     await expect(
       coordinator.start("user-1", {
+        ...requiredStartState,
         commandId: "connection-1",
         connectionTypeId: "gmail",
       }),
