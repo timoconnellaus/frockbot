@@ -14,6 +14,10 @@ const originalLocalStorage = Object.getOwnPropertyDescriptor(
   "localStorage",
 );
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+const originalDocument = Object.getOwnPropertyDescriptor(
+  globalThis,
+  "document",
+);
 
 function installMemoryStorage(): void {
   const values = new Map<string, string>();
@@ -33,6 +37,11 @@ function installMemoryStorage(): void {
 }
 
 afterEach(() => {
+  if (originalDocument) {
+    Object.defineProperty(globalThis, "document", originalDocument);
+  } else {
+    Reflect.deleteProperty(globalThis, "document");
+  }
   if (originalLocalStorage) {
     Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
   } else {
@@ -474,6 +483,63 @@ describe("Connection operation reconciliation", () => {
     expect(commandIds[1]).toBe(commandIds[0]);
     expect(nativeReturnNonces[0]).toBeString();
     expect(nativeReturnNonces[1]).toBe(nativeReturnNonces[0]);
+  });
+
+  test("does not reuse desktop authorization identity across users", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: { body: { dataset: {} } },
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/?bot=primary" },
+        frockbotDesktop: {},
+      },
+    });
+    const attempts: Array<{
+      commandId: string;
+      nativeReturnNonce?: string;
+    }> = [];
+    const mount = async (userId: string): Promise<Ref<FrockBotWebData>> => {
+      document.body.dataset.frockbotUserId = userId;
+      let provided: Ref<FrockBotWebData> | undefined;
+      await shellClientPlugin({
+        transport: {
+          turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+          startConnection: (input) => {
+            attempts.push({
+              commandId: input.commandId,
+              nativeReturnNonce: input.nativeReturnNonce,
+            });
+            return Promise.reject(new Error("response lost"));
+          },
+        },
+        slot: () => () => {},
+        provide: (_key, value) => {
+          provided = value as Ref<FrockBotWebData>;
+          return () => {};
+        },
+      });
+      if (!provided) throw new Error("shell data was not provided");
+      return provided;
+    };
+
+    const first = await mount("user-a");
+    await expect(
+      first.value.startConnection("composio", "gmail"),
+    ).rejects.toThrow("response lost");
+    const second = await mount("user-b");
+    await expect(
+      second.value.startConnection("composio", "gmail"),
+    ).rejects.toThrow("response lost");
+
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]?.commandId).not.toBe(attempts[0]?.commandId);
+    expect(attempts[1]?.nativeReturnNonce).not.toBe(
+      attempts[0]?.nativeReturnNonce,
+    );
   });
 
   test("validates browser authorization targets before opening them", async () => {

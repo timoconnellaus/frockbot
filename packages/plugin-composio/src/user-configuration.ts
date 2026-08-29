@@ -418,13 +418,20 @@ export class ComposioUserBackendContribution {
       const current =
         (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
         initialState();
-      const installed = current.packages.some(
+      const installed = current.packages.find(
         (installedPackage) =>
           installedPackage.packageId === input.packageId &&
           installedPackage.state === "installed",
       );
       if (!installed) {
         throw new Error(`Package "${input.packageId}" is not installed`);
+      }
+      if (
+        !this.availablePackages.has(
+          `${installed.packageId}\u0000${installed.version}`,
+        )
+      ) {
+        throw new Error(`Package "${input.packageId}" is not available`);
       }
       const existing = current.connections.find(
         (connection) => connection.connectionId === input.connectionId,

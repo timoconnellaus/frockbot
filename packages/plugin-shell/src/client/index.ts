@@ -391,9 +391,15 @@ function selectedBotId(): string {
   }
 }
 
+function selectedUserId(): string {
+  const userId = globalThis.document?.body.dataset.frockbotUserId;
+  return userId && userId !== "anonymous" ? userId : "anonymous";
+}
+
 export const shellClientPlugin: ClientPlugin = (ctx) => {
   let activeRequest: AbortController | undefined;
   const botId = selectedBotId();
+  const userId = selectedUserId();
   const connectionOperations = readConnectionOperations();
   const authorizationOperations = new Map<
     string,
@@ -585,7 +591,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
       }
-      const operationKey = `${packageId}:${connectionTypeId}`;
+      const operationKey = JSON.stringify([
+        userId,
+        packageId,
+        connectionTypeId,
+      ]);
       const now = Date.now();
       const existing = connectionOperations[operationKey];
       const expired =

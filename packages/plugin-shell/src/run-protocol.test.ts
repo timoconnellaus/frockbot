@@ -75,6 +75,12 @@ describe("client run protocol v1", () => {
   test("rejects durable runs missing current admission fields", () => {
     const complete = storedRun([], "running");
     for (const field of [
+      "runId",
+      "commandFingerprint",
+      "sessionId",
+      "acceptedAt",
+      "input",
+      "events",
       "status",
       "phase",
       "configurationSnapshot",
@@ -89,6 +95,18 @@ describe("client run protocol v1", () => {
         projectClientRunLookupV1(incomplete as unknown as StoredRun),
       ).toThrow();
     }
+    expect(() =>
+      projectClientRunLookupV1({
+        ...complete,
+        unrecognized: true,
+      } as unknown as StoredRun),
+    ).toThrow("stored run has invalid fields");
+    expect(() =>
+      projectClientRunLookupV1({
+        ...complete,
+        events: [{ type: "turn/start" }],
+      } as unknown as StoredRun),
+    ).toThrow("stored run has invalid events");
   });
 
   test("projects and strictly decodes command-specific admission state", () => {
@@ -385,12 +403,7 @@ describe("client run protocol v1", () => {
       phase: "reconciliation-required",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 17,
-      internalDeadline: "2026-08-29T01:00:00.000Z",
-      receipt: "receipt-secret",
-    } satisfies StoredRun & {
-      internalDeadline: string;
-      receipt: string;
-    };
+    } satisfies StoredRun;
 
     const projected = projectClientRunListV1([stored]);
 
@@ -445,8 +458,6 @@ describe("client run protocol v1", () => {
       "tool-input-secret",
       "provider-private",
       "model-private",
-      "internalDeadline",
-      "receipt-secret",
       "configurationSnapshot",
       "previousEventCount",
       "phase",
@@ -518,7 +529,7 @@ describe("client run protocol v1", () => {
       commandFingerprint: "fingerprint",
       sessionId: "user:primary",
       acceptedAt: timestamp,
-      input: "🧪".repeat(40_000),
+      input: "🧪".repeat(15_000),
       events: toolEvents(300),
       status: "failed",
       phase: "executing",

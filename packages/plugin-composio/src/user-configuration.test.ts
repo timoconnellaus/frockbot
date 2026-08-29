@@ -352,6 +352,38 @@ describe("Connection dependency admission", () => {
     expect((await contribution.read("user-1")).connections).toEqual([]);
   });
 
+  test("rejects Connection admission when the installed Package version is unavailable", async () => {
+    const storage = new MemoryStorage();
+    const host = backendHost(storage);
+    const contribution = createComposioUserBackendContribution(host);
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-composio",
+        expectedRevision: 0,
+        packageId: "composio",
+        version: "0.0.1",
+      },
+    });
+    const upgraded = createComposioUserBackendContribution({
+      ...host,
+      availablePackages: [{ packageId: "composio", version: "0.0.2" }],
+    });
+
+    await expect(
+      upgraded.startConnection("user-1", {
+        connectionId: "gmail-1",
+        packageId: "composio",
+        connectionTypeId: "gmail",
+        displayName: "Gmail",
+      }),
+    ).rejects.toThrow('Package "composio" is not available');
+    expect((await upgraded.read("user-1")).connections).toEqual([]);
+  });
+
   test("atomically enforces the Package and Connection Type requirement", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution({
