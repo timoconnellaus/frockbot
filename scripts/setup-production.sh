@@ -315,8 +315,8 @@ command -v openssl >/dev/null 2>&1 || {
   exit 1
 }
 FROCKBOT_AUTHORIZATION_STATE_SECRET=$(openssl rand -hex 32)
-if [[ ! "$FROCKBOT_AUTHORIZATION_STATE_SECRET" =~ ^[0-9a-f]{64}$ ]] ||
-  ! is_strong_authorization_state_secret "$FROCKBOT_AUTHORIZATION_STATE_SECRET"; then
+if [[ ! "$FROCKBOT_AUTHORIZATION_STATE_SECRET" =~ ^[0-9a-f]{64}$ ]] \
+  || ! is_strong_authorization_state_secret "$FROCKBOT_AUTHORIZATION_STATE_SECRET"; then
   warn "Failed to generate a strong Connection authorization-state secret"
   exit 1
 fi
