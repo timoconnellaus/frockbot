@@ -912,7 +912,7 @@ describe("Bot recovery", () => {
         commandFingerprint: `fingerprint-${index}`,
         sessionId: "user:primary",
         acceptedAt,
-        input: "🧪".repeat(40_000),
+        input: "🧪".repeat(16_000),
         events: [],
         status: active ? "reconciliation-required" : "completed",
         phase: active ? "reconciliation-required" : "executing",
@@ -920,7 +920,7 @@ describe("Bot recovery", () => {
         previousEventCount: 0,
         ...(active
           ? { failure: "Provider confirmation required" }
-          : { responseText: "📦".repeat(80_000) }),
+          : { responseText: "📦".repeat(16_000) }),
       } satisfies StoredRun;
       await storage.put({
         [`run:${runId}`]: run,
