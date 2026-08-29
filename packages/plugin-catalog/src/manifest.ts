@@ -120,9 +120,11 @@ function exactFields(
   boundary: string,
 ): void {
   const allowedFields = new Set(allowed);
-  const unknown = Object.keys(record).find((key) => !allowedFields.has(key));
+  const unknown = Reflect.ownKeys(record).find(
+    (key) => typeof key !== "string" || !allowedFields.has(key),
+  );
   if (unknown !== undefined) {
-    throw new Error(`${boundary} has unknown field "${unknown}"`);
+    throw new Error(`${boundary} has unknown field "${String(unknown)}"`);
   }
 }
 

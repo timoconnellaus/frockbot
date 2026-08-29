@@ -604,6 +604,24 @@ describe("decodeFrockBotManifest", () => {
     }
   });
 
+  test("rejects non-enumerable and symbol fields", () => {
+    const nonEnumerableCompatibility = { frockbot: "*" };
+    Object.defineProperty(nonEnumerableCompatibility, "hidden", { value: true });
+    const symbolCompatibility = { frockbot: "*" };
+    Object.defineProperty(symbolCompatibility, Symbol("unexpected"), {
+      value: true,
+    });
+
+    for (const [field, compatibility] of [
+      ["hidden", nonEnumerableCompatibility],
+      ["Symbol(unexpected)", symbolCompatibility],
+    ] as const) {
+      expect(() =>
+        decodeFrockBotManifest({ ...manifest(), compatibility }),
+      ).toThrow(`manifest compatibility has unknown field "${field}"`);
+    }
+  });
+
   test("recursively decodes the supported manifest v3 schema subset", () => {
     const schema = {
       type: "object",
