@@ -2,6 +2,7 @@ export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const NONCE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const AUTH_CALLBACK_PREFIX = "com.frockbot.desktop://auth/callback#";
 
 export interface DesktopApiRequest {
   schemaVersion: 1;
@@ -66,7 +67,9 @@ export type DesktopAuthEventV1 =
 export function decodeDesktopAuthCallbackToken(
   value: unknown,
 ): string | undefined {
-  if (typeof value !== "string") return undefined;
+  if (typeof value !== "string" || !value.startsWith(AUTH_CALLBACK_PREFIX)) {
+    return undefined;
+  }
   let url: URL;
   try {
     url = new URL(value);

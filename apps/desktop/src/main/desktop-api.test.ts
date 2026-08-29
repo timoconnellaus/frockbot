@@ -170,6 +170,7 @@ describe("desktop hosted protocol", () => {
     for (const value of [
       "com.frockbot.desktop:/auth/callback#token=token-1",
       "com.frockbot.desktop://auth/other#token=token-1",
+      "com.frockbot.desktop://auth/other/../callback#token=token-1",
       "com.frockbot.desktop://other/callback#token=token-1",
       "com.frockbot.desktop://auth/callback?next=/#token=token-1",
       "com.frockbot.desktop://auth/callback#token=",
