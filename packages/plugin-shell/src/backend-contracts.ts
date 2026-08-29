@@ -1,4 +1,4 @@
-import type { SessionEvent } from "@frockbot/agent-core";
+import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
 import {
   decodeBotSettingsViewV1,
   type BotSettingsViewV1,
@@ -41,25 +41,6 @@ const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
   "executing",
   "reconciliation-required",
 ];
-const STORED_RUN_EVENT_TYPES = new Set([
-  "session/created",
-  "input/queued",
-  "input/admitted",
-  "input/cancelled",
-  "turn/start",
-  "step/start",
-  "user/message",
-  "model/request",
-  "model/effect-not-started",
-  "model/reconciliation-required",
-  "assistant/chunk",
-  "assistant/message",
-  "tool/call",
-  "tool/result",
-  "step/end",
-  "turn/end",
-  "session/disposed",
-]);
 const STORED_RUN_REQUIRED_KEYS = [
   "runId",
   "commandFingerprint",
@@ -86,29 +67,9 @@ function boundedString(
   );
 }
 
-function requireStoredRunEvents(
-  value: unknown,
-): asserts value is SessionEvent[] {
-  if (
-    !Array.isArray(value) ||
-    value.some(
-      (event) =>
-        !event ||
-        typeof event !== "object" ||
-        Array.isArray(event) ||
-        !("type" in event) ||
-        typeof event.type !== "string" ||
-        !STORED_RUN_EVENT_TYPES.has(event.type) ||
-        !("seq" in event) ||
-        !Number.isSafeInteger(event.seq) ||
-        (event.seq as number) < 0 ||
-        !("timestamp" in event) ||
-        !boundedString(event.timestamp, 64) ||
-        !Number.isFinite(Date.parse(event.timestamp)),
-    )
-  ) {
-    throw new Error("stored run has invalid events");
-  }
+function decodeStoredRunEvents(value: unknown): SessionEvent[] {
+  if (!Array.isArray(value)) throw new Error("stored run has invalid events");
+  return value.map(decodeSessionEvent);
 }
 
 export function requireStoredRunV1(input: unknown): StoredRun {
@@ -126,12 +87,13 @@ export function requireStoredRunV1(input: unknown): StoredRun {
   ) {
     throw new Error("stored run has invalid fields");
   }
-  const runId = boundedString(candidate.runId, 128)
-    ? candidate.runId
-    : "unknown";
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(runId)) {
+  if (
+    !boundedString(candidate.runId, 128) ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(candidate.runId)
+  ) {
     throw new Error("stored run has invalid runId");
   }
+  const runId = candidate.runId;
   if (!boundedString(candidate.commandFingerprint, 65_536)) {
     throw new Error(`run "${runId}" has no valid command fingerprint`);
   }
@@ -147,7 +109,7 @@ export function requireStoredRunV1(input: unknown): StoredRun {
   if (!boundedString(candidate.input, 32_000)) {
     throw new Error(`run "${runId}" has no valid input`);
   }
-  requireStoredRunEvents(candidate.events);
+  const events = decodeStoredRunEvents(candidate.events);
   const status = STORED_RUN_STATUSES.find(
     (value) => value === candidate.status,
   );
@@ -173,13 +135,22 @@ export function requireStoredRunV1(input: unknown): StoredRun {
       throw new Error(`run "${runId}" has invalid ${key}`);
     }
   }
+  if (status === "completed" && candidate.responseText === undefined) {
+    throw new Error(`run "${runId}" has no response text`);
+  }
+  if (
+    (status === "failed" || status === "reconciliation-required") &&
+    candidate.failure === undefined
+  ) {
+    throw new Error(`run "${runId}" has no failure`);
+  }
   return {
     runId,
     commandFingerprint: candidate.commandFingerprint,
     sessionId: candidate.sessionId,
     acceptedAt: candidate.acceptedAt,
     input: candidate.input,
-    events: candidate.events,
+    events,
     status,
     phase,
     configurationSnapshot: candidate.configurationSnapshot as BotSettingsViewV1,

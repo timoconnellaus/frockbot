@@ -79,6 +79,33 @@ class MemoryStorage {
 }
 
 describe("Bot recovery", () => {
+  test("does not clear active work whose durable run is malformed", async () => {
+    const storage = new MemoryStorage();
+    await storage.put({
+      "active-run": "run-malformed",
+      "run:run-malformed": {
+        runId: "run-malformed",
+        commandFingerprint: "fingerprint",
+        sessionId: "user:primary",
+        acceptedAt: "2026-08-28T00:00:00.000Z",
+        input: "hello",
+        events: [],
+        phase: "executing",
+        configurationSnapshot: initializeBotSettingsV1("primary"),
+        previousEventCount: 0,
+      },
+    });
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(contribution.listRuns({ schemaVersion: 1 })).rejects.toThrow(
+      "stored run has invalid fields",
+    );
+    expect(await storage.get<string>("active-run")).toBe("run-malformed");
+  });
+
   test("atomically restores the admitted notification intent after eviction", async () => {
     const storage = new MemoryStorage();
     const admittedSettings = {

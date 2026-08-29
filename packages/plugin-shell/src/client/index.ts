@@ -391,15 +391,9 @@ function selectedBotId(): string {
   }
 }
 
-function selectedUserId(): string {
-  const userId = globalThis.document?.body.dataset.frockbotUserId;
-  return userId && userId !== "anonymous" ? userId : "anonymous";
-}
-
 export const shellClientPlugin: ClientPlugin = (ctx) => {
   let activeRequest: AbortController | undefined;
   const botId = selectedBotId();
-  const userId = selectedUserId();
   const connectionOperations = readConnectionOperations();
   const authorizationOperations = new Map<
     string,
@@ -590,6 +584,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     ): Promise<string | undefined> {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
+      }
+      const userId = await ctx.transport.readAuthenticatedUserId?.();
+      if (!userId) {
+        throw new Error("Authenticated User identity is unavailable");
       }
       const operationKey = JSON.stringify([
         userId,

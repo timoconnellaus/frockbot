@@ -126,6 +126,10 @@ export interface ShellBotBackendHost {
   env: BotStateEnv;
 }
 
+function optionalStoredRun(input: unknown): StoredRun | undefined {
+  return input === undefined ? undefined : requireStoredRunV1(input);
+}
+
 function parseStoredJson<T>(body: string): Promise<T> {
   try {
     return Promise.resolve(JSON.parse(body) as T);
@@ -766,7 +770,7 @@ export class ShellBotBackendContribution {
     await this.assertIdentity(identity);
     const key = `${RUN_PREFIX}${runId}`;
     const recovery = await this.ctx.storage.transaction(async (transaction) => {
-      const run = await transaction.get<StoredRun>(key);
+      const run = optionalStoredRun(await transaction.get<unknown>(key));
       const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
       if (
         !run ||
@@ -777,7 +781,6 @@ export class ShellBotBackendContribution {
       }
       const latest =
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
-      requireStoredRunV1(run);
       const settings = run.configurationSnapshot;
       await transaction.put(key, {
         ...run,
@@ -807,7 +810,7 @@ export class ShellBotBackendContribution {
     try {
       await this.ctx.storage.transaction(async (transaction) => {
         const key = `${RUN_PREFIX}${command.runId}`;
-        const run = await transaction.get<StoredRun>(key);
+        const run = optionalStoredRun(await transaction.get<unknown>(key));
         if (!run || run.status !== "running") {
           throw new Error(`run "${command.runId}" is not resumable`);
         }
@@ -842,8 +845,8 @@ export class ShellBotBackendContribution {
       await this.completeRun(command.runId, previous, completed);
       return completed;
     } catch (error) {
-      const durableRun = await this.ctx.storage.get<StoredRun>(
-        `${RUN_PREFIX}${command.runId}`,
+      const durableRun = optionalStoredRun(
+        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
       );
       const events = eventsForFailedRun(durableRun, error);
       const message =
@@ -907,8 +910,8 @@ export class ShellBotBackendContribution {
         systemPromptSection: promptParts.join("\n\n"),
         resume: true,
       });
-      const durableRun = await this.ctx.storage.get<StoredRun>(
-        `${RUN_PREFIX}${run.runId}`,
+      const durableRun = optionalStoredRun(
+        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
       );
       if (!durableRun) throw new Error(`run "${run.runId}" was not accepted`);
       const fullResult = {
@@ -924,8 +927,8 @@ export class ShellBotBackendContribution {
       await this.completeRun(run.runId, previous, completed);
       return completed;
     } catch (error) {
-      const durableRun = await this.ctx.storage.get<StoredRun>(
-        `${RUN_PREFIX}${run.runId}`,
+      const durableRun = optionalStoredRun(
+        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
       );
       const events = durableRun?.events ?? run.events;
       const message =
@@ -1040,7 +1043,9 @@ export class ShellBotBackendContribution {
     command: OwnedBotTurnCommand,
   ): Promise<BotTurnCompletion | undefined> {
     const { runId } = command;
-    const run = await this.ctx.storage.get<StoredRun>(`${RUN_PREFIX}${runId}`);
+    const run = optionalStoredRun(
+      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+    );
     if (!run) return undefined;
     if (run.commandFingerprint !== botTurnCommandFingerprintV1(command)) {
       throw new Error(
@@ -1052,12 +1057,15 @@ export class ShellBotBackendContribution {
         `run "${runId}" already exists with status ${run.status}`,
       );
     }
+    if (run.responseText === undefined) {
+      throw new Error(`run "${runId}" has no response text`);
+    }
     const notification = await this.ctx.storage.get<BotNotificationIntent>(
       `${NOTIFICATION_PREFIX}${runId}`,
     );
     return {
       runId,
-      text: run.responseText ?? "",
+      text: run.responseText,
       events: structuredClone(run.events),
       notification,
     };
@@ -1066,8 +1074,8 @@ export class ShellBotBackendContribution {
   private async assertMatchingRunCommand(
     command: OwnedBotTurnCommand,
   ): Promise<void> {
-    const run = await this.ctx.storage.get<StoredRun>(
-      `${RUN_PREFIX}${command.runId}`,
+    const run = optionalStoredRun(
+      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
     );
     if (
       run &&
@@ -1146,10 +1154,11 @@ export class ShellBotBackendContribution {
     }
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
     if (activeRunId) {
-      const [run, identity] = await Promise.all([
-        this.ctx.storage.get<StoredRun>(`${RUN_PREFIX}${activeRunId}`),
+      const [storedRun, identity] = await Promise.all([
+        this.ctx.storage.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
         this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
       ]);
+      const run = optionalStoredRun(storedRun);
       if (run?.status === "reconciliation-required" && identity) {
         await this.reconcileRun(identity, activeRunId);
         return;
@@ -1181,8 +1190,8 @@ export class ShellBotBackendContribution {
 
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
-      const active = await this.ctx.storage.get<StoredRun>(
-        `${RUN_PREFIX}${activeRunId}`,
+      const active = optionalStoredRun(
+        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
       );
       if (active)
         selected.set(active.runId, { run: projectClientRunV1(active) });
@@ -1195,8 +1204,8 @@ export class ShellBotBackendContribution {
         selected.set(candidate.runId, { ...current, cursor: candidate.cursor });
         continue;
       }
-      const stored = await this.ctx.storage.get<StoredRun>(
-        `${RUN_PREFIX}${candidate.runId}`,
+      const stored = optionalStoredRun(
+        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${candidate.runId}`),
       );
       if (!stored) continue;
       const projected = projectClientRunV1(stored);
@@ -1252,8 +1261,8 @@ export class ShellBotBackendContribution {
 
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
-    const run = await this.ctx.storage.get<StoredRun>(
-      `${RUN_PREFIX}${query.runId}`,
+    const run = optionalStoredRun(
+      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${query.runId}`),
     );
     if (run && run.runId !== query.runId) {
       throw new Error("stored run does not match its lookup key");
@@ -1264,8 +1273,8 @@ export class ShellBotBackendContribution {
   async fenceRunAdmission(input: unknown): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
     return this.ctx.storage.transaction(async (transaction) => {
-      const run = await transaction.get<StoredRun>(
-        `${RUN_PREFIX}${query.runId}`,
+      const run = optionalStoredRun(
+        await transaction.get<unknown>(`${RUN_PREFIX}${query.runId}`),
       );
       if (run && run.runId !== query.runId) {
         throw new Error("stored run does not match its lookup key");
@@ -1472,7 +1481,7 @@ export class ShellBotBackendContribution {
     } satisfies BotSettingsViewV1;
     const key = `${RUN_PREFIX}${command.runId}`;
     return this.ctx.storage.transaction(async (transaction) => {
-      const existing = await transaction.get<StoredRun>(key);
+      const existing = optionalStoredRun(await transaction.get<unknown>(key));
       if (existing) {
         if (
           existing.commandFingerprint !== botTurnCommandFingerprintV1(command)
@@ -1539,7 +1548,7 @@ export class ShellBotBackendContribution {
     if (durableEvents.length === 0) return;
     const key = `${RUN_PREFIX}${runId}`;
     await this.ctx.storage.transaction(async (transaction) => {
-      const run = await transaction.get<StoredRun>(key);
+      const run = optionalStoredRun(await transaction.get<unknown>(key));
       if (!run) throw new Error(`run "${runId}" was not accepted`);
       const latest =
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
@@ -1641,7 +1650,7 @@ export class ShellBotBackendContribution {
     const recovery = await this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<string>(ACTIVE_RUN_KEY);
       if (!current || current === this.executingRunId) return undefined;
-      const run = await transaction.get<StoredRun>(key);
+      const run = optionalStoredRun(await transaction.get<unknown>(key));
       if (run?.status === "reconciliation-required") {
         await this.refreshRecoveryAlarm(transaction);
         return undefined;

@@ -101,12 +101,34 @@ describe("client run protocol v1", () => {
         unrecognized: true,
       } as unknown as StoredRun),
     ).toThrow("stored run has invalid fields");
+    for (const runId of [42, "", "x".repeat(129)]) {
+      expect(() =>
+        projectClientRunLookupV1({
+          ...complete,
+          runId,
+        } as unknown as StoredRun),
+      ).toThrow("stored run has invalid runId");
+    }
     expect(() =>
       projectClientRunLookupV1({
         ...complete,
         events: [{ type: "turn/start" }],
       } as unknown as StoredRun),
-    ).toThrow("stored run has invalid events");
+    ).toThrow("session event.seq must be an integer");
+    expect(() =>
+      projectClientRunLookupV1({
+        ...complete,
+        events: [
+          {
+            type: "model/request",
+            seq: 0,
+            timestamp,
+            turn: 1,
+            step: 1,
+          },
+        ],
+      } as unknown as StoredRun),
+    ).toThrow("session event has invalid fields");
   });
 
   test("projects and strictly decodes command-specific admission state", () => {

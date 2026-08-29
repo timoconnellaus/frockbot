@@ -1,5 +1,9 @@
 import type { SessionEvent } from "@frockbot/agent-core";
-import type { BotTurnCompletion, StoredRun } from "./backend-contracts.js";
+import {
+  requireStoredRunV1,
+  type BotTurnCompletion,
+  type StoredRun,
+} from "./backend-contracts.js";
 
 export interface RunTerminalStorage {
   get<T>(key: string): Promise<T | undefined>;
@@ -23,8 +27,9 @@ export async function completeStoredRun(
 ): Promise<void> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
-  const run = await storage.get<StoredRun>(keys.run);
-  if (!run) throw new Error(`run "${runId}" was not accepted`);
+  const stored = await storage.get<StoredRun>(keys.run);
+  if (!stored) throw new Error(`run "${runId}" was not accepted`);
+  const run = requireStoredRunV1(stored);
   const records: Record<string, unknown> = {
     [keys.run]: {
       ...run,
@@ -50,8 +55,9 @@ export async function failStoredRun(
   events: readonly SessionEvent[],
   failure: string,
 ): Promise<"failed" | "preserved-completion" | "missing"> {
-  const run = await storage.get<StoredRun>(keys.run);
-  if (!run) return "missing";
+  const stored = await storage.get<StoredRun>(keys.run);
+  if (!stored) return "missing";
+  const run = requireStoredRunV1(stored);
   if (run.status === "completed") return "preserved-completion";
   await storage.put({
     [keys.run]: {
@@ -78,8 +84,9 @@ export async function requireStoredRunReconciliation(
 ): Promise<void> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
-  const run = await storage.get<StoredRun>(keys.run);
-  if (!run) throw new Error(`run "${runId}" was not accepted`);
+  const stored = await storage.get<StoredRun>(keys.run);
+  if (!stored) throw new Error(`run "${runId}" was not accepted`);
+  const run = requireStoredRunV1(stored);
   await storage.put({
     [keys.run]: {
       ...run,

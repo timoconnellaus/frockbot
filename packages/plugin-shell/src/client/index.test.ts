@@ -447,6 +447,7 @@ describe("Connection operation reconciliation", () => {
       await shellClientPlugin({
         transport: {
           turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+          readAuthenticatedUserId: () => Promise.resolve("user-a"),
           startConnection: (input) => {
             commandIds.push(input.commandId);
             nativeReturnNonces.push(input.nativeReturnNonce);
@@ -487,10 +488,6 @@ describe("Connection operation reconciliation", () => {
 
   test("does not reuse desktop authorization identity across users", async () => {
     installMemoryStorage();
-    Object.defineProperty(globalThis, "document", {
-      configurable: true,
-      value: { body: { dataset: {} } },
-    });
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: {
@@ -503,11 +500,11 @@ describe("Connection operation reconciliation", () => {
       nativeReturnNonce?: string;
     }> = [];
     const mount = async (userId: string): Promise<Ref<FrockBotWebData>> => {
-      document.body.dataset.frockbotUserId = userId;
       let provided: Ref<FrockBotWebData> | undefined;
       await shellClientPlugin({
         transport: {
           turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+          readAuthenticatedUserId: () => Promise.resolve(userId),
           startConnection: (input) => {
             attempts.push({
               commandId: input.commandId,
@@ -583,6 +580,7 @@ describe("Connection operation reconciliation", () => {
     await shellClientPlugin({
       transport: {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readAuthenticatedUserId: () => Promise.resolve("user-a"),
         startConnection: (input) => {
           commandIds.push(input.commandId);
           connectionId = input.commandId;

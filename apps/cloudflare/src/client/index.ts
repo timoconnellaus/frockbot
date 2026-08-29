@@ -32,6 +32,18 @@ function selectedBotId(): string {
 }
 
 const botId = selectedBotId();
+const AUTHENTICATED_USER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
+
+function requireAuthenticatedUserId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !AUTHENTICATED_USER_ID_PATTERN.test(value) ||
+    value === "anonymous"
+  ) {
+    throw new Error("Authenticated User identity is unavailable");
+  }
+  return value;
+}
 
 async function apiRequest(
   path: string,
@@ -164,6 +176,12 @@ const application = new ClientApplication({
   },
   readApplicationManifest() {
     return apiRequest("/app-manifest");
+  },
+  async readAuthenticatedUserId() {
+    const value = window.frockbotDesktop
+      ? (await window.getUser())?.id
+      : document.body.dataset.frockbotUserId;
+    return requireAuthenticatedUserId(value);
   },
   startConnection(input: {
     commandId: string;

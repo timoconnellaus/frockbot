@@ -86,6 +86,7 @@ export interface AgentTransport {
     command: ConfigurationCommandV1,
   ): Promise<OperationReceiptV1>;
   readApplicationManifest?(): Promise<unknown>;
+  readAuthenticatedUserId?(): Promise<string>;
   startConnection?(input: {
     commandId: string;
     packageId: string;
