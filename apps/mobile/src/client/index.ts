@@ -83,6 +83,7 @@ const auth = createAuthSession({
 
 const botId = ref("default");
 let activeRequest: AbortController | undefined;
+let admissionObserver: AbortController | undefined;
 let host: MobileHost | undefined;
 let botProjection: MobileBotProjectionController;
 
@@ -357,6 +358,8 @@ const web: Ref<FrockBotWebData> = ref({
         };
       }
       if (admission.status === "uncertain") {
+        const observer = new AbortController();
+        admissionObserver = observer;
         if (botProjection.isCurrent(projectionToken)) {
           replaceMessage(pendingRunId, {
             id: crypto.randomUUID(),
@@ -396,10 +399,12 @@ const web: Ref<FrockBotWebData> = ref({
               } Retrying…`;
             }
           },
-          wait: (delayMs) => waitForAdmissionLookup(delayMs, request.signal),
+          wait: (delayMs) => waitForAdmissionLookup(delayMs, observer.signal),
           isCurrent: () =>
-            botProjection.isCurrent(projectionToken) && !request.signal.aborted,
+            botProjection.isCurrent(projectionToken) &&
+            !observer.signal.aborted,
         });
+        if (admissionObserver === observer) admissionObserver = undefined;
         if (!lookup) {
           return { accepted: true, runId: pendingRunId };
         }
@@ -556,6 +561,8 @@ watch(
   (selectedBotId) => {
     activeRequest?.abort();
     activeRequest = undefined;
+    admissionObserver?.abort();
+    admissionObserver = undefined;
     web.value.composerContext = selectedBotId;
     void botProjection.switchBot(selectedBotId);
   },

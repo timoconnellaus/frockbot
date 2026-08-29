@@ -1542,7 +1542,7 @@ describe("Connection provider reconciliation alarms", () => {
     expect(storage.alarmAt).toBeUndefined();
   });
 
-  test("retires provider-absent expired Link through its durable alarm", async () => {
+  test("keeps a provider-absent expired Link pending for durable reconciliation", async () => {
     const storage = new MemoryStorage();
     const admitted = createComposioUserBackendContribution(
       backendHost(storage),
@@ -1597,11 +1597,14 @@ describe("Connection provider reconciliation alarms", () => {
     expect(
       await recovered.getConnection("user-1", "link-command"),
     ).toMatchObject({
-      state: "failed",
-      failure: "Connection authorization could not be recovered",
-      safeMetadata: { authorizationStateConsumed: true },
+      state: "reconciliation-required",
+      failure: "Expired authorization requires provider reconciliation",
+      safeMetadata: {
+        reconciliationOperation: "link",
+        connectedAccountId: "account-1",
+      },
     });
-    expect(storage.alarmAt).toBeUndefined();
+    expect(storage.alarmAt).toBeGreaterThan(Date.now());
   });
 
   test("schedules no-account revocation reconciliation after eviction", async () => {

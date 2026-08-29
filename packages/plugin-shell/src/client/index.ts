@@ -269,10 +269,39 @@ function writeConnectionOperations(
   }
 }
 
+function synchronizeConnectionOperations(
+  operations: Record<string, PendingConnectionOperation>,
+): void {
+  for (const key of Object.keys(operations)) delete operations[key];
+  Object.assign(operations, readConnectionOperations());
+}
+
+async function reserveConnectionOperation(
+  operations: Record<string, PendingConnectionOperation>,
+  operationKey: string,
+  create: () => PendingConnectionOperation,
+): Promise<PendingConnectionOperation> {
+  const reserve = () => {
+    synchronizeConnectionOperations(operations);
+    const operation = operations[operationKey] ?? create();
+    operations[operationKey] = operation;
+    writeConnectionOperations(operations);
+    return operation;
+  };
+  const locks = globalThis.navigator?.locks;
+  return locks
+    ? locks.request(
+        `${CONNECTION_OPERATION_STORAGE_KEY}:${operationKey}`,
+        reserve,
+      )
+    : reserve();
+}
+
 function retireSettledConnectionOperations(
   operations: Record<string, PendingConnectionOperation>,
   settings: UserSettingsViewV1,
 ): void {
+  synchronizeConnectionOperations(operations);
   let changed = false;
   for (const [key, operation] of Object.entries(operations)) {
     const connection = settings.connections.find(
@@ -397,6 +426,23 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     });
   }
 
+  async function observeWhileAttached<T>(
+    operation: Promise<T>,
+    signal: AbortSignal,
+  ): Promise<T> {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    return Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      }),
+    ]);
+  }
+
   async function reconcileUncertainAdmission(
     runId: string,
     signal: AbortSignal,
@@ -413,8 +459,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     let delayMs = 250;
     while (!signal.aborted) {
       try {
-        const observed = await ctx.transport.lookupRun(runId);
-        const run = observed ?? (await ctx.transport.fenceRunAdmission(runId));
+        const observed = await observeWhileAttached(
+          ctx.transport.lookupRun(runId),
+          signal,
+        );
+        const run =
+          observed ??
+          (await observeWhileAttached(
+            ctx.transport.fenceRunAdmission(runId),
+            signal,
+          ));
+        if (signal.aborted) return "detached";
         if (!run) {
           web.value.activeRun = undefined;
           return "not-admitted";
@@ -422,6 +477,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         projectDurableRuns(web.value, [], [run]);
         return "admitted";
       } catch (error) {
+        if (signal.aborted) return "detached";
         web.value.settingsError = `${
           error instanceof Error
             ? error.message
@@ -628,15 +684,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         packageId,
         connectionTypeId,
       ]);
-      const operation = connectionOperations[operationKey] ?? {
-        commandId: crypto.randomUUID(),
-        createdAt: Date.now(),
-        ...("frockbotDesktop" in (globalThis.window ?? {})
-          ? { nativeReturnNonce: crypto.randomUUID() }
-          : {}),
-      };
-      connectionOperations[operationKey] = operation;
-      writeConnectionOperations(connectionOperations);
+      const operation = await reserveConnectionOperation(
+        connectionOperations,
+        operationKey,
+        () => ({
+          commandId: crypto.randomUUID(),
+          createdAt: Date.now(),
+          ...("frockbotDesktop" in (globalThis.window ?? {})
+            ? { nativeReturnNonce: crypto.randomUUID() }
+            : {}),
+        }),
+      );
       let result;
       try {
         result = await ctx.transport.startConnection({

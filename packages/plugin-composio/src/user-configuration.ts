@@ -489,6 +489,20 @@ export class ComposioUserBackendContribution {
     safeMetadata: UserSettingsViewV1["connections"][number]["safeMetadata"],
   ): Promise<boolean> {
     return this.transitionConnection(userId, connectionId, (connection) => {
+      if (connection.state === "failed") {
+        return {
+          ...connection,
+          state: "reconciliation-required",
+          safeMetadata: {
+            ...safeMetadata,
+            authorizationStateConsumed: true,
+            revocationRequested: true,
+            reconciliationOperation: "link",
+            reconciliationRetryAt: Date.now() + CONNECTION_EFFECT_ALARM_MS,
+          },
+          failure: "Late Connect Link requires cleanup",
+        };
+      }
       const operation = connection.safeMetadata.reconciliationOperation;
       if (
         connection.state !== "authorizing" &&

@@ -463,7 +463,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
                   hasReadyConnection(
                     item.packageId,
                     item.connectionTypes[0]?.id ?? '',
-                  )
+                  ) && !item.connectionTypes[0]?.allowMultiple
                 "
                 class="plugin-added"
                 >✓ Connected</span

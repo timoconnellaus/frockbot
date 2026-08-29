@@ -28,7 +28,9 @@ export function linkReconciliationDisposition(
   result: ComposioProviderReconciliationResult,
 ): "ready" | "pending" | "failed" {
   if (result.status === "active") return "ready";
-  if (result.status === "pending") return "pending";
+  if (result.status === "pending" || result.status === "absent") {
+    return "pending";
+  }
   return "failed";
 }
 

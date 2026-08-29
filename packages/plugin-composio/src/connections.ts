@@ -822,6 +822,11 @@ export class ComposioConnectionCoordinator {
       if (account.userId !== userId || account.status !== "ACTIVE") {
         throw new Error("Composio connected account is not active");
       }
+      if (account.toolkitSlug !== connection.safeMetadata.toolkitSlug) {
+        throw new Error(
+          "Composio connected account does not match the admitted toolkit",
+        );
+      }
       verifiedMetadata = {
         ...connection.safeMetadata,
         toolkitSlug: account.toolkitSlug,

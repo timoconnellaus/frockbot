@@ -542,7 +542,19 @@ describe("client run protocol v1", () => {
     ).toThrow("truncated run list requires a next cursor");
     expect(() =>
       decodeClientRunListQueryV1({ schemaVersion: 1, before: "" }),
-    ).toThrow("run list query.before must not be empty");
+    ).toThrow("run list query.before is invalid");
+    expect(() =>
+      decodeClientRunListQueryV1({ schemaVersion: 1, before: "garbage" }),
+    ).toThrow("run list query.before is invalid");
+    expect(
+      decodeClientRunListQueryV1({
+        schemaVersion: 1,
+        before: "run-index:2026-08-29T00:00:00.000Z:run-1",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      before: "run-index:2026-08-29T00:00:00.000Z:run-1",
+    });
   });
 
   test("bounds projected visible history and messages", () => {

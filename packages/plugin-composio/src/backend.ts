@@ -106,9 +106,9 @@ export function createConfiguredComposioBackendContribution(
 ): BackendRouteContribution {
   const apiKey = host.readSecret("COMPOSIO_API_KEY");
   const gmailAuthConfigId = host.readSecret("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
-  const authorizationStateSecret =
-    host.readSecret("FROCKBOT_AUTHORIZATION_STATE_SECRET") ??
-    host.readSecret("BETTER_AUTH_SECRET");
+  const authorizationStateSecret = host.readSecret(
+    "FROCKBOT_AUTHORIZATION_STATE_SECRET",
+  );
   if (!apiKey || !gmailAuthConfigId || !authorizationStateSecret) {
     throw new Error("Composio backend Contribution is not configured");
   }
