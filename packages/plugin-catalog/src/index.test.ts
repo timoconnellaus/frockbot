@@ -138,7 +138,7 @@ describe("PackageCatalog", () => {
         },
         permissions: [],
       }),
-    ).toThrow("manifest has no contributions");
+    ).toThrow('manifest contributions has unknown field "backend"');
     expect(
       decodeFrockBotManifest({
         schemaVersion: 3,
@@ -427,6 +427,181 @@ describe("decodeFrockBotManifest", () => {
         capabilities: [{ id: "gmail-tools", kind: "tool" }],
       },
     });
+  });
+
+  test("rejects unknown fields at every manifest object boundary", () => {
+    const cases: Array<[string, unknown]> = [
+      ["", { ...manifest(), unexpected: true }],
+      [
+        "compatibility",
+        { ...manifest(), compatibility: { frockbot: "*", unexpected: true } },
+      ],
+      [
+        "contributions",
+        {
+          ...manifest(),
+          contributions: {
+            ...manifest().contributions,
+            unexpected: { entry: "./unexpected" },
+          },
+        },
+      ],
+      [
+        "runtime contribution",
+        {
+          ...manifest(),
+          contributions: {
+            runtime: { entry: "./agent", unexpected: true },
+          },
+        },
+      ],
+      [
+        "backend contribution",
+        {
+          ...manifest(),
+          contributions: {
+            backend: {
+              entry: "./backend",
+              host: "bot",
+              unexpected: true,
+            },
+          },
+        },
+      ],
+      [
+        "client contribution",
+        {
+          ...manifest(),
+          contributions: {
+            client: { entry: "./client", mounts: [], unexpected: true },
+          },
+        },
+      ],
+      [
+        "client mount",
+        {
+          ...manifest(),
+          contributions: {
+            client: {
+              entry: "./client",
+              mounts: [{ slot: "root", unexpected: true }],
+            },
+          },
+        },
+      ],
+      [
+        "desktop contribution",
+        {
+          ...manifest(),
+          contributions: {
+            desktop: {
+              entry: "./desktop",
+              execution: "trusted-main",
+              unexpected: true,
+            },
+          },
+        },
+      ],
+      [
+        "mobile contribution",
+        {
+          ...manifest(),
+          contributions: {
+            mobile: { entry: "./mobile", unexpected: true },
+          },
+        },
+      ],
+      [
+        "configuration",
+        {
+          ...manifest(),
+          configuration: { unexpected: true },
+        },
+      ],
+      [
+        "setting definition",
+        {
+          ...v3ManifestWithSchema({ type: "string" }),
+          configuration: {
+            settings: [
+              {
+                id: "preferences",
+                schemaVersion: 1,
+                scopes: ["user"],
+                schema: { type: "string" },
+                unexpected: true,
+              },
+            ],
+          },
+        },
+      ],
+      [
+        "connection definition",
+        {
+          ...manifest(),
+          configuration: {
+            connectionTypes: [
+              {
+                id: "mail",
+                displayName: "Mail",
+                allowMultiple: false,
+                authorization: { kind: "oauth2", driverId: "driver" },
+                unexpected: true,
+              },
+            ],
+          },
+        },
+      ],
+      [
+        "connection authorization",
+        {
+          ...manifest(),
+          configuration: {
+            connectionTypes: [
+              {
+                id: "mail",
+                displayName: "Mail",
+                allowMultiple: false,
+                authorization: {
+                  kind: "oauth2",
+                  driverId: "driver",
+                  unexpected: true,
+                },
+              },
+            ],
+          },
+        },
+      ],
+      [
+        "capability definition",
+        {
+          ...manifest(),
+          configuration: {
+            capabilities: [
+              { id: "mail-tools", kind: "tool", unexpected: true },
+            ],
+          },
+        },
+      ],
+      [
+        "legacy web contribution",
+        {
+          schemaVersion: 1,
+          id: "legacy",
+          displayName: "Legacy",
+          version: "1.0.0",
+          contributions: {
+            web: { entry: "./web", slots: [], unexpected: true },
+          },
+        },
+      ],
+    ];
+
+    for (const [boundary, candidate] of cases) {
+      expect(() => decodeFrockBotManifest(candidate)).toThrow(
+        `${boundary ? `manifest ${boundary}` : "manifest"} has unknown field "unexpected"`,
+      );
+    }
   });
 
   test("recursively decodes the supported manifest v3 schema subset", () => {

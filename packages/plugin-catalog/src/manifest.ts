@@ -114,6 +114,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function exactFields(
+  record: Record<string, unknown>,
+  allowed: readonly string[],
+  boundary: string,
+): void {
+  const allowedFields = new Set(allowed);
+  const unknown = Object.keys(record).find((key) => !allowedFields.has(key));
+  if (unknown !== undefined) {
+    throw new Error(`${boundary} has unknown field "${unknown}"`);
+  }
+}
+
 function requiredString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   if (typeof value !== "string" || !value.trim()) {
@@ -196,6 +208,11 @@ function decodeV1(value: Record<string, unknown>): FrockBotManifest {
   if (!isRecord(value.contributions)) {
     throw new Error("manifest contributions must be an object");
   }
+  exactFields(
+    value.contributions,
+    ["agent", "web", "desktop", "mobile"],
+    "manifest contributions",
+  );
   const agent = optionalLegacyEntry(value.contributions, "agent");
   if (value.contributions.desktop !== undefined) {
     throw new Error("manifest v1 desktop Contributions are unsupported");
@@ -206,6 +223,12 @@ function decodeV1(value: Record<string, unknown>): FrockBotManifest {
     const web = value.contributions.web;
     if (!isRecord(web))
       throw new Error("manifest web contribution must be an object");
+    exactFields(
+      web,
+      ["entry", "manifest", "slots"],
+      "manifest legacy web contribution",
+    );
+    optionalLegacyEntry(web, "manifest");
     const slots = optionalStringArray(web, "slots");
     client = {
       entry: relativeEntry(web, "entry"),
@@ -241,9 +264,17 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
   if (!isRecord(value.compatibility)) {
     throw new Error("manifest compatibility must be an object");
   }
+  exactFields(value.compatibility, ["frockbot"], "manifest compatibility");
   if (!isRecord(value.contributions)) {
     throw new Error("manifest contributions must be an object");
   }
+  exactFields(
+    value.contributions,
+    value.schemaVersion === 3
+      ? ["backend", "runtime", "client", "desktop", "mobile"]
+      : ["runtime", "client", "desktop", "mobile"],
+    "manifest contributions",
+  );
   const contributions: FrockBotManifest["contributions"] = {};
   if (value.schemaVersion === 3 && value.contributions.backend !== undefined) {
     const backend = Array.isArray(value.contributions.backend)
@@ -253,6 +284,11 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
       throw new Error("manifest backend contributions must contain objects");
     }
     contributions.backend = backend.map((contribution) => {
+      exactFields(
+        contribution,
+        ["entry", "host"],
+        "manifest backend contribution",
+      );
       if (
         contribution.host !== "gateway" &&
         contribution.host !== "bot" &&
@@ -270,6 +306,11 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     if (!isRecord(value.contributions.runtime)) {
       throw new Error("manifest runtime contribution must be an object");
     }
+    exactFields(
+      value.contributions.runtime,
+      ["entry"],
+      "manifest runtime contribution",
+    );
     contributions.runtime = {
       entry: relativeEntry(value.contributions.runtime, "entry"),
     };
@@ -278,6 +319,11 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     const client = value.contributions.client;
     if (!isRecord(client))
       throw new Error("manifest client contribution must be an object");
+    exactFields(
+      client,
+      ["entry", "mounts", "outlets"],
+      "manifest client contribution",
+    );
     const mounts = client.mounts;
     if (!Array.isArray(mounts)) {
       throw new Error("manifest client mounts must be an array");
@@ -287,6 +333,7 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
       mounts: mounts.map((mount) => {
         if (!isRecord(mount))
           throw new Error("manifest client mount must be an object");
+        exactFields(mount, ["slot", "order"], "manifest client mount");
         const order = mount.order;
         if (
           order !== undefined &&
@@ -304,6 +351,7 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     if (!isRecord(mobile)) {
       throw new Error("manifest mobile contribution must be an object");
     }
+    exactFields(mobile, ["entry"], "manifest mobile contribution");
     contributions.mobile = { entry: relativeEntry(mobile, "entry") };
   }
   if (value.contributions.desktop !== undefined) {
@@ -311,6 +359,11 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     if (!isRecord(desktop)) {
       throw new Error("manifest desktop contribution must be an object");
     }
+    exactFields(
+      desktop,
+      ["entry", "execution", "commands"],
+      "manifest desktop contribution",
+    );
     const execution = desktop.execution;
     if (
       execution !== "sandboxed-renderer" &&
@@ -818,7 +871,17 @@ function decodeConfiguration(value: unknown): PackageConfiguration {
   }
   if (!isRecord(value))
     throw new Error("manifest configuration must be an object");
+  exactFields(
+    value,
+    ["settings", "connectionTypes", "capabilities"],
+    "manifest configuration",
+  );
   const settings = definitionArray(value, "settings").map((setting) => {
+    exactFields(
+      setting,
+      ["id", "schemaVersion", "scopes", "schema"],
+      "manifest setting definition",
+    );
     const schemaVersion = setting.schemaVersion;
     if (!Number.isSafeInteger(schemaVersion) || (schemaVersion as number) < 1) {
       throw new Error(
@@ -841,9 +904,19 @@ function decodeConfiguration(value: unknown): PackageConfiguration {
   });
   const connectionTypes = definitionArray(value, "connectionTypes").map(
     (connection) => {
+      exactFields(
+        connection,
+        ["id", "displayName", "allowMultiple", "authorization", "capabilities"],
+        "manifest connection definition",
+      );
       if (!isRecord(connection.authorization)) {
         throw new Error("manifest connection authorization must be an object");
       }
+      exactFields(
+        connection.authorization,
+        ["kind", "driverId"],
+        "manifest connection authorization",
+      );
       const rawKind = requiredString(connection.authorization, "kind");
       if (
         rawKind !== "oauth2" &&
@@ -872,6 +945,11 @@ function decodeConfiguration(value: unknown): PackageConfiguration {
   );
   const capabilities = definitionArray(value, "capabilities").map(
     (capability) => {
+      exactFields(
+        capability,
+        ["id", "kind", "connectionTypes"],
+        "manifest capability definition",
+      );
       const rawKind = requiredString(capability, "kind");
       if (
         rawKind !== "tool" &&
@@ -903,9 +981,39 @@ function decodeV3(value: Record<string, unknown>): FrockBotManifest {
 
 export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
   if (!isRecord(value)) throw new Error("manifest must be an object");
-  if (value.schemaVersion === 1) return decodeV1(value);
-  if (value.schemaVersion === 2) return decodeV2(value);
-  if (value.schemaVersion === 3) return decodeV3(value);
+  if (value.schemaVersion === 1) {
+    exactFields(
+      value,
+      [
+        "schemaVersion",
+        "id",
+        "displayName",
+        "version",
+        "permissions",
+        "contributions",
+      ],
+      "manifest",
+    );
+    return decodeV1(value);
+  }
+  if (value.schemaVersion === 2 || value.schemaVersion === 3) {
+    exactFields(
+      value,
+      [
+        "schemaVersion",
+        "id",
+        "displayName",
+        "version",
+        "permissions",
+        "compatibility",
+        "dependencies",
+        "contributions",
+        ...(value.schemaVersion === 3 ? ["configuration"] : []),
+      ],
+      "manifest",
+    );
+    return value.schemaVersion === 2 ? decodeV2(value) : decodeV3(value);
+  }
   throw new Error("unsupported FrockBot manifest version");
 }
 
