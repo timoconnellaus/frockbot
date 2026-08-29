@@ -3,8 +3,8 @@ import { SpritesClient } from "@fly/sprites";
 import type { SessionEvent } from "@frockbot/agent-core";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import {
+  createFlySpriteProviderPlugin,
   FlySpriteComputer,
-  FlySpriteComputerProvider,
 } from "@frockbot/plugin-fly-sprite";
 import { Context } from "cordis";
 import { BotState } from "../src/bot-state.ts";
@@ -50,10 +50,7 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
         spriteName,
         token: this.env.SPRITES_TOKEN || undefined,
       });
-      const provider = new FlySpriteComputerProvider(computer);
-      const plugin = (ctx: Context) => ctx.computers.register(provider);
-      plugin.inject = ["computers"];
-      await root.plugin(plugin);
+      await root.plugin(createFlySpriteProviderPlugin(computer));
       return root;
     } catch (error) {
       await root.fiber.dispose();

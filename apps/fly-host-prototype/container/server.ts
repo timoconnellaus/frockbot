@@ -9,6 +9,51 @@ import {
   type FlyHostSmokeRequest,
 } from "./contracts.ts";
 
+const commandTimeoutMs = 60_000;
+const commandTerminationTimeoutMs = 5_000;
+
+type SpriteCommand = ReturnType<ReturnType<SpritesClient["sprite"]>["spawn"]>;
+
+function withTimeout<T>(
+  operation: Promise<T>,
+  phase: string,
+  timeoutMs = commandTimeoutMs,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error(`Sprites ${phase} timed out`)),
+      timeoutMs,
+    );
+    operation.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function terminateCommand(command: SpriteCommand): Promise<void> {
+  try {
+    command.kill("SIGKILL");
+  } catch (error) {
+    void error;
+  }
+  try {
+    await withTimeout(
+      command.wait(),
+      "command termination",
+      commandTerminationTimeoutMs,
+    );
+  } catch (error) {
+    void error;
+  }
+}
+
 function spriteName(effectId: string): string {
   const suffix = createHash("sha256")
     .update(effectId)
@@ -49,12 +94,23 @@ async function streamedEcho(
   const failed = new Promise<never>((_resolve, reject) => {
     command.once("error", reject);
   });
-  await Promise.race([once(command, "spawn"), failed]);
-  const exitCode = await Promise.race([command.wait(), failed]);
-  if (exitCode !== 0) {
-    throw new Error(`Sprites streaming probe exited with ${exitCode}`);
+  try {
+    await withTimeout(
+      Promise.race([once(command, "spawn"), failed]),
+      "streaming spawn",
+    );
+    const exitCode = await withTimeout(
+      Promise.race([command.wait(), failed]),
+      "streaming completion",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Sprites streaming probe exited with ${exitCode}`);
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } catch (error) {
+    await terminateCommand(command);
+    throw error;
   }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function cancellationProbe(
@@ -71,13 +127,29 @@ async function cancellationProbe(
     command.once("error", reject);
   });
   const ready = once(command.stdout, "data");
-  await Promise.race([once(command, "spawn"), failed]);
-  const [chunk] = await Promise.race([ready, failed]);
-  if (String(chunk) !== "ready") return false;
+  try {
+    await withTimeout(
+      Promise.race([once(command, "spawn"), failed]),
+      "cancellation spawn",
+    );
+    const [chunk] = await withTimeout(
+      Promise.race([ready, failed]),
+      "cancellation readiness",
+    );
+    if (String(chunk) !== "ready") {
+      throw new Error("Sprites cancellation probe did not become ready");
+    }
 
-  command.kill("SIGTERM");
-  const exitCode = await Promise.race([command.wait(), failed]);
-  return exitCode === 73;
+    command.kill("SIGTERM");
+    const exitCode = await withTimeout(
+      Promise.race([command.wait(), failed]),
+      "cancellation completion",
+    );
+    return exitCode === 73;
+  } catch (error) {
+    await terminateCommand(command);
+    throw error;
+  }
 }
 
 async function smoke(
