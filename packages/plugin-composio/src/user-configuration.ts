@@ -78,9 +78,22 @@ function readyAuthorizationMetadata(
   };
 }
 
-export function deriveRevocationCompensations(
+async function revocationCompensationId(
+  botId: string,
+  generation: string,
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${botId}\u0000${generation}`),
+  );
+  return `revocation-${Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("")}`;
+}
+
+export async function deriveRevocationCompensations(
   connection: UserSettingsViewV1["connections"][number],
-): Array<{ botId: string; id: string; expectedGeneration: string }> {
+): Promise<Array<{ botId: string; id: string; expectedGeneration: string }>> {
   const dependencies = Array.isArray(
     connection.safeMetadata.dependentAssignments,
   )
@@ -107,14 +120,16 @@ export function deriveRevocationCompensations(
       );
     }
   }
-  return [...dependenciesByKey].map(([key, expectedGeneration]) => {
-    const botId = key.slice(0, key.indexOf("\u0000"));
-    return {
-      botId,
-      id: expectedGeneration,
-      expectedGeneration,
-    };
-  });
+  return Promise.all(
+    [...dependenciesByKey].map(async ([key, expectedGeneration]) => {
+      const botId = key.slice(0, key.indexOf("\u0000"));
+      return {
+        botId,
+        id: await revocationCompensationId(botId, expectedGeneration),
+        expectedGeneration,
+      };
+    }),
+  );
 }
 
 export interface UserConfigurationEnv {
@@ -403,6 +418,14 @@ export class ComposioUserBackendContribution {
       const current =
         (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
         initialState();
+      const installed = current.packages.some(
+        (installedPackage) =>
+          installedPackage.packageId === input.packageId &&
+          installedPackage.state === "installed",
+      );
+      if (!installed) {
+        throw new Error(`Package "${input.packageId}" is not installed`);
+      }
       const existing = current.connections.find(
         (connection) => connection.connectionId === input.connectionId,
       );
@@ -550,7 +573,8 @@ export class ComposioUserBackendContribution {
         throw new Error("Pending Link cannot enter cleanup");
       }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
-      const assignmentCompensations = deriveRevocationCompensations(connection);
+      const assignmentCompensations =
+        await deriveRevocationCompensations(connection);
       const claimed = {
         ...connection,
         state: "revoking" as const,
@@ -915,7 +939,8 @@ export class ComposioUserBackendContribution {
         return { phase: "pending" as const, connection: pending };
       }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
-      const assignmentCompensations = deriveRevocationCompensations(connection);
+      const assignmentCompensations =
+        await deriveRevocationCompensations(connection);
       const claimed = {
         ...connection,
         state: "revoking" as const,

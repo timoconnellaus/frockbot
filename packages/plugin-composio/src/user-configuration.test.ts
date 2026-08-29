@@ -106,10 +106,34 @@ function connection(
   };
 }
 
+async function startInstalledConnection(
+  contribution: ReturnType<typeof createComposioUserBackendContribution>,
+  input: Parameters<
+    ReturnType<typeof createComposioUserBackendContribution>["startConnection"]
+  >[1],
+): Promise<boolean> {
+  const current = await contribution.read("user-1");
+  if (!current.packages.some((pkg) => pkg.packageId === input.packageId)) {
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: `install-${input.packageId}`,
+        expectedRevision: current.revision,
+        packageId: input.packageId,
+        version: "0.0.1",
+      },
+    });
+  }
+  return contribution.startConnection("user-1", input);
+}
+
 describe("Connection revocation dependencies", () => {
-  test("uses only acknowledged explicit Assignments", () => {
+  test("uses only acknowledged explicit Assignments", async () => {
     expect(
-      deriveRevocationCompensations(
+      await deriveRevocationCompensations(
         connection({
           targetBotId: "oauth-initiator",
           dependentAssignments: [
@@ -125,32 +149,33 @@ describe("Connection revocation dependencies", () => {
     ).toEqual([
       {
         botId: "acknowledged",
-        id: "gen-acknowledged",
+        id: expect.stringMatching(/^revocation-[a-f0-9]{64}$/),
         expectedGeneration: "gen-acknowledged",
       },
     ]);
   });
 
-  test("keeps compensation identifiers within the RPC identifier bound", () => {
+  test("keeps compensation identifiers unique and within the RPC bound", async () => {
     const generation = "g".repeat(128);
-    const [compensation] = deriveRevocationCompensations(
+    const [first, second] = await deriveRevocationCompensations(
       connection({
         dependentAssignments: [
           { botId: "primary", generation, status: "acknowledged" },
+          { botId: "secondary", generation, status: "acknowledged" },
         ],
       }),
     );
 
-    expect(compensation).toMatchObject({
-      id: generation,
-      expectedGeneration: generation,
-    });
-    expect(compensation?.id).toHaveLength(128);
+    expect(first).toMatchObject({ expectedGeneration: generation });
+    expect(second).toMatchObject({ expectedGeneration: generation });
+    expect(first?.id).not.toBe(second?.id);
+    expect(first?.id.length).toBeLessThanOrEqual(128);
+    expect(second?.id.length).toBeLessThanOrEqual(128);
   });
 
-  test("ignores legacy Bot metadata even when it has a generation", () => {
+  test("ignores legacy Bot metadata even when it has a generation", async () => {
     expect(
-      deriveRevocationCompensations(
+      await deriveRevocationCompensations(
         connection({
           targetBotId: "legacy-bot",
           assignmentGeneration: "gen-legacy",
@@ -286,6 +311,47 @@ describe("Connection dependency admission", () => {
     });
   });
 
+  test("rejects Connection admission after its Package is disabled", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-composio",
+        expectedRevision: 0,
+        packageId: "composio",
+        version: "0.0.1",
+      },
+    });
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "disable-composio",
+        expectedRevision: 1,
+        packageId: "composio",
+        enabled: false,
+      },
+    });
+
+    await expect(
+      contribution.startConnection("user-1", {
+        connectionId: "gmail-1",
+        packageId: "composio",
+        connectionTypeId: "gmail",
+        displayName: "Gmail",
+      }),
+    ).rejects.toThrow('Package "composio" is not installed');
+    expect((await contribution.read("user-1")).connections).toEqual([]);
+  });
+
   test("atomically enforces the Package and Connection Type requirement", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution({
@@ -336,7 +402,7 @@ describe("Connection dependency admission", () => {
       packageId: "composio",
       version: "0.0.1",
     });
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "gmail-1",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -766,6 +832,14 @@ describe("Connection provider reconciliation alarms", () => {
     ).rejects.toThrow(
       'Connection command idempotency key "link-command" was reused for a different command',
     );
+    await expect(
+      coordinator.start("user-1", {
+        ...command,
+        nativeReturnNonce: "native-return-2",
+      }),
+    ).rejects.toThrow(
+      'Connection command idempotency key "link-command" was reused for a different command',
+    );
     expect(createCalls).toBe(1);
     expect(providerReads).toBe(1);
     expect(
@@ -1034,7 +1108,7 @@ describe("Connection provider reconciliation alarms", () => {
       backendHost(storage),
     );
     const authorizationStateExpiresAt = Date.now() + 60_000;
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1101,7 +1175,7 @@ describe("Connection provider reconciliation alarms", () => {
         });
       }),
     );
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1170,7 +1244,7 @@ describe("Connection provider reconciliation alarms", () => {
           return providerResult.promise;
         }),
       );
-      await contribution.startConnection("user-1", {
+      await startInstalledConnection(contribution, {
         connectionId: "link-command",
         packageId: "composio",
         connectionTypeId: "gmail",
@@ -1213,7 +1287,7 @@ describe("Connection provider reconciliation alarms", () => {
     const admitted = createComposioUserBackendContribution(
       backendHost(storage),
     );
-    await admitted.startConnection("user-1", {
+    await startInstalledConnection(admitted, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1269,7 +1343,7 @@ describe("Connection provider reconciliation alarms", () => {
     const contribution = createComposioUserBackendContribution(
       backendHost(storage, () => Promise.reject(new Error("read unavailable"))),
     );
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1335,7 +1409,7 @@ describe("Connection provider reconciliation alarms", () => {
         },
       ),
     );
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1390,7 +1464,7 @@ describe("Connection provider reconciliation alarms", () => {
     );
     const authorizationStateExpiresAt = Date.now() + 60_000;
     const linkExpiresAt = new Date(Date.now() + 30_000).toISOString();
-    await admitted.startConnection("user-1", {
+    await startInstalledConnection(admitted, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1450,7 +1524,7 @@ describe("Connection provider reconciliation alarms", () => {
     const admitted = createComposioUserBackendContribution(
       backendHost(storage),
     );
-    await admitted.startConnection("user-1", {
+    await startInstalledConnection(admitted, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1498,7 +1572,7 @@ describe("Connection provider reconciliation alarms", () => {
     const admitted = createComposioUserBackendContribution(
       backendHost(storage),
     );
-    await admitted.startConnection("user-1", {
+    await startInstalledConnection(admitted, {
       connectionId: "connection-1",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1557,7 +1631,7 @@ describe("Connection provider reconciliation alarms", () => {
         });
       }),
     );
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1613,7 +1687,7 @@ describe("Connection provider reconciliation alarms", () => {
         },
       ),
     );
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1673,7 +1747,7 @@ describe("Connection provider reconciliation alarms", () => {
         },
       ),
     );
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "link-command",
       packageId: "composio",
       connectionTypeId: "gmail",
@@ -1741,7 +1815,7 @@ describe("Connection provider reconciliation alarms", () => {
         reconcileComposioProviderConnection(client, request),
       ),
     );
-    await contribution.startConnection("user-1", {
+    await startInstalledConnection(contribution, {
       connectionId: "connection-1",
       packageId: "composio",
       connectionTypeId: "gmail",

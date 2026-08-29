@@ -363,6 +363,50 @@ describe("configuration DTO seam", () => {
         ],
       }),
     ).toThrow(ConfigurationDecodeError);
+    for (const value of [
+      {
+        schemaVersion: 1,
+        revision: 0,
+        profile: { name: "User" },
+        packages: [],
+        connections: [],
+        extra: true,
+      },
+      {
+        schemaVersion: 1,
+        revision: 0,
+        profile: { name: "User", extra: true },
+        packages: [],
+        connections: [],
+      },
+      {
+        schemaVersion: 1,
+        revision: 0,
+        profile: { name: "User" },
+        packages: [
+          {
+            packageId: "composio",
+            version: "0.0.1",
+            state: "installed",
+            extra: true,
+          },
+        ],
+        connections: [],
+      },
+      {
+        schemaVersion: 1,
+        commandId: "command-1",
+        revision: 1,
+        status: "applied",
+        failure: "must not be accepted",
+      },
+    ]) {
+      expect(() =>
+        "commandId" in value
+          ? decodeOperationReceiptV1(value)
+          : decodeUserSettingsViewV1(value),
+      ).toThrow(ConfigurationDecodeError);
+    }
   });
 });
 

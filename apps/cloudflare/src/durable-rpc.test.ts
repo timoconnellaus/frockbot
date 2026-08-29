@@ -76,6 +76,24 @@ describe("Durable Object RPC boundaries", () => {
     ]);
   });
 
+  test("accepts the maximum composed User and Bot session identifier", () => {
+    const userId = "u".repeat(128);
+    const botId = "b".repeat(128);
+    expect(
+      decodeBotRunRpcV1({
+        schemaVersion: 1,
+        userId,
+        botId,
+        command: {
+          runId: "run-1",
+          sessionId: `${userId}:${botId}`,
+          acceptedAt: "2026-08-29T00:00:00.000Z",
+          text: "hello",
+        },
+      }).command.sessionId,
+    ).toHaveLength(257);
+  });
+
   test("rejects version-skewed Bot runs before Agent admission", () => {
     const admitted: unknown[] = [];
     const admit = (input: unknown) => admitted.push(decodeBotRunRpcV1(input));

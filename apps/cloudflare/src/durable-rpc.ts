@@ -204,7 +204,7 @@ export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
     botId: rpcIdentifier,
     command: rpcObject({
       runId: rpcIdentifier,
-      sessionId: rpcString(256),
+      sessionId: rpcString(257),
       acceptedAt: rpcString(64),
       text: rpcString(100_000),
     }),

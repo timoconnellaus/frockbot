@@ -116,6 +116,9 @@ describe("Bot capability assignment admission", () => {
     await expect(
       contribution.validateIdentity({ userId: "other", botId: "primary" }),
     ).rejects.toThrow("Bot authority does not match its durable identity");
+    await expect(
+      contribution.getSettings({ userId: "other", botId: "primary" }),
+    ).rejects.toThrow("Bot authority does not match its durable identity");
     expect(await storage.get<BotSettingsViewV1>("bot-configuration")).toEqual(
       settings,
     );

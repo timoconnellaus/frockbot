@@ -858,7 +858,12 @@ function viewRevision(value: unknown): number {
 }
 
 function packageInstallation(value: unknown): PackageInstallationView {
-  const installation = record(value, "Package installation");
+  const installation = exactRecord(
+    value,
+    "Package installation",
+    ["packageId", "version", "state"],
+    ["failure"],
+  );
   if (
     installation.state !== "installed" &&
     installation.state !== "disabled" &&
@@ -875,7 +880,19 @@ function packageInstallation(value: unknown): PackageInstallationView {
 }
 
 function connectionView(value: unknown): ConnectionView {
-  const connection = record(value, "Connection");
+  const connection = exactRecord(
+    value,
+    "Connection",
+    [
+      "connectionId",
+      "packageId",
+      "connectionTypeId",
+      "displayName",
+      "state",
+      "safeMetadata",
+    ],
+    ["failure"],
+  );
   const states: ConnectionView["state"][] = [
     "authorizing",
     "ready",
@@ -908,7 +925,12 @@ function connectionView(value: unknown): ConnectionView {
 }
 
 function capabilityAssignment(value: unknown): CapabilityAssignmentView {
-  const assignment = record(value, "Capability Assignment");
+  const assignment = exactRecord(
+    value,
+    "Capability Assignment",
+    ["assignmentId", "packageId", "capabilityId", "state"],
+    ["connectionId"],
+  );
   if (
     assignment.state !== "enabled" &&
     assignment.state !== "disabled" &&
@@ -940,9 +962,14 @@ function schemaVersion(value: Record<string, unknown>): void {
 }
 
 export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
-  const value = record(input, "User settings");
+  const value = exactRecord(
+    input,
+    "User settings",
+    ["schemaVersion", "revision", "profile", "packages", "connections"],
+    ["newBotModelTemplate"],
+  );
   schemaVersion(value);
-  const profile = record(value.profile, "profile");
+  const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
   if (!Array.isArray(value.packages) || !Array.isArray(value.connections)) {
     throw new ConfigurationDecodeError(
       "User settings Packages and Connections must be arrays",
@@ -965,7 +992,19 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
 }
 
 export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
-  const value = record(input, "Bot settings");
+  const value = exactRecord(
+    input,
+    "Bot settings",
+    [
+      "schemaVersion",
+      "botId",
+      "revision",
+      "profile",
+      "notifications",
+      "assignments",
+    ],
+    ["model"],
+  );
   schemaVersion(value);
   if (!Array.isArray(value.assignments)) {
     throw new ConfigurationDecodeError(
@@ -991,11 +1030,18 @@ export function decodeConfigurationViewV1(input: unknown): ConfigurationViewV1 {
 }
 
 export function decodeOperationReceiptV1(input: unknown): OperationReceiptV1 {
-  const value = record(input, "operation receipt");
-  schemaVersion(value);
-  if (value.status !== "applied" && value.status !== "rejected") {
+  const candidate = record(input, "operation receipt");
+  if (candidate.status !== "applied" && candidate.status !== "rejected") {
     throw new ConfigurationDecodeError("operation receipt status is invalid");
   }
+  const value = exactRecord(
+    input,
+    "operation receipt",
+    candidate.status === "rejected"
+      ? ["schemaVersion", "commandId", "revision", "status", "failure"]
+      : ["schemaVersion", "commandId", "revision", "status"],
+  );
+  schemaVersion(value);
   const receipt = {
     schemaVersion: 1,
     commandId: identifier(value.commandId, "commandId"),

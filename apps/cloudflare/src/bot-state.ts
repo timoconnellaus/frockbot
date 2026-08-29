@@ -16,10 +16,13 @@ import { createShellBotBackendContribution } from "@frockbot/plugin-shell/backen
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
+  type ClientRunListQueryV1,
+  type ClientRunLookupQueryV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
+  rpcDecoded,
   rpcIdentifier,
   rpcObject,
 } from "./durable-rpc.js";
@@ -78,25 +81,19 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async markConnectionUnavailable(input: unknown) {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      {
-        userId: rpcIdentifier,
-        botId: rpcIdentifier,
-        connectionId: rpcIdentifier,
-      },
-      {
-        compensation: rpcObject({
-          id: rpcIdentifier,
-          expectedGeneration: rpcIdentifier,
-        }),
-      },
-    );
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      compensation: rpcObject({
+        id: rpcIdentifier,
+        expectedGeneration: rpcIdentifier,
+      }),
+    });
     return (await this.contribution()).markConnectionUnavailable(
       { userId: request.userId as string, botId: request.botId as string },
       request.connectionId as string,
-      request.compensation as
-        { id: string; expectedGeneration: string } | undefined,
+      request.compensation as { id: string; expectedGeneration: string },
     );
   }
 
@@ -150,18 +147,50 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async listRuns(input: unknown) {
-    const request = decodeClientRunListQueryV1(input);
-    return (await this.contribution()).listRuns(request);
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      query: rpcDecoded(decodeClientRunListQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const contribution = await this.contribution();
+    await contribution.validateIdentity(identity);
+    return contribution.listRuns(request.query as ClientRunListQueryV1);
   }
 
   async lookupRun(input: unknown) {
-    const request = decodeClientRunLookupQueryV1(input);
-    return (await this.contribution()).lookupRun(request);
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      query: rpcDecoded(decodeClientRunLookupQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const contribution = await this.contribution();
+    await contribution.validateIdentity(identity);
+    return contribution.lookupRun(request.query as ClientRunLookupQueryV1);
   }
 
   async fenceRunAdmission(input: unknown) {
-    const request = decodeClientRunLookupQueryV1(input);
-    return (await this.contribution()).fenceRunAdmission(request);
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      query: rpcDecoded(decodeClientRunLookupQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const contribution = await this.contribution();
+    await contribution.validateIdentity(identity);
+    return contribution.fenceRunAdmission(
+      request.query as ClientRunLookupQueryV1,
+    );
   }
 
   async alarm(): Promise<void> {

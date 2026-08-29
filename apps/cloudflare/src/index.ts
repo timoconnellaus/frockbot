@@ -84,7 +84,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   markConnectionUnavailable(
     identity: { userId: string; botId: string },
     connectionId: string,
-    compensation?: { id: string; expectedGeneration: string },
+    compensation: { id: string; expectedGeneration: string },
   ): Promise<"applied" | "stale">;
 }
 
@@ -116,9 +116,12 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
           text: command.text,
         },
       }),
-    listRuns: (query) => rpc.listRuns(query),
-    lookupRun: (query) => rpc.lookupRun(query),
-    fenceRunAdmission: (query) => rpc.fenceRunAdmission(query),
+    listRuns: (query) =>
+      rpc.listRuns({ schemaVersion: 1, userId, botId, query }),
+    lookupRun: (query) =>
+      rpc.lookupRun({ schemaVersion: 1, userId, botId, query }),
+    fenceRunAdmission: (query) =>
+      rpc.fenceRunAdmission({ schemaVersion: 1, userId, botId, query }),
     listNotifications: () =>
       rpc.listNotifications({ schemaVersion: 1, userId, botId }),
     acknowledgeNotification: (notificationId) =>
@@ -135,7 +138,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
         schemaVersion: 1,
         ...identity,
         connectionId,
-        ...(compensation ? { compensation } : {}),
+        compensation,
       }),
   };
 }
@@ -245,7 +248,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       botId: rpcIdentifier,
       command: rpcObject({
         runId: rpcIdentifier,
-        sessionId: rpcString(256),
+        sessionId: rpcString(257),
         acceptedAt: rpcString(64),
         text: rpcString(100_000),
       }),

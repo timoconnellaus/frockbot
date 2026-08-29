@@ -138,6 +138,7 @@ function connectionStartCommandFingerprintV1(
     connectionTypeId: string;
     alias?: string;
     returnTarget: "browser" | "desktop";
+    nativeReturnNonce?: string;
   },
 ): string {
   return `connection-start-command-v1:${JSON.stringify({
@@ -147,6 +148,7 @@ function connectionStartCommandFingerprintV1(
     alias: input.alias ?? null,
     safeMetadata: {
       returnTarget: input.returnTarget,
+      nativeReturnNonce: input.nativeReturnNonce ?? null,
     },
   })}`;
 }
@@ -228,6 +230,7 @@ export class ComposioConnectionCoordinator {
       connectionTypeId: string;
       alias?: string;
       returnTarget?: "browser" | "desktop";
+      nativeReturnNonce?: string;
     },
   ): Promise<StartConnectionResult | undefined> {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.commandId)) {
@@ -237,6 +240,7 @@ export class ComposioConnectionCoordinator {
       connectionTypeId: input.connectionTypeId,
       alias: input.alias?.trim() || undefined,
       returnTarget: input.returnTarget ?? "browser",
+      nativeReturnNonce: input.nativeReturnNonce,
     });
     const existing = await this.config.store.getConnection(
       userId,
@@ -281,6 +285,7 @@ export class ComposioConnectionCoordinator {
       connectionTypeId: input.connectionTypeId,
       alias,
       returnTarget,
+      nativeReturnNonce: input.nativeReturnNonce,
     });
     const authorizationStateExpiresAt =
       input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000;

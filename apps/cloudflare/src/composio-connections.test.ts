@@ -215,7 +215,7 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     return Promise.resolve(true);
   }
 
-  claimConnectionRevocation(
+  async claimConnectionRevocation(
     _userId: string,
     connectionId: string,
     recoveredSafeMetadata?: ConnectionView["safeMetadata"],
@@ -260,7 +260,8 @@ class MemoryConnectionStore implements ComposioConnectionStore {
         connection,
       });
     }
-    const assignmentCompensations = deriveRevocationCompensations(connection);
+    const assignmentCompensations =
+      await deriveRevocationCompensations(connection);
     const claimed: ConnectionView = {
       ...connection,
       state: "revoking",
@@ -550,7 +551,10 @@ describe("ComposioConnectionCoordinator", () => {
           packageId: "composio",
           connectionTypeId: "gmail",
           alias: null,
-          safeMetadata: { returnTarget: "browser" },
+          safeMetadata: {
+            returnTarget: "browser",
+            nativeReturnNonce: null,
+          },
         })}`,
       },
     });
@@ -636,6 +640,7 @@ describe("ComposioConnectionCoordinator", () => {
           alias: null,
           safeMetadata: {
             returnTarget: "browser",
+            nativeReturnNonce: null,
           },
         })}`,
       },
@@ -706,7 +711,10 @@ describe("ComposioConnectionCoordinator", () => {
           packageId: "composio",
           connectionTypeId: "gmail",
           alias: null,
-          safeMetadata: { returnTarget: "browser" },
+          safeMetadata: {
+            returnTarget: "browser",
+            nativeReturnNonce: null,
+          },
         })}`,
       },
     });
@@ -770,7 +778,10 @@ describe("ComposioConnectionCoordinator", () => {
           packageId: "composio",
           connectionTypeId: "gmail",
           alias: null,
-          safeMetadata: { returnTarget: "browser" },
+          safeMetadata: {
+            returnTarget: "browser",
+            nativeReturnNonce: null,
+          },
         })}`,
       },
     });

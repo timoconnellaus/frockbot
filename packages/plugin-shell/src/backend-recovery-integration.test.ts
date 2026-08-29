@@ -635,7 +635,17 @@ describe("Bot recovery", () => {
       status: "completed",
       responseText: "Durable reply",
     } satisfies StoredRun;
-    await storage.put(`run:${run.runId}`, run);
+    const notification = {
+      notificationId: run.runId,
+      runId: run.runId,
+      createdAt: "2026-08-28T00:00:01.000Z",
+      title: "Bot replied",
+      body: "Durable reply",
+    };
+    await storage.put({
+      [`run:${run.runId}`]: run,
+      [`notification:${run.runId}`]: notification,
+    });
     const contribution = createShellBotBackendContribution({
       state: { storage } as unknown as DurableObjectState,
       env: {} as never,
@@ -649,6 +659,7 @@ describe("Bot recovery", () => {
     ).resolves.toMatchObject({
       runId: "run-replay",
       text: "Durable reply",
+      notification,
     });
     await expect(
       contribution.run({ ...original, text: "different input" }),

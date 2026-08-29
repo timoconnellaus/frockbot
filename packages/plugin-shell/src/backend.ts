@@ -693,17 +693,13 @@ export class ShellBotBackendContribution {
   async markConnectionUnavailable(
     identity: BotIdentity,
     connectionId: string,
-    compensation?: { id: string; expectedGeneration: string },
+    compensation: { id: string; expectedGeneration: string },
   ): Promise<"applied" | "stale"> {
     await this.ensureBotSettings(identity);
     return this.ctx.storage.transaction(async (transaction) => {
-      const receiptKey = compensation
-        ? `${ASSIGNMENT_COMPENSATION_PREFIX}${compensation.id}`
-        : undefined;
-      if (receiptKey) {
-        const existing = await transaction.get<"applied" | "stale">(receiptKey);
-        if (existing) return existing;
-      }
+      const receiptKey = `${ASSIGNMENT_COMPENSATION_PREFIX}${compensation.id}`;
+      const existing = await transaction.get<"applied" | "stale">(receiptKey);
+      if (existing) return existing;
       const current =
         (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
         this.initialBotSettings(identity.botId);
@@ -712,18 +708,16 @@ export class ShellBotBackendContribution {
           assignment.connectionId === connectionId &&
           assignment.state === "enabled",
       );
-      if (compensation) {
-        await transaction.put(
-          `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionId}:${compensation.expectedGeneration}`,
-          compensation.id,
-        );
-      }
-      if (compensation && enabled) {
+      await transaction.put(
+        `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionId}:${compensation.expectedGeneration}`,
+        compensation.id,
+      );
+      if (enabled) {
         const generation = await transaction.get<string>(
           `${ASSIGNMENT_GENERATION_PREFIX}${connectionId}`,
         );
         if (generation !== compensation.expectedGeneration) {
-          if (receiptKey) await transaction.put(receiptKey, "stale");
+          await transaction.put(receiptKey, "stale");
           return "stale";
         }
       }
@@ -738,7 +732,7 @@ export class ShellBotBackendContribution {
           ),
         } satisfies BotSettingsViewV1);
       }
-      if (receiptKey) await transaction.put(receiptKey, "applied");
+      await transaction.put(receiptKey, "applied");
       return "applied";
     });
   }
@@ -1057,7 +1051,7 @@ export class ShellBotBackendContribution {
       );
     }
     const notification = await this.ctx.storage.get<BotNotificationIntent>(
-      `${NOTIFICATION_PREFIX}notification-${runId}`,
+      `${NOTIFICATION_PREFIX}${runId}`,
     );
     return {
       runId,
@@ -1144,9 +1138,7 @@ export class ShellBotBackendContribution {
           { userId: saga.userId, botId: saga.botId },
           saga.commandId,
         );
-      } catch {
-        continue;
-      }
+      } catch {}
     }
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
     if (activeRunId) {
@@ -1380,11 +1372,11 @@ export class ShellBotBackendContribution {
   private async ensureBotSettings(
     identity: BotIdentity,
   ): Promise<BotSettingsViewV1> {
+    await this.assertIdentity(identity);
     const existing = await this.ctx.storage.get<BotSettingsViewV1>(
       BOT_CONFIGURATION_KEY,
     );
     if (existing) return existing;
-    await this.assertIdentity(identity);
     const user = await this.userConfiguration(identity).readConfiguration({
       schemaVersion: 1,
       userId: identity.userId,
