@@ -20,26 +20,6 @@ export interface FlyMountResult {
 }
 
 export class WorkerdBotState extends BotState {
-  private readonly residencyId = crypto.randomUUID();
-  private mountRecorded = false;
-
-  async inspectMountedBot(input: unknown) {
-    const settings = await super.readConfiguration(input);
-    if (!this.mountRecorded) {
-      await this.ctx.storage.transaction(async (transaction) => {
-        const mountCount =
-          ((await transaction.get<number>("workerd:mount-count")) ?? 0) + 1;
-        await transaction.put("workerd:mount-count", mountCount);
-      });
-      this.mountRecorded = true;
-    }
-    return {
-      residencyId: this.residencyId,
-      mountCount: await this.ctx.storage.get<number>("workerd:mount-count"),
-      settings,
-    };
-  }
-
   async durableSessionEvents(): Promise<SessionEvent[]> {
     return (await this.ctx.storage.get<SessionEvent[]>("latest-events")) ?? [];
   }

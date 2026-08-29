@@ -61,18 +61,23 @@ async function cancellationProbe(
   client: SpritesClient,
   name: string,
 ): Promise<boolean> {
-  const command = client.sprite(name).spawn("/bin/sleep", ["30"]);
+  const command = client
+    .sprite(name)
+    .spawn("/bin/sh", [
+      "-c",
+      "trap 'exit 73' TERM; printf ready; while :; do sleep 1; done",
+    ]);
   const failed = new Promise<never>((_resolve, reject) => {
     command.once("error", reject);
   });
+  const ready = once(command.stdout, "data");
   await Promise.race([once(command, "spawn"), failed]);
-  const timer = setTimeout(() => command.kill("SIGTERM"), 100);
-  try {
-    const exitCode = await Promise.race([command.wait(), failed]);
-    return exitCode !== 0;
-  } finally {
-    clearTimeout(timer);
-  }
+  const [chunk] = await Promise.race([ready, failed]);
+  if (String(chunk) !== "ready") return false;
+
+  command.kill("SIGTERM");
+  const exitCode = await Promise.race([command.wait(), failed]);
+  return exitCode === 73;
 }
 
 async function smoke(

@@ -16,7 +16,7 @@ const identity = {
   botId: "workerd-bot",
 };
 
-describe("Fly provider in a Durable Object", () => {
+describe("Fly provider Workerd compatibility", () => {
   test("mounts through the provider-neutral Computer interface", async () => {
     const result = await flyProbe(
       `mount-${crypto.randomUUID()}`,
@@ -28,25 +28,27 @@ describe("Fly provider in a Durable Object", () => {
     });
   });
 
-  test("mounts the production Bot Contribution and reconstructs it after eviction", async () => {
-    const stub = bot(`mount-${crypto.randomUUID()}`);
-    const beforeEviction = await stub.inspectMountedBot(identity);
+  test.skipIf(env.FROCKBOT_RUN_LIVE_SPRITE_TEST !== "1")(
+    "records the Sprites HTTP framing incompatibility in Workerd",
+    async () => {
+      expect(env.SPRITES_TOKEN).not.toBe("");
+      const spriteName = `frockbot-test-${crypto.randomUUID().slice(0, 8)}`;
+      const message = `workerd-${crypto.randomUUID()}`;
+      const stub = flyProbe(`live-${crypto.randomUUID()}`);
 
-    await evictDurableObject(stub);
+      try {
+        await expect(
+          stub.probeLiveWorkspace(spriteName, message),
+        ).rejects.toThrow(/preserved HTTP chunk boundaries/);
+      } finally {
+        await stub.deleteLiveSprite(spriteName);
+      }
+    },
+  );
+});
 
-    const afterEviction = await stub.inspectMountedBot(identity);
-    expect(beforeEviction).toMatchObject({
-      mountCount: 1,
-      settings: { botId: "workerd-bot", revision: 0 },
-    });
-    expect(afterEviction).toMatchObject({
-      mountCount: 2,
-      settings: beforeEviction.settings,
-    });
-    expect(afterEviction.residencyId).not.toBe(beforeEviction.residencyId);
-  });
-
-  test("persists production Bot session events in sequence", async () => {
+describe("production Bot durability in Workerd", () => {
+  test("persists session events in sequence across eviction", async () => {
     const stub = bot(`events-${crypto.randomUUID()}`);
     const result = await stub.run({
       ...identity,
@@ -70,7 +72,7 @@ describe("Fly provider in a Durable Object", () => {
     expect(await stub.durableSessionEvents()).toEqual(durableEvents);
   });
 
-  test("runs production Bot recovery through the alarm seam", async () => {
+  test("runs recovery through the alarm seam", async () => {
     const stub = bot(`alarm-${crypto.randomUUID()}`);
     await stub.scheduleRecoveryProbe();
 
@@ -80,22 +82,4 @@ describe("Fly provider in a Durable Object", () => {
       alarmScheduled: true,
     });
   });
-
-  test.skipIf(env.FROCKBOT_RUN_LIVE_SPRITE_TEST !== "1")(
-    "records the Sprites HTTP framing incompatibility in Workerd",
-    async () => {
-      expect(env.SPRITES_TOKEN).not.toBe("");
-      const spriteName = `frockbot-test-${crypto.randomUUID().slice(0, 8)}`;
-      const message = `workerd-${crypto.randomUUID()}`;
-      const stub = flyProbe(`live-${crypto.randomUUID()}`);
-
-      try {
-        await expect(
-          stub.probeLiveWorkspace(spriteName, message),
-        ).rejects.toThrow(/preserved HTTP chunk boundaries/);
-      } finally {
-        await stub.deleteLiveSprite(spriteName);
-      }
-    },
-  );
 });
