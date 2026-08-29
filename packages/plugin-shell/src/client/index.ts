@@ -319,7 +319,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
-  if (!isRecord(value) || !Array.isArray(value.packages)) {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.packages)
+  ) {
     throw new Error("Application manifest is invalid");
   }
   return value.packages.flatMap((candidate) => {

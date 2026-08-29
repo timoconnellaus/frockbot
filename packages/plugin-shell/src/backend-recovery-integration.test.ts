@@ -153,6 +153,7 @@ describe("Bot recovery", () => {
     await storage.put({
       "active-run": run.runId,
       "run:run-1": run,
+      "run-index:2026-08-28T00:00:00.000Z:run-1": run.runId,
       "latest-events": events,
       "bot-configuration": currentSettings,
     });
@@ -845,6 +846,32 @@ describe("Bot recovery", () => {
     expect(
       await storage.get("run-admission-fence:command-running"),
     ).toBeUndefined();
+  });
+
+  test("does not scan pre-index run records as a compatibility path", async () => {
+    const storage = new MemoryStorage();
+    await storage.put("run:unindexed", {
+      runId: "unindexed",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "legacy",
+      events: [],
+      status: "completed",
+      responseText: "legacy",
+    } satisfies StoredRun);
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    storage.listRequests.length = 0;
+
+    await expect(
+      contribution.listRuns({ schemaVersion: 1 }),
+    ).resolves.toMatchObject({ schemaVersion: 1, runs: [] });
+    expect(
+      storage.listRequests.some((request) => request.prefix === "run:"),
+    ).toBe(false);
   });
 
   test("pages large run history with bounded indexed reads and wire bytes", async () => {

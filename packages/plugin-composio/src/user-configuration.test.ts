@@ -131,10 +131,7 @@ describe("Connection revocation dependencies", () => {
     ]);
   });
 
-  test("accepts legacy Bot metadata only with an exact generation", () => {
-    expect(
-      deriveRevocationCompensations(connection({ targetBotId: "legacy-bot" })),
-    ).toEqual([]);
+  test("ignores legacy Bot metadata even when it has a generation", () => {
     expect(
       deriveRevocationCompensations(
         connection({
@@ -142,13 +139,7 @@ describe("Connection revocation dependencies", () => {
           assignmentGeneration: "gen-legacy",
         }),
       ),
-    ).toEqual([
-      {
-        botId: "legacy-bot",
-        id: "revoke:connection-1:legacy-bot:gen-legacy",
-        expectedGeneration: "gen-legacy",
-      },
-    ]);
+    ).toEqual([]);
   });
 });
 
@@ -413,6 +404,7 @@ describe("Connection provider reconciliation alarms", () => {
 
     expect(replayed).toEqual(recovered);
     expect(recovered).toEqual({
+      schemaVersion: 1,
       status: "ready",
       connectionId: "link-command",
     });
@@ -509,10 +501,12 @@ describe("Connection provider reconciliation alarms", () => {
     );
 
     await expect(retry).resolves.toEqual({
+      schemaVersion: 1,
       status: "ready",
       connectionId: "link-command",
     });
     await expect(coordinator.start("user-1", command)).resolves.toEqual({
+      schemaVersion: 1,
       status: "ready",
       connectionId: "link-command",
     });
@@ -602,6 +596,7 @@ describe("Connection provider reconciliation alarms", () => {
     );
 
     await expect(retry).resolves.toEqual({
+      schemaVersion: 1,
       status: "ready",
       connectionId: "link-command",
     });
@@ -681,6 +676,7 @@ describe("Connection provider reconciliation alarms", () => {
     expect(providerReads).toBe(1);
     expect(replayed).toEqual(recovered);
     expect(recovered).toEqual({
+      schemaVersion: 1,
       status: "ready",
       connectionId: "link-command",
     });

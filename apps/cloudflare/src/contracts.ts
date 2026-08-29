@@ -8,6 +8,11 @@ import type {
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import type {
+  ConnectionCompletionResult,
+  RevokeConnectionResult,
+  StartConnectionResult,
+} from "@frockbot/plugin-composio/backend-contracts";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 import type {
   ClientRunLookupQueryV1,
@@ -29,30 +34,6 @@ export interface BackendRouteContribution {
     url: URL,
     context: { userId?: string; client: "browser" | "desktop" },
   ): Promise<Response | undefined>;
-}
-
-export type StartConnectionResult =
-  | {
-      status?: "authorization-required";
-      connectionId: string;
-      redirectUrl: string;
-      expiresAt: string;
-      nativeReturnNonce?: string;
-    }
-  | {
-      status: "ready";
-      connectionId: string;
-      nativeReturnNonce?: string;
-    };
-
-export interface RevokeConnectionResult {
-  status: "revoked" | "reconciliation-required";
-}
-
-export interface ConnectionCompletionResult {
-  returnTarget: "browser" | "desktop";
-  status: "ready" | "pending" | "failed";
-  nativeReturnNonce?: string;
 }
 
 export interface UserApplicationIdentity {

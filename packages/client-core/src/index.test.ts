@@ -3,6 +3,7 @@ import { defineComponent } from "vue";
 import {
   ClientApplication,
   type ClientPlugin,
+  decodeAcknowledgement,
   decodeClientTurnResponse,
   decodeNotificationList,
   decodeStartConnectionResult,
@@ -83,6 +84,7 @@ describe("hosted response decoders", () => {
     });
     expect(
       decodeNotificationList({
+        schemaVersion: 1,
         notifications: [
           {
             notificationId: "notification-1",
@@ -96,6 +98,8 @@ describe("hosted response decoders", () => {
     ).toHaveLength(1);
     expect(
       decodeStartConnectionResult({
+        schemaVersion: 1,
+        status: "authorization-required",
         connectionId: "connection-1",
         redirectUrl: "https://connect.example/authorize",
         expiresAt: "2026-08-28T00:05:00.000Z",
@@ -103,10 +107,12 @@ describe("hosted response decoders", () => {
     ).toBe("connection-1");
     expect(
       decodeStartConnectionResult({
+        schemaVersion: 1,
         status: "ready",
         connectionId: "connection-1",
       }),
     ).toEqual({
+      schemaVersion: 1,
       status: "ready",
       connectionId: "connection-1",
     });
@@ -117,23 +123,66 @@ describe("hosted response decoders", () => {
       decodeClientTurnResponse({ runId: "run-1", text: "done", events: [{}] }),
     ).toThrow("turn event.type must be a string");
     expect(() =>
-      decodeNotificationList({ notifications: [{ notificationId: 1 }] }),
-    ).toThrow("notification.notificationId must be a string");
+      decodeNotificationList({
+        schemaVersion: 1,
+        notifications: [{ notificationId: 1 }],
+      }),
+    ).toThrow("notification is invalid");
     expect(() =>
-      decodeStartConnectionResult({ connectionId: "connection-1" }),
-    ).toThrow("Connection result.redirectUrl must be a string");
+      decodeNotificationList({
+        schemaVersion: 2,
+        notifications: [],
+      }),
+    ).toThrow("notification list is invalid");
+    expect(() =>
+      decodeNotificationList({
+        schemaVersion: 1,
+        notifications: [
+          {
+            notificationId: "notification-run-1",
+            createdAt: "2026-08-28T00:00:00.000Z",
+            title: "Done",
+            body: "Finished",
+          },
+        ],
+      }),
+    ).toThrow("notification is invalid");
     expect(() =>
       decodeStartConnectionResult({
+        schemaVersion: 1,
+        status: "authorization-required",
+        connectionId: "connection-1",
+      }),
+    ).toThrow("Connection result is invalid");
+    expect(() =>
+      decodeStartConnectionResult({
+        schemaVersion: 1,
         status: "ready",
         connectionId: "connection-1",
         redirectUrl: "https://connect.example/authorize",
       }),
-    ).toThrow("Ready Connection result must not include a redirect");
+    ).toThrow("Connection result is invalid");
+    expect(() =>
+      decodeStartConnectionResult({
+        schemaVersion: 2,
+        status: "ready",
+        connectionId: "connection-1",
+      }),
+    ).toThrow("Connection result is invalid");
+    expect(() =>
+      decodeAcknowledgement({
+        schemaVersion: 1,
+        status: "acknowledged",
+        extra: true,
+      }),
+    ).toThrow("acknowledgement is invalid");
   });
 
   test("allows only bounded absolute HTTPS Connection redirects", () => {
     const decode = (redirectUrl: string) => {
       const result = decodeStartConnectionResult({
+        schemaVersion: 1,
+        status: "authorization-required",
         connectionId: "connection-1",
         redirectUrl,
         expiresAt: "2026-08-28T00:05:00.000Z",

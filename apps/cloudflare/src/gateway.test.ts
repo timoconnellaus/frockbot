@@ -328,6 +328,8 @@ class MemoryConnections implements ConnectionBinding {
     alias?: string;
   }) {
     return Promise.resolve({
+      schemaVersion: 1 as const,
+      status: "authorization-required" as const,
       connectionId: `connection-${input.connectionTypeId}`,
       redirectUrl: "https://connect.composio.dev/link/test",
       expiresAt: "2026-08-28T01:00:00.000Z",
@@ -355,10 +357,11 @@ class MemoryConnections implements ConnectionBinding {
     return Promise.resolve({ returnTarget: "browser", status: "ready" });
   }
 
-  revoke(
-    _connectionId: string,
-  ): Promise<{ status: "revoked" | "reconciliation-required" }> {
-    return Promise.resolve({ status: "revoked" });
+  revoke(_connectionId: string) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      status: "revoked" as const,
+    });
   }
 }
 

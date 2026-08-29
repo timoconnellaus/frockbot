@@ -149,7 +149,7 @@ describe("Composio revoke route", () => {
     expect(response?.status).toBe(200);
     if (!response) throw new Error("Composio revoke route was not handled");
     const body: unknown = await response.json();
-    expect(body).toEqual({ status: "revoked" });
+    expect(body).toEqual({ schemaVersion: 1, status: "revoked" });
     expect(claimedConnectionId).toBe("connection-1");
   });
 });

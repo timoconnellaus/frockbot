@@ -1,3 +1,8 @@
+import {
+  decodeRevokeConnectionResultV1,
+  decodeStartConnectionResultV1,
+  type StartConnectionResult,
+} from "@frockbot/plugin-composio/backend-contracts";
 import { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 export { decodeExternalAuthorizationUrl };
@@ -35,6 +40,16 @@ export interface ClientNotificationIntent {
   body: string;
 }
 
+export interface ClientNotificationListV1 {
+  schemaVersion: 1;
+  notifications: ClientNotificationIntent[];
+}
+
+export interface ClientNotificationAcknowledgementV1 {
+  schemaVersion: 1;
+  status: "acknowledged";
+}
+
 export interface ClientTurnResponse {
   runId: string;
   text: string;
@@ -42,19 +57,7 @@ export interface ClientTurnResponse {
   notification?: ClientNotificationIntent;
 }
 
-export type ClientStartConnectionResult =
-  | {
-      status?: "authorization-required";
-      connectionId: string;
-      redirectUrl: string;
-      expiresAt: string;
-      nativeReturnNonce?: string;
-    }
-  | {
-      status: "ready";
-      connectionId: string;
-      nativeReturnNonce?: string;
-    };
+export type ClientStartConnectionResult = StartConnectionResult;
 
 export interface ClientRun {
   runId: string;
@@ -110,6 +113,19 @@ function responseRecord(
   return value as Record<string, unknown>;
 }
 
+function hasExactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  const keys = Object.keys(value);
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    keys.every((key) => allowed.has(key))
+  );
+}
+
 function responseString(
   value: Record<string, unknown>,
   key: string,
@@ -162,20 +178,24 @@ function decodeTurnEvent(value: unknown): ClientTurnEvent {
 
 function decodeNotification(value: unknown): ClientNotificationIntent {
   const notification = responseRecord(value, "notification");
-  const notificationId = responseString(
-    notification,
-    "notificationId",
-    "notification",
-  );
-  const runId =
-    notification.runId === undefined &&
-    notificationId.startsWith("notification-")
-      ? notificationId.slice("notification-".length)
-      : responseString(notification, "runId", "notification");
-  if (!runId) throw new Error("notification.runId must be a string");
+  if (
+    !hasExactKeys(notification, [
+      "notificationId",
+      "runId",
+      "createdAt",
+      "title",
+      "body",
+    ])
+  ) {
+    throw new Error("notification is invalid");
+  }
   return {
-    notificationId,
-    runId,
+    notificationId: responseString(
+      notification,
+      "notificationId",
+      "notification",
+    ),
+    runId: responseString(notification, "runId", "notification"),
     createdAt: responseString(notification, "createdAt", "notification"),
     title: responseString(notification, "title", "notification"),
     body: responseString(notification, "body", "notification"),
@@ -202,8 +222,12 @@ export function decodeNotificationList(
   input: unknown,
 ): ClientNotificationIntent[] {
   const value = responseRecord(input, "notification list");
-  if (!Array.isArray(value.notifications)) {
-    throw new Error("notification list.notifications must be an array");
+  if (
+    !hasExactKeys(value, ["schemaVersion", "notifications"]) ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.notifications)
+  ) {
+    throw new Error("notification list is invalid");
   }
   return value.notifications.map(decodeNotification);
 }
@@ -211,58 +235,27 @@ export function decodeNotificationList(
 export function decodeStartConnectionResult(
   input: unknown,
 ): ClientStartConnectionResult {
-  const value = responseRecord(input, "Connection result");
-  const connectionId = responseString(
-    value,
-    "connectionId",
-    "Connection result",
-  );
-  const nativeReturnNonce = value.nativeReturnNonce;
-  if (
-    nativeReturnNonce !== undefined &&
-    (typeof nativeReturnNonce !== "string" || !nativeReturnNonce)
-  ) {
-    throw new Error("Connection result.nativeReturnNonce must be a string");
-  }
-  if (value.status === "ready") {
-    if (value.redirectUrl !== undefined || value.expiresAt !== undefined) {
-      throw new Error("Ready Connection result must not include a redirect");
-    }
-    return {
-      status: "ready",
-      connectionId,
-      ...(nativeReturnNonce ? { nativeReturnNonce } : {}),
-    };
-  }
-  if (value.status !== undefined && value.status !== "authorization-required") {
-    throw new Error("Connection result.status is invalid");
-  }
+  const value = decodeStartConnectionResultV1(input);
+  if (value.status === "ready") return value;
   return {
-    status: "authorization-required",
-    connectionId,
-    redirectUrl: decodeExternalAuthorizationUrl(
-      responseString(value, "redirectUrl", "Connection result"),
-    ),
-    expiresAt: responseString(value, "expiresAt", "Connection result"),
-    nativeReturnNonce,
+    ...value,
+    redirectUrl: decodeExternalAuthorizationUrl(value.redirectUrl),
   };
 }
 
 export function decodeAcknowledgement(input: unknown): void {
   const value = responseRecord(input, "acknowledgement");
-  if (value.status !== "acknowledged") {
-    throw new Error("acknowledgement status is invalid");
+  if (
+    !hasExactKeys(value, ["schemaVersion", "status"]) ||
+    value.schemaVersion !== 1 ||
+    value.status !== "acknowledged"
+  ) {
+    throw new Error("acknowledgement is invalid");
   }
 }
 
 export function decodeRevocationResult(input: unknown): void {
-  const value = responseRecord(input, "revocation result");
-  if (
-    value.status !== "revoked" &&
-    value.status !== "reconciliation-required"
-  ) {
-    throw new Error("revocation result status is invalid");
-  }
+  decodeRevokeConnectionResultV1(input);
 }
 
 export interface ClientSlotRegistration {

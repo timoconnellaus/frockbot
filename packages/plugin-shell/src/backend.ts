@@ -73,7 +73,6 @@ const ASSIGNMENT_GENERATION_PREFIX = "assignment-generation:";
 const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
 const ASSIGNMENT_TOMBSTONE_PREFIX = "assignment-tombstone:";
 const ASSIGNMENT_SAGA_PREFIX = "assignment-saga:";
-const LEGACY_ASSIGNMENT_GENERATION = "legacy:any";
 const NOTIFICATION_PREFIX = "notification:";
 const RECOVERY_ALARM_DELAY_MS = 60_000;
 const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
@@ -713,10 +712,7 @@ export class ShellBotBackendContribution {
           assignment.connectionId === connectionId &&
           assignment.state === "enabled",
       );
-      if (
-        compensation &&
-        compensation.expectedGeneration !== LEGACY_ASSIGNMENT_GENERATION
-      ) {
+      if (compensation) {
         await transaction.put(
           `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionId}:${compensation.expectedGeneration}`,
           compensation.id,
@@ -726,10 +722,7 @@ export class ShellBotBackendContribution {
         const generation = await transaction.get<string>(
           `${ASSIGNMENT_GENERATION_PREFIX}${connectionId}`,
         );
-        if (
-          compensation.expectedGeneration !== LEGACY_ASSIGNMENT_GENERATION &&
-          generation !== compensation.expectedGeneration
-        ) {
+        if (generation !== compensation.expectedGeneration) {
           if (receiptKey) await transaction.put(receiptKey, "stale");
           return "stale";
         }
@@ -1175,27 +1168,10 @@ export class ShellBotBackendContribution {
         ? { end: query.before }
         : {}),
     });
-    let candidates: Array<{
-      cursor: string;
-      runId: string;
-      run?: StoredRun;
-    }> = [...indexEntries].map(([cursor, runId]) => ({ cursor, runId }));
-    if (
-      candidates.length === 0 &&
-      (!query.before || query.before.startsWith(RUN_PREFIX))
-    ) {
-      const legacyEntries = await this.ctx.storage.list<StoredRun>({
-        prefix: RUN_PREFIX,
-        reverse: true,
-        limit: CLIENT_RUN_PAGE_LIMIT + 1,
-        ...(query.before ? { end: query.before } : {}),
-      });
-      candidates = [...legacyEntries].map(([cursor, run]) => ({
-        cursor,
-        runId: run.runId,
-        run,
-      }));
-    }
+    const candidates = [...indexEntries].map(([cursor, runId]) => ({
+      cursor,
+      runId,
+    }));
 
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
@@ -1213,11 +1189,9 @@ export class ShellBotBackendContribution {
         selected.set(candidate.runId, { ...current, cursor: candidate.cursor });
         continue;
       }
-      const stored =
-        candidate.run ??
-        (await this.ctx.storage.get<StoredRun>(
-          `${RUN_PREFIX}${candidate.runId}`,
-        ));
+      const stored = await this.ctx.storage.get<StoredRun>(
+        `${RUN_PREFIX}${candidate.runId}`,
+      );
       if (!stored) continue;
       const projected = projectClientRunV1(stored);
       const tentative = [
@@ -1338,34 +1312,58 @@ export class ShellBotBackendContribution {
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
-    return this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      readConfiguration(input: {
-        schemaVersion: 1;
-        userId: string;
-      }): Promise<UserSettingsViewV1>;
-      getConnection(
-        userId: string,
-        connectionId: string,
-      ): Promise<ConnectionView | undefined>;
-      claimConnectionDependency(
-        userId: string,
-        connectionId: string,
-        botId: string,
-        generation: string,
-        requirement: ConnectionDependencyRequirementV1,
-      ): Promise<boolean>;
-      acknowledgeConnectionDependency(
-        userId: string,
-        connectionId: string,
-        botId: string,
-        generation: string,
-      ): Promise<boolean>;
-      compensateConnectionDependency(
-        userId: string,
-        connectionId: string,
-        botId: string,
-        generation: string,
-      ): Promise<boolean>;
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+      getConnection(input: unknown): Promise<ConnectionView | undefined>;
+      claimConnectionDependency(input: unknown): Promise<boolean>;
+      acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
+      compensateConnectionDependency(input: unknown): Promise<boolean>;
+    };
+    return {
+      readConfiguration: (input) => rpc.readConfiguration(input),
+      getConnection: (userId, connectionId) =>
+        rpc.getConnection({ schemaVersion: 1, userId, connectionId }),
+      claimConnectionDependency: (
+        userId,
+        connectionId,
+        botId,
+        generation,
+        requirement,
+      ) =>
+        rpc.claimConnectionDependency({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          botId,
+          generation,
+          requirement,
+        }),
+      acknowledgeConnectionDependency: (
+        userId,
+        connectionId,
+        botId,
+        generation,
+      ) =>
+        rpc.acknowledgeConnectionDependency({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          botId,
+          generation,
+        }),
+      compensateConnectionDependency: (
+        userId,
+        connectionId,
+        botId,
+        generation,
+      ) =>
+        rpc.compensateConnectionDependency({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          botId,
+          generation,
+        }),
     };
   }
 

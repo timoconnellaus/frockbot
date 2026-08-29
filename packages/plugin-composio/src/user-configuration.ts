@@ -108,11 +108,6 @@ export function deriveRevocationCompensations(
       );
     }
   }
-  const targetBotId = connection.safeMetadata.targetBotId;
-  const generation = connection.safeMetadata.assignmentGeneration;
-  if (typeof targetBotId === "string" && typeof generation === "string") {
-    dependenciesByKey.set(`${targetBotId}\u0000${generation}`, generation);
-  }
   return [...dependenciesByKey].map(([key, expectedGeneration]) => {
     const botId = key.slice(0, key.indexOf("\u0000"));
     return {

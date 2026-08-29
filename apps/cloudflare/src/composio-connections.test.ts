@@ -722,6 +722,7 @@ describe("ComposioConnectionCoordinator", () => {
     expect(reconciliationReads).toBe(2);
     expect(store.packagePolicyReads).toBe(1);
     expect(reconciled).toEqual({
+      schemaVersion: 1,
       status: "ready",
       connectionId: "connection-1",
     });
@@ -886,6 +887,7 @@ describe("ComposioConnectionCoordinator", () => {
         connectionTypeId: "gmail",
       }),
     ).resolves.toEqual({
+      schemaVersion: 1,
       status: "ready",
       connectionId: "connection-expired",
     });
@@ -1096,6 +1098,7 @@ describe("ComposioConnectionCoordinator", () => {
     });
 
     expect(await coordinator.revoke("user-1", "connection-1")).toEqual({
+      schemaVersion: 1,
       status: "revoked",
     });
     expect(store.connections.get("connection-1")?.state).toBe("revoked");
@@ -1114,8 +1117,13 @@ describe("ComposioConnectionCoordinator", () => {
       state: "ready",
       safeMetadata: {
         connectedAccountId: "ca_123",
-        targetBotId: "primary",
-        assignmentGeneration: "assigned-lease",
+        dependentAssignments: [
+          {
+            botId: "primary",
+            generation: "assigned-lease",
+            status: "acknowledged",
+          },
+        ],
       },
     });
     const coordinator = new ComposioConnectionCoordinator({
@@ -1224,7 +1232,7 @@ describe("ComposioConnectionCoordinator", () => {
       "response lost",
     );
     await expect(coordinator.revoke("user-1", "connection-1")).resolves.toEqual(
-      { status: "revoked" },
+      { schemaVersion: 1, status: "revoked" },
     );
 
     expect(revokeCalls).toBe(1);
@@ -1683,6 +1691,7 @@ describe("ComposioConnectionCoordinator", () => {
     });
 
     expect(await coordinator.revoke("user-1", "connection-1")).toEqual({
+      schemaVersion: 1,
       status: "revoked",
     });
     expect(invalidated).toEqual(["bot-a", "bot-b"]);
@@ -1721,7 +1730,7 @@ describe("ComposioConnectionCoordinator", () => {
     });
 
     await expect(coordinator.revoke("user-1", "connection-1")).resolves.toEqual(
-      { status: "revoked" },
+      { schemaVersion: 1, status: "revoked" },
     );
     expect(results).toEqual(["gen-old", "gen-new"]);
     expect(store.connections.get("connection-1")).toMatchObject({

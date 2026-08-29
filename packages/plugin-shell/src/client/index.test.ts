@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
-import { projectCompletedRuns, projectDurableRuns } from "./index.js";
-import { shellClientPlugin } from "./index.js";
+import {
+  decodePluginCatalog,
+  projectCompletedRuns,
+  projectDurableRuns,
+  shellClientPlugin,
+} from "./index.js";
 import type { FrockBotWebData } from "../shared.js";
 import type { Ref } from "vue";
 
@@ -39,6 +43,21 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(globalThis, "window");
   }
+});
+
+describe("application manifest protocol", () => {
+  test("requires the owned manifest response version", () => {
+    expect(decodePluginCatalog({ schemaVersion: 1, packages: [] })).toEqual([]);
+    for (const manifest of [
+      { packages: [] },
+      { schemaVersion: 2, packages: [] },
+      { schemaVersion: "1", packages: [] },
+    ]) {
+      expect(() => decodePluginCatalog(manifest)).toThrow(
+        "Application manifest is invalid",
+      );
+    }
+  });
 });
 
 describe("composer hydration context", () => {
@@ -417,6 +436,8 @@ describe("Connection operation reconciliation", () => {
             if (attempts === 1)
               return Promise.reject(new Error("response lost"));
             return Promise.resolve({
+              schemaVersion: 1 as const,
+              status: "authorization-required" as const,
               connectionId: input.commandId,
               redirectUrl: "https://connect.example/authorize",
               expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -489,6 +510,8 @@ describe("Connection operation reconciliation", () => {
           commandIds.push(input.commandId);
           connectionId = input.commandId;
           return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "authorization-required" as const,
             connectionId: input.commandId,
             redirectUrl: "https://connect.example/authorize",
             expiresAt: new Date(Date.now() + 60_000).toISOString(),

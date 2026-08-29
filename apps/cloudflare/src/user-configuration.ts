@@ -3,6 +3,11 @@ import {
   compileFoundationApplication,
   createFoundationBackendContributions,
 } from "@frockbot/application-foundation/runtime";
+import {
+  decodeConnectionDependencyRequirementV1,
+  decodeUserConfigurationExecuteRpcV1,
+  decodeUserConfigurationReadRpcV1,
+} from "@frockbot/configuration-core";
 import { reconcileComposioProviderConnection } from "@frockbot/plugin-composio";
 import { ComposioClient } from "@frockbot/plugin-composio/client";
 import type {
@@ -11,8 +16,90 @@ import type {
   UserConfigurationEnv,
 } from "@frockbot/plugin-composio/user-configuration";
 import { createComposioUserBackendContribution } from "@frockbot/plugin-composio/user-configuration";
+import {
+  decodeRpcEnvelopeV1,
+  decodeStartConnectionRpcV1,
+  rpcDecoded,
+  rpcEnum,
+  rpcIdentifier,
+  rpcJsonRecord,
+  rpcObject,
+  rpcString,
+} from "./durable-rpc.js";
 
 export type { StartConnectionInput };
+
+function decodeConnectionRequest(input: unknown): {
+  userId: string;
+  connectionId: string;
+} {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    connectionId: rpcIdentifier,
+  });
+  return {
+    userId: request.userId as string,
+    connectionId: request.connectionId as string,
+  };
+}
+
+function decodeConnectionMetadataRequest(input: unknown): {
+  userId: string;
+  connectionId: string;
+  safeMetadata: Parameters<
+    ComposioUserBackendContribution["recordConnectLinkResult"]
+  >[2];
+} {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    connectionId: rpcIdentifier,
+    safeMetadata: rpcJsonRecord,
+  });
+  return {
+    userId: request.userId as string,
+    connectionId: request.connectionId as string,
+    safeMetadata: request.safeMetadata as Parameters<
+      ComposioUserBackendContribution["recordConnectLinkResult"]
+    >[2],
+  };
+}
+
+function decodeLeaseRequest(input: unknown): {
+  userId: string;
+  connectionId: string;
+  leaseId: string;
+} {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    connectionId: rpcIdentifier,
+    leaseId: rpcIdentifier,
+  });
+  return {
+    userId: request.userId as string,
+    connectionId: request.connectionId as string,
+    leaseId: request.leaseId as string,
+  };
+}
+
+function decodeDependencyRequest(input: unknown): {
+  userId: string;
+  connectionId: string;
+  botId: string;
+  generation: string;
+} {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    connectionId: rpcIdentifier,
+    botId: rpcIdentifier,
+    generation: rpcIdentifier,
+  });
+  return {
+    userId: request.userId as string,
+    connectionId: request.connectionId as string,
+    botId: request.botId as string,
+    generation: request.generation as string,
+  };
+}
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   private mounted: Promise<ComposioUserBackendContribution> | undefined;
@@ -57,175 +144,275 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   async readConfiguration(input: unknown) {
-    return (await this.contribution()).readConfiguration(input);
+    return (await this.contribution()).readConfiguration(
+      decodeUserConfigurationReadRpcV1(input),
+    );
   }
 
   async executeConfiguration(input: unknown) {
-    return (await this.contribution()).executeConfiguration(input);
+    return (await this.contribution()).executeConfiguration(
+      decodeUserConfigurationExecuteRpcV1(input),
+    );
   }
 
-  async isPackageInstalled(
-    ...args: Parameters<ComposioUserBackendContribution["isPackageInstalled"]>
-  ) {
-    return (await this.contribution()).isPackageInstalled(...args);
+  async isPackageInstalled(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      packageId: rpcIdentifier,
+    });
+    return (await this.contribution()).isPackageInstalled(
+      request.userId as string,
+      request.packageId as string,
+    );
   }
 
-  async getConnection(
-    ...args: Parameters<ComposioUserBackendContribution["getConnection"]>
-  ) {
-    return (await this.contribution()).getConnection(...args);
+  async getConnection(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+    });
+    return (await this.contribution()).getConnection(
+      request.userId as string,
+      request.connectionId as string,
+    );
   }
 
-  async startConnection(
-    ...args: Parameters<ComposioUserBackendContribution["startConnection"]>
-  ) {
-    return (await this.contribution()).startConnection(...args);
+  async startConnection(input: unknown) {
+    const request = decodeStartConnectionRpcV1(input);
+    return (await this.contribution()).startConnection(
+      request.userId,
+      request.connection as StartConnectionInput,
+    );
   }
 
-  async recordConnectLinkResult(
-    ...args: Parameters<
-      ComposioUserBackendContribution["recordConnectLinkResult"]
-    >
-  ) {
-    return (await this.contribution()).recordConnectLinkResult(...args);
+  async recordConnectLinkResult(input: unknown) {
+    const request = decodeConnectionMetadataRequest(input);
+    return (await this.contribution()).recordConnectLinkResult(
+      request.userId,
+      request.connectionId,
+      request.safeMetadata,
+    );
   }
 
-  async recordLinkReconciliationIdentity(
-    ...args: Parameters<
-      ComposioUserBackendContribution["recordLinkReconciliationIdentity"]
-    >
-  ) {
+  async recordLinkReconciliationIdentity(input: unknown) {
+    const request = decodeConnectionMetadataRequest(input);
     return (await this.contribution()).recordLinkReconciliationIdentity(
-      ...args,
+      request.userId,
+      request.connectionId,
+      request.safeMetadata,
     );
   }
 
-  async claimLostLinkCleanup(
-    ...args: Parameters<ComposioUserBackendContribution["claimLostLinkCleanup"]>
-  ) {
-    return (await this.contribution()).claimLostLinkCleanup(...args);
+  async claimLostLinkCleanup(input: unknown) {
+    const request = decodeConnectionMetadataRequest(input);
+    return (await this.contribution()).claimLostLinkCleanup(
+      request.userId,
+      request.connectionId,
+      request.safeMetadata,
+    );
   }
 
-  async finishConnectionAuthorization(
-    ...args: Parameters<
-      ComposioUserBackendContribution["finishConnectionAuthorization"]
-    >
-  ) {
-    return (await this.contribution()).finishConnectionAuthorization(...args);
+  async finishConnectionAuthorization(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      update: rpcObject(
+        { state: rpcEnum(["ready", "failed"] as const) },
+        {
+          safeMetadata: rpcJsonRecord,
+          failure: rpcString(),
+          authorizationStateId: rpcIdentifier,
+        },
+      ),
+    });
+    return (await this.contribution()).finishConnectionAuthorization(
+      request.userId as string,
+      request.connectionId as string,
+      request.update as Parameters<
+        ComposioUserBackendContribution["finishConnectionAuthorization"]
+      >[2],
+    );
   }
 
-  async consumeAuthorizationState(
-    ...args: Parameters<
-      ComposioUserBackendContribution["consumeAuthorizationState"]
-    >
-  ) {
-    return (await this.contribution()).consumeAuthorizationState(...args);
+  async consumeAuthorizationState(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      authorizationStateId: rpcIdentifier,
+    });
+    return (await this.contribution()).consumeAuthorizationState(
+      request.userId as string,
+      request.connectionId as string,
+      request.authorizationStateId as string,
+    );
   }
 
-  async admitConnectionCallback(
-    ...args: Parameters<
-      ComposioUserBackendContribution["admitConnectionCallback"]
-    >
-  ) {
-    return (await this.contribution()).admitConnectionCallback(...args);
+  async admitConnectionCallback(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      callback: rpcObject(
+        {
+          authorizationStateId: rpcIdentifier,
+          connectedAccountId: rpcIdentifier,
+          leaseId: rpcIdentifier,
+        },
+        { verifiedMetadata: rpcJsonRecord },
+      ),
+    });
+    return (await this.contribution()).admitConnectionCallback(
+      request.userId as string,
+      request.connectionId as string,
+      request.callback as Parameters<
+        ComposioUserBackendContribution["admitConnectionCallback"]
+      >[2],
+    );
   }
 
-  async claimConnectionAssignment(
-    ...args: Parameters<
-      ComposioUserBackendContribution["claimConnectionAssignment"]
-    >
-  ) {
-    return (await this.contribution()).claimConnectionAssignment(...args);
+  async claimConnectionAssignment(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        connectionId: rpcIdentifier,
+        leaseId: rpcIdentifier,
+      },
+      { verifiedMetadata: rpcJsonRecord },
+    );
+    return (await this.contribution()).claimConnectionAssignment(
+      request.userId as string,
+      request.connectionId as string,
+      request.leaseId as string,
+      request.verifiedMetadata as Parameters<
+        ComposioUserBackendContribution["claimConnectionAssignment"]
+      >[3],
+    );
   }
 
-  async finishConnectionAssignment(
-    ...args: Parameters<
-      ComposioUserBackendContribution["finishConnectionAssignment"]
-    >
-  ) {
-    return (await this.contribution()).finishConnectionAssignment(...args);
+  async finishConnectionAssignment(input: unknown) {
+    const request = decodeLeaseRequest(input);
+    return (await this.contribution()).finishConnectionAssignment(
+      request.userId,
+      request.connectionId,
+      request.leaseId,
+    );
   }
 
-  async requireAssignmentCompensation(
-    ...args: Parameters<
-      ComposioUserBackendContribution["requireAssignmentCompensation"]
-    >
-  ) {
-    return (await this.contribution()).requireAssignmentCompensation(...args);
+  async requireAssignmentCompensation(input: unknown) {
+    const request = decodeLeaseRequest(input);
+    return (await this.contribution()).requireAssignmentCompensation(
+      request.userId,
+      request.connectionId,
+      request.leaseId,
+    );
   }
 
-  async recordAssignmentCompensated(
-    ...args: Parameters<
-      ComposioUserBackendContribution["recordAssignmentCompensated"]
-    >
-  ) {
-    return (await this.contribution()).recordAssignmentCompensated(...args);
+  async recordAssignmentCompensated(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      compensationId: rpcIdentifier,
+    });
+    return (await this.contribution()).recordAssignmentCompensated(
+      request.userId as string,
+      request.connectionId as string,
+      request.compensationId as string,
+    );
   }
 
-  async claimConnectionDependency(
-    ...args: Parameters<
-      ComposioUserBackendContribution["claimConnectionDependency"]
-    >
-  ) {
-    return (await this.contribution()).claimConnectionDependency(...args);
+  async claimConnectionDependency(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      botId: rpcIdentifier,
+      generation: rpcIdentifier,
+      requirement: rpcDecoded(decodeConnectionDependencyRequirementV1),
+    });
+    return (await this.contribution()).claimConnectionDependency(
+      request.userId as string,
+      request.connectionId as string,
+      request.botId as string,
+      request.generation as string,
+      request.requirement as Parameters<
+        ComposioUserBackendContribution["claimConnectionDependency"]
+      >[4],
+    );
   }
 
-  async acknowledgeConnectionDependency(
-    ...args: Parameters<
-      ComposioUserBackendContribution["acknowledgeConnectionDependency"]
-    >
-  ) {
-    return (await this.contribution()).acknowledgeConnectionDependency(...args);
+  async acknowledgeConnectionDependency(input: unknown) {
+    const request = decodeDependencyRequest(input);
+    return (await this.contribution()).acknowledgeConnectionDependency(
+      request.userId,
+      request.connectionId,
+      request.botId,
+      request.generation,
+    );
   }
 
-  async compensateConnectionDependency(
-    ...args: Parameters<
-      ComposioUserBackendContribution["compensateConnectionDependency"]
-    >
-  ) {
-    return (await this.contribution()).compensateConnectionDependency(...args);
+  async compensateConnectionDependency(input: unknown) {
+    const request = decodeDependencyRequest(input);
+    return (await this.contribution()).compensateConnectionDependency(
+      request.userId,
+      request.connectionId,
+      request.botId,
+      request.generation,
+    );
   }
 
-  async recordConnectionDependency(
-    ...args: Parameters<
-      ComposioUserBackendContribution["recordConnectionDependency"]
-    >
-  ) {
-    return (await this.contribution()).recordConnectionDependency(...args);
+  async recordConnectionDependency(input: unknown) {
+    const request = decodeDependencyRequest(input);
+    return (await this.contribution()).recordConnectionDependency(
+      request.userId,
+      request.connectionId,
+      request.botId,
+      request.generation,
+    );
   }
 
-  async requireConnectionReconciliation(
-    ...args: Parameters<
-      ComposioUserBackendContribution["requireConnectionReconciliation"]
-    >
-  ) {
-    return (await this.contribution()).requireConnectionReconciliation(...args);
+  async requireConnectionReconciliation(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      operation: rpcEnum(["link", "revoke"] as const),
+      failure: rpcString(),
+    });
+    return (await this.contribution()).requireConnectionReconciliation(
+      request.userId as string,
+      request.connectionId as string,
+      request.operation as "link" | "revoke",
+      request.failure as string,
+    );
   }
 
-  async claimConnectionRevocation(
-    ...args: Parameters<
-      ComposioUserBackendContribution["claimConnectionRevocation"]
-    >
-  ) {
-    return (await this.contribution()).claimConnectionRevocation(...args);
+  async claimConnectionRevocation(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier, connectionId: rpcIdentifier },
+      { recoveredSafeMetadata: rpcJsonRecord },
+    );
+    return (await this.contribution()).claimConnectionRevocation(
+      request.userId as string,
+      request.connectionId as string,
+      request.recoveredSafeMetadata as Parameters<
+        ComposioUserBackendContribution["claimConnectionRevocation"]
+      >[2],
+    );
   }
 
-  async recordRevocationProviderCompleted(
-    ...args: Parameters<
-      ComposioUserBackendContribution["recordRevocationProviderCompleted"]
-    >
-  ) {
+  async recordRevocationProviderCompleted(input: unknown) {
+    const request = decodeConnectionRequest(input);
     return (await this.contribution()).recordRevocationProviderCompleted(
-      ...args,
+      request.userId,
+      request.connectionId,
     );
   }
 
-  async finishConnectionRevocation(
-    ...args: Parameters<
-      ComposioUserBackendContribution["finishConnectionRevocation"]
-    >
-  ) {
-    return (await this.contribution()).finishConnectionRevocation(...args);
+  async finishConnectionRevocation(input: unknown) {
+    const request = decodeConnectionRequest(input);
+    return (await this.contribution()).finishConnectionRevocation(
+      request.userId,
+      request.connectionId,
+    );
   }
 
   async alarm(): Promise<void> {

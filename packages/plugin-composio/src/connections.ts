@@ -222,6 +222,7 @@ function decodeConnectionStartReplayV1(
     return undefined;
   }
   return {
+    schemaVersion: 1,
     status: "ready",
     connectionId: value.connectionId,
     ...(value.nativeReturnNonce
@@ -417,6 +418,7 @@ export class ComposioConnectionCoordinator {
         expiry > now
       ) {
         return {
+          schemaVersion: 1,
           status: "authorization-required",
           connectionId,
           redirectUrl,
@@ -645,6 +647,7 @@ export class ComposioConnectionCoordinator {
       throw new Error("Connection was revoked while creating its link");
     }
     return {
+      schemaVersion: 1,
       status: "authorization-required",
       connectionId,
       redirectUrl: link.redirectUrl,
@@ -700,10 +703,12 @@ export class ComposioConnectionCoordinator {
     if (connection.packageId !== "composio") {
       throw new Error("Composio Connection was not admitted");
     }
-    if (claim.phase === "done") return { status: "revoked" };
+    if (claim.phase === "done") {
+      return { schemaVersion: 1, status: "revoked" };
+    }
     const connectedAccountId = connection.safeMetadata.connectedAccountId;
     if (typeof connectedAccountId !== "string") {
-      return { status: "reconciliation-required" };
+      return { schemaVersion: 1, status: "reconciliation-required" };
     }
 
     const shouldInvokeProvider = claim.phase === "provider";
@@ -748,25 +753,13 @@ export class ComposioConnectionCoordinator {
       connectionId,
     );
     if (refreshed?.safeMetadata.revocationProviderCompleted !== true) {
-      return { status: "reconciliation-required" };
+      return { schemaVersion: 1, status: "reconciliation-required" };
     }
     const compensations = Array.isArray(
       refreshed.safeMetadata.assignmentCompensations,
     )
       ? refreshed.safeMetadata.assignmentCompensations
-      : typeof refreshed.safeMetadata.targetBotId === "string" &&
-          typeof refreshed.safeMetadata.assignmentCompensationId === "string" &&
-          typeof refreshed.safeMetadata.assignmentCompensationGeneration ===
-            "string"
-        ? [
-            {
-              botId: refreshed.safeMetadata.targetBotId,
-              id: refreshed.safeMetadata.assignmentCompensationId,
-              expectedGeneration:
-                refreshed.safeMetadata.assignmentCompensationGeneration,
-            },
-          ]
-        : [];
+      : [];
     if (this.config.markBotUnavailable) {
       for (const candidate of compensations) {
         if (
@@ -774,7 +767,7 @@ export class ComposioConnectionCoordinator {
           typeof candidate !== "object" ||
           Array.isArray(candidate)
         ) {
-          return { status: "reconciliation-required" };
+          return { schemaVersion: 1, status: "reconciliation-required" };
         }
         const compensation = candidate as Record<string, unknown>;
         if (
@@ -782,7 +775,7 @@ export class ComposioConnectionCoordinator {
           typeof compensation.id !== "string" ||
           typeof compensation.expectedGeneration !== "string"
         ) {
-          return { status: "reconciliation-required" };
+          return { schemaVersion: 1, status: "reconciliation-required" };
         }
         const result = await this.config.markBotUnavailable(
           userId,
@@ -807,6 +800,7 @@ export class ComposioConnectionCoordinator {
       connectionId,
     );
     return {
+      schemaVersion: 1,
       status: finished ? "revoked" : "reconciliation-required",
     };
   }

@@ -1,4 +1,8 @@
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
+import type {
+  ClientNotificationAcknowledgementV1,
+  ClientNotificationListV1,
+} from "@frockbot/client-core";
 import {
   decodeClientNotificationAcknowledgementCommandV1,
   decodeClientRunAdmissionFenceCommandV1,
@@ -149,9 +153,10 @@ export function createUserApplication() {
       }
       if (request.method === "GET") {
         return Response.json({
+          schemaVersion: 1,
           notifications:
             await env.BOT_STATE.listNotifications(notificationBotId),
-        });
+        } satisfies ClientNotificationListV1);
       }
       if (request.method !== "POST") {
         return jsonError(405, "method not allowed");
@@ -173,7 +178,10 @@ export function createUserApplication() {
         notificationBotId,
         command.notificationId,
       );
-      return Response.json({ status: "acknowledged" });
+      return Response.json({
+        schemaVersion: 1,
+        status: "acknowledged",
+      } satisfies ClientNotificationAcknowledgementV1);
     }
 
     const turnMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/turns$/);
@@ -300,7 +308,7 @@ export function createUserApplication() {
         const before = url.searchParams.get("before");
         query = decodeClientRunListQueryV1({
           schemaVersion: 1,
-          ...(before !== null ? { before } : {}),
+          ...(before === null ? {} : { before }),
         });
       } catch (error) {
         return jsonError(

@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./client": "./src/composio-client.ts",
     "./backend": "./src/backend.ts",
+    "./backend-contracts": "./src/backend-contracts.ts",
     "./user-configuration": "./src/user-configuration.ts",
     "./agent": "./src/agent.ts",
     "./manifest": "./src/manifest.ts",

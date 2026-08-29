@@ -166,19 +166,20 @@ describe("Bot capability assignment admission", () => {
         reads += 1;
         return Promise.resolve(structuredClone(user));
       },
-      claimConnectionDependency: (
-        _userId: string,
-        _connectionId: string,
-        _botId: string,
-        _generation: string,
-        requirement: unknown,
-      ) => {
-        expect(requirement).toEqual({
+      claimConnectionDependency: (request: unknown) => {
+        expect(request).toEqual({
           schemaVersion: 1,
-          packageId: "composio",
-          packageVersion: "0.0.1",
-          capabilityId: "gmail-tools",
-          connectionTypeIds: ["gmail"],
+          userId: "user-1",
+          connectionId: "gmail-1",
+          botId: "primary",
+          generation: expect.any(String),
+          requirement: {
+            schemaVersion: 1,
+            packageId: "composio",
+            packageVersion: "0.0.1",
+            capabilityId: "gmail-tools",
+            connectionTypeIds: ["gmail"],
+          },
         });
         dependencyClaims += 1;
         return Promise.resolve(claimAuthorized);
