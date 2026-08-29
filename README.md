@@ -6,6 +6,8 @@ The current vertical slice includes:
 
 - a hosted Cordis WebUI/Vue client composed from declared Package Contributions;
 - backend-owned Bot Durable Objects running the event-sourced custom agent loop;
+- durable User and Bot settings with explicit Package, Connection, and Capability Assignment ownership;
+- a Composio Gmail Connection with durable authorization, revocation, and reconciliation;
 - a sandboxed Electron window that loads the hosted application and brokers narrow optional platform capabilities;
 - streamed text, journaled tool calls, durable recovery, and lifecycle cleanup;
 - an executable Cordis loader, dependency, isolation, WebSocket, CSP, and Electron foundation proof.
@@ -36,7 +38,9 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools, memory, and viewer UI. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory; `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names and `FROCKBOT_BOT_ID`/`FROCKBOT_AGENT_NAME` bind the desktop host to a Bot. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
+Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs Packages, authorizes external accounts, and explicitly assigns their Capabilities to Bots. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser and desktop expose these hosted flows; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
+
+To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools, memory, and viewer UI. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory. `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names for standalone development; the hosted backend supplies durable User and Bot identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
 
 ```bash
 SPRITES_TOKEN="..." \
@@ -138,8 +142,10 @@ packages/
   agent-loop/       Concrete event-sourced custom agent-loop plugin
   client-core/      Shared client runtime helpers and brand typography stylesheet
   computer-core/    Provider registry and capability interfaces for Computers
+  configuration-core/ Versioned durable User/Bot settings and Connection contracts
   plugin-catalog/   Manifest decoding, scoped activation, and rollback
   plugin-clock/     Reference package with agent, host, and WebUI contributions
+  plugin-composio/  Composio Connection, reconciliation, and assigned Agent tools
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
   plugin-memory/    Computer-workspace or R2-backed durable Markdown memory
@@ -220,7 +226,6 @@ Cordis contexts provide composition and lifecycle ownership, not security isolat
 ## Current limitations
 
 - model configuration currently uses environment variables rather than onboarding UI;
-- sessions are currently in memory;
 - Fly Sprite live provisioning requires a valid Sprites token and has not been exercised by repository CI;
 - Fly uses one Sprite per Bot, but live isolation still depends on Fly's VM and network enforcement and has not been exercised by repository CI;
 - the local derived memory vector index is process-local and rebuilt through canonical-file fallback; cloud Vectorize remains durable;

@@ -1,6 +1,6 @@
 # FrockBot
 
-FrockBot is a desktop environment for creating and operating persistent conversational bots whose behavior and interface can be extended through installable packages.
+FrockBot is a hosted application for creating and operating persistent conversational bots whose behavior and interface can be extended through installable packages and optional platform shells.
 
 ## Language
 
@@ -29,7 +29,7 @@ A versioned, installable FrockBot distribution containing a manifest and one or 
 _Avoid_: Plugin, extension
 
 **Connection Type**:
-A Package-declared kind of external authorization, such as Gmail, Composio, or Codex.
+A Package-declared kind of external authorization, such as Composio Gmail.
 _Avoid_: Plugin, provider account
 
 **Connection**:

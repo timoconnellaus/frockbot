@@ -27,14 +27,14 @@ The first-party Sprites documentation does not describe a built-in graphical des
 4. Provision Chromium, Xvfb, a lightweight window manager, x11vnc, noVNC, and websockify in the Sprite. A single supervised gateway service serves noVNC and uses websockify's reloadable `TokenFile` routing to reach bot-scoped loopback VNC ports.
 5. Route noVNC through the Sprite HTTPS URL. Because an embedded iframe cannot attach an API `Authorization` header, use public URL mode only for this gateway and protect each route with an opaque viewer token plus a high-entropy VNC password passed in the URL fragment. Public exposure, token routing, and passwords are FrockBot design choices, not guarantees supplied by Sprites.
 6. Put an owner-scoped takeover lease under each Bot runtime directory. Serialize assertion, acquisition, renewal, release, and expired-lease replacement with `flock`. New process and browser operations refuse work while another fresh human lease exists; durable Package file operations remain available. A failed heartbeat immediately re-shields the viewer.
-7. Keep the Sprites token only in desktop-host and agent-runtime processes. The trusted WebUI receives the selected bot's noVNC URL/password through authenticated loopback RPC, never the API token.
+7. Keep the Sprites token only in the backend Fly provider Plugin. Hosted clients receive the selected Bot's noVNC URL/password through authenticated, decoded DTOs, never the API token.
 8. Use the SDK's cancellable HTTP exec path for bounded non-interactive commands; the pinned SDK's WebSocket `execFile` path does not honor `AbortSignal` or timeouts.
 9. Treat takeover as coordination rather than a security boundary for work already in flight. Bot isolation comes from assigning separate Sprites; Cordis contexts and directory names are not security controls.
 10. Treat the memory Package's workspace-backed Markdown as canonical on desktop. Cloudflare uses its explicit R2 adapter. Vector indexes are derived; session events remain authoritative and are not mirrored by the Fly provider.
 
 ## Configuration
 
-Support `SPRITES_TOKEN` (the current SDK README spelling) and `SPRITE_TOKEN` (used by some first-party examples) for compatibility. Use `FROCKBOT_SPRITE_NAME` to override the base name from which stable Bot and User storage Sprite names are derived, `FROCKBOT_COMPUTER_PROVIDER=fly-sprite` to select this adapter, `FROCKBOT_BOT_ID` for durable assignment, `FROCKBOT_AGENT_ID` for live execution identity, and `FROCKBOT_SESSION_ID` for conversation identity.
+Production configuration uses `SPRITES_TOKEN`, matching the current SDK README; alternate spellings are not part of the hosted contract. `FROCKBOT_SPRITE_NAME` overrides the base name from which stable Bot and User storage Sprite names are derived. Standalone agent-runtime development may also set `FROCKBOT_COMPUTER_PROVIDER=fly-sprite`, `FROCKBOT_BOT_ID`, `FROCKBOT_AGENT_ID`, and `FROCKBOT_SESSION_ID`; hosted identity comes from durable backend authority instead of these process variables.
 
 ## Verification limits
 
