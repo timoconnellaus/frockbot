@@ -1,0 +1,159 @@
+.flock-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background-position: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+.flock-art--canonical {
+  background-image: url("./canonical.webp");
+}
+.flock-art--background-hot-pink {
+  background-image: url("./background-hot-pink.webp");
+}
+.flock-art--background-electric-blue {
+  background-image: url("./background-electric-blue.webp");
+}
+.flock-art--background-lime-green {
+  background-image: url("./background-lime-green.webp");
+}
+.flock-art--background-canary-yellow {
+  background-image: url("./background-canary-yellow.webp");
+}
+.flock-art--background-bright-orange {
+  background-image: url("./background-bright-orange.webp");
+}
+.flock-art--background-vivid-purple {
+  background-image: url("./background-vivid-purple.webp");
+}
+.flock-art--terracotta-beanie {
+  background-image: url("./terracotta-beanie.webp");
+}
+.flock-art--canary-rain-cap {
+  background-image: url("./canary-rain-cap.webp");
+}
+.flock-art--matte-black-top-hat {
+  background-image: url("./matte-black-top-hat.webp");
+}
+.flock-art--navy-wizard-hat {
+  background-image: url("./navy-wizard-hat.webp");
+}
+.flock-art--coral-bucket-hat {
+  background-image: url("./coral-bucket-hat.webp");
+}
+.flock-art--lilac-flower-crown {
+  background-image: url("./lilac-flower-crown.webp");
+}
+.flock-art--canary-party-hat {
+  background-image: url("./canary-party-hat.webp");
+}
+.flock-art--forest-ranger-fedora {
+  background-image: url("./forest-ranger-fedora.webp");
+}
+.flock-art--purple-witch-hat {
+  background-image: url("./purple-witch-hat.webp");
+}
+.flock-art--blue-sailor-cap {
+  background-image: url("./blue-sailor-cap.webp");
+}
+.flock-art--gold-royal-crown {
+  background-image: url("./gold-royal-crown.webp");
+}
+.flock-art--chef-toque {
+  background-image: url("./chef-toque.webp");
+}
+.flock-art--rainbow-propeller-cap {
+  background-image: url("./rainbow-propeller-cap.webp");
+}
+.flock-art--burgundy-beret {
+  background-image: url("./burgundy-beret.webp");
+}
+.flock-art--silver-space-helmet {
+  background-image: url("./silver-space-helmet.webp");
+}
+.flock-art--straw-boater {
+  background-image: url("./straw-boater.webp");
+}
+.flock-art--graduation-cap {
+  background-image: url("./graduation-cap.webp");
+}
+.flock-art--orange-hard-hat {
+  background-image: url("./orange-hard-hat.webp");
+}
+.flock-art--ranger-fedora-feather {
+  background-image: url("./ranger-fedora-feather.webp");
+}
+.flock-art--witch-hat-moon {
+  background-image: url("./witch-hat-moon.webp");
+}
+.flock-art--sailor-cap-anchor {
+  background-image: url("./sailor-cap-anchor.webp");
+}
+.flock-art--royal-crown-rubies {
+  background-image: url("./royal-crown-rubies.webp");
+}
+.flock-art--white-tennis-visor {
+  background-image: url("./white-tennis-visor.webp");
+}
+.flock-art--teal-glasses {
+  background-image: url("./teal-glasses.webp");
+}
+.flock-art--amber-glasses {
+  background-image: url("./amber-glasses.webp");
+}
+.flock-art--plum-glasses {
+  background-image: url("./plum-glasses.webp");
+}
+.flock-art--rose-heart-sunglasses {
+  background-image: url("./rose-heart-sunglasses.webp");
+}
+.flock-art--bronze-aviator-goggles {
+  background-image: url("./bronze-aviator-goggles.webp");
+}
+.flock-art--cobalt-round-glasses {
+  background-image: url("./cobalt-round-glasses.webp");
+}
+.flock-art--green-square-glasses {
+  background-image: url("./green-square-glasses.webp");
+}
+.flock-art--yellow-star-glasses {
+  background-image: url("./yellow-star-glasses.webp");
+}
+.flock-art--tortoiseshell-readers {
+  background-image: url("./tortoiseshell-readers.webp");
+}
+.flock-art--rainbow-visor {
+  background-image: url("./rainbow-visor.webp");
+}
+.flock-art--violet-masquerade-mask {
+  background-image: url("./violet-masquerade-mask.webp");
+}
+.flock-art--white-snow-goggles {
+  background-image: url("./white-snow-goggles.webp");
+}
+.flock-art--retro-3d-glasses {
+  background-image: url("./retro-3d-glasses.webp");
+}
+.flock-art--teal-bowtie {
+  background-image: url("./teal-bowtie.webp");
+}
+.flock-art--purple-scarf {
+  background-image: url("./purple-scarf.webp");
+}
+.flock-art--red-polka-bowtie {
+  background-image: url("./red-polka-bowtie.webp");
+}
+.flock-art--turquoise-bandana {
+  background-image: url("./turquoise-bandana.webp");
+}
+.flock-art--gold-sun-medallion {
+  background-image: url("./gold-sun-medallion.webp");
+}
+.flock-art--emerald-necktie {
+  background-image: url("./emerald-necktie.webp");
+}
+.flock-art--leather-bell {
+  background-image: url("./leather-bell.webp");
+}

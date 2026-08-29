@@ -11,6 +11,7 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
+import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import {
   decodeClientRunLookupV1,
   decodeClientRunListV1,
@@ -181,6 +182,7 @@ class MemoryBotState implements BotStateBinding {
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
+    assertRegistered: () => Promise.resolve(),
     run: ({ botId, command }) => state.run(botId, command),
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
@@ -330,6 +332,61 @@ class MemoryConfiguration
       | Parameters<BotConfigurationBinding["executeConfiguration"]>[0],
   ): Promise<OperationReceiptV1> {
     return this.execute(request.command);
+  }
+
+  listBots() {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      revision: this.bots.size,
+      bots: [...this.bots.keys()].map((botId) => ({
+        botId,
+        registeredAt: "2026-08-29T00:00:00.000Z",
+        initialName: botId,
+        sheep: randomSheepRecipeV1(() => 0),
+      })),
+    });
+  }
+  createBot(request: Parameters<UserConfigurationBinding["createBot"]>[0]) {
+    void this.read({
+      schemaVersion: 1,
+      type: "bot/get",
+      botId: request.command.botId,
+    });
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      status: "applied" as const,
+      revision: this.bots.size,
+    });
+  }
+  getBotRegistration(
+    request: Parameters<UserConfigurationBinding["getBotRegistration"]>[0],
+  ) {
+    return Promise.resolve({
+      botId: request.botId,
+      registeredAt: "2026-08-29T00:00:00.000Z",
+      initialName: request.botId,
+      sheep: randomSheepRecipeV1(() => 0),
+    });
+  }
+  hasBot() {
+    return Promise.resolve(true);
+  }
+  readSheep(request: Parameters<BotConfigurationBinding["readSheep"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      revision: 0,
+      sheep: randomSheepRecipeV1(() => 0),
+    });
+  }
+  updateSheep(request: Parameters<BotConfigurationBinding["updateSheep"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      status: "applied" as const,
+      revision: request.command.expectedRevision + 1,
+    });
   }
 }
 
@@ -598,7 +655,13 @@ describe("Cloudflare user application gateway", () => {
 
   test("rejects invalid encoded Bot settings paths before configuration lookup", async () => {
     const { gateway, configurationRoutes } = createTestGateway();
-    for (const botId of ["invalid%2Fbot", "%"]) {
+    for (const botId of [
+      "invalid%2Fbot",
+      "%",
+      "bad:bot",
+      "bad@bot",
+      "b".repeat(129),
+    ]) {
       for (const method of ["GET", "POST"]) {
         const response = await gateway(
           request(`/api/bots/${botId}/settings`, "alice", { method }),

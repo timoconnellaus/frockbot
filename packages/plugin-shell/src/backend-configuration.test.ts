@@ -91,6 +91,22 @@ function assignmentCommand(
 }
 
 describe("Bot capability assignment admission", () => {
+  test("rejects an unmaterialized Bot without writing durable state", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    await expect(
+      contribution.readConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "unknown",
+      }),
+    ).rejects.toThrow("not materialized");
+    expect(storage.values.size).toBe(0);
+  });
+
   test("validates notification authority without changing settings", async () => {
     const storage = new MemoryStorage();
     const settings = {
@@ -151,6 +167,13 @@ describe("Bot capability assignment admission", () => {
       } as never,
     });
 
+    await contribution.materializeSettings(
+      { userId: "user-1", botId: "primary" },
+      {
+        name: "Primary",
+        model: { connectionId: "provider-1", providerModelId: "model-1" },
+      },
+    );
     await expect(
       contribution.readConfiguration({
         schemaVersion: 1,
@@ -198,6 +221,10 @@ describe("Bot capability assignment admission", () => {
       command,
     });
     const contribution = createShellBotBackendContribution(host);
+    await contribution.materializeSettings(
+      { userId: "user-1", botId: "primary" },
+      { name: "Primary" },
+    );
 
     const first = contribution.executeConfiguration(request(original));
     await expect(
@@ -274,6 +301,7 @@ describe("Bot capability assignment admission", () => {
       } as never,
     });
     const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
     const execute = (command: BotConfigurationCommandV1) =>
       contribution.executeConfiguration({
         schemaVersion: 1,
@@ -433,6 +461,10 @@ describe("Bot capability assignment admission", () => {
         },
       } as never,
     });
+    await contribution.materializeSettings(
+      { userId: "user-1", botId: "primary" },
+      { name: "Primary" },
+    );
     const command = assignmentCommand("lost-assignment-response", {
       packageId: "composio",
       capabilityId: "gmail-tools",

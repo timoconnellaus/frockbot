@@ -9,6 +9,7 @@ import { createUserApplication } from "./user-application.js";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
+    assertRegistered: () => Promise.resolve(),
     run: ({ botId, command }) => state.run(botId, command),
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
@@ -52,7 +53,12 @@ describe("user application security headers", () => {
     // The shipped stylesheet embeds Manrope and Archivo Black as data: URIs,
     // so fonts render only when the policy declares font-src for them.
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
+    expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
+    expect(policy.get("frame-ancestors")).toEqual([
+      "capacitor://localhost",
+      "frockbot://localhost",
+    ]);
   });
 });
 
@@ -105,6 +111,77 @@ describe("user application Bot seam", () => {
     expect(response.status).toBe(200);
     expect((await response.json()) as BotTurnResult).toEqual(result);
     expect(calls).toEqual([{ botId: "primary", text: "hello" }]);
+  });
+
+  test("rejects every unregistered Bot route before dispatch", async () => {
+    let dispatches = 0;
+    const unexpected = () => {
+      dispatches += 1;
+      return Promise.reject(new Error("must not dispatch"));
+    };
+    const missing = new Error('Bot "missing" is not registered');
+    missing.name = "BotNotFoundError";
+    const env = {
+      BOT_STATE: {
+        assertRegistered: () => Promise.reject(missing),
+        run: unexpected,
+        listRuns: unexpected,
+        lookupRun: unexpected,
+        fenceRunAdmission: unexpected,
+        listNotifications: unexpected,
+        acknowledgeNotification: unexpected,
+        reconcileRun: unexpected,
+      } as unknown as UserBotStateBinding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    } satisfies UserApplicationEnv;
+    const fetchUserApplication = createUserApplication();
+    const requests = [
+      new Request("https://frockbot.test/api/bots/missing/turns"),
+      new Request("https://frockbot.test/api/bots/missing/turns", {
+        method: "POST",
+        body: "{}",
+      }),
+      new Request("https://frockbot.test/api/bots/missing/turns/run-1"),
+      new Request("https://frockbot.test/api/bots/missing/turns/run-1/fence", {
+        method: "POST",
+        body: "{}",
+      }),
+      new Request(
+        "https://frockbot.test/api/bots/missing/turns/run-1/reconcile",
+        { method: "POST", body: "{}" },
+      ),
+      new Request("https://frockbot.test/api/bots/missing/notifications"),
+      new Request("https://frockbot.test/api/bots/missing/notifications", {
+        method: "POST",
+        body: "{}",
+      }),
+    ];
+    for (const request of requests) {
+      expect((await fetchUserApplication(request, env)).status).toBe(404);
+    }
+    expect(dispatches).toBe(0);
+  });
+
+  test("rejects noncanonical Bot path identifiers before authority lookup", async () => {
+    let authorityChecks = 0;
+    const env = {
+      BOT_STATE: {
+        assertRegistered: () => {
+          authorityChecks += 1;
+          return Promise.resolve();
+        },
+      } as unknown as UserBotStateBinding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    } satisfies UserApplicationEnv;
+    const fetchUserApplication = createUserApplication();
+    for (const botId of ["bad:bot", "bad@bot", "b".repeat(129)]) {
+      const response = await fetchUserApplication(
+        new Request(`https://frockbot.test/api/bots/${botId}/turns`),
+        env,
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(authorityChecks).toBe(0);
   });
 
   test("rejects unversioned, future, and inexact hosted Turn commands", async () => {

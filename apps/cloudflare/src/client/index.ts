@@ -24,16 +24,11 @@ import {
   decodeClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
 
-function selectedBotId(): string {
-  try {
-    return new URL(window.location.href).searchParams.get("bot") ?? "default";
-  } catch {
-    return "default";
-  }
-}
-
-const botId = selectedBotId();
 const AUTHENTICATED_USER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
+const MOBILE_SHELL_ORIGINS = new Set([
+  "capacitor://localhost",
+  "frockbot://localhost",
+]);
 
 function requireAuthenticatedUserId(value: unknown): string {
   if (
@@ -61,6 +56,86 @@ function decodeAuthenticatedIdentity(value: unknown): string {
   return requireAuthenticatedUserId(identity.userId);
 }
 
+function usesMobileShell(): boolean {
+  return (
+    window.parent !== window &&
+    new URL(window.location.href).searchParams.get("mobile_shell") === "1"
+  );
+}
+
+function mobileShellRequest(
+  path: string,
+  method: "GET" | "POST",
+  body?: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const id = crypto.randomUUID();
+  return new Promise<Response>((resolve, reject) => {
+    const finish = (event: MessageEvent) => {
+      if (
+        event.source !== window.parent ||
+        !MOBILE_SHELL_ORIGINS.has(event.origin) ||
+        typeof event.data !== "object" ||
+        event.data === null ||
+        Array.isArray(event.data)
+      )
+        return;
+      const value = event.data as Record<string, unknown>;
+      const allowed = new Set([
+        "schemaVersion",
+        "type",
+        "id",
+        "status",
+        "contentType",
+        "body",
+      ]);
+      if (
+        Object.keys(value).some((key) => !allowed.has(key)) ||
+        value.schemaVersion !== 1 ||
+        value.type !== "frockbot/mobile-api-response" ||
+        value.id !== id ||
+        typeof value.status !== "number" ||
+        !Number.isInteger(value.status) ||
+        value.status < 100 ||
+        value.status > 599 ||
+        typeof value.body !== "string" ||
+        (value.contentType !== undefined &&
+          typeof value.contentType !== "string")
+      )
+        return;
+      window.removeEventListener("message", finish);
+      signal?.removeEventListener("abort", aborted);
+      resolve(
+        new Response(value.body, {
+          status: value.status,
+          headers:
+            typeof value.contentType === "string"
+              ? { "content-type": value.contentType }
+              : undefined,
+        }),
+      );
+    };
+    const aborted = () => {
+      window.removeEventListener("message", finish);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    if (signal?.aborted) return aborted();
+    signal?.addEventListener("abort", aborted, { once: true });
+    window.addEventListener("message", finish);
+    window.parent.postMessage(
+      {
+        schemaVersion: 1,
+        type: "frockbot/mobile-api-request",
+        id,
+        path,
+        method,
+        ...(body === undefined ? {} : { body }),
+      },
+      "*",
+    );
+  });
+}
+
 async function apiRequest(
   path: string,
   method: "GET" | "POST" = "GET",
@@ -78,11 +153,13 @@ async function apiRequest(
                 : undefined,
             }),
         )
-    : await fetch(path, {
-        method,
-        headers: body ? { "content-type": "application/json" } : undefined,
-        body,
-      });
+    : usesMobileShell()
+      ? await mobileShellRequest(path, method, body)
+      : await fetch(path, {
+          method,
+          headers: body ? { "content-type": "application/json" } : undefined,
+          body,
+        });
   const value: unknown = await response.json();
   if (!response.ok) {
     const error =
@@ -107,7 +184,9 @@ async function apiRequest(
 }
 
 const application = new ClientApplication({
+  connectionsAvailable: !usesMobileShell(),
   async turn(
+    botId: string,
     text: string,
     signal: AbortSignal,
     commandId: string,
@@ -135,12 +214,14 @@ const application = new ClientApplication({
             else signal.addEventListener("abort", aborted, { once: true });
           }),
         ])
-      : await fetch(path, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body,
-          signal,
-        });
+      : usesMobileShell()
+        ? await mobileShellRequest(path, "POST", body, signal)
+        : await fetch(path, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+            signal,
+          });
     signal.throwIfAborted();
     const result: unknown = await response.json();
     if (!response.ok) {
@@ -166,17 +247,17 @@ const application = new ClientApplication({
         : decodeBotSettingsViewV1(value),
     );
   },
-  async listNotifications() {
+  async listNotifications(botId: string) {
     return decodeNotificationList(
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/notifications`),
     );
   },
-  async listRuns() {
+  async listRuns(botId: string) {
     return decodeClientRunListV1(
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
     );
   },
-  async lookupRun(runId: string) {
+  async lookupRun(botId: string, runId: string) {
     const lookup = decodeClientRunLookupV1(
       await apiRequest(
         `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}`,
@@ -184,7 +265,7 @@ const application = new ClientApplication({
     );
     return lookup.state === "not-admitted" ? undefined : lookup.run;
   },
-  async fenceRunAdmission(runId: string) {
+  async fenceRunAdmission(botId: string, runId: string) {
     const lookup = decodeClientRunLookupV1(
       await apiRequest(
         `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/fence`,
@@ -194,7 +275,7 @@ const application = new ClientApplication({
     );
     return lookup.state === "not-admitted" ? undefined : lookup.run;
   },
-  async reconcileRun(runId: string) {
+  async reconcileRun(botId: string, runId: string) {
     return decodeClientTurnV1(
       await apiRequest(
         `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
@@ -203,7 +284,7 @@ const application = new ClientApplication({
       ),
     );
   },
-  async acknowledgeNotification(notificationId: string) {
+  async acknowledgeNotification(botId: string, notificationId: string) {
     decodeAcknowledgement(
       await apiRequest(
         `/api/bots/${encodeURIComponent(botId)}/notifications`,
@@ -218,6 +299,9 @@ const application = new ClientApplication({
   },
   readApplicationManifest() {
     return apiRequest("/app-manifest");
+  },
+  hostedRequest(path, method = "GET", body) {
+    return apiRequest(path, method, body);
   },
   async readAuthenticatedUserId() {
     return decodeAuthenticatedIdentity(await apiRequest("/api/identity"));

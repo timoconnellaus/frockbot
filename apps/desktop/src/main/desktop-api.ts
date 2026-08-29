@@ -1,3 +1,5 @@
+import { BOT_ID_PATTERN_V1 } from "@frockbot/configuration-core/bot-id";
+
 export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -268,33 +270,61 @@ export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {
   };
 }
 
+const RPC_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
+const exactRoute = (pattern: RegExp) => (path: string) => pattern.test(path);
+function botRoute(path: string, pattern: RegExp, runIdIndex?: number): boolean {
+  const match = pattern.exec(path);
+  const botId = match?.[1];
+  if (!botId || !BOT_ID_PATTERN_V1.test(botId)) return false;
+  if (runIdIndex === undefined) return true;
+  const runId = match[runIdIndex];
+  return runId !== undefined && RPC_ID_PATTERN.test(runId);
+}
+
 const API_ROUTES: Array<{
-  pattern: RegExp;
+  matches(path: string): boolean;
   methods: ReadonlySet<DesktopApiRequest["method"]>;
 }> = [
-  { pattern: /^\/app-manifest$/, methods: new Set(["GET"]) },
-  { pattern: /^\/api\/identity$/, methods: new Set(["GET"]) },
-  { pattern: /^\/api\/settings$/, methods: new Set(["GET", "POST"]) },
+  { matches: exactRoute(/^\/app-manifest$/), methods: new Set(["GET"]) },
+  { matches: exactRoute(/^\/api\/identity$/), methods: new Set(["GET"]) },
   {
-    pattern: /^\/api\/bots\/[a-zA-Z0-9._-]+\/(turns|settings|notifications)$/,
+    matches: exactRoute(/^\/api\/settings$/),
     methods: new Set(["GET", "POST"]),
   },
   {
-    pattern: /^\/api\/bots\/[a-zA-Z0-9._-]+\/turns\/[a-zA-Z0-9._-]+$/,
+    matches: exactRoute(/^\/api\/bots$/),
+    methods: new Set(["GET", "POST"]),
+  },
+  {
+    matches: (path) =>
+      botRoute(
+        path,
+        /^\/api\/bots\/([^/]+)\/(turns|settings|notifications|sheep)$/,
+      ),
+    methods: new Set(["GET", "POST"]),
+  },
+  {
+    matches: (path) =>
+      botRoute(path, /^\/api\/bots\/([^/]+)\/turns\/([^/]+)$/, 2),
     methods: new Set(["GET"]),
   },
   {
-    pattern:
-      /^\/api\/bots\/[a-zA-Z0-9._-]+\/turns\/[a-zA-Z0-9._-]+\/(reconcile|fence)$/,
+    matches: (path) =>
+      botRoute(
+        path,
+        /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/(reconcile|fence)$/,
+        2,
+      ),
     methods: new Set(["POST"]),
   },
   {
-    pattern: /^\/api\/plugins\/[a-zA-Z0-9._-]+\/connections$/,
+    matches: exactRoute(/^\/api\/plugins\/[a-zA-Z0-9._-]+\/connections$/),
     methods: new Set(["POST"]),
   },
   {
-    pattern:
+    matches: exactRoute(
       /^\/api\/plugins\/[a-zA-Z0-9._-]+\/connections\/[a-zA-Z0-9._-]+\/revoke$/,
+    ),
     methods: new Set(["POST"]),
   },
 ];
@@ -311,7 +341,7 @@ export function decodeDesktopApiRequest(value: unknown): DesktopApiRequest {
   const route =
     typeof request.path === "string"
       ? API_ROUTES.find((candidate) =>
-          candidate.pattern.test(request.path as string),
+          candidate.matches(request.path as string),
         )
       : undefined;
   if (

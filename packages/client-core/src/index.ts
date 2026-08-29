@@ -71,7 +71,10 @@ export interface ClientRun {
 }
 
 export interface AgentTransport {
+  /** False when this platform cannot complete external Connection authorization. */
+  readonly connectionsAvailable?: boolean;
   turn(
+    botId: string,
     text: string,
     signal: AbortSignal,
     commandId: string,
@@ -89,13 +92,24 @@ export interface AgentTransport {
     alias?: string;
     nativeReturnNonce?: string;
   }): Promise<ClientStartConnectionResult>;
-  listRuns?(): Promise<ClientRun[]>;
-  lookupRun?(runId: string): Promise<ClientRun | undefined>;
-  fenceRunAdmission?(runId: string): Promise<ClientRun | undefined>;
-  reconcileRun?(runId: string): Promise<ClientTurnResponse>;
+  listRuns?(botId: string): Promise<ClientRun[]>;
+  lookupRun?(botId: string, runId: string): Promise<ClientRun | undefined>;
+  fenceRunAdmission?(
+    botId: string,
+    runId: string,
+  ): Promise<ClientRun | undefined>;
+  reconcileRun?(botId: string, runId: string): Promise<ClientTurnResponse>;
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;
-  listNotifications?(): Promise<ClientNotificationIntent[]>;
-  acknowledgeNotification?(notificationId: string): Promise<void>;
+  listNotifications?(botId: string): Promise<ClientNotificationIntent[]>;
+  acknowledgeNotification?(
+    botId: string,
+    notificationId: string,
+  ): Promise<void>;
+  hostedRequest?(
+    path: string,
+    method?: "GET" | "POST",
+    body?: string,
+  ): Promise<unknown>;
   openExternalAuthorization?(
     url: string,
     nativeReturnNonce?: string,

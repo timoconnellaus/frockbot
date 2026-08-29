@@ -172,12 +172,10 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
       await persist(DEVELOPMENT_USER_KEY, normalized);
     },
     authorizedFetch,
-    async probe(botId: string): Promise<boolean> {
+    async probe(_botId: string): Promise<boolean> {
       if (!state.token && !state.developmentUserId) return false;
       try {
-        const response = await authorizedFetch(
-          `/api/bots/${encodeURIComponent(botId)}/turns`,
-        );
+        const response = await authorizedFetch("/api/identity");
         return response.ok;
       } catch (error) {
         if (error instanceof UnauthorizedError) return false;

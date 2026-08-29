@@ -48,6 +48,7 @@ const isRunning = computed(() => Boolean(state.value.activeRunId));
 const canSend = computed(
   () =>
     state.value.connection === "ready" &&
+    Boolean(state.value.activeBotId) &&
     !isRunning.value &&
     draft.value.trim().length > 0,
 );
@@ -224,7 +225,6 @@ async function saveSettings(): Promise<void> {
 
 onMounted(() => {
   window.addEventListener("pointerdown", closeMenus);
-  if (state.value.settingsAvailable) void web.value.loadBotSettings();
 });
 onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
 </script>
@@ -235,14 +235,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
       <aside class="sidebar">
         <div class="window-controls" aria-hidden="true" />
         <div class="bot-list">
-          <div class="bot-row active">
-            <span class="bot-icon">⌁</span>
-            <span class="bot-copy">
-              <strong>{{ botName }}</strong>
-              <small>A plain bot, ready to grow.</small>
-            </span>
-            <time>Now</time>
-          </div>
+          <k-slot name="frockbot.sidebar-bots" />
         </div>
 
         <div class="sidebar-bottom">
@@ -275,13 +268,13 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
 
       <main class="workspace">
         <header class="topbar">
-          <span class="book-icon">⌁</span>
+          <span class="book-icon"><k-slot name="frockbot.bot-identity" /></span>
           <div class="workspace-title">
             <strong>{{ botName }}</strong>
             <small>{{ state.modelLabel }}</small>
           </div>
           <button
-            v-if="state.settingsAvailable"
+            v-if="state.settingsAvailable && state.activeBotId"
             class="icon-button"
             title="Bot settings"
             aria-label="Bot settings"
@@ -388,6 +381,8 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
         <k-slot name="frockbot.right-panel" />
       </aside>
     </div>
+
+    <k-slot name="frockbot.overlays" />
 
     <div
       v-if="pluginsOpen"

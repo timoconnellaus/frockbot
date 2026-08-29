@@ -24,9 +24,9 @@ import {
   type BackendRouteContribution,
   type ComposioBackendHost,
   type ComposioConnectionStore,
-} from "@frockbot/plugin-composio/backend";
+} from "@frockbot/plugin-composio";
 import { createConfiguredComposioRuntimeContribution } from "@frockbot/plugin-composio/agent";
-import type { Plugin } from "cordis";
+import { Context, type Plugin } from "cordis";
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
@@ -39,6 +39,30 @@ import notificationsManifest from "@frockbot/plugin-desktop-notifications/manife
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
 import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
+// Flock contributes lifecycle routes and durable User/Bot state.
+import flockManifest from "@frockbot/plugin-flock/manifest";
+// Gateway Flock behavior is resolved as a lifecycle-owned Plugin.
+import {
+  createFlockBackendContribution,
+  type FlockGatewayHost,
+} from "@frockbot/plugin-flock";
+const createComposioGatewayPlugin = (
+  createConfiguredComposioBackendContribution as typeof createConfiguredComposioBackendContribution & {
+    plugin(
+      host: ComposioBackendHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
+const createFlockGatewayPlugin = (
+  createFlockBackendContribution as typeof createFlockBackendContribution & {
+    plugin(
+      host: FlockGatewayHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
+
 import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
@@ -61,6 +85,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
+  ["@frockbot/plugin-flock", flockManifest],
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
@@ -129,50 +154,93 @@ function contributionSpecifier(specifier: string, entry: string): string {
   return `${specifier}${entry.slice(1)}`;
 }
 
-export interface FoundationMountedBackendHost<T> {
-  backendHost: "bot" | "user";
-  mount(specifier: string): T;
+export interface BackendContributionLifecycle<T> {
+  mount(contribution: T): () => void;
 }
 
-export function createFoundationBackendContributions(
+export interface FoundationBackendPluginHost<T> {
+  backendHost: "bot" | "user";
+  resolve(
+    specifier: string,
+    lifecycle: BackendContributionLifecycle<T>,
+  ): Plugin;
+}
+
+export interface MountedFoundationBackend<T> {
+  readonly contributions: readonly T[];
+  dispose(): Promise<void>;
+}
+
+/** Mount every declared backend Contribution into one owned Cordis root. */
+export async function createFoundationBackendContributions(
   plan: ApplicationPlan,
-  host: { backendHost: "gateway" } & ComposioBackendHost,
-): BackendRouteContribution[];
-export function createFoundationBackendContributions<T>(
+  host: { backendHost: "gateway" } & ComposioBackendHost & FlockGatewayHost,
+): Promise<MountedFoundationBackend<BackendRouteContribution>>;
+export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
-  host: FoundationMountedBackendHost<T> & { backendHost: "bot" },
-): T[];
-export function createFoundationBackendContributions<T>(
-  plan: ApplicationPlan,
-  host: FoundationMountedBackendHost<T> & { backendHost: "user" },
-): T[];
-export function createFoundationBackendContributions<T>(
+  host: FoundationBackendPluginHost<T>,
+): Promise<MountedFoundationBackend<T>>;
+export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host:
-    | ({ backendHost: "gateway" } & ComposioBackendHost)
-    | FoundationMountedBackendHost<T>,
-): Array<BackendRouteContribution | T> {
+    | ({ backendHost: "gateway" } & ComposioBackendHost & FlockGatewayHost)
+    | FoundationBackendPluginHost<T>,
+): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
+  const root = new Context();
   const contributions: Array<BackendRouteContribution | T> = [];
-  for (const pkg of plan.packages) {
-    if (!plan.contributions.backend.includes(pkg.id)) continue;
-    for (const backend of pkg.manifest.contributions.backend ?? []) {
-      if (backend.host !== host.backendHost) continue;
-      const specifier = contributionSpecifier(pkg.specifier, backend.entry);
-      if (
-        host.backendHost === "gateway" &&
-        specifier === "@frockbot/plugin-composio/backend"
-      ) {
-        contributions.push(createConfiguredComposioBackendContribution(host));
-      } else if (host.backendHost === "gateway") {
-        throw new Error(
-          `unknown foundation backend contribution: ${specifier}`,
-        );
-      } else {
-        contributions.push(host.mount(specifier));
+  const lifecycle: BackendContributionLifecycle<BackendRouteContribution | T> =
+    {
+      mount(contribution) {
+        contributions.push(contribution);
+        let mounted = true;
+        return () => {
+          if (!mounted) return;
+          mounted = false;
+          const index = contributions.indexOf(contribution);
+          if (index >= 0) contributions.splice(index, 1);
+        };
+      },
+    };
+  try {
+    for (const pkg of plan.packages) {
+      if (!plan.contributions.backend.includes(pkg.id)) continue;
+      for (const backend of pkg.manifest.contributions.backend ?? []) {
+        if (backend.host !== host.backendHost) continue;
+        const specifier = contributionSpecifier(pkg.specifier, backend.entry);
+        let plugin: Plugin;
+        if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-composio/backend"
+        ) {
+          plugin = createComposioGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-flock/backend"
+        ) {
+          plugin = createFlockGatewayPlugin(host, lifecycle);
+        } else if (host.backendHost === "gateway") {
+          throw new Error(
+            `unknown foundation backend contribution: ${specifier}`,
+          );
+        } else {
+          plugin = host.resolve(specifier, lifecycle);
+        }
+        await root.plugin(plugin);
       }
     }
+  } catch (error) {
+    await root.fiber.dispose();
+    throw error;
   }
-  return contributions;
+  let disposed = false;
+  return {
+    contributions,
+    async dispose() {
+      if (disposed) return;
+      disposed = true;
+      await root.fiber.dispose();
+    },
+  };
 }
 
 export interface FoundationAssignedRuntimePackage {

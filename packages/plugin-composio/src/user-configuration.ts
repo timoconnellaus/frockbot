@@ -9,6 +9,7 @@ import {
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import type { Plugin } from "cordis";
 import {
   acknowledgeDependentAssignment,
   claimDependentAssignment,
@@ -392,6 +393,12 @@ export class ComposioUserBackendContribution {
       });
       return receipt;
     });
+  }
+
+  async readSnapshot(storage: {
+    get<T>(key: string): Promise<T | undefined>;
+  }): Promise<UserSettingsViewV1> {
+    return (await storage.get<UserSettingsViewV1>(STATE_KEY)) ?? initialState();
   }
 
   async read(userId: string): Promise<UserSettingsViewV1> {
@@ -1481,4 +1488,11 @@ export function createComposioUserBackendContribution(
   host: ComposioUserBackendHost,
 ): ComposioUserBackendContribution {
   return new ComposioUserBackendContribution(host);
+}
+
+export function createComposioUserBackendPlugin(
+  host: ComposioUserBackendHost,
+  lifecycle: { mount(value: ComposioUserBackendContribution): () => void },
+): Plugin {
+  return () => lifecycle.mount(createComposioUserBackendContribution(host));
 }

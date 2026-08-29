@@ -15,7 +15,12 @@ import type {
   StartConnectionInput,
   UserConfigurationEnv,
 } from "@frockbot/plugin-composio/user-configuration";
-import { createComposioUserBackendContribution } from "@frockbot/plugin-composio/user-configuration";
+import { createComposioUserBackendPlugin } from "@frockbot/plugin-composio/user-configuration";
+import {
+  createFlockUserBackendPlugin,
+  type FlockUserBackendContribution,
+} from "@frockbot/plugin-flock/user";
+import { decodeCreateBotCommandV1 } from "@frockbot/plugin-flock/shared";
 import {
   decodeRpcEnvelopeV1,
   decodeStartConnectionRpcV1,
@@ -85,45 +90,97 @@ function decodeDependencyRequest(input: unknown): {
 }
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
-  private mounted: Promise<ComposioUserBackendContribution> | undefined;
+  private mounted:
+    | Promise<{
+        composio: ComposioUserBackendContribution;
+        flock: FlockUserBackendContribution;
+        dispose(): Promise<void>;
+      }>
+    | undefined;
 
-  private contribution(): Promise<ComposioUserBackendContribution> {
+  private contributions(): Promise<{
+    composio: ComposioUserBackendContribution;
+    flock: FlockUserBackendContribution;
+    dispose(): Promise<void>;
+  }> {
     if (!this.mounted) {
-      this.mounted = compileFoundationApplication().then((plan) => {
-        const contributions = createFoundationBackendContributions(plan, {
+      this.mounted = compileFoundationApplication().then(async (plan) => {
+        let composio: ComposioUserBackendContribution | undefined;
+        let flock: FlockUserBackendContribution | undefined;
+        const mounted = await createFoundationBackendContributions<
+          ComposioUserBackendContribution | FlockUserBackendContribution
+        >(plan, {
           backendHost: "user",
-          mount: (specifier) => {
-            if (specifier !== "@frockbot/plugin-composio/user-configuration") {
-              throw new Error(`Unsupported User Contribution: ${specifier}`);
+          resolve: (specifier, lifecycle) => {
+            if (specifier === "@frockbot/plugin-composio/user-configuration") {
+              const client = () => {
+                const apiKey = this.env.COMPOSIO_API_KEY;
+                if (!apiKey)
+                  throw new Error("Composio API key is not configured");
+                return new ComposioClient({ apiKey });
+              };
+              return createComposioUserBackendPlugin(
+                {
+                  state: this.ctx,
+                  env: this.env,
+                  reconcileProviderConnection: (request) =>
+                    reconcileComposioProviderConnection(client(), request),
+                  revokeConnectedAccount: (connectedAccountId) =>
+                    client().revokeConnectedAccount(connectedAccountId),
+                  availablePackages: plan.packages.map((pkg) => ({
+                    packageId: pkg.id,
+                    version: pkg.version,
+                  })),
+                },
+                {
+                  mount(value) {
+                    composio = value;
+                    return lifecycle.mount(value);
+                  },
+                },
+              );
             }
-            const client = () => {
-              const apiKey = this.env.COMPOSIO_API_KEY;
-              if (!apiKey) {
-                throw new Error("Composio API key is not configured");
-              }
-              return new ComposioClient({ apiKey });
-            };
-            return createComposioUserBackendContribution({
-              state: this.ctx,
-              env: this.env,
-              reconcileProviderConnection: (request) =>
-                reconcileComposioProviderConnection(client(), request),
-              revokeConnectedAccount: (connectedAccountId) =>
-                client().revokeConnectedAccount(connectedAccountId),
-              availablePackages: plan.packages.map((pkg) => ({
-                packageId: pkg.id,
-                version: pkg.version,
-              })),
-            });
+            if (specifier === "@frockbot/plugin-flock/user") {
+              return createFlockUserBackendPlugin(
+                {
+                  storage: this.ctx.storage,
+                  readUserSettings: (storage) => {
+                    if (!composio)
+                      throw new Error(
+                        "User configuration Contribution is unavailable",
+                      );
+                    return composio.readSnapshot(storage);
+                  },
+                },
+                {
+                  mount(value) {
+                    flock = value;
+                    return lifecycle.mount(value);
+                  },
+                },
+              );
+            }
+            throw new Error(`Unsupported User Contribution: ${specifier}`);
           },
         });
-        if (contributions.length !== 1) {
-          throw new Error("Foundation requires one User backend Contribution");
+        if (!composio || !flock || mounted.contributions.length !== 2) {
+          await mounted.dispose();
+          throw new Error(
+            "Foundation requires Composio and Flock User backend Contributions",
+          );
         }
-        return contributions[0]!;
+        return { composio, flock, dispose: mounted.dispose };
       });
     }
     return this.mounted;
+  }
+
+  private async contribution(): Promise<ComposioUserBackendContribution> {
+    return (await this.contributions()).composio;
+  }
+
+  private async flockContribution(): Promise<FlockUserBackendContribution> {
+    return (await this.contributions()).flock;
   }
 
   async readConfiguration(input: unknown) {
@@ -134,6 +191,51 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async executeConfiguration(input: unknown) {
     const request = decodeUserConfigurationExecuteRpcV1(input);
     return (await this.contribution()).executeConfiguration(request);
+  }
+
+  async listBots(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).listBots();
+  }
+
+  async createBot(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeCreateBotCommandV1),
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).createBot(
+      request.userId as string,
+      request.command as ReturnType<typeof decodeCreateBotCommandV1>,
+    );
+  }
+
+  async getBotRegistration(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).registration(
+      request.botId as string,
+    );
+  }
+
+  async hasBot(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).hasBot(request.botId as string);
+  }
+
+  private async assertFlockIdentity(userId: string): Promise<void> {
+    const settings = await (
+      await this.contribution()
+    ).readConfiguration({ schemaVersion: 1, userId });
+    if (!settings) throw new Error("User authority is unavailable");
   }
 
   async isPackageInstalled(input: unknown) {

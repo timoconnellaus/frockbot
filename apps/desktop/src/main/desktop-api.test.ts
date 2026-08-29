@@ -13,12 +13,14 @@ import {
 } from "./desktop-api.js";
 
 describe("desktop hosted protocol", () => {
-  test("admits only the hosted settings, Connection, notification, manifest, and Turn routes", () => {
+  test("admits only the hosted Bot, settings, Connection, notification, manifest, and Turn routes", () => {
     for (const request of [
       { schemaVersion: 1, path: "/app-manifest", method: "GET" },
       { schemaVersion: 1, path: "/api/identity", method: "GET" },
       { schemaVersion: 1, path: "/api/settings", method: "POST", body: "{}" },
+      { schemaVersion: 1, path: "/api/bots", method: "POST", body: "{}" },
       { schemaVersion: 1, path: "/api/bots/primary/settings", method: "GET" },
+      { schemaVersion: 1, path: "/api/bots/primary/sheep", method: "GET" },
       {
         schemaVersion: 1,
         path: "/api/bots/primary/notifications",
@@ -70,6 +72,15 @@ describe("desktop hosted protocol", () => {
         method: "DELETE",
       }),
     ).toThrow("invalid API request");
+    for (const botId of ["bad:bot", "bad@bot", "b".repeat(129)]) {
+      expect(() =>
+        decodeDesktopApiRequest({
+          schemaVersion: 1,
+          path: `/api/bots/${botId}/settings`,
+          method: "GET",
+        }),
+      ).toThrow("invalid API request");
+    }
   });
 
   test("decodes response envelopes before exposing them to the renderer", () => {

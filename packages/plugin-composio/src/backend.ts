@@ -5,6 +5,7 @@ import {
   type ConnectionView,
   type StartConnectionCommandV1,
 } from "@frockbot/configuration-core";
+import type { Plugin } from "cordis";
 import { ComposioClient } from "./composio-client.js";
 export type {
   ConnectionCompletionResult,
@@ -165,6 +166,16 @@ export function createConfiguredComposioBackendContribution(
     },
     markBotUnavailable: host.markConnectionUnavailable,
   });
+}
+
+export namespace createConfiguredComposioBackendContribution {
+  export function plugin(
+    host: ComposioBackendHost,
+    lifecycle: { mount(value: BackendRouteContribution): () => void },
+  ): Plugin {
+    return () =>
+      lifecycle.mount(createConfiguredComposioBackendContribution(host));
+  }
 }
 
 export interface AuthorizationState {

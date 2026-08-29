@@ -392,18 +392,10 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   });
 }
 
-function selectedBotId(): string {
-  try {
-    return new URL(window.location.href).searchParams.get("bot") ?? "default";
-  } catch {
-    return "default";
-  }
-}
-
 export const shellClientPlugin: ClientPlugin = (ctx) => {
   let activeRequest: AbortController | undefined;
   let admissionObserver: AbortController | undefined;
-  const botId = selectedBotId();
+  let selectionGeneration = 0;
   const connectionOperations = readConnectionOperations();
   const authorizationOperations = new Map<
     string,
@@ -444,6 +436,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   }
 
   async function reconcileUncertainAdmission(
+    botId: string,
     runId: string,
     signal: AbortSignal,
   ): Promise<"admitted" | "not-admitted" | "detached"> {
@@ -467,16 +460,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     while (!signal.aborted) {
       try {
         const observed = await observeWhileAttached(
-          ctx.transport.lookupRun(runId),
+          ctx.transport.lookupRun(botId, runId),
           signal,
         );
         clearReconciliationError();
-        const run = observed
-          ? observed
-          : await observeWhileAttached(
-              ctx.transport.fenceRunAdmission(runId),
-              signal,
-            );
+        const run =
+          observed ??
+          (await observeWhileAttached(
+            ctx.transport.fenceRunAdmission(botId, runId),
+            signal,
+          ));
         clearReconciliationError();
         if (signal.aborted) return "detached";
         if (!run) {
@@ -502,21 +495,34 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     return "detached";
   }
 
-  async function deliverNotifications(): Promise<void> {
-    const runs = await (ctx.transport.listRuns?.() ?? Promise.resolve([]));
+  async function deliverNotifications(
+    botId: string,
+    generation = selectionGeneration,
+  ): Promise<void> {
+    const runs = await (ctx.transport.listRuns?.(botId) ?? Promise.resolve([]));
+    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
+      return;
     projectDurableRuns(web.value, [], runs);
     let notifications: ClientNotificationIntent[];
     try {
-      notifications = await (ctx.transport.listNotifications?.() ??
+      notifications = await (ctx.transport.listNotifications?.(botId) ??
         Promise.resolve([]));
+      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
+        return;
     } catch (error) {
+      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
+        return;
       web.value.settingsError =
         error instanceof Error ? error.message : "Could not load notifications";
       return;
     }
+    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
+      return;
     const projected = projectDurableRuns(web.value, notifications, runs);
     if (!ctx.transport.acknowledgeNotification) return;
     for (const notification of notifications) {
+      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
+        return;
       if (!projected.has(notification.notificationId)) {
         web.value.settingsError = "A completed Bot result is waiting to load";
         continue;
@@ -532,7 +538,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         }
         new Notification(notification.title, { body: notification.body });
       }
-      await ctx.transport.acknowledgeNotification(notification.notificationId);
+      await ctx.transport.acknowledgeNotification(
+        botId,
+        notification.notificationId,
+      );
     }
   }
 
@@ -540,31 +549,64 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     connection: "ready",
     modelLabel: "Foundation · Dynamic Worker",
     settingsAvailable: true,
-    connectionsAvailable: true,
-    composerContext: botId,
+    connectionsAvailable: ctx.transport.connectionsAvailable !== false,
+    activeBotId: undefined,
+    composerContext: undefined,
     messages: [],
     pluginCatalog: [],
+    async selectBot(botId: string): Promise<void> {
+      activeRequest?.abort();
+      admissionObserver?.abort();
+      selectionGeneration += 1;
+      web.value.activeBotId = botId;
+      web.value.composerContext = botId;
+      web.value.botSettings = undefined;
+      web.value.messages = [];
+      web.value.activeRun = undefined;
+      web.value.activeRunId = undefined;
+      const url = URL.parse(window.location.href);
+      if (url) {
+        url.searchParams.set("bot", botId);
+        window.history.replaceState(null, "", url);
+      }
+      await web.value.loadBotSettings();
+    },
     async loadBotSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
         web.value.settingsError = "Settings are unavailable";
         return;
       }
+      const botId = web.value.activeBotId;
+      if (!botId) return;
+      const generation = selectionGeneration;
       try {
-        web.value.botSettings = (await ctx.transport.readConfiguration({
+        const settings = (await ctx.transport.readConfiguration({
           schemaVersion: 1,
           type: "bot/get",
           botId,
         })) as BotSettingsViewV1;
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.botSettings = settings;
         web.value.settingsError = undefined;
-        await deliverNotifications();
+        await deliverNotifications(botId, generation);
       } catch (error) {
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
         web.value.settingsError =
           error instanceof Error ? error.message : "Could not load settings";
       }
     },
     async saveBotProfile(profile: BotProfile): Promise<void> {
       const current = web.value.botSettings;
-      if (!current || !ctx.transport.executeConfiguration) {
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
       }
       await ctx.transport.executeConfiguration({
@@ -591,7 +633,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         }
       }
       const current = web.value.botSettings;
-      if (!current || !ctx.transport.executeConfiguration) {
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
       }
       await ctx.transport.executeConfiguration({
@@ -762,6 +805,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
     async sendPrompt(text: string): Promise<SendPromptResult> {
       if (web.value.activeRunId) return { accepted: false, error: "busy" };
+      const botId = web.value.activeBotId;
+      if (!botId) return { accepted: false, error: "no-bot" };
+      const generation = selectionGeneration;
       const pendingRunId = crypto.randomUUID();
       web.value.activeRunId = pendingRunId;
       web.value.error = undefined;
@@ -783,14 +829,27 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           tools: [],
         },
       );
-      activeRequest = new AbortController();
+      const requestController = new AbortController();
+      activeRequest = requestController;
       try {
         if (!web.value.botSettings) await web.value.loadBotSettings();
+        if (
+          requestController.signal.aborted ||
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return { accepted: true, runId: pendingRunId };
         const result = await ctx.transport.turn(
+          botId,
           text,
-          activeRequest.signal,
+          requestController.signal,
           pendingRunId,
         );
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return { accepted: true, runId: result.runId };
         for (const message of web.value.messages) {
           if (message.runId === pendingRunId) message.runId = result.runId;
         }
@@ -803,15 +862,24 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           tools: toolsFrom(result.events),
         });
         try {
-          await deliverNotifications();
+          await deliverNotifications(botId, generation);
         } catch (error) {
-          web.value.settingsError =
-            error instanceof Error
-              ? error.message
-              : "Notification delivery failed";
+          if (
+            generation === selectionGeneration &&
+            web.value.activeBotId === botId
+          )
+            web.value.settingsError =
+              error instanceof Error
+                ? error.message
+                : "Notification delivery failed";
         }
         return { accepted: true, runId: result.runId };
       } catch (error) {
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return { accepted: true, runId: pendingRunId };
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
         replaceMessage(web.value.messages, pendingRunId, {
@@ -834,6 +902,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         let disposition: "admitted" | "not-admitted" | "detached";
         try {
           disposition = await reconcileUncertainAdmission(
+            botId,
             pendingRunId,
             observer.signal,
           );
@@ -854,7 +923,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         }
         return { accepted: true, runId: pendingRunId };
       } finally {
-        activeRequest = undefined;
+        if (activeRequest === requestController) activeRequest = undefined;
         if (
           web.value.activeRunId === pendingRunId &&
           web.value.activeRun?.runId !== pendingRunId
@@ -875,14 +944,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         message: "Reconciliation requested; waiting for durable progress.",
         canResume: false,
       };
+      const botId = web.value.activeBotId;
+      if (!botId) return;
       try {
-        await ctx.transport.reconcileRun(runId);
+        await ctx.transport.reconcileRun(botId, runId);
       } catch (error) {
         web.value.settingsError =
           error instanceof Error ? error.message : "Reconciliation failed";
       }
       try {
-        await deliverNotifications();
+        await deliverNotifications(botId);
       } catch (error) {
         web.value.settingsError =
           error instanceof Error

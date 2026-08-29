@@ -1,6 +1,7 @@
 import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
+  decodeBotIdV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
 } from "@frockbot/configuration-core";
@@ -10,7 +11,7 @@ import type {
   WorkerCode,
 } from "./contracts.js";
 
-const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const USER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const HASH_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/;
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
 const PUBLIC_ASSET_PATHS = new Set(["/", "/app.js", "/app.css"]);
@@ -18,7 +19,7 @@ const PUBLIC_ASSET_PATHS = new Set(["/", "/app.js", "/app.css"]);
 export function applicationDeploymentId(
   identity: UserApplicationIdentity,
 ): string {
-  if (!ID_PATTERN.test(identity.userId)) {
+  if (!USER_ID_PATTERN.test(identity.userId)) {
     throw new Error("invalid user id");
   }
   if (!HASH_PATTERN.test(identity.applicationHash)) {
@@ -38,10 +39,11 @@ function decodeBotPathSegment(value: string): string {
   } catch {
     throw new ConfigurationDecodeError("invalid bot id");
   }
-  if (!ID_PATTERN.test(botId)) {
+  try {
+    return decodeBotIdV1(botId);
+  } catch {
     throw new ConfigurationDecodeError("invalid bot id");
   }
-  return botId;
 }
 
 interface DevelopmentIdentity {
@@ -221,6 +223,17 @@ export function createGateway(dependencies: GatewayDependencies) {
       } catch (error) {
         if (error instanceof ConfigurationDecodeError) {
           return jsonError(400, error.message);
+        }
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "name" in error &&
+          error.name === "BotNotFoundError"
+        ) {
+          return jsonError(
+            404,
+            error instanceof Error ? error.message : "Bot not found",
+          );
         }
         if (
           error instanceof ConfigurationConflictError ||

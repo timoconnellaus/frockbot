@@ -14,6 +14,15 @@ import type {
   StartConnectionResult,
 } from "@frockbot/plugin-composio/backend-contracts";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
+// Flock DTOs cross only the authenticated hosted/backend seam.
+import type {
+  BotDirectoryViewV1,
+  BotRegistrationV1,
+  CreateBotCommandV1,
+  FlockReceiptV1,
+  SheepIdentityViewV1,
+  UpdateSheepCommandV1,
+} from "@frockbot/plugin-flock/shared";
 import type {
   ClientRunLookupQueryV1,
   ClientRunLookupV1,
@@ -120,6 +129,7 @@ export interface MemoryBinding {
 }
 
 export interface UserBotStateBinding {
+  assertRegistered(input: { schemaVersion: 1; botId: string }): Promise<void>;
   run(input: {
     schemaVersion: 1;
     botId: string;
@@ -219,6 +229,25 @@ export interface ConnectionBinding {
 }
 
 export interface UserConfigurationBinding {
+  listBots(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<BotDirectoryViewV1>;
+  createBot(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: CreateBotCommandV1;
+  }): Promise<FlockReceiptV1>;
+  getBotRegistration(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<BotRegistrationV1>;
+  hasBot(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<boolean>;
   readConfiguration(
     request: UserConfigurationReadRpcV1,
   ): Promise<UserSettingsViewV1>;
@@ -228,6 +257,17 @@ export interface UserConfigurationBinding {
 }
 
 export interface BotConfigurationBinding {
+  readSheep(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<SheepIdentityViewV1>;
+  updateSheep(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: UpdateSheepCommandV1;
+  }): Promise<FlockReceiptV1>;
   readConfiguration(
     request: BotConfigurationReadRpcV1,
   ): Promise<BotSettingsViewV1>;

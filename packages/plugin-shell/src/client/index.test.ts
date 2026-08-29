@@ -70,7 +70,23 @@ describe("application manifest protocol", () => {
 });
 
 describe("composer hydration context", () => {
-  test("uses the selected Bot before settings hydration resolves", async () => {
+  test("hides Connection controls when the platform cannot authorize", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        connectionsAvailable: false,
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    expect(provided?.value.connectionsAvailable).toBe(false);
+  });
+
+  test("does not treat a query-selected Bot as backend authority", async () => {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: { location: { href: "https://app.example/?bot=work" } },
@@ -88,8 +104,65 @@ describe("composer hydration context", () => {
     });
     if (!provided) throw new Error("shell data was not provided");
 
-    expect(provided.value.composerContext).toBe("work");
+    expect(provided.value.composerContext).toBeUndefined();
+    expect(provided.value.activeBotId).toBeUndefined();
     expect(provided.value.botSettings).toBeUndefined();
+  });
+});
+
+describe("Bot selection", () => {
+  test("passes explicit Bot IDs and ignores stale hydration", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/" },
+        history: { replaceState: () => undefined },
+      },
+    });
+    let resolveOld!: (
+      value: ReturnType<typeof initializeBotSettingsV1>,
+    ) => void;
+    let resolveNew!: (
+      value: ReturnType<typeof initializeBotSettingsV1>,
+    ) => void;
+    const oldSettings = new Promise<ReturnType<typeof initializeBotSettingsV1>>(
+      (resolve) => {
+        resolveOld = resolve;
+      },
+    );
+    const newSettings = new Promise<ReturnType<typeof initializeBotSettingsV1>>(
+      (resolve) => {
+        resolveNew = resolve;
+      },
+    );
+    const requested: string[] = [];
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) => {
+          if (query.type === "user/get")
+            throw new Error("unexpected User query");
+          requested.push(query.botId);
+          return query.botId === "old" ? oldSettings : newSettings;
+        },
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    const oldLoad = provided.value.selectBot("old");
+    const newLoad = provided.value.selectBot("new");
+    resolveNew(initializeBotSettingsV1("new"));
+    await newLoad;
+    resolveOld(initializeBotSettingsV1("old"));
+    await oldLoad;
+    expect(requested).toEqual(["old", "new"]);
+    expect(provided.value.activeBotId).toBe("new");
+    expect(provided.value.botSettings?.botId).toBe("new");
   });
 });
 
@@ -380,7 +453,7 @@ describe("active durable Turn projection", () => {
           ]),
         listNotifications: () =>
           Promise.reject(new Error("notifications unavailable")),
-        reconcileRun: (runId) => {
+        reconcileRun: (_botId, runId) => {
           reconciled.push(runId);
           status = "completed";
           return Promise.resolve({ runId, text: "Done", events: [] });
@@ -393,6 +466,8 @@ describe("active durable Turn projection", () => {
       },
     });
     if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "default";
+    provided.value.composerContext = "default";
 
     await provided.value.loadBotSettings();
     expect(provided.value.activeRunId).toBe("run-1");
@@ -438,7 +513,7 @@ describe("uncertain Turn admission", () => {
     await shellClientPlugin({
       transport: {
         turn: () => Promise.reject(new Error("response lost")),
-        lookupRun: (runId) => {
+        lookupRun: (_botId, runId) => {
           lookups += 1;
           if (lookups === 1) {
             return Promise.reject(new Error("lookup unavailable"));
@@ -462,6 +537,8 @@ describe("uncertain Turn admission", () => {
       },
     });
     if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    provided.value.composerContext = "primary";
 
     let result: Awaited<ReturnType<FrockBotWebData["sendPrompt"]>>;
     try {
@@ -483,6 +560,58 @@ describe("uncertain Turn admission", () => {
     });
   });
 
+  test("detaches a rejected Turn without starting a stale observer after Bot switch", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/?bot=primary" },
+        history: { replaceState: () => undefined },
+      },
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    let lookups = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: (_botId, _text, signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => reject(new DOMException("switched", "AbortError")),
+              { once: true },
+            );
+          }),
+        readConfiguration: (query) =>
+          Promise.resolve(
+            initializeBotSettingsV1(
+              "botId" in query ? query.botId : "secondary",
+            ),
+          ),
+        lookupRun: () => {
+          lookups += 1;
+          return Promise.resolve(undefined);
+        },
+        fenceRunAdmission: () => Promise.resolve(undefined),
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    provided.value.composerContext = "primary";
+
+    const oldTurn = provided.value.sendPrompt("continue");
+    await Promise.resolve();
+    await provided.value.selectBot("secondary");
+    expect(await oldTurn).toMatchObject({ accepted: true });
+    expect(lookups).toBe(0);
+    expect(provided.value.activeBotId).toBe("secondary");
+    expect(provided.value.activeRunId).toBeUndefined();
+    expect(provided.value.activeRun).toBeUndefined();
+  });
+
   test("continues admission reconciliation after stopping the local request", async () => {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
@@ -492,7 +621,7 @@ describe("uncertain Turn admission", () => {
     let lookups = 0;
     await shellClientPlugin({
       transport: {
-        turn: (_text, signal) =>
+        turn: (_botId, _text, signal) =>
           new Promise((_resolve, reject) => {
             signal.addEventListener(
               "abort",
@@ -500,7 +629,7 @@ describe("uncertain Turn admission", () => {
               { once: true },
             );
           }),
-        lookupRun: (runId) => {
+        lookupRun: (_botId, runId) => {
           lookups += 1;
           return Promise.resolve({
             runId,
@@ -520,6 +649,8 @@ describe("uncertain Turn admission", () => {
       },
     });
     if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    provided.value.composerContext = "primary";
 
     const pending = provided.value.sendPrompt("continue");
     await Promise.resolve();
