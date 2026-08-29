@@ -16,6 +16,7 @@ describe("desktop hosted protocol", () => {
   test("admits only the hosted settings, Connection, notification, manifest, and Turn routes", () => {
     for (const request of [
       { schemaVersion: 1, path: "/app-manifest", method: "GET" },
+      { schemaVersion: 1, path: "/api/identity", method: "GET" },
       { schemaVersion: 1, path: "/api/settings", method: "POST", body: "{}" },
       { schemaVersion: 1, path: "/api/bots/primary/settings", method: "GET" },
       {
@@ -29,6 +30,11 @@ describe("desktop hosted protocol", () => {
         path: "/api/bots/primary/turns",
         method: "POST",
         body: "{}",
+      },
+      {
+        schemaVersion: 1,
+        path: "/api/bots/primary/turns/run-1",
+        method: "GET",
       },
       {
         schemaVersion: 1,

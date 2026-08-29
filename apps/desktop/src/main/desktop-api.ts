@@ -273,10 +273,15 @@ const API_ROUTES: Array<{
   methods: ReadonlySet<DesktopApiRequest["method"]>;
 }> = [
   { pattern: /^\/app-manifest$/, methods: new Set(["GET"]) },
+  { pattern: /^\/api\/identity$/, methods: new Set(["GET"]) },
   { pattern: /^\/api\/settings$/, methods: new Set(["GET", "POST"]) },
   {
     pattern: /^\/api\/bots\/[a-zA-Z0-9._-]+\/(turns|settings|notifications)$/,
     methods: new Set(["GET", "POST"]),
+  },
+  {
+    pattern: /^\/api\/bots\/[a-zA-Z0-9._-]+\/turns\/[a-zA-Z0-9._-]+$/,
+    methods: new Set(["GET"]),
   },
   {
     pattern:

@@ -779,8 +779,9 @@ export class ShellBotBackendContribution {
       ) {
         throw new Error(`run "${runId}" does not require reconciliation`);
       }
-      const latest =
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+      const latest = (
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
+      ).map(decodeSessionEvent);
       const settings = run.configurationSnapshot;
       await transaction.put(key, {
         ...run,
@@ -1709,14 +1710,19 @@ export class ShellBotBackendContribution {
         return undefined;
       }
       if (plan.kind === "fail") {
-        await transaction.put({
-          [key]: {
-            ...run,
-            status: "failed",
-            failure: plan.failure,
-          } satisfies StoredRun,
-        });
-        await transaction.delete(ACTIVE_RUN_KEY);
+        await failStoredRun(
+          transaction,
+          {
+            run: key,
+            activeRun: ACTIVE_RUN_KEY,
+            latestEvents: LATEST_EVENTS_KEY,
+            notificationPrefix: NOTIFICATION_PREFIX,
+          },
+          run.runId,
+          latest.slice(0, run.previousEventCount),
+          run.events,
+          plan.failure,
+        );
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }

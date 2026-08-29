@@ -202,7 +202,6 @@ interface PendingConnectionOperation {
 
 const CONNECTION_OPERATION_STORAGE_KEY =
   "frockbot.pending-connection-operations.v1";
-const CONNECTION_OPERATION_MAX_AGE_MS = 10 * 60_000;
 
 function readConnectionOperations(): Record<
   string,
@@ -374,6 +373,7 @@ function selectedBotId(): string {
 
 export const shellClientPlugin: ClientPlugin = (ctx) => {
   let activeRequest: AbortController | undefined;
+  let admissionObserver: AbortController | undefined;
   const botId = selectedBotId();
   const connectionOperations = readConnectionOperations();
   const authorizationOperations = new Map<
@@ -628,16 +628,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         packageId,
         connectionTypeId,
       ]);
-      const now = Date.now();
-      const existing = connectionOperations[operationKey];
-      const expired =
-        existing &&
-        (existing.expiresAt ??
-          existing.createdAt + CONNECTION_OPERATION_MAX_AGE_MS) <= now;
-      if (expired) delete connectionOperations[operationKey];
       const operation = connectionOperations[operationKey] ?? {
         commandId: crypto.randomUUID(),
-        createdAt: now,
+        createdAt: Date.now(),
         ...("frockbotDesktop" in (globalThis.window ?? {})
           ? { nativeReturnNonce: crypto.randomUUID() }
           : {}),
@@ -766,10 +759,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           : error instanceof Error
             ? error.message
             : "Agent request failed";
-        const disposition = await reconcileUncertainAdmission(
-          pendingRunId,
-          activeRequest.signal,
-        );
+        const observer = new AbortController();
+        admissionObserver = observer;
+        let disposition: "admitted" | "not-admitted" | "detached";
+        try {
+          disposition = await reconcileUncertainAdmission(
+            pendingRunId,
+            observer.signal,
+          );
+        } finally {
+          if (admissionObserver === observer) admissionObserver = undefined;
+        }
         if (disposition === "not-admitted") {
           replaceMessage(web.value.messages, pendingRunId, {
             id: crypto.randomUUID(),
@@ -836,7 +836,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       order: 10_000,
       component: FrockBotApp,
     }),
-    () => activeRequest?.abort(),
+    () => {
+      activeRequest?.abort();
+      admissionObserver?.abort();
+    },
   ];
 };
 

@@ -124,6 +124,89 @@ describe("Bot recovery", () => {
     expect(typeof storage.alarmAt).toBe("number");
   });
 
+  test("preserves active work when a recovery failure exceeds its durable bound", async () => {
+    const storage = new MemoryStorage();
+    const occurrenceId = `tool:${"x".repeat(9_000)}`;
+    const events = [
+      {
+        type: "tool/result" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        occurrenceId,
+        name: "echo",
+        content: "unsafe",
+        isError: false,
+        status: "completed" as const,
+      },
+    ];
+    const run = {
+      runId: "run-oversized-failure",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "hello",
+      events,
+      status: "running",
+      phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
+    } satisfies StoredRun;
+    await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
+      "active-run": run.runId,
+      [`run:${run.runId}`]: run,
+      "latest-events": events,
+    });
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(contribution.listRuns({ schemaVersion: 1 })).rejects.toThrow(
+      `run "${run.runId}" has invalid failure`,
+    );
+    expect(await storage.get<string>("active-run")).toBe(run.runId);
+    expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
+  });
+
+  test("preserves reconciliation state when durable history is malformed", async () => {
+    const storage = new MemoryStorage();
+    const run = {
+      runId: "run-reconciliation",
+      commandFingerprint: "fingerprint",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      input: "hello",
+      events: [],
+      status: "reconciliation-required",
+      phase: "reconciliation-required",
+      failure: "Provider confirmation required",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
+    } satisfies StoredRun;
+    await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
+      "active-run": run.runId,
+      [`run:${run.runId}`]: run,
+      "latest-events": [{ type: "model/request" }],
+    });
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(
+      contribution.reconcileRun(
+        { userId: "user-1", botId: "primary" },
+        run.runId,
+      ),
+    ).rejects.toThrow("session event.seq must be an integer");
+    expect(await storage.get<string>("active-run")).toBe(run.runId);
+    expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
+  });
+
   test("atomically restores the admitted notification intent after eviction", async () => {
     const storage = new MemoryStorage();
     const admittedSettings = {

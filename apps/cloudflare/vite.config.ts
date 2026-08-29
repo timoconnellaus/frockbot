@@ -24,6 +24,10 @@ export default defineConfig({
         target: "http://127.0.0.1:8787",
         headers: { "x-frockbot-user-id": "development" },
       },
+      "/app-manifest": {
+        target: "http://127.0.0.1:8787",
+        headers: { "x-frockbot-user-id": "development" },
+      },
     },
   },
   build: {

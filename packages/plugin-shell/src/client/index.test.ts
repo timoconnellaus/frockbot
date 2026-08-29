@@ -448,10 +448,54 @@ describe("uncertain Turn admission", () => {
     expect(provided.value.activeRunId).toBeString();
     expect(provided.value.activeRun?.status).toBe("running");
   });
+
+  test("continues admission reconciliation after stopping the local request", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: (_text, signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => reject(new DOMException("stopped", "AbortError")),
+              { once: true },
+            );
+          }),
+        lookupRun: (runId) =>
+          Promise.resolve({
+            runId,
+            admittedAt: "2026-08-29T00:00:00.000Z",
+            input: "continue",
+            status: "running",
+            events: [],
+          }),
+        fenceRunAdmission: () => Promise.resolve(undefined),
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    const pending = provided.value.sendPrompt("continue");
+    await Promise.resolve();
+    await provided.value.abort();
+    const result = await pending;
+
+    expect(result.accepted).toBe(true);
+    expect(provided.value.activeRunId).toBeString();
+    expect(provided.value.activeRun?.status).toBe("running");
+  });
 });
 
 describe("Connection operation reconciliation", () => {
-  test("reuses the desktop command ID and nonce after a lost Connect Link response", async () => {
+  test("reuses the desktop command ID and nonce until durable settlement", async () => {
     installMemoryStorage();
     Object.defineProperty(globalThis, "window", {
       configurable: true,
@@ -480,7 +524,7 @@ describe("Connection operation reconciliation", () => {
               status: "authorization-required" as const,
               connectionId: input.commandId,
               redirectUrl: "https://connect.example/authorize",
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              expiresAt: new Date(0).toISOString(),
             });
           },
         },
@@ -500,11 +544,13 @@ describe("Connection operation reconciliation", () => {
     ).rejects.toThrow("response lost");
     const afterRefresh = await mount();
     await afterRefresh.value.startConnection("composio", "gmail");
+    const afterLinkExpiry = await mount();
+    await afterLinkExpiry.value.startConnection("composio", "gmail");
 
-    expect(commandIds).toHaveLength(2);
-    expect(commandIds[1]).toBe(commandIds[0]);
+    expect(commandIds).toHaveLength(3);
+    expect(new Set(commandIds).size).toBe(1);
     expect(nativeReturnNonces[0]).toBeString();
-    expect(nativeReturnNonces[1]).toBe(nativeReturnNonces[0]);
+    expect(new Set(nativeReturnNonces).size).toBe(1);
   });
 
   test("does not reuse desktop authorization identity across users", async () => {
