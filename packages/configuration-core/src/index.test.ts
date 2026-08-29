@@ -3,6 +3,7 @@ import {
   capabilityAssignmentFailureV1,
   ConfigurationDecodeError,
   decodeBotConfigurationExecuteRpcV1,
+  decodeBotConfigurationReadRpcV1,
   decodeConnectionDependencyRequirementV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
@@ -10,6 +11,7 @@ import {
   decodeRevokeConnectionCommandV1,
   decodeStartConnectionCommandV1,
   decodeUserConfigurationExecuteRpcV1,
+  decodeUserConfigurationReadRpcV1,
   decodeUserSettingsViewV1,
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
@@ -146,6 +148,54 @@ describe("configuration DTO seam", () => {
           ? decodeRevokeConnectionCommandV1(value)
           : decodeStartConnectionCommandV1(value),
       ).toThrow(ConfigurationDecodeError);
+    }
+  });
+
+  test("rejects unknown configuration RPC envelope fields", () => {
+    for (const decode of [
+      () =>
+        decodeUserConfigurationReadRpcV1({
+          schemaVersion: 1,
+          userId: "user-1",
+          extra: true,
+        }),
+      () =>
+        decodeUserConfigurationExecuteRpcV1({
+          schemaVersion: 1,
+          userId: "user-1",
+          command: {
+            schemaVersion: 1,
+            type: "user/update-profile",
+            commandId: "profile-1",
+            expectedRevision: 0,
+            profile: { name: "Alice" },
+          },
+          extra: true,
+        }),
+      () =>
+        decodeBotConfigurationReadRpcV1({
+          schemaVersion: 1,
+          userId: "user-1",
+          botId: "primary",
+          extra: true,
+        }),
+      () =>
+        decodeBotConfigurationExecuteRpcV1({
+          schemaVersion: 1,
+          userId: "user-1",
+          botId: "primary",
+          command: {
+            schemaVersion: 1,
+            type: "bot/update-profile",
+            commandId: "profile-1",
+            botId: "primary",
+            expectedRevision: 0,
+            profile: { name: "Primary" },
+          },
+          extra: true,
+        }),
+    ]) {
+      expect(decode).toThrow(ConfigurationDecodeError);
     }
   });
 

@@ -1134,9 +1134,7 @@ export class ShellBotBackendContribution {
           { userId: saga.userId, botId: saga.botId },
           saga.commandId,
         );
-      } catch {
-        continue;
-      }
+      } catch {}
     }
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
     if (activeRunId) {
@@ -1374,16 +1372,6 @@ export class ShellBotBackendContribution {
       BOT_CONFIGURATION_KEY,
     );
     if (existing) return existing;
-    const [durableIdentity, latestEvents, activeRun, legacyRuns] =
-      await Promise.all([
-        this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
-        this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY),
-        this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
-        this.ctx.storage.list<StoredRun>({ prefix: RUN_PREFIX, limit: 1 }),
-      ]);
-    const existedBeforeConfiguration = Boolean(
-      durableIdentity || latestEvents?.length || activeRun || legacyRuns.size,
-    );
     await this.assertIdentity(identity);
     const user = await this.userConfiguration(identity).readConfiguration({
       schemaVersion: 1,
@@ -1391,7 +1379,7 @@ export class ShellBotBackendContribution {
     });
     const initial = this.initialBotSettings(
       identity.botId,
-      existedBeforeConfiguration ? undefined : user.newBotModelTemplate,
+      user.newBotModelTemplate,
     );
     return this.ctx.storage.transaction(async (transaction) => {
       const concurrent = await transaction.get<BotSettingsViewV1>(

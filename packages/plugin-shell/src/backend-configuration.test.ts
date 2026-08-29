@@ -91,6 +91,47 @@ function assignmentCommand(
 }
 
 describe("Bot capability assignment admission", () => {
+  test("initializes current Bot settings without historical-state branching", async () => {
+    const storage = new MemoryStorage();
+    await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
+      "latest-events": [{ type: "user", text: "existing history" }],
+      "active-run": "run-1",
+      "run:run-1": { status: "completed" },
+    });
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {
+        USER_CONFIGURATIONS: {
+          idFromName: () => "user-1",
+          get: () => ({
+            readConfiguration: () =>
+              Promise.resolve({
+                ...installedUser(),
+                newBotModelTemplate: {
+                  connectionId: "provider-1",
+                  providerModelId: "model-1",
+                },
+              }),
+          }),
+        },
+      } as never,
+    });
+
+    await expect(
+      contribution.readConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "primary",
+      }),
+    ).resolves.toMatchObject({
+      model: {
+        connectionId: "provider-1",
+        providerModelId: "model-1",
+      },
+    });
+  });
+
   test("binds in-flight and durable receipts to the complete Bot command", async () => {
     const storage = new MemoryStorage();
     const userConfiguration = {

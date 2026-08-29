@@ -68,15 +68,13 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async readConfiguration(input: unknown) {
-    return (await this.contribution()).readConfiguration(
-      decodeBotConfigurationReadRpcV1(input),
-    );
+    const request = decodeBotConfigurationReadRpcV1(input);
+    return (await this.contribution()).readConfiguration(request);
   }
 
   async executeConfiguration(input: unknown) {
-    return (await this.contribution()).executeConfiguration(
-      decodeBotConfigurationExecuteRpcV1(input),
-    );
+    const request = decodeBotConfigurationExecuteRpcV1(input);
+    return (await this.contribution()).executeConfiguration(request);
   }
 
   async markConnectionUnavailable(input: unknown) {
@@ -128,8 +126,11 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
-  async listNotifications() {
-    return (await this.contribution()).listNotifications();
+  async listNotifications(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const contribution = await this.contribution();
+    await contribution.resolveConfiguration(identity);
+    return contribution.listNotifications();
   }
 
   async acknowledgeNotification(input: unknown) {
@@ -149,21 +150,18 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async listRuns(input: unknown) {
-    return (await this.contribution()).listRuns(
-      decodeClientRunListQueryV1(input),
-    );
+    const request = decodeClientRunListQueryV1(input);
+    return (await this.contribution()).listRuns(request);
   }
 
   async lookupRun(input: unknown) {
-    return (await this.contribution()).lookupRun(
-      decodeClientRunLookupQueryV1(input),
-    );
+    const request = decodeClientRunLookupQueryV1(input);
+    return (await this.contribution()).lookupRun(request);
   }
 
   async fenceRunAdmission(input: unknown) {
-    return (await this.contribution()).fenceRunAdmission(
-      decodeClientRunLookupQueryV1(input),
-    );
+    const request = decodeClientRunLookupQueryV1(input);
+    return (await this.contribution()).fenceRunAdmission(request);
   }
 
   async alarm(): Promise<void> {

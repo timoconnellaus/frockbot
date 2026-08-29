@@ -119,7 +119,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     listRuns: (query) => rpc.listRuns(query),
     lookupRun: (query) => rpc.lookupRun(query),
     fenceRunAdmission: (query) => rpc.fenceRunAdmission(query),
-    listNotifications: () => rpc.listNotifications(undefined),
+    listNotifications: () =>
+      rpc.listNotifications({ schemaVersion: 1, userId, botId }),
     acknowledgeNotification: (notificationId) =>
       rpc.acknowledgeNotification({
         schemaVersion: 1,

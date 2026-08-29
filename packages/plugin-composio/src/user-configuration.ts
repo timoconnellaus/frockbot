@@ -1468,20 +1468,7 @@ export class ComposioUserBackendContribution {
             next.safeMetadata.assignmentCompensations,
           )
             ? next.safeMetadata.assignmentCompensations
-            : typeof next.safeMetadata.targetBotId === "string" &&
-                typeof next.safeMetadata.assignmentCompensationId ===
-                  "string" &&
-                typeof next.safeMetadata.assignmentCompensationGeneration ===
-                  "string"
-              ? [
-                  {
-                    botId: next.safeMetadata.targetBotId,
-                    id: next.safeMetadata.assignmentCompensationId,
-                    expectedGeneration:
-                      next.safeMetadata.assignmentCompensationGeneration,
-                  },
-                ]
-              : [];
+            : [];
           for (const candidate of stored) {
             if (
               !candidate ||
@@ -1709,20 +1696,24 @@ export class ComposioUserBackendContribution {
         // SAFETY: BOT_STATES binds BotState, whose public RPC method below is
         // stable; workers-types cannot infer the generated Durable Object stub.
         const bot = this.env.BOT_STATES.get(id) as unknown as {
-          markConnectionUnavailable(
-            identity: { userId: string; botId: string },
-            connectionId: string,
-            compensation: { id: string; expectedGeneration: string },
-          ): Promise<"applied" | "stale">;
+          markConnectionUnavailable(request: {
+            schemaVersion: 1;
+            userId: string;
+            botId: string;
+            connectionId: string;
+            compensation: { id: string; expectedGeneration: string };
+          }): Promise<"applied" | "stale">;
         };
-        const result = await bot.markConnectionUnavailable(
-          { userId, botId: compensation.botId },
-          compensation.connectionId,
-          {
+        const result = await bot.markConnectionUnavailable({
+          schemaVersion: 1,
+          userId,
+          botId: compensation.botId,
+          connectionId: compensation.connectionId,
+          compensation: {
             id: compensation.compensationId,
             expectedGeneration: compensation.expectedGeneration,
           },
-        );
+        });
         if (!isSettledBotCompensation(result)) continue;
         const cleared = await this.recordAssignmentCompensated(
           userId,

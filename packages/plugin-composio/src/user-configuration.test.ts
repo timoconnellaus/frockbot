@@ -141,6 +141,70 @@ describe("Connection revocation dependencies", () => {
       ),
     ).toEqual([]);
   });
+
+  test("retries durable Bot compensation through the versioned RPC envelope", async () => {
+    const storage = new MemoryStorage();
+    const requests: unknown[] = [];
+    await storage.put({
+      "user-id": "user-1",
+      "user-configuration": {
+        schemaVersion: 1,
+        revision: 1,
+        profile: { name: "User" },
+        packages: [],
+        connections: [
+          {
+            ...connection({
+              connectedAccountId: "account-1",
+              revocationProviderCompleted: true,
+              assignmentCompensationPending: true,
+              assignmentCompensations: [
+                {
+                  botId: "primary",
+                  id: "compensation-1",
+                  expectedGeneration: "generation-1",
+                },
+              ],
+              compensationRetryAt: 0,
+            }),
+            state: "revoking",
+          },
+        ],
+      } satisfies UserSettingsViewV1,
+    });
+    const contribution = createComposioUserBackendContribution({
+      ...backendHost(storage),
+      env: {
+        BOT_STATES: {
+          idFromName: (name: string) => name,
+          get: () => ({
+            markConnectionUnavailable: (request: unknown) => {
+              requests.push(request);
+              return Promise.resolve("applied" as const);
+            },
+          }),
+        },
+      } as never,
+    });
+
+    await contribution.alarm();
+
+    expect(requests).toEqual([
+      {
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "primary",
+        connectionId: "connection-1",
+        compensation: {
+          id: "compensation-1",
+          expectedGeneration: "generation-1",
+        },
+      },
+    ]);
+    expect(
+      await contribution.getConnection("user-1", "connection-1"),
+    ).toMatchObject({ state: "revoked" });
+  });
 });
 
 describe("Connection dependency admission", () => {

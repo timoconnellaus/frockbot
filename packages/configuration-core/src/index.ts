@@ -683,7 +683,10 @@ export function decodeConfigurationCommandV1(
 export function decodeUserConfigurationReadRpcV1(
   input: unknown,
 ): UserConfigurationReadRpcV1 {
-  const value = record(input, "User configuration read RPC");
+  const value = exactRecord(input, "User configuration read RPC", [
+    "schemaVersion",
+    "userId",
+  ]);
   schemaVersion(value);
   return {
     schemaVersion: 1,
@@ -694,7 +697,11 @@ export function decodeUserConfigurationReadRpcV1(
 export function decodeUserConfigurationExecuteRpcV1(
   input: unknown,
 ): UserConfigurationExecuteRpcV1 {
-  const value = record(input, "User configuration execute RPC");
+  const value = exactRecord(input, "User configuration execute RPC", [
+    "schemaVersion",
+    "userId",
+    "command",
+  ]);
   schemaVersion(value);
   const command = decodeConfigurationCommandV1(value.command);
   if ("botId" in command) {
@@ -712,7 +719,11 @@ export function decodeUserConfigurationExecuteRpcV1(
 export function decodeBotConfigurationReadRpcV1(
   input: unknown,
 ): BotConfigurationReadRpcV1 {
-  const value = record(input, "Bot configuration read RPC");
+  const value = exactRecord(input, "Bot configuration read RPC", [
+    "schemaVersion",
+    "userId",
+    "botId",
+  ]);
   schemaVersion(value);
   return {
     schemaVersion: 1,
@@ -724,7 +735,12 @@ export function decodeBotConfigurationReadRpcV1(
 export function decodeBotConfigurationExecuteRpcV1(
   input: unknown,
 ): BotConfigurationExecuteRpcV1 {
-  const value = record(input, "Bot configuration execute RPC");
+  const value = exactRecord(input, "Bot configuration execute RPC", [
+    "schemaVersion",
+    "userId",
+    "botId",
+    "command",
+  ]);
   schemaVersion(value);
   const botId = identifier(value.botId, "botId");
   const command = decodeConfigurationCommandV1(value.command);

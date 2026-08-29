@@ -144,15 +144,13 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   async readConfiguration(input: unknown) {
-    return (await this.contribution()).readConfiguration(
-      decodeUserConfigurationReadRpcV1(input),
-    );
+    const request = decodeUserConfigurationReadRpcV1(input);
+    return (await this.contribution()).readConfiguration(request);
   }
 
   async executeConfiguration(input: unknown) {
-    return (await this.contribution()).executeConfiguration(
-      decodeUserConfigurationExecuteRpcV1(input),
-    );
+    const request = decodeUserConfigurationExecuteRpcV1(input);
+    return (await this.contribution()).executeConfiguration(request);
   }
 
   async isPackageInstalled(input: unknown) {
