@@ -1,0 +1,13 @@
+{
+  "name": "frockbot-fly-host-container",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types container/server.ts"
+  },
+  "dependencies": {
+    "@fly/sprites": "0.1.0",
+    "ws": "8.21.3"
+  }
+}

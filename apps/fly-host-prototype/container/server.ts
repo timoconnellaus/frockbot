@@ -1,0 +1,180 @@
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { createServer, type IncomingMessage } from "node:http";
+import { SpritesClient } from "@fly/sprites";
+import WebSocket from "ws";
+import {
+  decodeSmokeHttpRequest,
+  encodeSmokeResponse,
+  type FlyHostSmokeRequest,
+} from "./contracts.ts";
+
+function spriteName(effectId: string): string {
+  const suffix = createHash("sha256")
+    .update(effectId)
+    .digest("hex")
+    .slice(0, 16);
+  return `frockbot-test-${suffix}`;
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    error instanceof Error && "statusCode" in error && error.statusCode === 404
+  );
+}
+
+async function findOrCreateSprite(client: SpritesClient, name: string) {
+  try {
+    return await client.getSprite(name);
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+    return client.createSprite(name);
+  }
+}
+
+async function streamedEcho(
+  client: SpritesClient,
+  name: string,
+  probe: string,
+): Promise<string> {
+  const command = client
+    .sprite(name)
+    .spawn("/bin/sh", ["-c", 'printf %s "$PROBE"'], {
+      env: { PROBE: probe },
+    });
+  const chunks: Buffer[] = [];
+  command.stdout.on("data", (chunk: Buffer | string) => {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  const failed = new Promise<never>((_resolve, reject) => {
+    command.once("error", reject);
+  });
+  await Promise.race([once(command, "spawn"), failed]);
+  const exitCode = await Promise.race([command.wait(), failed]);
+  if (exitCode !== 0) {
+    throw new Error(`Sprites streaming probe exited with ${exitCode}`);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function cancellationProbe(
+  client: SpritesClient,
+  name: string,
+): Promise<boolean> {
+  const command = client.sprite(name).spawn("/bin/sleep", ["30"]);
+  const failed = new Promise<never>((_resolve, reject) => {
+    command.once("error", reject);
+  });
+  await Promise.race([once(command, "spawn"), failed]);
+  const timer = setTimeout(() => command.kill("SIGTERM"), 100);
+  try {
+    const exitCode = await Promise.race([command.wait(), failed]);
+    return exitCode !== 0;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function smoke(
+  request: FlyHostSmokeRequest,
+  token: string,
+): Promise<Response> {
+  const client = new SpritesClient(token);
+  const name = spriteName(request.effectId);
+  try {
+    const sprite = await findOrCreateSprite(client, name);
+    const stream = await streamedEcho(client, name, request.probe);
+    const fileSystem = sprite.filesystem("/tmp");
+    await fileSystem.writeFile("frockbot-probe.txt", request.probe);
+    const file = await fileSystem.readFile("frockbot-probe.txt", "utf8");
+
+    const reconstructedClient = new SpritesClient(token);
+    const reconstructed = await reconstructedClient.getSprite(name);
+    const reconstructedFile = await reconstructed
+      .filesystem("/tmp")
+      .readFile("frockbot-probe.txt", "utf8");
+    const cancellationObserved = await cancellationProbe(client, name);
+
+    return Response.json(
+      encodeSmokeResponse({
+        effectId: request.effectId,
+        stream,
+        file,
+        cancellationObserved,
+        reconstructionObserved: reconstructedFile === request.probe,
+      }),
+    );
+  } finally {
+    try {
+      await client.deleteSprite(name);
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+  }
+}
+
+function problem(status: number, error: string): Response {
+  return Response.json({ error }, { status });
+}
+
+const configuredToken = process.env.SPRITES_TOKEN;
+if (!configuredToken) {
+  throw new Error("SPRITES_TOKEN is required by the Fly host container");
+}
+const token: string = configuredToken;
+
+Object.defineProperty(globalThis, "WebSocket", { value: WebSocket });
+
+async function handle(request: Request): Promise<Response> {
+  const decoded = await decodeSmokeHttpRequest(request);
+  if (!decoded.ok) return decoded.response;
+  try {
+    return await smoke(decoded.value, token);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    return problem(502, message);
+  }
+}
+
+async function webRequest(request: IncomingMessage): Promise<Request> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.byteLength;
+    if (size > 64 * 1_024) {
+      throw new Error("request-too-large");
+    }
+    chunks.push(bytes);
+  }
+  const method = request.method ?? "GET";
+  return new Request(
+    `http://${request.headers.host ?? "fly-host.internal"}${request.url ?? "/"}`,
+    {
+      method,
+      headers: request.headers as HeadersInit,
+      body:
+        method === "GET" || method === "HEAD"
+          ? undefined
+          : Buffer.concat(chunks),
+    },
+  );
+}
+
+const server = createServer(async (incoming, outgoing) => {
+  let response: Response;
+  try {
+    response = await handle(await webRequest(incoming));
+  } catch (error) {
+    response = problem(
+      error instanceof Error && error.message === "request-too-large"
+        ? 413
+        : 500,
+      "invalid-request",
+    );
+  }
+  outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+  outgoing.end(Buffer.from(await response.arrayBuffer()));
+});
+
+server.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");

@@ -15,6 +15,9 @@ These rules govern production features and architecture. Treat them as invariant
 
 - The cloud backend is authoritative for durable state, product policy, orchestration, and external integrations.
 - Each Bot's Agent loop runs in that Bot's Durable Object.
+- When resident, a Bot's Durable Object constructs one Cordis root from its declared backend Contributions. The root and its Plugins are ephemeral projections of durable state, not authorities that must remain resident.
+- The Bot's Durable Object owns command admission, the append-only event log, the resumable execution cursor, idempotency records, cancellation, serialization, and durable scheduling.
+- Gateways, application Workers, and Dynamic Workers may route commands or serve immutable artifacts; they do not run or own the Agent loop.
 - Admit input durably before acknowledging it.
 - Client disconnect, refresh, or shutdown detaches an observer; only an explicit authenticated command cancels work.
 - Persist enough state to resume safely after Durable Object eviction. Use durable scheduling to continue work instead of relying on an object remaining resident.
@@ -33,6 +36,7 @@ These rules govern production features and architecture. Treat them as invariant
 - The host bootstrap only initializes its runtime, mounts root Contributions, reports fatal startup failures, and disposes the runtime.
 - Product policy, Bot behavior, session orchestration, model and tool behavior, and feature-specific UI live in Plugins rather than the host bootstrap or transport adapters.
 - Built-in Plugins follow the same manifest, authority, lifecycle, and test requirements as installable Packages.
+- The Bot runtime composes its Agent loop, session persistence, durable checkpoint policy, model providers, tools, projections, and integrations as Plugins behind narrow interfaces.
 
 ## Plugin-owned integrations
 
@@ -40,7 +44,7 @@ These rules govern production features and architecture. Treat them as invariant
 - Every model provider is a runtime Plugin behind the shared LLM interface. Provider-specific authentication, request translation, streaming normalization, usage reporting, and errors stay inside that Plugin.
 - Provider and model configuration is durable cloud configuration scoped to its User or Bot.
 - Secrets remain server-side and cross interfaces only as opaque references when necessary.
-- Durable Object Agent loops communicate with Computers directly through the provider-neutral Computer interface. Human takeover uses an authenticated backend protocol and a durable, expiring lease.
+- Durable Object Agent loops invoke Computers only through the provider-neutral Computer interface. A Computer Contribution may execute in a separately declared shared backend host when Durable Object constraints are incompatible; that host remains non-authoritative and holds no canonical Bot state. Human takeover uses an authenticated backend protocol and a durable, expiring lease.
 - The Agent loop contains product-neutral orchestration and does not branch on individual providers or client platforms.
 
 ## Explicit seams
@@ -85,6 +89,7 @@ Ship complete vertical slices. Production controls represent implemented backend
 Add automated checks for constitutional rules whenever they can be enforced mechanically. Important paths prove that:
 
 - admitted work survives client shutdown and Durable Object restart;
+- a reconstructed Bot Durable Object remounts its Plugin tree from durable configuration and resumes from its durable cursor;
 - duplicate delivery does not duplicate effects;
 - cancellation is explicit and durable;
 - browser and native shells use the same backend execution path;
