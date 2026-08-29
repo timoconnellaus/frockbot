@@ -200,7 +200,7 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=5
+TOTAL_STAGES=6
 
 GITHUB_REPOSITORY="timoconnellaus/frockbot"
 GITHUB_ENVIRONMENT="production"
@@ -233,6 +233,28 @@ set_production_secret() {
   fi
   SKIPPED+=("GitHub production secret $name")
   warn "could not set $name; authenticate gh and rerun this wizard"
+}
+
+is_repeated_authorization_state_secret() {
+  local secret="$1" pattern_length pattern repetitions candidate i
+  for ((pattern_length = 1; pattern_length <= 16 && pattern_length <= ${#secret} / 2; pattern_length++)); do
+    ((${#secret} % pattern_length == 0)) || continue
+    pattern="${secret:0:pattern_length}"
+    repetitions=$((${#secret} / pattern_length))
+    candidate=""
+    for ((i = 0; i < repetitions; i++)); do candidate+="$pattern"; done
+    [[ "$candidate" != "$secret" ]] || return 0
+  done
+  return 1
+}
+
+is_strong_authorization_state_secret() {
+  local secret="$1" unique_characters
+  ((${#secret} >= 32)) || return 1
+  [[ "$secret" != "replace-with-an-independent-random-secret" ]] || return 1
+  unique_characters=$(printf '%s' "$secret" | LC_ALL=C grep -o . | sort -u | wc -l | tr -d ' ')
+  ((unique_characters >= 8)) || return 1
+  ! is_repeated_authorization_state_secret "$secret"
 }
 
 banner "FrockBot production setup"
@@ -285,6 +307,20 @@ ask_secret COMPOSIO_API_KEY "Paste the Composio project API key:"
 }
 set_production_variable COMPOSIO_GMAIL_AUTH_CONFIG_ID "$COMPOSIO_GMAIL_AUTH_CONFIG_ID"
 set_production_secret COMPOSIO_API_KEY "$COMPOSIO_API_KEY"
+
+stage "FrockBot: Connection authorization state"
+say "Generate an independent secret used only to sign hosted Connection authorization state."
+command -v openssl >/dev/null 2>&1 || {
+  warn "OpenSSL is required to generate the authorization-state secret"
+  exit 1
+}
+FROCKBOT_AUTHORIZATION_STATE_SECRET=$(openssl rand -hex 32)
+if [[ ! "$FROCKBOT_AUTHORIZATION_STATE_SECRET" =~ ^[0-9a-f]{64}$ ]] \
+  || ! is_strong_authorization_state_secret "$FROCKBOT_AUTHORIZATION_STATE_SECRET"; then
+  warn "Failed to generate a strong Connection authorization-state secret"
+  exit 1
+fi
+set_production_secret FROCKBOT_AUTHORIZATION_STATE_SECRET "$FROCKBOT_AUTHORIZATION_STATE_SECRET"
 
 stage "Fly: Sprites Computer token"
 say "Provision the server-side credential used by the built-in Fly Computer provider."

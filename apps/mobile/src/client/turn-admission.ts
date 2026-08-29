@@ -55,8 +55,9 @@ export async function admitMobileTurn(
 }
 
 export interface MobileTurnAdmissionReconciliationOptions {
-  lookup(): Promise<ClientRunLookup>;
-  fence(): Promise<ClientRunLookup>;
+  signal: AbortSignal;
+  lookup(signal: AbortSignal): Promise<ClientRunLookup>;
+  fence(signal: AbortSignal): Promise<ClientRunLookup>;
   observe(lookup: ClientRunLookup): void;
   transientFailure(error: unknown): void;
   wait(delayMs: number): Promise<void>;
@@ -73,10 +74,12 @@ export async function reconcileMobileTurnAdmission(
   let delay = initialDelay;
   while (options.isCurrent()) {
     try {
-      const observed = await options.lookup();
+      const observed = await options.lookup(options.signal);
       if (!options.isCurrent()) return undefined;
       const lookup =
-        observed.state === "not-admitted" ? await options.fence() : observed;
+        observed.state === "not-admitted"
+          ? await options.fence(options.signal)
+          : observed;
       if (!options.isCurrent()) return undefined;
       options.observe(lookup);
       if (lookup.state === "not-admitted" || lookup.state === "terminal") {

@@ -18,23 +18,56 @@ describe("configured Composio backend", () => {
     markConnectionUnavailable: () => Promise.resolve("applied" as const),
   });
 
-  test("requires the dedicated authorization-state secret without auth fallback", () => {
-    expect(() =>
-      createConfiguredComposioBackendContribution(
-        configuredHost({
-          COMPOSIO_API_KEY: "api-secret",
-          COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
-          BETTER_AUTH_SECRET: "unrelated-auth-secret",
-        }),
-      ),
-    ).toThrow("Composio backend Contribution is not configured");
+  test("requires a strong dedicated authorization-state secret without auth fallback", () => {
+    const invalidSecrets: Array<Record<string, string>> = [
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        BETTER_AUTH_SECRET: "unrelated-auth-secret-with-enough-length",
+      },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET: "too-short",
+      },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET:
+          "replace-with-an-independent-random-secret",
+      },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET: "x".repeat(32),
+      },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET: "0123456789abcdef".repeat(4),
+      },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        BETTER_AUTH_SECRET: "shared-trust-authority-secret-0001",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET:
+          "shared-trust-authority-secret-0001",
+      },
+    ];
+    for (const secrets of invalidSecrets) {
+      expect(() =>
+        createConfiguredComposioBackendContribution(configuredHost(secrets)),
+      ).toThrow("Composio backend Contribution is not configured");
+    }
 
     expect(
       createConfiguredComposioBackendContribution(
         configuredHost({
           COMPOSIO_API_KEY: "api-secret",
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
-          FROCKBOT_AUTHORIZATION_STATE_SECRET: "state-secret",
+          BETTER_AUTH_SECRET: "better-auth-secret-that-is-independent",
+          FROCKBOT_AUTHORIZATION_STATE_SECRET:
+            "6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
         }),
       ).packageId,
     ).toBe("composio");

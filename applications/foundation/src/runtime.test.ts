@@ -119,7 +119,8 @@ describe("foundation application", () => {
     const secrets: Record<string, string> = {
       COMPOSIO_API_KEY: "project-secret",
       COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-auth",
-      FROCKBOT_AUTHORIZATION_STATE_SECRET: "state-secret",
+      FROCKBOT_AUTHORIZATION_STATE_SECRET:
+        "test-authorization-state-secret-0001",
     };
     const backend = createFoundationBackendContributions(plan, {
       backendHost: "gateway",

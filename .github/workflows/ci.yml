@@ -137,6 +137,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: ${{ vars.COMPOSIO_GMAIL_AUTH_CONFIG_ID }}
+          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
         shell: bash
         run: |
@@ -151,6 +152,7 @@ jobs:
             GOOGLE_CLIENT_SECRET \
             COMPOSIO_API_KEY \
             COMPOSIO_GMAIL_AUTH_CONFIG_ID \
+            FROCKBOT_AUTHORIZATION_STATE_SECRET \
             SPRITES_TOKEN; do
             if [[ -z "${!name}" ]]; then missing+=("$name"); fi
           done
@@ -159,6 +161,34 @@ jobs:
             printf 'Missing production configuration: %s\n' "${missing[*]}" >&2
             exit 1
           fi
+          if (( ${#FROCKBOT_AUTHORIZATION_STATE_SECRET} < 32 )); then
+            printf 'FROCKBOT_AUTHORIZATION_STATE_SECRET must be at least 32 characters\n' >&2
+            exit 1
+          fi
+          if [[ "$FROCKBOT_AUTHORIZATION_STATE_SECRET" == "$BETTER_AUTH_SECRET" ]]; then
+            printf 'FROCKBOT_AUTHORIZATION_STATE_SECRET must not reuse BETTER_AUTH_SECRET\n' >&2
+            exit 1
+          fi
+          if [[ "$FROCKBOT_AUTHORIZATION_STATE_SECRET" == "replace-with-an-independent-random-secret" ]]; then
+            printf 'FROCKBOT_AUTHORIZATION_STATE_SECRET must be randomly generated\n' >&2
+            exit 1
+          fi
+          unique_characters=$(printf '%s' "$FROCKBOT_AUTHORIZATION_STATE_SECRET" | LC_ALL=C grep -o . | sort -u | wc -l | tr -d ' ')
+          if (( unique_characters < 8 )); then
+            printf 'FROCKBOT_AUTHORIZATION_STATE_SECRET must be randomly generated\n' >&2
+            exit 1
+          fi
+          for ((pattern_length = 1; pattern_length <= 16 && pattern_length <= ${#FROCKBOT_AUTHORIZATION_STATE_SECRET} / 2; pattern_length++)); do
+            (( ${#FROCKBOT_AUTHORIZATION_STATE_SECRET} % pattern_length == 0 )) || continue
+            pattern="${FROCKBOT_AUTHORIZATION_STATE_SECRET:0:pattern_length}"
+            repetitions=$((${#FROCKBOT_AUTHORIZATION_STATE_SECRET} / pattern_length))
+            candidate=""
+            for ((i = 0; i < repetitions; i++)); do candidate+="$pattern"; done
+            if [[ "$candidate" == "$FROCKBOT_AUTHORIZATION_STATE_SECRET" ]]; then
+              printf 'FROCKBOT_AUTHORIZATION_STATE_SECRET must be randomly generated\n' >&2
+              exit 1
+            fi
+          done
 
       - name: Configure production D1 database
         working-directory: apps/cloudflare
@@ -230,6 +260,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: ${{ vars.COMPOSIO_GMAIL_AUTH_CONFIG_ID }}
+          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
         shell: bash
         run: |
@@ -244,6 +275,7 @@ jobs:
             'GOOGLE_CLIENT_SECRET',
             'COMPOSIO_API_KEY',
             'COMPOSIO_GMAIL_AUTH_CONFIG_ID',
+            'FROCKBOT_AUTHORIZATION_STATE_SECRET',
             'SPRITES_TOKEN',
           ]) {
             console.log(`${name}=${JSON.stringify(process.env[name])}`);

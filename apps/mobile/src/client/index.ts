@@ -371,27 +371,36 @@ const web: Ref<FrockBotWebData> = ref({
           });
         }
         const lookup = await reconcileMobileTurnAdmission({
-          lookup: () =>
+          signal: observer.signal,
+          lookup: (signal) =>
             lookupRun(
               auth.authorizedFetch,
               projectionToken.botId,
               pendingRunId,
+              signal,
             ),
-          fence: () =>
+          fence: (signal) =>
             fenceRunAdmission(
               auth.authorizedFetch,
               projectionToken.botId,
               pendingRunId,
+              signal,
             ),
           observe: (observed) => {
-            const current = botProjection.currentToken();
-            if (current.botId !== projectionToken.botId) return;
+            if (
+              observer.signal.aborted ||
+              !botProjection.isCurrent(projectionToken)
+            ) {
+              return;
+            }
             web.value.settingsError = undefined;
             projectMobileTurnAdmissionLookup(web.value, pendingRunId, observed);
           },
           transientFailure: (error) => {
-            const current = botProjection.currentToken();
-            if (current.botId === projectionToken.botId) {
+            if (
+              !observer.signal.aborted &&
+              botProjection.isCurrent(projectionToken)
+            ) {
               web.value.settingsError = `${
                 error instanceof Error
                   ? error.message

@@ -431,16 +431,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     signal: AbortSignal,
   ): Promise<T> {
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-    return Promise.race([
-      operation,
-      new Promise<never>((_, reject) => {
-        signal.addEventListener(
-          "abort",
-          () => reject(new DOMException("Aborted", "AbortError")),
-          { once: true },
-        );
-      }),
-    ]);
+    let rejectOnAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      rejectOnAbort = () => reject(new DOMException("Aborted", "AbortError"));
+      signal.addEventListener("abort", rejectOnAbort, { once: true });
+    });
+    try {
+      return await Promise.race([operation, aborted]);
+    } finally {
+      if (rejectOnAbort) signal.removeEventListener("abort", rejectOnAbort);
+    }
   }
 
   async function reconcileUncertainAdmission(
@@ -457,32 +457,44 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       return "detached";
     }
     let delayMs = 250;
+    let reconciliationError: string | undefined;
+    const clearReconciliationError = () => {
+      if (web.value.settingsError === reconciliationError) {
+        web.value.settingsError = undefined;
+      }
+      reconciliationError = undefined;
+    };
     while (!signal.aborted) {
       try {
         const observed = await observeWhileAttached(
           ctx.transport.lookupRun(runId),
           signal,
         );
-        const run =
-          observed ??
-          (await observeWhileAttached(
-            ctx.transport.fenceRunAdmission(runId),
-            signal,
-          ));
+        clearReconciliationError();
+        const run = observed
+          ? observed
+          : await observeWhileAttached(
+              ctx.transport.fenceRunAdmission(runId),
+              signal,
+            );
+        clearReconciliationError();
         if (signal.aborted) return "detached";
         if (!run) {
           web.value.activeRun = undefined;
           return "not-admitted";
         }
         projectDurableRuns(web.value, [], [run]);
-        return "admitted";
+        if (run.status === "completed" || run.status === "failed") {
+          return "admitted";
+        }
       } catch (error) {
         if (signal.aborted) return "detached";
-        web.value.settingsError = `${
+        reconciliationError = `${
           error instanceof Error
             ? error.message
             : "Turn admission lookup failed"
         } Retrying…`;
+        web.value.settingsError = reconciliationError;
       }
       await waitForRunLookup(delayMs, signal);
       delayMs = Math.min(delayMs * 2, 5_000);

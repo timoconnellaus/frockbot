@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { ClientRunLookup } from "@frockbot/plugin-shell/run-protocol";
 import type { TurnResponse } from "./transport.ts";
 import type { MobileBotProjectionState } from "./bot-projection.ts";
 import {
@@ -26,6 +27,8 @@ const completedTurn: TurnResponse = {
   text: "done",
   events: [],
 };
+
+const attachedSignal = new AbortController().signal;
 
 describe("mobile Turn admission", () => {
   test("does not claim acceptance when a Bot switch wins before dispatch", async () => {
@@ -117,6 +120,7 @@ describe("mobile Turn admission", () => {
     const waits: number[] = [];
 
     const result = await reconcileMobileTurnAdmission({
+      signal: attachedSignal,
       lookup: () => Promise.resolve(lookups.shift()!),
       fence: () => Promise.reject(new Error("fence must not be called")),
       observe: (lookup) => observations.push(lookup.state),
@@ -154,6 +158,7 @@ describe("mobile Turn admission", () => {
     const waits: number[] = [];
 
     const result = await reconcileMobileTurnAdmission({
+      signal: attachedSignal,
       lookup: () => {
         attempts += 1;
         return attempts < 4
@@ -183,6 +188,7 @@ describe("mobile Turn admission", () => {
     const observations: string[] = [];
 
     const result = await reconcileMobileTurnAdmission({
+      signal: attachedSignal,
       lookup: () => Promise.resolve({ state: "not-admitted" }),
       fence: () => {
         fences += 1;
@@ -214,6 +220,7 @@ describe("mobile Turn admission", () => {
     const observations: string[] = [];
     const lookups = [{ state: "not-admitted" as const }, terminal];
     const result = await reconcileMobileTurnAdmission({
+      signal: attachedSignal,
       lookup: () => Promise.resolve(lookups.shift()!),
       fence: () =>
         Promise.resolve({
@@ -259,6 +266,7 @@ describe("mobile Turn admission", () => {
     const observations: string[] = [];
 
     const result = await reconcileMobileTurnAdmission({
+      signal: attachedSignal,
       lookup: () => Promise.resolve(lookups.shift()!),
       fence: () => Promise.resolve({ state: "not-admitted" }),
       observe: (lookup) => observations.push(lookup.state),
@@ -271,26 +279,47 @@ describe("mobile Turn admission", () => {
     expect(observations).toEqual(["reconciliation-required", "terminal"]);
   });
 
-  test("detaches reconciliation when its observer generation changes", async () => {
-    let current = true;
-    let attempts = 0;
+  test("passes observer cancellation through lookup and fence before projection", async () => {
+    const observer = new AbortController();
+    const fenceStarted = deferred<void>();
+    const fenced = deferred<ClientRunLookup>();
+    const receivedSignals: AbortSignal[] = [];
+    const observations: ClientRunLookup[] = [];
 
-    const result = await reconcileMobileTurnAdmission({
-      lookup: () => {
-        attempts += 1;
-        return Promise.reject(new Error("temporarily unavailable"));
+    const resultPromise = reconcileMobileTurnAdmission({
+      signal: observer.signal,
+      lookup: (signal) => {
+        receivedSignals.push(signal);
+        return Promise.resolve({ state: "not-admitted" });
       },
-      fence: () => Promise.resolve({ state: "not-admitted" }),
-      observe: () => undefined,
-      transientFailure: () => {
-        current = false;
+      fence: (signal) => {
+        receivedSignals.push(signal);
+        fenceStarted.resolve();
+        return fenced.promise;
       },
+      observe: (lookup) => observations.push(lookup),
+      transientFailure: () => undefined,
       wait: () => Promise.resolve(),
-      isCurrent: () => current,
+      isCurrent: () => !observer.signal.aborted,
     });
 
-    expect(result).toBeUndefined();
-    expect(attempts).toBe(1);
+    await fenceStarted.promise;
+    observer.abort();
+    fenced.resolve({
+      state: "terminal",
+      run: {
+        runId: "command-1",
+        admittedAt: "2026-08-29T00:00:00.000Z",
+        input: "continue",
+        status: "completed",
+        events: [],
+        responseText: "must not project",
+      },
+    });
+
+    expect(await resultPromise).toBeUndefined();
+    expect(receivedSignals).toEqual([observer.signal, observer.signal]);
+    expect(observations).toEqual([]);
   });
 
   test("keeps busy state until lookup is terminal or definitively absent", () => {

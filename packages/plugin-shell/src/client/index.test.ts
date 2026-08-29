@@ -408,30 +408,52 @@ describe("active durable Turn projection", () => {
 });
 
 describe("uncertain Turn admission", () => {
-  test("keeps the composer busy until admission is reconciled", async () => {
+  test("clears retry state and listeners after durable terminal state", async () => {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: { location: { href: "https://app.example/?bot=primary" } },
     });
+    const originalAddEventListener = AbortSignal.prototype.addEventListener;
+    const originalRemoveEventListener =
+      AbortSignal.prototype.removeEventListener;
+    let outstandingAbortListeners = 0;
+    AbortSignal.prototype.addEventListener = function (
+      type: string,
+      callback: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ) {
+      if (type === "abort") outstandingAbortListeners += 1;
+      return originalAddEventListener.call(this, type, callback, options);
+    };
+    AbortSignal.prototype.removeEventListener = function (
+      type: string,
+      callback: EventListenerOrEventListenerObject,
+      options?: boolean | EventListenerOptions,
+    ) {
+      if (type === "abort") outstandingAbortListeners -= 1;
+      return originalRemoveEventListener.call(this, type, callback, options);
+    };
     let provided: Ref<FrockBotWebData> | undefined;
     let lookups = 0;
     await shellClientPlugin({
       transport: {
         turn: () => Promise.reject(new Error("response lost")),
-        lookupRun: () => {
+        lookupRun: (runId) => {
           lookups += 1;
-          return lookups === 1
-            ? Promise.reject(new Error("lookup unavailable"))
-            : Promise.resolve(undefined);
-        },
-        fenceRunAdmission: (runId) =>
-          Promise.resolve({
+          if (lookups === 1) {
+            return Promise.reject(new Error("lookup unavailable"));
+          }
+          return Promise.resolve({
             runId,
             admittedAt: "2026-08-29T00:00:00.000Z",
             input: "continue",
-            status: "running",
+            status: lookups === 2 ? "running" : "completed",
             events: [],
-          }),
+            ...(lookups === 2 ? {} : { responseText: "Done durably" }),
+          });
+        },
+        fenceRunAdmission: () =>
+          Promise.reject(new Error("fence must not be called")),
       },
       slot: () => () => {},
       provide: (_key, value) => {
@@ -441,12 +463,24 @@ describe("uncertain Turn admission", () => {
     });
     if (!provided) throw new Error("shell data was not provided");
 
-    const result = await provided.value.sendPrompt("continue");
+    let result: Awaited<ReturnType<FrockBotWebData["sendPrompt"]>>;
+    try {
+      result = await provided.value.sendPrompt("continue");
+    } finally {
+      AbortSignal.prototype.addEventListener = originalAddEventListener;
+      AbortSignal.prototype.removeEventListener = originalRemoveEventListener;
+    }
 
     expect(result.accepted).toBe(true);
-    expect(lookups).toBe(2);
-    expect(provided.value.activeRunId).toBeString();
-    expect(provided.value.activeRun?.status).toBe("running");
+    expect(lookups).toBe(3);
+    expect(provided.value.activeRunId).toBeUndefined();
+    expect(provided.value.activeRun).toBeUndefined();
+    expect(provided.value.settingsError).toBeUndefined();
+    expect(outstandingAbortListeners).toBe(0);
+    expect(provided.value.messages.at(-1)).toMatchObject({
+      text: "Done durably",
+      status: "completed",
+    });
   });
 
   test("continues admission reconciliation after stopping the local request", async () => {
@@ -455,6 +489,7 @@ describe("uncertain Turn admission", () => {
       value: { location: { href: "https://app.example/?bot=primary" } },
     });
     let provided: Ref<FrockBotWebData> | undefined;
+    let lookups = 0;
     await shellClientPlugin({
       transport: {
         turn: (_text, signal) =>
@@ -465,14 +500,17 @@ describe("uncertain Turn admission", () => {
               { once: true },
             );
           }),
-        lookupRun: (runId) =>
-          Promise.resolve({
+        lookupRun: (runId) => {
+          lookups += 1;
+          return Promise.resolve({
             runId,
             admittedAt: "2026-08-29T00:00:00.000Z",
             input: "continue",
-            status: "running",
+            status: lookups === 1 ? "running" : "completed",
             events: [],
-          }),
+            ...(lookups === 1 ? {} : { responseText: "Finished later" }),
+          });
+        },
         fenceRunAdmission: () => Promise.resolve(undefined),
       },
       slot: () => () => {},
@@ -489,8 +527,13 @@ describe("uncertain Turn admission", () => {
     const result = await pending;
 
     expect(result.accepted).toBe(true);
-    expect(provided.value.activeRunId).toBeString();
-    expect(provided.value.activeRun?.status).toBe("running");
+    expect(lookups).toBe(2);
+    expect(provided.value.activeRunId).toBeUndefined();
+    expect(provided.value.activeRun).toBeUndefined();
+    expect(provided.value.messages.at(-1)).toMatchObject({
+      text: "Finished later",
+      status: "completed",
+    });
   });
 });
 
