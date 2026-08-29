@@ -1,6 +1,7 @@
 import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
 import {
   decodeBotSettingsViewV1,
+  isPublicIdentifier,
   type BotSettingsViewV1,
 } from "@frockbot/configuration-core";
 
@@ -64,10 +65,7 @@ function boundedString(
 }
 
 export function decodeRunIdV1(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value)
-  ) {
+  if (!isPublicIdentifier(value)) {
     throw new Error("runId is invalid");
   }
   return value;

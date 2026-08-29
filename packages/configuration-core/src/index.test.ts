@@ -17,6 +17,31 @@ import {
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
 } from "./index.js";
+import { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
+
+describe("shared public identifier policy", () => {
+  test("accepts the bounded cross-runtime identifier grammar", () => {
+    expect(isPublicIdentifier("Bot_1.release-candidate")).toBe(true);
+    expect(isPublicIdentifier("a".repeat(128))).toBe(true);
+
+    for (const candidate of [
+      "",
+      "-leading-hyphen",
+      "slash/value",
+      "a".repeat(129),
+      1,
+    ]) {
+      expect(isPublicIdentifier(candidate)).toBe(false);
+    }
+  });
+
+  test("excludes object-prototype names from Connection identifiers", () => {
+    expect(isConnectionIdentifier("connection-1")).toBe(true);
+    expect(isConnectionIdentifier("__proto__")).toBe(false);
+    expect(isConnectionIdentifier("constructor")).toBe(false);
+    expect(isConnectionIdentifier("slash/value")).toBe(false);
+  });
+});
 
 describe("configuration DTO seam", () => {
   test("uses one bounded Bot identifier grammar across hosted seams", () => {
