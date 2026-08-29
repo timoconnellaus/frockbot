@@ -893,10 +893,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     async abort() {
       activeRequest?.abort();
     },
-    async restart() {
-      web.value.connection = "ready";
-      web.value.error = undefined;
-    },
   });
 
   return [

@@ -88,7 +88,6 @@ export interface FrockBotWebData {
   sendPrompt(text: string): Promise<SendPromptResult>;
   resumeRun(runId: string): Promise<void>;
   abort(): Promise<void>;
-  restart(): Promise<void>;
 }
 
 export const frockBotWebDataKey: InjectionKey<Ref<FrockBotWebData>> =
