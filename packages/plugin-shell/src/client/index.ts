@@ -475,7 +475,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           return "not-admitted";
         }
         projectDurableRuns(web.value, [], [run]);
-        return "admitted";
+        if (run.status === "completed" || run.status === "failed") {
+          return "admitted";
+        }
       } catch (error) {
         if (signal.aborted) return "detached";
         web.value.settingsError = `${

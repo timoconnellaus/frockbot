@@ -134,6 +134,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: ${{ vars.COMPOSIO_GMAIL_AUTH_CONFIG_ID }}
+          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
         shell: bash
         run: |
@@ -148,6 +149,7 @@ jobs:
             GOOGLE_CLIENT_SECRET \
             COMPOSIO_API_KEY \
             COMPOSIO_GMAIL_AUTH_CONFIG_ID \
+            FROCKBOT_AUTHORIZATION_STATE_SECRET \
             SPRITES_TOKEN; do
             if [[ -z "${!name}" ]]; then missing+=("$name"); fi
           done
@@ -227,6 +229,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: ${{ vars.COMPOSIO_GMAIL_AUTH_CONFIG_ID }}
+          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
         shell: bash
         run: |
@@ -241,6 +244,7 @@ jobs:
             'GOOGLE_CLIENT_SECRET',
             'COMPOSIO_API_KEY',
             'COMPOSIO_GMAIL_AUTH_CONFIG_ID',
+            'FROCKBOT_AUTHORIZATION_STATE_SECRET',
             'SPRITES_TOKEN',
           ]) {
             console.log(`${name}=${JSON.stringify(process.env[name])}`);

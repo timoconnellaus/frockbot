@@ -90,18 +90,19 @@ Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first 
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                            | Purpose                                                                       |
-| -------- | ------------------------------- | ----------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`          | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`         | Cloudflare account containing the production resources                        |
-| Variable | `CLOUDFLARE_D1_DATABASE_ID`     | Immutable ID of `frockbot-auth`                                               |
-| Variable | `BETTER_AUTH_URL`               | Set to `https://bot.frockbot.com`                                             |
-| Secret   | `BETTER_AUTH_SECRET`            | Better Auth secret with at least 32 random characters                         |
-| Secret   | `GOOGLE_CLIENT_ID`              | Google Web application OAuth client ID                                        |
-| Secret   | `GOOGLE_CLIENT_SECRET`          | Google Web application OAuth client secret                                    |
-| Secret   | `COMPOSIO_API_KEY`              | Composio project API key used only by backend Connection and tool drivers     |
-| Variable | `COMPOSIO_GMAIL_AUTH_CONFIG_ID` | Composio Gmail auth config used by hosted Connect Link                        |
-| Secret   | `SPRITES_TOKEN`                 | Fly Sprites token used only by the backend Computer provider                  |
+| Type     | Name                                  | Purpose                                                                       |
+| -------- | ------------------------------------- | ----------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`                | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`               | Cloudflare account containing the production resources                        |
+| Variable | `CLOUDFLARE_D1_DATABASE_ID`           | Immutable ID of `frockbot-auth`                                               |
+| Variable | `BETTER_AUTH_URL`                     | Set to `https://bot.frockbot.com`                                             |
+| Secret   | `BETTER_AUTH_SECRET`                  | Better Auth secret with at least 32 random characters                         |
+| Secret   | `GOOGLE_CLIENT_ID`                    | Google Web application OAuth client ID                                        |
+| Secret   | `GOOGLE_CLIENT_SECRET`                | Google Web application OAuth client secret                                    |
+| Secret   | `COMPOSIO_API_KEY`                    | Composio project API key used only by backend Connection and tool drivers     |
+| Variable | `COMPOSIO_GMAIL_AUTH_CONFIG_ID`       | Composio Gmail auth config used by hosted Connect Link                        |
+| Secret   | `FROCKBOT_AUTHORIZATION_STATE_SECRET` | Independent secret used only to sign hosted Connection authorization state    |
+| Secret   | `SPRITES_TOKEN`                       | Fly Sprites token used only by the backend Computer provider                  |
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
 
@@ -193,11 +194,12 @@ Then open `http://localhost:8787/?as_user=alice`. CLI requests may instead send 
 
 The hosted gateway uses Better Auth with D1 and Google social login. Electron uses Better Auth's official desktop integration: sign-in opens in the system browser, returns over the `com.frockbot.desktop` protocol, and stores encrypted session material in the main process rather than the renderer.
 
-For local Google sign-in:
+For local Google sign-in and hosted Connection authorization in either the browser or desktop shell:
 
 ```bash
 cp apps/cloudflare/.dev.vars.example apps/cloudflare/.dev.vars
-# Replace every value in .dev.vars, then initialize the local D1 database.
+# Replace every value in .dev.vars with independent development credentials,
+# including a dedicated FROCKBOT_AUTHORIZATION_STATE_SECRET, then initialize D1.
 cd apps/cloudflare
 bunx wrangler d1 migrations apply AUTH_DB --env development --local
 bun run dev:electron
@@ -209,7 +211,7 @@ Create a Google **Web application** OAuth client and register this local redirec
 http://127.0.0.1:8787/api/auth/callback/google
 ```
 
-For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, or `GOOGLE_CLIENT_SECRET`.
+For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, `FROCKBOT_AUTHORIZATION_STATE_SECRET`, provider credentials, or OAuth client secrets. The authorization-state secret is a separate trust authority and must not reuse the Better Auth secret.
 
 The desktop host requires both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. A desktop deployment with either origin missing is invalid and must fail before exposing chat; there is no local Agent or WebUI product fallback.
 

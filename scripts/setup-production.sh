@@ -286,6 +286,16 @@ ask_secret COMPOSIO_API_KEY "Paste the Composio project API key:"
 set_production_variable COMPOSIO_GMAIL_AUTH_CONFIG_ID "$COMPOSIO_GMAIL_AUTH_CONFIG_ID"
 set_production_secret COMPOSIO_API_KEY "$COMPOSIO_API_KEY"
 
+stage "FrockBot: Connection authorization state"
+say "Configure an independent secret used only to sign hosted Connection authorization state."
+step "Generate a new random secret; do not reuse the Better Auth or provider credentials."
+ask_secret FROCKBOT_AUTHORIZATION_STATE_SECRET "Paste the Connection authorization-state secret:"
+[[ -n "$FROCKBOT_AUTHORIZATION_STATE_SECRET" ]] || {
+  warn "A dedicated Connection authorization-state secret is required"
+  exit 1
+}
+set_production_secret FROCKBOT_AUTHORIZATION_STATE_SECRET "$FROCKBOT_AUTHORIZATION_STATE_SECRET"
+
 stage "Fly: Sprites Computer token"
 say "Provision the server-side credential used by the built-in Fly Computer provider."
 open_url "https://fly.io/dashboard"

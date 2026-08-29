@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe("production setup", () => {
-  test("the wizard provisions the Fly Sprites environment secret", async () => {
+  test("the wizard provisions dedicated backend environment secrets", async () => {
     const directory = await temporaryDirectory("frockbot-setup-");
     const bin = join(directory, "bin");
     const ghLog = join(directory, "gh.log");
@@ -63,7 +63,7 @@ fi
       },
     );
     child.stdin.write(
-      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ngmail-config\ncomposio-key\nsprites-production\n\n",
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ngmail-config\ncomposio-key\nauthorization-state-secret\nsprites-production\n\n",
     );
     child.stdin.end();
     const [exitCode, stdout, stderr] = await Promise.all([
@@ -79,12 +79,18 @@ fi
     );
     const calls = (await Bun.file(ghLog).text()).trim().split("\n");
     expect(calls).toContain(
+      "secret set FROCKBOT_AUTHORIZATION_STATE_SECRET --repo timoconnellaus/frockbot --env production",
+    );
+    expect(calls).toContain(
+      "secret-value:FROCKBOT_AUTHORIZATION_STATE_SECRET:authorization-state-secret",
+    );
+    expect(calls).toContain(
       "secret set SPRITES_TOKEN --repo timoconnellaus/frockbot --env production",
     );
     expect(calls).toContain("secret-value:SPRITES_TOKEN:sprites-production");
   });
 
-  test("the deploy workflow forwards SPRITES_TOKEN through Wrangler", async () => {
+  test("the deploy workflow forwards dedicated backend secrets through Wrangler", async () => {
     const source = await Bun.file(
       new URL("../.github/workflows/ci.yml", import.meta.url),
     ).text();
@@ -99,8 +105,18 @@ fi
         };
       };
     };
-    const deploy = workflow.jobs["deploy-backend"].steps.find(
+    const deploymentSteps = workflow.jobs["deploy-backend"].steps;
+    const validation = deploymentSteps.find(
+      (step) => step.name === "Validate deployment configuration",
+    );
+    const deploy = deploymentSteps.find(
       (step) => step.name === "Deploy Worker",
+    );
+    expect(validation?.env?.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
+      "${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}",
+    );
+    expect(deploy?.env?.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
+      "${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}",
     );
     expect(deploy?.env?.SPRITES_TOKEN).toBe("${{ secrets.SPRITES_TOKEN }}");
 
@@ -135,6 +151,7 @@ exit 1
         GOOGLE_CLIENT_SECRET: "google-secret",
         COMPOSIO_API_KEY: "composio-key",
         COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET: "authorization-state-secret",
         SPRITES_TOKEN: "sprites-production",
       },
       stdout: "pipe",
@@ -153,6 +170,9 @@ exit 1
             JSON.parse(line.slice(separator + 1)),
           ];
         }),
+    );
+    expect(forwarded.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
+      "authorization-state-secret",
     );
     expect(forwarded.SPRITES_TOKEN).toBe("sprites-production");
     expect(forwarded).not.toHaveProperty("SPRITE_TOKEN");
