@@ -977,6 +977,19 @@ describe("Cloudflare user application gateway", () => {
     expect(script.status).toBe(200);
   });
 
+  test("consumes the development identity before strict hosted query decoding", async () => {
+    const { gateway, loader } = createTestGateway();
+    const response = await gateway(
+      new Request(
+        "https://frockbot.test/api/bots/default/turns?as_user=mobile-development",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(decodeClientRunListV1(await response.json())).toEqual([]);
+    expect(loader.ids).toEqual(["mobile-development:foundation-v1"]);
+  });
+
   test("serves the public shell but rejects unauthenticated application APIs", async () => {
     const { gateway } = createTestGateway();
     const page = await gateway(new Request("https://frockbot.test/"));

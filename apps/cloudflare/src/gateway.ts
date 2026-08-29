@@ -280,9 +280,18 @@ export function createGateway(dependencies: GatewayDependencies) {
     const forwardedHeaders = new Headers(request.headers);
     forwardedHeaders.delete("x-frockbot-user-id");
     forwardedHeaders.set("x-frockbot-deployment", workerId);
+    const forwardedUrl = new URL(request.url);
+    if (development.persist) forwardedUrl.searchParams.delete("as_user");
+    const forwardedRequest = new Request(request, {
+      headers: forwardedHeaders,
+    });
     const response = await worker
       .getEntrypoint()
-      .fetch(new Request(request, { headers: forwardedHeaders }));
+      .fetch(
+        development.persist
+          ? new Request(forwardedUrl, forwardedRequest)
+          : forwardedRequest,
+      );
     if (!development.persist) return response;
     const persisted = new Response(response.body, response);
     persisted.headers.append(
