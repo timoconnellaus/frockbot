@@ -81,6 +81,10 @@ async function smoke(
 ): Promise<Response> {
   const client = new SpritesClient(token);
   const name = spriteName(request.effectId);
+  let evidence: Omit<
+    Parameters<typeof encodeSmokeResponse>[0],
+    "cleanupObserved"
+  >;
   try {
     const sprite = await findOrCreateSprite(client, name);
     const stream = await streamedEcho(client, name, request.probe);
@@ -95,15 +99,13 @@ async function smoke(
       .readFile("frockbot-probe.txt", "utf8");
     const cancellationObserved = await cancellationProbe(client, name);
 
-    return Response.json(
-      encodeSmokeResponse({
-        effectId: request.effectId,
-        stream,
-        file,
-        cancellationObserved,
-        reconstructionObserved: reconstructedFile === request.probe,
-      }),
-    );
+    evidence = {
+      effectId: request.effectId,
+      stream,
+      file,
+      cancellationObserved,
+      reconstructionObserved: reconstructedFile === request.probe,
+    };
   } finally {
     try {
       await client.deleteSprite(name);
@@ -111,6 +113,15 @@ async function smoke(
       if (!isNotFound(error)) throw error;
     }
   }
+
+  let cleanupObserved = false;
+  try {
+    await client.getSprite(name);
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+    cleanupObserved = true;
+  }
+  return Response.json(encodeSmokeResponse({ ...evidence, cleanupObserved }));
 }
 
 function problem(status: number, error: string): Response {

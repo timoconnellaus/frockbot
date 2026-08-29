@@ -12,6 +12,7 @@ export interface FlyHostSmokeEvidence {
   file: string;
   cancellationObserved: boolean;
   reconstructionObserved: boolean;
+  cleanupObserved: boolean;
 }
 
 function boundedString(value: unknown, maximumLength: number): value is string {
@@ -87,6 +88,7 @@ export function encodeSmokeResponse(evidence: FlyHostSmokeEvidence) {
       files: evidence.file.length > 0,
       cancellation: evidence.cancellationObserved,
       reconstruction: evidence.reconstructionObserved,
+      cleanup: evidence.cleanupObserved,
     },
     evidence: {
       stream: evidence.stream,

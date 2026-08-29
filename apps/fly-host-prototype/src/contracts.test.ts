@@ -46,6 +46,7 @@ describe("Fly host v1 DTO", () => {
         file: "hello",
         cancellationObserved: true,
         reconstructionObserved: true,
+        cleanupObserved: true,
       }),
     ).toEqual({
       version: 1,
@@ -55,6 +56,7 @@ describe("Fly host v1 DTO", () => {
         files: true,
         cancellation: true,
         reconstruction: true,
+        cleanup: true,
       },
       evidence: {
         stream: "hello",

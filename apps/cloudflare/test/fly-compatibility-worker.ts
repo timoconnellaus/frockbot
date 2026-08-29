@@ -1,11 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 import { SpritesClient } from "@fly/sprites";
+import type { SessionEvent } from "@frockbot/agent-core";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import {
   FlySpriteComputer,
   FlySpriteComputerProvider,
 } from "@frockbot/plugin-fly-sprite";
 import { Context } from "cordis";
+import { BotState } from "../src/bot-state.ts";
+import { UserConfiguration } from "../src/user-configuration.ts";
 
 interface FlyCompatibilityEnv {
   SPRITES_TOKEN: string;
@@ -14,13 +17,47 @@ interface FlyCompatibilityEnv {
 export interface FlyMountResult {
   providerId: string;
   generation: number;
-  durableMountCount: number;
 }
 
-export interface DurableProbeEvent {
-  sequence: number;
-  label: string;
+export class WorkerdBotState extends BotState {
+  private readonly residencyId = crypto.randomUUID();
+  private mountRecorded = false;
+
+  async inspectMountedBot(input: unknown) {
+    const settings = await super.readConfiguration(input);
+    if (!this.mountRecorded) {
+      await this.ctx.storage.transaction(async (transaction) => {
+        const mountCount =
+          ((await transaction.get<number>("workerd:mount-count")) ?? 0) + 1;
+        await transaction.put("workerd:mount-count", mountCount);
+      });
+      this.mountRecorded = true;
+    }
+    return {
+      residencyId: this.residencyId,
+      mountCount: await this.ctx.storage.get<number>("workerd:mount-count"),
+      settings,
+    };
+  }
+
+  async durableSessionEvents(): Promise<SessionEvent[]> {
+    return (await this.ctx.storage.get<SessionEvent[]>("latest-events")) ?? [];
+  }
+
+  async scheduleRecoveryProbe(): Promise<void> {
+    await this.ctx.storage.put("active-run", "missing-run");
+    await this.ctx.storage.setAlarm(Date.now() + 60_000);
+  }
+
+  async recoveryProbe() {
+    return {
+      activeRunId: await this.ctx.storage.get<string>("active-run"),
+      alarmScheduled: (await this.ctx.storage.getAlarm()) !== null,
+    };
+  }
 }
+
+export { UserConfiguration };
 
 export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
   private root: Context | undefined;
@@ -50,47 +87,10 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     const assignment = this.root.computers.assign(target, "fly-sprite");
     const computer = await this.root.computers.open(target);
     await computer.close();
-    const durableMountCount =
-      ((await this.ctx.storage.get<number>("mount-count")) ?? 0) + 1;
-    await this.ctx.storage.put("mount-count", durableMountCount);
     return {
       providerId: assignment.providerId,
       generation: assignment.generation,
-      durableMountCount,
     };
-  }
-
-  async appendDurableEvent(label: string): Promise<DurableProbeEvent> {
-    return this.ctx.storage.transaction(async (transaction) => {
-      const sequence =
-        ((await transaction.get<number>("event-sequence")) ?? 0) + 1;
-      const event = { sequence, label };
-      await transaction.put("event-sequence", sequence);
-      await transaction.put(
-        `event:${sequence.toString().padStart(8, "0")}`,
-        event,
-      );
-      return event;
-    });
-  }
-
-  async durableEvents(): Promise<DurableProbeEvent[]> {
-    const events = await this.ctx.storage.list<DurableProbeEvent>({
-      prefix: "event:",
-    });
-    return [...events.values()];
-  }
-
-  async scheduleDurableEvent(label: string): Promise<void> {
-    await this.ctx.storage.put("alarm-label", label);
-    await this.ctx.storage.setAlarm(Date.now() + 60_000);
-  }
-
-  async alarm(): Promise<void> {
-    const label = await this.ctx.storage.get<string>("alarm-label");
-    if (label === undefined) return;
-    await this.appendDurableEvent(label);
-    await this.ctx.storage.delete("alarm-label");
   }
 
   async deleteLiveSprite(spriteName: string): Promise<void> {

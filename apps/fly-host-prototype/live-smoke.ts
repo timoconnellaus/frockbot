@@ -1,17 +1,31 @@
-import { chmod, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const root = import.meta.dirname;
 const localVariablesPath = resolve(root, ".dev.vars");
 const cloudflareVariablesPath = resolve(root, "../cloudflare/.dev.vars");
 
-async function hasSpritesToken(path: string): Promise<boolean> {
+interface SavedFile {
+  source: string;
+  mode: number;
+}
+
+async function readOptionalFile(path: string): Promise<SavedFile | undefined> {
   try {
-    const source = await readFile(path, "utf8");
-    return /^\s*SPRITES_TOKEN\s*=\s*.+$/m.test(source);
-  } catch {
-    return false;
+    const [source, metadata] = await Promise.all([
+      readFile(path, "utf8"),
+      stat(path),
+    ]);
+    return { source, mode: metadata.mode & 0o777 };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
   }
+}
+
+function spritesTokenAssignment(source: string): string | undefined {
+  const match = source.match(/^\s*SPRITES_TOKEN\s*=\s*(.+?)\s*$/m);
+  return match?.[1] ? `SPRITES_TOKEN=${match[1]}\n` : undefined;
 }
 
 async function waitForWorker(url: string): Promise<void> {
@@ -27,31 +41,32 @@ async function waitForWorker(url: string): Promise<void> {
   throw new Error("Timed out waiting for the Container host Worker");
 }
 
-const hadLocalVariables = await hasSpritesToken(localVariablesPath);
-if (!hadLocalVariables) {
-  if (!(await hasSpritesToken(cloudflareVariablesPath))) {
+const originalLocalVariables = await readOptionalFile(localVariablesPath);
+let restoreLocalVariables = false;
+if (!spritesTokenAssignment(originalLocalVariables?.source ?? "")) {
+  const cloudflareVariables = await readOptionalFile(cloudflareVariablesPath);
+  const assignment = spritesTokenAssignment(cloudflareVariables?.source ?? "");
+  if (!assignment) {
     throw new Error(
       "Add SPRITES_TOKEN to apps/cloudflare/.dev.vars before running the live prototype",
     );
   }
-  await writeFile(
-    localVariablesPath,
-    await readFile(cloudflareVariablesPath, "utf8"),
-    { mode: 0o600 },
-  );
+  await writeFile(localVariablesPath, assignment, { mode: 0o600 });
   await chmod(localVariablesPath, 0o600);
+  restoreLocalVariables = true;
 }
 
-const worker = Bun.spawn(
-  ["bunx", "wrangler", "dev", "--ip", "127.0.0.1", "--port", "8790"],
-  {
-    cwd: root,
-    stdout: "inherit",
-    stderr: "inherit",
-  },
-);
-
+let worker: ReturnType<typeof Bun.spawn> | undefined;
 try {
+  worker = Bun.spawn(
+    ["bunx", "wrangler", "dev", "--ip", "127.0.0.1", "--port", "8790"],
+    {
+      cwd: root,
+      stdout: "inherit",
+      stderr: "inherit",
+    },
+  );
+
   await waitForWorker("http://127.0.0.1:8790/");
   const effectId = `effect-${crypto.randomUUID()}`;
   const probe = `container-${crypto.randomUUID()}`;
@@ -75,6 +90,7 @@ try {
       files?: unknown;
       cancellation?: unknown;
       reconstruction?: unknown;
+      cleanup?: unknown;
     };
     evidence?: {
       stream?: unknown;
@@ -96,6 +112,7 @@ try {
     capabilities.files !== true ||
     capabilities.cancellation !== true ||
     capabilities.reconstruction !== true ||
+    capabilities.cleanup !== true ||
     evidence?.stream !== probe ||
     evidence.file !== probe
   ) {
@@ -103,9 +120,18 @@ try {
   }
   process.stdout.write("Shared Container Fly compatibility smoke passed\n");
 } finally {
-  worker.kill("SIGTERM");
-  await worker.exited;
-  if (!hadLocalVariables) {
-    await rm(localVariablesPath, { force: true });
+  if (worker) {
+    worker.kill("SIGTERM");
+    await worker.exited;
+  }
+  if (restoreLocalVariables) {
+    if (originalLocalVariables) {
+      await writeFile(localVariablesPath, originalLocalVariables.source, {
+        mode: originalLocalVariables.mode,
+      });
+      await chmod(localVariablesPath, originalLocalVariables.mode);
+    } else {
+      await rm(localVariablesPath, { force: true });
+    }
   }
 }

@@ -39,7 +39,9 @@ export default defineConfig({
         compatibilityDate: "2026-08-27",
         compatibilityFlags: ["nodejs_compat"],
         durableObjects: {
+          BOT_STATES: "WorkerdBotState",
           FLY_COMPATIBILITY: "FlyCompatibilityProbe",
+          USER_CONFIGURATIONS: "UserConfiguration",
         },
         bindings: {
           FROCKBOT_RUN_LIVE_SPRITE_TEST: runLiveSpriteTest ? "1" : "0",
