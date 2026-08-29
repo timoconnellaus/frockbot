@@ -19,6 +19,7 @@ import {
 } from "./connections.js";
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH = 32;
 const RESERVED_CONNECTION_IDENTIFIERS = new Set([
   "__defineGetter__",
   "__defineSetter__",
@@ -109,7 +110,12 @@ export function createConfiguredComposioBackendContribution(
   const authorizationStateSecret = host.readSecret(
     "FROCKBOT_AUTHORIZATION_STATE_SECRET",
   );
-  if (!apiKey || !gmailAuthConfigId || !authorizationStateSecret) {
+  if (
+    !apiKey ||
+    !gmailAuthConfigId ||
+    !authorizationStateSecret ||
+    authorizationStateSecret.length < MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH
+  ) {
     throw new Error("Composio backend Contribution is not configured");
   }
   return createComposioBackendContribution({

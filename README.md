@@ -101,7 +101,7 @@ Configure these GitHub `production` environment values:
 | Secret   | `GOOGLE_CLIENT_SECRET`                | Google Web application OAuth client secret                                    |
 | Secret   | `COMPOSIO_API_KEY`                    | Composio project API key used only by backend Connection and tool drivers     |
 | Variable | `COMPOSIO_GMAIL_AUTH_CONFIG_ID`       | Composio Gmail auth config used by hosted Connect Link                        |
-| Secret   | `FROCKBOT_AUTHORIZATION_STATE_SECRET` | Independent secret used only to sign hosted Connection authorization state    |
+| Secret   | `FROCKBOT_AUTHORIZATION_STATE_SECRET` | Independent secret of at least 32 random characters for Connection state      |
 | Secret   | `SPRITES_TOKEN`                       | Fly Sprites token used only by the backend Computer provider                  |
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
@@ -211,7 +211,7 @@ Create a Google **Web application** OAuth client and register this local redirec
 http://127.0.0.1:8787/api/auth/callback/google
 ```
 
-For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, `FROCKBOT_AUTHORIZATION_STATE_SECRET`, provider credentials, or OAuth client secrets. The authorization-state secret is a separate trust authority and must not reuse the Better Auth secret.
+For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, `FROCKBOT_AUTHORIZATION_STATE_SECRET`, provider credentials, or OAuth client secrets. The authorization-state secret must contain at least 32 random characters, is a separate trust authority, and must not reuse the Better Auth secret.
 
 The desktop host requires both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. A desktop deployment with either origin missing is invalid and must fail before exposing chat; there is no local Agent or WebUI product fallback.
 

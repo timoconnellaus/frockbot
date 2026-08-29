@@ -408,11 +408,31 @@ describe("active durable Turn projection", () => {
 });
 
 describe("uncertain Turn admission", () => {
-  test("observes uncertain admission through durable terminal state", async () => {
+  test("clears retry state and listeners after durable terminal state", async () => {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: { location: { href: "https://app.example/?bot=primary" } },
     });
+    const originalAddEventListener = AbortSignal.prototype.addEventListener;
+    const originalRemoveEventListener =
+      AbortSignal.prototype.removeEventListener;
+    let outstandingAbortListeners = 0;
+    AbortSignal.prototype.addEventListener = function (
+      type: string,
+      callback: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ) {
+      if (type === "abort") outstandingAbortListeners += 1;
+      return originalAddEventListener.call(this, type, callback, options);
+    };
+    AbortSignal.prototype.removeEventListener = function (
+      type: string,
+      callback: EventListenerOrEventListenerObject,
+      options?: boolean | EventListenerOptions,
+    ) {
+      if (type === "abort") outstandingAbortListeners -= 1;
+      return originalRemoveEventListener.call(this, type, callback, options);
+    };
     let provided: Ref<FrockBotWebData> | undefined;
     let lookups = 0;
     await shellClientPlugin({
@@ -443,12 +463,20 @@ describe("uncertain Turn admission", () => {
     });
     if (!provided) throw new Error("shell data was not provided");
 
-    const result = await provided.value.sendPrompt("continue");
+    let result: Awaited<ReturnType<FrockBotWebData["sendPrompt"]>>;
+    try {
+      result = await provided.value.sendPrompt("continue");
+    } finally {
+      AbortSignal.prototype.addEventListener = originalAddEventListener;
+      AbortSignal.prototype.removeEventListener = originalRemoveEventListener;
+    }
 
     expect(result.accepted).toBe(true);
     expect(lookups).toBe(3);
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.activeRun).toBeUndefined();
+    expect(provided.value.settingsError).toBeUndefined();
+    expect(outstandingAbortListeners).toBe(0);
     expect(provided.value.messages.at(-1)).toMatchObject({
       text: "Done durably",
       status: "completed",
