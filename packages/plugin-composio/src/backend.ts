@@ -110,11 +110,14 @@ export function createConfiguredComposioBackendContribution(
   const authorizationStateSecret = host.readSecret(
     "FROCKBOT_AUTHORIZATION_STATE_SECRET",
   );
+  const betterAuthSecret = host.readSecret("BETTER_AUTH_SECRET");
   if (
     !apiKey ||
     !gmailAuthConfigId ||
     !authorizationStateSecret ||
-    authorizationStateSecret.length < MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH
+    authorizationStateSecret.length <
+      MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH ||
+    authorizationStateSecret === betterAuthSecret
   ) {
     throw new Error("Composio backend Contribution is not configured");
   }

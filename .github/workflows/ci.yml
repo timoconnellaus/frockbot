@@ -162,6 +162,10 @@ jobs:
             printf 'FROCKBOT_AUTHORIZATION_STATE_SECRET must be at least 32 characters\n' >&2
             exit 1
           fi
+          if [[ "$FROCKBOT_AUTHORIZATION_STATE_SECRET" == "$BETTER_AUTH_SECRET" ]]; then
+            printf 'FROCKBOT_AUTHORIZATION_STATE_SECRET must not reuse BETTER_AUTH_SECRET\n' >&2
+            exit 1
+          fi
 
       - name: Configure production D1 database
         working-directory: apps/cloudflare

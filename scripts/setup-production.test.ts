@@ -150,7 +150,7 @@ describe("production setup", () => {
       CLOUDFLARE_ACCOUNT_ID: "cloudflare-account",
       CLOUDFLARE_D1_DATABASE_ID: "cloudflare-database",
       BETTER_AUTH_URL: "https://bot.frockbot.com",
-      BETTER_AUTH_SECRET: "auth-secret",
+      BETTER_AUTH_SECRET: "independent-better-auth-secret-0001",
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       COMPOSIO_API_KEY: "composio-key",
@@ -179,6 +179,23 @@ describe("production setup", () => {
     expect(weakConfiguration.exitCode).toBe(1);
     expect(weakConfiguration.stderr.toString()).toContain(
       "FROCKBOT_AUTHORIZATION_STATE_SECRET must be at least 32 characters",
+    );
+
+    const reusedAuthority = Bun.spawnSync(
+      ["bash", "-c", validation?.run ?? ""],
+      {
+        env: {
+          ...productionEnvironment,
+          FROCKBOT_AUTHORIZATION_STATE_SECRET:
+            productionEnvironment.BETTER_AUTH_SECRET,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    expect(reusedAuthority.exitCode).toBe(1);
+    expect(reusedAuthority.stderr.toString()).toContain(
+      "FROCKBOT_AUTHORIZATION_STATE_SECRET must not reuse BETTER_AUTH_SECRET",
     );
 
     const directory = await temporaryDirectory("frockbot-workflow-");

@@ -30,6 +30,13 @@ describe("configured Composio backend", () => {
         COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
         FROCKBOT_AUTHORIZATION_STATE_SECRET: "too-short",
       },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        BETTER_AUTH_SECRET: "shared-trust-authority-secret-0001",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET:
+          "shared-trust-authority-secret-0001",
+      },
     ];
     for (const secrets of invalidSecrets) {
       expect(() =>
@@ -42,6 +49,7 @@ describe("configured Composio backend", () => {
         configuredHost({
           COMPOSIO_API_KEY: "api-secret",
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+          BETTER_AUTH_SECRET: "better-auth-secret-that-is-independent",
           FROCKBOT_AUTHORIZATION_STATE_SECRET:
             "independent-authorization-state-secret",
         }),
