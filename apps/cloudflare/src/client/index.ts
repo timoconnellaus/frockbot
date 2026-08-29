@@ -20,6 +20,7 @@ import {
 } from "@frockbot/client-core";
 import {
   decodeClientRunListV1,
+  decodeClientRunLookupV1,
   decodeClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
 
@@ -43,6 +44,21 @@ function requireAuthenticatedUserId(value: unknown): string {
     throw new Error("Authenticated User identity is unavailable");
   }
   return value;
+}
+
+function decodeAuthenticatedIdentity(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Authenticated User identity is unavailable");
+  }
+  const identity = value as Record<string, unknown>;
+  if (
+    identity.schemaVersion !== 1 ||
+    Object.keys(identity).length !== 2 ||
+    !("userId" in identity)
+  ) {
+    throw new Error("Authenticated User identity is unavailable");
+  }
+  return requireAuthenticatedUserId(identity.userId);
 }
 
 async function apiRequest(
@@ -152,6 +168,24 @@ const application = new ClientApplication({
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
     );
   },
+  async lookupRun(runId: string) {
+    const lookup = decodeClientRunLookupV1(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}`,
+      ),
+    );
+    return lookup.state === "not-admitted" ? undefined : lookup.run;
+  },
+  async fenceRunAdmission(runId: string) {
+    const lookup = decodeClientRunLookupV1(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/fence`,
+        "POST",
+        JSON.stringify({ schemaVersion: 1, action: "fence-admission" }),
+      ),
+    );
+    return lookup.state === "not-admitted" ? undefined : lookup.run;
+  },
   async reconcileRun(runId: string) {
     return decodeClientTurnV1(
       await apiRequest(
@@ -178,10 +212,7 @@ const application = new ClientApplication({
     return apiRequest("/app-manifest");
   },
   async readAuthenticatedUserId() {
-    const value = window.frockbotDesktop
-      ? (await window.getUser())?.id
-      : document.body.dataset.frockbotUserId;
-    return requireAuthenticatedUserId(value);
+    return decodeAuthenticatedIdentity(await apiRequest("/api/identity"));
   },
   startConnection(input: {
     commandId: string;

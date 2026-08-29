@@ -1,4 +1,4 @@
-import type { SessionEvent } from "@frockbot/agent-core";
+import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
@@ -1270,9 +1270,20 @@ export class ShellBotBackendContribution {
     return projectClientRunLookupV1(run);
   }
 
-  async fenceRunAdmission(input: unknown): Promise<ClientRunLookupV1> {
+  async fenceRunAdmission(
+    identity: BotIdentity,
+    input: unknown,
+  ): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
     return this.ctx.storage.transaction(async (transaction) => {
+      const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
+      if (
+        durableIdentity &&
+        (durableIdentity.userId !== identity.userId ||
+          durableIdentity.botId !== identity.botId)
+      ) {
+        throw new Error("Bot authority does not match its durable identity");
+      }
       const run = optionalStoredRun(
         await transaction.get<unknown>(`${RUN_PREFIX}${query.runId}`),
       );
@@ -1280,10 +1291,10 @@ export class ShellBotBackendContribution {
         throw new Error("stored run does not match its lookup key");
       }
       if (!run) {
-        await transaction.put(
-          `${RUN_ADMISSION_FENCE_PREFIX}${query.runId}`,
-          true,
-        );
+        await transaction.put({
+          [`${RUN_ADMISSION_FENCE_PREFIX}${query.runId}`]: true,
+          [IDENTITY_KEY]: durableIdentity ?? identity,
+        });
       }
       return projectClientRunLookupV1(run);
     });
@@ -1508,24 +1519,26 @@ export class ShellBotBackendContribution {
       if (await transaction.get(ACTIVE_RUN_KEY)) {
         throw new Error("bot already has an active run");
       }
-      const latestEvents =
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+      const latestEvents = (
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
+      ).map(decodeSessionEvent);
       const admittedSettings =
         (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
         settings;
+      const admittedRun = requireStoredRunV1({
+        runId: command.runId,
+        commandFingerprint: botTurnCommandFingerprintV1(command),
+        sessionId: command.sessionId,
+        acceptedAt: command.acceptedAt,
+        input: command.text,
+        events: [],
+        status: "running",
+        phase: "admitted",
+        configurationSnapshot: structuredClone(admittedSettings),
+        previousEventCount: latestEvents.length,
+      } satisfies StoredRun);
       await transaction.put({
-        [key]: {
-          runId: command.runId,
-          commandFingerprint: botTurnCommandFingerprintV1(command),
-          sessionId: command.sessionId,
-          acceptedAt: command.acceptedAt,
-          input: command.text,
-          events: [],
-          status: "running",
-          phase: "admitted",
-          configurationSnapshot: structuredClone(admittedSettings),
-          previousEventCount: latestEvents.length,
-        } satisfies StoredRun,
+        [key]: admittedRun,
         [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
         [ACTIVE_RUN_KEY]: command.runId,
         [IDENTITY_KEY]: identity ?? {
@@ -1542,16 +1555,17 @@ export class ShellBotBackendContribution {
     runId: string,
     events: readonly SessionEvent[],
   ): Promise<void> {
-    const durableEvents = events.filter(
-      (event) => event.type !== "session/disposed",
-    );
+    const durableEvents = events
+      .filter((event) => event.type !== "session/disposed")
+      .map(decodeSessionEvent);
     if (durableEvents.length === 0) return;
     const key = `${RUN_PREFIX}${runId}`;
     await this.ctx.storage.transaction(async (transaction) => {
       const run = optionalStoredRun(await transaction.get<unknown>(key));
       if (!run) throw new Error(`run "${runId}" was not accepted`);
-      const latest =
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+      const latest = (
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
+      ).map(decodeSessionEvent);
       for (const [index, event] of durableEvents.entries()) {
         if (event.seq !== latest.length + index) {
           throw new Error(
@@ -1559,12 +1573,13 @@ export class ShellBotBackendContribution {
           );
         }
       }
+      const next = requireStoredRunV1({
+        ...run,
+        events: [...run.events, ...durableEvents],
+      } satisfies StoredRun);
       await transaction.put({
-        [key]: {
-          ...run,
-          events: [...run.events, ...structuredClone(durableEvents)],
-        } satisfies StoredRun,
-        [LATEST_EVENTS_KEY]: [...latest, ...structuredClone(durableEvents)],
+        [key]: structuredClone(next),
+        [LATEST_EVENTS_KEY]: structuredClone([...latest, ...durableEvents]),
       });
     });
   }
@@ -1656,12 +1671,12 @@ export class ShellBotBackendContribution {
         return undefined;
       }
       if (!run || run.status !== "running") {
-        await transaction.delete(ACTIVE_RUN_KEY);
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
-      const latest =
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+      const latest = (
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
+      ).map(decodeSessionEvent);
       const plan = planBotRunRecovery(run, latest);
       if (plan.kind === "complete") {
         const result = {

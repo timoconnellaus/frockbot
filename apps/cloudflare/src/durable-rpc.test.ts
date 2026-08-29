@@ -120,6 +120,30 @@ describe("Durable Object RPC boundaries", () => {
         command: { ...command, internal: true },
       }),
     ).toThrow("RPC request.command is invalid");
+    expect(() =>
+      admit({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "bot-1",
+        command: { ...command, runId: "run:1" },
+      }),
+    ).toThrow("runId is invalid");
+    expect(() =>
+      admit({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "bot-1",
+        command: { ...command, acceptedAt: "not-a-timestamp" },
+      }),
+    ).toThrow("acceptedAt is invalid");
+    expect(() =>
+      admit({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "bot-1",
+        command: { ...command, text: "🧪".repeat(8_001) },
+      }),
+    ).toThrow("text is invalid");
     expect(admitted).toHaveLength(0);
 
     admit({

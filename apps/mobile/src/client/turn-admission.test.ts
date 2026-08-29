@@ -127,6 +127,7 @@ describe("mobile Turn admission", () => {
         waits.push(delay);
         return Promise.resolve();
       },
+      isCurrent: () => true,
       initialDelayMs: 10,
       maximumDelayMs: 20,
     });
@@ -167,6 +168,7 @@ describe("mobile Turn admission", () => {
         waits.push(delay);
         return Promise.resolve();
       },
+      isCurrent: () => true,
       initialDelayMs: 10,
       maximumDelayMs: 20,
     });
@@ -189,6 +191,7 @@ describe("mobile Turn admission", () => {
       observe: (lookup) => observations.push(lookup.state),
       transientFailure: () => undefined,
       wait: () => Promise.resolve(),
+      isCurrent: () => true,
     });
 
     expect(result).toEqual({ state: "not-admitted" });
@@ -224,6 +227,7 @@ describe("mobile Turn admission", () => {
       observe: (lookup) => observations.push(lookup.state),
       transientFailure: () => undefined,
       wait: () => Promise.resolve(),
+      isCurrent: () => true,
     });
 
     expect(result).toEqual(terminal);
@@ -260,10 +264,33 @@ describe("mobile Turn admission", () => {
       observe: (lookup) => observations.push(lookup.state),
       transientFailure: () => undefined,
       wait: () => Promise.resolve(),
+      isCurrent: () => true,
     });
 
     expect(result).toEqual(terminal);
     expect(observations).toEqual(["reconciliation-required", "terminal"]);
+  });
+
+  test("detaches reconciliation when its observer generation changes", async () => {
+    let current = true;
+    let attempts = 0;
+
+    const result = await reconcileMobileTurnAdmission({
+      lookup: () => {
+        attempts += 1;
+        return Promise.reject(new Error("temporarily unavailable"));
+      },
+      fence: () => Promise.resolve({ state: "not-admitted" }),
+      observe: () => undefined,
+      transientFailure: () => {
+        current = false;
+      },
+      wait: () => Promise.resolve(),
+      isCurrent: () => current,
+    });
+
+    expect(result).toBeUndefined();
+    expect(attempts).toBe(1);
   });
 
   test("keeps busy state until lookup is terminal or definitively absent", () => {

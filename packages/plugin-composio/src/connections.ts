@@ -267,12 +267,20 @@ export class ComposioConnectionCoordinator {
       connectionTypeId: string;
       alias?: string;
       returnTarget?: "browser" | "desktop";
-      callbackState?: string;
-      authorizationStateId?: string;
-      authorizationStateExpiresAt?: number;
+      callbackState: string;
+      authorizationStateId: string;
+      authorizationStateExpiresAt: number;
       nativeReturnNonce?: string;
     },
   ): Promise<StartConnectionResult> {
+    if (
+      !input.callbackState ||
+      !input.authorizationStateId ||
+      !Number.isFinite(input.authorizationStateExpiresAt) ||
+      input.authorizationStateExpiresAt <= Date.now()
+    ) {
+      throw new Error("Connection authorization state is invalid");
+    }
     const terminalReplay = await this.replayStart(userId, input);
     if (terminalReplay) return terminalReplay;
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.commandId)) {
@@ -287,8 +295,7 @@ export class ComposioConnectionCoordinator {
       returnTarget,
       nativeReturnNonce: input.nativeReturnNonce,
     });
-    const authorizationStateExpiresAt =
-      input.authorizationStateExpiresAt ?? Date.now() + 10 * 60_000;
+    const authorizationStateExpiresAt = input.authorizationStateExpiresAt;
     const stored = await this.config.store.getConnection(userId, connectionId);
     let type: ComposioConnectionTypeConfig | undefined;
     let claimed = false;
@@ -308,7 +315,7 @@ export class ComposioConnectionCoordinator {
           providerAlias: connectionId,
           returnTarget,
           startCommandFingerprint: commandFingerprint,
-          authorizationStateId: input.authorizationStateId ?? connectionId,
+          authorizationStateId: input.authorizationStateId,
           authorizationStateExpiresAt,
           ...(input.nativeReturnNonce
             ? { nativeReturnNonce: input.nativeReturnNonce }
@@ -558,7 +565,7 @@ export class ComposioConnectionCoordinator {
       link = await this.config.client.createConnectLink({
         userId,
         authConfigId: type.authConfigId,
-        callbackUrl: `${this.config.callbackBaseUrl}/api/plugins/composio/callback?state=${encodeURIComponent(input.callbackState ?? connectionId)}`,
+        callbackUrl: `${this.config.callbackBaseUrl}/api/plugins/composio/callback?state=${encodeURIComponent(input.callbackState)}`,
         alias: connectionId,
       });
     } catch (error) {
@@ -581,7 +588,7 @@ export class ComposioConnectionCoordinator {
         redirectUrl: link.redirectUrl,
         toolkitSlug: type.toolkitSlug,
         expiresAt: link.expiresAt,
-        authorizationStateId: input.authorizationStateId ?? connectionId,
+        authorizationStateId: input.authorizationStateId,
         authorizationStateExpiresAt,
         ...(input.nativeReturnNonce
           ? { nativeReturnNonce: input.nativeReturnNonce }

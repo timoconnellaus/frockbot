@@ -60,31 +60,41 @@ export interface MobileTurnAdmissionReconciliationOptions {
   observe(lookup: ClientRunLookup): void;
   transientFailure(error: unknown): void;
   wait(delayMs: number): Promise<void>;
+  isCurrent(): boolean;
   initialDelayMs?: number;
   maximumDelayMs?: number;
 }
 
 export async function reconcileMobileTurnAdmission(
   options: MobileTurnAdmissionReconciliationOptions,
-): Promise<ClientRunLookup> {
+): Promise<ClientRunLookup | undefined> {
   const initialDelay = options.initialDelayMs ?? 250;
   const maximumDelay = options.maximumDelayMs ?? 5_000;
   let delay = initialDelay;
-  while (true) {
+  while (options.isCurrent()) {
     try {
       const observed = await options.lookup();
+      if (!options.isCurrent()) return undefined;
       const lookup =
         observed.state === "not-admitted" ? await options.fence() : observed;
+      if (!options.isCurrent()) return undefined;
       options.observe(lookup);
       if (lookup.state === "not-admitted" || lookup.state === "terminal") {
         return lookup;
       }
     } catch (error) {
+      if (!options.isCurrent()) return undefined;
       options.transientFailure(error);
     }
-    await options.wait(delay);
+    let remainingDelay = delay;
+    while (options.isCurrent() && remainingDelay > 0) {
+      const slice = Math.min(remainingDelay, 100);
+      await options.wait(slice);
+      remainingDelay -= slice;
+    }
     delay = Math.min(delay * 2, maximumDelay);
   }
+  return undefined;
 }
 
 export function projectMobileTurnAdmissionLookup(

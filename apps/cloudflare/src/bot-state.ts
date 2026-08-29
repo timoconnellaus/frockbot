@@ -187,8 +187,8 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId as string,
     };
     const contribution = await this.contribution();
-    await contribution.validateIdentity(identity);
     return contribution.fenceRunAdmission(
+      identity,
       request.query as ClientRunLookupQueryV1,
     );
   }

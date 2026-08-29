@@ -62,15 +62,6 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
       canResume: false,
     };
   }
-  if (run.status === "interrupted") {
-    return {
-      runId: run.runId,
-      status: run.status,
-      message:
-        run.failure ?? "This Turn is interrupted while durable recovery runs.",
-      canResume: false,
-    };
-  }
   if (run.status === "reconciliation-required") {
     return {
       runId: run.runId,
@@ -96,16 +87,6 @@ function assistantMessage(
       role: "assistant",
       text: run.responseText ?? "Working…",
       status: "streaming",
-      tools: toolsFrom(run.events),
-    };
-  }
-  if (run.status === "interrupted") {
-    return {
-      id: `${run.runId}:assistant`,
-      runId: run.runId,
-      role: "assistant",
-      text: run.failure ?? "Turn interrupted; durable recovery is pending.",
-      status: "interrupted",
       tools: toolsFrom(run.events),
     };
   }
@@ -399,6 +380,59 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     string,
     { nativeReturnNonce?: string }
   >();
+
+  async function waitForRunLookup(
+    delayMs: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (signal.aborted) return;
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(finish, delayMs);
+      function finish() {
+        clearTimeout(timeout);
+        signal.removeEventListener("abort", finish);
+        resolve();
+      }
+      signal.addEventListener("abort", finish, { once: true });
+    });
+  }
+
+  async function reconcileUncertainAdmission(
+    runId: string,
+    signal: AbortSignal,
+  ): Promise<"admitted" | "not-admitted" | "detached"> {
+    web.value.activeRun = {
+      runId,
+      status: "running",
+      message: "Confirming whether this Turn was admitted.",
+      canResume: false,
+    };
+    if (!ctx.transport.lookupRun || !ctx.transport.fenceRunAdmission) {
+      return "detached";
+    }
+    let delayMs = 250;
+    while (!signal.aborted) {
+      try {
+        const observed = await ctx.transport.lookupRun(runId);
+        const run = observed ?? (await ctx.transport.fenceRunAdmission(runId));
+        if (!run) {
+          web.value.activeRun = undefined;
+          return "not-admitted";
+        }
+        projectDurableRuns(web.value, [], [run]);
+        return "admitted";
+      } catch (error) {
+        web.value.settingsError = `${
+          error instanceof Error
+            ? error.message
+            : "Turn admission lookup failed"
+        } Retrying…`;
+      }
+      await waitForRunLookup(delayMs, signal);
+      delayMs = Math.min(delayMs * 2, 5_000);
+    }
+    return "detached";
+  }
 
   async function deliverNotifications(): Promise<void> {
     const runs = await (ctx.transport.listRuns?.() ?? Promise.resolve([]));
@@ -721,8 +755,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           id: crypto.randomUUID(),
           runId: pendingRunId,
           role: "assistant",
-          text: aborted ? "Request stopped locally." : "Agent request failed.",
-          status: aborted ? "aborted" : "error",
+          text: aborted
+            ? "Request stopped locally; admission may still be durable."
+            : "Confirming whether this Turn was admitted.",
+          status: "interrupted",
           tools: [],
         });
         web.value.error = aborted
@@ -730,13 +766,21 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           : error instanceof Error
             ? error.message
             : "Agent request failed";
-        try {
-          await deliverNotifications();
-        } catch (projectionError) {
-          web.value.settingsError =
-            projectionError instanceof Error
-              ? projectionError.message
-              : "Could not restore the active Turn";
+        const disposition = await reconcileUncertainAdmission(
+          pendingRunId,
+          activeRequest.signal,
+        );
+        if (disposition === "not-admitted") {
+          replaceMessage(web.value.messages, pendingRunId, {
+            id: crypto.randomUUID(),
+            runId: pendingRunId,
+            role: "assistant",
+            text: "Turn was not admitted.",
+            status: "error",
+            tools: [],
+          });
+          web.value.error = "Turn was not admitted";
+          return { accepted: false, error: "Turn was not admitted" };
         }
         return { accepted: true, runId: pendingRunId };
       } finally {

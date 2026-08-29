@@ -311,6 +311,59 @@ describe("Connection dependency admission", () => {
     });
   });
 
+  test("rejects re-enabling a Package version removed from the application", async () => {
+    const storage = new MemoryStorage();
+    const host = backendHost(storage);
+    const contribution = createComposioUserBackendContribution(host);
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-composio",
+        expectedRevision: 0,
+        packageId: "composio",
+        version: "0.0.1",
+      },
+    });
+    await contribution.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "disable-composio",
+        expectedRevision: 1,
+        packageId: "composio",
+        enabled: false,
+      },
+    });
+    const upgraded = createComposioUserBackendContribution({
+      ...host,
+      availablePackages: [{ packageId: "composio", version: "0.0.2" }],
+    });
+
+    await expect(
+      upgraded.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-enabled",
+          commandId: "enable-composio",
+          expectedRevision: 2,
+          packageId: "composio",
+          enabled: true,
+        },
+      }),
+    ).rejects.toThrow("Package is not available");
+    await expect(upgraded.read("user-1")).resolves.toMatchObject({
+      revision: 2,
+      packages: [{ packageId: "composio", state: "disabled" }],
+    });
+  });
+
   test("rejects Connection admission after its Package is disabled", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution(

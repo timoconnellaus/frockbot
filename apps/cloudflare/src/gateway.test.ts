@@ -1034,6 +1034,26 @@ describe("Cloudflare user application gateway", () => {
     expect(response.status).toBe(200);
     expect(loader.ids).toEqual(["signed-in-user:foundation-v1"]);
   });
+
+  test("projects authenticated identity through the hosted transport seam", async () => {
+    const auth: GatewayAuth = {
+      handler: unauthenticatedAuth.handler,
+      getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
+    };
+    const { gateway, loader } = createTestGateway(undefined, auth);
+
+    const response = await gateway(
+      new Request("https://frockbot.test/api/identity"),
+    );
+
+    expect(response.status).toBe(200);
+    const identity: unknown = await response.json();
+    expect(identity).toEqual({
+      schemaVersion: 1,
+      userId: "signed-in-user",
+    });
+    expect(loader.ids).toEqual([]);
+  });
 });
 
 const MOBILE_ORIGIN = "capacitor://localhost";

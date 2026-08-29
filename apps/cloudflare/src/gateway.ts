@@ -130,6 +130,9 @@ export function createGateway(dependencies: GatewayDependencies) {
       request.method === "GET" && PUBLIC_ASSET_PATHS.has(url.pathname);
     if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
     if (!userId) return jsonError(401, "authentication required");
+    if (request.method === "GET" && url.pathname === "/api/identity") {
+      return Response.json({ schemaVersion: 1, userId });
+    }
 
     for (const contribution of dependencies.backendContributions ?? []) {
       const response = await contribution.route(request, url, {
@@ -280,7 +283,8 @@ export function createGateway(dependencies: GatewayDependencies) {
     const forwardedHeaders = new Headers(request.headers);
     forwardedHeaders.delete("x-frockbot-user-id");
     forwardedHeaders.set("x-frockbot-deployment", workerId);
-    const forwardedUrl = new URL(request.url);
+    const forwardedUrl = URL.parse(request.url);
+    if (!forwardedUrl) return jsonError(400, "invalid request URL");
     if (development.persist) forwardedUrl.searchParams.delete("as_user");
     const forwardedRequest = new Request(request, {
       headers: forwardedHeaders,

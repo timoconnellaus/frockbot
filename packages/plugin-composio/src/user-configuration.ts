@@ -363,6 +363,19 @@ export class ComposioUserBackendContribution {
       const current =
         (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
         initialState();
+      if (command.type === "user/set-package-enabled" && command.enabled) {
+        const installed = current.packages.find(
+          (pkg) => pkg.packageId === command.packageId,
+        );
+        if (
+          installed &&
+          !this.availablePackages.has(
+            `${installed.packageId}\u0000${installed.version}`,
+          )
+        ) {
+          throw new Error("Package is not available in this application");
+        }
+      }
       if (command.expectedRevision !== current.revision) {
         throw new ConfigurationConflictError(current.revision);
       }

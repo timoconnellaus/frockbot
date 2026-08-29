@@ -273,29 +273,7 @@ describe("active durable Turn projection", () => {
     });
   });
 
-  test("projects interrupted and reconciliation-required recovery states", () => {
-    const interrupted: Pick<
-      FrockBotWebData,
-      "messages" | "activeRunId" | "activeRun"
-    > = { messages: [] };
-    projectDurableRuns(
-      interrupted,
-      [],
-      [
-        {
-          runId: "run-interrupted",
-          input: "Continue",
-          events: [],
-          status: "interrupted",
-        },
-      ],
-    );
-    expect(interrupted.activeRun).toMatchObject({
-      status: "interrupted",
-      canResume: false,
-    });
-    expect(interrupted.messages[1]).toMatchObject({ status: "interrupted" });
-
+  test("projects reconciliation-required recovery state", () => {
     const reconciliation: Pick<
       FrockBotWebData,
       "messages" | "activeRunId" | "activeRun"
@@ -426,6 +404,49 @@ describe("active durable Turn projection", () => {
       text: "Done",
       status: "completed",
     });
+  });
+});
+
+describe("uncertain Turn admission", () => {
+  test("keeps the composer busy until admission is reconciled", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    let lookups = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.reject(new Error("response lost")),
+        lookupRun: () => {
+          lookups += 1;
+          return lookups === 1
+            ? Promise.reject(new Error("lookup unavailable"))
+            : Promise.resolve(undefined);
+        },
+        fenceRunAdmission: (runId) =>
+          Promise.resolve({
+            runId,
+            admittedAt: "2026-08-29T00:00:00.000Z",
+            input: "continue",
+            status: "running",
+            events: [],
+          }),
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    const result = await provided.value.sendPrompt("continue");
+
+    expect(result.accepted).toBe(true);
+    expect(lookups).toBe(2);
+    expect(provided.value.activeRunId).toBeString();
+    expect(provided.value.activeRun?.status).toBe("running");
   });
 });
 

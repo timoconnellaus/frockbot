@@ -5,11 +5,7 @@ import {
 } from "@frockbot/configuration-core";
 
 export type StoredRunStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "interrupted"
-  | "reconciliation-required";
+  "running" | "completed" | "failed" | "reconciliation-required";
 
 export type StoredRunPhase =
   "admitted" | "executing" | "reconciliation-required";
@@ -33,7 +29,6 @@ const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
   "running",
   "completed",
   "failed",
-  "interrupted",
   "reconciliation-required",
 ];
 const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
@@ -54,6 +49,7 @@ const STORED_RUN_REQUIRED_KEYS = [
   "previousEventCount",
 ] as const;
 const STORED_RUN_OPTIONAL_KEYS = ["responseText", "failure"] as const;
+const UTF8_ENCODER = new TextEncoder();
 
 function boundedString(
   value: unknown,
@@ -63,8 +59,18 @@ function boundedString(
   return (
     typeof value === "string" &&
     (allowEmpty || value.length > 0) &&
-    value.length <= maximum
+    UTF8_ENCODER.encode(value).byteLength <= maximum
   );
+}
+
+export function decodeRunIdV1(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value)
+  ) {
+    throw new Error("runId is invalid");
+  }
+  return value;
 }
 
 function decodeStoredRunEvents(value: unknown): SessionEvent[] {
@@ -87,13 +93,12 @@ export function requireStoredRunV1(input: unknown): StoredRun {
   ) {
     throw new Error("stored run has invalid fields");
   }
-  if (
-    !boundedString(candidate.runId, 128) ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(candidate.runId)
-  ) {
+  let runId: string;
+  try {
+    runId = decodeRunIdV1(candidate.runId);
+  } catch {
     throw new Error("stored run has invalid runId");
   }
-  const runId = candidate.runId;
   if (!boundedString(candidate.commandFingerprint, 65_536)) {
     throw new Error(`run "${runId}" has no valid command fingerprint`);
   }
@@ -127,22 +132,37 @@ export function requireStoredRunV1(input: unknown): StoredRun {
     throw new Error(`run "${runId}" has no valid previous event count`);
   }
   decodeBotSettingsViewV1(candidate.configurationSnapshot);
-  for (const key of STORED_RUN_OPTIONAL_KEYS) {
-    if (
-      candidate[key] !== undefined &&
-      !boundedString(candidate[key], 32_000, true)
-    ) {
-      throw new Error(`run "${runId}" has invalid ${key}`);
-    }
-  }
-  if (status === "completed" && candidate.responseText === undefined) {
-    throw new Error(`run "${runId}" has no response text`);
+  if (
+    candidate.responseText !== undefined &&
+    !boundedString(candidate.responseText, 64_000, true)
+  ) {
+    throw new Error(`run "${runId}" has invalid responseText`);
   }
   if (
-    (status === "failed" || status === "reconciliation-required") &&
-    candidate.failure === undefined
+    candidate.failure !== undefined &&
+    !boundedString(candidate.failure, 8_000)
   ) {
-    throw new Error(`run "${runId}" has no failure`);
+    throw new Error(`run "${runId}" has invalid failure`);
+  }
+  if (
+    status === "completed"
+      ? candidate.responseText === undefined || candidate.failure !== undefined
+      : candidate.responseText !== undefined
+  ) {
+    throw new Error(`run "${runId}" has invalid completion fields`);
+  }
+  if (
+    status === "failed" || status === "reconciliation-required"
+      ? candidate.failure === undefined
+      : candidate.failure !== undefined
+  ) {
+    throw new Error(`run "${runId}" has invalid failure fields`);
+  }
+  if (
+    (status === "reconciliation-required") !==
+    (phase === "reconciliation-required")
+  ) {
+    throw new Error(`run "${runId}" has inconsistent recovery state`);
   }
   return {
     runId,

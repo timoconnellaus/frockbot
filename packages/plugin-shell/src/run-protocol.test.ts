@@ -551,13 +551,13 @@ describe("client run protocol v1", () => {
       commandFingerprint: "fingerprint",
       sessionId: "user:primary",
       acceptedAt: timestamp,
-      input: "🧪".repeat(15_000),
+      input: "🧪".repeat(8_000),
       events: toolEvents(300),
       status: "failed",
       phase: "executing",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
-      failure: "💥".repeat(10_000),
+      failure: "💥".repeat(2_000),
     };
 
     const projected = projectClientRunListV1([stored]).runs[0];

@@ -102,7 +102,10 @@ function responseError(value: unknown, fallback: string): string {
     : fallback;
 }
 
-function waitForAdmissionLookup(delayMs: number): Promise<void> {
+function waitForAdmissionLookup(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<void> {
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -110,12 +113,14 @@ function waitForAdmissionLookup(delayMs: number): Promise<void> {
       settled = true;
       clearTimeout(timeout);
       document.removeEventListener("visibilitychange", visibilityChanged);
+      signal.removeEventListener("abort", finish);
       resolve();
     };
     const visibilityChanged = () => {
       if (!document.hidden) finish();
     };
     const timeout = setTimeout(finish, delayMs);
+    signal.addEventListener("abort", finish, { once: true });
     if (document.hidden) {
       document.addEventListener("visibilitychange", visibilityChanged);
     }
@@ -391,8 +396,13 @@ const web: Ref<FrockBotWebData> = ref({
               } Retrying…`;
             }
           },
-          wait: waitForAdmissionLookup,
+          wait: (delayMs) => waitForAdmissionLookup(delayMs, request.signal),
+          isCurrent: () =>
+            botProjection.isCurrent(projectionToken) && !request.signal.aborted,
         });
+        if (!lookup) {
+          return { accepted: true, runId: pendingRunId };
+        }
         if (lookup.state === "not-admitted") {
           return {
             accepted: false,

@@ -106,6 +106,24 @@ describe("Bot recovery", () => {
     expect(await storage.get<string>("active-run")).toBe("run-malformed");
   });
 
+  test("preserves an active marker whose referenced run is missing", async () => {
+    const storage = new MemoryStorage();
+    await storage.put("active-run", "run-missing");
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(contribution.listRuns({ schemaVersion: 1 })).resolves.toEqual({
+      schemaVersion: 1,
+      runs: [],
+      page: { truncated: false },
+    });
+
+    expect(await storage.get<string>("active-run")).toBe("run-missing");
+    expect(typeof storage.alarmAt).toBe("number");
+  });
+
   test("atomically restores the admitted notification intent after eviction", async () => {
     const storage = new MemoryStorage();
     const admittedSettings = {
@@ -841,14 +859,32 @@ describe("Bot recovery", () => {
     });
 
     await expect(
-      contribution.fenceRunAdmission({
-        schemaVersion: 1,
-        runId: "command-fenced",
-      }),
+      contribution.fenceRunAdmission(
+        { userId: "user-1", botId: "primary" },
+        {
+          schemaVersion: 1,
+          runId: "command-fenced",
+        },
+      ),
     ).resolves.toEqual({ schemaVersion: 1, state: "not-admitted" });
     expect(
       await storage.get<boolean>("run-admission-fence:command-fenced"),
     ).toBe(true);
+    expect(
+      await storage.get<{ userId: string; botId: string }>("identity"),
+    ).toEqual({
+      userId: "user-1",
+      botId: "primary",
+    });
+    await expect(
+      contribution.fenceRunAdmission(
+        { userId: "other-user", botId: "primary" },
+        { schemaVersion: 1, runId: "other-command" },
+      ),
+    ).rejects.toThrow("Bot authority does not match its durable identity");
+    expect(
+      await storage.get("run-admission-fence:other-command"),
+    ).toBeUndefined();
 
     await expect(
       contribution.run({
@@ -884,10 +920,13 @@ describe("Bot recovery", () => {
     });
 
     await expect(
-      contribution.fenceRunAdmission({
-        schemaVersion: 1,
-        runId: "command-running",
-      }),
+      contribution.fenceRunAdmission(
+        { userId: "user-1", botId: "primary" },
+        {
+          schemaVersion: 1,
+          runId: "command-running",
+        },
+      ),
     ).resolves.toMatchObject({
       schemaVersion: 1,
       state: "running",
@@ -939,7 +978,7 @@ describe("Bot recovery", () => {
         commandFingerprint: `fingerprint-${index}`,
         sessionId: "user:primary",
         acceptedAt,
-        input: "🧪".repeat(16_000),
+        input: "🧪".repeat(8_000),
         events: [],
         status: active ? "reconciliation-required" : "completed",
         phase: active ? "reconciliation-required" : "executing",

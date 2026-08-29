@@ -106,6 +106,43 @@ describe("Bot run terminal persistence", () => {
     expect(storage.values.has(keys.activeRun)).toBe(false);
   });
 
+  test("rejects malformed terminal events before clearing active work", async () => {
+    const storage = new MemoryRunStorage();
+    const malformed = {
+      ...result(),
+      events: [
+        {
+          type: "model/request",
+          seq: 0,
+          timestamp: "2026-08-28T00:00:00.000Z",
+          turn: 1,
+          step: 1,
+        },
+      ] as SessionEvent[],
+    };
+
+    await expect(
+      completeStoredRun(storage, keys, "run-1", [], malformed),
+    ).rejects.toThrow();
+
+    expect(storage.values.get(keys.run)).toMatchObject({ status: "running" });
+    expect(storage.values.get(keys.activeRun)).toBe("run-1");
+  });
+
+  test("persists responses up to the public wire limit", async () => {
+    const storage = new MemoryRunStorage();
+
+    await completeStoredRun(storage, keys, "run-1", [], {
+      ...result(),
+      text: "x".repeat(64_000),
+    });
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "completed",
+      responseText: "x".repeat(64_000),
+    });
+  });
+
   test("does not leave a success notification when completion rolls back", async () => {
     const storage = new MemoryRunStorage();
     storage.putFailure = new Error("completion transaction failed");

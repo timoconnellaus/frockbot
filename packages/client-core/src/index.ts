@@ -64,12 +64,7 @@ export interface ClientRun {
   admittedAt?: string;
   input: string;
   events: ClientTurnEvent[];
-  status:
-    | "running"
-    | "completed"
-    | "failed"
-    | "interrupted"
-    | "reconciliation-required";
+  status: "running" | "completed" | "failed" | "reconciliation-required";
   responseText?: string;
   failure?: string;
   recovery?: { action: "resume"; message: string };
@@ -95,6 +90,8 @@ export interface AgentTransport {
     nativeReturnNonce?: string;
   }): Promise<ClientStartConnectionResult>;
   listRuns?(): Promise<ClientRun[]>;
+  lookupRun?(runId: string): Promise<ClientRun | undefined>;
+  fenceRunAdmission?(runId: string): Promise<ClientRun | undefined>;
   reconcileRun?(runId: string): Promise<ClientTurnResponse>;
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;
   listNotifications?(): Promise<ClientNotificationIntent[]>;

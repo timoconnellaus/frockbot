@@ -1,4 +1,4 @@
-import type { SessionEvent } from "@frockbot/agent-core";
+import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
 import {
   requireStoredRunV1,
   type BotTurnCompletion,
@@ -30,14 +30,17 @@ export async function completeStoredRun(
   const stored = await storage.get<StoredRun>(keys.run);
   if (!stored) throw new Error(`run "${runId}" was not accepted`);
   const run = requireStoredRunV1(stored);
+  const events = result.events.map(decodeSessionEvent);
+  const latestEvents = [...previous, ...events].map(decodeSessionEvent);
+  const completed = requireStoredRunV1({
+    ...run,
+    events,
+    status: "completed",
+    responseText: result.text,
+  } satisfies StoredRun);
   const records: Record<string, unknown> = {
-    [keys.run]: {
-      ...run,
-      events: structuredClone(result.events),
-      status: "completed",
-      responseText: result.text,
-    } satisfies StoredRun,
-    [keys.latestEvents]: structuredClone([...previous, ...result.events]),
+    [keys.run]: structuredClone(completed),
+    [keys.latestEvents]: structuredClone(latestEvents),
   };
   if (result.notification) {
     records[`${keys.notificationPrefix}${result.notification.notificationId}`] =
@@ -59,14 +62,17 @@ export async function failStoredRun(
   if (!stored) return "missing";
   const run = requireStoredRunV1(stored);
   if (run.status === "completed") return "preserved-completion";
+  const decodedEvents = events.map(decodeSessionEvent);
+  const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
+  const failed = requireStoredRunV1({
+    ...run,
+    events: decodedEvents,
+    status: "failed",
+    failure,
+  } satisfies StoredRun);
   await storage.put({
-    [keys.run]: {
-      ...run,
-      events: structuredClone([...events]),
-      status: "failed",
-      failure,
-    } satisfies StoredRun,
-    [keys.latestEvents]: structuredClone([...previous, ...events]),
+    [keys.run]: structuredClone(failed),
+    [keys.latestEvents]: structuredClone(latestEvents),
   });
   if ((await storage.get<string>(keys.activeRun)) === runId) {
     await storage.delete(keys.activeRun);
@@ -87,14 +93,17 @@ export async function requireStoredRunReconciliation(
   const stored = await storage.get<StoredRun>(keys.run);
   if (!stored) throw new Error(`run "${runId}" was not accepted`);
   const run = requireStoredRunV1(stored);
+  const decodedEvents = events.map(decodeSessionEvent);
+  const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
+  const reconciliation = requireStoredRunV1({
+    ...run,
+    events: decodedEvents,
+    status: "reconciliation-required",
+    phase: "reconciliation-required",
+    failure,
+  } satisfies StoredRun);
   await storage.put({
-    [keys.run]: {
-      ...run,
-      events: structuredClone([...events]),
-      status: "reconciliation-required",
-      phase: "reconciliation-required",
-      failure,
-    } satisfies StoredRun,
-    [keys.latestEvents]: structuredClone([...previous, ...events]),
+    [keys.run]: structuredClone(reconciliation),
+    [keys.latestEvents]: structuredClone(latestEvents),
   });
 }

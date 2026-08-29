@@ -6,6 +6,7 @@ import type {
   ClientTurnResponse,
 } from "@frockbot/client-core";
 import {
+  decodeRunIdV1,
   requireStoredRunV1,
   type BotNotificationIntent,
   type BotTurnCompletion,
@@ -26,17 +27,12 @@ const MAX_NOTIFICATION_TITLE_BYTES = 512;
 const MAX_NOTIFICATION_BODY_BYTES = 2_000;
 const MAX_CLIENT_TURN_BYTES = 256_000;
 const MAX_CURSOR_LENGTH = 320;
-const RUN_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-
+const IDENTIFIER_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 export const CLIENT_RUN_PAGE_LIMIT = 32;
 export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
 export type ClientRunStatusV1 =
-  | "running"
-  | "completed"
-  | "failed"
-  | "interrupted"
-  | "reconciliation-required";
+  "running" | "completed" | "failed" | "reconciliation-required";
 
 export type ClientRunEventV1 =
   | {
@@ -466,7 +462,6 @@ function status(value: unknown): ClientRunStatusV1 {
     value !== "running" &&
     value !== "completed" &&
     value !== "failed" &&
-    value !== "interrupted" &&
     value !== "reconciliation-required"
   ) {
     throw new Error("run.status is invalid");
@@ -637,8 +632,12 @@ function decodeRun(value: unknown): ClientRun {
     "run",
   );
   if (run.schemaVersion !== 1) throw new Error("run.schemaVersion is invalid");
-  const runId = string(run, "runId", MAX_RUN_ID_LENGTH, "run");
-  if (!RUN_ID_PATTERN.test(runId)) throw new Error("run.runId is invalid");
+  let runId: string;
+  try {
+    runId = decodeRunIdV1(string(run, "runId", MAX_RUN_ID_LENGTH, "run"));
+  } catch {
+    throw new Error("run.runId is invalid");
+  }
   const admittedAt = string(run, "admittedAt", MAX_TIMESTAMP_LENGTH, "run");
   if (!Number.isFinite(Date.parse(admittedAt))) {
     throw new Error("run.admittedAt is invalid");
@@ -747,8 +746,12 @@ export function decodeClientTurnV1(input: unknown): ClientTurnResponse {
   if (wireBytes(input) > MAX_CLIENT_TURN_BYTES) {
     throw new Error("turn exceeds the wire byte limit");
   }
-  const runId = string(turn, "runId", MAX_RUN_ID_LENGTH, "turn");
-  if (!RUN_ID_PATTERN.test(runId)) throw new Error("turn.runId is invalid");
+  let runId: string;
+  try {
+    runId = decodeRunIdV1(string(turn, "runId", MAX_RUN_ID_LENGTH, "turn"));
+  } catch {
+    throw new Error("turn.runId is invalid");
+  }
   const notification =
     turn.notification === undefined
       ? undefined
@@ -794,7 +797,7 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     MAX_RUN_ID_LENGTH,
     "turn command",
   );
-  if (!RUN_ID_PATTERN.test(commandId)) {
+  if (!IDENTIFIER_PATTERN.test(commandId)) {
     throw new Error("turn command.commandId is invalid");
   }
   const text = wireString(
@@ -825,7 +828,7 @@ export function decodeClientNotificationAcknowledgementCommandV1(
     MAX_RUN_ID_LENGTH,
     "notification acknowledgement command",
   );
-  if (!RUN_ID_PATTERN.test(notificationId)) {
+  if (!IDENTIFIER_PATTERN.test(notificationId)) {
     throw new Error(
       "notification acknowledgement command.notificationId is invalid",
     );
@@ -852,8 +855,12 @@ export function decodeClientRunLookupQueryV1(
   if (query.schemaVersion !== 1) {
     throw new Error("run lookup query.schemaVersion is invalid");
   }
-  const runId = string(query, "runId", MAX_RUN_ID_LENGTH, "run lookup query");
-  if (!RUN_ID_PATTERN.test(runId)) {
+  let runId: string;
+  try {
+    runId = decodeRunIdV1(
+      string(query, "runId", MAX_RUN_ID_LENGTH, "run lookup query"),
+    );
+  } catch {
     throw new Error("run lookup query.runId is invalid");
   }
   return { schemaVersion: 1, runId };

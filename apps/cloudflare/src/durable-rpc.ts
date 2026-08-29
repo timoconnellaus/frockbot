@@ -1,3 +1,5 @@
+import { decodeRunIdV1 } from "@frockbot/plugin-shell/backend-contracts";
+
 type RpcValueDecoder = (value: unknown, label: string) => unknown;
 export type RpcJsonValue =
   | null
@@ -203,16 +205,24 @@ export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
     userId: rpcIdentifier,
     botId: rpcIdentifier,
     command: rpcObject({
-      runId: rpcIdentifier,
+      runId: rpcString(128),
       sessionId: rpcString(257),
       acceptedAt: rpcString(64),
-      text: rpcString(100_000),
+      text: rpcString(32_000),
     }),
   });
+  const command = request.command as DecodedBotRunRpcV1["command"];
+  command.runId = decodeRunIdV1(command.runId);
+  if (!Number.isFinite(Date.parse(command.acceptedAt))) {
+    throw new Error("RPC request.command.acceptedAt is invalid");
+  }
+  if (new TextEncoder().encode(command.text).byteLength > 32_000) {
+    throw new Error("RPC request.command.text is invalid");
+  }
   return {
     schemaVersion: 1,
     userId: request.userId as string,
     botId: request.botId as string,
-    command: request.command as DecodedBotRunRpcV1["command"],
+    command,
   };
 }
