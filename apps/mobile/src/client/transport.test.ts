@@ -58,7 +58,7 @@ describe("decodeTurnResponse", () => {
     expect(() => decodeTurnResponse(null)).toThrow("turn must be an object");
     expect(() =>
       decodeTurnResponse({ schemaVersion: 1, runId: 1, text: "x", events: [] }),
-    ).toThrow("turn.runId must be a bounded string");
+    ).toThrow("turn.runId is invalid");
     expect(() =>
       decodeTurnResponse({ schemaVersion: 1, runId: "r", text: "x" }),
     ).toThrow("turn.events must be a bounded array");
