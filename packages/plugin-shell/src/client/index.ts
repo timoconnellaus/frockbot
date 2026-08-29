@@ -429,6 +429,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     modelLabel: "Foundation · Dynamic Worker",
     settingsAvailable: true,
     connectionsAvailable: true,
+    composerContext: botId,
     messages: [],
     pluginCatalog: [],
     async loadBotSettings(): Promise<void> {

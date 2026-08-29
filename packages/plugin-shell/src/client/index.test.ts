@@ -9,6 +9,7 @@ const originalLocalStorage = Object.getOwnPropertyDescriptor(
   globalThis,
   "localStorage",
 );
+const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 
 function installMemoryStorage(): void {
   const values = new Map<string, string>();
@@ -33,6 +34,35 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(globalThis, "localStorage");
   }
+  if (originalWindow) {
+    Object.defineProperty(globalThis, "window", originalWindow);
+  } else {
+    Reflect.deleteProperty(globalThis, "window");
+  }
+});
+
+describe("composer hydration context", () => {
+  test("uses the selected Bot before settings hydration resolves", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=work" } },
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+      },
+      slot: () => () => {},
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    expect(provided.value.composerContext).toBe("work");
+    expect(provided.value.botSettings).toBeUndefined();
+  });
 });
 
 describe("detached Turn projection", () => {

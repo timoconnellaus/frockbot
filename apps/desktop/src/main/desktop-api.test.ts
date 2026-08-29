@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   decodeDesktopAuthAcknowledgement,
+  decodeDesktopAuthCallbackToken,
   decodeDesktopAuthEvent,
   decodeDesktopAuthRequest,
   decodeDesktopAuthUserResponse,
@@ -158,6 +159,23 @@ describe("desktop hosted protocol", () => {
     expect(() => decodeExternalAuthorizationAcknowledgement({})).toThrow(
       "invalid external authorization acknowledgement",
     );
+  });
+
+  test("decodes the exact Better Auth desktop callback target", () => {
+    expect(
+      decodeDesktopAuthCallbackToken(
+        "com.frockbot.desktop://auth/callback#token=token-1",
+      ),
+    ).toBe("token-1");
+    for (const value of [
+      "com.frockbot.desktop:/auth/callback#token=token-1",
+      "com.frockbot.desktop://auth/other#token=token-1",
+      "com.frockbot.desktop://other/callback#token=token-1",
+      "com.frockbot.desktop://auth/callback?next=/#token=token-1",
+      "com.frockbot.desktop://auth/callback#token=",
+    ]) {
+      expect(decodeDesktopAuthCallbackToken(value)).toBeUndefined();
+    }
   });
 
   test("strictly decodes every desktop auth request, response, and event", () => {

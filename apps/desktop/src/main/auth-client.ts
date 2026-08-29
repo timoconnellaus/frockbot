@@ -5,6 +5,7 @@ import { createAuthClient } from "better-auth/client";
 import type { Context } from "cordis";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import {
+  decodeDesktopAuthCallbackToken,
   decodeDesktopAuthRequest,
   decodeDesktopApiRequest,
   decodeDesktopExternalAuthorizationRequest,
@@ -148,19 +149,8 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
       });
     };
     const acceptProtocolUrl = (value: string) => {
-      let url: URL;
-      try {
-        url = new URL(value);
-      } catch {
-        return;
-      }
-      if (
-        url.protocol === `${AUTH_PROTOCOL}:` &&
-        url.pathname === "/auth/callback" &&
-        url.hash.startsWith("#token=")
-      ) {
-        const token = url.hash.slice("#token=".length);
-        if (!token) return;
+      const token = decodeDesktopAuthCallbackToken(value);
+      if (token !== undefined) {
         void authClient
           .authenticate({ token })
           .then(async (result) => {

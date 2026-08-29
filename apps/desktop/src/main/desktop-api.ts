@@ -63,6 +63,40 @@ export type DesktopAuthEventV1 =
     }
   | { schemaVersion: 1; type: "auth/error"; message: string };
 
+export function decodeDesktopAuthCallbackToken(
+  value: unknown,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    url.protocol !== "com.frockbot.desktop:" ||
+    url.hostname !== "auth" ||
+    url.pathname !== "/callback" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.search
+  ) {
+    return undefined;
+  }
+  const parameters = new URLSearchParams(url.hash.slice(1));
+  const token = parameters.get("token");
+  if (
+    parameters.size !== 1 ||
+    !token ||
+    token.length > 8_192 ||
+    /[\u0000-\u001f\u007f]/u.test(token)
+  ) {
+    return undefined;
+  }
+  return token;
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
