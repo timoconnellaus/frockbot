@@ -9,6 +9,7 @@ import {
   type AgentHandle,
   type AgentOptions,
   LlmRegistry,
+  type PersistSessionEvents,
   type SessionEvent,
   SessionStore,
   SystemPromptRegistry,
@@ -69,6 +70,8 @@ export interface FoundationRuntimeOptions {
   resolveContribution?: ContributionResolver;
   agentPackages?: readonly FoundationAgentPackage[];
   memory?: MemoryPluginConfig;
+  persistSessionEvents?: PersistSessionEvents;
+  systemPromptSection?: string;
 }
 
 export async function createFoundationRuntime(
@@ -83,8 +86,16 @@ export async function createFoundationRuntime(
     initialSessions: options.sessionEvents
       ? { [sessionId]: options.sessionEvents }
       : undefined,
+    persistEvents: options.persistSessionEvents,
   });
   await root.plugin(SystemPromptRegistry);
+  if (options.systemPromptSection?.trim()) {
+    const content = options.systemPromptSection.trim();
+    const settingsPromptPlugin: Plugin.Function = (ctx) =>
+      ctx.systemPrompt.register({ id: "bot-settings", render: () => content });
+    settingsPromptPlugin.inject = ["systemPrompt"];
+    await root.plugin(settingsPromptPlugin);
+  }
   await root.plugin(LlmRegistry);
   await root.plugin(ToolRegistry);
   await root.plugin(AgentRegistry);

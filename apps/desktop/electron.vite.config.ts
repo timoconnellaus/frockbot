@@ -8,6 +8,7 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const workspaceMainDependencies = [
   "@frockbot/application-foundation",
   "@frockbot/desktop-core",
+  "@frockbot/plugin-auth",
   "@frockbot/plugin-shell",
   "@frockbot/protocol",
 ];
@@ -25,9 +26,6 @@ export default defineConfig({
   },
   preload: {
     build: {
-      externalizeDeps: {
-        exclude: ["@better-auth/electron"],
-      },
       rollupOptions: {
         input: resolve(root, "src/preload/index.ts"),
       },

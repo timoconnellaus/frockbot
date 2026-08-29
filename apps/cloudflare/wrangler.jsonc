@@ -1,5 +1,5 @@
 {
-  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "frockbot-cloudflare",
   "account_id": "374784ce2915a597adcecf9bcb2c5ee6",
   "main": "src/index.ts",
@@ -49,12 +49,20 @@
         "name": "BOT_STATES",
         "class_name": "BotState",
       },
+      {
+        "name": "USER_CONFIGURATIONS",
+        "class_name": "UserConfiguration",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["BotState"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["UserConfiguration"],
     },
   ],
   "vars": {
@@ -107,6 +115,10 @@
           {
             "name": "BOT_STATES",
             "class_name": "BotState",
+          },
+          {
+            "name": "USER_CONFIGURATIONS",
+            "class_name": "UserConfiguration",
           },
         ],
       },

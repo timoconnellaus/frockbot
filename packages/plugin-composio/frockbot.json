@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 3,
+  "id": "composio",
+  "displayName": "Composio",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "contributions": {
+    "backend": [
+      { "entry": "./backend", "host": "gateway" },
+      { "entry": "./user-configuration", "host": "user" }
+    ],
+    "runtime": { "entry": "./agent" }
+  },
+  "permissions": ["connections:manage", "tools:execute"],
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [
+      {
+        "id": "gmail",
+        "displayName": "Gmail",
+        "allowMultiple": true,
+        "authorization": { "kind": "oauth2", "driverId": "composio" },
+        "capabilities": ["gmail-tools"]
+      }
+    ],
+    "capabilities": [
+      {
+        "id": "gmail-tools",
+        "kind": "tool",
+        "connectionTypes": ["gmail"]
+      }
+    ]
+  }
+}

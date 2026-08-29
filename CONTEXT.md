@@ -1,11 +1,11 @@
 # FrockBot
 
-FrockBot is a desktop environment for creating and operating persistent conversational bots whose behavior and interface can be extended through installable packages.
+FrockBot is a hosted application for creating and operating persistent conversational bots whose behavior and interface can be extended through installable packages and optional platform shells.
 
 ## Language
 
 **User**:
-A person who owns bots and one shared set of enabled, configured packages inherited by all of those bots.
+A person who owns Bots, installed Packages, authorized Connections, and preferences shared across their Bots. Shared availability does not grant a Bot authority to use a Capability.
 _Avoid_: Account, tenant
 
 **Bot**:
@@ -25,8 +25,24 @@ One run of an agent that begins when queued input is durably admitted and ends w
 _Avoid_: Message, request
 
 **Package**:
-A versioned, installable FrockBot distribution containing a manifest and one or more contributions.
+A versioned, installable FrockBot distribution containing a manifest and one or more Contributions.
 _Avoid_: Plugin, extension
+
+**Connection Type**:
+A Package-declared kind of external authorization, such as Composio Gmail.
+_Avoid_: Plugin, provider account
+
+**Connection**:
+A User-owned authorization for one external account or credential set.
+_Avoid_: Credential, integration, account
+
+**Capability**:
+Behavior made available by an installed Package, such as a model, tool set, memory provider, or notification adapter.
+_Avoid_: Plugin, feature
+
+**Assignment**:
+A Bot-owned grant selecting a Capability and, when required, a User-owned Connection.
+_Avoid_: Installation, connection
 
 **Contribution**:
 One environment-specific part of a package, such as desktop-host behavior, agent capability, or WebUI presentation.

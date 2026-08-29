@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { NormalizedModelRequest } from "@frockbot/agent-core";
+import { LlmRegistry, type NormalizedModelRequest } from "@frockbot/agent-core";
+import { Context } from "cordis";
 import { OpenAICompatibleProvider, requestToWire } from "./index.js";
 
 const request: NormalizedModelRequest = {
@@ -70,6 +71,7 @@ describe("OpenAICompatibleProvider", () => {
     ];
     let capturedUrl = "";
     let capturedAuthorization = "";
+    let capturedIdempotencyKey: string | null = null;
     const fetcher = async (
       input: string | URL | Request,
       init?: RequestInit,
@@ -77,6 +79,9 @@ describe("OpenAICompatibleProvider", () => {
       capturedUrl = String(input);
       capturedAuthorization =
         new Headers(init?.headers).get("authorization") ?? "";
+      capturedIdempotencyKey = new Headers(init?.headers).get(
+        "idempotency-key",
+      );
       return new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
@@ -104,6 +109,7 @@ describe("OpenAICompatibleProvider", () => {
 
     expect(capturedUrl).toBe("https://models.example/v1/chat/completions");
     expect(capturedAuthorization).toBe("Bearer secret");
+    expect(capturedIdempotencyKey).toBeNull();
     expect(events).toEqual([
       { type: "text-delta", text: "Checking " },
       {
@@ -116,6 +122,33 @@ describe("OpenAICompatibleProvider", () => {
       },
       { type: "finish", reason: "tool-calls" },
     ]);
+  });
+
+  test("reports retrieval unavailable without another provider request", async () => {
+    let requests = 0;
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () => {
+        requests += 1;
+        return Promise.resolve(new Response(null, { status: 500 }));
+      },
+    });
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    root.llm.register(provider);
+
+    const outcome = await root.llm.reconcile(
+      request,
+      new AbortController().signal,
+    );
+
+    expect(outcome).toEqual({
+      status: "unavailable",
+      reason:
+        'LLM provider "openai-compatible" does not support provider-bound retrieval',
+    });
+    expect(requests).toBe(0);
+    await root.fiber.dispose();
   });
 
   test("surfaces bounded HTTP errors", async () => {

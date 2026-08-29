@@ -200,10 +200,25 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=3
+TOTAL_STAGES=5
 
 GITHUB_REPOSITORY="timoconnellaus/frockbot"
 GITHUB_ENVIRONMENT="production"
+
+set_production_variable() {
+  local name="$1" value="$2"
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    if gh variable set "$name" \
+      --repo "$GITHUB_REPOSITORY" \
+      --env "$GITHUB_ENVIRONMENT" \
+      --body "$value" >/dev/null 2>&1; then
+      printf '  %s✓ set%s GitHub production variable %s\n' "$GREEN" "$RESET" "$name"
+      return
+    fi
+  fi
+  SKIPPED+=("GitHub production variable $name")
+  warn "could not set $name; authenticate gh and rerun this wizard"
+}
 
 set_production_secret() {
   local name="$1" value="$2"
@@ -256,6 +271,32 @@ ask_secret GOOGLE_CLIENT_SECRET "Paste the Google client secret:"
 }
 set_production_secret GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID"
 set_production_secret GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
+
+stage "Composio: project and Gmail Connection"
+say "Configure the backend project key and hosted Gmail Connect Link."
+open_url "https://dashboard.composio.dev/~/project/auth-configs"
+step "Create or select a Gmail auth config using Composio managed OAuth."
+step "Copy the Gmail auth config ID, then open project settings and copy the project API key."
+ask COMPOSIO_GMAIL_AUTH_CONFIG_ID "Paste the Gmail auth config ID:"
+ask_secret COMPOSIO_API_KEY "Paste the Composio project API key:"
+[[ -n "$COMPOSIO_GMAIL_AUTH_CONFIG_ID" && -n "$COMPOSIO_API_KEY" ]] || {
+  warn "Both Composio values are required"
+  exit 1
+}
+set_production_variable COMPOSIO_GMAIL_AUTH_CONFIG_ID "$COMPOSIO_GMAIL_AUTH_CONFIG_ID"
+set_production_secret COMPOSIO_API_KEY "$COMPOSIO_API_KEY"
+
+stage "Fly: Sprites Computer token"
+say "Provision the server-side credential used by the built-in Fly Computer provider."
+open_url "https://fly.io/dashboard"
+step "Open the organization that owns FrockBot Sprites and create a scoped Sprites access token."
+step "Copy the token. It remains a GitHub production secret and is never sent to clients."
+ask_secret SPRITES_TOKEN "Paste the Fly Sprites token:"
+[[ -n "$SPRITES_TOKEN" ]] || {
+  warn "A Fly Sprites token is required"
+  exit 1
+}
+set_production_secret SPRITES_TOKEN "$SPRITES_TOKEN"
 
 stage "GitHub: verify production configuration"
 say "The repository already has the account ID, auth secret, app URL, and D1 ID."

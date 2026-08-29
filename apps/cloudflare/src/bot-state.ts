@@ -1,63 +1,199 @@
 import { DurableObject } from "cloudflare:workers";
-import type { SessionEvent } from "@frockbot/agent-core";
-import type { StoredRun } from "./contracts.js";
-import { appendedSessionEvents } from "./durable-session.js";
+import {
+  compileFoundationApplication,
+  createFoundationBackendContributions,
+} from "@frockbot/application-foundation/runtime";
+import {
+  decodeBotConfigurationExecuteRpcV1,
+  decodeBotConfigurationReadRpcV1,
+} from "@frockbot/configuration-core";
+import type {
+  BotStateEnv,
+  OwnedBotTurnCommand,
+  ShellBotBackendContribution,
+} from "@frockbot/plugin-shell/backend";
+import { createShellBotBackendContribution } from "@frockbot/plugin-shell/backend";
+import {
+  decodeClientRunListQueryV1,
+  decodeClientRunLookupQueryV1,
+  type ClientRunListQueryV1,
+  type ClientRunLookupQueryV1,
+} from "@frockbot/plugin-shell/run-protocol";
+import {
+  decodeBotRunRpcV1,
+  decodeRpcEnvelopeV1,
+  rpcDecoded,
+  rpcIdentifier,
+  rpcObject,
+} from "./durable-rpc.js";
 
-const RUN_PREFIX = "run:";
-const ACTIVE_RUN_KEY = "active-run";
-const LATEST_EVENTS_KEY = "latest-events";
+export type { BotStateEnv, OwnedBotTurnCommand };
 
-export class BotState extends DurableObject<Record<string, never>> {
-  async acceptRun(
-    run: Omit<StoredRun, "events">,
-  ): Promise<StoredRun["events"]> {
-    const key = `${RUN_PREFIX}${run.runId}`;
-    return this.ctx.storage.transaction(async (transaction) => {
-      if (await transaction.get(key)) {
-        throw new Error(`run "${run.runId}" already exists`);
-      }
-      if (await transaction.get(ACTIVE_RUN_KEY)) {
-        throw new Error("bot already has an active run");
-      }
-      const latestEvents =
-        (await transaction.get<StoredRun["events"]>(LATEST_EVENTS_KEY)) ?? [];
-      await transaction.put({
-        [key]: { ...run, events: [] } satisfies StoredRun,
-        [ACTIVE_RUN_KEY]: run.runId,
+function decodeBotIdentityRpcV1(input: unknown): {
+  userId: string;
+  botId: string;
+} {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcIdentifier,
+  });
+  return {
+    userId: request.userId as string,
+    botId: request.botId as string,
+  };
+}
+
+export class BotState extends DurableObject<BotStateEnv> {
+  private mounted: Promise<ShellBotBackendContribution> | undefined;
+
+  private contribution(): Promise<ShellBotBackendContribution> {
+    if (!this.mounted) {
+      this.mounted = compileFoundationApplication().then((plan) => {
+        const contributions = createFoundationBackendContributions(plan, {
+          backendHost: "bot",
+          mount: (specifier) => {
+            if (specifier !== "@frockbot/plugin-shell/backend") {
+              throw new Error(`Unsupported Bot Contribution: ${specifier}`);
+            }
+            return createShellBotBackendContribution({
+              state: this.ctx,
+              env: this.env,
+            });
+          },
+        });
+        if (contributions.length !== 1) {
+          throw new Error("Foundation requires one Bot backend Contribution");
+        }
+        return contributions[0]!;
       });
-      return latestEvents;
-    });
+    }
+    return this.mounted;
   }
 
-  async completeRun(runId: string, events: SessionEvent[]): Promise<void> {
-    const key = `${RUN_PREFIX}${runId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
-      const [run, activeRunId, previousEvents] = await Promise.all([
-        transaction.get<StoredRun>(key),
-        transaction.get<string>(ACTIVE_RUN_KEY),
-        transaction.get<StoredRun["events"]>(LATEST_EVENTS_KEY),
-      ]);
-      if (!run) throw new Error(`run "${runId}" was not accepted`);
-      if (activeRunId !== runId) {
-        throw new Error(`run "${runId}" is not active`);
-      }
-      const runEvents = appendedSessionEvents(previousEvents ?? [], events);
-      await transaction.put({
-        [key]: { ...run, events: runEvents },
-        [LATEST_EVENTS_KEY]: events,
-      });
-      await transaction.delete(ACTIVE_RUN_KEY);
-    });
+  async readConfiguration(input: unknown) {
+    const request = decodeBotConfigurationReadRpcV1(input);
+    return (await this.contribution()).readConfiguration(request);
   }
 
-  async listRuns(): Promise<StoredRun[]> {
-    const entries = await this.ctx.storage.list<StoredRun>({
-      prefix: RUN_PREFIX,
+  async executeConfiguration(input: unknown) {
+    const request = decodeBotConfigurationExecuteRpcV1(input);
+    return (await this.contribution()).executeConfiguration(request);
+  }
+
+  async markConnectionUnavailable(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      compensation: rpcObject({
+        id: rpcIdentifier,
+        expectedGeneration: rpcIdentifier,
+      }),
     });
-    return [...entries.values()].sort(
-      (left, right) =>
-        left.acceptedAt.localeCompare(right.acceptedAt) ||
-        left.runId.localeCompare(right.runId),
+    return (await this.contribution()).markConnectionUnavailable(
+      { userId: request.userId as string, botId: request.botId as string },
+      request.connectionId as string,
+      request.compensation as { id: string; expectedGeneration: string },
     );
+  }
+
+  async resolveConfiguration(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    return (await this.contribution()).resolveConfiguration(identity);
+  }
+
+  async run(input: unknown) {
+    const request = decodeBotRunRpcV1(input);
+    return (await this.contribution()).run({
+      userId: request.userId,
+      botId: request.botId,
+      ...request.command,
+    });
+  }
+
+  async reconcileRun(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      runId: rpcIdentifier,
+    });
+    return (await this.contribution()).reconcileRun(
+      { userId: request.userId as string, botId: request.botId as string },
+      request.runId as string,
+    );
+  }
+
+  async listNotifications(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const contribution = await this.contribution();
+    await contribution.validateIdentity(identity);
+    return contribution.listNotifications();
+  }
+
+  async acknowledgeNotification(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      notificationId: rpcIdentifier,
+    });
+    const contribution = await this.contribution();
+    await contribution.validateIdentity({
+      userId: request.userId as string,
+      botId: request.botId as string,
+    });
+    return contribution.acknowledgeNotification(
+      request.notificationId as string,
+    );
+  }
+
+  async listRuns(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      query: rpcDecoded(decodeClientRunListQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const contribution = await this.contribution();
+    await contribution.validateIdentity(identity);
+    return contribution.listRuns(request.query as ClientRunListQueryV1);
+  }
+
+  async lookupRun(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      query: rpcDecoded(decodeClientRunLookupQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const contribution = await this.contribution();
+    await contribution.validateIdentity(identity);
+    return contribution.lookupRun(request.query as ClientRunLookupQueryV1);
+  }
+
+  async fenceRunAdmission(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcIdentifier,
+      query: rpcDecoded(decodeClientRunLookupQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const contribution = await this.contribution();
+    return contribution.fenceRunAdmission(
+      identity,
+      request.query as ClientRunLookupQueryV1,
+    );
+  }
+
+  async alarm(): Promise<void> {
+    await (await this.contribution()).alarm();
   }
 }

@@ -5,6 +5,183 @@ import type {
   SessionEventEnvelope,
   SessionEventInput,
 } from "./types.js";
+import { toolCallOccurrences, toolIntentMatches } from "./types.js";
+
+export interface ToolOccurrenceJournalEntry {
+  occurrence: ReturnType<typeof toolCallOccurrences>[number];
+  intent?: Extract<SessionEvent, { type: "tool/call" }>;
+  result?: Extract<SessionEvent, { type: "tool/result" }>;
+}
+
+export function validateToolOccurrenceJournal(
+  events: readonly SessionEvent[],
+): ReadonlyMap<string, ToolOccurrenceJournalEntry> {
+  const journal = new Map<string, ToolOccurrenceJournalEntry>();
+  const startedTurns = new Set<number>();
+  const startedSteps = new Set<string>();
+  let openTurn: number | undefined;
+  let openStep:
+    { turn: number; step: number; occurrences: Set<string> } | undefined;
+  for (const event of events) {
+    if (event.type === "turn/start") {
+      if (openTurn !== undefined) {
+        throw new Error(
+          `turn ${event.turn} started while turn ${openTurn} is open`,
+        );
+      }
+      if (startedTurns.has(event.turn)) {
+        throw new Error(`turn ${event.turn} started more than once`);
+      }
+      startedTurns.add(event.turn);
+      openTurn = event.turn;
+      continue;
+    }
+    if (event.type === "turn/end") {
+      if (openTurn !== event.turn) {
+        throw new Error(`turn ${event.turn} ended without its matching start`);
+      }
+      if (openStep) {
+        throw new Error(
+          `turn ${event.turn} ended while step ${openStep.step} is open`,
+        );
+      }
+      openTurn = undefined;
+      continue;
+    }
+    if (event.type === "step/start") {
+      if (openTurn !== event.turn) {
+        throw new Error(
+          `step ${event.turn}:${event.step} started outside its open turn`,
+        );
+      }
+      if (openStep) {
+        throw new Error(
+          `step ${event.turn}:${event.step} started while step ${openStep.turn}:${openStep.step} is open`,
+        );
+      }
+      const key = `${event.turn}:${event.step}`;
+      if (startedSteps.has(key)) {
+        throw new Error(`step ${key} started more than once`);
+      }
+      startedSteps.add(key);
+      openStep = {
+        turn: event.turn,
+        step: event.step,
+        occurrences: new Set(),
+      };
+      continue;
+    }
+    if (event.type === "step/end") {
+      if (
+        !openStep ||
+        openStep.turn !== event.turn ||
+        openStep.step !== event.step
+      ) {
+        throw new Error(
+          `step ${event.turn}:${event.step} ended without its matching start`,
+        );
+      }
+      const unsettled = [...openStep.occurrences]
+        .map((occurrenceId) => journal.get(occurrenceId)!)
+        .find((entry) => !entry.intent || !entry.result);
+      if (unsettled) {
+        throw new Error(
+          `tool occurrence "${unsettled.occurrence.occurrenceId}" was not settled before step end`,
+        );
+      }
+      openStep = undefined;
+      continue;
+    }
+    if (event.type === "assistant/message") {
+      if (event.toolCalls.length === 0) continue;
+      if (
+        !openStep ||
+        openStep.turn !== event.turn ||
+        openStep.step !== event.step
+      ) {
+        throw new Error(
+          `assistant tool calls for ${event.turn}:${event.step} are outside their open step`,
+        );
+      }
+      for (const occurrence of toolCallOccurrences(
+        event.turn,
+        event.step,
+        event.toolCalls,
+      )) {
+        if (journal.has(occurrence.occurrenceId)) {
+          throw new Error(
+            `tool occurrence "${occurrence.occurrenceId}" has multiple assistant calls`,
+          );
+        }
+        journal.set(occurrence.occurrenceId, { occurrence });
+        openStep.occurrences.add(occurrence.occurrenceId);
+      }
+      continue;
+    }
+    if (event.type !== "tool/call" && event.type !== "tool/result") continue;
+    if (
+      !openStep ||
+      openStep.turn !== event.turn ||
+      openStep.step !== event.step
+    ) {
+      throw new Error(
+        `tool occurrence "${event.occurrenceId}" is outside its open step`,
+      );
+    }
+    const entry = journal.get(event.occurrenceId);
+    if (
+      !entry ||
+      entry.occurrence.turn !== event.turn ||
+      entry.occurrence.step !== event.step ||
+      entry.occurrence.call.name !== event.name
+    ) {
+      throw new Error(
+        `tool occurrence "${event.occurrenceId}" does not match an assistant call`,
+      );
+    }
+    if (event.type === "tool/call") {
+      if (!toolIntentMatches(entry.occurrence.call, event)) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" input does not match its assistant call`,
+        );
+      }
+      if (entry.intent || entry.result) {
+        throw new Error(
+          `tool occurrence "${event.occurrenceId}" has duplicate intent`,
+        );
+      }
+      entry.intent = event;
+      continue;
+    }
+    if (!entry.intent) {
+      throw new Error(
+        `tool occurrence "${event.occurrenceId}" has a result without intent`,
+      );
+    }
+    if (entry.result) {
+      throw new Error(
+        `tool occurrence "${event.occurrenceId}" has duplicate results`,
+      );
+    }
+    entry.result = event;
+  }
+  return journal;
+}
+
+export function validateSettledToolOccurrenceJournal(
+  events: readonly SessionEvent[],
+): ReadonlyMap<string, ToolOccurrenceJournalEntry> {
+  const journal = validateToolOccurrenceJournal(events);
+  const unsettled = [...journal.values()].find(
+    (entry) => !entry.intent || !entry.result,
+  );
+  if (unsettled) {
+    throw new Error(
+      `tool occurrence "${unsettled.occurrence.occurrenceId}" is not durably settled`,
+    );
+  }
+  return journal;
+}
 
 declare module "cordis" {
   interface Context {
@@ -16,19 +193,28 @@ declare module "cordis" {
   }
 }
 
+export type PersistSessionEvents = (
+  sessionId: string,
+  events: readonly SessionEvent[],
+) => Promise<void>;
+
 export class Session {
   readonly id: string;
   #events: SessionEvent[] = [];
   #disposed = false;
   #emit: (envelope: SessionEventEnvelope) => void;
+  #persist?: PersistSessionEvents;
+  #pendingPersistence: Promise<void> = Promise.resolve();
 
   constructor(
     id: string,
     emit: (envelope: SessionEventEnvelope) => void,
     initialEvents: readonly SessionEvent[] = [],
+    persist?: PersistSessionEvents,
   ) {
     this.id = id;
     this.#emit = emit;
+    this.#persist = persist;
     if (initialEvents.length > 0) {
       for (const [index, event] of initialEvents.entries()) {
         if (event.seq !== index) {
@@ -66,11 +252,22 @@ export class Session {
     })) as SessionEvent[];
     this.#events.push(...events);
     for (const event of events) this.#emit({ sessionId: this.id, event });
+    if (this.#persist && events.length > 0) {
+      const durableEvents = structuredClone(events);
+      this.#pendingPersistence = this.#pendingPersistence.then(() =>
+        this.#persist?.(this.id, durableEvents),
+      );
+    }
     return events;
+  }
+
+  flush(): Promise<void> {
+    return this.#pendingPersistence;
   }
 
   deriveMessages(): LlmMessage[] {
     const messages: LlmMessage[] = [];
+    const journal = validateToolOccurrenceJournal(this.#events);
     for (const event of this.#events) {
       if (event.type === "user/message") {
         messages.push({ role: "user", content: event.text });
@@ -81,9 +278,10 @@ export class Session {
           toolCalls: event.toolCalls,
         });
       } else if (event.type === "tool/result") {
+        const call = journal.get(event.occurrenceId)!.occurrence.call;
         messages.push({
           role: "tool",
-          callId: event.callId,
+          callId: call.id,
           name: event.name,
           content: event.content,
           isError: event.isError,
@@ -102,19 +300,30 @@ export class Session {
   }
 
   reconcileInterrupted(): SessionEvent[] {
+    const repairs = this.interruptionRepairs(true);
+    return repairs.length > 0 ? this.appendBatch(repairs) : [];
+  }
+
+  reconcileForResume(): SessionEvent[] {
+    const repairs = this.interruptionRepairs(false);
+    return repairs.length > 0 ? this.appendBatch(repairs) : [];
+  }
+
+  private interruptionRepairs(closeTurn: boolean): SessionEventInput[] {
     let openTurn: number | undefined;
     let openStep: { turn: number; step: number } | undefined;
-    const calls = new Map<
-      string,
-      Extract<SessionEvent, { type: "tool/call" }>
-    >();
+    let openStepHasAssistant = false;
+    const unresolvedModelRequests = new Set<string>();
+    const journal = validateToolOccurrenceJournal(this.#events);
 
     for (const event of this.#events) {
       if (event.type === "turn/start") openTurn = event.turn;
       if (event.type === "turn/end" && openTurn === event.turn)
         openTurn = undefined;
-      if (event.type === "step/start")
+      if (event.type === "step/start") {
         openStep = { turn: event.turn, step: event.step };
+        openStepHasAssistant = false;
+      }
       if (
         event.type === "step/end" &&
         openStep?.turn === event.turn &&
@@ -122,34 +331,47 @@ export class Session {
       ) {
         openStep = undefined;
       }
-      if (event.type === "tool/call") calls.set(event.call.id, event);
-      if (event.type === "tool/result") calls.delete(event.callId);
+      if (event.type === "model/request") {
+        unresolvedModelRequests.add(event.request.requestId);
+      }
+      if (event.type === "assistant/message") {
+        unresolvedModelRequests.delete(event.requestId);
+        if (openStep?.turn === event.turn && openStep.step === event.step) {
+          openStepHasAssistant = true;
+        }
+      }
     }
 
     const repairs: SessionEventInput[] = [];
-    for (const event of calls.values()) {
+    for (const entry of journal.values()) {
+      if (!entry.intent || entry.result) continue;
+      const event = entry.intent;
       repairs.push({
         type: "tool/result",
         turn: event.turn,
         step: event.step,
-        callId: event.call.id,
-        name: event.call.name,
+        occurrenceId: event.occurrenceId,
+        name: event.name,
         content: "Interrupted before a durable result was recorded.",
         isError: true,
         status: "interrupted",
       });
     }
-    if (openStep) {
+    if (
+      openStep &&
+      unresolvedModelRequests.size === 0 &&
+      (closeTurn || !openStepHasAssistant)
+    ) {
       repairs.push({ type: "step/end", ...openStep, outcome: "interrupted" });
     }
-    if (openTurn !== undefined) {
+    if (closeTurn && openTurn !== undefined) {
       repairs.push({
         type: "turn/end",
         turn: openTurn,
         outcome: "interrupted",
       });
     }
-    return repairs.length > 0 ? this.appendBatch(repairs) : [];
+    return repairs;
   }
 
   dispose(): void {
@@ -164,15 +386,18 @@ export class Session {
 
 export interface SessionStoreConfig {
   initialSessions?: Readonly<Record<string, readonly SessionEvent[]>>;
+  persistEvents?: PersistSessionEvents;
 }
 
 export class SessionStore extends Service {
   private sessions = new Map<string, Session>();
   private initialSessions: Readonly<Record<string, readonly SessionEvent[]>>;
+  private persistEvents?: PersistSessionEvents;
 
   constructor(ctx: Context, config: SessionStoreConfig = {}) {
     super(ctx, "sessions");
     this.initialSessions = config.initialSessions ?? {};
+    this.persistEvents = config.persistEvents;
   }
 
   create(sessionId: string): Session {
@@ -185,6 +410,7 @@ export class SessionStore extends Service {
         this.ctx.emit("session/event", envelope);
       },
       this.initialSessions[sessionId],
+      this.persistEvents,
     );
     this.sessions.set(sessionId, session);
     return session;

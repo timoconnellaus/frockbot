@@ -1,8 +1,19 @@
-import { createFoundationRuntime } from "@frockbot/agent-runtime/runtime";
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
+import type {
+  ClientNotificationAcknowledgementV1,
+  ClientNotificationListV1,
+} from "@frockbot/client-core";
+import {
+  decodeClientNotificationAcknowledgementCommandV1,
+  decodeClientRunAdmissionFenceCommandV1,
+  decodeClientRunLookupQueryV1,
+  decodeClientRunListQueryV1,
+  decodeClientRunReconciliationCommandV1,
+  decodeClientTurnCommandV1,
+  type ClientRunLookupQueryV1,
+  type ClientTurnCommandV1,
+} from "@frockbot/plugin-shell/run-protocol";
 import type { UserApplicationEnv } from "./contracts.js";
-import { appendedSessionEvents } from "./durable-session.js";
 
 const BOT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const USER_ID_PATTERN = BOT_ID_PATTERN;
@@ -55,61 +66,12 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
-function parseStoredJson<T>(body: string): Promise<T> {
-  try {
-    return Promise.resolve(JSON.parse(body) as T);
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
-
-function memoryPluginConfig(
-  env: UserApplicationEnv,
-  botId: string,
-): MemoryPluginConfig {
-  return {
-    ownerId: env.DEPLOYMENT.userId,
-    botId,
-    bucket: {
-      get: async (key) => {
-        const body = await env.MEMORY.get(key);
-        return body === null
-          ? null
-          : {
-              text: () => Promise.resolve(body),
-              json: <T>() => parseStoredJson<T>(body),
-            };
-      },
-      put: (key, value, options) =>
-        env.MEMORY.put(key, value, options?.httpMetadata?.contentType),
-      delete: (key) => env.MEMORY.delete(key),
-      list: ({ prefix, cursor }) => env.MEMORY.list(prefix, cursor),
-    },
-    vectorize: {
-      upsert: (vectors) => env.MEMORY.vectorUpsert(vectors),
-      query: (vector, options) => env.MEMORY.vectorQuery(vector, options),
-      deleteByIds: (ids) => env.MEMORY.vectorDeleteByIds(ids),
-    },
-    ai: {
-      run: (model, input) => env.MEMORY.embed(model, input.text),
-    },
-  };
-}
-
-async function readPrompt(request: Request): Promise<string> {
+async function readTurnCommand(request: Request): Promise<ClientTurnCommandV1> {
   const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (contentLength > MAX_INPUT_LENGTH * 2)
+  if (contentLength > MAX_INPUT_LENGTH * 2) {
     throw new Error("prompt is too large");
-  const value: unknown = await request.json();
-  const text =
-    typeof value === "object" && value !== null && "text" in value
-      ? (value as { text?: unknown }).text
-      : undefined;
-  if (typeof text !== "string" || !text.trim()) {
-    throw new Error("prompt text is required");
   }
-  if (text.length > MAX_INPUT_LENGTH) throw new Error("prompt is too large");
-  return text.trim();
+  return decodeClientTurnCommandV1(await request.json());
 }
 
 export function createUserApplication() {
@@ -163,34 +125,221 @@ export function createUserApplication() {
         applicationHash: compiled.plan.applicationHash,
         packages: compiled.plan.packages.map((pkg) => ({
           id: pkg.id,
+          displayName: pkg.manifest.displayName,
           version: pkg.version,
           contributions: [
+            ...(pkg.manifest.contributions.backend ? ["backend"] : []),
             ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
             ...(pkg.manifest.contributions.client ? ["client"] : []),
             ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
           ],
+          configuration: pkg.manifest.configuration,
         })),
       });
     }
 
+    const notificationMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/notifications$/,
+    );
+    if (notificationMatch) {
+      let notificationBotId: string;
+      try {
+        notificationBotId = decodeURIComponent(notificationMatch[1]);
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      if (!BOT_ID_PATTERN.test(notificationBotId)) {
+        return jsonError(400, "invalid bot id");
+      }
+      if (request.method === "GET") {
+        return Response.json({
+          schemaVersion: 1,
+          notifications: await env.BOT_STATE.listNotifications({
+            schemaVersion: 1,
+            botId: notificationBotId,
+          }),
+        } satisfies ClientNotificationListV1);
+      }
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let command;
+      try {
+        command = decodeClientNotificationAcknowledgementCommandV1(
+          await request.json(),
+        );
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error
+            ? error.message
+            : "invalid notification acknowledgement",
+        );
+      }
+      await env.BOT_STATE.acknowledgeNotification({
+        schemaVersion: 1,
+        botId: notificationBotId,
+        notificationId: command.notificationId,
+      });
+      return Response.json({
+        schemaVersion: 1,
+        status: "acknowledged",
+      } satisfies ClientNotificationAcknowledgementV1);
+    }
+
     const turnMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/turns$/);
-    if (!turnMatch) return jsonError(404, "not found");
+    const lookupMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)$/,
+    );
+    const reconcileMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/reconcile$/,
+    );
+    const fenceMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/fence$/,
+    );
+    if (!turnMatch && !lookupMatch && !reconcileMatch && !fenceMatch) {
+      return jsonError(404, "not found");
+    }
     let botId: string;
     try {
-      botId = decodeURIComponent(turnMatch[1]);
+      botId = decodeURIComponent(
+        (turnMatch ?? lookupMatch ?? reconcileMatch ?? fenceMatch)![1],
+      );
     } catch {
       return jsonError(400, "invalid bot id");
     }
     if (!BOT_ID_PATTERN.test(botId)) return jsonError(400, "invalid bot id");
 
+    if (reconcileMatch) {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      let runId: string;
+      try {
+        runId = decodeURIComponent(reconcileMatch[2]);
+      } catch {
+        return jsonError(400, "invalid run id");
+      }
+      if (!BOT_ID_PATTERN.test(runId)) return jsonError(400, "invalid run id");
+      try {
+        decodeClientRunReconciliationCommandV1(await request.json());
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error
+            ? error.message
+            : "reconciliation action is invalid",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.reconcileRun({
+            schemaVersion: 1,
+            botId,
+            runId,
+          }),
+        );
+      } catch (error) {
+        return jsonError(
+          409,
+          error instanceof Error ? error.message : "Reconciliation failed",
+        );
+      }
+    }
+
+    if (fenceMatch) {
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let query: ClientRunLookupQueryV1;
+      try {
+        decodeClientRunAdmissionFenceCommandV1(await request.json());
+        query = decodeClientRunLookupQueryV1({
+          schemaVersion: 1,
+          runId: decodeURIComponent(fenceMatch[2]),
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid admission fence",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.fenceRunAdmission({
+            schemaVersion: 1,
+            botId,
+            query,
+          }),
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "admission fence failed",
+        );
+      }
+    }
+
+    if (lookupMatch) {
+      if (request.method !== "GET") {
+        return jsonError(405, "method not allowed");
+      }
+      let query: ClientRunLookupQueryV1;
+      try {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new Error("run lookup query does not accept URL parameters");
+        }
+        query = decodeClientRunLookupQueryV1({
+          schemaVersion: 1,
+          runId: decodeURIComponent(lookupMatch[2]),
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid run lookup",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.lookupRun({ schemaVersion: 1, botId, query }),
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "run lookup failed",
+        );
+      }
+    }
+
     if (request.method === "GET") {
-      return Response.json({ runs: await env.BOT_STATE.listRuns(botId) });
+      let query;
+      try {
+        const queryKeys = [...url.searchParams.keys()];
+        if (
+          queryKeys.some((key) => key !== "before") ||
+          url.searchParams.getAll("before").length > 1
+        ) {
+          throw new Error("run list query is invalid");
+        }
+        const before = url.searchParams.get("before");
+        query = decodeClientRunListQueryV1({
+          schemaVersion: 1,
+          ...(before === null ? {} : { before }),
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid run page",
+        );
+      }
+      return Response.json(
+        await env.BOT_STATE.listRuns({ schemaVersion: 1, botId, query }),
+      );
     }
     if (request.method !== "POST") return jsonError(405, "method not allowed");
 
-    let text: string;
+    let turnCommand: { commandId: string; text: string };
     try {
-      text = await readPrompt(request);
+      turnCommand = await readTurnCommand(request);
     } catch (error) {
       return jsonError(
         400,
@@ -198,38 +347,24 @@ export function createUserApplication() {
       );
     }
 
-    const runId = crypto.randomUUID();
-    const sessionId = `${env.DEPLOYMENT.userId}:${botId}`;
-    const sessionEvents = await env.BOT_STATE.acceptRun(botId, {
-      runId,
-      sessionId,
-      acceptedAt: new Date().toISOString(),
-      input: text,
-    });
-
-    const runtime = await createFoundationRuntime(undefined, {
-      botId,
-      agentId: botId,
-      sessionId,
-      sessionEvents,
-      application: await application,
-      memory: memoryPluginConfig(env, botId),
-    });
-
     try {
-      runtime.agent.agent.send(text);
-      await runtime.agent.agent.whenIdle();
-      const events = [...runtime.agent.agent.session.events];
-      const runEvents = appendedSessionEvents(sessionEvents, events);
-      await env.BOT_STATE.completeRun(botId, runId, events);
-      const message = runtime.agent.agent.session.deriveMessages().at(-1);
-      return Response.json({
-        runId,
-        text: message?.role === "assistant" ? message.content : "",
-        events: runEvents,
-      });
-    } finally {
-      await runtime.dispose();
+      return Response.json(
+        await env.BOT_STATE.run({
+          schemaVersion: 1,
+          botId,
+          command: {
+            runId: turnCommand.commandId,
+            sessionId: `${env.DEPLOYMENT.userId}:${botId}`,
+            acceptedAt: new Date().toISOString(),
+            text: turnCommand.text,
+          },
+        }),
+      );
+    } catch (error) {
+      return jsonError(
+        500,
+        error instanceof Error ? error.message : "Bot turn failed",
+      );
     }
   };
 }

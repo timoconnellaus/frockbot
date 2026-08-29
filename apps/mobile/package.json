@@ -18,6 +18,7 @@
     "@capacitor/preferences": "8.0.1",
     "@capacitor/share": "8.0.1",
     "@frockbot/client-core": "workspace:*",
+    "@frockbot/configuration-core": "workspace:*",
     "@frockbot/mobile-core": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",

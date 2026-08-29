@@ -1,10 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "id": "desktop-directory-picker",
   "displayName": "Desktop Directory Picker",
   "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {
-    "desktop": "./desktop"
+    "desktop": {
+      "entry": "./desktop",
+      "execution": "trusted-main",
+      "commands": []
+    }
   },
   "permissions": ["desktop:directory-picker"]
 }

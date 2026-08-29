@@ -19,9 +19,11 @@
   "dependencies": {
     "@frockbot/application-compiler": "workspace:*",
     "@frockbot/client-core": "workspace:*",
+    "@frockbot/configuration-core": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
+    "@frockbot/plugin-composio": "workspace:*",
     "@frockbot/plugin-computer": "workspace:*",
     "@frockbot/plugin-desktop-clipboard": "workspace:*",
     "@frockbot/plugin-desktop-directory-picker": "workspace:*",

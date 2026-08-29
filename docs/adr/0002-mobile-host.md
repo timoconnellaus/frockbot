@@ -4,7 +4,7 @@ status: accepted
 
 # Add mobile as a FrockBot host environment
 
-FrockBot will treat mobile as a fourth host environment beside Electron main, the agent utility process, and the WebUI renderer. `apps/mobile` ships a Capacitor application whose WebView reuses the web client architecture — plain Vue, no runtime Cordis client, a fetch-driven `FrockBotWebData` — as a thin client of the Cloudflare gateway, and whose bundle also owns a real Cordis root that mounts `mobile` contributions against device capabilities.
+FrockBot treats mobile as an optional platform shell around the hosted backend protocol. `apps/mobile` ships a Capacitor application whose WebView reuses the hosted Vue shell through a fetch-driven `FrockBotWebData`, while its bundle owns a Cordis root that mounts `mobile` Contributions against device capabilities. Agent execution and durable product authority remain in the cloud backend.
 
 ## Considered options
 
@@ -23,4 +23,4 @@ A bundled host cannot `import(specifier)` an arbitrary package path, so the mobi
 
 Device capability failures surface as ordinary command failures. Notification and clipboard permission denials, and an unavailable Web Share target, reject the invoked command rather than degrading silently, so the UI reports them like any other turn error.
 
-Open questions remain. Turns are request/response because the gateway has no streaming turn endpoint yet; the mobile client will need `assistant/chunk` delivery before long turns feel native. The package catalog is local to the device build, so a server-side catalog sync is required before a user's enabled packages follow them to mobile. Google sign-in currently opens the system browser and completes out of band; a deep-link callback into `com.frockbot.mobile` has not been wired, and the app accepts a pasted session token in the interim. LAN pairing with a desktop host is unspecified. Finally, app-store review of an application whose behavior is served from a gateway bundle is unresolved and may constrain how much of the interface can change without a new release.
+Turn commands use the shared hosted protocol. After an uncertain admission, the client repeatedly performs authenticated run lookup and, when no run is visible, durably fences that run ID before reopening submission; stopping or switching observers detaches this reconciliation without cancelling admitted backend work. The Plugins catalog is projected from the hosted immutable application manifest. Native OAuth/deep-link return is still absent, so mobile hides the Plugins surface instead of exposing a Connection flow it cannot complete. App-store review of an application whose behavior is served from a gateway bundle remains unresolved and may constrain how much of the interface can change without a new release.

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "auth",
   "displayName": "Authentication",
   "version": "0.0.1",
@@ -9,6 +9,11 @@
       "entry": "./client",
       "mounts": [{ "slot": "root", "order": 20000 }],
       "outlets": ["authenticated-root"]
+    },
+    "desktop": {
+      "entry": "./desktop",
+      "execution": "trusted-main",
+      "commands": []
     }
   },
   "permissions": ["identity:authenticate"]

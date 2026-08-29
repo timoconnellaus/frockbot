@@ -418,7 +418,10 @@ export class FlySpriteComputerProvider implements ComputerProvider {
   private readonly computers = new Map<string, FlyComputerPair>();
   private readonly userComputers = new Map<string, FlySpriteComputer>();
 
-  constructor(private readonly fixedComputer?: FlySpriteComputer) {}
+  constructor(
+    private readonly fixedComputer?: FlySpriteComputer,
+    private readonly token?: string,
+  ) {}
 
   private pair(target: ComputerTarget): FlyComputerPair {
     const key = `${target.userId}\0${target.botId}`;
@@ -430,6 +433,7 @@ export class FlySpriteComputerProvider implements ComputerProvider {
         let user = this.userComputers.get(target.userId);
         if (!user) {
           user = new FlySpriteComputer({
+            token: this.token,
             respectHumanControl: false,
             spriteName: flySpriteNameForUserStorage(target.userId),
           });
@@ -437,6 +441,7 @@ export class FlySpriteComputerProvider implements ComputerProvider {
         }
         pair = {
           bot: new FlySpriteComputer({
+            token: this.token,
             respectHumanControl: true,
             spriteName: flySpriteNameForTarget(target),
           }),
@@ -465,9 +470,12 @@ export class FlySpriteComputerProvider implements ComputerProvider {
 
 export function createFlySpriteProviderPlugin(
   computer?: FlySpriteComputer,
+  options?: { token?: string },
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) =>
-    ctx.computers.register(new FlySpriteComputerProvider(computer));
+    ctx.computers.register(
+      new FlySpriteComputerProvider(computer, options?.token),
+    );
   plugin.inject = ["computers"];
   return plugin;
 }

@@ -1,17 +1,23 @@
-import type {
-  Agent,
-  AgentFactory,
-  AgentHandle,
-  AgentInput,
-  AgentOptions,
-  AgentStatus,
-  LlmStreamEvent,
-  NormalizedModelRequest,
-  PreStepDecision,
-  Session,
-  StepOutcome,
-  ToolCall,
-  ToolExecutionResult,
+import {
+  type Agent,
+  type AgentFactory,
+  type AgentHandle,
+  type AgentInput,
+  type AgentOptions,
+  type AgentStatus,
+  LlmEffectNotStartedError,
+  type LlmStreamEvent,
+  type NormalizedModelRequest,
+  type PreStepDecision,
+  type Session,
+  type SessionEvent,
+  type StepOutcome,
+  type ToolCall,
+  type ToolCallOccurrence,
+  type ToolExecutionResult,
+  toolCallOccurrences,
+  validateSettledToolOccurrenceJournal,
+  validateToolOccurrenceJournal,
 } from "@frockbot/agent-core";
 import { type Context, Service } from "cordis";
 
@@ -31,6 +37,26 @@ interface ModelResponse {
   toolCalls: ToolCall[];
 }
 
+type ModelReconciliation =
+  | { status: "recovered"; response: ModelResponse }
+  | { status: "unavailable"; reason: string };
+
+class ModelEffectReconciliationRequiredError extends Error {
+  constructor(
+    readonly requestId: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ModelEffectReconciliationRequiredError";
+  }
+}
+
+function modelFailureMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : "Model provider response was lost";
+}
+
 class LoopAgent implements Agent {
   readonly id: string;
   readonly botId: string;
@@ -43,6 +69,7 @@ class LoopAgent implements Agent {
   #activity: Promise<void> = Promise.resolve();
   #controller: AbortController | undefined;
   #disposeRequested = false;
+  #resumeRequested = false;
 
   constructor(
     ctx: Context,
@@ -76,6 +103,20 @@ class LoopAgent implements Agent {
     this.#ctx.emit("agent/inbox/inserted", this, input);
     this.#wake();
     return input.messageId;
+  }
+
+  resume(): void {
+    if (this.#disposeRequested)
+      throw new Error(`agent "${this.id}" is disposing`);
+    if (
+      this.#status !== "idle" ||
+      this.#inbox.length > 0 ||
+      this.#resumeRequested
+    ) {
+      throw new Error(`agent "${this.id}" cannot resume while active`);
+    }
+    this.#resumeRequested = true;
+    this.#wake();
   }
 
   cancel(reason: "user" | "shutdown" = "user"): void {
@@ -120,7 +161,7 @@ class LoopAgent implements Agent {
     if (
       this.#disposeRequested ||
       this.#status !== "idle" ||
-      this.#inbox.length === 0
+      (this.#inbox.length === 0 && !this.#resumeRequested)
     ) {
       return;
     }
@@ -135,8 +176,286 @@ class LoopAgent implements Agent {
   }
 
   async #drive(signal: AbortSignal): Promise<void> {
+    if (this.#resumeRequested) {
+      this.#resumeRequested = false;
+      await this.#resumeTurn(signal);
+    }
     while (!signal.aborted && this.#inbox.length > 0) {
       await this.#runTurn(signal);
+    }
+  }
+
+  async #resumeTurn(signal: AbortSignal): Promise<void> {
+    let openTurn: number | undefined;
+    let latestStep = 0;
+    let latestStepStatus: "none" | "open" | "ended" = "none";
+    let latestStepOutcome: StepOutcome | undefined;
+    let unresolvedRequest: NormalizedModelRequest | undefined;
+    let definitiveNoEffect:
+      Extract<SessionEvent, { type: "model/effect-not-started" }> | undefined;
+    for (const event of this.session.events) {
+      if (event.type === "turn/start") {
+        openTurn = event.turn;
+        latestStep = 0;
+        latestStepStatus = "none";
+        latestStepOutcome = undefined;
+        unresolvedRequest = undefined;
+        definitiveNoEffect = undefined;
+      }
+      if (event.type === "turn/end" && event.turn === openTurn)
+        openTurn = undefined;
+      if (event.type === "step/start" && event.turn === openTurn) {
+        latestStep = Math.max(latestStep, event.step);
+        latestStepStatus = "open";
+        latestStepOutcome = undefined;
+      }
+      if (
+        event.type === "step/end" &&
+        event.turn === openTurn &&
+        event.step === latestStep
+      ) {
+        latestStepStatus = "ended";
+        latestStepOutcome = event.outcome;
+      }
+      if (event.type === "model/request" && event.turn === openTurn) {
+        unresolvedRequest = event.request;
+        definitiveNoEffect = undefined;
+      }
+      if (
+        event.type === "model/effect-not-started" &&
+        event.requestId === unresolvedRequest?.requestId
+      ) {
+        definitiveNoEffect = event;
+      }
+      if (
+        event.type === "assistant/message" &&
+        event.requestId === unresolvedRequest?.requestId
+      ) {
+        unresolvedRequest = undefined;
+        definitiveNoEffect = undefined;
+      }
+    }
+    if (openTurn === undefined)
+      throw new Error("session has no resumable turn");
+    let latestAssistant:
+      Extract<SessionEvent, { type: "assistant/message" }> | undefined;
+    for (const event of this.session.events) {
+      if (
+        event.type === "assistant/message" &&
+        event.turn === openTurn &&
+        event.step === latestStep
+      ) {
+        latestAssistant = event;
+      }
+    }
+    let openStep: number | undefined;
+    let turnOutcome: StepOutcome = "interrupted";
+    let reconciliationRequired = false;
+    try {
+      let nextStep = latestStep === 0 ? 1 : latestStep + 1;
+      if (unresolvedRequest) {
+        openStep = latestStep;
+        if (definitiveNoEffect) {
+          turnOutcome = "model-error";
+          this.#ctx.emit(
+            "agent/error",
+            this,
+            new LlmEffectNotStartedError(definitiveNoEffect.reason),
+          );
+          return;
+        }
+        const reconciliation = await this.#reconcileModel(
+          unresolvedRequest,
+          openTurn,
+          latestStep,
+          signal,
+        );
+        if (reconciliation.status === "unavailable") {
+          const existing = this.session.events.findLast(
+            (event) =>
+              event.type === "model/reconciliation-required" &&
+              event.requestId === unresolvedRequest.requestId,
+          );
+          if (
+            existing?.type !== "model/reconciliation-required" ||
+            existing.reason !== reconciliation.reason
+          ) {
+            this.session.append({
+              type: "model/reconciliation-required",
+              turn: openTurn,
+              step: latestStep,
+              requestId: unresolvedRequest.requestId,
+              reason: reconciliation.reason,
+            });
+          }
+          reconciliationRequired = true;
+          return;
+        }
+        const { response } = reconciliation;
+        this.session.append({
+          type: "assistant/message",
+          turn: openTurn,
+          step: latestStep,
+          requestId: response.request.requestId,
+          text: response.text,
+          toolCalls: response.toolCalls,
+        });
+        await this.session.flush();
+        if (response.toolCalls.length === 0) {
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step: latestStep,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          turnOutcome = "completed";
+          return;
+        }
+        await this.#executeTools(
+          toolCallOccurrences(openTurn, latestStep, response.toolCalls),
+          signal,
+        );
+        this.session.append({
+          type: "step/end",
+          turn: openTurn,
+          step: latestStep,
+          outcome: "completed",
+        });
+        openStep = undefined;
+        nextStep = latestStep + 1;
+      } else if (latestStepStatus === "open" && latestAssistant) {
+        openStep = latestStep;
+        if (latestAssistant.toolCalls.length === 0) {
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step: latestStep,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          turnOutcome = "completed";
+          return;
+        }
+        const occurrences = toolCallOccurrences(
+          openTurn,
+          latestStep,
+          latestAssistant.toolCalls,
+        );
+        const journal = validateToolOccurrenceJournal(this.session.events);
+        for (const occurrence of occurrences) {
+          const entry = journal.get(occurrence.occurrenceId);
+          if (entry?.intent && !entry.result) {
+            this.session.append({
+              type: "tool/result",
+              turn: openTurn,
+              step: latestStep,
+              occurrenceId: occurrence.occurrenceId,
+              name: occurrence.call.name,
+              content: "Interrupted before a durable result was recorded.",
+              isError: true,
+              status: "interrupted",
+            });
+          }
+        }
+        await this.session.flush();
+        await this.#executeTools(
+          occurrences.filter(
+            (occurrence) => !journal.get(occurrence.occurrenceId)?.intent,
+          ),
+          signal,
+        );
+        this.session.append({
+          type: "step/end",
+          turn: openTurn,
+          step: latestStep,
+          outcome: "completed",
+        });
+        openStep = undefined;
+        nextStep = latestStep + 1;
+      } else if (latestStepStatus === "ended") {
+        turnOutcome = latestStepOutcome ?? "interrupted";
+        if (
+          turnOutcome !== "completed" ||
+          !latestAssistant ||
+          latestAssistant.toolCalls.length === 0
+        ) {
+          return;
+        }
+      } else if (latestStepStatus === "open") {
+        nextStep = latestStep;
+      }
+      for (let step = nextStep; step <= this.#maxSteps; step += 1) {
+        signal.throwIfAborted();
+        openStep = step;
+        if (!(latestStepStatus === "open" && step === latestStep)) {
+          this.session.append({ type: "step/start", turn: openTurn, step });
+        }
+        const response = await this.#requestModel(openTurn, step, signal);
+        this.session.append({
+          type: "assistant/message",
+          turn: openTurn,
+          step,
+          requestId: response.request.requestId,
+          text: response.text,
+          toolCalls: response.toolCalls,
+        });
+        await this.session.flush();
+        if (response.toolCalls.length === 0) {
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          turnOutcome = "completed";
+          return;
+        }
+        await this.#executeTools(
+          toolCallOccurrences(openTurn, step, response.toolCalls),
+          signal,
+        );
+        this.session.append({
+          type: "step/end",
+          turn: openTurn,
+          step,
+          outcome: "completed",
+        });
+        openStep = undefined;
+      }
+      throw new Error(`agent exceeded ${this.#maxSteps} steps`);
+    } catch (error) {
+      if (signal.aborted) {
+        turnOutcome = "cancelled";
+      } else if (error instanceof ModelEffectReconciliationRequiredError) {
+        reconciliationRequired = true;
+        this.#ctx.emit("agent/error", this, error);
+      } else {
+        turnOutcome = "model-error";
+        this.#ctx.emit("agent/error", this, error);
+      }
+    } finally {
+      if (!reconciliationRequired) {
+        if (openStep !== undefined && turnOutcome === "cancelled") {
+          await this.#settleCancelledStep(openTurn, openStep);
+        }
+        if (openStep !== undefined) {
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step: openStep,
+            outcome: turnOutcome,
+          });
+        }
+        this.session.append({
+          type: "turn/end",
+          turn: openTurn,
+          outcome: turnOutcome,
+        });
+      }
+      await this.session.flush();
+      await this.#ctx.serial("agent/turn-stopping", this, openTurn);
     }
   }
 
@@ -148,11 +467,13 @@ class LoopAgent implements Agent {
       { type: "turn/start", turn },
       { type: "input/admitted", messageId: input.messageId, turn },
     ]);
+    await this.session.flush();
     this.#inbox.shift();
     this.#ctx.emit("agent/inbox/claimed", this, [input], turn);
 
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
+    let reconciliationRequired = false;
     try {
       let inputs = [input];
       for (let step = 1; step <= this.#maxSteps; step += 1) {
@@ -191,6 +512,7 @@ class LoopAgent implements Agent {
           text: response.text,
           toolCalls: response.toolCalls,
         });
+        await this.session.flush();
 
         if (response.toolCalls.length === 0) {
           this.session.append({
@@ -204,7 +526,10 @@ class LoopAgent implements Agent {
           return;
         }
 
-        await this.#executeTools(turn, step, response.toolCalls, signal);
+        await this.#executeTools(
+          toolCallOccurrences(turn, step, response.toolCalls),
+          signal,
+        );
         this.session.append({
           type: "step/end",
           turn,
@@ -218,20 +543,29 @@ class LoopAgent implements Agent {
     } catch (error) {
       if (signal.aborted) {
         turnOutcome = "cancelled";
+      } else if (error instanceof ModelEffectReconciliationRequiredError) {
+        reconciliationRequired = true;
+        this.#ctx.emit("agent/error", this, error);
       } else {
         turnOutcome = "model-error";
         this.#ctx.emit("agent/error", this, error);
       }
     } finally {
-      if (openStep !== undefined) {
-        this.session.append({
-          type: "step/end",
-          turn,
-          step: openStep,
-          outcome: turnOutcome,
-        });
+      if (!reconciliationRequired) {
+        if (openStep !== undefined && turnOutcome === "cancelled") {
+          await this.#settleCancelledStep(turn, openStep);
+        }
+        if (openStep !== undefined) {
+          this.session.append({
+            type: "step/end",
+            turn,
+            step: openStep,
+            outcome: turnOutcome,
+          });
+        }
+        this.session.append({ type: "turn/end", turn, outcome: turnOutcome });
       }
-      this.session.append({ type: "turn/end", turn, outcome: turnOutcome });
+      await this.session.flush();
       await this.#ctx.serial("agent/turn-stopping", this, turn);
     }
   }
@@ -241,6 +575,7 @@ class LoopAgent implements Agent {
     step: number,
     signal: AbortSignal,
   ): Promise<ModelResponse> {
+    validateSettledToolOccurrenceJournal(this.session.events);
     const assembly = await this.#ctx.systemPrompt.assemble({
       sessionId: this.session.id,
       provider: this.#options.provider,
@@ -264,11 +599,35 @@ class LoopAgent implements Agent {
         () => Promise.resolve(proposed),
       );
       this.session.append({ type: "model/request", turn, step, request });
+      await this.session.flush();
 
       try {
         return await this.#consumeStream(request, turn, step, signal);
       } catch (error) {
         if (signal.aborted) throw error;
+        if (!(error instanceof LlmEffectNotStartedError)) {
+          const reason = `Model response outcome is uncertain: ${modelFailureMessage(error)}`;
+          this.session.append({
+            type: "model/reconciliation-required",
+            turn,
+            step,
+            requestId: request.requestId,
+            reason,
+          });
+          await this.session.flush();
+          throw new ModelEffectReconciliationRequiredError(
+            request.requestId,
+            reason,
+          );
+        }
+        this.session.append({
+          type: "model/effect-not-started",
+          turn,
+          step,
+          requestId: request.requestId,
+          reason: modelFailureMessage(error),
+        });
+        await this.session.flush();
         const action = await this.#ctx.waterfall(
           "agent/request-error",
           this,
@@ -289,8 +648,81 @@ class LoopAgent implements Agent {
   ): Promise<ModelResponse> {
     let text = "";
     const toolCalls: ToolCall[] = [];
-    for await (const event of this.#ctx.llm.stream(request, signal)) {
+    let receivedProviderEvent = false;
+    try {
+      for await (const event of this.#ctx.llm.stream(request, signal)) {
+        receivedProviderEvent = true;
+        signal.throwIfAborted();
+        this.#applyStreamEvent(
+          event,
+          request.requestId,
+          turn,
+          step,
+          toolCalls,
+          (delta) => {
+            text += delta;
+          },
+        );
+      }
+    } catch (error) {
+      if (receivedProviderEvent && error instanceof LlmEffectNotStartedError) {
+        throw new Error(
+          "Model provider reported no effect after returning response data",
+        );
+      }
+      throw error;
+    }
+    return { request, text, toolCalls };
+  }
+
+  async #reconcileModel(
+    request: NormalizedModelRequest,
+    turn: number,
+    step: number,
+    signal: AbortSignal,
+  ): Promise<ModelReconciliation> {
+    const reconciliation = await this.#ctx.llm.reconcile(request, signal);
+    if (reconciliation.status === "unavailable") return reconciliation;
+    const durablePrefix = this.session.events.flatMap((event) =>
+      event.type === "assistant/chunk" &&
+      event.turn === turn &&
+      event.step === step &&
+      event.requestId === request.requestId
+        ? [{ type: "text-delta" as const, text: event.text }]
+        : [],
+    );
+    const recoveredTextDeltas = reconciliation.events.flatMap((event) =>
+      event.type === "text-delta" ? [event] : [],
+    );
+    const prefixMatches = durablePrefix.every((event, index) => {
+      const recovered = recoveredTextDeltas[index];
+      return recovered?.text === event.text;
+    });
+    if (!prefixMatches || recoveredTextDeltas.length < durablePrefix.length) {
+      return {
+        status: "unavailable",
+        reason: `Provider-bound retrieval diverged from durable response prefix for request "${request.requestId}"`,
+      };
+    }
+    const finishIndexes = reconciliation.events.flatMap((event, index) =>
+      event.type === "finish" ? [index] : [],
+    );
+    if (
+      finishIndexes.length !== 1 ||
+      finishIndexes[0] !== reconciliation.events.length - 1
+    ) {
+      return {
+        status: "unavailable",
+        reason: `Provider-bound retrieval returned an invalid event structure for request "${request.requestId}"`,
+      };
+    }
+    let text = "";
+    const toolCalls: ToolCall[] = [];
+    let textDeltaIndex = 0;
+    for (const event of reconciliation.events) {
       signal.throwIfAborted();
+      const journalTextDelta =
+        event.type !== "text-delta" || textDeltaIndex >= durablePrefix.length;
       this.#applyStreamEvent(
         event,
         request.requestId,
@@ -300,9 +732,14 @@ class LoopAgent implements Agent {
         (delta) => {
           text += delta;
         },
+        journalTextDelta,
       );
+      if (event.type === "text-delta") textDeltaIndex += 1;
     }
-    return { request, text, toolCalls };
+    return {
+      status: "recovered",
+      response: { request, text, toolCalls },
+    };
   }
 
   #applyStreamEvent(
@@ -312,29 +749,31 @@ class LoopAgent implements Agent {
     step: number,
     toolCalls: ToolCall[],
     appendText: (text: string) => void,
+    journal = true,
   ): void {
     if (event.type === "text-delta") {
       appendText(event.text);
-      this.session.append({
-        type: "assistant/chunk",
-        turn,
-        step,
-        requestId,
-        text: event.text,
-      });
+      if (journal) {
+        this.session.append({
+          type: "assistant/chunk",
+          turn,
+          step,
+          requestId,
+          text: event.text,
+        });
+      }
     } else if (event.type === "tool-call") {
       toolCalls.push(event.call);
     }
   }
 
   async #executeTools(
-    turn: number,
-    step: number,
-    calls: ToolCall[],
+    occurrences: readonly ToolCallOccurrence[],
     signal: AbortSignal,
   ): Promise<void> {
-    for (const call of calls) {
+    for (const occurrence of occurrences) {
       signal.throwIfAborted();
+      const { call, occurrenceId, turn, step } = occurrence;
       const context = {
         botId: this.botId,
         agentId: this.id,
@@ -342,25 +781,92 @@ class LoopAgent implements Agent {
         signal,
       };
       const preparation = await this.#ctx.tools.prepare(call, context);
-      this.session.append({ type: "tool/call", turn, step, call });
+      signal.throwIfAborted();
+      this.session.append({
+        type: "tool/call",
+        turn,
+        step,
+        occurrenceId,
+        name: call.name,
+        input: call.input,
+      });
+      await this.session.flush();
       let result: ToolExecutionResult;
       if (preparation.kind === "denied") {
         result = preparation.result;
         this.#ctx.emit("tools/result", call, result);
       } else {
-        result = await this.#ctx.tools.executePrepared(preparation, context);
+        signal.throwIfAborted();
+        try {
+          result = await this.#ctx.tools.executePrepared(preparation, context);
+        } catch (error) {
+          result = {
+            content:
+              error instanceof Error ? error.message : "Tool execution failed",
+            isError: true,
+          };
+          this.#ctx.emit("tools/result", call, result);
+        }
       }
       this.session.append({
         type: "tool/result",
         turn,
         step,
-        callId: call.id,
+        occurrenceId,
         name: call.name,
         content: result.content,
         isError: result.isError,
         status: "completed",
       });
     }
+  }
+
+  async #settleCancelledStep(turn: number, step: number): Promise<void> {
+    const assistant = this.session.events.findLast(
+      (event) =>
+        event.type === "assistant/message" &&
+        event.turn === turn &&
+        event.step === step,
+    );
+    if (
+      !assistant ||
+      assistant.type !== "assistant/message" ||
+      assistant.toolCalls.length === 0
+    ) {
+      return;
+    }
+
+    const journal = validateToolOccurrenceJournal(this.session.events);
+    for (const occurrence of toolCallOccurrences(
+      turn,
+      step,
+      assistant.toolCalls,
+    )) {
+      const entry = journal.get(occurrence.occurrenceId);
+      if (!entry?.intent) {
+        this.session.append({
+          type: "tool/call",
+          turn,
+          step,
+          occurrenceId: occurrence.occurrenceId,
+          name: occurrence.call.name,
+          input: occurrence.call.input,
+        });
+      }
+      if (!entry?.result) {
+        this.session.append({
+          type: "tool/result",
+          turn,
+          step,
+          occurrenceId: occurrence.occurrenceId,
+          name: occurrence.call.name,
+          content: "Cancelled before tool execution started.",
+          isError: true,
+          status: "interrupted",
+        });
+      }
+    }
+    await this.session.flush();
   }
 }
 

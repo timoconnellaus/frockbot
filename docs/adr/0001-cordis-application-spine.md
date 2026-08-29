@@ -4,7 +4,7 @@ status: accepted
 
 # Make Cordis the application spine
 
-FrockBot will use pinned upstream Cordis as the composition and lifecycle spine in Electron main, the agent utility process, and the Cordis WebUI/Vue renderer. FrockBot will own a custom event-sourced agent loop rather than retaining Pi or consuming DeepSeek Harness as its runtime, because the product requires every host, agent, and UI capability to participate in one plugin-oriented architecture while preserving explicit process seams.
+FrockBot uses pinned upstream Cordis as the composition and lifecycle spine in the hosted backend, Cordis WebUI/Vue client, and optional native platform shells. FrockBot owns a custom event-sourced agent loop rather than retaining Pi or consuming DeepSeek Harness as its runtime, because the product requires every host, Agent, and UI capability to participate in one plugin-oriented architecture while preserving explicit runtime seams.
 
 ## Considered options
 
@@ -15,4 +15,4 @@ FrockBot will use pinned upstream Cordis as the composition and lifecycle spine 
 
 ## Consequences
 
-The Pi-backed React application remains a rollback point until the custom loop and Cordis WebUI reach parity, then is removed. Each process owns an independent Cordis root; cross-process communication uses versioned DTOs rather than service proxies. Cordis lifecycle isolation is never treated as a security boundary, and exact upstream package pins must pass Electron, Bun, loader, WebUI, and disposal proofs before product capabilities build on them.
+The Pi-backed React application was retained at Git commit `0d5a41e` as a rollback point after the custom loop and Cordis WebUI reached parity. Each runtime owns an independent Cordis root; cross-runtime communication uses versioned DTOs rather than service proxies. Cordis lifecycle isolation is never treated as a security boundary, and exact upstream package pins must pass Electron, Bun, loader, WebUI, and disposal proofs before product capabilities build on them.

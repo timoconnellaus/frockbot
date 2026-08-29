@@ -1,3 +1,9 @@
+import {
+  ConfigurationConflictError,
+  ConfigurationDecodeError,
+  decodeConfigurationCommandV1,
+  decodeConfigurationQueryV1,
+} from "@frockbot/configuration-core";
 import type {
   GatewayDependencies,
   UserApplicationIdentity,
@@ -23,6 +29,19 @@ export function applicationDeploymentId(
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+function decodeBotPathSegment(value: string): string {
+  let botId: string;
+  try {
+    botId = decodeURIComponent(value);
+  } catch {
+    throw new ConfigurationDecodeError("invalid bot id");
+  }
+  if (!ID_PATTERN.test(botId)) {
+    throw new ConfigurationDecodeError("invalid bot id");
+  }
+  return botId;
 }
 
 interface DevelopmentIdentity {
@@ -90,6 +109,16 @@ export function createGateway(dependencies: GatewayDependencies) {
       return dependencies.auth.handler(request);
     }
 
+    for (const contribution of dependencies.backendContributions ?? []) {
+      const response = await contribution.publicRoute?.(request, url, {
+        client:
+          request.headers.get("x-frockbot-client") === "desktop"
+            ? "desktop"
+            : "browser",
+      });
+      if (response) return response;
+    }
+
     const development = dependencies.allowDevelopmentIdentity
       ? developmentIdentity(request)
       : { persist: false };
@@ -101,6 +130,126 @@ export function createGateway(dependencies: GatewayDependencies) {
       request.method === "GET" && PUBLIC_ASSET_PATHS.has(url.pathname);
     if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
     if (!userId) return jsonError(401, "authentication required");
+    if (request.method === "GET" && url.pathname === "/api/identity") {
+      return Response.json({ schemaVersion: 1, userId });
+    }
+
+    for (const contribution of dependencies.backendContributions ?? []) {
+      const response = await contribution.route(request, url, {
+        userId,
+        client:
+          request.headers.get("x-frockbot-client") === "desktop"
+            ? "desktop"
+            : "browser",
+      });
+      if (response) return response;
+    }
+
+    const botSettingsMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/settings$/,
+    );
+    const isUserSettings = url.pathname === "/api/settings";
+    if (isUserSettings || botSettingsMatch) {
+      try {
+        const pathBotId = botSettingsMatch
+          ? decodeBotPathSegment(botSettingsMatch[1])
+          : undefined;
+        if (request.method === "GET") {
+          if (!botSettingsMatch) {
+            return Response.json(
+              await dependencies
+                .userConfigurationFor(userId)
+                .readConfiguration({ schemaVersion: 1, userId }),
+            );
+          }
+          const query = decodeConfigurationQueryV1({
+            schemaVersion: 1,
+            type: "bot/get",
+            botId: pathBotId,
+          });
+          if (query.type !== "bot/get") {
+            throw new ConfigurationDecodeError(
+              "Bot settings require a Bot query",
+            );
+          }
+          return Response.json(
+            await dependencies
+              .botConfigurationFor(userId, query.botId)
+              .readConfiguration({
+                schemaVersion: 1,
+                userId,
+                botId: query.botId,
+              }),
+          );
+        }
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const command = decodeConfigurationCommandV1(await request.json());
+        if (
+          botSettingsMatch &&
+          "botId" in command &&
+          command.botId !== pathBotId
+        ) {
+          return jsonError(400, "Bot command does not match the request path");
+        }
+        if (botSettingsMatch && !("botId" in command)) {
+          return jsonError(400, "Bot settings require a Bot command");
+        }
+        if (isUserSettings && "botId" in command) {
+          return jsonError(400, "User settings require a User command");
+        }
+        if ("botId" in command) {
+          return Response.json(
+            await dependencies
+              .botConfigurationFor(userId, command.botId)
+              .executeConfiguration({
+                schemaVersion: 1,
+                userId,
+                botId: command.botId,
+                command,
+              }),
+          );
+        }
+        return Response.json(
+          await dependencies.userConfigurationFor(userId).executeConfiguration({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof ConfigurationDecodeError) {
+          return jsonError(400, error.message);
+        }
+        if (
+          error instanceof ConfigurationConflictError ||
+          (typeof error === "object" &&
+            error !== null &&
+            "name" in error &&
+            error.name === "ConfigurationConflictError" &&
+            "currentRevision" in error &&
+            typeof error.currentRevision === "number")
+        ) {
+          const currentRevision =
+            error instanceof ConfigurationConflictError
+              ? error.currentRevision
+              : error.currentRevision;
+          return Response.json(
+            {
+              error: `configuration revision is ${currentRevision}`,
+              code: "revision-conflict",
+              currentRevision,
+            },
+            { status: 409 },
+          );
+        }
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "Configuration failed",
+        );
+      }
+    }
 
     let applicationHash: string;
     let workerId: string;
@@ -124,7 +273,6 @@ export function createGateway(dependencies: GatewayDependencies) {
         globalOutbound: null,
         env: {
           BOT_STATE: dependencies.botStateFor(userId),
-          MEMORY: dependencies.memoryFor(),
           DEPLOYMENT: identity,
         },
         limits: { cpuMs: 30_000, subRequests: 1_000 },
@@ -135,9 +283,19 @@ export function createGateway(dependencies: GatewayDependencies) {
     const forwardedHeaders = new Headers(request.headers);
     forwardedHeaders.delete("x-frockbot-user-id");
     forwardedHeaders.set("x-frockbot-deployment", workerId);
+    const forwardedUrl = URL.parse(request.url);
+    if (!forwardedUrl) return jsonError(400, "invalid request URL");
+    if (development.persist) forwardedUrl.searchParams.delete("as_user");
+    const forwardedRequest = new Request(request, {
+      headers: forwardedHeaders,
+    });
     const response = await worker
       .getEntrypoint()
-      .fetch(new Request(request, { headers: forwardedHeaders }));
+      .fetch(
+        development.persist
+          ? new Request(forwardedUrl, forwardedRequest)
+          : forwardedRequest,
+      );
     if (!development.persist) return response;
     const persisted = new Response(response.body, response);
     persisted.headers.append(

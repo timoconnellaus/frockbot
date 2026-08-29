@@ -2,9 +2,28 @@
 
 import { foundationClientPlugins } from "@frockbot/application-foundation/client";
 import {
+  decodeBotSettingsViewV1,
+  decodeOperationReceiptV1,
+  decodeUserSettingsViewV1,
+  type ConfigurationCommandV1,
+  type ConfigurationQueryV1,
+  type RevokeConnectionCommandV1,
+  type StartConnectionCommandV1,
+} from "@frockbot/configuration-core";
+import {
   ClientApplication,
+  decodeAcknowledgement,
+  decodeNotificationList,
+  decodeRevocationResult,
+  decodeStartConnectionResult,
   type ClientTurnResponse,
 } from "@frockbot/client-core";
+import {
+  decodeClientRunListV1,
+  decodeClientRunLookupV1,
+  decodeClientTurnV1,
+} from "@frockbot/plugin-shell/run-protocol";
+
 function selectedBotId(): string {
   try {
     return new URL(window.location.href).searchParams.get("bot") ?? "default";
@@ -14,23 +33,108 @@ function selectedBotId(): string {
 }
 
 const botId = selectedBotId();
+const AUTHENTICATED_USER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
+
+function requireAuthenticatedUserId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !AUTHENTICATED_USER_ID_PATTERN.test(value) ||
+    value === "anonymous"
+  ) {
+    throw new Error("Authenticated User identity is unavailable");
+  }
+  return value;
+}
+
+function decodeAuthenticatedIdentity(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Authenticated User identity is unavailable");
+  }
+  const identity = value as Record<string, unknown>;
+  if (
+    identity.schemaVersion !== 1 ||
+    Object.keys(identity).length !== 2 ||
+    !("userId" in identity)
+  ) {
+    throw new Error("Authenticated User identity is unavailable");
+  }
+  return requireAuthenticatedUserId(identity.userId);
+}
+
+async function apiRequest(
+  path: string,
+  method: "GET" | "POST" = "GET",
+  body?: string,
+): Promise<unknown> {
+  const response = window.frockbotDesktop
+    ? await window.frockbotDesktop
+        .request({ schemaVersion: 1, path, method, body })
+        .then(
+          (result: DesktopApiResponse) =>
+            new Response(result.body, {
+              status: result.status,
+              headers: result.contentType
+                ? { "content-type": result.contentType }
+                : undefined,
+            }),
+        )
+    : await fetch(path, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body,
+      });
+  const value: unknown = await response.json();
+  if (!response.ok) {
+    const error =
+      typeof value === "object" &&
+      value !== null &&
+      "error" in value &&
+      typeof value.error === "string"
+        ? value.error
+        : "Hosted request failed";
+    const failure = new Error(error) as Error & { definitive?: boolean };
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "definitive" in value &&
+      value.definitive === true
+    ) {
+      failure.definitive = true;
+    }
+    throw failure;
+  }
+  return value;
+}
+
 const application = new ClientApplication({
-  async turn(text: string, signal: AbortSignal): Promise<ClientTurnResponse> {
+  async turn(
+    text: string,
+    signal: AbortSignal,
+    commandId: string,
+  ): Promise<ClientTurnResponse> {
     signal.throwIfAborted();
     const path = `/api/bots/${encodeURIComponent(botId)}/turns`;
-    const body = JSON.stringify({ text });
+    const body = JSON.stringify({ schemaVersion: 1, text, commandId });
     const response = window.frockbotDesktop
-      ? await window.frockbotDesktop
-          .request({ path, method: "POST", body })
-          .then(
-            (result: DesktopApiResponse) =>
-              new Response(result.body, {
-                status: result.status,
-                headers: result.contentType
-                  ? { "content-type": result.contentType }
-                  : undefined,
-              }),
-          )
+      ? await Promise.race([
+          window.frockbotDesktop
+            .request({ schemaVersion: 1, path, method: "POST", body })
+            .then(
+              (result: DesktopApiResponse) =>
+                new Response(result.body, {
+                  status: result.status,
+                  headers: result.contentType
+                    ? { "content-type": result.contentType }
+                    : undefined,
+                }),
+            ),
+          new Promise<never>((_, reject) => {
+            const aborted = () =>
+              reject(new DOMException("Aborted", "AbortError"));
+            if (signal.aborted) aborted();
+            else signal.addEventListener("abort", aborted, { once: true });
+          }),
+        ])
       : await fetch(path, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -38,11 +142,139 @@ const application = new ClientApplication({
           signal,
         });
     signal.throwIfAborted();
-    const result = (await response.json()) as ClientTurnResponse & {
-      error?: string;
-    };
-    if (!response.ok) throw new Error(result.error ?? "Agent request failed");
-    return result;
+    const result: unknown = await response.json();
+    if (!response.ok) {
+      const error =
+        typeof result === "object" &&
+        result !== null &&
+        "error" in result &&
+        typeof result.error === "string"
+          ? result.error
+          : "Agent request failed";
+      throw new Error(error);
+    }
+    return decodeClientTurnV1(result);
+  },
+  readConfiguration(query: ConfigurationQueryV1) {
+    const path =
+      query.type === "user/get"
+        ? "/api/settings"
+        : `/api/bots/${encodeURIComponent(query.botId)}/settings`;
+    return apiRequest(path).then((value) =>
+      query.type === "user/get"
+        ? decodeUserSettingsViewV1(value)
+        : decodeBotSettingsViewV1(value),
+    );
+  },
+  async listNotifications() {
+    return decodeNotificationList(
+      await apiRequest(`/api/bots/${encodeURIComponent(botId)}/notifications`),
+    );
+  },
+  async listRuns() {
+    return decodeClientRunListV1(
+      await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
+    );
+  },
+  async lookupRun(runId: string) {
+    const lookup = decodeClientRunLookupV1(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}`,
+      ),
+    );
+    return lookup.state === "not-admitted" ? undefined : lookup.run;
+  },
+  async fenceRunAdmission(runId: string) {
+    const lookup = decodeClientRunLookupV1(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/fence`,
+        "POST",
+        JSON.stringify({ schemaVersion: 1, action: "fence-admission" }),
+      ),
+    );
+    return lookup.state === "not-admitted" ? undefined : lookup.run;
+  },
+  async reconcileRun(runId: string) {
+    return decodeClientTurnV1(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
+        "POST",
+        JSON.stringify({ schemaVersion: 1, action: "resume" }),
+      ),
+    );
+  },
+  async acknowledgeNotification(notificationId: string) {
+    decodeAcknowledgement(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/notifications`,
+        "POST",
+        JSON.stringify({
+          schemaVersion: 1,
+          action: "acknowledge",
+          notificationId,
+        }),
+      ),
+    );
+  },
+  readApplicationManifest() {
+    return apiRequest("/app-manifest");
+  },
+  async readAuthenticatedUserId() {
+    return decodeAuthenticatedIdentity(await apiRequest("/api/identity"));
+  },
+  startConnection(input: {
+    commandId: string;
+    packageId: string;
+    connectionTypeId: string;
+    alias?: string;
+    nativeReturnNonce?: string;
+  }) {
+    return apiRequest(
+      `/api/plugins/${encodeURIComponent(input.packageId)}/connections`,
+      "POST",
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId: input.commandId,
+        connectionTypeId: input.connectionTypeId,
+        alias: input.alias,
+        nativeReturnNonce: input.nativeReturnNonce,
+      } satisfies StartConnectionCommandV1),
+    ).then(decodeStartConnectionResult);
+  },
+  async revokeConnection(packageId: string, connectionId: string) {
+    decodeRevocationResult(
+      await apiRequest(
+        `/api/plugins/${encodeURIComponent(packageId)}/connections/${encodeURIComponent(connectionId)}/revoke`,
+        "POST",
+        JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/revoke",
+        } satisfies RevokeConnectionCommandV1),
+      ),
+    );
+  },
+  openExternalAuthorization(
+    url: string,
+    nativeReturnNonce?: string,
+  ): Promise<void> {
+    if (window.frockbotDesktop) {
+      return window.frockbotDesktop.openExternalAuthorization(
+        url,
+        nativeReturnNonce,
+      );
+    }
+    window.location.assign(url);
+    return Promise.resolve();
+  },
+  executeConfiguration(command: ConfigurationCommandV1) {
+    const path =
+      "botId" in command
+        ? `/api/bots/${encodeURIComponent(command.botId)}/settings`
+        : "/api/settings";
+    return apiRequest(path, "POST", JSON.stringify(command)).then(
+      decodeOperationReceiptV1,
+    );
   },
 });
 

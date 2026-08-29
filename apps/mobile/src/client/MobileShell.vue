@@ -61,8 +61,6 @@ function applyBot(): void {
   botDraft.value = next;
   if (next === botId.value) return;
   botId.value = next;
-  web.value.messages = [];
-  web.value.error = undefined;
   settingsOpen.value = false;
 }
 

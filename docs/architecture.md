@@ -6,7 +6,7 @@ Accepted direction. The pinned foundation proof, first custom event-sourced agen
 
 ## Decision summary
 
-FrockBot is a Cordis-first application. Every capability beyond a deliberately small process bootstrap is mounted as a Cordis plugin. FrockBot owns a custom agent loop, uses pinned upstream Cordis rather than the DeepSeek Harness fork, and uses Cordis WebUI with Vue for the desktop interface.
+FrockBot is a Cordis-first hosted application. Every capability beyond a deliberately small host bootstrap is mounted as a Cordis plugin from a declared Package Contribution. FrockBot owns a custom agent loop, uses pinned upstream Cordis rather than the DeepSeek Harness fork, and renders its hosted interface with Cordis WebUI and Vue. Browser, Electron, and mobile clients use the same backend protocols and Bot Durable Object Agent runtime.
 
 The original Pi-backed React prototype remains available at Git commit `0d5a41e` as a rollback point. The current application has cut over to the custom Cordis runtime and Cordis WebUI after reaching prompt, streaming, tool, cancellation, restart, and screenshot-smoke parity.
 
@@ -15,7 +15,7 @@ Exact upstream pins and compatibility risks are recorded in [`research/cordis-fo
 ## Architectural principles
 
 1. **Everything beyond bootstrap is a plugin.** Process entry, root-context creation, and last-resort crash reporting form the boot kernel. Transport bridge plugins own protocol decoding. Product behavior does not.
-2. **A context is process-local.** Electron main, the agent utility process, and the WebUI renderer each own an independent Cordis root. Cordis services are never transparently proxied across a process seam.
+2. **A context is runtime-local.** Backend hosts, the hosted WebUI, and optional native shells each own independent Cordis roots. Cordis services are never transparently proxied across a runtime seam.
 3. **Cross-process communication is explicit.** Narrow, versioned DTOs cross Electron IPC, `MessagePort`, HTTP, or WebSocket transports. Every inbound value is decoded at the seam.
 4. **Definitions are separate from providers and consumers.** Contract packages declare stable service interfaces and events. Provider plugins implement them. Consumer plugins depend only on definitions.
 5. **The session log is authoritative.** Every model-visible fact and every fact required for UI replay is represented by a durable session event.
@@ -26,49 +26,39 @@ Exact upstream pins and compatibility risks are recorded in [`research/cordis-fo
 ## Process topology
 
 ```text
-Electron main process
+Browser or sandboxed Electron renderer
 ┌─────────────────────────────────────────────────────────┐
-│ Minimal bootstrap                                       │
-│   └── Desktop Cordis root                               │
-│       ├── package-catalog plugin                        │
-│       ├── process-supervisor plugin                     │
-│       ├── desktop-window plugin                         │
-│       ├── server plugin                                 │
-│       ├── WebUI host plugin                             │
-│       └── desktop-runtime bridge plugin                 │
+│ Hosted Cordis WebUI client root + Vue                   │
+│   ├── FrockBot shell plugin                             │
+│   ├── settings and Connections plugins                  │
+│   ├── conversation and Computer plugins                 │
+│   └── authenticated, versioned backend client           │
 └──────────────────────────┬──────────────────────────────┘
-                           │ typed MessagePort protocol
+                           │ HTTPS hosted protocol
                            ▼
-Electron utility process
+Cloudflare application gateway
 ┌─────────────────────────────────────────────────────────┐
-│ Minimal bootstrap                                       │
-│   └── Agent Cordis root                                 │
-│       ├── session-store provider                        │
-│       ├── system-prompt registry                        │
-│       ├── LLM registry + provider plugins               │
-│       ├── tool registry + tool plugins                  │
-│       ├── agent registry                                │
-│       ├── concrete agent-loop provider                  │
-│       └── runtime bridge plugin                         │
+│ Authentication, application artifact, and DTO routing   │
+│   ├── User Durable Object authority/storage/scheduling  │
+│   └── Bot Durable Object authority/storage/scheduling   │
+│       └── declared backend runtime Contributions        │
+│           ├── session + custom Agent-loop plugins       │
+│           ├── model and tool provider plugins           │
+│           └── durable settings and Connection plugins   │
 └─────────────────────────────────────────────────────────┘
 
-Sandboxed Electron renderer
+Electron main + preload
 ┌─────────────────────────────────────────────────────────┐
-│ Cordis WebUI client root + Vue                          │
-│   ├── FrockBot shell plugin                             │
-│   ├── bot-list plugin                                   │
-│   ├── conversation plugin                               │
-│   ├── computer plugin                                   │
-│   ├── routines plugin                                   │
-│   └── package-manager plugin                            │
+│ Hosted URL window, auth handoff, and decoded optional   │
+│ platform adapters; no local WebUI or Agent runtime      │
 └─────────────────────────────────────────────────────────┘
 ```
 
-The WebUI server binds to loopback on an ephemeral port. The desktop window receives an unguessable per-launch credential, and both HTTP and WebSocket admission validate it. The server rejects arbitrary origins. Production CSP allows only the application origin, its authenticated WebSocket endpoint, and `data:` fonts for the brand typefaces inlined into the client bundle.
+Desktop configuration supplies both `FROCKBOT_APPLICATION_URL`, loaded by the sandboxed window, and `FROCKBOT_AUTH_BASE_URL`, used for authenticated API and authorization handoff. A deployment missing either origin is invalid. Optional native capabilities cross narrow preload DTOs and progressively enhance the hosted application; they do not own chat, settings, Connections, or Agent execution.
 
 ## Boot kernel
 
-Each process entry may do only the following before loading its root bundle:
+Each runtime entry may do only the following before loading its root bundle:
 
 1. install fatal error reporting;
 2. construct the Cordis root context;
@@ -105,25 +95,19 @@ Cordis services expose context-specific proxy objects that inherit from the prov
 
 ## Module map
 
-### Desktop host
+### Desktop shell
 
-**Package catalog** owns installed package metadata, enabled versions, contribution declarations, provenance, and activation state. It coordinates activation across processes and rolls back already-mounted contributions when a later contribution fails.
+**Desktop window** owns Electron windows, hosted-origin navigation policy, sandboxing, and application lifecycle integration. It requires the hosted application URL before creating a window.
 
-**Process supervisor** owns the agent utility process, handshake, health, restart policy, and graceful shutdown. A restarted process receives the currently enabled agent contribution set before accepting work.
+**Hosted API and authentication adapters** broker authenticated requests and native authorization handoff across decoded preload DTOs. Optional notification, clipboard, file-selection, and deep-link adapters belong at this seam. Their absence cannot prevent core hosted workflows.
 
-**Desktop window** owns Electron windows, navigation policy, CSP, and application lifecycle integration. Other plugins request windows through its interface rather than importing Electron.
+### Backend Agent runtime
 
-**WebUI host** mounts the Cordis server and WebUI plugins, authenticates local transport, and publishes trusted WebUI entries.
-
-**Runtime bridge** translates desktop commands into the agent protocol and projects runtime events back into WebUI services.
-
-### Agent runtime
-
-**Session store** owns append-only session events, atomic event batches, interrupted-work reconciliation, and model-history derivation. It persists the exact normalized request sent to each model after all prompt, schema, provider, and request middleware has run. In-memory storage is the first adapter; persistence is a second adapter added through the same interface.
+**Session store** owns append-only session events, atomic event batches, interrupted-work reconciliation, and model-history derivation. It persists the exact normalized request sent to each model after all prompt, schema, provider, and request middleware has run. The Bot Durable Object supplies durable persistence through the same narrow interface.
 
 **System-prompt registry** accepts scoped prompt sections, variables, and tool-schema presentation. It assembles a prompt for one proposed step.
 
-**LLM registry** selects a provider adapter and streams normalized response chunks. Provider SDK choice is internal to each adapter and does not enter the agent-loop interface. The first production adapter, `@frockbot/provider-openai-compatible`, normalizes messages and tools, parses streamed SSE text and fragmented tool calls, bounds HTTP errors, and receives credentials only inside the utility process.
+**LLM registry** selects a provider adapter and streams normalized response chunks. A separate optional reconciliation capability retrieves an original result by its durable provider effect ID; adapters without a provider-guaranteed retrieval path return reconciliation unavailable. Provider SDK choice is internal to each adapter and does not enter the agent-loop interface. The generic `@frockbot/provider-openai-compatible` adapter normalizes messages and tools, parses streamed SSE text and fragmented tool calls, bounds HTTP errors, and receives credentials only inside its backend provider Plugin, but does not claim idempotency or repeat an uncertain request.
 
 **Tool registry** owns tool definitions, per-agent visibility, input decoding, execution policy, and result finalization.
 
@@ -213,7 +197,11 @@ input/queued wakes agent
   → return to idle
 ```
 
-Every started step receives exactly one `step/end` before another step starts. Every started turn receives exactly one `turn/end`. Atomic session batches and `finally` paths enforce the pairing during ordinary errors and cancellation.
+Every started step receives exactly one `step/end` before another step starts, and every started turn receives exactly one `turn/end`, except while an uncertain provider effect is durably `model/reconciliation-required`. That state deliberately keeps the current step and turn open until provider-bound retrieval succeeds. Atomic session batches and `finally` paths enforce terminal pairing during ordinary errors and cancellation.
+
+Bot Durable Objects persist each run's identity, command fingerprint, session identity, acceptance time, input, events, status, execution phase, admitted configuration snapshot, and prior-event boundary. One exact stored-run decoder rejects invalid identifiers, missing admission data, unknown fields, inconsistent status-specific completion or failure fields, and every malformed discriminator-specific session event, including its normalized model request, before branching or persistence. Malformed durable state preserves the active-run marker for explicit repair rather than reopening admission. Recovery restarts only work that has not recorded an external effect intent, finalizes already-durable completion, and moves uncertain model or tool outcomes into durable reconciliation instead of duplicating the effect. If the selected provider cannot retrieve the original model effect, the run remains active, scheduled, and visibly `reconciliation-required`; recovery never calls the provider's streaming creation path again.
+
+The Durable Object bindings remain authority, transactional storage, and scheduler hosts. The shell's declared Bot backend Contribution owns admission, configuration, recovery, and runtime composition; Composio's declared backend Contribution owns the User Connection state machine and provider orchestration. Hosted Bot runtimes mount the declared Fly provider and provider-neutral Computer consumer before assigned Connection runtime Contributions, so browser and native shells observe one backend execution path.
 
 Cancellation uses an `AbortSignal` for the active turn and atomically appends `input/cancelled` for selected queued input. Teardown stops admission, cancels active work, waits for the driver and durability flush, detaches the agent, and only then detaches its session.
 
@@ -240,25 +228,15 @@ A tool definition declares whether calls may run concurrently, which resources t
 
 ## Package model
 
-A Package is the installable unit. A Contribution is one process-specific entry in that package. A Plugin is the live Cordis instance created from a contribution.
+A Package is the installable unit. A Contribution is one runtime-specific entry in that Package. A Plugin is the live Cordis instance created from a Contribution.
 
-A package manifest has a versioned FrockBot section that can declare:
+Manifest v3 backend Contributions declare their backend host explicitly. The hosted gateway mounts their narrow route handlers from the compiled application plan; provider routes, callback policy, and external-system coordinators stay in the owning Package. The gateway supplies authenticated User authority and platform context without branching on provider identity.
 
-```text
-identity and version
-provenance and integrity
-minimum FrockBot version
-desktop contributions
-agent contributions
-trusted WebUI contributions
-sandbox-view contributions
-requested permissions
-configuration schema
-```
+A Package manifest has a versioned FrockBot section that declares identity, compatibility, dependencies, permissions, and runtime Contributions. Manifest v3 may additionally declare bounded setting schemas, Connection Types, and Capabilities. Contributions are scoped to backend hosts, the Bot Agent runtime, the hosted client, the desktop shell, or the mobile shell.
 
-`@frockbot/plugin-clock` is the reference package for this contract. Its manifest declares one agent contribution that registers and invokes a `current_time` tool, one desktop contribution that publishes reactive state and RPC, and one built Cordis WebUI contribution that fills the shell's `frockbot.right-panel` slot. Each process installs the same decoded manifest into its scoped package catalog and activates only the contribution kinds it owns; the desktop contribution currently owns publication of the corresponding WebUI entry.
+`@frockbot/plugin-clock` is the reference Package for this contract. Its manifest declares one runtime Contribution that registers and invokes a `current_time` tool, one trusted desktop-main Contribution, and one hosted client Contribution that fills the shell's `frockbot.right-panel` slot. Each host activates only the Contribution kinds it owns.
 
-One package may contribute to several processes, but Cordis does not make that activation atomic. The package catalog coordinates prepare, mount, commit, and rollback across roots. Disabling a package first blocks new work, then drains and disposes contributions in reverse dependency order.
+One Package may contribute to several runtimes, but Cordis does not make that activation atomic. The Package catalog coordinates prepare, mount, commit, and rollback across roots. Disabling a Package first blocks new work, then drains and disposes Contributions in reverse dependency order.
 
 Computer behavior is split across three modules. `@frockbot/computer-core` defines the provider registry, durable workspace, process, browser, viewer, and control interfaces. `@frockbot/plugin-computer` owns provider-neutral tools, prompt policy, reactive state, and the trusted viewer UI. Provider Packages register adapters; consumers resolve the selected provider using persistent User and Bot identity and never import provider SDKs.
 
@@ -266,11 +244,23 @@ Computer behavior is split across three modules. `@frockbot/computer-core` defin
 
 Computer assignments are keyed by `botId`, not live `agentId`. A provider change increments an assignment generation so handles can reject stale work. Cloudflare memory retains its explicit R2 document adapter; desktop memory uses the selected Computer's workspace. Vector indexes are derived from canonical Markdown in either store.
 
+## Configuration and Connections
+
+The cloud gateway owns the authenticated production settings transport. `@frockbot/configuration-core` defines exact versioned User and Bot queries, commands, RPC authority envelopes, views, revisions, and receipts, including their nested profiles, models, Assignments, and dependency requirements. Every exported RPC on the `UserConfiguration` and `BotState` Durable Objects and the `UserBotState` worker entrypoint accepts an exact v1 authority envelope and decodes caller-controlled values before mounting a Contribution or accessing durable state. Notification reads and acknowledgements validate durable identity through a read-only check, so observation cannot reconcile configuration or advance its revision. Declared User and Bot backend Contributions own configuration policy and orchestration; Durable Objects provide their authority, storage, scheduling, and narrow RPC adapters. Commands carry stable IDs and expected revisions, so duplicate delivery returns the existing receipt and stale writes fail explicitly.
+
+Manifest v3 lets a Package declare bounded User/Bot setting schemas, Connection Types, and Capabilities. Remote schema references, excessive nesting, and oversized schemas are rejected at manifest decoding. The hosted Plugins surface accepts only the exact owned version of the immutable application-manifest response before projecting those declarations; installing a Package records durable User availability but does not grant a Bot authority. Notification list and acknowledgement responses and Composio start and revoke results likewise use exact shared v1 envelopes.
+
+`@frockbot/plugin-composio` is the first Connection Package. Connection admission atomically verifies that the exact installed Package version remains available, then records a durable User-owned intent before asking Composio for a hosted Connect Link. The Connection ID is the provider alias, so a lost response can be reconciled by a read instead of repeating the effect. Before keying a persisted Connect operation, the hosted client reads the current authenticated User through its transport/auth seam; static HTML and anonymous identities are not authority. It persists one Connect command ID per authenticated User, Package, and Connection Type until matching durable terminal state or a definitive server response, regardless of Connect Link expiry; desktop retries and refreshes also reuse the same persisted native return nonce, which is part of the backend replay fingerprint. Composio retains and refreshes external OAuth credentials; FrockBot keeps only safe metadata and opaque connected-account identifiers. Provider verification and the signed callback transition the Connection to ready in one conditional User Durable Object transaction without identifying or granting a Bot. A separate authenticated `bot/assign-capability` command validates the installed Package, declared Capability, and matching ready Connection Type before it claims a dependency and writes a receipt-backed Bot Assignment. Invalid assignments produce durable rejected receipts without changing Bot settings or Connection dependencies. Revocation derives Bot invalidation only from acknowledged explicit Assignment dependencies at their exact assignment generation. It claims the Connection, records provider completion, retries failed invalidation by alarm, and automatically finalizes revoked only after every matching compensation is acknowledged. Compensation IDs are bounded digests of Bot identity and assignment generation, and notification IDs reuse their bounded run IDs, keeping both within the shared 128-character RPC identifier contract. Alarms always schedule the earliest stored deadline, while retries preserve which operation needs reconciliation; uncertain provider outcomes are inspected but never automatically repeated. The hosted browser exposes this two-step authorization and assignment flow; mobile hides the Plugins control until its native OAuth/deep-link return adapter is implemented, rather than presenting a connection flow that cannot complete with bearer-token authentication.
+
+A ready Composio Assignment reconstructs a Bot-local runtime Plugin exposing `composio_search_tools` and `composio_execute_tool`. The Agent must search for an exact provider tool slug before execution. As with every tool, the Bot session flushes `tool/call` intent durably before external execution. The Composio project key remains a gateway/Durable Object secret and never enters a client DTO, application artifact, or session event.
+
+Bot admission, Agent execution, session-event persistence, recovery alarms, and runtime reconstruction now run in the Bot Durable Object. Session persistence is asynchronous internally but exposes an explicit flush seam; the Agent loop flushes admission, `model/request`, `tool/call`, assistant completion, and terminal events before crossing their relevant effect or completion boundaries. A Bot with notifications enabled records a durable notification intent before any browser or mobile adapter displays it; unacknowledged intents replay after disconnect, and adapters acknowledge only after display or when the visible conversation already delivered the result.
+
 ## Trust model
 
-| Trust tier              | Desktop contribution                 | Agent contribution                                   | WebUI contribution                                          |
+| Trust tier              | Desktop contribution                 | Backend contribution                                 | WebUI contribution                                          |
 | ----------------------- | ------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------- |
-| Built-in                | Electron main                        | Agent utility process                                | Direct WebUI client plugin                                  |
+| Built-in                | Electron main or preload adapter     | Bot or User Durable Object runtime                   | Direct hosted client plugin                                 |
 | Reviewed third-party    | Separate host process where possible | Dedicated runtime/container according to permissions | Direct only when explicitly trusted; otherwise sandbox view |
 | Generated or unreviewed | Never                                | Quarantine process/container only                    | Sandbox view only                                           |
 
@@ -278,56 +268,52 @@ A permission manifest improves review and routing but is not enforcement. Enforc
 
 Cordis `ctx.isolate()` is not used as a security boundary. Until upstream issue #72 is resolved or excluded by a regression test, FrockBot also avoids relying on bare isolated-context disposal for critical ownership.
 
-## Repository direction
+## Repository shape
 
-The target workspace shape is:
+The current workspace separates hosted applications, backend runtime composition, platform shells, and shared Plugin contracts:
 
 ```text
 apps/
-  desktop/                 Electron bootstrap and desktop root bundle
-  agent-runtime/           Utility-process bootstrap and agent root bundle
+  cloudflare/              Hosted application gateway and Durable Object adapters
+  desktop/                 Electron hosted-window shell and platform adapters
+  mobile/                  Hosted mobile shell and platform adapters
+  agent-runtime/           Transport-neutral backend Agent composition
 packages/
-  protocol/                Cross-process DTOs and decoders
-  core-session/            Session definition and default provider
-  core-system-prompt/      Prompt registry
-  core-llm/                LLM definition and registry
-  core-tools/              Tool definition and registry
-  core-agent/              Agent definition and registry
-  core-agent-loop/         Concrete loop provider
+  agent-core/              Session, LLM, prompt, tool, and Agent contracts
+  agent-loop/              Concrete durable loop provider
+  configuration-core/      Versioned settings and Connection contracts
   plugin-catalog/          Package manifest and activation coordinator
-  webui-shell/             FrockBot Vue shell and stable contribution slots
-  plugins/                 First-party feature/provider plugins
+  plugin-shell/            Hosted Vue shell and backend shell Contributions
+  plugin-*/                First-party feature and provider Packages
+  protocol/                Versioned cross-runtime DTOs and decoders
 ```
 
 Package boundaries may be consolidated when two modules do not vary independently. The definitions/providers/consumers dependency rule matters more than maximizing workspace count.
 
-## Implementation sequence
+## Startup and execution sequence
 
-1. Prove the exact pinned Cordis packages under Bun and Electron.
-2. Prove plugin mount, pending dependency, disposal, and reload in main and utility processes.
-3. Prove Cordis server plus WebUI/client startup in a sandboxed Electron window.
-4. Introduce session, LLM, tools, agent, and loop definitions with in-memory adapters.
-5. Complete one streaming turn without tools.
-6. Add one reference tool and the guarded repetition loop.
-7. Add cancellation, process restart, and session replay.
-8. Rebuild the current FrockBot interface as WebUI feature plugins.
-9. Add the package catalog and one package spanning agent and WebUI contributions.
-10. Cut over from the Pi prototype after parity and remove React/Pi dependencies.
+1. The browser loads the hosted application directly, or Electron validates the configured application origin before creating its sandboxed hosted window.
+2. The hosted client authenticates against the configured auth origin and exchanges only versioned DTOs with the Cloudflare gateway.
+3. The gateway routes User configuration work to the User Durable Object and Bot work to the selected Bot Durable Object.
+4. Each Durable Object mounts declared backend Contributions in its host-owned runtime context.
+5. The Bot host durably admits a Turn before its Agent-loop Plugin crosses a model or tool effect boundary.
+6. Browser and native observers project the same durable run and session state; disconnecting an observer does not cancel the Turn.
+7. Native authentication handoff, deep links, notifications, clipboard, and file selection remain optional enhancements at decoded platform seams.
 
 ## Validation gates
 
-The Cordis foundation is accepted only when automated tests demonstrate:
+The production composition is accepted only when automated tests demonstrate:
 
 - one resolved copy of every pinned Cordis/WebUI package;
-- exact-once plugin setup and cleanup across repeated reloads;
+- exact-once Plugin setup and cleanup across repeated runtime reconstruction;
 - pending activation and recovery when dependencies appear or disappear;
-- agent utility-process shutdown with no admitted work after disposal begins;
-- loopback HTTP/WebSocket authentication and origin rejection;
+- admitted work surviving client shutdown and Durable Object reconstruction;
+- hosted API authentication, DTO decoding, and origin rejection;
 - WebUI operation with Node integration disabled;
 - durable replay reproducing the exact normalized model request and visible chat output;
 - every started step and turn receiving exactly one typed ending;
 - side-effecting tools being journaled before execution and never implicitly retried after interruption;
-- restart reconciliation closing unmatched model, tool, step, and turn work before admission resumes;
-- cancellation leaving no unmatched tool call or open turn;
+- recovery resuming completed model journals while retaining genuinely uncertain effects for reconciliation;
+- explicit authenticated cancellation leaving no unmatched tool call or open turn;
 - package activation rollback after failure in any contribution;
-- packaged Electron startup without Bun installed.
+- packaged Electron startup without Bun installed and clear failure when required hosted configuration is absent.

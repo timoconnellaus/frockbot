@@ -7,24 +7,21 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "build:webui": "bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-computer build",
-    "build:agent": "bun run --filter @frockbot/agent-runtime build",
-    "dev": "bun run build:webui && electron-vite dev",
-    "build": "bun run build:webui && electron-vite build && bun run verify:bundle",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && bun run verify:bundle",
     "verify:bundle": "bun run scripts/verify-main-bundle.ts",
-    "package": "bun run build:agent && bun run build && electron-builder",
-    "package:dir": "bun run build:agent && bun run build && electron-builder --dir",
-    "start": "bun run build:webui && electron-vite preview",
+    "package": "bun run build && electron-builder",
+    "package:dir": "bun run build && electron-builder --dir",
+    "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@better-auth/electron": "1.7.2",
     "@cordisjs/client": "0.8.2",
     "@cordisjs/plugin-loader": "1.0.0-rc.5",
-    "@cordisjs/plugin-server": "1.7.0",
-    "@cordisjs/plugin-webui": "0.8.2",
     "@frockbot/application-foundation": "workspace:*",
     "@frockbot/desktop-core": "workspace:*",
+    "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "better-auth": "1.7.2",
@@ -43,12 +40,11 @@
       "out/**/*",
       "package.json"
     ],
-    "extraResources": [
+    "protocols": [
       {
-        "from": "resources/cordis-agent",
-        "to": "cordis-agent",
-        "filter": [
-          "**/*"
+        "name": "FrockBot",
+        "schemes": [
+          "com.frockbot.desktop"
         ]
       }
     ],

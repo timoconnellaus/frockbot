@@ -1,13 +1,15 @@
 # FrockBot
 
-FrockBot is an experimental Cordis-first desktop environment for persistent conversational bots. Host, agent, and WebUI capabilities are composed as plugins across explicit Electron process seams.
+FrockBot is an experimental Cordis-first application for persistent conversational bots. The hosted WebUI and cloud backend provide the product path; Electron and mobile are thin platform shells around the same hosted protocols.
 
 The current vertical slice includes:
 
-- an Electron main-process Cordis root and authenticated loopback WebUI host;
-- a sandboxed Cordis WebUI/Vue renderer composed as a client plugin;
-- a separate Cordis utility process with an event-sourced custom agent loop;
-- streamed text, journaled tool calls, cancellation, restart, and lifecycle cleanup;
+- a hosted Cordis WebUI/Vue client composed from declared Package Contributions;
+- backend-owned Bot Durable Objects running the event-sourced custom agent loop;
+- durable User and Bot settings with explicit Package, Connection, and Capability Assignment ownership;
+- a Composio Gmail Connection with durable authorization, revocation, and reconciliation;
+- a sandboxed Electron window that loads the hosted application and brokers narrow optional platform capabilities;
+- streamed text, journaled tool calls, durable recovery, and lifecycle cleanup;
 - an executable Cordis loader, dependency, isolation, WebSocket, CSP, and Electron foundation proof.
 
 See [`docs/architecture.md`](docs/architecture.md) and [`docs/adr/0001-cordis-application-spine.md`](docs/adr/0001-cordis-application-spine.md).
@@ -20,8 +22,10 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/adr/0001-cordis-ap
 
 ```bash
 bun install
-bun run dev
+bun run dev:cloudflare:electron
 ```
+
+The development launcher builds the hosted application, starts its local Cloudflare and Vite origins, and passes both required origins to the Electron thin shell. Starting the desktop workspace directly requires explicit `FROCKBOT_APPLICATION_URL` and `FROCKBOT_AUTH_BASE_URL` values.
 
 The deterministic foundation provider runs without credentials. To use an OpenAI-compatible endpoint:
 
@@ -29,17 +33,19 @@ The deterministic foundation provider runs without credentials. To use an OpenAI
 FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
   FROCKBOT_LLM_MODEL="model-id" \
   FROCKBOT_LLM_API_KEY="..." \
-  bun run dev
+  bun run dev:cloudflare:electron
 ```
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools, memory, and viewer UI. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory; `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names and `FROCKBOT_BOT_ID`/`FROCKBOT_AGENT_NAME` bind the desktop host to a Bot. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
+Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs Packages, authorizes external accounts, and explicitly assigns their Capabilities to Bots. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser and desktop expose these hosted flows; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
+
+To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools, memory, and viewer UI. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory. `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names for standalone development; the hosted backend supplies durable User and Bot identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
 
 ```bash
 SPRITES_TOKEN="..." \
   FROCKBOT_SPRITE_NAME="frockbot-barebones" \
-  bun run dev
+  bun run dev:cloudflare:electron
 ```
 
 The Computer panel shows the selected Bot's live browser. **Take control** creates a Bot-scoped lease that blocks new process and browser actions while leaving durable Package file operations available; **Release control** returns it to the Bot. A token-routed noVNC gateway serves each Bot desktop through that Bot Sprite's public HTTPS URL. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical desktop memory Markdown and derived index metadata live in the memory Package's private Computer directory under `/home/box/agent-data`; cloud runtimes retain the explicit R2/Vectorize adapter. See [`docs/research/fly-sprites-computer.md`](docs/research/fly-sprites-computer.md) for provider constraints and primary sources.
@@ -84,15 +90,18 @@ Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first 
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                        | Purpose                                                                       |
-| -------- | --------------------------- | ----------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                        |
-| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                               |
-| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                             |
-| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                         |
-| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
-| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
+| Type     | Name                            | Purpose                                                                       |
+| -------- | ------------------------------- | ----------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`          | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`         | Cloudflare account containing the production resources                        |
+| Variable | `CLOUDFLARE_D1_DATABASE_ID`     | Immutable ID of `frockbot-auth`                                               |
+| Variable | `BETTER_AUTH_URL`               | Set to `https://bot.frockbot.com`                                             |
+| Secret   | `BETTER_AUTH_SECRET`            | Better Auth secret with at least 32 random characters                         |
+| Secret   | `GOOGLE_CLIENT_ID`              | Google Web application OAuth client ID                                        |
+| Secret   | `GOOGLE_CLIENT_SECRET`          | Google Web application OAuth client secret                                    |
+| Secret   | `COMPOSIO_API_KEY`              | Composio project API key used only by backend Connection and tool drivers     |
+| Variable | `COMPOSIO_GMAIL_AUTH_CONFIG_ID` | Composio Gmail auth config used by hosted Connect Link                        |
+| Secret   | `SPRITES_TOKEN`                 | Fly Sprites token used only by the backend Computer provider                  |
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
 
@@ -102,6 +111,8 @@ The desktop smoke path can capture the connected UI without a model call:
 
 ```bash
 FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot.png" \
+  FROCKBOT_APPLICATION_URL="https://bot.frockbot.com" \
+  FROCKBOT_AUTH_BASE_URL="https://bot.frockbot.com" \
   bun run --filter @frockbot/desktop start
 ```
 
@@ -110,6 +121,8 @@ To exercise one streamed custom-loop turn and its WebUI projection:
 ```bash
 FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot-chat.png" \
   FROCKBOT_SMOKE_PROMPT='/echo FrockBot is ready.' \
+  FROCKBOT_APPLICATION_URL="https://bot.frockbot.com" \
+  FROCKBOT_AUTH_BASE_URL="https://bot.frockbot.com" \
   bun run --filter @frockbot/desktop start
 ```
 
@@ -119,8 +132,8 @@ FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot-chat.png" \
 
 ```text
 apps/
-  desktop/          Electron Cordis host, WebUI server, and window plugins
-  agent-runtime/    Transport-neutral Cordis agent composition plus Electron bridge
+  desktop/          Electron hosted-window shell and optional platform adapters
+  agent-runtime/    Transport-neutral backend Agent composition
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
   marketing/        Public frockbot.com site and static-assets Worker
   cordis-poc/       Executable pinned Cordis/Electron/WebUI foundation proof
@@ -129,8 +142,10 @@ packages/
   agent-loop/       Concrete event-sourced custom agent-loop plugin
   client-core/      Shared client runtime helpers and brand typography stylesheet
   computer-core/    Provider registry and capability interfaces for Computers
+  configuration-core/ Versioned durable User/Bot settings and Connection contracts
   plugin-catalog/   Manifest decoding, scoped activation, and rollback
   plugin-clock/     Reference package with agent, host, and WebUI contributions
+  plugin-composio/  Composio Connection, reconciliation, and assigned Agent tools
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
   plugin-memory/    Computer-workspace or R2-backed durable Markdown memory
@@ -196,22 +211,21 @@ http://127.0.0.1:8787/api/auth/callback/google
 
 For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, or `GOOGLE_CLIENT_SECRET`.
 
-The desktop host must receive both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. If `FROCKBOT_APPLICATION_URL` is absent, the desktop loads its local host; if `FROCKBOT_AUTH_BASE_URL` is absent, it does not initialize hosted authentication.
+The desktop host requires both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. A desktop deployment with either origin missing is invalid and must fail before exposing chat; there is no local Agent or WebUI product fallback.
 
-The memory Package has a provider-neutral document-store seam. Desktop runtimes store canonical Markdown and incremental index metadata in private durable directories on the selected Computer; the Fly adapter places them on Sprite disk. Cloudflare runtimes use R2 for canonical documents and Vectorize with 768-dimensional embeddings from `@cf/baai/bge-base-en-v1.5`. Local Cloudflare development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`. The development memory resources are separate from the production names listed in [Production deployment](#production-deployment).
+The memory Package has a provider-neutral document-store seam. Computer-backed runtimes store canonical Markdown and incremental index metadata in private durable directories on the selected Computer; the Fly adapter places them on Sprite disk. Cloudflare runtimes use R2 for canonical documents and Vectorize with 768-dimensional embeddings from `@cf/baai/bge-base-en-v1.5`. Local Cloudflare development selects Wrangler's `development` environment and uses the remote-only development resources `frockbot-memory-files-development` and `frockbot-memory-development`; local application artifacts, D1, and Durable Objects remain isolated in `.wrangler/state`. The development memory resources are separate from the production names listed in [Production deployment](#production-deployment).
 
 Memory has two user-private tiers: **agent** memory belongs to one bot, while **global** memory is shared by all of that user's bots. Reads and recall check both by default; when the same path exists in both tiers, the agent copy wins. Writes default to the safer agent tier.
 
 ## Security model
 
-Renderers use `nodeIntegration: false`, context isolation, Chromium sandboxing, authenticated loopback transport, origin checks, and restrictive content security policy. Agent execution runs in an Electron utility process.
+The Electron renderer uses `nodeIntegration: false`, context isolation, Chromium sandboxing, hosted-origin navigation checks, and a narrow decoded preload bridge. Authentication handoff, external authorization, notifications, clipboard, and file selection are optional shell capabilities; core chat and Agent execution remain hosted and continue without a native process.
 
 Cordis contexts provide composition and lifecycle ownership, not security isolation. Generated or unreviewed executable plugins must run inside a restricted process, container, or micro-VM rather than Electron main; untrusted rich UI must run in a sandboxed frame rather than the trusted WebUI context.
 
 ## Current limitations
 
 - model configuration currently uses environment variables rather than onboarding UI;
-- sessions are currently in memory;
 - Fly Sprite live provisioning requires a valid Sprites token and has not been exercised by repository CI;
 - Fly uses one Sprite per Bot, but live isolation still depends on Fly's VM and network enforcement and has not been exercised by repository CI;
 - the local derived memory vector index is process-local and rebuilt through canonical-file fallback; cloud Vectorize remains durable;

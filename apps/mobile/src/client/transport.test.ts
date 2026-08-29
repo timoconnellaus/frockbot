@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeRunList,
   decodeTurnResponse,
+  fenceRunAdmission,
   listRuns,
+  lookupRun,
   requestTurn,
   toolsFrom,
 } from "./transport.ts";
@@ -18,13 +20,17 @@ describe("decodeTurnResponse", () => {
   test("decodes a turn with tool events", () => {
     expect(
       decodeTurnResponse({
+        schemaVersion: 1,
         runId: "run-1",
         text: "hello",
         events: [
-          { type: "tool/call", call: { id: "call-1", name: "echo" } },
+          {
+            type: "tool/call",
+            call: { id: "tool-1", name: "echo" },
+          },
           {
             type: "tool/result",
-            callId: "call-1",
+            callId: "tool-1",
             content: "hi",
             isError: false,
           },
@@ -36,13 +42,11 @@ describe("decodeTurnResponse", () => {
       events: [
         {
           type: "tool/call",
-          call: { id: "call-1", name: "echo" },
-          callId: undefined,
-          content: undefined,
+          call: { id: "tool-1", name: "echo" },
         },
         {
           type: "tool/result",
-          callId: "call-1",
+          callId: "tool-1",
           content: "hi",
           isError: false,
         },
@@ -51,32 +55,37 @@ describe("decodeTurnResponse", () => {
   });
 
   test("rejects malformed payloads", () => {
-    expect(() => decodeTurnResponse(null)).toThrow(
-      "turn response must be an object",
-    );
+    expect(() => decodeTurnResponse(null)).toThrow("turn must be an object");
     expect(() =>
-      decodeTurnResponse({ runId: 1, text: "x", events: [] }),
-    ).toThrow('turn response field "runId" must be a string');
-    expect(() => decodeTurnResponse({ runId: "r", text: "x" })).toThrow(
-      'turn response field "events" must be an array',
-    );
+      decodeTurnResponse({ schemaVersion: 1, runId: 1, text: "x", events: [] }),
+    ).toThrow("turn.runId is invalid");
     expect(() =>
-      decodeTurnResponse({ runId: "r", text: "x", events: [{ type: 3 }] }),
-    ).toThrow('turn event field "type" must be a string');
+      decodeTurnResponse({ schemaVersion: 1, runId: "r", text: "x" }),
+    ).toThrow("turn.events must be a bounded array");
     expect(() =>
       decodeTurnResponse({
+        schemaVersion: 1,
+        runId: "r",
+        text: "x",
+        events: [{ type: 3 }],
+      }),
+    ).toThrow("run event.type is invalid");
+    expect(() =>
+      decodeTurnResponse({
+        schemaVersion: 1,
         runId: "r",
         text: "x",
         events: [{ type: "tool/call", call: { id: "c" } }],
       }),
-    ).toThrow('tool call field "name" must be a string');
+    ).toThrow("run event.call.name must be a wire-bounded string");
     expect(() =>
       decodeTurnResponse({
+        schemaVersion: 1,
         runId: "r",
         text: "x",
         events: [{ type: "tool/result", isError: "no" }],
       }),
-    ).toThrow('turn event field "isError" must be a boolean');
+    ).toThrow("run event.isError must be a boolean");
   });
 });
 
@@ -84,33 +93,43 @@ describe("decodeRunList", () => {
   test("decodes stored runs", () => {
     expect(
       decodeRunList({
+        schemaVersion: 1,
         runs: [
           {
+            schemaVersion: 1,
             runId: "run-1",
-            sessionId: "user:default",
-            acceptedAt: "2026-08-27T00:00:00.000Z",
+            admittedAt: "2026-08-27T00:00:00.000Z",
             input: "hello",
+            status: "completed",
             events: [],
+            outcome: { type: "completed", text: "done" },
           },
         ],
+        page: { truncated: false },
       }),
     ).toEqual([
       {
         runId: "run-1",
-        sessionId: "user:default",
-        acceptedAt: "2026-08-27T00:00:00.000Z",
+        admittedAt: "2026-08-27T00:00:00.000Z",
         input: "hello",
+        status: "completed",
+        events: [],
+        responseText: "done",
       },
     ]);
   });
 
   test("rejects malformed payloads", () => {
     expect(() => decodeRunList({})).toThrow(
-      'run list field "runs" must be an array',
+      "run list.schemaVersion is invalid",
     );
-    expect(() => decodeRunList({ runs: [{ runId: "run-1" }] })).toThrow(
-      'run field "sessionId" must be a string',
-    );
+    expect(() =>
+      decodeRunList({
+        schemaVersion: 1,
+        runs: [{ runId: "run-1" }],
+        page: { truncated: false },
+      }),
+    ).toThrow("run.schemaVersion is invalid");
   });
 });
 
@@ -144,17 +163,29 @@ describe("gateway requests", () => {
       (path, init) => {
         calls.push({ path, init });
         return Promise.resolve(
-          jsonResponse({ runId: "run-1", text: "hi", events: [] }),
+          jsonResponse({
+            schemaVersion: 1,
+            runId: "run-1",
+            text: "hi",
+            events: [],
+          }),
         );
       },
       "my bot",
       "hello",
+      "command-1",
     );
 
     expect(result).toEqual({ runId: "run-1", text: "hi", events: [] });
     expect(calls[0]?.path).toBe("/api/bots/my%20bot/turns");
     expect(calls[0]?.init?.method).toBe("POST");
-    expect(calls[0]?.init?.body).toBe(JSON.stringify({ text: "hello" }));
+    expect(calls[0]?.init?.body).toBe(
+      JSON.stringify({
+        schemaVersion: 1,
+        text: "hello",
+        commandId: "command-1",
+      }),
+    );
   });
 
   test("surfaces a gateway error body", async () => {
@@ -164,6 +195,7 @@ describe("gateway requests", () => {
         () => Promise.resolve(jsonResponse({ error: "invalid prompt" }, 400)),
         "default",
         "",
+        "command-1",
       );
     } catch (error) {
       failure = error;
@@ -179,6 +211,7 @@ describe("gateway requests", () => {
         () => Promise.resolve(new Response("<html>", { status: 502 })),
         "default",
         "hello",
+        "command-1",
       );
     } catch (error) {
       failure = error;
@@ -193,19 +226,89 @@ describe("gateway requests", () => {
       () =>
         Promise.resolve(
           jsonResponse({
+            schemaVersion: 1,
             runs: [
               {
+                schemaVersion: 1,
                 runId: "run-1",
-                sessionId: "s",
-                acceptedAt: "2026-08-27T00:00:00.000Z",
+                admittedAt: "2026-08-27T00:00:00.000Z",
                 input: "hello",
+                status: "completed",
+                events: [],
+                outcome: { type: "completed", text: "done" },
               },
             ],
+            page: { truncated: false },
           }),
         ),
       "default",
     );
     expect(runs).toHaveLength(1);
     expect(runs[0]?.runId).toBe("run-1");
+  });
+
+  test("authoritatively fences absent admission without replaying the Turn", async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = [];
+    const result = await fenceRunAdmission(
+      (path, init) => {
+        calls.push({ path, init });
+        return Promise.resolve(
+          jsonResponse({ schemaVersion: 1, state: "not-admitted" }),
+        );
+      },
+      "my bot",
+      "command-1",
+    );
+
+    expect(result).toEqual({ state: "not-admitted" });
+    expect(calls).toEqual([
+      {
+        path: "/api/bots/my%20bot/turns/command-1/fence",
+        init: {
+          method: "POST",
+          body: JSON.stringify({
+            schemaVersion: 1,
+            action: "fence-admission",
+          }),
+          signal: undefined,
+        },
+      },
+    ]);
+  });
+
+  test("looks up admission through a read-only run request", async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = [];
+    const result = await lookupRun(
+      (path, init) => {
+        calls.push({ path, init });
+        return Promise.resolve(
+          jsonResponse({
+            schemaVersion: 1,
+            state: "running",
+            run: {
+              schemaVersion: 1,
+              runId: "command-1",
+              admittedAt: "2026-08-29T00:00:00.000Z",
+              input: "continue",
+              status: "running",
+              events: [],
+            },
+          }),
+        );
+      },
+      "my bot",
+      "command-1",
+    );
+
+    expect(result).toMatchObject({
+      state: "running",
+      run: { runId: "command-1", status: "running" },
+    });
+    expect(calls).toEqual([
+      {
+        path: "/api/bots/my%20bot/turns/command-1",
+        init: { method: "GET", signal: undefined },
+      },
+    ]);
   });
 });

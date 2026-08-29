@@ -1,111 +1,29 @@
+import type {
+  ClientRun,
+  ClientTurnEvent,
+  ClientTurnResponse,
+} from "@frockbot/client-core";
+import {
+  decodeClientRunLookupV1,
+  decodeClientRunListV1,
+  decodeClientTurnV1,
+  type ClientRunLookup,
+} from "@frockbot/plugin-shell/run-protocol";
 import type { WebToolActivity } from "@frockbot/plugin-shell/shared";
 
-export interface TurnEvent {
-  type: string;
-  call?: { id: string; name: string };
-  callId?: string;
-  content?: string;
-  isError?: boolean;
-}
+export type TurnEvent = ClientTurnEvent;
+export type TurnResponse = ClientTurnResponse;
 
-export interface TurnResponse {
-  runId: string;
-  text: string;
-  events: TurnEvent[];
-}
-
-export interface RunSummary {
-  runId: string;
-  sessionId: string;
-  acceptedAt: string;
-  input: string;
-}
+export type RunSummary = ClientRun;
 
 export type Fetcher = (path: string, init?: RequestInit) => Promise<Response>;
 
-function record(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function requiredString(
-  source: Record<string, unknown>,
-  key: string,
-  label: string,
-): string {
-  const value = source[key];
-  if (typeof value !== "string") {
-    throw new Error(`${label} field "${key}" must be a string`);
-  }
-  return value;
-}
-
-function optionalString(
-  source: Record<string, unknown>,
-  key: string,
-  label: string,
-): string | undefined {
-  const value = source[key];
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== "string") {
-    throw new Error(`${label} field "${key}" must be a string`);
-  }
-  return value;
-}
-
-function decodeTurnEvent(value: unknown): TurnEvent {
-  const source = record(value, "turn event");
-  const event: TurnEvent = {
-    type: requiredString(source, "type", "turn event"),
-  };
-  if (source.call !== undefined) {
-    const call = record(source.call, "tool call");
-    event.call = {
-      id: requiredString(call, "id", "tool call"),
-      name: requiredString(call, "name", "tool call"),
-    };
-  }
-  event.callId = optionalString(source, "callId", "turn event");
-  event.content = optionalString(source, "content", "turn event");
-  if (source.isError !== undefined) {
-    if (typeof source.isError !== "boolean") {
-      throw new Error('turn event field "isError" must be a boolean');
-    }
-    event.isError = source.isError;
-  }
-  return event;
-}
-
 export function decodeTurnResponse(value: unknown): TurnResponse {
-  const source = record(value, "turn response");
-  const events = source.events;
-  if (!Array.isArray(events)) {
-    throw new Error('turn response field "events" must be an array');
-  }
-  return {
-    runId: requiredString(source, "runId", "turn response"),
-    text: requiredString(source, "text", "turn response"),
-    events: events.map(decodeTurnEvent),
-  };
+  return decodeClientTurnV1(value);
 }
 
 export function decodeRunList(value: unknown): RunSummary[] {
-  const source = record(value, "run list");
-  const runs = source.runs;
-  if (!Array.isArray(runs)) {
-    throw new Error('run list field "runs" must be an array');
-  }
-  return runs.map((run) => {
-    const entry = record(run, "run");
-    return {
-      runId: requiredString(entry, "runId", "run"),
-      sessionId: requiredString(entry, "sessionId", "run"),
-      acceptedAt: requiredString(entry, "acceptedAt", "run"),
-      input: requiredString(entry, "input", "run"),
-    };
-  });
+  return decodeClientRunListV1(value);
 }
 
 export function toolsFrom(events: readonly TurnEvent[]): WebToolActivity[] {
@@ -160,11 +78,12 @@ export async function requestTurn(
   fetcher: Fetcher,
   botId: string,
   text: string,
+  commandId: string,
   signal?: AbortSignal,
 ): Promise<TurnResponse> {
   const response = await fetcher(turnsPath(botId), {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ schemaVersion: 1, text, commandId }),
     signal,
   });
   return decodeTurnResponse(await decodeBody(response));
@@ -177,4 +96,42 @@ export async function listRuns(
 ): Promise<RunSummary[]> {
   const response = await fetcher(turnsPath(botId), { method: "GET", signal });
   return decodeRunList(await decodeBody(response));
+}
+
+export async function lookupRun(
+  fetcher: Fetcher,
+  botId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<ClientRunLookup> {
+  const response = await fetcher(
+    `${turnsPath(botId)}/${encodeURIComponent(commandId)}`,
+    { method: "GET", signal },
+  );
+  const lookup = decodeClientRunLookupV1(await decodeBody(response));
+  if (lookup.state !== "not-admitted" && lookup.run.runId !== commandId) {
+    throw new Error("run lookup response does not match the command id");
+  }
+  return lookup;
+}
+
+export async function fenceRunAdmission(
+  fetcher: Fetcher,
+  botId: string,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<ClientRunLookup> {
+  const response = await fetcher(
+    `${turnsPath(botId)}/${encodeURIComponent(commandId)}/fence`,
+    {
+      method: "POST",
+      body: JSON.stringify({ schemaVersion: 1, action: "fence-admission" }),
+      signal,
+    },
+  );
+  const lookup = decodeClientRunLookupV1(await decodeBody(response));
+  if (lookup.state !== "not-admitted" && lookup.run.runId !== commandId) {
+    throw new Error("run admission fence does not match the command id");
+  }
+  return lookup;
 }

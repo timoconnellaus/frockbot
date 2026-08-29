@@ -1,26 +1,18 @@
-import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import Server from "@cordisjs/plugin-server";
-import WebUI from "@cordisjs/plugin-webui";
-import { foundationTrustedDesktopPlugins } from "@frockbot/application-foundation/desktop";
-import { DesktopCommandRegistry } from "@frockbot/desktop-core";
-
-// Electron main mounts only statically bundled application contributions.
-import {
-  type Context,
-  Context as CordisContext,
-  type Plugin,
-  Service,
-} from "cordis";
+import { resolveFoundationTrustedDesktopContribution } from "@frockbot/application-foundation/desktop";
+import { compileFoundationApplicationDeclarations } from "@frockbot/application-foundation/runtime";
+import { type Context, Context as CordisContext, Service } from "cordis";
 import { app, BrowserWindow } from "electron";
-import { installDesktopCapabilities } from "./desktop-capabilities.js";
-import { webChatPlugin } from "./web-chat.js";
+import {
+  ElectronDesktopAuthCapability,
+  prepareElectronDesktopAuthRuntime,
+} from "./auth-client.js";
+import { startHostedDesktopApplication } from "./hosted-application.js";
 
 interface DesktopWindowConfig {
   baseUrl: string;
-  credential?: string;
 }
 
 declare module "cordis" {
@@ -69,15 +61,6 @@ class DesktopWindowService extends Service {
         event.preventDefault();
       }
     });
-    if (this.config.credential) {
-      await window.webContents.session.cookies.set({
-        url: this.config.baseUrl,
-        name: "frockbot_session",
-        value: this.config.credential,
-        httpOnly: true,
-        sameSite: "strict",
-      });
-    }
     await window.loadURL(this.config.baseUrl);
     if (process.env.FROCKBOT_SMOKE_SCREENSHOT) void this.captureSmoke(window);
     return window;
@@ -176,77 +159,27 @@ class DesktopWindowService extends Service {
   }
 }
 
-function createAdmissionPlugin(
-  baseUrl: string,
-  credential: string,
-): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) => {
-    const hasCredential = (cookies: string | null) =>
-      (cookies ?? "").split(/;\s*/).includes(`frockbot_session=${credential}`);
-    const httpAdmission = ctx.server.use(async (request, response, next) => {
-      response.headers.set(
-        "content-security-policy",
-        "default-src 'self'; script-src 'self' 'sha256-Vy96PtZRI7fYqJ2gNVKETLELTSMNWTVyT22r0v1TlLQ='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ws:; img-src 'self' data:; frame-src https://*.sprites.app",
-      );
-      const origin = request.headers.get("origin");
-      if (origin && origin !== baseUrl) {
-        response.status = 403;
-        return;
-      }
-      if (!hasCredential(request.headers.get("cookie"))) {
-        response.status = 401;
-        return;
-      }
-      await next();
-    });
-    const socketAdmission = ctx.on("server/route-check", (request) => {
-      if (request.path !== "/api") return;
-      if (request.headers.get("origin") !== baseUrl) return true;
-      if (!hasCredential(request.headers.get("cookie"))) return true;
-    });
-    return [httpAdmission, socketAdmission];
-  };
-  plugin.inject = ["server"];
-  return plugin;
-}
-
 export async function createCordisDesktopHost(): Promise<Context> {
-  const root = new CordisContext();
-  const applicationUrl = process.env.FROCKBOT_APPLICATION_URL?.trim();
-  if (applicationUrl) {
-    let protocol: string;
-    try {
-      protocol = new URL(applicationUrl).protocol;
-    } catch {
-      throw new Error("FROCKBOT_APPLICATION_URL must be a valid URL");
-    }
-    if (protocol !== "http:" && protocol !== "https:") {
-      throw new Error("FROCKBOT_APPLICATION_URL must use HTTP or HTTPS");
-    }
-    await root.plugin(DesktopWindowService, { baseUrl: applicationUrl });
-    await root.desktopWindows.create();
-    return root;
-  }
-
-  await root.plugin(Server, { host: "127.0.0.1", port: 0, maxPort: 0 });
-  const baseUrl = root.server.baseUrl;
-  const credential = randomUUID();
-  await root.plugin(createAdmissionPlugin(baseUrl, credential));
-  await root.plugin(WebUI, {
-    uiPath: "",
-    apiPath: "/api",
-    selfUrl: "",
-    devMode: false,
-    open: false,
-  });
-  await root.plugin(DesktopCommandRegistry);
-  // Capability adapters mount before contributions that request them.
-  await installDesktopCapabilities(root);
-  for (const plugin of foundationTrustedDesktopPlugins) {
-    await root.plugin(plugin);
-  }
-  await root.plugin(webChatPlugin);
-  await root.plugin(DesktopWindowService, { baseUrl, credential });
-  await root.desktopWindows.create();
-  return root;
+  const declarations = compileFoundationApplicationDeclarations();
+  const authContribution = resolveFoundationTrustedDesktopContribution(
+    declarations,
+    "auth",
+  );
+  const authRuntime = prepareElectronDesktopAuthRuntime();
+  return startHostedDesktopApplication(
+    process.env.FROCKBOT_APPLICATION_URL,
+    process.env.FROCKBOT_AUTH_BASE_URL,
+    async ({ applicationUrl }) => {
+      const root = new CordisContext();
+      try {
+        await root.plugin(ElectronDesktopAuthCapability, authRuntime);
+        await root.plugin(authContribution.plugin);
+        await root.plugin(DesktopWindowService, { baseUrl: applicationUrl });
+        return root;
+      } catch (error) {
+        await root.fiber.dispose();
+        throw error;
+      }
+    },
+  );
 }

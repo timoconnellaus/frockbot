@@ -1,10 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "id": "desktop-notifications",
   "displayName": "Desktop Notifications",
   "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {
-    "desktop": "./desktop"
+    "desktop": {
+      "entry": "./desktop",
+      "execution": "trusted-main",
+      "commands": []
+    }
   },
   "permissions": ["desktop:notifications"]
 }

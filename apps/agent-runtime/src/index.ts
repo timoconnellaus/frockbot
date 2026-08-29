@@ -178,15 +178,15 @@ async function start(): Promise<void> {
           post({
             type: "tool-start",
             runId,
-            toolCallId: event.call.id,
-            name: event.call.name,
-            input: event.call.input,
+            toolCallId: event.occurrenceId,
+            name: event.name,
+            input: event.input,
           });
         } else if (event.type === "tool/result") {
           post({
             type: "tool-end",
             runId,
-            toolCallId: event.callId,
+            toolCallId: event.occurrenceId,
             name: event.name,
             text: event.content,
             isError: event.isError,

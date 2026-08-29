@@ -39,6 +39,26 @@ describe("foundation Cordis runtime", () => {
     });
   });
 
+  test("includes the durable Bot description in the normalized model request", async () => {
+    const runtime = await createFoundationRuntime(undefined, {
+      systemPromptSection:
+        "You are Housework.\n\nResearch, marketing, admin.\n\nKeep the household organized.",
+    });
+    runtimes.push(runtime);
+    runtime.agent.agent.send("hello");
+    await runtime.agent.agent.whenIdle();
+
+    const request = runtime.agent.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    expect(request).toMatchObject({
+      type: "model/request",
+      request: {
+        system: expect.stringContaining("Keep the household organized."),
+      },
+    });
+  });
+
   test("loads the echo capability as a Cordis tool plugin", async () => {
     const runtime = await createRuntime();
     runtime.agent.agent.send("/echo plugin architecture");
@@ -69,7 +89,7 @@ describe("foundation Cordis runtime", () => {
       runtime.agent.agent.session.events.find(
         (event) => event.type === "tool/call",
       ),
-    ).toMatchObject({ call: { name: "current_time" } });
+    ).toMatchObject({ name: "current_time" });
     expect(runtime.agent.agent.session.deriveMessages().at(-1)).toMatchObject({
       role: "assistant",
     });

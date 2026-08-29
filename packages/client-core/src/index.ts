@@ -1,4 +1,19 @@
 import {
+  decodeRevokeConnectionResultV1,
+  decodeStartConnectionResultV1,
+  type StartConnectionResult,
+} from "@frockbot/plugin-composio/backend-contracts";
+import { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
+
+export { decodeExternalAuthorizationUrl };
+
+import type {
+  ConfigurationCommandV1,
+  ConfigurationQueryV1,
+  ConfigurationViewV1,
+  OperationReceiptV1,
+} from "@frockbot/configuration-core";
+import {
   createApp,
   defineComponent,
   Fragment,
@@ -14,16 +29,232 @@ export interface ClientTurnEvent {
   callId?: string;
   content?: string;
   isError?: boolean;
+  omittedInteractions?: number;
+}
+
+export interface ClientNotificationIntent {
+  notificationId: string;
+  runId: string;
+  createdAt: string;
+  title: string;
+  body: string;
+}
+
+export interface ClientNotificationListV1 {
+  schemaVersion: 1;
+  notifications: ClientNotificationIntent[];
+}
+
+export interface ClientNotificationAcknowledgementV1 {
+  schemaVersion: 1;
+  status: "acknowledged";
 }
 
 export interface ClientTurnResponse {
   runId: string;
   text: string;
   events: ClientTurnEvent[];
+  notification?: ClientNotificationIntent;
+}
+
+export type ClientStartConnectionResult = StartConnectionResult;
+
+export interface ClientRun {
+  runId: string;
+  admittedAt?: string;
+  input: string;
+  events: ClientTurnEvent[];
+  status: "running" | "completed" | "failed" | "reconciliation-required";
+  responseText?: string;
+  failure?: string;
+  recovery?: { action: "resume"; message: string };
 }
 
 export interface AgentTransport {
-  turn(text: string, signal: AbortSignal): Promise<ClientTurnResponse>;
+  turn(
+    text: string,
+    signal: AbortSignal,
+    commandId: string,
+  ): Promise<ClientTurnResponse>;
+  readConfiguration?(query: ConfigurationQueryV1): Promise<ConfigurationViewV1>;
+  executeConfiguration?(
+    command: ConfigurationCommandV1,
+  ): Promise<OperationReceiptV1>;
+  readApplicationManifest?(): Promise<unknown>;
+  readAuthenticatedUserId?(): Promise<string>;
+  startConnection?(input: {
+    commandId: string;
+    packageId: string;
+    connectionTypeId: string;
+    alias?: string;
+    nativeReturnNonce?: string;
+  }): Promise<ClientStartConnectionResult>;
+  listRuns?(): Promise<ClientRun[]>;
+  lookupRun?(runId: string): Promise<ClientRun | undefined>;
+  fenceRunAdmission?(runId: string): Promise<ClientRun | undefined>;
+  reconcileRun?(runId: string): Promise<ClientTurnResponse>;
+  revokeConnection?(packageId: string, connectionId: string): Promise<void>;
+  listNotifications?(): Promise<ClientNotificationIntent[]>;
+  acknowledgeNotification?(notificationId: string): Promise<void>;
+  openExternalAuthorization?(
+    url: string,
+    nativeReturnNonce?: string,
+  ): Promise<void>;
+}
+
+function responseRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  const keys = Object.keys(value);
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    keys.every((key) => allowed.has(key))
+  );
+}
+
+function responseString(
+  value: Record<string, unknown>,
+  key: string,
+  label: string,
+): string {
+  const field = value[key];
+  if (typeof field !== "string") {
+    throw new Error(`${label}.${key} must be a string`);
+  }
+  return field;
+}
+
+function decodeTurnEvent(value: unknown): ClientTurnEvent {
+  const event = responseRecord(value, "turn event");
+  const decoded: ClientTurnEvent = {
+    type: responseString(event, "type", "turn event"),
+  };
+  if (
+    event.type === "tool/call" &&
+    event.occurrenceId !== undefined &&
+    event.name !== undefined
+  ) {
+    decoded.call = {
+      id: responseString(event, "occurrenceId", "turn event"),
+      name: responseString(event, "name", "turn event"),
+    };
+  } else if (event.call !== undefined) {
+    const call = responseRecord(event.call, "tool call");
+    decoded.call = {
+      id: responseString(call, "id", "tool call"),
+      name: responseString(call, "name", "tool call"),
+    };
+  }
+  if (event.type === "tool/result" && event.occurrenceId !== undefined) {
+    decoded.callId = responseString(event, "occurrenceId", "turn event");
+  } else if (event.callId !== undefined) {
+    decoded.callId = responseString(event, "callId", "turn event");
+  }
+  if (event.content !== undefined) {
+    decoded.content = responseString(event, "content", "turn event");
+  }
+  if (event.isError !== undefined) {
+    if (typeof event.isError !== "boolean") {
+      throw new Error("turn event.isError must be a boolean");
+    }
+    decoded.isError = event.isError;
+  }
+  return decoded;
+}
+
+function decodeNotification(value: unknown): ClientNotificationIntent {
+  const notification = responseRecord(value, "notification");
+  if (
+    !hasExactKeys(notification, [
+      "notificationId",
+      "runId",
+      "createdAt",
+      "title",
+      "body",
+    ])
+  ) {
+    throw new Error("notification is invalid");
+  }
+  return {
+    notificationId: responseString(
+      notification,
+      "notificationId",
+      "notification",
+    ),
+    runId: responseString(notification, "runId", "notification"),
+    createdAt: responseString(notification, "createdAt", "notification"),
+    title: responseString(notification, "title", "notification"),
+    body: responseString(notification, "body", "notification"),
+  };
+}
+
+export function decodeClientTurnResponse(input: unknown): ClientTurnResponse {
+  const value = responseRecord(input, "turn response");
+  if (!Array.isArray(value.events)) {
+    throw new Error("turn response.events must be an array");
+  }
+  return {
+    runId: responseString(value, "runId", "turn response"),
+    text: responseString(value, "text", "turn response"),
+    events: value.events.map(decodeTurnEvent),
+    notification:
+      value.notification === undefined
+        ? undefined
+        : decodeNotification(value.notification),
+  };
+}
+
+export function decodeNotificationList(
+  input: unknown,
+): ClientNotificationIntent[] {
+  const value = responseRecord(input, "notification list");
+  if (
+    !hasExactKeys(value, ["schemaVersion", "notifications"]) ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.notifications)
+  ) {
+    throw new Error("notification list is invalid");
+  }
+  return value.notifications.map(decodeNotification);
+}
+
+export function decodeStartConnectionResult(
+  input: unknown,
+): ClientStartConnectionResult {
+  const value = decodeStartConnectionResultV1(input);
+  if (value.status === "ready") return value;
+  return {
+    ...value,
+    redirectUrl: decodeExternalAuthorizationUrl(value.redirectUrl),
+  };
+}
+
+export function decodeAcknowledgement(input: unknown): void {
+  const value = responseRecord(input, "acknowledgement");
+  if (
+    !hasExactKeys(value, ["schemaVersion", "status"]) ||
+    value.schemaVersion !== 1 ||
+    value.status !== "acknowledged"
+  ) {
+    throw new Error("acknowledgement is invalid");
+  }
+}
+
+export function decodeRevocationResult(input: unknown): void {
+  decodeRevokeConnectionResultV1(input);
 }
 
 export interface ClientSlotRegistration {

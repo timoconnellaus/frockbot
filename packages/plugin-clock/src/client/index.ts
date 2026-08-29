@@ -14,6 +14,7 @@ export const clockClientPlugin: ClientPlugin = (ctx) => {
       const result = await ctx.transport.turn(
         "/time",
         new AbortController().signal,
+        crypto.randomUUID(),
       );
       clock.value.lastTime = result.text;
       return result.text;

@@ -1,11 +1,16 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "id": "fly-sprite",
   "displayName": "Fly Sprite Computer",
   "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {
-    "agent": "./provider",
-    "desktop": "./host"
+    "runtime": { "entry": "./provider" },
+    "desktop": {
+      "entry": "./host",
+      "execution": "trusted-main",
+      "commands": []
+    }
   },
   "permissions": ["network:sprites"]
 }

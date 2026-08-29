@@ -7,12 +7,14 @@ interface DesktopAuthUser {
 }
 
 interface DesktopApiRequest {
+  schemaVersion: 1;
   path: string;
   method: "GET" | "POST";
   body?: string;
 }
 
 interface DesktopApiResponse {
+  schemaVersion: 1;
   status: number;
   contentType: string | null;
   body: string;
@@ -21,6 +23,10 @@ interface DesktopApiResponse {
 interface Window {
   frockbotDesktop?: {
     request(request: DesktopApiRequest): Promise<DesktopApiResponse>;
+    openExternalAuthorization(
+      url: string,
+      nativeReturnNonce?: string,
+    ): Promise<void>;
   };
   getUser(): Promise<DesktopAuthUser | null>;
   requestAuth(options?: { provider?: string }): Promise<void>;

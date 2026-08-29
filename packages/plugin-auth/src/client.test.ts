@@ -7,6 +7,6 @@ import packageJson from "../package.json" with { type: "json" };
 test("auth satisfies plugin package conventions", () => {
   expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
     name: "@frockbot/plugin-auth",
-    contributionKinds: ["client"],
+    contributionKinds: ["client", "desktop"],
   });
 });

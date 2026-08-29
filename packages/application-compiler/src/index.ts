@@ -29,6 +29,11 @@ export type ApplicationPackageResolver = (
   version: string,
 ) => Promise<ResolvedPackageSource>;
 
+export type ApplicationPackageDeclarationResolver = (
+  specifier: string,
+  version: string,
+) => ResolvedPackageSource;
+
 export interface CompiledPackage {
   id: string;
   specifier: string;
@@ -43,12 +48,18 @@ export interface ApplicationPlan {
   applicationHash: string;
   packages: CompiledPackage[];
   contributions: {
+    backend: string[];
     runtime: string[];
     client: string[];
     desktop: string[];
     mobile: string[];
   };
 }
+
+export type ApplicationDeclarationPlan = Omit<
+  ApplicationPlan,
+  "applicationHash"
+>;
 
 export interface CompileApplicationOptions {
   frockbotVersion: string;
@@ -174,11 +185,11 @@ function validateClientComposition(packages: readonly CompiledPackage[]): void {
   }
 }
 
-export async function compileApplicationPlan(
+export function compileApplicationDeclarations(
   source: ApplicationSource,
-  resolvePackage: ApplicationPackageResolver,
+  resolvePackage: ApplicationPackageDeclarationResolver,
   options: CompileApplicationOptions,
-): Promise<ApplicationPlan> {
+): ApplicationDeclarationPlan {
   if (source.schemaVersion !== 1) {
     throw new Error("unsupported application source version");
   }
@@ -195,10 +206,7 @@ export async function compileApplicationPlan(
       selection.version,
       `package "${selection.specifier}" version`,
     );
-    const resolved = await resolvePackage(
-      selection.specifier,
-      selection.version,
-    );
+    const resolved = resolvePackage(selection.specifier, selection.version);
     if (resolved.specifier !== selection.specifier) {
       throw new Error(
         `resolver returned the wrong package for "${selection.specifier}"`,
@@ -232,10 +240,13 @@ export async function compileApplicationPlan(
 
   const packages = orderedPackages(byId);
   validateClientComposition(packages);
-  const unsigned = {
+  return {
     schemaVersion: 1 as const,
     packages,
     contributions: {
+      backend: packages
+        .filter((pkg) => pkg.manifest.contributions.backend)
+        .map((pkg) => pkg.id),
       runtime: packages
         .filter((pkg) => pkg.manifest.contributions.runtime)
         .map((pkg) => pkg.id),
@@ -250,6 +261,29 @@ export async function compileApplicationPlan(
         .map((pkg) => pkg.id),
     },
   };
+}
+
+export async function compileApplicationPlan(
+  source: ApplicationSource,
+  resolvePackage: ApplicationPackageResolver,
+  options: CompileApplicationOptions,
+): Promise<ApplicationPlan> {
+  const resolved = new Map<string, ResolvedPackageSource>();
+  for (const selection of source.packages) {
+    resolved.set(
+      `${selection.specifier}\0${selection.version}`,
+      await resolvePackage(selection.specifier, selection.version),
+    );
+  }
+  const unsigned = compileApplicationDeclarations(
+    source,
+    (specifier, version) => {
+      const pkg = resolved.get(`${specifier}\0${version}`);
+      if (!pkg) throw new Error(`unknown package: ${specifier}`);
+      return pkg;
+    },
+    options,
+  );
   return {
     ...unsigned,
     applicationHash: await sha256(canonicalJson(unsigned)),
