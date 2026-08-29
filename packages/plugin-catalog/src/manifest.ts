@@ -312,17 +312,20 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     if (!isRecord(desktop)) {
       throw new Error("manifest desktop contribution must be an object");
     }
+    const execution = desktop.execution;
     if (
-      desktop.execution !== "sandboxed-renderer" &&
-      desktop.execution !== "trusted-main"
+      execution !== "sandboxed-renderer" &&
+      (value.schemaVersion !== 3 || execution !== "trusted-main")
     ) {
       throw new Error(
-        'manifest desktop execution must be "sandboxed-renderer" or "trusted-main"',
+        value.schemaVersion === 3
+          ? 'manifest desktop execution must be "sandboxed-renderer" or "trusted-main"'
+          : 'manifest v2 desktop execution must be "sandboxed-renderer"',
       );
     }
     contributions.desktop = {
       entry: relativeEntry(desktop, "entry"),
-      execution: desktop.execution,
+      execution,
       commands: optionalStringArray(desktop, "commands"),
     };
   }

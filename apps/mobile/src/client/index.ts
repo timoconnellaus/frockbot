@@ -83,6 +83,7 @@ const botId = ref("default");
 let activeRequest: AbortController | undefined;
 let host: MobileHost | undefined;
 let botProjection: MobileBotProjectionController;
+let composerGeneration = 0;
 
 function replaceMessage(runId: string, replacement: WebChatMessage): void {
   const index = web.value.messages.findIndex(
@@ -125,6 +126,7 @@ const web: Ref<FrockBotWebData> = ref({
   modelLabel: "FrockBot gateway",
   settingsAvailable: true,
   connectionsAvailable: false,
+  composerContext: "default:0",
   messages: [],
   pluginCatalog: [],
   async loadBotSettings(): Promise<void> {
@@ -535,6 +537,8 @@ watch(
   (selectedBotId) => {
     activeRequest?.abort();
     activeRequest = undefined;
+    composerGeneration += 1;
+    web.value.composerContext = `${selectedBotId}:${composerGeneration}`;
     void botProjection.switchBot(selectedBotId);
   },
   { flush: "sync" },

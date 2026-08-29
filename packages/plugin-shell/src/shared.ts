@@ -63,6 +63,7 @@ export interface FrockBotWebData {
   modelLabel: string;
   settingsAvailable: boolean;
   connectionsAvailable: boolean;
+  composerContext?: unknown;
   messages: WebChatMessage[];
   activeRunId?: string;
   activeRun?: WebActiveRun;

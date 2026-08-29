@@ -19,6 +19,7 @@
     "@better-auth/electron": "1.7.2",
     "@cordisjs/client": "0.8.2",
     "@cordisjs/plugin-loader": "1.0.0-rc.5",
+    "@frockbot/application-foundation": "workspace:*",
     "@frockbot/desktop-core": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
@@ -38,6 +39,14 @@
     "files": [
       "out/**/*",
       "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "FrockBot",
+        "schemes": [
+          "com.frockbot.desktop"
+        ]
+      }
     ],
     "mac": {
       "icon": "resources/icon.icns",

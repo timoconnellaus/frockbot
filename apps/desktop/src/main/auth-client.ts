@@ -11,11 +11,16 @@ import {
   type DesktopApiResponse,
 } from "./desktop-api.js";
 import { resolveHostedDesktopOrigins } from "./hosted-application.js";
+import {
+  mountOwnedRegistrations,
+  setupDisposableAuthMain,
+} from "./owned-registrations.js";
 
 const AUTH_PROTOCOL = "com.frockbot.desktop";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const API_CHANNEL = "frockbot:api";
 const AUTHORIZATION_CHANNEL = "frockbot:open-external-authorization";
+const BETTER_AUTH_CHANNEL = "better-auth:";
 
 type AuthorizationStatus = "ready" | "pending" | "failed";
 
@@ -25,6 +30,25 @@ function isLoopbackOrigin(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function exactRecord(
+  value: unknown,
+  allowedKeys: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !allowedKeys.includes(key))) {
+    throw new Error(`${label} contains unsupported fields`);
+  }
+  return record;
+}
+
+function authErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Authentication failed";
 }
 
 export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
@@ -52,9 +76,12 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
           protocol: { scheme: AUTH_PROTOCOL },
           signInURL: new URL("/", authBaseUrl),
           storage: storage(),
+          userImageProxy: { enabled: false },
         }),
       ],
     });
+    const getWindow = () => BrowserWindow.getAllWindows()[0] ?? null;
+    setupDisposableAuthMain(authClient, app.isReady(), getWindow);
     const trustedRenderer = (url: string): boolean => {
       try {
         return new URL(url).origin === applicationUrl;
@@ -62,26 +89,67 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
         return false;
       }
     };
-    const onOpenUrl = (event: Electron.Event, url: string) => {
-      event.preventDefault();
-      this.acceptAuthorizationReturn(url);
-    };
-    const onSecondInstance = (_event: Electron.Event, argv: string[]) => {
-      for (const argument of argv) this.acceptAuthorizationReturn(argument);
-    };
-
-    app.on("open-url", onOpenUrl);
-    app.on("second-instance", onSecondInstance);
-
-    authClient.setupMain({
-      csp: false,
-      getWindow: () => BrowserWindow.getAllWindows()[0] ?? null,
-    });
-
-    ipcMain.handle(API_CHANNEL, async (event, request: unknown) => {
+    const requireTrustedRenderer = (event: Electron.IpcMainInvokeEvent) => {
       if (!event.senderFrame || !trustedRenderer(event.senderFrame.url)) {
         throw new Error("untrusted renderer");
       }
+    };
+    const sendAuthError = (error: unknown) => {
+      getWindow()?.webContents.send(`${BETTER_AUTH_CHANNEL}error`, {
+        message: authErrorMessage(error),
+      });
+    };
+    const acceptProtocolUrl = (value: string) => {
+      let url: URL;
+      try {
+        url = new URL(value);
+      } catch {
+        return;
+      }
+      if (
+        url.protocol === `${AUTH_PROTOCOL}:` &&
+        url.pathname === "/auth/callback" &&
+        url.hash.startsWith("#token=")
+      ) {
+        const token = url.hash.slice("#token=".length);
+        if (!token) return;
+        void authClient
+          .authenticate({ token })
+          .then((result) => {
+            if (result.error) sendAuthError(result.error);
+            else {
+              const window = getWindow();
+              window?.show();
+              window?.focus();
+            }
+          })
+          .catch(sendAuthError);
+        return;
+      }
+      this.acceptAuthorizationReturn(value);
+    };
+    const onOpenUrl = (event: Electron.Event, url: string) => {
+      event.preventDefault();
+      acceptProtocolUrl(url);
+    };
+    const onSecondInstance = (
+      _event: Electron.Event,
+      argv: string[],
+      _workingDirectory: string,
+      _additionalData: unknown,
+    ) => {
+      for (const argument of argv) acceptProtocolUrl(argument);
+    };
+    const onReady = () => {
+      if (process.platform === "darwin") return;
+      for (const argument of process.argv) acceptProtocolUrl(argument);
+    };
+
+    const apiHandler = async (
+      event: Electron.IpcMainInvokeEvent,
+      request: unknown,
+    ): Promise<DesktopApiResponse> => {
+      requireTrustedRenderer(event);
       const decodedRequest = decodeDesktopApiRequest(request);
       const headers = new Headers({ cookie: authClient.getCookie() });
       headers.set("x-frockbot-client", "desktop");
@@ -103,12 +171,13 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
         contentType: response.headers.get("content-type"),
         body: await response.text(),
       } satisfies DesktopApiResponse;
-    });
+    };
 
-    ipcMain.handle(AUTHORIZATION_CHANNEL, async (event, request: unknown) => {
-      if (!event.senderFrame || !trustedRenderer(event.senderFrame.url)) {
-        throw new Error("untrusted renderer");
-      }
+    const authorizationHandler = async (
+      event: Electron.IpcMainInvokeEvent,
+      request: unknown,
+    ) => {
+      requireTrustedRenderer(event);
       const decodedRequest = decodeDesktopExternalAuthorizationRequest(request);
       const { nativeReturnNonce } = decodedRequest;
       const authorizationUrl = decodeExternalAuthorizationUrl(
@@ -142,18 +211,120 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
         });
       });
       return { schemaVersion: 1, status: "accepted" } as const;
-    });
-
-    return () => {
-      app.off("open-url", onOpenUrl);
-      app.off("second-instance", onSecondInstance);
-      ipcMain.removeHandler(API_CHANNEL);
-      ipcMain.removeHandler(AUTHORIZATION_CHANNEL);
-      for (const finish of this.pendingAuthorizationReturns.values()) {
-        finish("failed");
-      }
-      this.pendingAuthorizationReturns.clear();
     };
+    const betterAuthGetUser = async (event: Electron.IpcMainInvokeEvent) => {
+      requireTrustedRenderer(event);
+      const session = await authClient.getSession();
+      if (session.error) throw new Error(session.error.message);
+      return session.data?.user ?? null;
+    };
+    const betterAuthRequest = async (
+      event: Electron.IpcMainInvokeEvent,
+      value: unknown,
+    ) => {
+      requireTrustedRenderer(event);
+      if (value === undefined) return await authClient.requestAuth();
+      const request = exactRecord(value, ["provider"], "auth request");
+      if (
+        request.provider !== undefined &&
+        (typeof request.provider !== "string" || !request.provider)
+      ) {
+        throw new Error("auth request provider is invalid");
+      }
+      await authClient.requestAuth(
+        request.provider ? { provider: request.provider } : undefined,
+      );
+    };
+    const betterAuthAuthenticate = async (
+      event: Electron.IpcMainInvokeEvent,
+      value: unknown,
+    ) => {
+      requireTrustedRenderer(event);
+      const request = exactRecord(value, ["token"], "auth callback");
+      if (typeof request.token !== "string" || !request.token) {
+        throw new Error("auth callback token is invalid");
+      }
+      const result = await authClient.authenticate({ token: request.token });
+      if (result.error) throw new Error(result.error.message);
+    };
+    const betterAuthSignOut = async (event: Electron.IpcMainInvokeEvent) => {
+      requireTrustedRenderer(event);
+      const result = await authClient.signOut();
+      if (result.error) throw new Error(result.error.message);
+      getWindow()?.webContents.send(`${BETTER_AUTH_CHANNEL}user-updated`, null);
+    };
+    const ipcRegistration =
+      (channel: string, listener: Parameters<typeof ipcMain.handle>[1]) =>
+      () => {
+        ipcMain.handle(channel, listener);
+        return () => ipcMain.removeHandler(channel);
+      };
+
+    return mountOwnedRegistrations([
+      () => {
+        if (!app.requestSingleInstanceLock()) {
+          app.quit();
+          throw new Error("another FrockBot desktop instance owns OAuth");
+        }
+        return () => app.releaseSingleInstanceLock();
+      },
+      () => {
+        if (app.isPackaged) return;
+        const args = process.defaultApp
+          ? process.argv[1]
+            ? [process.argv[1]]
+            : []
+          : undefined;
+        const registered = args
+          ? app.setAsDefaultProtocolClient(
+              AUTH_PROTOCOL,
+              process.execPath,
+              args,
+            )
+          : app.setAsDefaultProtocolClient(AUTH_PROTOCOL);
+        if (!registered) {
+          throw new Error("could not register the desktop OAuth protocol");
+        }
+        return () => {
+          if (args) {
+            app.removeAsDefaultProtocolClient(
+              AUTH_PROTOCOL,
+              process.execPath,
+              args,
+            );
+          } else {
+            app.removeAsDefaultProtocolClient(AUTH_PROTOCOL);
+          }
+        };
+      },
+      () => {
+        app.on("open-url", onOpenUrl);
+        return () => app.off("open-url", onOpenUrl);
+      },
+      () => {
+        app.on("second-instance", onSecondInstance);
+        return () => app.off("second-instance", onSecondInstance);
+      },
+      () => {
+        app.on("ready", onReady);
+        return () => app.off("ready", onReady);
+      },
+      ipcRegistration(API_CHANNEL, apiHandler),
+      ipcRegistration(AUTHORIZATION_CHANNEL, authorizationHandler),
+      ipcRegistration(`${BETTER_AUTH_CHANNEL}getUser`, betterAuthGetUser),
+      ipcRegistration(`${BETTER_AUTH_CHANNEL}requestAuth`, betterAuthRequest),
+      ipcRegistration(
+        `${BETTER_AUTH_CHANNEL}authenticate`,
+        betterAuthAuthenticate,
+      ),
+      ipcRegistration(`${BETTER_AUTH_CHANNEL}signOut`, betterAuthSignOut),
+      () => () => {
+        for (const finish of this.pendingAuthorizationReturns.values()) {
+          finish("failed");
+        }
+        this.pendingAuthorizationReturns.clear();
+      },
+    ]);
   }
 
   private acceptAuthorizationReturn(value: string): void {

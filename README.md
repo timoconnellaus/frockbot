@@ -97,6 +97,7 @@ Configure these GitHub `production` environment values:
 | Secret   | `GOOGLE_CLIENT_SECRET`          | Google Web application OAuth client secret                                    |
 | Secret   | `COMPOSIO_API_KEY`              | Composio project API key used only by backend Connection and tool drivers     |
 | Variable | `COMPOSIO_GMAIL_AUTH_CONFIG_ID` | Composio Gmail auth config used by hosted Connect Link                        |
+| Secret   | `SPRITES_TOKEN`                 | Fly Sprites token used only by the backend Computer provider                  |
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
 

@@ -6,6 +6,7 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 // Workspace packages export TypeScript source and must be compiled into Electron's
 // main bundle. Third-party dependencies remain external for electron-builder.
 const workspaceMainDependencies = [
+  "@frockbot/application-foundation",
   "@frockbot/desktop-core",
   "@frockbot/plugin-auth",
   "@frockbot/protocol",

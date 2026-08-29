@@ -6,6 +6,7 @@ import {
   createFoundationHostedRuntimePackages,
   createFoundationRuntimeApplication,
 } from "./runtime.js";
+import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
 
 describe("foundation application", () => {
   test("compiles one deterministic package graph for every contribution kind", async () => {
@@ -79,6 +80,29 @@ describe("foundation application", () => {
     ]);
   });
 
+  test("resolves trusted desktop code only from the compiled declaration", async () => {
+    const plan = await compileFoundationApplication();
+    expect(
+      resolveFoundationTrustedDesktopContribution(plan, "auth"),
+    ).toMatchObject({
+      packageId: "auth",
+      contributionSpecifier: "@frockbot/plugin-auth/desktop",
+    });
+
+    expect(() =>
+      resolveFoundationTrustedDesktopContribution(
+        {
+          ...plan,
+          contributions: {
+            ...plan.contributions,
+            desktop: plan.contributions.desktop.filter((id) => id !== "auth"),
+          },
+        },
+        "auth",
+      ),
+    ).toThrow('foundation desktop package "auth" is not declared');
+  });
+
   test("resolves declared backend and assigned runtime Contributions through host seams", async () => {
     const plan = await compileFoundationApplication();
     const secrets: Record<string, string> = {
@@ -110,12 +134,17 @@ describe("foundation application", () => {
     expect(userBackend).toHaveLength(1);
     expect(typeof botBackend[0]?.executeConfiguration).toBe("function");
     expect(typeof userBackend[0]?.startConnection).toBe("function");
+    const requestedSecrets: string[] = [];
     expect(
       createFoundationHostedRuntimePackages(plan, {
         userId: "user-1",
-        readSecret: () => undefined,
+        readSecret: (name) => {
+          requestedSecrets.push(name);
+          return undefined;
+        },
       }).map((pkg) => pkg.specifier),
     ).toEqual(["@frockbot/plugin-fly-sprite", "@frockbot/plugin-computer"]);
+    expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
 
     const assignment = {
       assignmentId: "gmail-primary",

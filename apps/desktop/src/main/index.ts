@@ -8,11 +8,14 @@ let disposing = false;
 
 app.setName("FrockBot");
 
-void app
-  .whenReady()
-  .then(async () => {
+const hostPromise = createCordisDesktopHost();
+
+void hostPromise
+  .then(async (createdHost) => {
+    host = createdHost;
+    await app.whenReady();
     setDevelopmentAppIcon(app);
-    host = await createCordisDesktopHost();
+    await host.desktopWindows.create();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         void host?.desktopWindows.create();

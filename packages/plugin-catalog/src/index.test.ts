@@ -266,6 +266,42 @@ describe("PackageCatalog", () => {
 });
 
 describe("decodeFrockBotManifest", () => {
+  test("keeps trusted Electron main execution exclusive to manifest v3", () => {
+    const contribution = {
+      desktop: {
+        entry: "./desktop",
+        execution: "trusted-main",
+        commands: [],
+      },
+    };
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 2,
+        id: "desktop-v2",
+        displayName: "Desktop v2",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: contribution,
+        permissions: [],
+      }),
+    ).toThrow('manifest v2 desktop execution must be "sandboxed-renderer"');
+    expect(
+      decodeFrockBotManifest({
+        schemaVersion: 3,
+        id: "desktop-v3",
+        displayName: "Desktop v3",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: contribution,
+        permissions: [],
+      }).contributions.desktop,
+    ).toEqual({
+      entry: "./desktop",
+      execution: "trusted-main",
+      commands: [],
+    });
+  });
+
   test("decodes an explicitly hosted backend Contribution", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 3,

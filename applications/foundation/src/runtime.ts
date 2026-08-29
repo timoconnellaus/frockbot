@@ -198,8 +198,7 @@ export function createFoundationHostedRuntimePackages(
       plan,
       "fly-sprite",
       createFlySpriteProviderPlugin(undefined, {
-        token:
-          host.readSecret("SPRITES_TOKEN") ?? host.readSecret("SPRITE_TOKEN"),
+        token: host.readSecret("SPRITES_TOKEN"),
       }),
     ),
     runtimePackage(

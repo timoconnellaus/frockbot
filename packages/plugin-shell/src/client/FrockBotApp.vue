@@ -5,11 +5,13 @@ import {
   type FrockBotWebData,
   type WebToolActivity,
 } from "../shared.js";
+import { ComposerDraftFence } from "./composer-draft.js";
 
 const injectedWeb = inject(frockBotWebDataKey);
 if (!injectedWeb) throw new Error("shell client data was not provided");
 const web = injectedWeb;
 const draft = ref("");
+const draftFence = new ComposerDraftFence();
 const rightPanelOpen = ref(true);
 const settingsOpen = ref(false);
 const pluginsOpen = ref(false);
@@ -55,9 +57,21 @@ function toolSymbol(tool: WebToolActivity): string {
 async function sendMessage(): Promise<void> {
   const text = draft.value.trim();
   if (!text || !canSend.value) return;
+  const submission = draftFence.begin(
+    state.value.composerContext ?? state.value.botSettings,
+  );
   draft.value = "";
   const result = await web.value.sendPrompt(text);
-  if (!result.accepted) draft.value = text;
+  if (
+    !result.accepted &&
+    draftFence.canRestore(
+      submission,
+      state.value.composerContext ?? state.value.botSettings,
+      draft.value,
+    )
+  ) {
+    draft.value = text;
+  }
 }
 
 function handleComposerKeydown(event: KeyboardEvent): void {
