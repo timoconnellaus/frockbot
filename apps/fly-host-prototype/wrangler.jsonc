@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "frockbot-fly-host-prototype",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [
+    {
+      "class_name": "FlyHostContainer",
+      "image": "./Dockerfile",
+      "max_instances": 3,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FLY_HOST",
+        "class_name": "FlyHostContainer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["FlyHostContainer"],
+    },
+  ],
+  "vars": {
+    "FLY_HOST_SHARDS": "1",
+    "PROTOTYPE_CREDENTIAL_REF": "sprites:prototype",
+  },
+}
