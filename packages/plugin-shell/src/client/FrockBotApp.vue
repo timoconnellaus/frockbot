@@ -291,12 +291,8 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
           </button>
           <button
             class="panel-toggle"
-            :title="
-              rightPanelOpen ? 'Hide computer panel' : 'Show computer panel'
-            "
-            :aria-label="
-              rightPanelOpen ? 'Hide computer panel' : 'Show computer panel'
-            "
+            :title="rightPanelOpen ? 'Hide side panel' : 'Show side panel'"
+            :aria-label="rightPanelOpen ? 'Hide side panel' : 'Show side panel'"
             @click="rightPanelOpen = !rightPanelOpen"
           >
             {{ rightPanelOpen ? "»" : "«" }}
@@ -354,12 +350,6 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
           >
             Resume Turn
           </button>
-          <button
-            v-else-if="state.error && state.connection !== 'ready'"
-            @click="web.restart()"
-          >
-            Restart agent
-          </button>
         </div>
 
         <form class="composer" @submit.prevent="sendMessage">
@@ -395,17 +385,6 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenus));
       </main>
 
       <aside v-if="rightPanelOpen" class="right-panel">
-        <k-slot name="frockbot.computer" />
-        <section class="routines-section">
-          <div class="panel-heading"><strong>Routines</strong></div>
-          <div class="routine-empty">
-            <span>○</span>
-            <div>
-              <strong>No routines yet</strong>
-              <p>Ask Barebones to repeat something later.</p>
-            </div>
-          </div>
-        </section>
         <k-slot name="frockbot.right-panel" />
       </aside>
     </div>

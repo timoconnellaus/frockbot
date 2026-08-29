@@ -499,11 +499,6 @@ const web: Ref<FrockBotWebData> = ref({
     activeRequest?.abort();
     return Promise.resolve();
   },
-  restart(): Promise<void> {
-    web.value.connection = "ready";
-    web.value.error = undefined;
-    return Promise.resolve();
-  },
 });
 
 botProjection = new MobileBotProjectionController(botId.value, {

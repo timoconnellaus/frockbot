@@ -40,7 +40,7 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs Packages, authorizes external accounts, and explicitly assigns their Capabilities to Bots. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser and desktop expose these hosted flows; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
 
-To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools, memory, and viewer UI. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory. `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names for standalone development; the hosted backend supplies durable User and Bot identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
+To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory. `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names for standalone development; the hosted backend supplies durable User and Bot identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
 
 ```bash
 SPRITES_TOKEN="..." \
@@ -48,7 +48,7 @@ SPRITES_TOKEN="..." \
   bun run dev:cloudflare:electron
 ```
 
-The Computer panel shows the selected Bot's live browser. **Take control** creates a Bot-scoped lease that blocks new process and browser actions while leaving durable Package file operations available; **Release control** returns it to the Bot. A token-routed noVNC gateway serves each Bot desktop through that Bot Sprite's public HTTPS URL. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical desktop memory Markdown and derived index metadata live in the memory Package's private Computer directory under `/home/box/agent-data`; cloud runtimes retain the explicit R2/Vectorize adapter. See [`docs/research/fly-sprites-computer.md`](docs/research/fly-sprites-computer.md) for provider constraints and primary sources.
+The shared hosted shell does not currently expose Computer viewer or takeover controls. The backend's token-routed noVNC gateway serves each Bot desktop through that Bot Sprite's public HTTPS URL, and its Bot-scoped takeover lease blocks new process and browser actions while leaving durable Package file operations available. Shells start in `/workspaces/<bot-key>` with `HOME=/home/box`. Canonical desktop memory Markdown and derived index metadata live in the memory Package's private Computer directory under `/home/box/agent-data`; cloud runtimes retain the explicit R2/Vectorize adapter. See [`docs/research/fly-sprites-computer.md`](docs/research/fly-sprites-computer.md) for provider constraints and primary sources.
 
 Electron's installer script is explicitly allowed through the root `trustedDependencies` setting. If Electron was installed before that setting existed, rebuild its binary once:
 
