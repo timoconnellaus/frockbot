@@ -7,6 +7,8 @@ import {
   decodeUserSettingsViewV1,
   type ConfigurationCommandV1,
   type ConfigurationQueryV1,
+  type RevokeConnectionCommandV1,
+  type StartConnectionCommandV1,
 } from "@frockbot/configuration-core";
 import {
   ClientApplication,
@@ -176,11 +178,13 @@ const application = new ClientApplication({
       `/api/plugins/${encodeURIComponent(input.packageId)}/connections`,
       "POST",
       JSON.stringify({
+        schemaVersion: 1,
+        type: "connection/start",
         commandId: input.commandId,
         connectionTypeId: input.connectionTypeId,
         alias: input.alias,
         nativeReturnNonce,
-      }),
+      } satisfies StartConnectionCommandV1),
     ).then(decodeStartConnectionResult);
   },
   async revokeConnection(packageId: string, connectionId: string) {
@@ -188,6 +192,10 @@ const application = new ClientApplication({
       await apiRequest(
         `/api/plugins/${encodeURIComponent(packageId)}/connections/${encodeURIComponent(connectionId)}/revoke`,
         "POST",
+        JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/revoke",
+        } satisfies RevokeConnectionCommandV1),
       ),
     );
   },

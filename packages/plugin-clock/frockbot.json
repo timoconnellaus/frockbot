@@ -1,15 +1,20 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "id": "clock",
   "displayName": "Clock",
   "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {
-    "agent": "./agent",
-    "desktop": "./host",
-    "web": {
-      "entry": "./src/client/index.ts",
-      "manifest": "./dist/manifest.json",
-      "slots": ["frockbot.right-panel"]
+    "runtime": { "entry": "./agent" },
+    "desktop": {
+      "entry": "./host",
+      "execution": "trusted-main",
+      "commands": []
+    },
+    "client": {
+      "entry": "./client",
+      "mounts": [{ "slot": "frockbot.right-panel" }],
+      "outlets": []
     }
   },
   "permissions": ["time:read"]

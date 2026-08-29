@@ -1,4 +1,10 @@
-import type { ConnectionView } from "@frockbot/configuration-core";
+import {
+  ConfigurationDecodeError,
+  decodeRevokeConnectionCommandV1,
+  decodeStartConnectionCommandV1,
+  type ConnectionView,
+  type StartConnectionCommandV1,
+} from "@frockbot/configuration-core";
 import { ComposioClient } from "./composio-client.js";
 export type {
   ConnectionCompletionResult,
@@ -307,46 +313,35 @@ export function createComposioBackendContribution(
         if (request.method !== "POST") {
           return jsonError(405, "method not allowed");
         }
+        let value: StartConnectionCommandV1;
         try {
-          const input: unknown = await request.json();
-          if (typeof input !== "object" || input === null) {
-            return jsonError(400, "Connection request must be an object");
-          }
-          const value = input as Record<string, unknown>;
-          const commandId = decodeConnectionIdentifier(value.commandId);
-          if (!commandId) {
-            return jsonError(400, "commandId is invalid");
-          }
-          const connectionTypeId = decodeConnectionIdentifier(
-            value.connectionTypeId,
+          value = decodeStartConnectionCommandV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error
+              ? error.message
+              : "Connection request is invalid",
           );
-          if (
-            !connectionTypeId ||
-            !Object.hasOwn(config.connectionTypes, connectionTypeId)
-          ) {
-            return jsonError(400, "connectionTypeId is invalid");
-          }
-          if (
-            value.alias !== undefined &&
-            (typeof value.alias !== "string" || value.alias.trim().length > 100)
-          ) {
-            return jsonError(400, "alias is invalid");
-          }
-          if (
-            context.client === "desktop" &&
-            (typeof value.nativeReturnNonce !== "string" ||
-              !ID_PATTERN.test(value.nativeReturnNonce))
-          ) {
-            return jsonError(400, "nativeReturnNonce is invalid");
-          }
+        }
+        const { commandId, connectionTypeId } = value;
+        if (!Object.hasOwn(config.connectionTypes, connectionTypeId)) {
+          return jsonError(400, "connectionTypeId is invalid");
+        }
+        if (
+          (context.client === "desktop" && !value.nativeReturnNonce) ||
+          (context.client === "browser" &&
+            value.nativeReturnNonce !== undefined)
+        ) {
+          return jsonError(400, "nativeReturnNonce is invalid");
+        }
+        try {
           const nativeReturnNonce =
-            context.client === "desktop"
-              ? (value.nativeReturnNonce as string)
-              : undefined;
+            context.client === "desktop" ? value.nativeReturnNonce : undefined;
           const startInput = {
             commandId,
             connectionTypeId,
-            alias: value.alias as string | undefined,
+            alias: value.alias,
             returnTarget: context.client,
           };
           const connections = coordinator(config, user);
@@ -388,6 +383,16 @@ export function createComposioBackendContribution(
       }
 
       if (revokeConnectionId) {
+        try {
+          decodeRevokeConnectionCommandV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof ConfigurationDecodeError
+              ? error.message
+              : "Connection revoke command is invalid",
+          );
+        }
         try {
           const connections = coordinator(config, user);
           return Response.json(

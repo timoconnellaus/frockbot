@@ -1,10 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "id": "desktop-clipboard",
   "displayName": "Desktop Clipboard",
   "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {
-    "desktop": "./desktop"
+    "desktop": {
+      "entry": "./desktop",
+      "execution": "trusted-main",
+      "commands": []
+    }
   },
   "permissions": ["desktop:clipboard:read", "desktop:clipboard:write"]
 }

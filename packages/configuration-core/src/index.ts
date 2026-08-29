@@ -48,6 +48,20 @@ export interface ConnectionView {
   failure?: string;
 }
 
+export interface StartConnectionCommandV1 {
+  schemaVersion: 1;
+  type: "connection/start";
+  commandId: string;
+  connectionTypeId: string;
+  alias?: string;
+  nativeReturnNonce?: string;
+}
+
+export interface RevokeConnectionCommandV1 {
+  schemaVersion: 1;
+  type: "connection/revoke";
+}
+
 export interface UserSettingsViewV1 {
   schemaVersion: 1;
   revision: number;
@@ -369,12 +383,103 @@ function record(value: unknown, label: string): Record<string, unknown> {
 }
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const RESERVED_CONNECTION_IDENTIFIERS = new Set([
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
+  "__proto__",
+  "constructor",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "prototype",
+  "toLocaleString",
+  "toString",
+  "valueOf",
+]);
 
 function identifier(value: unknown, label: string): string {
   if (typeof value !== "string" || !ID_PATTERN.test(value)) {
     throw new ConfigurationDecodeError(`${label} is invalid`);
   }
   return value;
+}
+
+function connectionIdentifier(value: unknown, label: string): string {
+  const decoded = identifier(value, label);
+  if (RESERVED_CONNECTION_IDENTIFIERS.has(decoded)) {
+    throw new ConfigurationDecodeError(`${label} is invalid`);
+  }
+  return decoded;
+}
+
+function exactRecord(
+  value: unknown,
+  label: string,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): Record<string, unknown> {
+  const decoded = record(value, label);
+  const allowed = new Set([...required, ...optional]);
+  if (
+    !required.every((key) => Object.hasOwn(decoded, key)) ||
+    Object.keys(decoded).some((key) => !allowed.has(key))
+  ) {
+    throw new ConfigurationDecodeError(`${label} has invalid fields`);
+  }
+  return decoded;
+}
+
+export function decodeStartConnectionCommandV1(
+  input: unknown,
+): StartConnectionCommandV1 {
+  const value = exactRecord(
+    input,
+    "Connection start command",
+    ["schemaVersion", "type", "commandId", "connectionTypeId"],
+    ["alias", "nativeReturnNonce"],
+  );
+  if (value.schemaVersion !== 1 || value.type !== "connection/start") {
+    throw new ConfigurationDecodeError("unsupported Connection start command");
+  }
+  if (
+    value.alias !== undefined &&
+    (typeof value.alias !== "string" || value.alias.length > 100)
+  ) {
+    throw new ConfigurationDecodeError("alias is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    type: "connection/start",
+    commandId: connectionIdentifier(value.commandId, "commandId"),
+    connectionTypeId: connectionIdentifier(
+      value.connectionTypeId,
+      "connectionTypeId",
+    ),
+    ...(value.alias === undefined ? {} : { alias: value.alias }),
+    ...(value.nativeReturnNonce === undefined
+      ? {}
+      : {
+          nativeReturnNonce: connectionIdentifier(
+            value.nativeReturnNonce,
+            "nativeReturnNonce",
+          ),
+        }),
+  };
+}
+
+export function decodeRevokeConnectionCommandV1(
+  input: unknown,
+): RevokeConnectionCommandV1 {
+  const value = exactRecord(input, "Connection revoke command", [
+    "schemaVersion",
+    "type",
+  ]);
+  if (value.schemaVersion !== 1 || value.type !== "connection/revoke") {
+    throw new ConfigurationDecodeError("unsupported Connection revoke command");
+  }
+  return { schemaVersion: 1, type: "connection/revoke" };
 }
 
 export function decodeConnectionDependencyRequirementV1(

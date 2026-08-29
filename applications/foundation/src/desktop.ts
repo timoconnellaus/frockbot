@@ -1,4 +1,4 @@
-import type { ApplicationPlan } from "@frockbot/application-compiler";
+import type { ApplicationDeclarationPlan } from "@frockbot/application-compiler";
 import authPlugin from "@frockbot/plugin-auth/desktop";
 import clockHostPlugin from "@frockbot/plugin-clock/host";
 import clipboardPlugin from "@frockbot/plugin-desktop-clipboard/desktop";
@@ -23,7 +23,7 @@ export interface FoundationTrustedDesktopContribution {
 }
 
 export function resolveFoundationTrustedDesktopContribution(
-  plan: ApplicationPlan,
+  plan: ApplicationDeclarationPlan,
   packageId: string,
 ): FoundationTrustedDesktopContribution {
   if (!plan.contributions.desktop.includes(packageId)) {
@@ -38,10 +38,7 @@ export function resolveFoundationTrustedDesktopContribution(
       `foundation desktop package "${packageId}" has no Contribution`,
     );
   }
-  if (
-    contribution.execution !== "trusted-main" &&
-    contribution.execution !== "trusted-main-legacy"
-  ) {
+  if (contribution.execution !== "trusted-main") {
     throw new Error(
       `foundation desktop package "${packageId}" is not trusted for Electron main`,
     );

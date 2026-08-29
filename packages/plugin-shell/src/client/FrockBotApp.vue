@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
   type WebToolActivity,
 } from "../shared.js";
-import { ComposerDraftFence } from "./composer-draft.js";
+import { ComposerDraftStore } from "./composer-draft.js";
 
 const injectedWeb = inject(frockBotWebDataKey);
 if (!injectedWeb) throw new Error("shell client data was not provided");
 const web = injectedWeb;
-const draft = ref("");
-const draftFence = new ComposerDraftFence();
+const state = computed(() => web.value);
+const composerContext = computed(
+  () =>
+    state.value.composerContext ?? state.value.botSettings?.botId ?? "default",
+);
+const draftStore = new ComposerDraftStore();
+const draft = ref(draftStore.draftFor(composerContext.value));
 const rightPanelOpen = ref(true);
 const settingsOpen = ref(false);
 const pluginsOpen = ref(false);
@@ -25,7 +30,6 @@ const settingsName = ref("");
 const settingsLabel = ref("");
 const settingsDescription = ref("");
 const settingsNotifications = ref(false);
-const state = computed(() => web.value);
 const botName = computed(
   () => state.value.botSettings?.profile.name ?? "Barebones",
 );
@@ -48,6 +52,18 @@ const canSend = computed(
     draft.value.trim().length > 0,
 );
 
+watch(
+  composerContext,
+  (current, previous) => {
+    draftStore.setDraft(previous, draft.value);
+    draft.value = draftStore.draftFor(current);
+  },
+  { flush: "sync" },
+);
+watch(draft, (value) => draftStore.setDraft(composerContext.value, value), {
+  flush: "sync",
+});
+
 function toolSymbol(tool: WebToolActivity): string {
   if (tool.status === "running") return "···";
   if (tool.status === "failed") return "!";
@@ -57,20 +73,17 @@ function toolSymbol(tool: WebToolActivity): string {
 async function sendMessage(): Promise<void> {
   const text = draft.value.trim();
   if (!text || !canSend.value) return;
-  const submission = draftFence.begin(
-    state.value.composerContext ?? state.value.botSettings,
-  );
+  const submission = draftStore.begin(composerContext.value, text);
   draft.value = "";
   const result = await web.value.sendPrompt(text);
-  if (
-    !result.accepted &&
-    draftFence.canRestore(
-      submission,
-      state.value.composerContext ?? state.value.botSettings,
-      draft.value,
-    )
-  ) {
-    draft.value = text;
+  if (!result.accepted) {
+    const restored = draftStore.reject(submission);
+    if (
+      restored !== undefined &&
+      composerContext.value === submission.context
+    ) {
+      draft.value = restored;
+    }
   }
 }
 

@@ -2,6 +2,8 @@ import "@frockbot/client-core/fonts.css";
 import type {
   BotNotificationPolicy,
   BotProfile,
+  RevokeConnectionCommandV1,
+  StartConnectionCommandV1,
 } from "@frockbot/configuration-core";
 import {
   decodeBotSettingsViewV1,
@@ -83,7 +85,6 @@ const botId = ref("default");
 let activeRequest: AbortController | undefined;
 let host: MobileHost | undefined;
 let botProjection: MobileBotProjectionController;
-let composerGeneration = 0;
 
 function replaceMessage(runId: string, replacement: WebChatMessage): void {
   const index = web.value.messages.findIndex(
@@ -126,7 +127,7 @@ const web: Ref<FrockBotWebData> = ref({
   modelLabel: "FrockBot gateway",
   settingsAvailable: true,
   connectionsAvailable: false,
-  composerContext: "default:0",
+  composerContext: "default",
   messages: [],
   pluginCatalog: [],
   async loadBotSettings(): Promise<void> {
@@ -249,9 +250,11 @@ const web: Ref<FrockBotWebData> = ref({
       {
         method: "POST",
         body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/start",
           commandId: crypto.randomUUID(),
           connectionTypeId,
-        }),
+        } satisfies StartConnectionCommandV1),
       },
     );
     const value: unknown = await response.json();
@@ -267,7 +270,13 @@ const web: Ref<FrockBotWebData> = ref({
   ): Promise<void> {
     const response = await auth.authorizedFetch(
       `/api/plugins/${encodeURIComponent(packageId)}/connections/${encodeURIComponent(connectionId)}/revoke`,
-      { method: "POST" },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/revoke",
+        } satisfies RevokeConnectionCommandV1),
+      },
     );
     const value: unknown = await response.json();
     if (!response.ok)
@@ -537,8 +546,7 @@ watch(
   (selectedBotId) => {
     activeRequest?.abort();
     activeRequest = undefined;
-    composerGeneration += 1;
-    web.value.composerContext = `${selectedBotId}:${composerGeneration}`;
+    web.value.composerContext = selectedBotId;
     void botProjection.switchBot(selectedBotId);
   },
   { flush: "sync" },

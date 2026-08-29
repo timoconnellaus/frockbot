@@ -27,6 +27,37 @@ describe("owned desktop registrations", () => {
     ).toThrow("desktop authentication must mount before app ready");
   });
 
+  test("keeps one-time auth preparation separate from remountable ownership", () => {
+    let preparations = 0;
+    let activeHandlers = 0;
+    setupDisposableAuthMain(
+      { setupMain: () => preparations++ },
+      false,
+      () => null,
+    );
+    const mount = () =>
+      mountOwnedRegistrations([
+        () => {
+          activeHandlers += 1;
+          return () => activeHandlers--;
+        },
+      ]);
+
+    const firstDispose = mount();
+    expect({ preparations, activeHandlers }).toEqual({
+      preparations: 1,
+      activeHandlers: 1,
+    });
+    firstDispose();
+    const secondDispose = mount();
+    expect({ preparations, activeHandlers }).toEqual({
+      preparations: 1,
+      activeHandlers: 1,
+    });
+    secondDispose();
+    expect(activeHandlers).toBe(0);
+  });
+
   test("tears down every registration and supports a clean remount", () => {
     const listeners = new Set<(value: string) => void>();
     const handlers = new Map<string, (value: string) => string>();

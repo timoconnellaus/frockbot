@@ -25,9 +25,6 @@ export default defineConfig({
   },
   preload: {
     build: {
-      externalizeDeps: {
-        exclude: ["@better-auth/electron"],
-      },
       rollupOptions: {
         input: resolve(root, "src/preload/index.ts"),
       },

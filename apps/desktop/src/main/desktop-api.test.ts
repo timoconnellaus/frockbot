@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeDesktopAuthAcknowledgement,
+  decodeDesktopAuthEvent,
+  decodeDesktopAuthRequest,
+  decodeDesktopAuthUserResponse,
   decodeDesktopApiRequest,
   decodeDesktopApiResponse,
   decodeDesktopExternalAuthorizationRequest,
@@ -154,5 +158,77 @@ describe("desktop hosted protocol", () => {
     expect(() => decodeExternalAuthorizationAcknowledgement({})).toThrow(
       "invalid external authorization acknowledgement",
     );
+  });
+
+  test("strictly decodes every desktop auth request, response, and event", () => {
+    expect(
+      decodeDesktopAuthRequest({ schemaVersion: 1, type: "auth/get-user" }),
+    ).toEqual({ schemaVersion: 1, type: "auth/get-user" });
+    expect(
+      decodeDesktopAuthRequest({
+        schemaVersion: 1,
+        type: "auth/request",
+        provider: "google",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      type: "auth/request",
+      provider: "google",
+    });
+    const user = { id: "user-1", name: "Alice", email: "a@example.com" };
+    expect(
+      decodeDesktopAuthUserResponse({
+        schemaVersion: 1,
+        type: "auth/user",
+        user,
+      }),
+    ).toEqual({ schemaVersion: 1, type: "auth/user", user });
+    expect(
+      decodeDesktopAuthAcknowledgement({
+        schemaVersion: 1,
+        type: "auth/accepted",
+      }),
+    ).toEqual({ schemaVersion: 1, type: "auth/accepted" });
+    expect(
+      decodeDesktopAuthEvent({
+        schemaVersion: 1,
+        type: "auth/authenticated",
+        user,
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      type: "auth/authenticated",
+      user,
+    });
+    for (const invalid of [
+      { type: "auth/get-user" },
+      { schemaVersion: 2, type: "auth/sign-out" },
+      { schemaVersion: 1, type: "auth/get-user", extra: true },
+      {
+        schemaVersion: 1,
+        type: "auth/request",
+        provider: "google",
+        extra: true,
+      },
+    ]) {
+      expect(() => decodeDesktopAuthRequest(invalid)).toThrow(
+        "invalid desktop auth request",
+      );
+    }
+    expect(() =>
+      decodeDesktopAuthUserResponse({
+        schemaVersion: 1,
+        type: "auth/user",
+        user: { ...user, token: "secret" },
+      }),
+    ).toThrow("invalid desktop auth user");
+    expect(() =>
+      decodeDesktopAuthEvent({
+        schemaVersion: 1,
+        type: "auth/error",
+        message: "failed",
+        extra: true,
+      }),
+    ).toThrow("invalid desktop auth event");
   });
 });

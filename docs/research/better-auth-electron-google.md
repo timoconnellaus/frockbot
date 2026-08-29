@@ -14,7 +14,7 @@ Research date: 2026-08-27
 
 - Better Auth server: explicit `baseURL`, strong `BETTER_AUTH_SECRET`, D1 database, `socialProviders.google`, official `electron()` plugin, and `com.frockbot.desktop:/` in `trustedOrigins`.
 - Electron main process: official `electronClient()`, `setupMain()` before `app.ready`, system-browser sign-in URL, persistent main-process storage, and custom protocol scheme `com.frockbot.desktop`.
-- Electron preload: call `setupRenderer()` while retaining `contextIsolation: true`, `nodeIntegration: false`, and Chromium sandboxing.
+- Electron preload: expose the narrow FrockBot auth surface through exact versioned request, response, and event envelopes while retaining `contextIsolation: true`, `nodeIntegration: false`, and Chromium sandboxing.
 - Web sign-in page: official proxy client, preserve Electron PKCE/state query parameters when calling `signIn.social`, and call `ensureElectronRedirect()`.
 - Google console redirect URIs: `http://127.0.0.1:8787/api/auth/callback/google` for local development and `https://<production-host>/api/auth/callback/google` in production.
 

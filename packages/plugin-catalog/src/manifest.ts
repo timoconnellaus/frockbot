@@ -23,7 +23,7 @@ export interface ClientContribution {
 
 export interface DesktopContribution {
   entry: string;
-  execution: "sandboxed-renderer" | "trusted-main" | "trusted-main-legacy";
+  execution: "sandboxed-renderer" | "trusted-main";
   commands: string[];
 }
 
@@ -197,7 +197,9 @@ function decodeV1(value: Record<string, unknown>): FrockBotManifest {
     throw new Error("manifest contributions must be an object");
   }
   const agent = optionalLegacyEntry(value.contributions, "agent");
-  const desktop = optionalLegacyEntry(value.contributions, "desktop");
+  if (value.contributions.desktop !== undefined) {
+    throw new Error("manifest v1 desktop Contributions are unsupported");
+  }
   const mobile = optionalLegacyEntry(value.contributions, "mobile");
   let client: ClientContribution | undefined;
   if (value.contributions.web !== undefined) {
@@ -214,9 +216,6 @@ function decodeV1(value: Record<string, unknown>): FrockBotManifest {
   const contributions: FrockBotManifest["contributions"] = {
     runtime: agent ? { entry: agent } : undefined,
     client,
-    desktop: desktop
-      ? { entry: desktop, execution: "trusted-main-legacy", commands: [] }
-      : undefined,
     mobile: mobile ? { entry: mobile } : undefined,
   };
   if (

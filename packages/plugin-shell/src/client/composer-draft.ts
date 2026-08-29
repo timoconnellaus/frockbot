@@ -1,25 +1,35 @@
 export interface ComposerSubmissionToken {
   generation: number;
-  botProjection: unknown;
+  context: unknown;
+  text: string;
 }
 
-export class ComposerDraftFence {
-  #generation = 0;
+export class ComposerDraftStore {
+  readonly #drafts = new Map<unknown, string>();
+  readonly #generations = new Map<unknown, number>();
 
-  begin(botProjection: unknown): ComposerSubmissionToken {
-    this.#generation += 1;
-    return { generation: this.#generation, botProjection };
+  draftFor(context: unknown): string {
+    return this.#drafts.get(context) ?? "";
   }
 
-  canRestore(
-    token: ComposerSubmissionToken,
-    currentBotProjection: unknown,
-    currentDraft: string,
-  ): boolean {
-    return (
-      token.generation === this.#generation &&
-      token.botProjection === currentBotProjection &&
-      currentDraft === ""
-    );
+  setDraft(context: unknown, draft: string): void {
+    this.#drafts.set(context, draft);
+  }
+
+  begin(context: unknown, text: string): ComposerSubmissionToken {
+    const generation = (this.#generations.get(context) ?? 0) + 1;
+    this.#generations.set(context, generation);
+    this.#drafts.set(context, "");
+    return { generation, context, text };
+  }
+
+  reject(token: ComposerSubmissionToken): string | undefined {
+    if (this.#generations.get(token.context) !== token.generation) {
+      return undefined;
+    }
+    const existing = this.draftFor(token.context);
+    const restored = existing ? `${token.text}\n\n${existing}` : token.text;
+    this.#drafts.set(token.context, restored);
+    return restored;
   }
 }

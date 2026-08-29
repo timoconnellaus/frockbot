@@ -28,6 +28,41 @@ export interface DesktopExternalAuthorizationAcknowledgement {
   status: "accepted";
 }
 
+export interface DesktopAuthUserV1 {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export type DesktopAuthRequestV1 =
+  | { schemaVersion: 1; type: "auth/get-user" }
+  | { schemaVersion: 1; type: "auth/request"; provider?: string }
+  | { schemaVersion: 1; type: "auth/sign-out" };
+
+export interface DesktopAuthUserResponseV1 {
+  schemaVersion: 1;
+  type: "auth/user";
+  user: DesktopAuthUserV1 | null;
+}
+
+export interface DesktopAuthAcknowledgementV1 {
+  schemaVersion: 1;
+  type: "auth/accepted";
+}
+
+export type DesktopAuthEventV1 =
+  | {
+      schemaVersion: 1;
+      type: "auth/authenticated";
+      user: DesktopAuthUserV1;
+    }
+  | {
+      schemaVersion: 1;
+      type: "auth/user-updated";
+      user: DesktopAuthUserV1 | null;
+    }
+  | { schemaVersion: 1; type: "auth/error"; message: string };
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -45,6 +80,127 @@ function hasExactKeys(
     required.every((key) => Object.hasOwn(value, key)) &&
     keys.every((key) => allowed.has(key))
   );
+}
+
+function boundedString(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= minimum &&
+    value.length <= maximum
+  );
+}
+
+function decodeDesktopAuthUser(value: unknown): DesktopAuthUserV1 {
+  const user = record(value);
+  if (
+    !user ||
+    !hasExactKeys(user, ["id", "name", "email"]) ||
+    !boundedString(user.id, 1, 256) ||
+    !boundedString(user.name, 1, 256) ||
+    !boundedString(user.email, 1, 320)
+  ) {
+    throw new Error("invalid desktop auth user");
+  }
+  return { id: user.id, name: user.name, email: user.email };
+}
+
+export function decodeDesktopAuthRequest(value: unknown): DesktopAuthRequestV1 {
+  const request = record(value);
+  if (!request || request.schemaVersion !== 1) {
+    throw new Error("invalid desktop auth request");
+  }
+  if (request.type === "auth/get-user" || request.type === "auth/sign-out") {
+    if (!hasExactKeys(request, ["schemaVersion", "type"])) {
+      throw new Error("invalid desktop auth request");
+    }
+    return { schemaVersion: 1, type: request.type };
+  }
+  if (
+    request.type !== "auth/request" ||
+    !hasExactKeys(request, ["schemaVersion", "type"], ["provider"]) ||
+    (request.provider !== undefined && !boundedString(request.provider, 1, 100))
+  ) {
+    throw new Error("invalid desktop auth request");
+  }
+  return {
+    schemaVersion: 1,
+    type: "auth/request",
+    ...(request.provider === undefined ? {} : { provider: request.provider }),
+  };
+}
+
+export function decodeDesktopAuthUserResponse(
+  value: unknown,
+): DesktopAuthUserResponseV1 {
+  const response = record(value);
+  if (
+    !response ||
+    !hasExactKeys(response, ["schemaVersion", "type", "user"]) ||
+    response.schemaVersion !== 1 ||
+    response.type !== "auth/user"
+  ) {
+    throw new Error("invalid desktop auth response");
+  }
+  return {
+    schemaVersion: 1,
+    type: "auth/user",
+    user: response.user === null ? null : decodeDesktopAuthUser(response.user),
+  };
+}
+
+export function decodeDesktopAuthAcknowledgement(
+  value: unknown,
+): DesktopAuthAcknowledgementV1 {
+  const response = record(value);
+  if (
+    !response ||
+    !hasExactKeys(response, ["schemaVersion", "type"]) ||
+    response.schemaVersion !== 1 ||
+    response.type !== "auth/accepted"
+  ) {
+    throw new Error("invalid desktop auth acknowledgement");
+  }
+  return { schemaVersion: 1, type: "auth/accepted" };
+}
+
+export function decodeDesktopAuthEvent(value: unknown): DesktopAuthEventV1 {
+  const event = record(value);
+  if (!event || event.schemaVersion !== 1) {
+    throw new Error("invalid desktop auth event");
+  }
+  if (event.type === "auth/error") {
+    if (
+      !hasExactKeys(event, ["schemaVersion", "type", "message"]) ||
+      !boundedString(event.message, 1, 2_000)
+    ) {
+      throw new Error("invalid desktop auth event");
+    }
+    return { schemaVersion: 1, type: "auth/error", message: event.message };
+  }
+  if (
+    (event.type !== "auth/authenticated" &&
+      event.type !== "auth/user-updated") ||
+    !hasExactKeys(event, ["schemaVersion", "type", "user"]) ||
+    (event.type === "auth/authenticated" && event.user === null)
+  ) {
+    throw new Error("invalid desktop auth event");
+  }
+  if (event.type === "auth/authenticated") {
+    return {
+      schemaVersion: 1,
+      type: "auth/authenticated",
+      user: decodeDesktopAuthUser(event.user),
+    };
+  }
+  return {
+    schemaVersion: 1,
+    type: "auth/user-updated",
+    user: event.user === null ? null : decodeDesktopAuthUser(event.user),
+  };
 }
 
 export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {

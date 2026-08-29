@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   compileFoundationApplication,
+  compileFoundationApplicationDeclarations,
   createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
@@ -9,6 +10,16 @@ import {
 import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
 
 describe("foundation application", () => {
+  test("resolves trusted desktop declarations without asynchronous startup work", () => {
+    const declarations = compileFoundationApplicationDeclarations();
+    expect(
+      resolveFoundationTrustedDesktopContribution(declarations, "auth"),
+    ).toMatchObject({
+      packageId: "auth",
+      contributionSpecifier: "@frockbot/plugin-auth/desktop",
+    });
+  });
+
   test("compiles one deterministic package graph for every contribution kind", async () => {
     const first = await compileFoundationApplication();
     const second = await compileFoundationApplication();

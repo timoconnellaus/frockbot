@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  compileApplicationDeclarations,
   compileApplicationPlan,
   type ApplicationPackageResolver,
   type ApplicationSource,
@@ -44,6 +45,17 @@ function selection(
 }
 
 describe("compileApplicationPlan", () => {
+  test("resolves Contribution declarations synchronously before hashing", () => {
+    const declarations = compileApplicationDeclarations(
+      { schemaVersion: 1, packages: [selection("@fixture/base")] },
+      (specifier) => ({ specifier, manifest: runtimeManifest("base") }),
+      { frockbotVersion: "1.0.0" },
+    );
+
+    expect(declarations.contributions.runtime).toEqual(["base"]);
+    expect(declarations).not.toHaveProperty("applicationHash");
+  });
+
   test("orders dependencies and hashes semantic input deterministically", async () => {
     const manifests = {
       "@fixture/base": runtimeManifest("base"),

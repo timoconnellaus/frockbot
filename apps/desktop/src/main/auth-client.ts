@@ -5,9 +5,12 @@ import { createAuthClient } from "better-auth/client";
 import type { Context } from "cordis";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import {
+  decodeDesktopAuthRequest,
   decodeDesktopApiRequest,
   decodeDesktopExternalAuthorizationRequest,
   decodeExternalAuthorizationUrl,
+  type DesktopAuthEventV1,
+  type DesktopAuthUserV1,
   type DesktopApiResponse,
 } from "./desktop-api.js";
 import { resolveHostedDesktopOrigins } from "./hosted-application.js";
@@ -20,7 +23,8 @@ const AUTH_PROTOCOL = "com.frockbot.desktop";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const API_CHANNEL = "frockbot:api";
 const AUTHORIZATION_CHANNEL = "frockbot:open-external-authorization";
-const BETTER_AUTH_CHANNEL = "better-auth:";
+const AUTH_CHANNEL = "frockbot:auth";
+const AUTH_EVENT_CHANNEL = "frockbot:auth-event";
 
 type AuthorizationStatus = "ready" | "pending" | "failed";
 
@@ -32,23 +36,71 @@ function isLoopbackOrigin(value: string): boolean {
   }
 }
 
-function exactRecord(
-  value: unknown,
-  allowedKeys: readonly string[],
-  label: string,
-): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !allowedKeys.includes(key))) {
-    throw new Error(`${label} contains unsupported fields`);
-  }
-  return record;
-}
-
 function authErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Authentication failed";
+}
+
+function desktopAuthUser(value: unknown): DesktopAuthUserV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Authentication returned an invalid user");
+  }
+  const user = value as Record<string, unknown>;
+  if (
+    typeof user.id !== "string" ||
+    !user.id ||
+    user.id.length > 256 ||
+    typeof user.name !== "string" ||
+    !user.name ||
+    user.name.length > 256 ||
+    typeof user.email !== "string" ||
+    !user.email ||
+    user.email.length > 320
+  ) {
+    throw new Error("Authentication returned an invalid user");
+  }
+  return { id: user.id, name: user.name, email: user.email };
+}
+
+function createElectronAuthClient(authBaseUrl: string) {
+  return createAuthClient({
+    baseURL: authBaseUrl,
+    plugins: [
+      electronClient({
+        clientID: "frockbot-desktop",
+        protocol: { scheme: AUTH_PROTOCOL },
+        signInURL: new URL("/", authBaseUrl),
+        storage: storage(),
+        userImageProxy: { enabled: false },
+      }),
+    ],
+  });
+}
+
+type ElectronAuthClient = ReturnType<typeof createElectronAuthClient>;
+
+export interface PreparedElectronDesktopAuthRuntime {
+  applicationUrl: string;
+  authBaseUrl: string;
+  useDevelopmentIdentity: boolean;
+  authClient: ElectronAuthClient;
+  getWindow(): BrowserWindow | null;
+}
+
+export function prepareElectronDesktopAuthRuntime(): PreparedElectronDesktopAuthRuntime {
+  const { applicationUrl, authBaseUrl } = resolveHostedDesktopOrigins(
+    process.env.FROCKBOT_APPLICATION_URL,
+    process.env.FROCKBOT_AUTH_BASE_URL,
+  );
+  const authClient = createElectronAuthClient(authBaseUrl);
+  setupDisposableAuthMain(authClient, app.isReady(), () => null);
+  return {
+    applicationUrl,
+    authBaseUrl,
+    useDevelopmentIdentity:
+      isLoopbackOrigin(authBaseUrl) && isLoopbackOrigin(applicationUrl),
+    authClient,
+    getWindow: () => BrowserWindow.getAllWindows()[0] ?? null,
+  };
 }
 
 export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
@@ -57,31 +109,21 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
     (status: AuthorizationStatus) => void
   >();
 
-  constructor(ctx: Context) {
+  constructor(
+    ctx: Context,
+    private readonly runtime: PreparedElectronDesktopAuthRuntime,
+  ) {
     super(ctx);
   }
 
   start(): () => void {
-    const { applicationUrl, authBaseUrl } = resolveHostedDesktopOrigins(
-      process.env.FROCKBOT_APPLICATION_URL,
-      process.env.FROCKBOT_AUTH_BASE_URL,
-    );
-    const useDevelopmentIdentity =
-      isLoopbackOrigin(authBaseUrl) && isLoopbackOrigin(applicationUrl);
-    const authClient = createAuthClient({
-      baseURL: authBaseUrl,
-      plugins: [
-        electronClient({
-          clientID: "frockbot-desktop",
-          protocol: { scheme: AUTH_PROTOCOL },
-          signInURL: new URL("/", authBaseUrl),
-          storage: storage(),
-          userImageProxy: { enabled: false },
-        }),
-      ],
-    });
-    const getWindow = () => BrowserWindow.getAllWindows()[0] ?? null;
-    setupDisposableAuthMain(authClient, app.isReady(), getWindow);
+    const {
+      applicationUrl,
+      authBaseUrl,
+      useDevelopmentIdentity,
+      authClient,
+      getWindow,
+    } = this.runtime;
     const trustedRenderer = (url: string): boolean => {
       try {
         return new URL(url).origin === applicationUrl;
@@ -94,9 +136,15 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
         throw new Error("untrusted renderer");
       }
     };
+    const sendAuthEvent = (event: DesktopAuthEventV1) => {
+      getWindow()?.webContents.send(AUTH_EVENT_CHANNEL, event);
+    };
     const sendAuthError = (error: unknown) => {
-      getWindow()?.webContents.send(`${BETTER_AUTH_CHANNEL}error`, {
-        message: authErrorMessage(error),
+      const message = authErrorMessage(error).slice(0, 2_000);
+      sendAuthEvent({
+        schemaVersion: 1,
+        type: "auth/error",
+        message: message || "Authentication failed",
       });
     };
     const acceptProtocolUrl = (value: string) => {
@@ -115,9 +163,21 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
         if (!token) return;
         void authClient
           .authenticate({ token })
-          .then((result) => {
+          .then(async (result) => {
             if (result.error) sendAuthError(result.error);
             else {
+              const session = await authClient.getSession();
+              if (session.error || !session.data?.user) {
+                throw new Error(
+                  session.error?.message ??
+                    "Authentication did not return a user",
+                );
+              }
+              sendAuthEvent({
+                schemaVersion: 1,
+                type: "auth/authenticated",
+                user: desktopAuthUser(session.data.user),
+              });
               const window = getWindow();
               window?.show();
               window?.focus();
@@ -212,46 +272,35 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
       });
       return { schemaVersion: 1, status: "accepted" } as const;
     };
-    const betterAuthGetUser = async (event: Electron.IpcMainInvokeEvent) => {
-      requireTrustedRenderer(event);
-      const session = await authClient.getSession();
-      if (session.error) throw new Error(session.error.message);
-      return session.data?.user ?? null;
-    };
-    const betterAuthRequest = async (
+    const authHandler = async (
       event: Electron.IpcMainInvokeEvent,
       value: unknown,
     ) => {
       requireTrustedRenderer(event);
-      if (value === undefined) return await authClient.requestAuth();
-      const request = exactRecord(value, ["provider"], "auth request");
-      if (
-        request.provider !== undefined &&
-        (typeof request.provider !== "string" || !request.provider)
-      ) {
-        throw new Error("auth request provider is invalid");
+      const request = decodeDesktopAuthRequest(value);
+      if (request.type === "auth/get-user") {
+        const session = await authClient.getSession();
+        if (session.error) throw new Error(session.error.message);
+        return {
+          schemaVersion: 1,
+          type: "auth/user",
+          user: session.data?.user ? desktopAuthUser(session.data.user) : null,
+        } as const;
       }
-      await authClient.requestAuth(
-        request.provider ? { provider: request.provider } : undefined,
-      );
-    };
-    const betterAuthAuthenticate = async (
-      event: Electron.IpcMainInvokeEvent,
-      value: unknown,
-    ) => {
-      requireTrustedRenderer(event);
-      const request = exactRecord(value, ["token"], "auth callback");
-      if (typeof request.token !== "string" || !request.token) {
-        throw new Error("auth callback token is invalid");
+      if (request.type === "auth/request") {
+        await authClient.requestAuth(
+          request.provider ? { provider: request.provider } : undefined,
+        );
+        return { schemaVersion: 1, type: "auth/accepted" } as const;
       }
-      const result = await authClient.authenticate({ token: request.token });
-      if (result.error) throw new Error(result.error.message);
-    };
-    const betterAuthSignOut = async (event: Electron.IpcMainInvokeEvent) => {
-      requireTrustedRenderer(event);
       const result = await authClient.signOut();
       if (result.error) throw new Error(result.error.message);
-      getWindow()?.webContents.send(`${BETTER_AUTH_CHANNEL}user-updated`, null);
+      sendAuthEvent({
+        schemaVersion: 1,
+        type: "auth/user-updated",
+        user: null,
+      });
+      return { schemaVersion: 1, type: "auth/accepted" } as const;
     };
     const ipcRegistration =
       (channel: string, listener: Parameters<typeof ipcMain.handle>[1]) =>
@@ -311,13 +360,7 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
       },
       ipcRegistration(API_CHANNEL, apiHandler),
       ipcRegistration(AUTHORIZATION_CHANNEL, authorizationHandler),
-      ipcRegistration(`${BETTER_AUTH_CHANNEL}getUser`, betterAuthGetUser),
-      ipcRegistration(`${BETTER_AUTH_CHANNEL}requestAuth`, betterAuthRequest),
-      ipcRegistration(
-        `${BETTER_AUTH_CHANNEL}authenticate`,
-        betterAuthAuthenticate,
-      ),
-      ipcRegistration(`${BETTER_AUTH_CHANNEL}signOut`, betterAuthSignOut),
+      ipcRegistration(AUTH_CHANNEL, authHandler),
       () => () => {
         for (const finish of this.pendingAuthorizationReturns.values()) {
           finish("failed");

@@ -24,14 +24,19 @@ async function createCatalog(): Promise<Context> {
 
 function manifest(id = "fixture") {
   return {
-    schemaVersion: 1,
+    schemaVersion: 3,
     id,
     displayName: id,
     version: "1.0.0",
+    compatibility: { frockbot: "*" },
     contributions: {
-      agent: "./agent",
-      desktop: "./host",
-      web: { entry: "./client.ts", manifest: "./manifest.json", slots: [] },
+      runtime: { entry: "./agent" },
+      desktop: {
+        entry: "./host",
+        execution: "trusted-main",
+        commands: [],
+      },
+      client: { entry: "./client.ts", mounts: [], outlets: [] },
     },
     permissions: [],
   };
@@ -94,6 +99,32 @@ afterEach(async () => {
 });
 
 describe("PackageCatalog", () => {
+  test("keeps trusted main authority exclusive to manifest v3", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 1,
+        id: "legacy-desktop",
+        displayName: "Legacy Desktop",
+        version: "1.0.0",
+        contributions: { desktop: "./desktop" },
+        permissions: [],
+      }),
+    ).toThrow("manifest v1 desktop Contributions are unsupported");
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 2,
+        id: "v2-desktop",
+        displayName: "V2 Desktop",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: {
+          desktop: { entry: "./desktop", execution: "trusted-main" },
+        },
+        permissions: [],
+      }),
+    ).toThrow('manifest v2 desktop execution must be "sandboxed-renderer"');
+  });
+
   test("keeps backend Contributions unavailable to v2 manifests", () => {
     expect(() =>
       decodeFrockBotManifest({
@@ -134,11 +165,11 @@ describe("PackageCatalog", () => {
     });
 
     expect(installed.manifest).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       id: "clock",
       contributions: {
         runtime: { entry: "./agent" },
-        desktop: { entry: "./host", execution: "trusted-main-legacy" },
+        desktop: { entry: "./host", execution: "trusted-main" },
         client: { mounts: [{ slot: "frockbot.right-panel" }] },
       },
       permissions: ["time:read"],
@@ -638,15 +669,20 @@ describe("decodeFrockBotManifest", () => {
 
   test("orders normalized contribution kinds", () => {
     const decoded = decodeFrockBotManifest({
-      schemaVersion: 1,
+      schemaVersion: 3,
       id: "every-kind",
       displayName: "Every Kind",
       version: "1.0.0",
+      compatibility: { frockbot: "*" },
       contributions: {
-        web: { entry: "./client.ts", manifest: "./manifest.json", slots: [] },
-        mobile: "./mobile",
-        desktop: "./host",
-        agent: "./agent",
+        client: { entry: "./client.ts", mounts: [], outlets: [] },
+        mobile: { entry: "./mobile" },
+        desktop: {
+          entry: "./host",
+          execution: "trusted-main",
+          commands: [],
+        },
+        runtime: { entry: "./agent" },
       },
     });
 

@@ -1,5 +1,7 @@
 import {
+  compileApplicationDeclarations,
   compileApplicationPlan,
+  type ApplicationDeclarationPlan,
   type ApplicationPlan,
   type ApplicationSource,
 } from "@frockbot/application-compiler";
@@ -106,6 +108,18 @@ export async function compileFoundationApplication(): Promise<ApplicationPlan> {
       if (!manifest)
         return Promise.reject(new Error(`unknown package: ${specifier}`));
       return Promise.resolve({ specifier, manifest });
+    },
+    { frockbotVersion: "0.0.1" },
+  );
+}
+
+export function compileFoundationApplicationDeclarations(): ApplicationDeclarationPlan {
+  return compileApplicationDeclarations(
+    applicationSource,
+    (specifier) => {
+      const manifest = manifests.get(specifier);
+      if (!manifest) throw new Error(`unknown package: ${specifier}`);
+      return { specifier, manifest };
     },
     { frockbotVersion: "0.0.1" },
   );

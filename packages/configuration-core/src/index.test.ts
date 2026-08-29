@@ -7,6 +7,8 @@ import {
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
   decodeOperationReceiptV1,
+  decodeRevokeConnectionCommandV1,
+  decodeStartConnectionCommandV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserSettingsViewV1,
   initializeBotSettingsV1,
@@ -99,6 +101,52 @@ describe("configuration DTO seam", () => {
         connectionTypeIds: [],
       }),
     ).toThrow(ConfigurationDecodeError);
+  });
+
+  test("strictly decodes versioned Connection commands", () => {
+    expect(
+      decodeStartConnectionCommandV1({
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+        alias: "Work",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      type: "connection/start",
+      commandId: "connection-1",
+      connectionTypeId: "gmail",
+      alias: "Work",
+    });
+    expect(
+      decodeRevokeConnectionCommandV1({
+        schemaVersion: 1,
+        type: "connection/revoke",
+      }),
+    ).toEqual({ schemaVersion: 1, type: "connection/revoke" });
+    for (const value of [
+      {
+        schemaVersion: 2,
+        type: "connection/start",
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+      },
+      {
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+        extra: true,
+      },
+      { schemaVersion: 1, type: "connection/revoke", extra: true },
+    ]) {
+      expect(() =>
+        value.type === "connection/revoke"
+          ? decodeRevokeConnectionCommandV1(value)
+          : decodeStartConnectionCommandV1(value),
+      ).toThrow(ConfigurationDecodeError);
+    }
   });
 
   test("decodes configuration RPC authority before commands", () => {

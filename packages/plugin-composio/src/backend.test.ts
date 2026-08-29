@@ -134,7 +134,14 @@ describe("Composio revoke route", () => {
     );
 
     const response = await contribution.route(
-      new Request(url, { method: "POST" }),
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/revoke",
+        }),
+      }),
       url,
       { userId: "user-1", client: "browser" },
     );
@@ -183,13 +190,79 @@ describe("Composio Connection start route", () => {
         new Request(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(input),
+          body: JSON.stringify({
+            schemaVersion: 1,
+            type: "connection/start",
+            ...input,
+          }),
         }),
         url,
         { userId: "user-1", client: "browser" },
       );
       expect(response?.status).toBe(400);
     }
+    expect(storeLookups).toBe(0);
+  });
+
+  test("rejects unsupported and inexact command envelopes before storage", async () => {
+    let storeLookups = 0;
+    const contribution = createComposioBackendContribution({
+      client: {} as ComposioClient,
+      callbackBaseUrl: "https://bot.frockbot.com",
+      authorizationStateSecret: "state-secret",
+      connectionTypes: {
+        gmail: {
+          authConfigId: "gmail-auth",
+          displayName: "Gmail",
+          toolkitSlug: "gmail",
+        },
+      },
+      storeFor() {
+        storeLookups += 1;
+        throw new Error("invalid commands must not resolve storage");
+      },
+    });
+    for (const body of [
+      {
+        schemaVersion: 2,
+        type: "connection/start",
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+      },
+      {
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId: "connection-1",
+        connectionTypeId: "gmail",
+        extra: true,
+      },
+    ]) {
+      const url = new URL(
+        "https://bot.frockbot.com/api/plugins/composio/connections",
+      );
+      const response = await contribution.route(
+        new Request(url, { method: "POST", body: JSON.stringify(body) }),
+        url,
+        { userId: "user-1", client: "browser" },
+      );
+      expect(response?.status).toBe(400);
+    }
+    const revokeUrl = new URL(
+      "https://bot.frockbot.com/api/plugins/composio/connections/connection-1/revoke",
+    );
+    const revokeResponse = await contribution.route(
+      new Request(revokeUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/revoke",
+          extra: true,
+        }),
+      }),
+      revokeUrl,
+      { userId: "user-1", client: "browser" },
+    );
+    expect(revokeResponse?.status).toBe(400);
     expect(storeLookups).toBe(0);
   });
 });
