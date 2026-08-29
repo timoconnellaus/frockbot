@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
+import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import {
   botTurnCommandFingerprintV1,
   type BotTurnCompletion,
@@ -45,6 +46,8 @@ function storedRun(): StoredRun {
     events: [ended],
     status: "running",
     phase: "executing",
+    configurationSnapshot: initializeBotSettingsV1("primary"),
+    previousEventCount: 0,
   };
 }
 

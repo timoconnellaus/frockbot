@@ -5,10 +5,11 @@ import type {
   ClientTurnEvent,
   ClientTurnResponse,
 } from "@frockbot/client-core";
-import type {
-  BotNotificationIntent,
-  BotTurnCompletion,
-  StoredRun,
+import {
+  requireStoredRunV1,
+  type BotNotificationIntent,
+  type BotTurnCompletion,
+  type StoredRun,
 } from "./backend-contracts.js";
 
 const MAX_RUN_ID_LENGTH = 128;
@@ -306,7 +307,7 @@ function visibleEvents(
 }
 
 function runStatus(run: StoredRun): ClientRunStatusV1 {
-  return run.status ?? "failed";
+  return requireStoredRunV1(run).status;
 }
 
 export function projectClientRunV1(run: StoredRun): ClientRunV1 {

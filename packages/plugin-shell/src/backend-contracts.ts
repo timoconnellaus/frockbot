@@ -1,5 +1,8 @@
 import type { SessionEvent } from "@frockbot/agent-core";
-import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
+import {
+  decodeBotSettingsViewV1,
+  type BotSettingsViewV1,
+} from "@frockbot/configuration-core";
 
 export type StoredRunStatus =
   | "running"
@@ -8,6 +11,9 @@ export type StoredRunStatus =
   | "interrupted"
   | "reconciliation-required";
 
+export type StoredRunPhase =
+  "admitted" | "executing" | "reconciliation-required";
+
 export interface StoredRun {
   runId: string;
   commandFingerprint: string;
@@ -15,12 +21,52 @@ export interface StoredRun {
   acceptedAt: string;
   input: string;
   events: SessionEvent[];
-  status?: StoredRunStatus;
+  status: StoredRunStatus;
   responseText?: string;
   failure?: string;
-  phase?: "admitted" | "executing" | "reconciliation-required";
-  configurationSnapshot?: BotSettingsViewV1;
-  previousEventCount?: number;
+  phase: StoredRunPhase;
+  configurationSnapshot: BotSettingsViewV1;
+  previousEventCount: number;
+}
+
+const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
+  "running",
+  "completed",
+  "failed",
+  "interrupted",
+  "reconciliation-required",
+];
+const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
+  "admitted",
+  "executing",
+  "reconciliation-required",
+];
+
+export function requireStoredRunV1(input: StoredRun): StoredRun {
+  const candidate = input as Partial<StoredRun>;
+  if (!candidate.status || !STORED_RUN_STATUSES.includes(candidate.status)) {
+    throw new Error(
+      `run "${candidate.runId ?? "unknown"}" has no valid status`,
+    );
+  }
+  if (!candidate.phase || !STORED_RUN_PHASES.includes(candidate.phase)) {
+    throw new Error(`run "${candidate.runId ?? "unknown"}" has no valid phase`);
+  }
+  if (
+    !Number.isSafeInteger(candidate.previousEventCount) ||
+    (candidate.previousEventCount ?? -1) < 0
+  ) {
+    throw new Error(
+      `run "${candidate.runId ?? "unknown"}" has no valid previous event count`,
+    );
+  }
+  if (!candidate.configurationSnapshot) {
+    throw new Error(
+      `run "${candidate.runId ?? "unknown"}" has no configuration snapshot`,
+    );
+  }
+  decodeBotSettingsViewV1(candidate.configurationSnapshot);
+  return input;
 }
 
 export interface BotTurnCommand {

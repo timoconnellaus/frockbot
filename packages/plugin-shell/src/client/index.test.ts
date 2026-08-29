@@ -421,9 +421,17 @@ describe("active durable Turn projection", () => {
 });
 
 describe("Connection operation reconciliation", () => {
-  test("reuses the command ID after a lost Connect Link response", async () => {
+  test("reuses the desktop command ID and nonce after a lost Connect Link response", async () => {
     installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/?bot=primary" },
+        frockbotDesktop: {},
+      },
+    });
     const commandIds: string[] = [];
+    const nativeReturnNonces: Array<string | undefined> = [];
     let attempts = 0;
     const mount = async (): Promise<Ref<FrockBotWebData>> => {
       let provided: Ref<FrockBotWebData> | undefined;
@@ -432,6 +440,7 @@ describe("Connection operation reconciliation", () => {
           turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
           startConnection: (input) => {
             commandIds.push(input.commandId);
+            nativeReturnNonces.push(input.nativeReturnNonce);
             attempts += 1;
             if (attempts === 1)
               return Promise.reject(new Error("response lost"));
@@ -463,6 +472,8 @@ describe("Connection operation reconciliation", () => {
 
     expect(commandIds).toHaveLength(2);
     expect(commandIds[1]).toBe(commandIds[0]);
+    expect(nativeReturnNonces[0]).toBeString();
+    expect(nativeReturnNonces[1]).toBe(nativeReturnNonces[0]);
   });
 
   test("validates browser authorization targets before opening them", async () => {

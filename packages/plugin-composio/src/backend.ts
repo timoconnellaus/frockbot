@@ -343,6 +343,7 @@ export function createComposioBackendContribution(
             connectionTypeId,
             alias: value.alias,
             returnTarget: context.client,
+            nativeReturnNonce,
           };
           const connections = coordinator(config, user);
           const replay = await connections.replayStart(user, startInput);

@@ -314,6 +314,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
 
@@ -377,6 +378,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
 
@@ -469,6 +471,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
 
@@ -541,6 +544,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
 
@@ -609,6 +613,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
 
@@ -633,6 +638,9 @@ describe("Bot recovery", () => {
       input: original.text,
       events: [],
       status: "completed",
+      phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
       responseText: "Durable reply",
     } satisfies StoredRun;
     const notification = {
@@ -762,6 +770,8 @@ describe("Bot recovery", () => {
       events: [],
       status: "running",
       phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
     } satisfies StoredRun;
     await storage.put("run:command-1", running);
     await expect(
@@ -837,6 +847,8 @@ describe("Bot recovery", () => {
       events: [],
       status: "running",
       phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
     } satisfies StoredRun;
     await storage.put("run:command-running", running);
     const contribution = createShellBotBackendContribution({
@@ -869,6 +881,9 @@ describe("Bot recovery", () => {
       input: "legacy",
       events: [],
       status: "completed",
+      phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
       responseText: "legacy",
     } satisfies StoredRun);
     const contribution = createShellBotBackendContribution({
@@ -900,6 +915,9 @@ describe("Bot recovery", () => {
         input: "🧪".repeat(40_000),
         events: [],
         status: active ? "reconciliation-required" : "completed",
+        phase: active ? "reconciliation-required" : "executing",
+        configurationSnapshot: initializeBotSettingsV1("primary"),
+        previousEventCount: 0,
         ...(active
           ? { failure: "Provider confirmation required" }
           : { responseText: "📦".repeat(80_000) }),

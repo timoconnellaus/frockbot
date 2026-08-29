@@ -170,10 +170,8 @@ const application = new ClientApplication({
     packageId: string;
     connectionTypeId: string;
     alias?: string;
+    nativeReturnNonce?: string;
   }) {
-    const nativeReturnNonce = window.frockbotDesktop
-      ? crypto.randomUUID()
-      : undefined;
     return apiRequest(
       `/api/plugins/${encodeURIComponent(input.packageId)}/connections`,
       "POST",
@@ -183,7 +181,7 @@ const application = new ClientApplication({
         commandId: input.commandId,
         connectionTypeId: input.connectionTypeId,
         alias: input.alias,
-        nativeReturnNonce,
+        nativeReturnNonce: input.nativeReturnNonce,
       } satisfies StartConnectionCommandV1),
     ).then(decodeStartConnectionResult);
   },

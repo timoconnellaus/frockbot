@@ -63,12 +63,34 @@ function storedRun(
     input: "continue",
     events,
     status,
+    phase: status === "reconciliation-required" ? status : "executing",
+    configurationSnapshot: initializeBotSettingsV1("primary"),
+    previousEventCount: 0,
     ...(status === "completed" ? { responseText: "done" } : {}),
     ...(status === "failed" ? { failure: "failed" } : {}),
   };
 }
 
 describe("client run protocol v1", () => {
+  test("rejects durable runs missing current admission fields", () => {
+    const complete = storedRun([], "running");
+    for (const field of [
+      "status",
+      "phase",
+      "configurationSnapshot",
+      "previousEventCount",
+    ] as const) {
+      const incomplete = structuredClone(complete) as unknown as Record<
+        string,
+        unknown
+      >;
+      delete incomplete[field];
+      expect(() =>
+        projectClientRunLookupV1(incomplete as unknown as StoredRun),
+      ).toThrow();
+    }
+  });
+
   test("projects and strictly decodes command-specific admission state", () => {
     expect(
       decodeClientRunLookupV1(projectClientRunLookupV1(undefined)),
@@ -499,6 +521,9 @@ describe("client run protocol v1", () => {
       input: "🧪".repeat(40_000),
       events: toolEvents(300),
       status: "failed",
+      phase: "executing",
+      configurationSnapshot: initializeBotSettingsV1("primary"),
+      previousEventCount: 0,
       failure: "💥".repeat(10_000),
     };
 

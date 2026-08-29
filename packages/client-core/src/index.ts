@@ -91,6 +91,7 @@ export interface AgentTransport {
     packageId: string;
     connectionTypeId: string;
     alias?: string;
+    nativeReturnNonce?: string;
   }): Promise<ClientStartConnectionResult>;
   listRuns?(): Promise<ClientRun[]>;
   reconcileRun?(runId: string): Promise<ClientTurnResponse>;

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
+import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { eventsForFailedRun, planBotRunRecovery } from "./bot-recovery.js";
 
@@ -13,6 +14,7 @@ function run(events: SessionEvent[]): StoredRun {
     events,
     status: "running",
     phase: "executing",
+    configurationSnapshot: initializeBotSettingsV1("primary"),
     previousEventCount: 1,
   };
 }

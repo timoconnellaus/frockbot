@@ -53,13 +53,14 @@ import {
   type ClientRunV1,
   type ClientTurnV1,
 } from "./run-protocol.js";
-import type {
-  BotNotificationIntent,
-  BotTurnCommand,
-  BotTurnCompletion,
-  StoredRun,
+import {
+  botTurnCommandFingerprintV1,
+  requireStoredRunV1,
+  type BotNotificationIntent,
+  type BotTurnCommand,
+  type BotTurnCompletion,
+  type StoredRun,
 } from "./backend-contracts.js";
-import { botTurnCommandFingerprintV1 } from "./backend-contracts.js";
 
 const RUN_PREFIX = "run:";
 const RUN_INDEX_PREFIX = "run-index:";
@@ -776,8 +777,8 @@ export class ShellBotBackendContribution {
       }
       const latest =
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
-      const settings =
-        run.configurationSnapshot ?? this.initialBotSettings(identity.botId);
+      requireStoredRunV1(run);
+      const settings = run.configurationSnapshot;
       await transaction.put(key, {
         ...run,
         status: "running",
@@ -878,7 +879,8 @@ export class ShellBotBackendContribution {
     settings: BotSettingsViewV1,
   ): Promise<BotTurnCompletion> {
     this.executingRunId = run.runId;
-    const previous = latest.slice(0, run.previousEventCount ?? 0);
+    requireStoredRunV1(run);
+    const previous = latest.slice(0, run.previousEventCount);
     try {
       const agentPackages = await this.assignedAgentPackages(
         identity,
@@ -1138,7 +1140,9 @@ export class ShellBotBackendContribution {
           { userId: saga.userId, botId: saga.botId },
           saga.commandId,
         );
-      } catch {}
+      } catch {
+        continue;
+      }
     }
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
     if (activeRunId) {
@@ -1651,12 +1655,6 @@ export class ShellBotBackendContribution {
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
       const plan = planBotRunRecovery(run, latest);
       if (plan.kind === "complete") {
-        if (!run.configurationSnapshot) {
-          throw new Error(`run "${run.runId}" has no configuration snapshot`);
-        }
-        if (run.previousEventCount === undefined) {
-          throw new Error(`run "${run.runId}" has no previous event count`);
-        }
         const result = {
           runId: run.runId,
           text: plan.responseText,
@@ -1699,9 +1697,7 @@ export class ShellBotBackendContribution {
         return undefined;
       }
       if (plan.kind === "restart") {
-        const settings =
-          run.configurationSnapshot ??
-          this.initialBotSettings(durableIdentity?.botId ?? "default");
+        const settings = run.configurationSnapshot;
         await transaction.put({
           [key]: {
             ...run,
@@ -1719,9 +1715,7 @@ export class ShellBotBackendContribution {
         };
       }
       if (plan.kind === "resume") {
-        const settings =
-          run.configurationSnapshot ??
-          this.initialBotSettings(durableIdentity?.botId ?? "default");
+        const settings = run.configurationSnapshot;
         await transaction.put(key, {
           ...run,
           phase: "executing",

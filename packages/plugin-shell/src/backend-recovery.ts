@@ -6,7 +6,7 @@ import {
   validateToolOccurrenceJournal,
 } from "@frockbot/agent-core";
 import { BotTurnExecutionError } from "./backend-runner.js";
-import type { StoredRun } from "./backend-contracts.js";
+import { requireStoredRunV1, type StoredRun } from "./backend-contracts.js";
 
 export type BotRunRecoveryPlan =
   | { kind: "complete"; responseText: string }
@@ -64,6 +64,7 @@ export function planBotRunRecovery(
   run: StoredRun,
   latest: readonly SessionEvent[],
 ): BotRunRecoveryPlan {
+  requireStoredRunV1(run);
   let toolJournal: ReturnType<typeof validateToolOccurrenceJournal>;
   try {
     toolJournal = validateToolOccurrenceJournal(run.events);
@@ -142,7 +143,7 @@ export function planBotRunRecovery(
     }
     return {
       kind: "restart",
-      previous: [...latest.slice(0, run.previousEventCount ?? 0)],
+      previous: [...latest.slice(0, run.previousEventCount)],
     };
   }
   const session = new Session(run.sessionId, () => {}, latest);

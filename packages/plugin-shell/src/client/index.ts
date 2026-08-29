@@ -216,6 +216,7 @@ interface PendingConnectionOperation {
   commandId: string;
   createdAt: number;
   expiresAt?: number;
+  nativeReturnNonce?: string;
 }
 
 const CONNECTION_OPERATION_STORAGE_KEY =
@@ -247,7 +248,9 @@ function readConnectionOperations(): Record<
           typeof operation.commandId !== "string" ||
           typeof operation.createdAt !== "number" ||
           (operation.expiresAt !== undefined &&
-            typeof operation.expiresAt !== "number")
+            typeof operation.expiresAt !== "number") ||
+          (operation.nativeReturnNonce !== undefined &&
+            typeof operation.nativeReturnNonce !== "string")
         ) {
           return [];
         }
@@ -259,6 +262,9 @@ function readConnectionOperations(): Record<
               createdAt: operation.createdAt,
               ...(typeof operation.expiresAt === "number"
                 ? { expiresAt: operation.expiresAt }
+                : {}),
+              ...(typeof operation.nativeReturnNonce === "string"
+                ? { nativeReturnNonce: operation.nativeReturnNonce }
                 : {}),
             },
           ],
@@ -590,6 +596,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const operation = connectionOperations[operationKey] ?? {
         commandId: crypto.randomUUID(),
         createdAt: now,
+        ...("frockbotDesktop" in (globalThis.window ?? {})
+          ? { nativeReturnNonce: crypto.randomUUID() }
+          : {}),
       };
       connectionOperations[operationKey] = operation;
       writeConnectionOperations(connectionOperations);
@@ -599,6 +608,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           commandId: operation.commandId,
           packageId,
           connectionTypeId,
+          nativeReturnNonce: operation.nativeReturnNonce,
         });
       } catch (error) {
         if (isDefinitiveConnectionFailure(error)) {
