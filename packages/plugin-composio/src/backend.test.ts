@@ -33,6 +33,22 @@ describe("configured Composio backend", () => {
       {
         COMPOSIO_API_KEY: "api-secret",
         COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET:
+          "replace-with-an-independent-random-secret",
+      },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET: "x".repeat(32),
+      },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
+        FROCKBOT_AUTHORIZATION_STATE_SECRET: "0123456789abcdef".repeat(4),
+      },
+      {
+        COMPOSIO_API_KEY: "api-secret",
+        COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
         BETTER_AUTH_SECRET: "shared-trust-authority-secret-0001",
         FROCKBOT_AUTHORIZATION_STATE_SECRET:
           "shared-trust-authority-secret-0001",
@@ -51,7 +67,7 @@ describe("configured Composio backend", () => {
           COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
           BETTER_AUTH_SECRET: "better-auth-secret-that-is-independent",
           FROCKBOT_AUTHORIZATION_STATE_SECRET:
-            "independent-authorization-state-secret",
+            "6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
         }),
       ).packageId,
     ).toBe("composio");

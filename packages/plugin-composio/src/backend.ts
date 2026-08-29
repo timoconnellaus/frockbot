@@ -20,6 +20,10 @@ import {
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH = 32;
+const MINIMUM_AUTHORIZATION_STATE_SECRET_UNIQUE_CHARACTERS = 8;
+const FORBIDDEN_AUTHORIZATION_STATE_SECRETS = new Set([
+  "replace-with-an-independent-random-secret",
+]);
 const RESERVED_CONNECTION_IDENTIFIERS = new Set([
   "__defineGetter__",
   "__defineSetter__",
@@ -102,6 +106,33 @@ export interface ComposioBackendHost {
   ): Promise<"applied" | "stale">;
 }
 
+function isRepeatedAuthorizationStateSecret(secret: string): boolean {
+  for (
+    let patternLength = 1;
+    patternLength <= Math.min(16, Math.floor(secret.length / 2));
+    patternLength += 1
+  ) {
+    if (
+      secret.length % patternLength === 0 &&
+      secret ===
+        secret.slice(0, patternLength).repeat(secret.length / patternLength)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isStrongAuthorizationStateSecret(secret: string): boolean {
+  return (
+    secret.length >= MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH &&
+    new Set(secret).size >=
+      MINIMUM_AUTHORIZATION_STATE_SECRET_UNIQUE_CHARACTERS &&
+    !FORBIDDEN_AUTHORIZATION_STATE_SECRETS.has(secret) &&
+    !isRepeatedAuthorizationStateSecret(secret)
+  );
+}
+
 export function createConfiguredComposioBackendContribution(
   host: ComposioBackendHost,
 ): BackendRouteContribution {
@@ -115,8 +146,7 @@ export function createConfiguredComposioBackendContribution(
     !apiKey ||
     !gmailAuthConfigId ||
     !authorizationStateSecret ||
-    authorizationStateSecret.length <
-      MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH ||
+    !isStrongAuthorizationStateSecret(authorizationStateSecret) ||
     authorizationStateSecret === betterAuthSecret
   ) {
     throw new Error("Composio backend Contribution is not configured");

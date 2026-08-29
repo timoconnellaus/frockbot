@@ -21,7 +21,10 @@ afterEach(async () => {
   );
 });
 
-async function runProductionSetup(stdin: string): Promise<{
+async function runProductionSetup(
+  stdin: string,
+  generatedAuthorizationStateSecret = "6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
+): Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -33,6 +36,7 @@ async function runProductionSetup(stdin: string): Promise<{
   await mkdir(bin);
   const gh = join(bin, "gh");
   const open = join(bin, "open");
+  const openssl = join(bin, "openssl");
   await Bun.write(
     gh,
     `#!/usr/bin/env bash
@@ -46,7 +50,19 @@ fi
 `,
   );
   await Bun.write(open, "#!/usr/bin/env bash\nexit 0\n");
-  await Promise.all([chmod(gh, 0o755), chmod(open, 0o755)]);
+  await Bun.write(
+    openssl,
+    `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == "rand -hex 32" ]]
+printf '%s\n' "$GENERATED_AUTHORIZATION_STATE_SECRET"
+`,
+  );
+  await Promise.all([
+    chmod(gh, 0o755),
+    chmod(open, 0o755),
+    chmod(openssl, 0o755),
+  ]);
 
   const child = Bun.spawn(
     ["bash", fileURLToPath(new URL("./setup-production.sh", import.meta.url))],
@@ -56,6 +72,7 @@ fi
         ...process.env,
         ENV_FILE: join(directory, ".env"),
         GH_LOG: ghLog,
+        GENERATED_AUTHORIZATION_STATE_SECRET: generatedAuthorizationStateSecret,
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       },
       stdin: "pipe",
@@ -77,7 +94,7 @@ fi
 describe("production setup", () => {
   test("the wizard provisions dedicated backend environment secrets", async () => {
     const { exitCode, stdout, stderr, calls } = await runProductionSetup(
-      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ngmail-config\ncomposio-key\nindependent-authorization-state-secret\nsprites-production\n\n",
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ngmail-config\ncomposio-key\nsprites-production\n\n",
     );
 
     expect(exitCode).toBe(0);
@@ -92,7 +109,7 @@ describe("production setup", () => {
       "secret set FROCKBOT_AUTHORIZATION_STATE_SECRET --repo timoconnellaus/frockbot --env production",
     );
     expect(calls).toContain(
-      "secret-value:FROCKBOT_AUTHORIZATION_STATE_SECRET:independent-authorization-state-secret",
+      "secret-value:FROCKBOT_AUTHORIZATION_STATE_SECRET:6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
     );
     expect(calls).toContain(
       "secret set SPRITES_TOKEN --repo timoconnellaus/frockbot --env production",
@@ -100,14 +117,15 @@ describe("production setup", () => {
     expect(calls).toContain("secret-value:SPRITES_TOKEN:sprites-production");
   });
 
-  test("the wizard rejects a weak authorization-state secret", async () => {
+  test("the wizard rejects weak authorization-state generation", async () => {
     const { exitCode, stdout, calls } = await runProductionSetup(
-      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ngmail-config\ncomposio-key\ntoo-short\n",
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\ngmail-config\ncomposio-key\n",
+      "0123456789abcdef".repeat(4),
     );
 
     expect(exitCode).toBe(1);
     expect(stdout).toContain(
-      "The Connection authorization-state secret must be at least 32 characters",
+      "Failed to generate a strong Connection authorization-state secret",
     );
     expect(calls).not.toContain(
       "secret set FROCKBOT_AUTHORIZATION_STATE_SECRET --repo timoconnellaus/frockbot --env production",
@@ -150,13 +168,14 @@ describe("production setup", () => {
       CLOUDFLARE_ACCOUNT_ID: "cloudflare-account",
       CLOUDFLARE_D1_DATABASE_ID: "cloudflare-database",
       BETTER_AUTH_URL: "https://bot.frockbot.com",
-      BETTER_AUTH_SECRET: "independent-better-auth-secret-0001",
+      BETTER_AUTH_SECRET:
+        "a87ad4f95378b32a7954573d8f0933e07bc99a6d3c58ae2b61d85fd43ac424eb",
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       COMPOSIO_API_KEY: "composio-key",
       COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-config",
       FROCKBOT_AUTHORIZATION_STATE_SECRET:
-        "independent-authorization-state-secret",
+        "6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
       SPRITES_TOKEN: "sprites-production",
     };
     const validConfiguration = Bun.spawnSync(
@@ -179,6 +198,36 @@ describe("production setup", () => {
     expect(weakConfiguration.exitCode).toBe(1);
     expect(weakConfiguration.stderr.toString()).toContain(
       "FROCKBOT_AUTHORIZATION_STATE_SECRET must be at least 32 characters",
+    );
+
+    const sourcePlaceholder = Bun.spawnSync(
+      ["bash", "-c", validation?.run ?? ""],
+      {
+        env: {
+          ...productionEnvironment,
+          FROCKBOT_AUTHORIZATION_STATE_SECRET:
+            "replace-with-an-independent-random-secret",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    expect(sourcePlaceholder.exitCode).toBe(1);
+    expect(sourcePlaceholder.stderr.toString()).toContain(
+      "FROCKBOT_AUTHORIZATION_STATE_SECRET must be randomly generated",
+    );
+
+    const repeatedValue = Bun.spawnSync(["bash", "-c", validation?.run ?? ""], {
+      env: {
+        ...productionEnvironment,
+        FROCKBOT_AUTHORIZATION_STATE_SECRET: "0123456789abcdef".repeat(4),
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(repeatedValue.exitCode).toBe(1);
+    expect(repeatedValue.stderr.toString()).toContain(
+      "FROCKBOT_AUTHORIZATION_STATE_SECRET must be randomly generated",
     );
 
     const reusedAuthority = Bun.spawnSync(
@@ -242,7 +291,7 @@ exit 1
         }),
     );
     expect(forwarded.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
-      "independent-authorization-state-secret",
+      "6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
     );
     expect(forwarded.SPRITES_TOKEN).toBe("sprites-production");
     expect(forwarded).not.toHaveProperty("SPRITE_TOKEN");
