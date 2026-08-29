@@ -183,212 +183,6 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     return Promise.resolve(true);
   }
 
-  consumeAuthorizationState(
-    _userId: string,
-    connectionId: string,
-    authorizationStateId: string,
-  ): Promise<"claimed" | "duplicate" | "invalid"> {
-    const current = this.connections.get(connectionId);
-    if (
-      !current ||
-      (current.safeMetadata.authorizationStateId !== undefined &&
-        current.safeMetadata.authorizationStateId !== authorizationStateId)
-    ) {
-      return Promise.resolve("invalid");
-    }
-    if (current.safeMetadata.authorizationStateConsumed === true) {
-      return Promise.resolve("duplicate");
-    }
-    this.connections.set(connectionId, {
-      ...current,
-      safeMetadata: {
-        ...current.safeMetadata,
-        authorizationStateConsumed: true,
-      },
-    });
-    return Promise.resolve("claimed");
-  }
-
-  admitConnectionCallback(
-    _userId: string,
-    connectionId: string,
-    input: {
-      authorizationStateId: string;
-      connectedAccountId: string;
-      leaseId: string;
-      verifiedMetadata?: ConnectionView["safeMetadata"];
-    },
-  ): Promise<{
-    phase: "acquired" | "resumable" | "pending" | "done" | "invalid";
-    connection: ConnectionView;
-    leaseId?: string;
-  }> {
-    const current = this.connections.get(connectionId);
-    if (!current) throw new Error("missing connection");
-    if (
-      (current.safeMetadata.authorizationStateId !== undefined &&
-        current.safeMetadata.authorizationStateId !==
-          input.authorizationStateId) ||
-      current.safeMetadata.connectedAccountId !== input.connectedAccountId
-    ) {
-      return Promise.resolve({ phase: "invalid", connection: current });
-    }
-    if (current.safeMetadata.authorizationStateConsumed === true) {
-      if (current.state === "ready") {
-        return Promise.resolve({ phase: "done", connection: current });
-      }
-      if (
-        current.state === "reconciliation-required" &&
-        current.safeMetadata.reconciliationOperation === "assignment" &&
-        typeof current.safeMetadata.assignmentLeaseId === "string" &&
-        typeof current.safeMetadata.assignmentLeaseExpiresAt === "number" &&
-        current.safeMetadata.assignmentLeaseExpiresAt > Date.now() &&
-        current.safeMetadata.assignmentCompensationPending !== true &&
-        current.safeMetadata.revocationRequested !== true
-      ) {
-        return Promise.resolve({
-          phase: "resumable",
-          connection: current,
-          leaseId: current.safeMetadata.assignmentLeaseId,
-        });
-      }
-      return Promise.resolve({ phase: "pending", connection: current });
-    }
-    if (
-      typeof current.safeMetadata.authorizationStateExpiresAt === "number" &&
-      current.safeMetadata.authorizationStateExpiresAt <= Date.now()
-    ) {
-      return Promise.resolve({ phase: "invalid", connection: current });
-    }
-    if (
-      current.safeMetadata.revocationRequested === true ||
-      (current.state !== "authorizing" &&
-        !(
-          current.state === "reconciliation-required" &&
-          current.safeMetadata.reconciliationOperation === "link"
-        ))
-    ) {
-      return Promise.resolve({ phase: "invalid", connection: current });
-    }
-    const claimed: ConnectionView = {
-      ...current,
-      state: "reconciliation-required",
-      safeMetadata: {
-        ...(input.verifiedMetadata ?? current.safeMetadata),
-        authorizationStateConsumed: true,
-        reconciliationOperation: "assignment",
-        assignmentLeaseId: input.leaseId,
-        assignmentLeaseExpiresAt: Date.now() + 60_000,
-      },
-    };
-    this.connections.set(connectionId, claimed);
-    return Promise.resolve({
-      phase: "acquired",
-      connection: claimed,
-      leaseId: input.leaseId,
-    });
-  }
-
-  claimConnectionAssignment(
-    _userId: string,
-    connectionId: string,
-    leaseId: string,
-    verifiedMetadata?: ConnectionView["safeMetadata"],
-  ): Promise<{
-    phase: "acquired" | "pending" | "done";
-    connection: ConnectionView;
-  }> {
-    const current = this.connections.get(connectionId);
-    if (!current) throw new Error("missing connection");
-    if (current.state === "ready") {
-      return Promise.resolve({ phase: "done", connection: current });
-    }
-    if (
-      current.state === "reconciliation-required" &&
-      current.safeMetadata.reconciliationOperation === "assignment" &&
-      typeof current.safeMetadata.assignmentLeaseExpiresAt === "number" &&
-      current.safeMetadata.assignmentLeaseExpiresAt > Date.now()
-    ) {
-      return Promise.resolve({ phase: "pending", connection: current });
-    }
-    if (
-      current.state !== "authorizing" &&
-      !(
-        current.state === "reconciliation-required" &&
-        (current.safeMetadata.reconciliationOperation === "link" ||
-          current.safeMetadata.reconciliationOperation === "assignment")
-      )
-    ) {
-      return Promise.resolve({ phase: "pending", connection: current });
-    }
-    const claimed: ConnectionView = {
-      ...current,
-      state: "reconciliation-required",
-      safeMetadata: {
-        ...(verifiedMetadata ?? current.safeMetadata),
-        reconciliationOperation: "assignment",
-        assignmentLeaseId: leaseId,
-        assignmentLeaseExpiresAt: Date.now() + 60_000,
-      },
-    };
-    this.connections.set(connectionId, claimed);
-    return Promise.resolve({ phase: "acquired", connection: claimed });
-  }
-
-  finishConnectionAssignment(
-    _userId: string,
-    connectionId: string,
-    leaseId: string,
-  ): Promise<boolean> {
-    const current = this.connections.get(connectionId);
-    if (
-      !current ||
-      current.state !== "reconciliation-required" ||
-      current.safeMetadata.reconciliationOperation !== "assignment" ||
-      current.safeMetadata.assignmentLeaseId !== leaseId ||
-      typeof current.safeMetadata.assignmentLeaseExpiresAt !== "number" ||
-      current.safeMetadata.assignmentLeaseExpiresAt <= Date.now()
-    ) {
-      return Promise.resolve(false);
-    }
-    const {
-      reconciliationOperation: _,
-      assignmentLeaseId: __,
-      assignmentLeaseExpiresAt: ___,
-      ...safeMetadata
-    } = current.safeMetadata;
-    this.updateConnection(_userId, connectionId, {
-      state: "ready",
-      safeMetadata: { ...safeMetadata, assignmentGeneration: leaseId },
-    });
-    return Promise.resolve(true);
-  }
-
-  requireAssignmentCompensation(
-    _userId: string,
-    connectionId: string,
-    leaseId: string,
-  ): Promise<boolean> {
-    const current = this.connections.get(connectionId);
-    if (
-      !current ||
-      current.state === "ready" ||
-      current.safeMetadata.assignmentLeaseId !== leaseId
-    ) {
-      return Promise.resolve(false);
-    }
-    this.connections.set(connectionId, {
-      ...current,
-      safeMetadata: {
-        ...current.safeMetadata,
-        assignmentCompensationPending: true,
-        assignmentCompensationId: leaseId,
-        assignmentCompensationGeneration: leaseId,
-      },
-    });
-    return Promise.resolve(true);
-  }
-
   recordAssignmentCompensated(
     _userId: string,
     connectionId: string,
@@ -399,10 +193,6 @@ class MemoryConnectionStore implements ComposioConnectionStore {
     const completed = completeAssignmentCompensation(current, compensationId);
     if (!completed) return Promise.resolve(false);
     this.connections.set(connectionId, completed);
-    return Promise.resolve(true);
-  }
-
-  recordConnectionDependency(): Promise<boolean> {
     return Promise.resolve(true);
   }
 
@@ -1532,8 +1322,6 @@ describe("ComposioConnectionCoordinator", () => {
         authorizationStateExpiresAt: Date.now() + 60_000,
       },
     });
-    store.consumeAuthorizationState = () =>
-      Promise.reject(new Error("separate state consumption is unsafe"));
     const coordinator = new ComposioConnectionCoordinator({
       client: new ComposioClient({ apiKey: "secret" }),
       store,
@@ -1562,42 +1350,6 @@ describe("ComposioConnectionCoordinator", () => {
         "state-1",
       ),
     ).resolves.toMatchObject({ status: "failed" });
-  });
-
-  test("does not re-enter a consumed callback after lease expiry", async () => {
-    const store = new MemoryConnectionStore();
-    await store.startConnection("user-1", {
-      connectionId: "connection-1",
-      packageId: "composio",
-      connectionTypeId: "gmail",
-      displayName: "Gmail",
-    });
-    await store.updateConnection("user-1", "connection-1", {
-      state: "reconciliation-required",
-      safeMetadata: {
-        connectedAccountId: "ca_123",
-        targetBotId: "primary",
-        authorizationStateConsumed: true,
-        reconciliationOperation: "assignment",
-        assignmentLeaseId: "expired-lease",
-        assignmentLeaseExpiresAt: Date.now() - 1,
-      },
-    });
-    const coordinator = new ComposioConnectionCoordinator({
-      client: new ComposioClient({
-        apiKey: "secret",
-        fetch: () => Promise.reject(new Error("provider not expected")),
-      }),
-      store,
-      callbackBaseUrl: "https://bot.frockbot.com",
-      connectionTypes: {},
-    });
-
-    const result = await coordinator.complete("user-1", {
-      connectionId: "connection-1",
-      connectedAccountId: "ca_123",
-    });
-    expect(result.status).toBe("pending");
   });
 
   test("does not resurrect a connection when revocation wins the callback race", async () => {

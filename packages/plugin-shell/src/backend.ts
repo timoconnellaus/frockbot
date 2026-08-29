@@ -1083,6 +1083,16 @@ export class ShellBotBackendContribution {
     }
   }
 
+  async validateIdentity(identity: BotIdentity): Promise<void> {
+    const existing = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    if (
+      existing &&
+      (existing.userId !== identity.userId || existing.botId !== identity.botId)
+    ) {
+      throw new Error("Bot authority does not match its durable identity");
+    }
+  }
+
   async listNotifications(): Promise<BotNotificationIntent[]> {
     const entries = await this.ctx.storage.list<BotNotificationIntent>({
       prefix: NOTIFICATION_PREFIX,
@@ -1101,7 +1111,7 @@ export class ShellBotBackendContribution {
     result: BotTurnCompletion,
   ): BotNotificationIntent {
     return {
-      notificationId: `notification-${result.runId}`,
+      notificationId: result.runId,
       runId: result.runId,
       createdAt: new Date().toISOString(),
       title: `${settings.profile.name} replied`,
@@ -1134,7 +1144,9 @@ export class ShellBotBackendContribution {
           { userId: saga.userId, botId: saga.botId },
           saga.commandId,
         );
-      } catch {}
+      } catch {
+        continue;
+      }
     }
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
     if (activeRunId) {

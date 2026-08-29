@@ -129,7 +129,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async listNotifications(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const contribution = await this.contribution();
-    await contribution.resolveConfiguration(identity);
+    await contribution.validateIdentity(identity);
     return contribution.listNotifications();
   }
 
@@ -140,7 +140,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       notificationId: rpcIdentifier,
     });
     const contribution = await this.contribution();
-    await contribution.resolveConfiguration({
+    await contribution.validateIdentity({
       userId: request.userId as string,
       botId: request.botId as string,
     });

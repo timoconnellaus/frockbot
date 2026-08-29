@@ -54,7 +54,7 @@ function result(): BotTurnCompletion {
     text: "Done",
     events: [ended],
     notification: {
-      notificationId: "notification-run-1",
+      notificationId: "run-1",
       runId: "run-1",
       createdAt: "2026-08-28T00:00:01.000Z",
       title: "Bot replied",
@@ -98,9 +98,7 @@ describe("Bot run terminal persistence", () => {
 
     expect(storage.putBatches).toHaveLength(1);
     expect(storage.putBatches[0]).toHaveProperty(keys.run);
-    expect(storage.putBatches[0]).toHaveProperty(
-      "notification:notification-run-1",
-    );
+    expect(storage.putBatches[0]).toHaveProperty("notification:run-1");
     expect(storage.values.get(keys.run)).toMatchObject({ status: "completed" });
     expect(storage.values.has(keys.activeRun)).toBe(false);
   });
@@ -123,7 +121,7 @@ describe("Bot run terminal persistence", () => {
     );
 
     expect(storage.values.get(keys.run)).toMatchObject({ status: "failed" });
-    expect(storage.values.has("notification:notification-run-1")).toBe(false);
+    expect(storage.values.has("notification:run-1")).toBe(false);
   });
 
   test("preserves committed success after an uncertain response", async () => {
@@ -147,7 +145,7 @@ describe("Bot run terminal persistence", () => {
     ).resolves.toBe("preserved-completion");
 
     expect(storage.values.get(keys.run)).toMatchObject({ status: "completed" });
-    expect(storage.values.has("notification:notification-run-1")).toBe(true);
+    expect(storage.values.has("notification:run-1")).toBe(true);
   });
 
   test("keeps an unretrievable effect active and reconciliation-required", async () => {

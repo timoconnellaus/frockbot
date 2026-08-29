@@ -13,14 +13,7 @@ export function claimDependentAssignment(
   ) {
     return undefined;
   }
-  if (
-    connection.state !== "ready" &&
-    !(
-      connection.state === "reconciliation-required" &&
-      connection.safeMetadata.reconciliationOperation === "assignment" &&
-      connection.safeMetadata.assignmentLeaseId === generation
-    )
-  ) {
+  if (connection.state !== "ready") {
     return undefined;
   }
   const existing = Array.isArray(connection.safeMetadata.dependentAssignments)

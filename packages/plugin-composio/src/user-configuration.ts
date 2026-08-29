@@ -16,7 +16,6 @@ import {
 } from "./dependency-coordination.js";
 import {
   completeAssignmentCompensation,
-  expireAssignmentLease,
   isSettledBotCompensation,
 } from "./connection-recovery.js";
 import {
@@ -112,7 +111,7 @@ export function deriveRevocationCompensations(
     const botId = key.slice(0, key.indexOf("\u0000"));
     return {
       botId,
-      id: `revoke:${connection.connectionId}:${botId}:${expectedGeneration}`,
+      id: expectedGeneration,
       expectedGeneration,
     };
   });
@@ -164,13 +163,6 @@ function nextConnectionAlarm(settings: UserSettingsViewV1): number | undefined {
         const expiresAt = Date.parse(metadata.expiresAt);
         values.push(Number.isFinite(expiresAt) ? expiresAt : 0);
       }
-    }
-    if (
-      connection.state === "reconciliation-required" &&
-      metadata.reconciliationOperation === "assignment" &&
-      typeof metadata.assignmentLeaseExpiresAt === "number"
-    ) {
-      values.push(metadata.assignmentLeaseExpiresAt);
     }
     if (
       connection.state === "reconciliation-required" &&
@@ -706,282 +698,6 @@ export class ComposioUserBackendContribution {
     });
   }
 
-  async consumeAuthorizationState(
-    userId: string,
-    connectionId: string,
-    authorizationStateId: string,
-  ): Promise<"claimed" | "duplicate" | "invalid"> {
-    await this.assertIdentity(userId);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
-      const connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
-      );
-      if (
-        !connection ||
-        connection.safeMetadata.authorizationStateId !== authorizationStateId ||
-        typeof connection.safeMetadata.authorizationStateExpiresAt !==
-          "number" ||
-        connection.safeMetadata.authorizationStateExpiresAt <= Date.now()
-      ) {
-        return "invalid";
-      }
-      if (connection.safeMetadata.authorizationStateConsumed === true) {
-        return "duplicate";
-      }
-      const nextConnection = {
-        ...connection,
-        safeMetadata: {
-          ...connection.safeMetadata,
-          authorizationStateConsumed: true,
-        },
-      };
-      await transaction.put(STATE_KEY, {
-        ...current,
-        revision: current.revision + 1,
-        connections: current.connections.map((item) =>
-          item.connectionId === connectionId ? nextConnection : item,
-        ),
-      } satisfies UserSettingsViewV1);
-      return "claimed";
-    });
-  }
-
-  async admitConnectionCallback(
-    userId: string,
-    connectionId: string,
-    input: {
-      authorizationStateId: string;
-      connectedAccountId: string;
-      leaseId: string;
-      verifiedMetadata?: UserSettingsViewV1["connections"][number]["safeMetadata"];
-    },
-  ): Promise<{
-    phase: "acquired" | "resumable" | "pending" | "done" | "invalid";
-    connection: UserSettingsViewV1["connections"][number];
-    leaseId?: string;
-  }> {
-    await this.assertIdentity(userId);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
-      const connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
-      );
-      if (!connection) {
-        throw new Error(`Connection "${connectionId}" was not admitted`);
-      }
-      const now = Date.now();
-      if (
-        connection.safeMetadata.authorizationStateId !==
-          input.authorizationStateId ||
-        connection.safeMetadata.connectedAccountId !== input.connectedAccountId
-      ) {
-        return { phase: "invalid" as const, connection };
-      }
-      if (connection.safeMetadata.authorizationStateConsumed === true) {
-        if (connection.state === "ready") {
-          return { phase: "done" as const, connection };
-        }
-        const existingLeaseId = connection.safeMetadata.assignmentLeaseId;
-        if (
-          connection.state === "reconciliation-required" &&
-          connection.safeMetadata.reconciliationOperation === "assignment" &&
-          typeof existingLeaseId === "string" &&
-          typeof connection.safeMetadata.assignmentLeaseExpiresAt ===
-            "number" &&
-          connection.safeMetadata.assignmentLeaseExpiresAt > now &&
-          connection.safeMetadata.assignmentCompensationPending !== true &&
-          connection.safeMetadata.revocationRequested !== true
-        ) {
-          return {
-            phase: "resumable" as const,
-            connection,
-            leaseId: existingLeaseId,
-          };
-        }
-        return { phase: "pending" as const, connection };
-      }
-      if (
-        typeof connection.safeMetadata.authorizationStateExpiresAt !==
-          "number" ||
-        connection.safeMetadata.authorizationStateExpiresAt <= now
-      ) {
-        return { phase: "invalid" as const, connection };
-      }
-      if (
-        connection.safeMetadata.revocationRequested === true ||
-        (connection.state !== "authorizing" &&
-          !(
-            connection.state === "reconciliation-required" &&
-            connection.safeMetadata.reconciliationOperation === "link"
-          ))
-      ) {
-        return { phase: "invalid" as const, connection };
-      }
-      const expiresAt = now + CONNECTION_EFFECT_ALARM_MS;
-      const claimed = {
-        ...connection,
-        state: "reconciliation-required" as const,
-        safeMetadata: {
-          ...(input.verifiedMetadata ?? connection.safeMetadata),
-          authorizationStateConsumed: true,
-          reconciliationOperation: "assignment",
-          assignmentLeaseId: input.leaseId,
-          assignmentLeaseExpiresAt: expiresAt,
-        },
-        failure: "Bot assignment is pending",
-      };
-      const next = {
-        ...current,
-        revision: current.revision + 1,
-        connections: current.connections.map((item) =>
-          item.connectionId === connectionId ? claimed : item,
-        ),
-      } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
-      await transaction.setAlarm(nextConnectionAlarm(next) ?? expiresAt);
-      return {
-        phase: "acquired" as const,
-        connection: claimed,
-        leaseId: input.leaseId,
-      };
-    });
-  }
-
-  async claimConnectionAssignment(
-    userId: string,
-    connectionId: string,
-    leaseId: string,
-    verifiedMetadata?: UserSettingsViewV1["connections"][number]["safeMetadata"],
-  ): Promise<{
-    phase: "acquired" | "pending" | "done";
-    connection: UserSettingsViewV1["connections"][number];
-  }> {
-    await this.assertIdentity(userId);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
-      const connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
-      );
-      if (!connection) {
-        throw new Error(`Connection "${connectionId}" was not admitted`);
-      }
-      if (connection.state === "ready") {
-        return { phase: "done" as const, connection };
-      }
-      if (connection.safeMetadata.assignmentCompensationPending === true) {
-        return { phase: "pending" as const, connection };
-      }
-      if (connection.safeMetadata.revocationRequested === true) {
-        return { phase: "pending" as const, connection };
-      }
-      const operation = connection.safeMetadata.reconciliationOperation;
-      const isAssignment =
-        connection.state === "reconciliation-required" &&
-        operation === "assignment";
-      const isVerifiedAuthorization =
-        connection.state === "authorizing" ||
-        (connection.state === "reconciliation-required" &&
-          operation === "link");
-      if (!isAssignment && !isVerifiedAuthorization) {
-        return { phase: "pending" as const, connection };
-      }
-      const leaseExpiresAt = connection.safeMetadata.assignmentLeaseExpiresAt;
-      if (
-        isAssignment &&
-        typeof leaseExpiresAt === "number" &&
-        leaseExpiresAt > Date.now()
-      ) {
-        return { phase: "pending" as const, connection };
-      }
-      const expiresAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
-      const claimed = {
-        ...connection,
-        state: "reconciliation-required" as const,
-        safeMetadata: {
-          ...(verifiedMetadata ?? connection.safeMetadata),
-          reconciliationOperation: "assignment",
-          assignmentLeaseId: leaseId,
-          assignmentLeaseExpiresAt: expiresAt,
-        },
-        failure: "Bot assignment is pending",
-      };
-      const next = {
-        ...current,
-        revision: current.revision + 1,
-        connections: current.connections.map((item) =>
-          item.connectionId === connectionId ? claimed : item,
-        ),
-      } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
-      await transaction.setAlarm(nextConnectionAlarm(next) ?? expiresAt);
-      return { phase: "acquired" as const, connection: claimed };
-    });
-  }
-
-  async finishConnectionAssignment(
-    userId: string,
-    connectionId: string,
-    leaseId: string,
-  ): Promise<boolean> {
-    return this.transitionConnection(userId, connectionId, (connection) => {
-      if (
-        connection.state !== "reconciliation-required" ||
-        connection.safeMetadata.reconciliationOperation !== "assignment" ||
-        connection.safeMetadata.assignmentLeaseId !== leaseId ||
-        typeof connection.safeMetadata.assignmentLeaseExpiresAt !== "number" ||
-        connection.safeMetadata.assignmentLeaseExpiresAt <= Date.now()
-      ) {
-        return undefined;
-      }
-      const {
-        reconciliationOperation: _,
-        assignmentLeaseId: __,
-        assignmentLeaseExpiresAt: ___,
-        assignmentCompensationPending: ____,
-        compensationRetryAt: _____,
-        ...safeMetadata
-      } = connection.safeMetadata;
-      return {
-        ...connection,
-        state: "ready",
-        safeMetadata: { ...safeMetadata, assignmentGeneration: leaseId },
-        failure: undefined,
-      };
-    });
-  }
-
-  async requireAssignmentCompensation(
-    userId: string,
-    connectionId: string,
-    leaseId: string,
-  ): Promise<boolean> {
-    return this.transitionConnection(userId, connectionId, (connection) => {
-      if (
-        connection.state === "ready" ||
-        connection.safeMetadata.assignmentLeaseId !== leaseId
-      ) {
-        return undefined;
-      }
-      return {
-        ...connection,
-        safeMetadata: {
-          ...connection.safeMetadata,
-          assignmentCompensationPending: true,
-          assignmentCompensationId: leaseId,
-          assignmentCompensationGeneration: leaseId,
-          compensationRetryAt: Date.now() + CONNECTION_EFFECT_ALARM_MS,
-        },
-      };
-    });
-  }
-
   async recordAssignmentCompensated(
     userId: string,
     connectionId: string,
@@ -1065,17 +781,6 @@ export class ComposioUserBackendContribution {
   ): Promise<boolean> {
     return this.transitionConnection(userId, connectionId, (connection) =>
       compensateDependentAssignment(connection, botId, generation),
-    );
-  }
-
-  async recordConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.transitionConnection(userId, connectionId, (connection) =>
-      claimDependentAssignment(connection, botId, generation),
     );
   }
 
@@ -1163,66 +868,6 @@ export class ComposioUserBackendContribution {
             revocationRequested: true,
           },
         };
-      }
-      const assignmentLeaseExpiresAt =
-        connection.safeMetadata.assignmentLeaseExpiresAt;
-      if (
-        connection.state === "reconciliation-required" &&
-        connection.safeMetadata.reconciliationOperation === "assignment" &&
-        typeof assignmentLeaseExpiresAt === "number" &&
-        assignmentLeaseExpiresAt > Date.now()
-      ) {
-        const connectedAccountId = connection.safeMetadata.connectedAccountId;
-        if (typeof connectedAccountId !== "string") {
-          const pending = {
-            ...connection,
-            safeMetadata: {
-              ...connection.safeMetadata,
-              revocationRequested: true,
-            },
-            failure: "Revocation is waiting for Connection reconciliation",
-          };
-          await transaction.put(STATE_KEY, {
-            ...current,
-            revision: current.revision + 1,
-            connections: current.connections.map((item) =>
-              item.connectionId === connectionId ? pending : item,
-            ),
-          } satisfies UserSettingsViewV1);
-          return { phase: "pending" as const, connection: pending };
-        }
-        const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
-        const assignmentCompensations =
-          deriveRevocationCompensations(connection);
-        const claimed = {
-          ...connection,
-          state: "revoking" as const,
-          safeMetadata: {
-            ...connection.safeMetadata,
-            reconciliationOperation: "revoke",
-            revocationRequested: true,
-            revocationProviderCompleted: false,
-            effectDeadlineAt,
-            assignmentCompensationPending: assignmentCompensations.length > 0,
-            assignmentCompensations,
-            ...(assignmentCompensations.length > 0
-              ? { compensationRetryAt: effectDeadlineAt }
-              : {}),
-          },
-          failure: undefined,
-        };
-        const next = {
-          ...current,
-          revision: current.revision + 1,
-          connections: current.connections.map((item) =>
-            item.connectionId === connectionId ? claimed : item,
-          ),
-        } satisfies UserSettingsViewV1;
-        await transaction.put(STATE_KEY, next);
-        await transaction.setAlarm(
-          nextConnectionAlarm(next) ?? effectDeadlineAt,
-        );
-        return { phase: "provider" as const, connection: claimed };
       }
       const providerCompleted =
         connection.safeMetadata.revocationProviderCompleted === true;
@@ -1371,12 +1016,6 @@ export class ComposioUserBackendContribution {
       }> = [];
       const connections = current.connections.map((connection) => {
         let next = connection;
-        const expiredAssignment = expireAssignmentLease(connection, now);
-        if (expiredAssignment) {
-          next = expiredAssignment;
-          changed = true;
-        }
-
         if (connectionAuthorizationExpired(next, now)) {
           const providerAlias = next.safeMetadata.providerAlias;
           const toolkitSlug = next.safeMetadata.toolkitSlug;

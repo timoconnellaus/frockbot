@@ -8,52 +8,6 @@ export function isSettledBotCompensation(
   return result === "applied" || result === "stale";
 }
 
-export function expireAssignmentLease(
-  connection: ConnectionView,
-  now: number,
-): ConnectionView | undefined {
-  const metadata = connection.safeMetadata;
-  if (
-    connection.state !== "reconciliation-required" ||
-    metadata.reconciliationOperation !== "assignment" ||
-    typeof metadata.assignmentLeaseExpiresAt !== "number" ||
-    metadata.assignmentLeaseExpiresAt > now
-  ) {
-    return undefined;
-  }
-  const expiredLeaseId = metadata.assignmentLeaseId;
-  const {
-    reconciliationOperation: _operation,
-    assignmentLeaseId: _lease,
-    assignmentLeaseExpiresAt: _leaseExpiry,
-    ...safeMetadata
-  } = metadata;
-  if (
-    typeof metadata.targetBotId !== "string" ||
-    typeof expiredLeaseId !== "string" ||
-    typeof metadata.assignmentGeneration !== "string"
-  ) {
-    return {
-      ...connection,
-      state: "failed",
-      safeMetadata,
-      failure: "Bot assignment was interrupted; reconnect to retry",
-    };
-  }
-  return {
-    ...connection,
-    safeMetadata: {
-      ...safeMetadata,
-      reconciliationOperation: "assignment",
-      assignmentCompensationPending: true,
-      assignmentCompensationId: expiredLeaseId,
-      assignmentCompensationGeneration: metadata.assignmentGeneration,
-      compensationRetryAt: now,
-    },
-    failure: "Bot assignment was interrupted and can be retried",
-  };
-}
-
 export function completeAssignmentCompensation(
   connection: ConnectionView,
   compensationId: string,
@@ -94,32 +48,5 @@ export function completeAssignmentCompensation(
       },
     };
   }
-  if (
-    connection.safeMetadata.assignmentCompensationPending !== true ||
-    connection.safeMetadata.assignmentCompensationId !== compensationId
-  ) {
-    return undefined;
-  }
-  const {
-    reconciliationOperation: _,
-    assignmentLeaseId: __,
-    assignmentLeaseExpiresAt: ___,
-    assignmentCompensationPending: ____,
-    assignmentCompensationId: _____,
-    assignmentCompensationGeneration: ______,
-    compensationRetryAt: _______,
-    ...safeMetadata
-  } = connection.safeMetadata;
-  if (
-    connection.state === "reconciliation-required" &&
-    connection.safeMetadata.reconciliationOperation === "assignment"
-  ) {
-    return {
-      ...connection,
-      state: "failed",
-      safeMetadata,
-      failure: "Bot assignment was interrupted; reconnect to retry",
-    };
-  }
-  return { ...connection, safeMetadata };
+  return undefined;
 }

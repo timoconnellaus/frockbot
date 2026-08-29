@@ -649,7 +649,7 @@ describe("Cloudflare user application gateway", () => {
     await gateway(request("/api/bots/primary/turns", "alice"));
     states.get("alice")?.notifications.set("primary", [
       {
-        notificationId: "notification-run-1",
+        notificationId: "run-1",
         runId: "run-1",
         createdAt: "2026-08-28T01:00:00.000Z",
         title: "Housework replied",
@@ -661,7 +661,7 @@ describe("Cloudflare user application gateway", () => {
       request("/api/bots/primary/notifications", "alice"),
     );
     expect(await pending.json()).toMatchObject({
-      notifications: [{ notificationId: "notification-run-1" }],
+      notifications: [{ notificationId: "run-1" }],
     });
 
     const acknowledged = await gateway(
@@ -671,7 +671,7 @@ describe("Cloudflare user application gateway", () => {
         body: JSON.stringify({
           schemaVersion: 1,
           action: "acknowledge",
-          notificationId: "notification-run-1",
+          notificationId: "run-1",
         }),
       }),
     );

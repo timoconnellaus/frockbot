@@ -12,11 +12,8 @@ function assignmentConnection(): ConnectionView {
     packageId: "composio",
     connectionTypeId: "gmail",
     displayName: "Gmail",
-    state: "reconciliation-required",
-    safeMetadata: {
-      reconciliationOperation: "assignment",
-      assignmentLeaseId: "generation-1",
-    },
+    state: "ready",
+    safeMetadata: {},
   };
 }
 

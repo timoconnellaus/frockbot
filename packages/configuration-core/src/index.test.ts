@@ -65,6 +65,58 @@ describe("configuration DTO seam", () => {
     }
   });
 
+  test("rejects unknown fields throughout configuration commands", () => {
+    const meta = {
+      schemaVersion: 1,
+      commandId: "command-1",
+      expectedRevision: 0,
+    } as const;
+    for (const value of [
+      {
+        ...meta,
+        type: "user/update-profile",
+        profile: { name: "Alice", extra: true },
+      },
+      {
+        ...meta,
+        type: "user/set-new-bot-model",
+        model: {
+          connectionId: "provider-1",
+          providerModelId: "model-1",
+          extra: true,
+        },
+      },
+      {
+        ...meta,
+        type: "bot/update-notifications",
+        botId: "primary",
+        notifications: { enabled: true, extra: true },
+      },
+      {
+        ...meta,
+        type: "bot/assign-capability",
+        botId: "primary",
+        assignment: {
+          assignmentId: "gmail",
+          packageId: "composio",
+          capabilityId: "gmail-tools",
+          extra: true,
+        },
+      },
+      {
+        ...meta,
+        type: "bot/update-profile",
+        botId: "primary",
+        profile: { name: "Primary" },
+        extra: true,
+      },
+    ]) {
+      expect(() => decodeConfigurationCommandV1(value)).toThrow(
+        ConfigurationDecodeError,
+      );
+    }
+  });
+
   test("decodes only explicit User and Bot queries", () => {
     expect(
       decodeConfigurationQueryV1({
@@ -73,9 +125,15 @@ describe("configuration DTO seam", () => {
         botId: "primary",
       }),
     ).toEqual({ schemaVersion: 1, type: "bot/get", botId: "primary" });
-    expect(() =>
-      decodeConfigurationQueryV1({ schemaVersion: 1, type: "all/get" }),
-    ).toThrow(ConfigurationDecodeError);
+    for (const value of [
+      { schemaVersion: 1, type: "all/get" },
+      { schemaVersion: 1, type: "user/get", extra: true },
+      { schemaVersion: 1, type: "bot/get", botId: "primary", extra: true },
+    ]) {
+      expect(() => decodeConfigurationQueryV1(value)).toThrow(
+        ConfigurationDecodeError,
+      );
+    }
   });
 
   test("decodes versioned Connection dependency requirements", () => {
@@ -94,15 +152,27 @@ describe("configuration DTO seam", () => {
       capabilityId: "gmail-tools",
       connectionTypeIds: ["gmail"],
     });
-    expect(() =>
-      decodeConnectionDependencyRequirementV1({
+    for (const value of [
+      {
         schemaVersion: 1,
         packageId: "composio",
         packageVersion: "0.0.1",
         capabilityId: "gmail-tools",
         connectionTypeIds: [],
-      }),
-    ).toThrow(ConfigurationDecodeError);
+      },
+      {
+        schemaVersion: 1,
+        packageId: "composio",
+        packageVersion: "0.0.1",
+        capabilityId: "gmail-tools",
+        connectionTypeIds: ["gmail"],
+        extra: true,
+      },
+    ]) {
+      expect(() => decodeConnectionDependencyRequirementV1(value)).toThrow(
+        ConfigurationDecodeError,
+      );
+    }
   });
 
   test("strictly decodes versioned Connection commands", () => {

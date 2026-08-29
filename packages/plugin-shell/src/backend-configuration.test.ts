@@ -91,6 +91,36 @@ function assignmentCommand(
 }
 
 describe("Bot capability assignment admission", () => {
+  test("validates notification authority without changing settings", async () => {
+    const storage = new MemoryStorage();
+    const settings = {
+      schemaVersion: 1,
+      botId: "primary",
+      revision: 7,
+      profile: { name: "Primary" },
+      notifications: { enabled: true },
+      assignments: [],
+    } satisfies BotSettingsViewV1;
+    await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
+      "bot-configuration": settings,
+    });
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await expect(
+      contribution.validateIdentity({ userId: "user-1", botId: "primary" }),
+    ).resolves.toBeUndefined();
+    await expect(
+      contribution.validateIdentity({ userId: "other", botId: "primary" }),
+    ).rejects.toThrow("Bot authority does not match its durable identity");
+    expect(await storage.get<BotSettingsViewV1>("bot-configuration")).toEqual(
+      settings,
+    );
+  });
+
   test("initializes current Bot settings without historical-state branching", async () => {
     const storage = new MemoryStorage();
     await storage.put({

@@ -178,7 +178,7 @@ describe("Bot recovery", () => {
     const notifications = await recovered.listNotifications();
     expect(notifications).toEqual([
       expect.objectContaining({
-        notificationId: "notification-run-1",
+        notificationId: "run-1",
         runId: "run-1",
         title: "Admitted Bot replied",
         body: "Durable reply",

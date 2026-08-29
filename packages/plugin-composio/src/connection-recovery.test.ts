@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import type { ConnectionView } from "@frockbot/configuration-core";
 import {
   completeAssignmentCompensation,
-  expireAssignmentLease,
   isSettledBotCompensation,
 } from "./connection-recovery.js";
 
@@ -21,48 +20,6 @@ function connection(
 }
 
 describe("Connection recovery", () => {
-  test("terminalizes an admitted callback after alarm compensation", () => {
-    const admitted = connection("reconciliation-required", {
-      authorizationStateConsumed: true,
-      reconciliationOperation: "assignment",
-      assignmentLeaseId: "lease-1",
-      assignmentLeaseExpiresAt: 100,
-      targetBotId: "primary",
-      assignmentGeneration: "lease-1",
-    });
-    const interrupted = expireAssignmentLease(admitted, 101);
-
-    const completed = interrupted
-      ? completeAssignmentCompensation(interrupted, "lease-1")
-      : undefined;
-
-    expect(completed).toMatchObject({
-      state: "failed",
-      failure: "Bot assignment was interrupted; reconnect to retry",
-      safeMetadata: { authorizationStateConsumed: true },
-    });
-    expect(completed?.safeMetadata).not.toHaveProperty(
-      "reconciliationOperation",
-    );
-    expect(completed?.safeMetadata).not.toHaveProperty(
-      "assignmentCompensationPending",
-    );
-  });
-
-  test("fails an expired lease that has no Bot effect to compensate", () => {
-    const admitted = connection("reconciliation-required", {
-      authorizationStateConsumed: true,
-      reconciliationOperation: "assignment",
-      assignmentLeaseId: "lease-1",
-      assignmentLeaseExpiresAt: 100,
-    });
-
-    expect(expireAssignmentLease(admitted, 101)).toMatchObject({
-      state: "failed",
-      failure: "Bot assignment was interrupted; reconnect to retry",
-    });
-  });
-
   test("treats stale Bot generations as settled compensation", () => {
     expect(isSettledBotCompensation("stale")).toBe(true);
     expect(isSettledBotCompensation("applied")).toBe(true);

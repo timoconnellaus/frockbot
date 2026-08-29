@@ -58,54 +58,10 @@ export interface ComposioConnectionStore {
       authorizationStateId?: string;
     },
   ): Promise<boolean>;
-  consumeAuthorizationState(
-    userId: string,
-    connectionId: string,
-    authorizationStateId: string,
-  ): Promise<"claimed" | "duplicate" | "invalid">;
-  admitConnectionCallback(
-    userId: string,
-    connectionId: string,
-    input: {
-      authorizationStateId: string;
-      connectedAccountId: string;
-      leaseId: string;
-      verifiedMetadata?: ConnectionView["safeMetadata"];
-    },
-  ): Promise<{
-    phase: "acquired" | "resumable" | "pending" | "done" | "invalid";
-    connection: ConnectionView;
-    leaseId?: string;
-  }>;
-  claimConnectionAssignment(
-    userId: string,
-    connectionId: string,
-    leaseId: string,
-    verifiedMetadata?: ConnectionView["safeMetadata"],
-  ): Promise<{
-    phase: "acquired" | "pending" | "done";
-    connection: ConnectionView;
-  }>;
-  finishConnectionAssignment(
-    userId: string,
-    connectionId: string,
-    leaseId: string,
-  ): Promise<boolean>;
-  requireAssignmentCompensation(
-    userId: string,
-    connectionId: string,
-    leaseId: string,
-  ): Promise<boolean>;
   recordAssignmentCompensated(
     userId: string,
     connectionId: string,
     compensationId: string,
-  ): Promise<boolean>;
-  recordConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
   ): Promise<boolean>;
   requireConnectionReconciliation(
     userId: string,
@@ -172,12 +128,6 @@ function durableCompletionResult(
       status: connection.state,
       nativeReturnNonce,
     };
-  }
-  if (
-    connection.state === "reconciliation-required" &&
-    connection.safeMetadata.reconciliationOperation === "assignment"
-  ) {
-    return { returnTarget, status: "pending", nativeReturnNonce };
   }
   return undefined;
 }

@@ -183,66 +183,12 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
         connectionId,
         update,
       }),
-    consumeAuthorizationState: (owner, connectionId, authorizationStateId) =>
-      rpc.consumeAuthorizationState({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        authorizationStateId,
-      }),
-    admitConnectionCallback: (owner, connectionId, callback) =>
-      rpc.admitConnectionCallback({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        callback,
-      }),
-    claimConnectionAssignment: (
-      owner,
-      connectionId,
-      leaseId,
-      verifiedMetadata,
-    ) =>
-      rpc.claimConnectionAssignment({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        leaseId,
-        ...(verifiedMetadata ? { verifiedMetadata } : {}),
-      }),
-    finishConnectionAssignment: (owner, connectionId, leaseId) =>
-      rpc.finishConnectionAssignment({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        leaseId,
-      }),
-    requireAssignmentCompensation: (owner, connectionId, leaseId) =>
-      rpc.requireAssignmentCompensation({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        leaseId,
-      }),
     recordAssignmentCompensated: (owner, connectionId, compensationId) =>
       rpc.recordAssignmentCompensated({
         schemaVersion: 1,
         userId: owner,
         connectionId,
         compensationId,
-      }),
-    recordConnectionDependency: (
-      owner,
-      connectionId,
-      targetBotId,
-      generation,
-    ) =>
-      rpc.recordConnectionDependency({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        botId: targetBotId,
-        generation,
       }),
     requireConnectionReconciliation: (
       owner,

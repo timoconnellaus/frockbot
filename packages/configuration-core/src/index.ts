@@ -485,7 +485,13 @@ export function decodeRevokeConnectionCommandV1(
 export function decodeConnectionDependencyRequirementV1(
   input: unknown,
 ): ConnectionDependencyRequirementV1 {
-  const value = record(input, "Connection dependency requirement");
+  const value = exactRecord(input, "Connection dependency requirement", [
+    "schemaVersion",
+    "packageId",
+    "packageVersion",
+    "capabilityId",
+    "connectionTypeIds",
+  ]);
   schemaVersion(value);
   if (
     !Array.isArray(value.connectionTypeIds) ||
@@ -532,6 +538,26 @@ function revision(value: unknown): number {
   return value as number;
 }
 
+const COMMAND_META_FIELDS = [
+  "schemaVersion",
+  "type",
+  "commandId",
+  "expectedRevision",
+] as const;
+
+function exactCommand(
+  input: unknown,
+  fields: readonly string[],
+  optional: readonly string[] = [],
+): Record<string, unknown> {
+  return exactRecord(
+    input,
+    "command",
+    [...COMMAND_META_FIELDS, ...fields],
+    optional,
+  );
+}
+
 function commandMeta(value: Record<string, unknown>): CommandMetaV1 {
   if (value.schemaVersion !== 1) {
     throw new ConfigurationDecodeError("unsupported configuration schema");
@@ -544,7 +570,12 @@ function commandMeta(value: Record<string, unknown>): CommandMetaV1 {
 }
 
 function botProfile(value: unknown): BotProfile {
-  const profile = record(value, "profile");
+  const profile = exactRecord(
+    value,
+    "profile",
+    ["name"],
+    ["label", "description"],
+  );
   return {
     name: text(profile.name, "profile.name", 100),
     label: optionalText(profile.label, "profile.label", 120),
@@ -557,7 +588,7 @@ function botProfile(value: unknown): BotProfile {
 }
 
 function notifications(value: unknown): BotNotificationPolicy {
-  const policy = record(value, "notifications");
+  const policy = exactRecord(value, "notifications", ["enabled"]);
   if (typeof policy.enabled !== "boolean") {
     throw new ConfigurationDecodeError("notifications.enabled is invalid");
   }
@@ -565,7 +596,10 @@ function notifications(value: unknown): BotNotificationPolicy {
 }
 
 function model(value: unknown): ModelAssignment {
-  const assignment = record(value, "model");
+  const assignment = exactRecord(value, "model", [
+    "connectionId",
+    "providerModelId",
+  ]);
   return {
     connectionId: identifier(assignment.connectionId, "model.connectionId"),
     providerModelId: text(
@@ -583,12 +617,20 @@ export function decodeConfigurationQueryV1(
   if (value.schemaVersion !== 1) {
     throw new ConfigurationDecodeError("unsupported configuration schema");
   }
-  if (value.type === "user/get") return { schemaVersion: 1, type: "user/get" };
+  if (value.type === "user/get") {
+    exactRecord(input, "query", ["schemaVersion", "type"]);
+    return { schemaVersion: 1, type: "user/get" };
+  }
   if (value.type === "bot/get") {
+    const query = exactRecord(input, "query", [
+      "schemaVersion",
+      "type",
+      "botId",
+    ]);
     return {
       schemaVersion: 1,
       type: "bot/get",
-      botId: identifier(value.botId, "botId"),
+      botId: identifier(query.botId, "botId"),
     };
   }
   throw new ConfigurationDecodeError("unknown configuration query");
@@ -598,12 +640,17 @@ export function decodeConfigurationCommandV1(
   input: unknown,
 ): ConfigurationCommandV1 {
   const value = record(input, "command");
-  const meta = commandMeta(value);
   switch (value.type) {
     case "user/update-profile": {
-      const profile = record(value.profile, "profile");
+      const command = exactCommand(input, ["profile"]);
+      const profile = exactRecord(
+        command.profile,
+        "profile",
+        ["name"],
+        ["email"],
+      );
       return {
-        ...meta,
+        ...commandMeta(command),
         type: value.type,
         profile: {
           name: text(profile.name, "profile.name", 100),
@@ -611,56 +658,74 @@ export function decodeConfigurationCommandV1(
         },
       };
     }
-    case "user/set-new-bot-model":
+    case "user/set-new-bot-model": {
+      const command = exactCommand(input, [], ["model"]);
       return {
-        ...meta,
+        ...commandMeta(command),
         type: value.type,
-        model: value.model === undefined ? undefined : model(value.model),
+        model: command.model === undefined ? undefined : model(command.model),
       };
-    case "user/install-package":
+    }
+    case "user/install-package": {
+      const command = exactCommand(input, ["packageId", "version"]);
       return {
-        ...meta,
+        ...commandMeta(command),
         type: value.type,
-        packageId: identifier(value.packageId, "packageId"),
-        version: text(value.version, "version", 100),
+        packageId: identifier(command.packageId, "packageId"),
+        version: text(command.version, "version", 100),
       };
-    case "user/set-package-enabled":
-      if (typeof value.enabled !== "boolean") {
+    }
+    case "user/set-package-enabled": {
+      const command = exactCommand(input, ["packageId", "enabled"]);
+      if (typeof command.enabled !== "boolean") {
         throw new ConfigurationDecodeError("enabled is invalid");
       }
       return {
-        ...meta,
+        ...commandMeta(command),
         type: value.type,
-        packageId: identifier(value.packageId, "packageId"),
-        enabled: value.enabled,
+        packageId: identifier(command.packageId, "packageId"),
+        enabled: command.enabled,
       };
-    case "bot/update-profile":
+    }
+    case "bot/update-profile": {
+      const command = exactCommand(input, ["botId", "profile"]);
       return {
-        ...meta,
+        ...commandMeta(command),
         type: value.type,
-        botId: identifier(value.botId, "botId"),
-        profile: botProfile(value.profile),
+        botId: identifier(command.botId, "botId"),
+        profile: botProfile(command.profile),
       };
-    case "bot/update-notifications":
+    }
+    case "bot/update-notifications": {
+      const command = exactCommand(input, ["botId", "notifications"]);
       return {
-        ...meta,
+        ...commandMeta(command),
         type: value.type,
-        botId: identifier(value.botId, "botId"),
-        notifications: notifications(value.notifications),
+        botId: identifier(command.botId, "botId"),
+        notifications: notifications(command.notifications),
       };
-    case "bot/select-model":
+    }
+    case "bot/select-model": {
+      const command = exactCommand(input, ["botId", "model"]);
       return {
-        ...meta,
+        ...commandMeta(command),
         type: value.type,
-        botId: identifier(value.botId, "botId"),
-        model: model(value.model),
+        botId: identifier(command.botId, "botId"),
+        model: model(command.model),
       };
+    }
     case "bot/assign-capability": {
-      const assignment = record(value.assignment, "assignment");
+      const command = exactCommand(input, ["botId", "assignment"]);
+      const assignment = exactRecord(
+        command.assignment,
+        "assignment",
+        ["assignmentId", "packageId", "capabilityId"],
+        ["connectionId"],
+      );
       return {
-        ...meta,
+        ...commandMeta(command),
         type: value.type,
-        botId: identifier(value.botId, "botId"),
+        botId: identifier(command.botId, "botId"),
         assignment: {
           assignmentId: identifier(assignment.assignmentId, "assignmentId"),
           packageId: identifier(assignment.packageId, "assignment.packageId"),

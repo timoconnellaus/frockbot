@@ -125,10 +125,27 @@ describe("Connection revocation dependencies", () => {
     ).toEqual([
       {
         botId: "acknowledged",
-        id: "revoke:connection-1:acknowledged:gen-acknowledged",
+        id: "gen-acknowledged",
         expectedGeneration: "gen-acknowledged",
       },
     ]);
+  });
+
+  test("keeps compensation identifiers within the RPC identifier bound", () => {
+    const generation = "g".repeat(128);
+    const [compensation] = deriveRevocationCompensations(
+      connection({
+        dependentAssignments: [
+          { botId: "primary", generation, status: "acknowledged" },
+        ],
+      }),
+    );
+
+    expect(compensation).toMatchObject({
+      id: generation,
+      expectedGeneration: generation,
+    });
+    expect(compensation?.id).toHaveLength(128);
   });
 
   test("ignores legacy Bot metadata even when it has a generation", () => {
@@ -1066,13 +1083,6 @@ describe("Connection provider reconciliation alarms", () => {
       nativeReturnNonce: undefined,
     });
     expect((await contribution.read("user-1")).revision).toBe(first.revision);
-    await expect(
-      contribution.consumeAuthorizationState(
-        "user-1",
-        "link-command",
-        "authorization-state",
-      ),
-    ).resolves.toBe("duplicate");
   });
 
   test("survives interruption immediately after recovered ACTIVE commit", async () => {

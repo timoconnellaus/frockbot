@@ -64,23 +64,6 @@ function decodeConnectionMetadataRequest(input: unknown): {
   };
 }
 
-function decodeLeaseRequest(input: unknown): {
-  userId: string;
-  connectionId: string;
-  leaseId: string;
-} {
-  const request = decodeRpcEnvelopeV1(input, {
-    userId: rpcIdentifier,
-    connectionId: rpcIdentifier,
-    leaseId: rpcIdentifier,
-  });
-  return {
-    userId: request.userId as string,
-    connectionId: request.connectionId as string,
-    leaseId: request.leaseId as string,
-  };
-}
-
 function decodeDependencyRequest(input: unknown): {
   userId: string;
   connectionId: string;
@@ -232,79 +215,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     );
   }
 
-  async consumeAuthorizationState(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-      authorizationStateId: rpcIdentifier,
-    });
-    return (await this.contribution()).consumeAuthorizationState(
-      request.userId as string,
-      request.connectionId as string,
-      request.authorizationStateId as string,
-    );
-  }
-
-  async admitConnectionCallback(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-      callback: rpcObject(
-        {
-          authorizationStateId: rpcIdentifier,
-          connectedAccountId: rpcIdentifier,
-          leaseId: rpcIdentifier,
-        },
-        { verifiedMetadata: rpcJsonRecord },
-      ),
-    });
-    return (await this.contribution()).admitConnectionCallback(
-      request.userId as string,
-      request.connectionId as string,
-      request.callback as Parameters<
-        ComposioUserBackendContribution["admitConnectionCallback"]
-      >[2],
-    );
-  }
-
-  async claimConnectionAssignment(input: unknown) {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      {
-        userId: rpcIdentifier,
-        connectionId: rpcIdentifier,
-        leaseId: rpcIdentifier,
-      },
-      { verifiedMetadata: rpcJsonRecord },
-    );
-    return (await this.contribution()).claimConnectionAssignment(
-      request.userId as string,
-      request.connectionId as string,
-      request.leaseId as string,
-      request.verifiedMetadata as Parameters<
-        ComposioUserBackendContribution["claimConnectionAssignment"]
-      >[3],
-    );
-  }
-
-  async finishConnectionAssignment(input: unknown) {
-    const request = decodeLeaseRequest(input);
-    return (await this.contribution()).finishConnectionAssignment(
-      request.userId,
-      request.connectionId,
-      request.leaseId,
-    );
-  }
-
-  async requireAssignmentCompensation(input: unknown) {
-    const request = decodeLeaseRequest(input);
-    return (await this.contribution()).requireAssignmentCompensation(
-      request.userId,
-      request.connectionId,
-      request.leaseId,
-    );
-  }
-
   async recordAssignmentCompensated(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
@@ -350,16 +260,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async compensateConnectionDependency(input: unknown) {
     const request = decodeDependencyRequest(input);
     return (await this.contribution()).compensateConnectionDependency(
-      request.userId,
-      request.connectionId,
-      request.botId,
-      request.generation,
-    );
-  }
-
-  async recordConnectionDependency(input: unknown) {
-    const request = decodeDependencyRequest(input);
-    return (await this.contribution()).recordConnectionDependency(
       request.userId,
       request.connectionId,
       request.botId,
