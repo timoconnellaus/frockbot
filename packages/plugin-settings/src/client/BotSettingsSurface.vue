@@ -3,7 +3,10 @@ import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiButton, UiField } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onMounted, ref } from "vue";
-import { resolveBotSettingsModel } from "./bot-settings.js";
+import {
+  isModelConnectionEligible,
+  resolveBotSettingsModel,
+} from "./bot-settings.js";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
 const providedWeb = inject(frockBotWebDataKey);
@@ -22,22 +25,13 @@ const useExactModel = ref(false);
 const exactConnectionId = ref("");
 const exactProviderModelId = ref("");
 const readyConnections = computed(() =>
-  (web.value.userSettings?.connections ?? []).filter((connection) => {
-    const pkg = web.value.pluginCatalog.find(
-      (candidate) => candidate.packageId === connection.packageId,
-    );
-    const connectionType = pkg?.connectionTypes.find(
-      (candidate) => candidate.id === connection.connectionTypeId,
-    );
-    return (
-      connection.state === "ready" &&
-      pkg?.capabilities.some(
-        (capability) =>
-          capability.kind === "model" &&
-          connectionType?.capabilities.includes(capability.id),
-      )
-    );
-  }),
+  (web.value.userSettings?.connections ?? []).filter((connection) =>
+    isModelConnectionEligible({
+      connection,
+      packages: web.value.userSettings?.packages ?? [],
+      catalog: web.value.pluginCatalog,
+    }),
+  ),
 );
 const modelOptions = computed(() =>
   readyConnections.value.flatMap((connection) =>
@@ -49,11 +43,8 @@ const modelOptions = computed(() =>
 );
 
 onMounted(async () => {
-  await Promise.all([
-    web.value.loadBotSettings(),
-    web.value.loadUserSettings(),
-    web.value.loadPluginCatalog(),
-  ]);
+  await web.value.loadPluginCatalog();
+  await web.value.loadBotSettings();
   const settings = web.value.botSettings;
   if (!settings) return;
   name.value = settings.profile.name;

@@ -217,6 +217,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
     const tools = new Map<number, ToolAccumulator>();
     let finishReason: string | undefined;
     let terminal = false;
+    let sawChoice = false;
     for await (const data of readSseData(response.body)) {
       signal.throwIfAborted();
       if (data === "[DONE]") {
@@ -229,6 +230,9 @@ export class OpenAICompatibleProvider implements LlmProvider {
       const choices = payload?.choices;
       const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
       const delta = asRecord(choice?.delta);
+      if (choice && (delta || typeof choice.finish_reason === "string")) {
+        sawChoice = true;
+      }
       if (typeof delta?.content === "string" && delta.content) {
         yield { type: "text-delta", text: delta.content };
       }
@@ -240,6 +244,9 @@ export class OpenAICompatibleProvider implements LlmProvider {
     }
     if (!terminal) {
       throw new Error("Model response stream ended before a terminal marker");
+    }
+    if (!sawChoice) {
+      throw new Error("Model response stream did not include a valid choice");
     }
 
     for (const tool of [...tools.values()].sort(

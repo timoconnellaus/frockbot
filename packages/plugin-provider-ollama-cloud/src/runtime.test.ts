@@ -6,11 +6,13 @@ import {
   type NormalizedModelRequest,
 } from "@frockbot/agent-core";
 import {
+  openCredentialV1,
   parseCredentialKeyringV1,
   sealCredentialV1,
+  type CredentialLeaseV1,
 } from "@frockbot/connection-core";
 import { OpenAICompatibleHttpError } from "@frockbot/provider-openai-compatible";
-import { Context } from "cordis";
+import { Context, Service } from "cordis";
 import { createOllamaCloudRuntimePlugin } from "./runtime.js";
 
 function serializedKeyring(): string {
@@ -25,6 +27,42 @@ function serializedKeyring(): string {
     schemaVersion: 1,
     currentKeyId: "primary",
     keys: { primary: key },
+  });
+}
+
+class TestCredentialLeaseRuntime extends Service {
+  private readonly keyring;
+
+  constructor(ctx: Context, serializedKeyring: string) {
+    super(ctx, "credentialLease");
+    this.keyring = parseCredentialKeyringV1(serializedKeyring);
+  }
+
+  open(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    lease: CredentialLeaseV1;
+  }): Promise<string> {
+    return openCredentialV1({
+      keyring: this.keyring,
+      context: {
+        accountId: input.accountId,
+        connectionId: input.connectionId,
+        packageId: input.packageId,
+        credentialGeneration: input.lease.credentialGeneration,
+      },
+      envelope: input.lease.envelope,
+    });
+  }
+}
+
+async function mountCredentialRuntime(
+  root: Context,
+  keyring = serializedKeyring(),
+): Promise<void> {
+  await root.plugin((ctx) => {
+    new TestCredentialLeaseRuntime(ctx, keyring);
   });
 }
 
@@ -59,12 +97,12 @@ describe("Ollama Cloud runtime Contribution", () => {
     const settled: string[] = [];
     const root = new Context();
     await root.plugin(LlmRegistry);
+    await mountCredentialRuntime(root, keyringText);
     await root.plugin(
       createOllamaCloudRuntimePlugin({
         accountId: "account-1",
         connectionId: "connection-1",
         packageId: "provider-ollama-cloud",
-        credentialKeyring: keyringText,
         now: () => Date.parse("2026-08-30T00:00:00.000Z"),
         leaseCredential: (effectId, expectedGeneration) => {
           leasedGenerations.push(expectedGeneration);
@@ -141,12 +179,12 @@ describe("Ollama Cloud runtime Contribution", () => {
     const settled: string[] = [];
     const root = new Context();
     await root.plugin(LlmRegistry);
+    await mountCredentialRuntime(root);
     await root.plugin(
       createOllamaCloudRuntimePlugin({
         accountId: "account-1",
         connectionId: "connection-1",
         packageId: "provider-ollama-cloud",
-        credentialKeyring: serializedKeyring(),
         leaseCredential: () => Promise.reject(new Error("not used")),
         settleCredential: (effectId) => {
           settled.push(effectId);
@@ -183,12 +221,12 @@ describe("Ollama Cloud runtime Contribution", () => {
       const settled: string[] = [];
       const root = new Context();
       await root.plugin(LlmRegistry);
+      await mountCredentialRuntime(root, keyringText);
       await root.plugin(
         createOllamaCloudRuntimePlugin({
           accountId: "account-1",
           connectionId: "connection-1",
           packageId: "provider-ollama-cloud",
-          credentialKeyring: keyringText,
           now: () => Date.parse("2026-08-30T00:00:00.000Z"),
           leaseCredential: (effectId) =>
             Promise.resolve({
@@ -248,12 +286,12 @@ describe("Ollama Cloud runtime Contribution", () => {
     const settled: string[] = [];
     const root = new Context();
     await root.plugin(LlmRegistry);
+    await mountCredentialRuntime(root, keyringText);
     await root.plugin(
       createOllamaCloudRuntimePlugin({
         accountId: "account-1",
         connectionId: "connection-1",
         packageId: "provider-ollama-cloud",
-        credentialKeyring: keyringText,
         now: () => Date.parse("2026-08-30T00:00:00.000Z"),
         leaseCredential: (effectId) =>
           Promise.resolve({

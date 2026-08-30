@@ -1,4 +1,35 @@
-import type { ModelAssignment } from "@frockbot/configuration-core";
+import type {
+  ConnectionView,
+  ModelAssignment,
+  PackageInstallationView,
+} from "@frockbot/configuration-core";
+import type { PluginCatalogItem } from "@frockbot/plugin-shell/shared";
+
+export function isModelConnectionEligible(input: {
+  connection: ConnectionView;
+  packages: readonly PackageInstallationView[];
+  catalog: readonly PluginCatalogItem[];
+}): boolean {
+  const pkg = input.catalog.find(
+    (candidate) => candidate.packageId === input.connection.packageId,
+  );
+  const connectionType = pkg?.connectionTypes.find(
+    (candidate) => candidate.id === input.connection.connectionTypeId,
+  );
+  return Boolean(
+    input.connection.state === "ready" &&
+    input.packages.some(
+      (candidate) =>
+        candidate.packageId === input.connection.packageId &&
+        candidate.state === "installed",
+    ) &&
+    pkg?.capabilities.some(
+      (capability) =>
+        capability.kind === "model" &&
+        connectionType?.capabilities.includes(capability.id),
+    ),
+  );
+}
 
 export function resolveBotSettingsModel(input: {
   current?: ModelAssignment;

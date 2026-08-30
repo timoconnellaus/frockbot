@@ -227,6 +227,57 @@ describe("Bot selection", () => {
     expect(provided.value.activeBotId).toBe("new");
     expect(provided.value.botSettings?.botId).toBe("new");
   });
+  test("preserves load failures and ignores stale User settings", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const older = Promise.withResolvers<UserSettingsViewV1>();
+    const newer = Promise.withResolvers<UserSettingsViewV1>();
+    let userReads = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) => {
+          if (query.type === "bot/get") {
+            return Promise.reject(new Error("Bot settings unavailable"));
+          }
+          userReads += 1;
+          return userReads === 1 ? older.promise : newer.promise;
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    const botLoad = provided.value.loadBotSettings();
+    const olderLoad = provided.value.loadUserSettings();
+    const newerLoad = provided.value.loadUserSettings();
+    newer.resolve({
+      schemaVersion: 1,
+      revision: 2,
+      profile: { name: "Newer" },
+      packages: [],
+      connections: [],
+    });
+    await newerLoad;
+    older.resolve({
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "Older" },
+      packages: [],
+      connections: [],
+    });
+    await Promise.all([botLoad, olderLoad]);
+
+    expect(provided.value.userSettings?.profile.name).toBe("Newer");
+    expect(provided.value.settingsError).toBe("Bot settings unavailable");
+  });
+
   test("labels an explicitly bound Ollama Bot by its provider", async () => {
     let provided: Ref<FrockBotWebData> | undefined;
     const bot = {

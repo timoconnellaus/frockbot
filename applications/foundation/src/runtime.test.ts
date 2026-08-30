@@ -58,6 +58,7 @@ describe("foundation application", () => {
       runtime: [
         "clock",
         "computer",
+        "credentials",
         "echo",
         "fly-sprite",
         "identity",
@@ -120,8 +121,6 @@ describe("foundation application", () => {
       {
         accountId: "account-1",
         connectionId: "ollama-work",
-        credentialKeyring:
-          '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
         leaseCredential: () => Promise.reject(new Error("not executed")),
         settleCredential: () => Promise.resolve(),
       },
@@ -243,7 +242,11 @@ describe("foundation application", () => {
           return undefined;
         },
       }).map((pkg) => pkg.specifier),
-    ).toEqual(["@frockbot/plugin-fly-sprite", "@frockbot/plugin-computer"]);
+    ).toEqual([
+      "@frockbot/plugin-credentials",
+      "@frockbot/plugin-fly-sprite",
+      "@frockbot/plugin-computer",
+    ]);
     expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
 
     const assignment = {

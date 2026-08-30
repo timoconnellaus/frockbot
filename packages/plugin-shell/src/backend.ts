@@ -1614,15 +1614,10 @@ export class ShellBotBackendContribution {
       throw new Error(binding.failure ?? "Bot model Connection is unavailable");
     }
     const bindingPackageId = binding.packageId;
-    const credentialKeyring = readSecret("CREDENTIAL_KEYRING");
-    if (!credentialKeyring) {
-      throw new Error("Credential Store Contribution is not configured");
-    }
     agentPackages.push(
       createFoundationModelRuntimePackage(application, binding, {
         accountId: identity.userId,
         connectionId: binding.connection.connectionId,
-        credentialKeyring,
         leaseCredential: (
           effectId,
           expectedGeneration,

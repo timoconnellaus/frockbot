@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./user": "./src/user.ts",
+    "./runtime": "./src/runtime.ts",
     "./manifest": "./src/manifest.ts",
     "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"

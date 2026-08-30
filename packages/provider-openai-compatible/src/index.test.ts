@@ -156,6 +156,32 @@ describe("OpenAICompatibleProvider", () => {
     );
   });
 
+  test.each([
+    "data: [DONE]\n\n",
+    'data: {"model":"test-model"}\n\ndata: [DONE]\n\n',
+  ])("rejects a terminal stream without a choice", async (body) => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+
+    let failure: unknown;
+    try {
+      for await (const _event of provider.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        throw new Error("unexpected stream event");
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure instanceof Error ? failure.message : "").toBe(
+      "Model response stream did not include a valid choice",
+    );
+  });
+
   test("cancels an oversized unterminated stream", async () => {
     const encoder = new TextEncoder();
     let cancelled = false;

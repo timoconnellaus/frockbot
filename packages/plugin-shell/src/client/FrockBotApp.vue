@@ -36,7 +36,7 @@ const canSend = computed(
     draft.value.trim().length > 0,
 );
 
-onMounted(() => web.value.loadUserSettings());
+onMounted(() => web.value.loadPluginCatalog());
 
 watch(
   composerContext,

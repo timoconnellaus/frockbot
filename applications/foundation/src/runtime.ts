@@ -34,6 +34,7 @@ export interface BackendRouteContribution {
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
 import credentialsManifest from "@frockbot/plugin-credentials/manifest";
+import { createCredentialRuntimePlugin } from "@frockbot/plugin-credentials/user";
 // Desktop and mobile Package manifests remain part of the immutable plan.
 import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
 import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
@@ -123,7 +124,6 @@ const assignedRuntimeContributionFactories = new Map<
 interface ModelRuntimeContributionConfig {
   accountId: string;
   connectionId: string;
-  credentialKeyring: string;
   leaseCredential(
     effectId: string,
     expectedGeneration?: string,
@@ -146,7 +146,7 @@ const modelRuntimeContributionFactories = new Map<
       createOllamaCloudRuntimePlugin({
         ...config,
         packageId: "provider-ollama-cloud",
-      }),
+      } as Parameters<typeof createOllamaCloudRuntimePlugin>[0]),
   ],
 ]);
 
@@ -309,6 +309,11 @@ export function createFoundationHostedRuntimePackages(
   return [
     runtimePackage(
       plan,
+      "credentials",
+      createCredentialRuntimePlugin({ readSecret: host.readSecret }),
+    ),
+    runtimePackage(
+      plan,
       "fly-sprite",
       createFlySpriteProviderPlugin(undefined, {
         token: host.readSecret("SPRITES_TOKEN"),
@@ -413,6 +418,7 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   const runtimeIds = new Set(plan.contributions.runtime);
   // Computer providers require host authority and are added only by a capable runtime.
   runtimeIds.delete("computer");
+  runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");
   // Assigned provider Packages mount only after durable Connections resolve.
   runtimeIds.delete("composio");

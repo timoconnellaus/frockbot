@@ -519,6 +519,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   let activeRequest: AbortController | undefined;
   let admissionObserver: AbortController | undefined;
   let selectionGeneration = 0;
+  let userSettingsGeneration = 0;
+  const settingsLoadErrors = new Map<"bot" | "user" | "catalog", string>();
   const connectionOperations = readConnectionOperations();
   const authorizationOperations = new Map<
     string,
@@ -726,6 +728,15 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     }
   }
 
+  function updateSettingsLoadError(
+    source: "bot" | "user" | "catalog",
+    message?: string,
+  ): void {
+    settingsLoadErrors.delete(source);
+    if (message) settingsLoadErrors.set(source, message);
+    web.value.settingsError = [...settingsLoadErrors.values()].at(-1);
+  }
+
   function updateModelLabel(): void {
     const model = web.value.botSettings?.model;
     const connection = web.value.userSettings?.connections.find(
@@ -802,7 +813,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
     async loadBotSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
-        web.value.settingsError = "Settings are unavailable";
+        updateSettingsLoadError("bot", "Settings are unavailable");
         return;
       }
       const botId = web.value.activeBotId;
@@ -821,7 +832,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           return;
         web.value.botSettings = settings;
         updateModelLabel();
-        web.value.settingsError = undefined;
+        updateSettingsLoadError("bot");
         await deliverNotifications(botId, generation);
       } catch (error) {
         if (
@@ -829,8 +840,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId !== botId
         )
           return;
-        web.value.settingsError =
-          error instanceof Error ? error.message : "Could not load settings";
+        updateSettingsLoadError(
+          "bot",
+          error instanceof Error ? error.message : "Could not load settings",
+        );
       }
     },
     async saveBotProfile(profile: BotProfile): Promise<void> {
@@ -981,9 +994,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
     async loadUserSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
-        web.value.settingsError = "Settings are unavailable";
+        updateSettingsLoadError("user", "Settings are unavailable");
         return;
       }
+      const generation = ++userSettingsGeneration;
       try {
         const settings = (await ctx.transport.readConfiguration({
           schemaVersion: 1,
@@ -994,12 +1008,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           connectionOperations,
           ctx.transport.lookupConnectionCommand,
         );
+        if (generation !== userSettingsGeneration) return;
         web.value.userSettings = settings;
         updateModelLabel();
-        web.value.settingsError = undefined;
+        updateSettingsLoadError("user");
       } catch (error) {
-        web.value.settingsError =
-          error instanceof Error ? error.message : "Could not load settings";
+        if (generation !== userSettingsGeneration) return;
+        updateSettingsLoadError(
+          "user",
+          error instanceof Error ? error.message : "Could not load settings",
+        );
       }
     },
     async saveUserProfile(profile: {
@@ -1024,9 +1042,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         !ctx.transport.readApplicationManifest ||
         !ctx.transport.readConfiguration
       ) {
-        web.value.settingsError = "Plugins are unavailable";
+        updateSettingsLoadError("catalog", "Plugins are unavailable");
         return;
       }
+      const generation = ++userSettingsGeneration;
       try {
         const [manifest, settings] = await Promise.all([
           ctx.transport.readApplicationManifest(),
@@ -1035,19 +1054,25 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             type: "user/get",
           }),
         ]);
-        web.value.pluginCatalog = decodePluginCatalog(manifest);
+        const pluginCatalog = decodePluginCatalog(manifest);
         const userSettings = settings as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, userSettings);
         await reconcileRetainedConnectionCommands(
           connectionOperations,
           ctx.transport.lookupConnectionCommand,
         );
+        if (generation !== userSettingsGeneration) return;
+        web.value.pluginCatalog = pluginCatalog;
         web.value.userSettings = userSettings;
         updateModelLabel();
-        web.value.settingsError = undefined;
+        updateSettingsLoadError("user");
+        updateSettingsLoadError("catalog");
       } catch (error) {
-        web.value.settingsError =
-          error instanceof Error ? error.message : "Could not load Plugins";
+        if (generation !== userSettingsGeneration) return;
+        updateSettingsLoadError(
+          "catalog",
+          error instanceof Error ? error.message : "Could not load Plugins",
+        );
       }
     },
     async installPackage(packageId: string, version: string): Promise<void> {

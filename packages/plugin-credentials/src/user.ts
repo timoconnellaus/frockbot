@@ -8,6 +8,10 @@ import {
   sealCredentialV1,
 } from "@frockbot/connection-core";
 import type { Plugin } from "cordis";
+export {
+  createCredentialRuntimePlugin,
+  CredentialLeaseRuntime,
+} from "./runtime.js";
 
 const CREDENTIAL_PREFIX = "credential:";
 const ACTIVE_PREFIX = "credential-active:";

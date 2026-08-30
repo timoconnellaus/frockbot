@@ -5,7 +5,8 @@
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {
-    "backend": [{ "entry": "./user", "host": "user" }]
+    "backend": [{ "entry": "./user", "host": "user" }],
+    "runtime": { "entry": "./runtime" }
   },
   "permissions": ["credentials:manage"]
 }

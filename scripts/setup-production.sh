@@ -220,6 +220,18 @@ set_production_secret() {
   warn "could not set $name; authenticate gh and rerun this wizard"
 }
 
+set_required_production_secret() {
+  local name="$1" value="$2"
+  if ! printf '%s' "$value" | gh secret set "$name" \
+    --repo "$GITHUB_REPOSITORY" \
+    --env "$GITHUB_ENVIRONMENT" >/dev/null 2>&1; then
+    warn "could not set required production secret $name"
+    return 1
+  fi
+  WRITTEN_SECRET+=("$name")
+  printf '  %s✓ set%s required GitHub production secret %s\n' "$GREEN" "$RESET" "$name"
+}
+
 banner "FrockBot production setup"
 
 stage "Cloudflare: CI deployment token"
@@ -299,7 +311,7 @@ NODE
     warn "Credential keyring generation failed"
     exit 1
   }
-  set_production_secret CREDENTIAL_KEYRING "$CREDENTIAL_KEYRING"
+  set_required_production_secret CREDENTIAL_KEYRING "$CREDENTIAL_KEYRING"
   unset CREDENTIAL_KEYRING
 fi
 unset PRODUCTION_SECRETS

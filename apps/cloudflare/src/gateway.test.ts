@@ -213,9 +213,19 @@ class MemoryConfiguration
     ConnectionCommandReceiptV1
   >();
   private connectionReceiptOverride: unknown;
+  private configurationReadOverride: unknown;
+  private operationReceiptOverride: unknown;
 
   setConnectionReceiptOverride(receipt: unknown): void {
     this.connectionReceiptOverride = receipt;
+  }
+
+  setConfigurationReadOverride(configuration: unknown): void {
+    this.configurationReadOverride = configuration;
+  }
+
+  setOperationReceiptOverride(receipt: unknown): void {
+    this.operationReceiptOverride = receipt;
   }
 
   private read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
@@ -338,6 +348,11 @@ class MemoryConfiguration
       | Parameters<UserConfigurationBinding["readConfiguration"]>[0]
       | Parameters<BotConfigurationBinding["readConfiguration"]>[0],
   ): Promise<ConfigurationViewV1> {
+    if (this.configurationReadOverride !== undefined) {
+      return Promise.resolve(
+        this.configurationReadOverride as ConfigurationViewV1,
+      );
+    }
     return this.read(
       "botId" in request
         ? { schemaVersion: 1, type: "bot/get", botId: request.botId }
@@ -350,6 +365,11 @@ class MemoryConfiguration
       | Parameters<UserConfigurationBinding["executeConfiguration"]>[0]
       | Parameters<BotConfigurationBinding["executeConfiguration"]>[0],
   ): Promise<OperationReceiptV1> {
+    if (this.operationReceiptOverride !== undefined) {
+      return Promise.resolve(
+        this.operationReceiptOverride as OperationReceiptV1,
+      );
+    }
     return this.execute(request.command);
   }
 
@@ -724,6 +744,68 @@ describe("Cloudflare user application gateway", () => {
       "user:alice",
     ]);
     expect(loader.ids).toEqual([]);
+  });
+
+  test("rejects malformed configuration RPC results at the gateway seam", async () => {
+    {
+      const { gateway, configurations } = createTestGateway();
+      const configuration = new MemoryConfiguration();
+      configuration.setConfigurationReadOverride({
+        schemaVersion: 1,
+        revision: 0,
+        profile: { name: "Alice" },
+        packages: [],
+        connections: [],
+        secret: "must-not-cross-the-seam",
+      });
+      configurations.set("alice", configuration);
+      expect((await gateway(request("/api/settings", "alice"))).status).toBe(
+        400,
+      );
+    }
+    {
+      const { gateway, configurations } = createTestGateway();
+      const configuration = new MemoryConfiguration();
+      configuration.setConfigurationReadOverride({
+        schemaVersion: 1,
+        botId: "primary",
+        revision: 0,
+        profile: { name: "Bot" },
+        notifications: { enabled: false },
+        assignments: [],
+        secret: "must-not-cross-the-seam",
+      });
+      configurations.set("alice", configuration);
+      expect(
+        (await gateway(request("/api/bots/primary/settings", "alice"))).status,
+      ).toBe(400);
+    }
+    {
+      const { gateway, configurations } = createTestGateway();
+      const configuration = new MemoryConfiguration();
+      configuration.setOperationReceiptOverride({
+        schemaVersion: 1,
+        commandId: "profile-malformed",
+        revision: 1,
+        status: "applied",
+        secret: "must-not-cross-the-seam",
+      });
+      configurations.set("alice", configuration);
+      const response = await gateway(
+        request("/api/settings", "alice", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            type: "user/update-profile",
+            commandId: "profile-malformed",
+            expectedRevision: 0,
+            profile: { name: "Alice" },
+          }),
+        }),
+      );
+      expect(response.status).toBe(400);
+    }
   });
 
   test("admits API-key Connections only through the authenticated generic seam", async () => {

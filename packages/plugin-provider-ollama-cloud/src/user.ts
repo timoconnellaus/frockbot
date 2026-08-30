@@ -1556,7 +1556,22 @@ export class OllamaCloudUserBackendContribution {
         );
         if (!current || current.packageId !== PACKAGE_ID) return "stale";
         if (current.generation !== expectedGeneration) return "stale";
-        if (current.state === "revoked") return "revoked";
+        if (current.state === "revoked") {
+          if (!record.revokeUpstream) return "revoked";
+          await this.host.settings.replaceConnection(
+            record.accountId,
+            record.connectionId,
+            expectedGeneration,
+            {
+              ...current,
+              state: "reconciliation-required",
+              failure:
+                "Ollama Cloud does not expose upstream API-key revocation",
+            },
+            storage,
+          );
+          return "reconciliation-required";
+        }
         if (current.state === "reconciliation-required") {
           return "reconciliation-required";
         }
@@ -1588,45 +1603,64 @@ export class OllamaCloudUserBackendContribution {
     }
 
     await this.host.credentials.disconnect(record.connectionId);
-    const revoking = await this.requireConnection(
-      record.accountId,
-      record.connectionId,
-    );
-    if (revoking.generation !== expectedGeneration) {
-      return this.finishRecord(record, "failed");
-    }
-    const unsupportedUpstreamRevoke = record.revokeUpstream === true;
-    await this.host.settings.replaceConnection(
-      record.accountId,
-      record.connectionId,
-      expectedGeneration,
-      {
-        ...revoking,
-        state: unsupportedUpstreamRevoke
-          ? "reconciliation-required"
-          : "revoked",
-        authorization: {
-          schemaVersion: 1,
-          kind: "api-key",
-          credential: {
-            schemaVersion: 1,
-            configured: false,
-            source: "api-key",
-            writable: true,
+    const terminalStatus = await this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        const current = await this.host.settings.getConnection(
+          record.accountId,
+          record.connectionId,
+          storage,
+        );
+        if (
+          !current ||
+          current.packageId !== PACKAGE_ID ||
+          current.generation !== expectedGeneration
+        ) {
+          return "failed" as const;
+        }
+        if (current.state === "reconciliation-required") {
+          return "reconciliation-required" as const;
+        }
+        const unsupportedUpstreamRevoke = record.revokeUpstream === true;
+        if (current.state === "revoked" && !unsupportedUpstreamRevoke) {
+          return "applied" as const;
+        }
+        if (current.state !== "revoking" && current.state !== "revoked") {
+          return "failed" as const;
+        }
+        await this.host.settings.replaceConnection(
+          record.accountId,
+          record.connectionId,
+          expectedGeneration,
+          {
+            ...current,
+            state: unsupportedUpstreamRevoke
+              ? "reconciliation-required"
+              : "revoked",
+            authorization: {
+              schemaVersion: 1,
+              kind: "api-key",
+              credential: {
+                schemaVersion: 1,
+                configured: false,
+                source: "api-key",
+                writable: true,
+              },
+            },
+            ...(unsupportedUpstreamRevoke
+              ? {
+                  failure:
+                    "Ollama Cloud does not expose upstream API-key revocation",
+                }
+              : {}),
           },
-        },
-        ...(unsupportedUpstreamRevoke
-          ? {
-              failure:
-                "Ollama Cloud does not expose upstream API-key revocation",
-            }
-          : {}),
+          storage,
+        );
+        return unsupportedUpstreamRevoke
+          ? ("reconciliation-required" as const)
+          : ("applied" as const);
       },
     );
-    return this.finishRecord(
-      record,
-      unsupportedUpstreamRevoke ? "reconciliation-required" : "applied",
-    );
+    return this.finishRecord(record, terminalStatus);
   }
 
   private async finishRecord(

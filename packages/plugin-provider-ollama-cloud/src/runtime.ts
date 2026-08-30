@@ -4,11 +4,7 @@ import {
   type LlmProvider,
   type NormalizedModelRequest,
 } from "@frockbot/agent-core";
-import {
-  type CredentialLeaseV1,
-  openCredentialV1,
-  parseCredentialKeyringV1,
-} from "@frockbot/connection-core";
+import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import {
   OpenAICompatibleHttpError,
   OpenAICompatibleProvider,
@@ -16,7 +12,20 @@ import {
 import type { Plugin } from "cordis";
 import type { OllamaFetch } from "./client.js";
 
+interface CredentialLeaseOpener {
+  open(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    lease: CredentialLeaseV1;
+  }): Promise<string>;
+}
+
 declare module "cordis" {
+  interface Context {
+    credentialLease: CredentialLeaseOpener;
+  }
+
   interface Events {
     "agent/model-outcome-committed": (
       agent: Agent,
@@ -32,7 +41,6 @@ export interface OllamaCloudRuntimeConfig {
   accountId: string;
   connectionId: string;
   packageId: "provider-ollama-cloud";
-  credentialKeyring: string;
   leaseCredential(
     effectId: string,
     expectedGeneration?: string,
@@ -50,12 +58,12 @@ interface AuthorizedRequest {
 
 class OllamaCloudProvider implements LlmProvider {
   readonly id = OLLAMA_CLOUD_PROVIDER;
-  private readonly keyring;
   private readonly authorized = new Map<string, AuthorizedRequest>();
 
-  constructor(private readonly config: OllamaCloudRuntimeConfig) {
-    this.keyring = parseCredentialKeyringV1(config.credentialKeyring);
-  }
+  constructor(
+    private readonly config: OllamaCloudRuntimeConfig,
+    private readonly credentialLease: CredentialLeaseOpener,
+  ) {}
 
   async authorize(request: NormalizedModelRequest): Promise<void> {
     const expectedGeneration = request.modelBinding?.connectionGeneration;
@@ -86,15 +94,11 @@ class OllamaCloudProvider implements LlmProvider {
       ) {
         throw new Error("Ollama Cloud credential lease is invalid");
       }
-      const apiKey = await openCredentialV1({
-        keyring: this.keyring,
-        context: {
-          accountId: this.config.accountId,
-          connectionId: this.config.connectionId,
-          packageId: this.config.packageId,
-          credentialGeneration: lease.credentialGeneration,
-        },
-        envelope: lease.envelope,
+      const apiKey = await this.credentialLease.open({
+        accountId: this.config.accountId,
+        connectionId: this.config.connectionId,
+        packageId: this.config.packageId,
+        lease,
       });
       this.authorized.set(request.requestId, { lease, apiKey });
     } catch (error) {
@@ -151,7 +155,7 @@ export function createOllamaCloudRuntimePlugin(
   config: OllamaCloudRuntimeConfig,
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) => {
-    const provider = new OllamaCloudProvider(config);
+    const provider = new OllamaCloudProvider(config, ctx.credentialLease);
     const disposeProvider = ctx.llm.register(provider);
     const disposeSettlement = ctx.on(
       "agent/model-outcome-committed",
@@ -162,7 +166,7 @@ export function createOllamaCloudRuntimePlugin(
       disposeProvider();
     };
   };
-  plugin.inject = ["llm"];
+  plugin.inject = ["llm", "credentialLease"];
   return plugin;
 }
 

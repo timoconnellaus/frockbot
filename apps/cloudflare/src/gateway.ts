@@ -6,8 +6,11 @@ import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
   decodeBotIdV1,
+  decodeBotSettingsViewV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
+  decodeOperationReceiptV1,
+  decodeUserSettingsViewV1,
   isApplicationDeploymentHash,
   isPublicIdentifier,
 } from "@frockbot/configuration-core";
@@ -232,9 +235,11 @@ export function createGateway(dependencies: GatewayDependencies) {
         if (request.method === "GET") {
           if (!botSettingsMatch) {
             return Response.json(
-              await dependencies
-                .userConfigurationFor(userId)
-                .readConfiguration({ schemaVersion: 1, userId }),
+              decodeUserSettingsViewV1(
+                await dependencies
+                  .userConfigurationFor(userId)
+                  .readConfiguration({ schemaVersion: 1, userId }),
+              ),
             );
           }
           const query = decodeConfigurationQueryV1({
@@ -248,13 +253,15 @@ export function createGateway(dependencies: GatewayDependencies) {
             );
           }
           return Response.json(
-            await dependencies
-              .botConfigurationFor(userId, query.botId)
-              .readConfiguration({
-                schemaVersion: 1,
-                userId,
-                botId: query.botId,
-              }),
+            decodeBotSettingsViewV1(
+              await dependencies
+                .botConfigurationFor(userId, query.botId)
+                .readConfiguration({
+                  schemaVersion: 1,
+                  userId,
+                  botId: query.botId,
+                }),
+            ),
           );
         }
         if (request.method !== "POST") {
@@ -276,22 +283,28 @@ export function createGateway(dependencies: GatewayDependencies) {
         }
         if ("botId" in command) {
           return Response.json(
-            await dependencies
-              .botConfigurationFor(userId, command.botId)
-              .executeConfiguration({
-                schemaVersion: 1,
-                userId,
-                botId: command.botId,
-                command,
-              }),
+            decodeOperationReceiptV1(
+              await dependencies
+                .botConfigurationFor(userId, command.botId)
+                .executeConfiguration({
+                  schemaVersion: 1,
+                  userId,
+                  botId: command.botId,
+                  command,
+                }),
+            ),
           );
         }
         return Response.json(
-          await dependencies.userConfigurationFor(userId).executeConfiguration({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
+          decodeOperationReceiptV1(
+            await dependencies
+              .userConfigurationFor(userId)
+              .executeConfiguration({
+                schemaVersion: 1,
+                userId,
+                command,
+              }),
+          ),
         );
       } catch (error) {
         if (error instanceof ConfigurationDecodeError) {

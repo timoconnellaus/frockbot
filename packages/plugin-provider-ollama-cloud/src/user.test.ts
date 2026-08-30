@@ -853,6 +853,61 @@ describe("Ollama Cloud User Contribution", () => {
     ).toMatchObject({ state: "ready" });
   });
 
+  test("does not downgrade concurrent upstream revocation reconciliation", async () => {
+    const { settings, credentials, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-disconnect-race",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "key",
+    });
+    const firstStarted = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const releaseSecond = Promise.withResolvers<void>();
+    const disconnect = credentials.disconnect.bind(credentials);
+    let disconnectCalls = 0;
+    credentials.disconnect = async (connectionId) => {
+      disconnectCalls += 1;
+      const call = disconnectCalls;
+      if (call === 1) {
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      } else {
+        secondStarted.resolve();
+        await releaseSecond.promise;
+      }
+      await disconnect(connectionId);
+    };
+
+    const upstream = ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/disconnect",
+      commandId: "disconnect-upstream",
+      connectionId: created.connectionId,
+      revokeUpstream: true,
+    });
+    await firstStarted.promise;
+    const local = ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/disconnect",
+      commandId: "disconnect-local",
+      connectionId: created.connectionId,
+      revokeUpstream: false,
+    });
+    await secondStarted.promise;
+    releaseFirst.resolve();
+    expect((await upstream).status).toBe("reconciliation-required");
+    releaseSecond.resolve();
+    expect((await local).status).toBe("reconciliation-required");
+    expect(
+      await settings.getConnection("account-1", created.connectionId),
+    ).toMatchObject({ state: "reconciliation-required" });
+  });
+
   test("does not reactivate a Connection disconnected during authorization", async () => {
     const catalogStarted = Promise.withResolvers<void>();
     const catalogResponse = Promise.withResolvers<Response>();
