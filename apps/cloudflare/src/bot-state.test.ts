@@ -153,7 +153,7 @@ describe("BotState Ollama execution", () => {
       ],
     };
     const leases: Array<Record<string, unknown>> = [];
-    const settlements: string[] = [];
+    const settlements: Array<Record<string, unknown>> = [];
     const dependencyEffects: string[] = [];
     const rpc = {
       getBotRegistration: () =>
@@ -197,7 +197,7 @@ describe("BotState Ollama execution", () => {
         });
       },
       settleModelCredential: (input: unknown) => {
-        settlements.push((input as { effectId: string }).effectId);
+        settlements.push(input as Record<string, unknown>);
         return Promise.resolve();
       },
     };
@@ -287,6 +287,17 @@ describe("BotState Ollama execution", () => {
     expect(requests).toHaveLength(2);
     expect(leases).toHaveLength(2);
     expect(settlements).toHaveLength(2);
+    expect(settlements).toEqual(
+      settlements.map((settlement) =>
+        expect.objectContaining({
+          schemaVersion: 1,
+          userId: "user-1",
+          connectionId: "ollama-1",
+          packageId: "provider-ollama-cloud",
+          effectId: settlement.effectId,
+        }),
+      ),
+    );
     for (const runId of ["ollama-do-run-1", "ollama-do-run-2"]) {
       const run = await storage.get<StoredRun>(`run:${runId}`);
       expect(

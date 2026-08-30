@@ -130,6 +130,19 @@ describe("Credential User Contribution", () => {
         lease,
       }),
     ).rejects.toThrow("Stored credential lease is invalid");
+
+    storage.values.set("credential-lease-queue", {
+      schemaVersion: 1,
+      headPage: 0,
+      tailPage: 0,
+      scanPage: null,
+      scanMinimum: null,
+      nextAlarm: null,
+      unexpected: true,
+    });
+    await expect(credentials.nextLeaseExpiry()).rejects.toThrow(
+      "Stored credential lease queue is invalid",
+    );
   });
 
   test("deletes an unleased credential generation during rotation", async () => {
@@ -318,6 +331,14 @@ describe("Credential User Contribution", () => {
         key.startsWith("credential-lease-expired:effect-"),
       ),
     ).toHaveLength(64);
+    expect(storage.values.has("credential-lease:other-connection-effect")).toBe(
+      true,
+    );
+    expect(storage.alarm).toBe(now);
+    await credentials.expireLeases();
+    expect(storage.values.has("credential-lease:other-connection-effect")).toBe(
+      false,
+    );
     await expect(
       credentials.lease({
         ...authority,
@@ -379,6 +400,19 @@ describe("Credential User Contribution", () => {
         expiresAt: "2026-08-30T01:00:00.000Z",
       }),
     ).rejects.toThrow("Connection credential is unavailable");
-    await credentials.settle("effect-1");
+    await expect(
+      credentials.settle({
+        ...authority,
+        connectionId: "connection-2",
+        effectId: "effect-1",
+      }),
+    ).rejects.toThrow("Credential lease authority does not match");
+    await expect(
+      credentials.replayLease({
+        ...authority,
+        effectId: "effect-1",
+      }),
+    ).resolves.toEqual(admitted);
+    await credentials.settle({ ...authority, effectId: "effect-1" });
   });
 });

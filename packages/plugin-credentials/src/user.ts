@@ -13,10 +13,13 @@ const CREDENTIAL_PREFIX = "credential:";
 const ACTIVE_PREFIX = "credential-active:";
 const LEASE_PREFIX = "credential-lease:";
 const LEASE_TOMBSTONE_PREFIX = "credential-lease-expired:";
-const LEASE_INDEX_KEY = "credential-lease-index";
+const LEASE_QUEUE_STATE_KEY = "credential-lease-queue";
+const LEASE_QUEUE_PAGE_PREFIX = "credential-lease-queue-page:";
+const LEASE_QUEUE_POINTER_PREFIX = "credential-lease-queue-pointer:";
 const LEASE_GENERATION_INDEX_PREFIX = "credential-lease-generation-index:";
 const LEASE_TOMBSTONE_INDEX_PREFIX = "credential-lease-expired-index:";
 const MAX_GENERATION_LEASE_RECORDS = 64;
+const MAX_LEASE_RECOVERIES_PER_ALARM = 64;
 
 export interface CredentialTransaction {
   get<T>(key: string): Promise<T | undefined>;
@@ -67,6 +70,15 @@ interface StoredCredentialLease extends CredentialLeaseV1 {
   settled: boolean;
 }
 
+interface StoredLeaseQueue {
+  schemaVersion: 1;
+  headPage: number;
+  tailPage: number;
+  scanPage: number | null;
+  scanMinimum: number | null;
+  nextAlarm: number | null;
+}
+
 function credentialKey(connectionId: string, generation: string): string {
   return `${CREDENTIAL_PREFIX}${connectionId}:${generation}`;
 }
@@ -81,6 +93,14 @@ function leaseKey(effectId: string): string {
 
 function leaseTombstoneKey(effectId: string): string {
   return `${LEASE_TOMBSTONE_PREFIX}${effectId}`;
+}
+
+function leaseQueuePageKey(page: number): string {
+  return `${LEASE_QUEUE_PAGE_PREFIX}${page}`;
+}
+
+function leaseQueuePointerKey(effectId: string): string {
+  return `${LEASE_QUEUE_POINTER_PREFIX}${effectId}`;
 }
 
 function leaseGenerationIndexKey(
@@ -129,6 +149,54 @@ function storedText(value: unknown, label: string, maximum = 256): string {
 function decodeStoredStringList(input: unknown, label: string): string[] {
   if (!Array.isArray(input)) throw new Error(`${label} is invalid`);
   return [...new Set(input.map((value) => storedText(value, label)))];
+}
+
+function storedQueueNumber(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value as number;
+}
+
+function decodeStoredLeaseQueue(input: unknown): StoredLeaseQueue {
+  const value = storedRecord(input, "Stored credential lease queue", [
+    "schemaVersion",
+    "headPage",
+    "tailPage",
+    "scanPage",
+    "scanMinimum",
+    "nextAlarm",
+  ]);
+  if (value.schemaVersion !== 1) {
+    throw new Error("Stored credential lease queue is invalid");
+  }
+  const optionalNumber = (candidate: unknown, label: string) =>
+    candidate === null ? null : storedQueueNumber(candidate, label);
+  const headPage = storedQueueNumber(value.headPage, "headPage");
+  const tailPage = storedQueueNumber(value.tailPage, "tailPage");
+  const scanPage = optionalNumber(value.scanPage, "scanPage");
+  if (
+    headPage > tailPage ||
+    (scanPage !== null && (scanPage < headPage || scanPage > tailPage))
+  ) {
+    throw new Error("Stored credential lease queue is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    headPage,
+    tailPage,
+    scanPage,
+    scanMinimum: optionalNumber(value.scanMinimum, "scanMinimum"),
+    nextAlarm: optionalNumber(value.nextAlarm, "nextAlarm"),
+  };
+}
+
+function decodeLeaseQueuePage(input: unknown): string[] {
+  const page = decodeStoredStringList(input, "credential lease queue page");
+  if (page.length > MAX_LEASE_RECOVERIES_PER_ALARM) {
+    throw new Error("credential lease queue page is invalid");
+  }
+  return page;
 }
 
 function decodeStoredCredentialGeneration(
@@ -255,6 +323,45 @@ export class CredentialUserBackendContribution {
   constructor(private readonly host: CredentialUserBackendHost) {
     this.keyring = parseCredentialKeyringV1(host.keyring);
     this.now = host.now ?? Date.now;
+  }
+
+  private async enqueueLease(
+    storage: CredentialTransaction,
+    effectId: string,
+    expiresAt: number,
+  ): Promise<void> {
+    const stateValue = await storage.get<unknown>(LEASE_QUEUE_STATE_KEY);
+    let state: StoredLeaseQueue =
+      stateValue === undefined
+        ? {
+            schemaVersion: 1,
+            headPage: 0,
+            tailPage: 0,
+            scanPage: null,
+            scanMinimum: null,
+            nextAlarm: null,
+          }
+        : decodeStoredLeaseQueue(stateValue);
+    let pageValue = await storage.get<unknown>(
+      leaseQueuePageKey(state.tailPage),
+    );
+    let page = pageValue === undefined ? [] : decodeLeaseQueuePage(pageValue);
+    if (page.length >= MAX_LEASE_RECOVERIES_PER_ALARM) {
+      state = { ...state, tailPage: state.tailPage + 1 };
+      pageValue = await storage.get<unknown>(leaseQueuePageKey(state.tailPage));
+      page = pageValue === undefined ? [] : decodeLeaseQueuePage(pageValue);
+    }
+    await storage.put({
+      [leaseQueuePageKey(state.tailPage)]: [...page, effectId],
+      [leaseQueuePointerKey(effectId)]: state.tailPage,
+      [LEASE_QUEUE_STATE_KEY]: {
+        ...state,
+        nextAlarm:
+          state.nextAlarm === null
+            ? expiresAt
+            : Math.min(state.nextAlarm, expiresAt),
+      } satisfies StoredLeaseQueue,
+    });
   }
 
   async prepareApiKey(input: {
@@ -608,11 +715,6 @@ export class CredentialUserBackendContribution {
       ) {
         throw new Error("Credential lease capacity requires rotation");
       }
-      const leaseIndexValue = await transaction.get<unknown>(LEASE_INDEX_KEY);
-      const leaseIndex =
-        leaseIndexValue === undefined
-          ? []
-          : decodeStoredStringList(leaseIndexValue, "credential lease index");
       const leaseId = crypto.randomUUID();
       const lease: StoredCredentialLease = {
         schemaVersion: 1,
@@ -628,7 +730,6 @@ export class CredentialUserBackendContribution {
       };
       await transaction.put({
         [leaseKey(input.effectId)]: lease,
-        [LEASE_INDEX_KEY]: [...new Set([...leaseIndex, input.effectId])],
         [generationLeaseIndexKey]: [
           ...new Set([...generationLeaseIndex, input.effectId]),
         ],
@@ -637,6 +738,7 @@ export class CredentialUserBackendContribution {
           leaseIds: [...new Set([...stored.leaseIds, leaseId])],
         } satisfies StoredCredentialGeneration,
       });
+      await this.enqueueLease(transaction, input.effectId, expiresAt);
       return this.publicLease(lease);
     };
     const result = storage
@@ -683,11 +785,23 @@ export class CredentialUserBackendContribution {
     });
   }
 
-  async settle(effectId: string): Promise<void> {
+  async settle(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    effectId: string;
+  }): Promise<void> {
     await this.host.storage.transaction(async (storage) => {
-      const leaseValue = await storage.get<unknown>(leaseKey(effectId));
+      const leaseValue = await storage.get<unknown>(leaseKey(input.effectId));
       if (leaseValue === undefined) return;
       const lease = decodeStoredCredentialLease(leaseValue);
+      if (
+        lease.accountId !== input.accountId ||
+        lease.connectionId !== input.connectionId ||
+        lease.packageId !== input.packageId
+      ) {
+        throw new Error("Credential lease authority does not match");
+      }
       if (lease.settled) return;
       await this.releaseLease(storage, lease, false);
     });
@@ -696,21 +810,63 @@ export class CredentialUserBackendContribution {
 
   async expireLeases(now = this.now()): Promise<void> {
     await this.host.storage.transaction(async (storage) => {
-      const effectIdsValue = await storage.get<unknown>(LEASE_INDEX_KEY);
+      const stateValue = await storage.get<unknown>(LEASE_QUEUE_STATE_KEY);
+      if (stateValue === undefined) return;
+      const state = decodeStoredLeaseQueue(stateValue);
+      if (
+        state.scanPage === null &&
+        (state.nextAlarm === null || state.nextAlarm > now)
+      ) {
+        return;
+      }
+      const pageNumber = state.scanPage ?? state.headPage;
+      const pageValue = await storage.get<unknown>(
+        leaseQueuePageKey(pageNumber),
+      );
       const effectIds =
-        effectIdsValue === undefined
-          ? []
-          : decodeStoredStringList(effectIdsValue, "credential lease index");
+        pageValue === undefined ? [] : decodeLeaseQueuePage(pageValue);
+      const retained: string[] = [];
+      let minimum = state.scanMinimum;
       for (const effectId of effectIds) {
         const leaseValue = await storage.get<unknown>(leaseKey(effectId));
-        const lease =
-          leaseValue === undefined
-            ? undefined
-            : decodeStoredCredentialLease(leaseValue);
-        if (lease && Date.parse(lease.expiresAt) <= now) {
+        if (leaseValue === undefined) continue;
+        const lease = decodeStoredCredentialLease(leaseValue);
+        const expiry = Date.parse(lease.expiresAt);
+        if (expiry <= now) {
           await this.releaseLease(storage, lease, true);
+        } else {
+          retained.push(effectId);
+          minimum = minimum === null ? expiry : Math.min(minimum, expiry);
         }
       }
+      if (retained.length === 0) {
+        await storage.delete(leaseQueuePageKey(pageNumber));
+      } else {
+        await storage.put(leaseQueuePageKey(pageNumber), retained);
+      }
+      if (pageNumber < state.tailPage) {
+        await storage.put(LEASE_QUEUE_STATE_KEY, {
+          ...state,
+          headPage:
+            pageNumber === state.headPage && retained.length === 0
+              ? state.headPage + 1
+              : state.headPage,
+          scanPage: pageNumber + 1,
+          scanMinimum: minimum,
+        } satisfies StoredLeaseQueue);
+        return;
+      }
+      await storage.put(LEASE_QUEUE_STATE_KEY, {
+        schemaVersion: 1,
+        headPage:
+          pageNumber === state.headPage && retained.length === 0
+            ? state.tailPage
+            : state.headPage,
+        tailPage: state.tailPage,
+        scanPage: null,
+        scanMinimum: null,
+        nextAlarm: minimum,
+      } satisfies StoredLeaseQueue);
     });
     await this.scheduleLeaseAlarm();
   }
@@ -718,20 +874,11 @@ export class CredentialUserBackendContribution {
   async nextLeaseExpiry(
     storage: CredentialTransaction = this.host.storage,
   ): Promise<number | undefined> {
-    const effectIdsValue = await storage.get<unknown>(LEASE_INDEX_KEY);
-    const effectIds =
-      effectIdsValue === undefined
-        ? []
-        : decodeStoredStringList(effectIdsValue, "credential lease index");
-    const expiries: number[] = [];
-    for (const effectId of effectIds) {
-      const leaseValue = await storage.get<unknown>(leaseKey(effectId));
-      if (leaseValue !== undefined) {
-        const lease = decodeStoredCredentialLease(leaseValue);
-        expiries.push(Date.parse(lease.expiresAt));
-      }
-    }
-    return expiries.length > 0 ? Math.min(...expiries) : undefined;
+    const stateValue = await storage.get<unknown>(LEASE_QUEUE_STATE_KEY);
+    if (stateValue === undefined) return undefined;
+    const state = decodeStoredLeaseQueue(stateValue);
+    if (state.scanPage !== null) return this.now();
+    return state.nextAlarm ?? undefined;
   }
 
   private publicLease(lease: StoredCredentialLease): CredentialLeaseV1 {
@@ -754,12 +901,33 @@ export class CredentialUserBackendContribution {
       ...stored,
       leaseIds: stored.leaseIds.filter((id) => id !== lease.leaseId),
     } satisfies StoredCredentialGeneration;
-    const leaseIndexValue = await storage.get<unknown>(LEASE_INDEX_KEY);
-    const leaseIndex = (
-      leaseIndexValue === undefined
-        ? []
-        : decodeStoredStringList(leaseIndexValue, "credential lease index")
-    ).filter((effectId) => effectId !== lease.effectId);
+    const queuePointerValue = await storage.get<unknown>(
+      leaseQueuePointerKey(lease.effectId),
+    );
+    if (queuePointerValue !== undefined) {
+      const queuePage = storedQueueNumber(
+        queuePointerValue,
+        "lease queue page",
+      );
+      if (!expired) {
+        const queuePageValue = await storage.get<unknown>(
+          leaseQueuePageKey(queuePage),
+        );
+        const queueEntries =
+          queuePageValue === undefined
+            ? []
+            : decodeLeaseQueuePage(queuePageValue);
+        const retainedQueueEntries = queueEntries.filter(
+          (effectId) => effectId !== lease.effectId,
+        );
+        if (retainedQueueEntries.length === 0) {
+          await storage.delete(leaseQueuePageKey(queuePage));
+        } else {
+          await storage.put(leaseQueuePageKey(queuePage), retainedQueueEntries);
+        }
+      }
+      await storage.delete(leaseQueuePointerKey(lease.effectId));
+    }
     const generationLeaseIndexKey = leaseGenerationIndexKey(
       lease.connectionId,
       lease.credentialGeneration,
@@ -776,10 +944,7 @@ export class CredentialUserBackendContribution {
           )
     ).filter((effectId) => effectId !== lease.effectId);
     await storage.delete(leaseKey(lease.effectId));
-    await storage.put({
-      [LEASE_INDEX_KEY]: leaseIndex,
-      [generationLeaseIndexKey]: generationLeaseIndex,
-    });
+    await storage.put(generationLeaseIndexKey, generationLeaseIndex);
     if (expired && stored.state === "active") {
       const tombstoneIndexKey = leaseTombstoneIndexKey(
         lease.connectionId,
@@ -824,7 +989,12 @@ export class CredentialUserBackendContribution {
     const next = await this.nextLeaseExpiry(storage);
     if (next === undefined) return;
     const current = await storage.getAlarm?.();
-    if (current === null || current === undefined || next < current) {
+    if (
+      next <= this.now() ||
+      current === null ||
+      current === undefined ||
+      next < current
+    ) {
       await storage.setAlarm(next);
     }
   }

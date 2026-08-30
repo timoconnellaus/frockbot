@@ -59,7 +59,7 @@ interface StoredCommand {
 
 type OllamaCredentialContribution = Omit<
   CredentialUserBackendContribution,
-  "discardPending" | "lease" | "replayLease"
+  "discardPending" | "lease" | "replayLease" | "settle"
 > & {
   discardPending(
     connectionId: string,
@@ -83,6 +83,12 @@ type OllamaCredentialContribution = Omit<
     },
     storage?: CredentialTransaction,
   ): Promise<CredentialLeaseV1>;
+  settle(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    effectId: string;
+  }): Promise<void>;
 };
 
 export interface OllamaUserBackendHost {
@@ -1067,7 +1073,14 @@ export class OllamaCloudUserBackendContribution {
       );
     } finally {
       if (lease) {
-        await this.host.credentials.settle(effectId).catch(() => undefined);
+        await this.host.credentials
+          .settle({
+            accountId: record.accountId,
+            connectionId: record.connectionId,
+            packageId: PACKAGE_ID,
+            effectId,
+          })
+          .catch(() => undefined);
       }
     }
     return this.finishRecord(record, failed ? "failed" : "applied");
@@ -1444,7 +1457,12 @@ export class OllamaCloudUserBackendContribution {
           input.providerModelId,
         );
       } finally {
-        await this.host.credentials.settle(discoveryEffectId);
+        await this.host.credentials.settle({
+          accountId: input.accountId,
+          connectionId: input.connectionId,
+          packageId: PACKAGE_ID,
+          effectId: discoveryEffectId,
+        });
       }
     }
 
@@ -1518,8 +1536,15 @@ export class OllamaCloudUserBackendContribution {
     return connection;
   }
 
-  async settleModelCredential(effectId: string): Promise<void> {
-    await this.host.credentials.settle(effectId);
+  async settleModelCredential(input: {
+    accountId: string;
+    connectionId: string;
+    effectId: string;
+  }): Promise<void> {
+    await this.host.credentials.settle({
+      ...input,
+      packageId: PACKAGE_ID,
+    });
   }
 
   async alarm(): Promise<void> {

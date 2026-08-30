@@ -369,12 +369,19 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async settleModelCredential(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      packageId: rpcIdentifier,
       effectId: rpcIdentifier,
     });
     await (await this.settingsContribution()).read(request.userId as string);
     await (
       await this.credentialContribution()
-    ).settle(request.effectId as string);
+    ).settle({
+      accountId: request.userId as string,
+      connectionId: request.connectionId as string,
+      packageId: request.packageId as string,
+      effectId: request.effectId as string,
+    });
   }
 
   async alarm() {

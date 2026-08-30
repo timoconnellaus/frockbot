@@ -1300,7 +1300,11 @@ describe("Ollama Cloud User Contribution", () => {
         effectId,
         connectionGeneration: connection.generation,
       });
-      await ollama.settleModelCredential(effectId);
+      await ollama.settleModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        effectId,
+      });
     }
     const models = (
       await settings.getConnection("account-1", created.connectionId)
@@ -1357,7 +1361,11 @@ describe("Ollama Cloud User Contribution", () => {
         effectId,
         connectionGeneration: connection.generation,
       });
-      await ollama.settleModelCredential(effectId);
+      await ollama.settleModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        effectId,
+      });
     }
     const models = (
       await settings.getConnection("account-1", created.connectionId)

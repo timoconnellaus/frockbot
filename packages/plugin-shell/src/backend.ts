@@ -1258,10 +1258,12 @@ export class ShellBotBackendContribution {
     if (
       binding.state === "unavailable" ||
       !binding.connection ||
-      !binding.providerType
+      !binding.providerType ||
+      !binding.packageId
     ) {
       throw new Error(binding.failure ?? "Bot model Connection is unavailable");
     }
+    const bindingPackageId = binding.packageId;
     const credentialKeyring = readSecret("CREDENTIAL_KEYRING");
     if (!credentialKeyring) {
       throw new Error("Credential Store Contribution is not configured");
@@ -1289,7 +1291,12 @@ export class ShellBotBackendContribution {
           );
         },
         settleCredential: (effectId) =>
-          userConfiguration.settleModelCredential(identity.userId, effectId),
+          userConfiguration.settleModelCredential(
+            identity.userId,
+            binding.connection!.connectionId,
+            bindingPackageId,
+            effectId,
+          ),
         fetch: this.outboundFetch,
       }),
     );
@@ -1663,7 +1670,12 @@ export class ShellBotBackendContribution {
       effectId: string,
       connectionGeneration: string,
     ): Promise<CredentialLeaseV1>;
-    settleModelCredential(userId: string, effectId: string): Promise<void>;
+    settleModelCredential(
+      userId: string,
+      connectionId: string,
+      packageId: string,
+      effectId: string,
+    ): Promise<void>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
@@ -1747,8 +1759,14 @@ export class ShellBotBackendContribution {
             connectionGeneration,
           }),
         ),
-      settleModelCredential: (userId, effectId) =>
-        rpc.settleModelCredential({ schemaVersion: 1, userId, effectId }),
+      settleModelCredential: (userId, connectionId, packageId, effectId) =>
+        rpc.settleModelCredential({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          packageId,
+          effectId,
+        }),
     };
   }
 

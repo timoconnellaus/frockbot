@@ -112,11 +112,8 @@ class OllamaCloudProvider implements LlmProvider {
   }
 
   async settle(requestId: string): Promise<void> {
-    if (!this.authorized.has(requestId)) return;
     try {
       await this.config.settleCredential(requestId);
-    } catch {
-      return;
     } finally {
       this.authorized.delete(requestId);
     }

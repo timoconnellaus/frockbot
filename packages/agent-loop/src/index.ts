@@ -258,6 +258,14 @@ class LoopAgent implements Agent {
         latestAssistant = event;
       }
     }
+    if (latestAssistant) {
+      await this.#ctx.serial(
+        "agent/model-outcome-committed",
+        this,
+        latestAssistant.requestId,
+        "completed",
+      );
+    }
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
     let reconciliationRequired = false;

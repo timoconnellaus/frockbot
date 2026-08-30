@@ -121,17 +121,48 @@ describe("Ollama Cloud runtime Contribution", () => {
     expect(authorizations).toEqual(["Bearer account-secret"]);
     expect(leasedGenerations).toEqual(["generation-1"]);
     expect(settled).toEqual([]);
-    await root.serial(
-      "agent/model-outcome-committed",
-      {} as Agent,
-      request.requestId,
-      "completed",
-    );
+    await expect(
+      root.serial(
+        "agent/model-outcome-committed",
+        {} as Agent,
+        request.requestId,
+        "completed",
+      ),
+    ).rejects.toThrow("settlement unavailable");
     expect(settled).toEqual(["effect-1"]);
     for await (const event of root.llm.stream(authorizedRequest, signal)) {
       void event;
     }
     expect(leasedGenerations).toEqual(["generation-1", "generation-1"]);
+    await root.fiber.dispose();
+  });
+
+  test("settles a durable outcome after provider reconstruction", async () => {
+    const settled: string[] = [];
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createOllamaCloudRuntimePlugin({
+        accountId: "account-1",
+        connectionId: "connection-1",
+        packageId: "provider-ollama-cloud",
+        credentialKeyring: serializedKeyring(),
+        leaseCredential: () => Promise.reject(new Error("not used")),
+        settleCredential: (effectId) => {
+          settled.push(effectId);
+          return Promise.resolve();
+        },
+      }),
+    );
+
+    await root.serial(
+      "agent/model-outcome-committed",
+      {} as Agent,
+      "durable-effect",
+      "completed",
+    );
+
+    expect(settled).toEqual(["durable-effect"]);
     await root.fiber.dispose();
   });
 

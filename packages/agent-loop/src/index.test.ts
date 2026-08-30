@@ -126,6 +126,64 @@ describe("AgentLoop", () => {
     expect(committed[0]?.durable).toBe(true);
   });
 
+  test("reannounces a durable assistant outcome during recovery", async () => {
+    const timestamp = "2026-08-28T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "durable-assistant-request",
+          provider: "recovered-provider",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "durable-assistant-request",
+        text: "Durable response",
+        toolCalls: [],
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const committed: string[] = [];
+    const provider: LlmProvider = {
+      id: "recovered-provider",
+      async *stream() {
+        throw new Error("stream must not run");
+      },
+    };
+    const root = await mountRuntime(provider, undefined, undefined, {
+      "durable-assistant": initial,
+    });
+    root.on("agent/model-outcome-committed", async (_agent, requestId) => {
+      committed.push(requestId);
+    });
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "durable-assistant",
+      provider: provider.id,
+      model: "model-1",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(committed).toEqual(["durable-assistant-request"]);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+
   test("reconciles an admitted model request by its durable id", async () => {
     let streams = 0;
     const reconciled: string[] = [];
