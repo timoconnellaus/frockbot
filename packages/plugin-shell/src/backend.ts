@@ -340,6 +340,34 @@ export class ShellBotBackendContribution {
       throw new ConfigurationConflictError(settings.revision);
     }
     let dependencyRequirement: ConnectionDependencyRequirementV1 | undefined;
+    if (command.type === "bot/select-model") {
+      const [user, application] = await Promise.all([
+        this.userConfiguration(identity).readConfiguration({
+          schemaVersion: 1,
+          userId: identity.userId,
+        }),
+        this.compileApplication(),
+      ]);
+      const binding = resolveBotModelBindingV1({
+        model: command.model,
+        assignments: settings.assignments,
+        user,
+        packages: application.packages.map((pkg) => ({
+          packageId: pkg.id,
+          version: pkg.version,
+          capabilities: pkg.manifest.configuration?.capabilities ?? [],
+          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+        })),
+      });
+      if (binding.state === "unavailable") {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          binding.failure ?? "Bot model binding is unavailable",
+        );
+      }
+    }
     if (command.type === "bot/assign-capability") {
       const [user, application] = await Promise.all([
         this.userConfiguration(identity).readConfiguration({
@@ -517,7 +545,16 @@ export class ShellBotBackendContribution {
 
   private async rejectConfigurationCommand(
     identity: BotIdentity,
-    command: Extract<ConfigurationCommandV1, { type: "bot/assign-capability" }>,
+    command: Extract<
+      ConfigurationCommandV1,
+      {
+        type:
+          | "bot/update-profile"
+          | "bot/update-notifications"
+          | "bot/select-model"
+          | "bot/assign-capability";
+      }
+    >,
     commandFingerprint: string,
     failure: string,
     saga?: StoredAssignmentSaga,
@@ -1055,6 +1092,7 @@ export class ShellBotBackendContribution {
 
     const binding = resolveBotModelBindingV1({
       model: settings.model,
+      assignments: settings.assignments,
       user,
       packages: packageDefinitions,
     });

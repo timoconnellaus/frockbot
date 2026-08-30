@@ -360,6 +360,7 @@ export interface ResolvedModelBindingV1 {
 
 export function resolveBotModelBindingV1(input: {
   model: ModelAssignment;
+  assignments: readonly CapabilityAssignmentView[];
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): ResolvedModelBindingV1 {
@@ -395,6 +396,16 @@ export function resolveBotModelBindingV1(input: {
   );
   if (!pkg || !connectionType || !modelCapability) {
     return unavailable("Connection does not provide models");
+  }
+  const assignment = input.assignments.find(
+    (candidate) =>
+      candidate.packageId === pkg.packageId &&
+      candidate.capabilityId === modelCapability.id &&
+      candidate.connectionId === connection.connectionId &&
+      candidate.state === "enabled",
+  );
+  if (!assignment) {
+    return unavailable("Bot is not assigned the Connection model capability");
   }
   if (!connection.providerType) {
     return unavailable("Connection provider type is unavailable");

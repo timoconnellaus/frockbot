@@ -587,6 +587,15 @@ describe("Bot execution-plan authority", () => {
         ],
       },
     ];
+    const assignments = [
+      {
+        assignmentId: "ollama-model",
+        packageId: "provider-ollama-cloud",
+        capabilityId: "ollama-cloud-models",
+        connectionId: "ollama-work",
+        state: "enabled" as const,
+      },
+    ];
 
     expect(
       resolveBotModelBindingV1({
@@ -594,6 +603,7 @@ describe("Bot execution-plan authority", () => {
           connectionId: "ollama-work",
           providerModelId: "glm-5.3-flash:cloud",
         },
+        assignments,
         user,
         packages: modelPackages,
       }),
@@ -608,10 +618,25 @@ describe("Bot execution-plan authority", () => {
           connectionId: "ollama-work",
           providerModelId: "new-model:cloud",
         },
+        assignments,
         user,
         packages: modelPackages,
       }).state,
     ).toBe("requires-resolution");
+    expect(
+      resolveBotModelBindingV1({
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        assignments: [],
+        user,
+        packages: modelPackages,
+      }),
+    ).toMatchObject({
+      state: "unavailable",
+      failure: "Bot is not assigned the Connection model capability",
+    });
   });
 
   test("requires an enabled installation, declared capability, and ready typed Connection", () => {

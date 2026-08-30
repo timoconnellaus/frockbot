@@ -170,6 +170,8 @@ describe("User settings backend Contribution", () => {
         {
           botId: "bot-1",
           generation: "assignment-1",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
           status: "acknowledged",
         },
       ],
@@ -182,6 +184,47 @@ describe("User settings backend Contribution", () => {
         "assignment-1",
       ),
     ).resolves.toBe(false);
+
+    await settings.createConnection("user-1", {
+      connectionId: "ollama-2",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      displayName: "Personal",
+      state: "ready",
+      providerType: "ollama-cloud",
+      generation: "connection-generation-2",
+      safeMetadata: {},
+    });
+    await settings.claimConnectionDependency(
+      "user-1",
+      "ollama-2",
+      "bot-1",
+      "assignment-2",
+      requirement,
+    );
+    await settings.acknowledgeConnectionDependency(
+      "user-1",
+      "ollama-2",
+      "bot-1",
+      "assignment-2",
+    );
+
+    expect(
+      (await settings.getConnection("user-1", "ollama-1"))?.safeMetadata,
+    ).toMatchObject({ dependentAssignments: [] });
+    expect(
+      (await settings.getConnection("user-1", "ollama-2"))?.safeMetadata,
+    ).toMatchObject({
+      dependentAssignments: [
+        {
+          botId: "bot-1",
+          generation: "assignment-2",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          status: "acknowledged",
+        },
+      ],
+    });
   });
 
   test("compacts revoked Connections and bounds active Connections", async () => {

@@ -23,6 +23,8 @@ const MAX_CONNECTION_DEPENDENCIES = 256;
 type ConnectionDependency = {
   botId: string;
   generation: string;
+  packageId: string;
+  capabilityId: string;
   status: "pending" | "acknowledged";
 };
 
@@ -109,6 +111,8 @@ function connectionDependencies(
     if (
       typeof dependency.botId !== "string" ||
       typeof dependency.generation !== "string" ||
+      typeof dependency.packageId !== "string" ||
+      typeof dependency.capabilityId !== "string" ||
       (dependency.status !== "pending" && dependency.status !== "acknowledged")
     ) {
       return [];
@@ -117,6 +121,8 @@ function connectionDependencies(
       {
         botId: dependency.botId,
         generation: dependency.generation,
+        packageId: dependency.packageId,
+        capabilityId: dependency.capabilityId,
         status: dependency.status,
       } satisfies ConnectionDependency,
     ];
@@ -403,7 +409,13 @@ export class UserSettingsBackendContribution {
         if (existing.length >= MAX_CONNECTION_DEPENDENCIES) return undefined;
         return withConnectionDependencies(current, [
           ...existing,
-          { botId, generation, status: "pending" },
+          {
+            botId,
+            generation,
+            packageId: decoded.packageId,
+            capabilityId: decoded.capabilityId,
+            status: "pending",
+          },
         ]);
       },
     );
@@ -415,31 +427,54 @@ export class UserSettingsBackendContribution {
     botId: string,
     generation: string,
   ): Promise<boolean> {
-    return this.transitionConnectionDependency(
-      userId,
-      connectionId,
-      (current) => {
-        if (current.state === "revoking" || current.state === "revoked") {
-          return undefined;
-        }
-        let matched = false;
-        const dependencies = connectionDependencies(current).flatMap(
-          (dependency) => {
-            if (
-              dependency.botId === botId &&
-              dependency.generation === generation
-            ) {
-              matched = true;
-              return [{ ...dependency, status: "acknowledged" as const }];
-            }
-            return dependency.botId === botId ? [] : [dependency];
-          },
-        );
-        return matched
-          ? withConnectionDependencies(current, dependencies)
-          : undefined;
-      },
-    );
+    return this.host.storage.transaction(async (storage) => {
+      await this.assertIdentity(userId, storage);
+      const current = await this.readSnapshot(storage);
+      const target = current.connections.find(
+        (connection) => connection.connectionId === connectionId,
+      );
+      if (
+        !target ||
+        target.state === "revoking" ||
+        target.state === "revoked"
+      ) {
+        return false;
+      }
+      const matched = connectionDependencies(target).find(
+        (dependency) =>
+          dependency.botId === botId && dependency.generation === generation,
+      );
+      if (!matched) return false;
+      const connections = current.connections.map((connection) => {
+        const dependencies = connectionDependencies(connection);
+        const nextDependencies = dependencies.flatMap((dependency) => {
+          const sameAuthority =
+            dependency.botId === botId &&
+            dependency.packageId === matched.packageId &&
+            dependency.capabilityId === matched.capabilityId;
+          if (!sameAuthority) return [dependency];
+          if (
+            connection.connectionId === connectionId &&
+            dependency.generation === generation
+          ) {
+            return [{ ...dependency, status: "acknowledged" as const }];
+          }
+          return [];
+        });
+        return nextDependencies.length === dependencies.length &&
+          nextDependencies.every(
+            (dependency, index) => dependency === dependencies[index],
+          )
+          ? connection
+          : withConnectionDependencies(connection, nextDependencies);
+      });
+      await storage.put(STATE_KEY, {
+        ...current,
+        revision: current.revision + 1,
+        connections,
+      } satisfies UserSettingsViewV1);
+      return true;
+    });
   }
 
   async compensateConnectionDependency(

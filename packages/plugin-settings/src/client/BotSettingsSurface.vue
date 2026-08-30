@@ -3,6 +3,7 @@ import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiButton, UiField } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onMounted, ref } from "vue";
+import { resolveBotSettingsModel } from "./bot-settings.js";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
 const providedWeb = inject(frockBotWebDataKey);
@@ -20,11 +21,20 @@ const selectedModel = ref("");
 const useExactModel = ref(false);
 const exactConnectionId = ref("");
 const exactProviderModelId = ref("");
-const readyConnections = computed(() =>
-  (web.value.userSettings?.connections ?? []).filter(
-    (connection) => connection.state === "ready",
-  ),
-);
+const readyConnections = computed(() => {
+  const assignedConnectionIds = new Set(
+    (web.value.botSettings?.assignments ?? []).flatMap((assignment) =>
+      assignment.state === "enabled" && assignment.connectionId
+        ? [assignment.connectionId]
+        : [],
+    ),
+  );
+  return (web.value.userSettings?.connections ?? []).filter(
+    (connection) =>
+      connection.state === "ready" &&
+      assignedConnectionIds.has(connection.connectionId),
+  );
+});
 const modelOptions = computed(() =>
   readyConnections.value.flatMap((connection) =>
     (connection.modelCatalog?.models ?? []).map((model) => ({
@@ -65,23 +75,25 @@ onMounted(async () => {
 async function save(): Promise<void> {
   saving.value = true;
   try {
+    const current = web.value.botSettings?.model;
+    const selected = resolveBotSettingsModel({
+      current,
+      useExactModel: useExactModel.value,
+      selectedModel: selectedModel.value,
+      exactConnectionId: exactConnectionId.value,
+      exactProviderModelId: exactProviderModelId.value,
+    });
     await web.value.saveBotProfile({
       name: name.value,
       label: label.value || undefined,
       description: description.value || undefined,
     });
-    const [connectionId, providerModelId] = useExactModel.value
-      ? [exactConnectionId.value, exactProviderModelId.value.trim()]
-      : (JSON.parse(selectedModel.value) as [string, string]);
-    if (!connectionId || !providerModelId) {
-      throw new Error("A Connection and model ID are required");
-    }
-    const current = web.value.botSettings?.model;
     if (
-      current?.connectionId !== connectionId ||
-      current.providerModelId !== providerModelId
+      selected &&
+      (current?.connectionId !== selected.connectionId ||
+        current.providerModelId !== selected.providerModelId)
     ) {
-      await web.value.saveBotModel({ connectionId, providerModelId });
+      await web.value.saveBotModel(selected);
     }
     await web.value.saveBotNotifications({ enabled: notifications.value });
     surfaces?.close();
@@ -125,7 +137,7 @@ async function save(): Promise<void> {
     </label>
     <template v-if="useExactModel">
       <UiField label="Connection">
-        <select v-model="exactConnectionId" required>
+        <select v-model="exactConnectionId">
           <option disabled value="">Select a Connection</option>
           <option
             v-for="connection in readyConnections"
@@ -141,12 +153,11 @@ async function save(): Promise<void> {
           v-model="exactProviderModelId"
           maxlength="256"
           placeholder="model-name:cloud"
-          required
         />
       </UiField>
     </template>
     <UiField v-else label="Model">
-      <select v-model="selectedModel" required>
+      <select v-model="selectedModel">
         <option disabled value="">Select a connected model</option>
         <option
           v-for="model in modelOptions"

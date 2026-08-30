@@ -25,6 +25,8 @@ const PACKAGE_ID = "provider-ollama-cloud";
 const CONNECTION_TYPE_ID = "ollama-cloud-account";
 const COMMAND_PREFIX = "ollama-connection-command:";
 const PENDING_KEY = "ollama-pending-connection-commands";
+const RECEIPT_INDEX_KEY = "ollama-connection-receipt-index";
+const MAX_MANUAL_RECEIPTS = 256;
 const ACCOUNT_KEY = "ollama-connection-account";
 const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
 const MUTATION_SEQUENCE_PREFIX = "ollama-mutation-sequence:";
@@ -68,7 +70,7 @@ type OllamaCredentialContribution = Omit<
       packageId: string;
       effectId: string;
       expiresAt: string;
-      expectedGeneration?: string;
+      expectedGeneration: string;
     },
     storage?: CredentialTransaction,
   ): Promise<CredentialLeaseV1>;
@@ -155,13 +157,25 @@ function decodeStoredAccount(input: unknown): string {
   return storedText(input, "Stored Ollama account", 256);
 }
 
-function decodePendingCommands(input: unknown): string[] {
+function decodeCommandIdList(input: unknown, label: string): string[] {
   if (!Array.isArray(input)) {
-    throw new Error("Stored Ollama pending commands are invalid");
+    throw new Error(`Stored Ollama ${label} is invalid`);
   }
   return [
     ...new Set(input.map((value) => storedText(value, "commandId", 128))),
   ];
+}
+
+function decodePendingCommands(input: unknown): string[] {
+  return decodeCommandIdList(input, "pending commands");
+}
+
+function decodeReceiptIndex(input: unknown): string[] {
+  const index = decodeCommandIdList(input, "receipt index");
+  if (index.length > MAX_MANUAL_RECEIPTS) {
+    throw new Error("Stored Ollama receipt index is invalid");
+  }
+  return index;
 }
 
 function decodeStoredCommand(input: unknown): StoredCommand {
@@ -1181,11 +1195,28 @@ export class OllamaCloudUserBackendContribution {
             [PENDING_KEY]: pending,
           });
         } else {
+          const receiptIndexValue =
+            await storage.get<unknown>(RECEIPT_INDEX_KEY);
+          const receiptIndex =
+            receiptIndexValue === undefined
+              ? []
+              : decodeReceiptIndex(receiptIndexValue);
+          const ordered = [
+            ...receiptIndex.filter(
+              (commandId) => commandId !== record.commandId,
+            ),
+            record.commandId,
+          ];
+          const retained = ordered.slice(-MAX_MANUAL_RECEIPTS);
+          for (const commandId of ordered.slice(0, -MAX_MANUAL_RECEIPTS)) {
+            await storage.delete(commandKey(commandId));
+          }
           await storage.put({
             [commandKey(record.commandId)]: {
               ...(stored ?? record),
               receipt: proposed,
             },
+            [RECEIPT_INDEX_KEY]: retained,
             [PENDING_KEY]: pending,
           });
         }

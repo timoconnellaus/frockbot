@@ -39,6 +39,11 @@ import {
 
 export type { BotStateEnv, OwnedBotTurnCommand };
 
+export interface BotStateDependencies {
+  compileApplication?: typeof compileFoundationApplication;
+  outboundFetch?: typeof fetch;
+}
+
 function decodeBotIdentityRpcV1(input: unknown): {
   userId: string;
   botId: string;
@@ -54,6 +59,8 @@ function decodeBotIdentityRpcV1(input: unknown): {
 }
 
 export class BotState extends DurableObject<BotStateEnv> {
+  private readonly compileApplication: typeof compileFoundationApplication;
+  private readonly outboundFetch?: typeof fetch;
   private mounted:
     | Promise<{
         shell: ShellBotBackendContribution;
@@ -62,13 +69,24 @@ export class BotState extends DurableObject<BotStateEnv> {
       }>
     | undefined;
 
+  constructor(
+    ctx: DurableObjectState,
+    env: BotStateEnv,
+    dependencies: BotStateDependencies = {},
+  ) {
+    super(ctx, env);
+    this.compileApplication =
+      dependencies.compileApplication ?? compileFoundationApplication;
+    this.outboundFetch = dependencies.outboundFetch;
+  }
+
   private contributions(): Promise<{
     shell: ShellBotBackendContribution;
     flock: FlockBotBackendContribution;
     dispose(): Promise<void>;
   }> {
     if (!this.mounted) {
-      this.mounted = compileFoundationApplication().then(async (plan) => {
+      this.mounted = this.compileApplication().then(async (plan) => {
         let shell: ShellBotBackendContribution | undefined;
         let flock: FlockBotBackendContribution | undefined;
         const mounted = await createFoundationBackendContributions<
@@ -78,7 +96,11 @@ export class BotState extends DurableObject<BotStateEnv> {
           resolve: (specifier, lifecycle) => {
             if (specifier === "@frockbot/plugin-shell/backend") {
               return createShellBotBackendPlugin(
-                { state: this.ctx, env: this.env },
+                {
+                  state: this.ctx,
+                  env: this.env,
+                  outboundFetch: this.outboundFetch,
+                },
                 {
                   mount(value) {
                     shell = value;

@@ -228,6 +228,15 @@ describe("Bot selection", () => {
         connectionId: "ollama-work",
         providerModelId: "glm-5.3-flash:cloud",
       },
+      assignments: [
+        {
+          assignmentId: "ollama-model",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "ollama-work",
+          state: "enabled" as const,
+        },
+      ],
     };
     const user: UserSettingsViewV1 = {
       schemaVersion: 1,
@@ -873,7 +882,7 @@ describe("Connection operation reconciliation", () => {
         status: "applied";
       }
     >();
-    let first = true;
+    let lostResponses = 2;
     let provided: Ref<FrockBotWebData> | undefined;
     await shellClientPlugin({
       transport: {
@@ -907,8 +916,8 @@ describe("Connection operation reconciliation", () => {
             connectionId: "connection-1",
             status: "applied",
           });
-          if (first) {
-            first = false;
+          if (lostResponses > 0) {
+            lostResponses -= 1;
             return Promise.reject(new Error("response lost"));
           }
           return Promise.resolve(receipts.get(command.commandId)!);
@@ -932,8 +941,9 @@ describe("Connection operation reconciliation", () => {
       provided.value.rotateApiKeyConnection("connection-1", "key-a"),
     ).rejects.toThrow("response lost");
     const lostCommandId = commandIds[0];
-    await provided.value.loadUserSettings();
-    await provided.value.rotateApiKeyConnection("connection-1", "key-b");
+    await expect(
+      provided.value.rotateApiKeyConnection("connection-1", "key-b"),
+    ).rejects.toThrow("response lost");
     await provided.value.rotateApiKeyConnection("connection-1", "key-a");
 
     expect(commandIds).toHaveLength(3);
@@ -1021,7 +1031,7 @@ describe("Connection operation reconciliation", () => {
     expect(commandIds[1]).not.toBe(commandIds[0]);
   });
 
-  test("surfaces failed disable and disconnect receipts", async () => {
+  test("surfaces failed label, disable, and disconnect receipts", async () => {
     const commands: string[] = [];
     let provided: Ref<FrockBotWebData> | undefined;
     await shellClientPlugin({
@@ -1052,12 +1062,16 @@ describe("Connection operation reconciliation", () => {
     if (!provided) throw new Error("shell data was not provided");
 
     await expect(
+      provided.value.updateConnectionLabel("connection-1", "Renamed"),
+    ).rejects.toThrow("Connection label update failed");
+    await expect(
       provided.value.setConnectionEnabled("connection-1", false),
     ).rejects.toThrow("Connection state update failed");
     await expect(
       provided.value.disconnectConnection("connection-1"),
     ).rejects.toThrow("Connection revocation failed");
     expect(commands).toEqual([
+      "connection/update-label",
       "connection/set-enabled",
       "connection/disconnect",
     ]);

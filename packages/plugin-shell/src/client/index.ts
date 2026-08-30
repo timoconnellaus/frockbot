@@ -311,10 +311,17 @@ async function reserveConnectionOperation(
   operations: Record<string, PendingConnectionOperation>,
   operationKey: string,
   create: () => PendingConnectionOperation,
+  settled?: (operation: PendingConnectionOperation) => Promise<boolean>,
 ): Promise<PendingConnectionOperation> {
-  const reserve = () => {
+  const reserve = async () => {
     synchronizeConnectionOperations(operations);
-    const operation = operations[operationKey] ?? create();
+    let operation: PendingConnectionOperation | undefined =
+      operations[operationKey];
+    if (operation && settled && (await settled(operation))) {
+      delete operations[operationKey];
+      operation = undefined;
+    }
+    operation ??= create();
     operations[operationKey] = operation;
     writeConnectionOperations(operations);
     return operation;
@@ -368,7 +375,9 @@ async function reconcileRetainedConnectionCommands(
       if (!receipt) continue;
       delete operations[key];
       changed = true;
-    } catch {}
+    } catch (error) {
+      void error;
+    }
   }
   if (changed) writeConnectionOperations(operations);
 }
@@ -540,6 +549,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         createdAt: Date.now(),
         ...pending,
       }),
+      pending.packageId &&
+        pending.connectionId &&
+        ctx.transport.lookupConnectionCommand
+        ? async (existing) =>
+            Boolean(
+              await ctx.transport.lookupConnectionCommand!(
+                pending.packageId!,
+                existing.commandId,
+              ),
+            )
+        : undefined,
     );
     try {
       const result = await ctx.transport.executeConnection(
@@ -709,8 +729,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       (pkg) =>
         pkg.packageId === connection?.packageId && pkg.state === "installed",
     );
+    const capabilityAssigned = web.value.botSettings?.assignments.some(
+      (assignment) =>
+        assignment.connectionId === model?.connectionId &&
+        assignment.packageId === connection?.packageId &&
+        assignment.state === "enabled",
+    );
     web.value.modelReady = Boolean(
-      model && connection?.state === "ready" && packageInstalled,
+      model &&
+      connection?.state === "ready" &&
+      packageInstalled &&
+      capabilityAssigned,
     );
     web.value.modelLabel =
       connection?.providerType === "ollama-cloud"
@@ -833,7 +862,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!current || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
       }
-      await ctx.transport.executeConfiguration({
+      const receipt = await ctx.transport.executeConfiguration({
         schemaVersion: 1,
         type: "bot/select-model",
         commandId: crypto.randomUUID(),
@@ -842,6 +871,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         model,
       });
       await web.value.loadBotSettings();
+      if (receipt.status === "rejected") {
+        throw new Error(receipt.failure);
+      }
     },
     async loadUserSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
@@ -1041,7 +1073,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!ctx.transport.executeConnection) {
         throw new Error("Connections are unavailable");
       }
-      await ctx.transport.executeConnection({
+      const result = await ctx.transport.executeConnection({
         schemaVersion: 1,
         type: "connection/update-label",
         commandId: crypto.randomUUID(),
@@ -1049,6 +1081,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         label,
       });
       await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Connection label update failed");
+      }
     },
     async refreshConnectionModels(connectionId): Promise<void> {
       if (!ctx.transport.executeConnection) {

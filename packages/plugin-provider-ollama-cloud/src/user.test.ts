@@ -296,6 +296,40 @@ describe("Ollama Cloud User Contribution", () => {
     ).resolves.toBeUndefined();
   });
 
+  test("bounds completed manual Connection command records", async () => {
+    const { storage, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-receipt-retention",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Original",
+      apiKey: "valid-key",
+    });
+    for (let index = 0; index < 257; index += 1) {
+      await ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: `label-retention-${index}`,
+        connectionId: created.connectionId,
+        label: `Label ${index}`,
+      });
+    }
+
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "connect-receipt-retention"),
+    ).resolves.toBeUndefined();
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "label-retention-256"),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(
+      [...storage.values.keys()].filter((key) =>
+        key.startsWith("ollama-connection-command:"),
+      ),
+    ).toHaveLength(256);
+  });
+
   test("keeps the active generation when rotation validation fails", async () => {
     const { settings, ollama, rejectCatalog } = await fixture();
     const created = await ollama.executeConnection("account-1", {
