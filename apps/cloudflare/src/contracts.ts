@@ -12,7 +12,7 @@ import type {
   ConnectionCompletionResult,
   RevokeConnectionResult,
   StartConnectionResult,
-} from "@frockbot/plugin-composio/backend-contracts";
+} from "@frockbot/connection-core";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {

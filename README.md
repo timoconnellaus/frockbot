@@ -8,7 +8,7 @@ The current vertical slice includes:
 - backend-owned Bot Durable Objects running the event-sourced custom agent loop;
 - a durable User-owned Bot directory with Bot-owned settings, sessions, and composable sheep identities;
 - explicit Package, Connection, and Capability Assignment ownership;
-- a Composio Gmail Connection with durable authorization, revocation, and reconciliation;
+- provider-neutral durable User settings independent of external integrations;
 - thin Electron and Capacitor shells that load the hosted application and broker narrow optional platform capabilities;
 - streamed text, journaled tool calls, durable recovery, and lifecycle cleanup;
 - an executable Cordis loader, dependency, isolation, WebSocket, CSP, and Electron foundation proof.
@@ -39,7 +39,7 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-The left sidebar lists the authenticated User's Bots and switches the active workspace. **Add sheep** creates a Bot with a durable random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs Packages, authorizes external accounts, and explicitly assigns their Capabilities to Bots. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser, desktop, and mobile render the same hosted Bot and sheep UI; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
+The left sidebar lists the authenticated User's Bots and switches the active workspace. **Add sheep** creates a Bot with a durable random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs available Packages and explicitly assigns their Capabilities to Bots; external account controls appear only when the compiled application includes a Connection Package. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser, desktop, and mobile render the same hosted Bot and sheep UI; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
 
 To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory. `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names for standalone development; the hosted backend supplies durable User and Bot identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
 
@@ -93,19 +93,18 @@ Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first 
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                                  | Purpose                                                                       |
-| -------- | ------------------------------------- | ----------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`                | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`               | Cloudflare account containing the production resources                        |
-| Variable | `CLOUDFLARE_D1_DATABASE_ID`           | Immutable ID of `frockbot-auth`                                               |
-| Variable | `BETTER_AUTH_URL`                     | Set to `https://bot.frockbot.com`                                             |
-| Secret   | `BETTER_AUTH_SECRET`                  | Better Auth secret with at least 32 random characters                         |
-| Secret   | `GOOGLE_CLIENT_ID`                    | Google Web application OAuth client ID                                        |
-| Secret   | `GOOGLE_CLIENT_SECRET`                | Google Web application OAuth client secret                                    |
-| Secret   | `COMPOSIO_API_KEY`                    | Composio project API key used only by backend Connection and tool drivers     |
-| Variable | `COMPOSIO_GMAIL_AUTH_CONFIG_ID`       | Composio Gmail auth config used by hosted Connect Link                        |
-| Secret   | `FROCKBOT_AUTHORIZATION_STATE_SECRET` | Independent secret of at least 32 random characters for Connection state      |
-| Secret   | `SPRITES_TOKEN`                       | Fly Sprites token used only by the backend Computer provider                  |
+| Type     | Name                        | Purpose                                                                       |
+| -------- | --------------------------- | ----------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                        |
+| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                               |
+| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                             |
+| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                         |
+| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
+| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
+| Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                  |
+
+Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
 
@@ -148,10 +147,11 @@ packages/
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Cordis-free reusable Vue primitives and surface registry
   computer-core/    Provider registry and capability interfaces for Computers
-  configuration-core/ Versioned durable User/Bot settings and Connection contracts
+  configuration-core/ Versioned durable User/Bot settings contracts
+  connection-core/  Provider-neutral Connection transport result contracts
   plugin-catalog/   Manifest decoding, scoped activation, and rollback
   plugin-clock/     Reference package with agent, host, and WebUI contributions
-  plugin-composio/  Composio Connection, reconciliation, and assigned Agent tools
+  plugin-composio/  Dormant Composio source pending Connect MCP redesign
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-flock/     Durable Bot directory and composable sheep identity Package
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
@@ -202,12 +202,12 @@ Then open `http://localhost:8787/?as_user=alice`. CLI requests may instead send 
 
 The hosted gateway uses Better Auth with D1 and Google social login. Electron uses Better Auth's official desktop integration: sign-in opens in the system browser, returns over the `com.frockbot.desktop` protocol, and stores encrypted session material in the main process rather than the renderer.
 
-For local Google sign-in and hosted Connection authorization in either the browser or desktop shell:
+For local Google sign-in in either the browser or desktop shell:
 
 ```bash
 cp apps/cloudflare/.dev.vars.example apps/cloudflare/.dev.vars
 # Replace every value in .dev.vars with independent development credentials,
-# including a dedicated FROCKBOT_AUTHORIZATION_STATE_SECRET, then initialize D1.
+# then initialize D1.
 cd apps/cloudflare
 bunx wrangler d1 migrations apply AUTH_DB --env development --local
 bun run dev:electron
@@ -219,7 +219,7 @@ Create a Google **Web application** OAuth client and register this local redirec
 http://127.0.0.1:8787/api/auth/callback/google
 ```
 
-For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, `FROCKBOT_AUTHORIZATION_STATE_SECRET`, provider credentials, or OAuth client secrets. The authorization-state secret must contain at least 32 random characters, is a separate trust authority, and must not reuse the Better Auth secret.
+For production, keep `ALLOW_DEVELOPMENT_AUTH` unset and configure the GitHub `production` environment described above. `BETTER_AUTH_URL` is `https://bot.frockbot.com`; register `https://bot.frockbot.com/api/auth/callback/google` with Google. Never commit `BETTER_AUTH_SECRET`, provider credentials, or OAuth client secrets.
 
 The desktop host requires both `FROCKBOT_APPLICATION_URL` (the public application URL loaded by its sandboxed window) and `FROCKBOT_AUTH_BASE_URL` (the Better Auth Worker origin). They may be the same hosted origin. A desktop deployment with either origin missing is invalid and must fail before exposing chat; there is no local Agent or WebUI product fallback.
 

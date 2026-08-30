@@ -30,7 +30,6 @@ describe("foundation application", () => {
       "auth",
       "shell",
       "clock",
-      "composio",
       "computer",
       "desktop-clipboard",
       "desktop-directory-picker",
@@ -46,10 +45,9 @@ describe("foundation application", () => {
       "settings",
     ]);
     expect(first.contributions).toEqual({
-      backend: ["shell", "composio", "flock"],
+      backend: ["shell", "flock", "settings"],
       runtime: [
         "clock",
-        "composio",
         "computer",
         "echo",
         "fly-sprite",
@@ -81,12 +79,10 @@ describe("foundation application", () => {
         .backend,
     ).toEqual([{ entry: "./backend", host: "bot" }]);
     expect(
-      first.packages.find((pkg) => pkg.id === "composio")?.manifest
+      first.packages.find((pkg) => pkg.id === "settings")?.manifest
         .contributions.backend,
-    ).toEqual([
-      { entry: "./backend", host: "gateway" },
-      { entry: "./user-configuration", host: "user" },
-    ]);
+    ).toEqual([{ entry: "./user", host: "user" }]);
+    expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
   });
 
   test("exposes only compiled runtime packages to the runtime host", async () => {
@@ -127,20 +123,8 @@ describe("foundation application", () => {
 
   test("resolves declared backend and assigned runtime Contributions through host seams", async () => {
     const plan = await compileFoundationApplication();
-    const secrets: Record<string, string> = {
-      COMPOSIO_API_KEY: "project-secret",
-      COMPOSIO_GMAIL_AUTH_CONFIG_ID: "gmail-auth",
-      FROCKBOT_AUTHORIZATION_STATE_SECRET:
-        "test-authorization-state-secret-0001",
-    };
     const backend = await createFoundationBackendContributions(plan, {
       backendHost: "gateway",
-      callbackBaseUrl: "https://bot.frockbot.com",
-      readSecret: (name) => secrets[name],
-      storeFor: () => {
-        throw new Error("not used while composing");
-      },
-      markConnectionUnavailable: () => Promise.resolve("applied"),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       createBot: () =>
@@ -155,7 +139,7 @@ describe("foundation application", () => {
     });
     expect(
       backend.contributions.map((contribution) => contribution.packageId),
-    ).toEqual(["composio", "flock"]);
+    ).toEqual(["flock"]);
     interface TestContribution {
       specifier: string;
       executeConfiguration?(): void;
@@ -202,7 +186,7 @@ describe("foundation application", () => {
     expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
 
     const assignment = {
-      assignmentId: "gmail-primary",
+      assignmentId: "unavailable-assignment",
       packageId: "composio",
       capabilityId: "gmail-tools",
       connectionId: "connection-1",
@@ -226,23 +210,11 @@ describe("foundation application", () => {
       },
       {
         userId: "user-1",
-        readSecret: (name) => secrets[name],
+        readSecret: () => undefined,
         authorizeConnection: () =>
-          Promise.resolve({
-            connectionId: "connection-1",
-            packageId: "composio",
-            connectionTypeId: "gmail",
-            displayName: "Gmail",
-            state: "ready",
-            safeMetadata: {
-              connectedAccountId: "ca_123",
-              toolkitSlug: "gmail",
-            },
-          }),
+          Promise.reject(new Error("unavailable Package must not authorize")),
       },
     );
-    expect(runtime.map((pkg) => pkg.contributionSpecifier)).toEqual([
-      "@frockbot/plugin-composio/agent",
-    ]);
+    expect(runtime).toEqual([]);
   });
 });

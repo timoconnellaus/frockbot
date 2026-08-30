@@ -1,25 +1,18 @@
 {
-  "name": "@frockbot/client-core",
+  "name": "@frockbot/connection-core",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./fonts.css": "./fonts.css",
     "./package.json": "./package.json"
   },
   "scripts": {
     "test": "bun test src",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
-  "dependencies": {
-    "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/connection-core": "workspace:*",
-    "@frockbot/protocol": "workspace:*",
-    "vue": "3.5.41"
-  },
   "devDependencies": {
-    "@types/bun": "1.4.0",
+    "@types/bun": "1.3.6",
     "typescript": "^7.0.2"
   },
   "publishConfig": {
@@ -28,6 +21,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
-    "directory": "packages/client-core"
+    "directory": "packages/connection-core"
   }
 }

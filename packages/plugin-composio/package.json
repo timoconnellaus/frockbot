@@ -24,6 +24,8 @@
   "dependencies": {
     "@frockbot/agent-core": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
+    "@frockbot/connection-core": "workspace:*",
+    "@frockbot/plugin-settings": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {

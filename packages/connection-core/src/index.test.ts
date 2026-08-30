@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
-} from "./backend-contracts.js";
+} from "./index.js";
 
-describe("Composio backend result contracts", () => {
+describe("Connection result contracts", () => {
   test("requires exact versioned Connection start variants", () => {
     expect(
       decodeStartConnectionResultV1({

@@ -2,7 +2,8 @@ import {
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
   type StartConnectionResult,
-} from "@frockbot/plugin-composio/backend-contracts";
+  // pi-lens-ignore: ts:2307
+} from "@frockbot/connection-core";
 import { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 export { decodeExternalAuthorizationUrl };

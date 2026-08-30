@@ -18,15 +18,16 @@ import authManifest from "@frockbot/plugin-auth/manifest";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
-import composioManifest from "@frockbot/plugin-composio/manifest";
-import {
-  createConfiguredComposioBackendContribution,
-  type BackendRouteContribution,
-  type ComposioBackendHost,
-  type ComposioConnectionStore,
-} from "@frockbot/plugin-composio";
-import { createConfiguredComposioRuntimeContribution } from "@frockbot/plugin-composio/agent";
 import { Context, type Plugin } from "cordis";
+
+export interface BackendRouteContribution {
+  packageId: string;
+  route(
+    request: Request,
+    url: URL,
+    context: { userId?: string },
+  ): Promise<Response | undefined>;
+}
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
@@ -46,14 +47,6 @@ import {
   createFlockBackendContribution,
   type FlockGatewayHost,
 } from "@frockbot/plugin-flock";
-const createComposioGatewayPlugin = (
-  createConfiguredComposioBackendContribution as typeof createConfiguredComposioBackendContribution & {
-    plugin(
-      host: ComposioBackendHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
 const createFlockGatewayPlugin = (
   createFlockBackendContribution as typeof createFlockBackendContribution & {
     plugin(
@@ -93,7 +86,6 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
   ["@frockbot/plugin-clock", clockManifest],
-  ["@frockbot/plugin-composio", composioManifest],
   ["@frockbot/plugin-computer", computerManifest],
   ["@frockbot/plugin-desktop-clipboard", clipboardManifest],
   ["@frockbot/plugin-desktop-directory-picker", directoryPickerManifest],
@@ -109,12 +101,17 @@ const runtimeContributions = new Map([
   ["@frockbot/plugin-clock/agent", clockRuntimePlugin],
 ]);
 
-const assignedRuntimeContributionFactories = new Map([
-  [
-    "@frockbot/plugin-composio/agent",
-    createConfiguredComposioRuntimeContribution,
-  ],
-]);
+type AssignedRuntimeContributionFactory = (config: {
+  assignment: BotExecutionPlanV1["assignments"][number];
+  userId: string;
+  readSecret(name: string): string | undefined;
+  authorizeConnection(): Promise<ConnectionView>;
+}) => Plugin | undefined;
+
+const assignedRuntimeContributionFactories = new Map<
+  string,
+  AssignedRuntimeContributionFactory
+>();
 
 const applicationSource: ApplicationSource = {
   schemaVersion: 1,
@@ -126,8 +123,6 @@ export interface FoundationRuntimeApplication {
   packages: PackageSource[];
   resolveContribution: ContributionResolver;
 }
-
-export type FoundationConnectionStore = ComposioConnectionStore;
 
 export async function compileFoundationApplication(): Promise<ApplicationPlan> {
   return await compileApplicationPlan(
@@ -178,7 +173,7 @@ export interface MountedFoundationBackend<T> {
 /** Mount every declared backend Contribution into one owned Cordis root. */
 export async function createFoundationBackendContributions(
   plan: ApplicationPlan,
-  host: { backendHost: "gateway" } & ComposioBackendHost & FlockGatewayHost,
+  host: { backendHost: "gateway" } & FlockGatewayHost,
 ): Promise<MountedFoundationBackend<BackendRouteContribution>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
@@ -187,7 +182,7 @@ export async function createFoundationBackendContributions<T>(
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host:
-    | ({ backendHost: "gateway" } & ComposioBackendHost & FlockGatewayHost)
+    | ({ backendHost: "gateway" } & FlockGatewayHost)
     | FoundationBackendPluginHost<T>,
 ): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
   const root = new Context();
@@ -213,11 +208,6 @@ export async function createFoundationBackendContributions<T>(
         const specifier = contributionSpecifier(pkg.specifier, backend.entry);
         let plugin: Plugin;
         if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-composio/backend"
-        ) {
-          plugin = createComposioGatewayPlugin(host, lifecycle);
-        } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-flock/backend"
         ) {
