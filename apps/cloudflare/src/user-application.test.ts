@@ -79,10 +79,7 @@ describe("user application security headers", () => {
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
-    expect(policy.get("frame-ancestors")).toEqual([
-      "capacitor://localhost",
-      "frockbot://localhost",
-    ]);
+    expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
   });
 });
 

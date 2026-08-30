@@ -64,15 +64,6 @@ interface Env {
   GOOGLE_CLIENT_SECRET?: string;
   SPRITES_TOKEN?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
-  ALLOWED_CLIENT_ORIGINS?: string;
-}
-
-function allowedClientOrigins(env: Env): string[] | undefined {
-  const origins = (env.ALLOWED_CLIENT_ORIGINS ?? "")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
-  return origins.length > 0 ? origins : undefined;
 }
 
 interface UserScopedProps {
@@ -418,7 +409,6 @@ export default {
       botConfigurationFor: (userId, botId): BotConfigurationBinding =>
         botStateStub(env, userId, botId),
       backendContributions: [...mountedBackend.contributions],
-      allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });
     try {

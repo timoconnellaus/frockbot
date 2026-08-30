@@ -23,6 +23,7 @@
     "@frockbot/client-core": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
+    "@frockbot/mobile": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",

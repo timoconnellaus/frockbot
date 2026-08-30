@@ -120,6 +120,13 @@ describe("mobile notifications plugin", () => {
       }),
       'notification urgency must be "normal" or "critical"',
     );
+    await expectFailure(
+      harness.root.mobileCommands.invoke(SHOW_NOTIFICATION_COMMAND, {
+        title: "Turn complete",
+        extra: true,
+      }),
+      "notification input has unknown fields",
+    );
     expect(notifications.requests).toEqual([]);
     await harness.dispose();
   });

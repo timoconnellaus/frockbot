@@ -126,7 +126,18 @@ describe("mobile clipboard plugin", () => {
       }),
       "clipboard text must be at most 1000000 characters",
     );
-    expect(clipboard.text).toBe("initial");
+    await expectFailure(
+      harness.root.mobileCommands.invoke(READ_CLIPBOARD_TEXT_COMMAND, {
+        extra: true,
+      }),
+      "clipboard input has unknown fields",
+    );
+    clipboard.text = "x".repeat(MAX_CLIPBOARD_TEXT_LENGTH + 1);
+    await expectFailure(
+      harness.root.mobileCommands.invoke(READ_CLIPBOARD_TEXT_COMMAND, {}),
+      "clipboard text must be at most 1000000 characters",
+    );
+    expect(clipboard.text.length).toBe(MAX_CLIPBOARD_TEXT_LENGTH + 1);
     await harness.dispose();
   });
 

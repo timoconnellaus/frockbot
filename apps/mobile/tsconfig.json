@@ -5,23 +5,11 @@
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
-    "baseUrl": "..",
-    "paths": {
-      "@cordisjs/client": [
-        "../packages/webui-shell/src/client/cordis-client-shim.d.ts"
-      ]
-    },
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["bun", "vite/client"]
+    "types": ["bun"]
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.d.ts",
-    "src/**/*.vue",
-    "vite.config.ts",
-    "capacitor.config.ts"
-  ]
+  "include": ["src/**/*.ts", "vite.config.ts", "capacitor.config.ts"]
 }

@@ -309,7 +309,6 @@ export interface GatewayDependencies {
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   backendContributions?: readonly BackendRouteContribution[];
-  allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;
 }

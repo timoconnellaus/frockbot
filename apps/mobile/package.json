@@ -3,37 +3,34 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "exports": {
+    "./host": "./src/host/hosted.ts",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test src",
     "sync": "cap sync"
   },
   "dependencies": {
-    "@capacitor/browser": "8.0.4",
     "@capacitor/clipboard": "8.0.1",
     "@capacitor/core": "8.5.0",
     "@capacitor/local-notifications": "8.3.1",
-    "@capacitor/preferences": "8.0.1",
-    "@capacitor/share": "8.0.1",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/mobile-core": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-mobile-clipboard": "workspace:*",
     "@frockbot/plugin-mobile-notifications": "workspace:*",
-    "cordis": "4.0.0-rc.8",
-    "vue": "3.5.41"
+    "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
     "@capacitor/android": "8.5.0",
     "@capacitor/cli": "8.5.0",
     "@capacitor/ios": "8.5.0",
     "@types/bun": "1.4.0",
-    "@vitejs/plugin-vue": "6.0.8",
-    "electron": "44.0.0",
     "typescript": "5.9.3",
-    "vite": "8.2.2",
-    "vue-tsc": "3.3.10"
+    "vite": "8.2.2"
   }
 }

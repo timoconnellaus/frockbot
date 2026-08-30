@@ -8,6 +8,7 @@
     "./client": "./src/client.ts",
     "./desktop": "./src/desktop.ts",
     "./desktop-runtime": "./src/desktop-runtime.ts",
+    "./mobile": "./src/mobile.ts",
     "./runtime": "./src/runtime.ts",
     "./frockbot.application.json": "./frockbot.application.json",
     "./package.json": "./package.json"

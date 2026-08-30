@@ -1,9 +1,7 @@
 import {
-  decodeMobileShareRequest,
   MobileCommandRegistry,
   type MobileCommandResult,
   type MobileCommandSummary,
-  type MobileShareRequest,
 } from "@frockbot/mobile-core";
 import {
   type ContributionResolver,
@@ -11,15 +9,12 @@ import {
   PackageCatalog,
 } from "@frockbot/plugin-catalog";
 import mobileClipboardPlugin from "@frockbot/plugin-mobile-clipboard/mobile";
-import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
 import mobileNotificationsPlugin from "@frockbot/plugin-mobile-notifications/mobile";
-import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
 import { Context } from "cordis";
 import type { MobilePlatformAdapters } from "./adapters.ts";
 import {
   createClipboardProvider,
   createNotificationProvider,
-  createShareProvider,
 } from "./capabilities.ts";
 
 export * from "./adapters.ts";
@@ -32,6 +27,7 @@ const BUILT_IN_CONTRIBUTIONS = new Map<string, unknown>([
   [`${CLIPBOARD_PACKAGE}/mobile`, { default: mobileClipboardPlugin }],
 ]);
 
+/** Resolves only implementations shipped by this mobile shell. */
 export const resolveBuiltInMobileContribution: ContributionResolver = (
   specifier,
 ) => {
@@ -49,14 +45,10 @@ export interface MobileHostPackage {
   manifest: unknown;
 }
 
-export const BUILT_IN_MOBILE_PACKAGES: readonly MobileHostPackage[] = [
-  { specifier: NOTIFICATIONS_PACKAGE, manifest: mobileNotificationsManifest },
-  { specifier: CLIPBOARD_PACKAGE, manifest: mobileClipboardManifest },
-];
-
 export interface MobileHostOptions {
   adapters: MobilePlatformAdapters;
-  packages?: readonly MobileHostPackage[];
+  /** Exact immutable-application declaration order. */
+  packages: readonly MobileHostPackage[];
   resolveContribution?: ContributionResolver;
 }
 
@@ -67,7 +59,6 @@ export interface MobileHost {
     signal?: AbortSignal,
   ): Promise<Output>;
   list(): MobileCommandSummary[];
-  share(request: MobileShareRequest, signal?: AbortSignal): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -81,7 +72,6 @@ export async function createMobileHost(
       createNotificationProvider(options.adapters.notifications),
     );
     await root.plugin(createClipboardProvider(options.adapters.clipboard));
-    await root.plugin(createShareProvider(options.adapters.share));
     await root.plugin(PackageCatalog, { kinds: ["mobile"] });
 
     root.packages.registerHost(
@@ -92,8 +82,11 @@ export async function createMobileHost(
       ),
     );
 
-    for (const pkg of options.packages ?? BUILT_IN_MOBILE_PACKAGES) {
-      const installed = root.packages.install(pkg);
+    for (const pkg of options.packages) {
+      const installed = root.packages.install({
+        specifier: pkg.specifier,
+        manifest: structuredClone(pkg.manifest),
+      });
       await root.packages.enable(installed.manifest.id);
     }
   } catch (error) {
@@ -114,16 +107,6 @@ export async function createMobileHost(
       return await root.mobileCommands.invoke<Output>(commandId, input, signal);
     },
     list: () => (disposed ? [] : root.mobileCommands.list()),
-    async share(
-      request: MobileShareRequest,
-      signal?: AbortSignal,
-    ): Promise<void> {
-      if (disposed) throw new Error("the mobile host is disposed");
-      await root.mobileShare.share(
-        decodeMobileShareRequest(request),
-        signal ?? new AbortController().signal,
-      );
-    },
     async dispose(): Promise<void> {
       disposed = true;
       await root.fiber.dispose();

@@ -11,17 +11,15 @@ export interface AuthEnvironment {
   GOOGLE_CLIENT_SECRET: string;
 }
 
+export const HOSTED_AUTH_TRUSTED_ORIGINS = ["com.frockbot.desktop:/"] as const;
+
 export function createAuth(environment: AuthEnvironment) {
   return betterAuth({
     appName: "FrockBot",
     baseURL: environment.BETTER_AUTH_URL,
     secret: environment.BETTER_AUTH_SECRET,
     database: environment.AUTH_DB,
-    trustedOrigins: [
-      "com.frockbot.desktop:/",
-      "capacitor://localhost",
-      "frockbot://localhost",
-    ],
+    trustedOrigins: [...HOSTED_AUTH_TRUSTED_ORIGINS],
     socialProviders: {
       google: {
         clientId: environment.GOOGLE_CLIENT_ID,
