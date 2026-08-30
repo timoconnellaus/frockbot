@@ -1,4 +1,7 @@
-import { decodeConnectionCommandV1 } from "@frockbot/connection-core";
+import {
+  decodeConnectionCommandReceiptV1,
+  decodeConnectionCommandV1,
+} from "@frockbot/connection-core";
 import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
@@ -154,11 +157,13 @@ export function createGateway(dependencies: GatewayDependencies) {
       try {
         const command = decodeConnectionCommandV1(await request.json());
         return Response.json(
-          await dependencies.userConfigurationFor(userId).executeConnection({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
+          decodeConnectionCommandReceiptV1(
+            await dependencies.userConfigurationFor(userId).executeConnection({
+              schemaVersion: 1,
+              userId,
+              command,
+            }),
+          ),
         );
       } catch (error) {
         return jsonError(

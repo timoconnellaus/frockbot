@@ -207,6 +207,11 @@ class MemoryConfiguration
   };
   private readonly bots = new Map<string, BotSettingsViewV1>();
   private readonly receipts = new Map<string, OperationReceiptV1>();
+  private connectionReceiptOverride: unknown;
+
+  setConnectionReceiptOverride(receipt: unknown): void {
+    this.connectionReceiptOverride = receipt;
+  }
 
   private read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
     if (query.type === "user/get") return Promise.resolve(this.user);
@@ -336,7 +341,12 @@ class MemoryConfiguration
 
   executeConnection(
     request: Parameters<UserConfigurationBinding["executeConnection"]>[0],
-  ) {
+  ): ReturnType<UserConfigurationBinding["executeConnection"]> {
+    if (this.connectionReceiptOverride !== undefined) {
+      return Promise.resolve(this.connectionReceiptOverride) as ReturnType<
+        UserConfigurationBinding["executeConnection"]
+      >;
+    }
     const connectionId =
       "connectionId" in request.command
         ? request.command.connectionId
@@ -731,6 +741,37 @@ describe("Cloudflare user application gateway", () => {
       connectionId: "connection-test",
       status: "applied",
     });
+  });
+
+  test("rejects malformed Connection receipts from the User Durable Object", async () => {
+    const { gateway, configurations } = createTestGateway();
+    const configuration = new MemoryConfiguration();
+    configuration.setConnectionReceiptOverride({
+      schemaVersion: 1,
+      commandId: "ollama-connect-malformed",
+      connectionId: "connection-test",
+      status: "applied",
+      credential: "must-not-cross-the-seam",
+    });
+    configurations.set("alice", configuration);
+
+    const response = await gateway(
+      request("/api/connections", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/create-api-key",
+          commandId: "ollama-connect-malformed",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          label: "Work",
+          apiKey: "write-only-secret",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
   });
 
   test("rejects invalid encoded Bot settings paths before configuration lookup", async () => {

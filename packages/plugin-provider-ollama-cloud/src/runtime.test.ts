@@ -72,7 +72,7 @@ describe("Ollama Cloud runtime Contribution", () => {
           }),
         settleCredential: (effectId) => {
           settled.push(effectId);
-          return Promise.resolve();
+          return Promise.reject(new Error("settlement unavailable"));
         },
         fetch: (input, init) => {
           const outbound = new Request(input, init);
@@ -121,6 +121,7 @@ describe("Ollama Cloud runtime Contribution", () => {
       },
       plaintext: "account-secret",
     });
+    const settled: string[] = [];
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
@@ -140,7 +141,10 @@ describe("Ollama Cloud runtime Contribution", () => {
             expiresAt: "2026-08-30T01:00:00.000Z",
             envelope,
           }),
-        settleCredential: () => Promise.resolve(),
+        settleCredential: (effectId) => {
+          settled.push(effectId);
+          return Promise.resolve();
+        },
         fetch: () => Promise.resolve(new Response("timeout", { status: 408 })),
       }),
     );
@@ -159,6 +163,7 @@ describe("Ollama Cloud runtime Contribution", () => {
 
     expect(failure).toBeInstanceOf(OpenAICompatibleHttpError);
     expect(failure).not.toBeInstanceOf(LlmEffectNotStartedError);
+    expect(settled).toEqual([]);
     await root.fiber.dispose();
   });
 });

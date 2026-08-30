@@ -44,6 +44,23 @@ interface StoredCommand {
   receipt?: ConnectionCommandReceiptV1;
 }
 
+type OllamaCredentialContribution = Omit<
+  CredentialUserBackendContribution,
+  "lease"
+> & {
+  lease(
+    input: {
+      accountId: string;
+      connectionId: string;
+      packageId: string;
+      effectId: string;
+      expiresAt: string;
+      expectedGeneration?: string;
+    },
+    storage?: CredentialTransaction,
+  ): Promise<CredentialLeaseV1>;
+};
+
 export interface OllamaUserBackendHost {
   storage: UserSettingsStorage &
     CredentialStorage & {
@@ -51,7 +68,7 @@ export interface OllamaUserBackendHost {
       setAlarm(scheduledTime: number | Date): Promise<void>;
     };
   settings: UserSettingsBackendContribution;
-  credentials: CredentialUserBackendContribution;
+  credentials: OllamaCredentialContribution;
   client?: OllamaCloudClient;
   now?: () => number;
   randomId?: () => string;
@@ -417,6 +434,13 @@ export class OllamaCloudUserBackendContribution {
             throw new Error("Ollama Cloud Connection is unavailable");
           }
           if (
+            record.operation === "connection/create-api-key" &&
+            (current.state !== "authorizing" ||
+              current.generation !== generation)
+          ) {
+            throw new Error(`Connection is ${current.state}`);
+          }
+          if (
             record.operation === "connection/rotate-api-key" &&
             current.state !== "ready" &&
             current.state !== "disabled"
@@ -470,29 +494,34 @@ export class OllamaCloudUserBackendContribution {
           record.accountId,
           record.connectionId,
         );
-        await this.host.settings.replaceConnection(
-          record.accountId,
-          record.connectionId,
-          current.generation,
-          {
-            ...current,
-            state: "failed",
-            authorization: {
-              schemaVersion: 1,
-              kind: "api-key",
-              credential: {
+        if (
+          current.state === "authorizing" &&
+          current.generation === generation
+        ) {
+          await this.host.settings.replaceConnection(
+            record.accountId,
+            record.connectionId,
+            current.generation,
+            {
+              ...current,
+              state: "failed",
+              authorization: {
                 schemaVersion: 1,
-                configured: false,
-                source: "api-key",
-                writable: true,
+                kind: "api-key",
+                credential: {
+                  schemaVersion: 1,
+                  configured: false,
+                  source: "api-key",
+                  writable: true,
+                },
               },
+              failure:
+                error instanceof Error
+                  ? error.message
+                  : "Ollama Cloud validation failed",
             },
-            failure:
-              error instanceof Error
-                ? error.message
-                : "Ollama Cloud validation failed",
-          },
-        );
+          );
+        }
       }
       return this.finishRecord(record, "failed");
     }
@@ -599,26 +628,52 @@ export class OllamaCloudUserBackendContribution {
   private async disconnect(
     record: StoredCommand,
   ): Promise<ConnectionCommandReceiptV1> {
-    const current = await this.requireConnection(
-      record.accountId,
-      record.connectionId,
+    const expectedGeneration = record.expectedGeneration;
+    if (!expectedGeneration) return this.finishRecord(record, "failed");
+    const transition = await this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        const current = await this.host.settings.getConnection(
+          record.accountId,
+          record.connectionId,
+          storage,
+        );
+        if (!current || current.packageId !== PACKAGE_ID) return "stale";
+        if (current.generation !== expectedGeneration) return "stale";
+        if (current.state === "revoked") return "revoked";
+        if (current.state === "reconciliation-required") {
+          return "reconciliation-required";
+        }
+        if (current.state !== "revoking") {
+          await this.host.settings.replaceConnection(
+            record.accountId,
+            record.connectionId,
+            expectedGeneration,
+            { ...current, state: "revoking" },
+            storage,
+          );
+        }
+        return "revoking";
+      },
     );
-    await this.host.settings.replaceConnection(
-      record.accountId,
-      record.connectionId,
-      current.generation,
-      { ...current, state: "revoking" },
-    );
+    if (transition === "stale") return this.finishRecord(record, "failed");
+    if (transition === "revoked") return this.finishRecord(record, "applied");
+    if (transition === "reconciliation-required") {
+      return this.finishRecord(record, "reconciliation-required");
+    }
+
     await this.host.credentials.disconnect(record.connectionId);
     const revoking = await this.requireConnection(
       record.accountId,
       record.connectionId,
     );
+    if (revoking.generation !== expectedGeneration) {
+      return this.finishRecord(record, "failed");
+    }
     const unsupportedUpstreamRevoke = record.revokeUpstream === true;
     await this.host.settings.replaceConnection(
       record.accountId,
       record.connectionId,
-      revoking.generation,
+      expectedGeneration,
       {
         ...revoking,
         state: unsupportedUpstreamRevoke
@@ -693,12 +748,14 @@ export class OllamaCloudUserBackendContribution {
       input.accountId,
       input.connectionId,
     );
-    if (connection.state !== "ready") {
+    if (connection.state !== "ready" || !connection.generation) {
       throw new Error(`Connection is ${connection.state}`);
     }
+    const admittedGeneration = connection.generation;
     const known = connection.modelCatalog?.models.some(
       (model) => model.providerModelId === input.providerModelId,
     );
+    let resolvedModel: ConnectionModelCatalogV1["models"][number] | undefined;
     if (!known) {
       const discoveryEffectId = `resolve:${input.effectId}`;
       const discoveryLease = await this.host.credentials.lease({
@@ -707,6 +764,7 @@ export class OllamaCloudUserBackendContribution {
         packageId: PACKAGE_ID,
         effectId: discoveryEffectId,
         expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
+        expectedGeneration: admittedGeneration,
       });
       try {
         const apiKey = await this.host.credentials.openLease({
@@ -714,44 +772,66 @@ export class OllamaCloudUserBackendContribution {
           packageId: PACKAGE_ID,
           lease: discoveryLease,
         });
-        const model = await this.client.resolveModel(
+        resolvedModel = await this.client.resolveModel(
           apiKey,
           input.providerModelId,
-        );
-        const current = await this.requireConnection(
-          input.accountId,
-          input.connectionId,
-        );
-        const catalog = current.modelCatalog ?? this.catalog([]);
-        await this.host.settings.replaceConnection(
-          input.accountId,
-          input.connectionId,
-          current.generation,
-          {
-            ...current,
-            modelCatalog: {
-              ...catalog,
-              models: [
-                ...catalog.models.filter(
-                  (candidate) =>
-                    candidate.providerModelId !== input.providerModelId,
-                ),
-                model,
-              ],
-            },
-          },
         );
       } finally {
         await this.host.credentials.settle(discoveryEffectId);
       }
     }
-    return this.host.credentials.lease({
-      accountId: input.accountId,
-      connectionId: input.connectionId,
-      packageId: PACKAGE_ID,
-      effectId: input.effectId,
-      expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
-    });
+
+    await this.host.credentials.expireLeases();
+    return this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        const current = await this.host.settings.getConnection(
+          input.accountId,
+          input.connectionId,
+          storage,
+        );
+        if (
+          !current ||
+          current.packageId !== PACKAGE_ID ||
+          current.state !== "ready" ||
+          current.generation !== admittedGeneration
+        ) {
+          throw new Error("Connection changed before model authorization");
+        }
+        if (
+          resolvedModel &&
+          !current.modelCatalog?.models.some(
+            (model) => model.providerModelId === input.providerModelId,
+          )
+        ) {
+          const catalog = current.modelCatalog ?? this.catalog([]);
+          await this.host.settings.replaceConnection(
+            input.accountId,
+            input.connectionId,
+            admittedGeneration,
+            {
+              ...current,
+              modelCatalog: {
+                ...catalog,
+                generation: this.randomId(),
+                models: [...catalog.models, resolvedModel],
+              },
+            },
+            storage,
+          );
+        }
+        return this.host.credentials.lease(
+          {
+            accountId: input.accountId,
+            connectionId: input.connectionId,
+            packageId: PACKAGE_ID,
+            effectId: input.effectId,
+            expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
+            expectedGeneration: admittedGeneration,
+          },
+          storage,
+        );
+      },
+    );
   }
 
   async settleModelCredential(effectId: string): Promise<void> {

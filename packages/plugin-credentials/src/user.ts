@@ -18,6 +18,7 @@ export interface CredentialTransaction {
   put<T>(key: string, value: T): Promise<void>;
   put(entries: Record<string, unknown>): Promise<void>;
   delete(key: string): Promise<boolean>;
+  getAlarm?(): Promise<number | null>;
   setAlarm?(scheduledTime: number | Date): Promise<void>;
 }
 
@@ -263,20 +264,24 @@ export class CredentialUserBackendContribution {
     });
   }
 
-  async lease(input: {
-    accountId: string;
-    connectionId: string;
-    packageId: string;
-    effectId: string;
-    expiresAt: string;
-  }): Promise<CredentialLeaseV1> {
+  async lease(
+    input: {
+      accountId: string;
+      connectionId: string;
+      packageId: string;
+      effectId: string;
+      expiresAt: string;
+      expectedGeneration?: string;
+    },
+    storage?: CredentialTransaction,
+  ): Promise<CredentialLeaseV1> {
     const expiresAt = Date.parse(input.expiresAt);
     if (!Number.isFinite(expiresAt) || expiresAt <= this.now()) {
       throw new Error("Credential lease expiry is invalid");
     }
-    await this.expireLeases();
-    const result = await this.host.storage.transaction(async (storage) => {
-      const expired = await storage.get<{
+    if (!storage) await this.expireLeases();
+    const issue = async (transaction: CredentialTransaction) => {
+      const expired = await transaction.get<{
         accountId: string;
         connectionId: string;
         packageId: string;
@@ -291,7 +296,7 @@ export class CredentialUserBackendContribution {
         }
         throw new Error("Credential lease expired");
       }
-      const existing = await storage.get<StoredCredentialLease>(
+      const existing = await transaction.get<StoredCredentialLease>(
         leaseKey(input.effectId),
       );
       if (existing) {
@@ -304,12 +309,18 @@ export class CredentialUserBackendContribution {
         }
         return this.publicLease(existing);
       }
-      const generation = await storage.get<string>(
+      const generation = await transaction.get<string>(
         activeKey(input.connectionId),
       );
-      if (!generation) throw new Error("Connection credential is unavailable");
+      if (
+        !generation ||
+        (input.expectedGeneration !== undefined &&
+          generation !== input.expectedGeneration)
+      ) {
+        throw new Error("Connection credential is unavailable");
+      }
       const stored = requireGeneration(
-        await storage.get<StoredCredentialGeneration>(
+        await transaction.get<StoredCredentialGeneration>(
           credentialKey(input.connectionId, generation),
         ),
         input.connectionId,
@@ -335,8 +346,9 @@ export class CredentialUserBackendContribution {
         envelope: stored.envelope,
         settled: false,
       };
-      const leaseIndex = (await storage.get<string[]>(LEASE_INDEX_KEY)) ?? [];
-      await storage.put({
+      const leaseIndex =
+        (await transaction.get<string[]>(LEASE_INDEX_KEY)) ?? [];
+      await transaction.put({
         [leaseKey(input.effectId)]: lease,
         [LEASE_INDEX_KEY]: [...new Set([...leaseIndex, input.effectId])],
         [credentialKey(input.connectionId, generation)]: {
@@ -345,8 +357,11 @@ export class CredentialUserBackendContribution {
         } satisfies StoredCredentialGeneration,
       });
       return this.publicLease(lease);
-    });
-    await this.scheduleLeaseAlarm();
+    };
+    const result = storage
+      ? await issue(storage)
+      : await this.host.storage.transaction(issue);
+    await this.scheduleLeaseAlarm(storage);
     return result;
   }
 
@@ -409,12 +424,13 @@ export class CredentialUserBackendContribution {
     await this.scheduleLeaseAlarm();
   }
 
-  async nextLeaseExpiry(): Promise<number | undefined> {
-    const effectIds =
-      (await this.host.storage.get<string[]>(LEASE_INDEX_KEY)) ?? [];
+  async nextLeaseExpiry(
+    storage: CredentialTransaction = this.host.storage,
+  ): Promise<number | undefined> {
+    const effectIds = (await storage.get<string[]>(LEASE_INDEX_KEY)) ?? [];
     const expiries: number[] = [];
     for (const effectId of effectIds) {
-      const lease = await this.host.storage.get<StoredCredentialLease>(
+      const lease = await storage.get<StoredCredentialLease>(
         leaseKey(effectId),
       );
       if (lease) expiries.push(Date.parse(lease.expiresAt));
@@ -462,13 +478,15 @@ export class CredentialUserBackendContribution {
     }
   }
 
-  private async scheduleLeaseAlarm(): Promise<void> {
-    if (!this.host.storage.setAlarm) return;
-    const next = await this.nextLeaseExpiry();
+  private async scheduleLeaseAlarm(
+    storage: CredentialTransaction = this.host.storage,
+  ): Promise<void> {
+    if (!storage.setAlarm) return;
+    const next = await this.nextLeaseExpiry(storage);
     if (next === undefined) return;
-    const current = await this.host.storage.getAlarm?.();
+    const current = await storage.getAlarm?.();
     if (current === null || current === undefined || next < current) {
-      await this.host.storage.setAlarm(next);
+      await storage.setAlarm(next);
     }
   }
 

@@ -35,7 +35,7 @@ class OllamaCloudProvider implements LlmProvider {
   }
 
   async *stream(request: NormalizedModelRequest, signal: AbortSignal) {
-    let lease: CredentialLeaseV1;
+    let lease: CredentialLeaseV1 | undefined;
     let apiKey: string;
     try {
       lease = await this.config.leaseCredential(request.requestId);
@@ -53,6 +53,11 @@ class OllamaCloudProvider implements LlmProvider {
         envelope: lease.envelope,
       });
     } catch (error) {
+      if (lease) {
+        await this.config
+          .settleCredential(request.requestId)
+          .catch(() => undefined);
+      }
       throw new LlmEffectNotStartedError(
         error instanceof Error
           ? error.message
@@ -66,11 +71,10 @@ class OllamaCloudProvider implements LlmProvider {
       providerId: this.id,
       fetch: this.config.fetch,
     });
-    try {
-      yield* provider.stream(request, signal);
-    } finally {
-      await this.config.settleCredential(request.requestId);
-    }
+    yield* provider.stream(request, signal);
+    await this.config
+      .settleCredential(request.requestId)
+      .catch(() => undefined);
   }
 }
 
