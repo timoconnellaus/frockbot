@@ -44,16 +44,16 @@ describe("foundation application", () => {
       "mobile-clipboard",
       "mobile-notifications",
       "provider-foundation",
-      "provider-ollama-cloud",
       "settings",
+      "provider-ollama-cloud",
     ]);
     expect(first.contributions).toEqual({
       backend: [
         "shell",
         "credentials",
         "flock",
-        "provider-ollama-cloud",
         "settings",
+        "provider-ollama-cloud",
       ],
       runtime: [
         "clock",
@@ -207,6 +207,19 @@ describe("foundation application", () => {
       });
     expect(botBackend.contributions).toHaveLength(2);
     expect(userBackend.contributions).toHaveLength(4);
+    const userSpecifiers = userBackend.contributions.map(
+      (contribution) => contribution.specifier,
+    );
+    expect(
+      userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
+    ).toBeLessThan(
+      userSpecifiers.indexOf("@frockbot/plugin-provider-ollama-cloud/user"),
+    );
+    expect(
+      userSpecifiers.indexOf("@frockbot/plugin-credentials/user"),
+    ).toBeLessThan(
+      userSpecifiers.indexOf("@frockbot/plugin-provider-ollama-cloud/user"),
+    );
     expect(typeof botBackend.contributions[0]?.executeConfiguration).toBe(
       "function",
     );

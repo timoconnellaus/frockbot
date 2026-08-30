@@ -4,7 +4,10 @@ import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
 } from "@frockbot/agent-runtime/runtime";
-import type { CredentialLeaseV1 } from "@frockbot/connection-core";
+import {
+  decodeCredentialLeaseV1,
+  type CredentialLeaseV1,
+} from "@frockbot/connection-core";
 import {
   compileFoundationApplication,
   createFoundationModelRuntimePackage,
@@ -1002,7 +1005,7 @@ export class ShellBotBackendContribution {
     settings: BotSettingsViewV1,
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
-    modelSelection?: RuntimeModelSelection;
+    modelSelection: RuntimeModelSelection;
   }> {
     const userConfiguration = this.userConfiguration(identity);
     const user = await userConfiguration.readConfiguration({
@@ -1043,7 +1046,9 @@ export class ShellBotBackendContribution {
         },
       )),
     ];
-    if (!settings.model) return { agentPackages };
+    if (!settings.model) {
+      throw new Error("Bot model Connection is not configured");
+    }
 
     const binding = resolveBotModelBindingV1({
       model: settings.model,
@@ -1453,7 +1458,7 @@ export class ShellBotBackendContribution {
       claimConnectionDependency(input: unknown): Promise<boolean>;
       acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
       compensateConnectionDependency(input: unknown): Promise<boolean>;
-      leaseModelCredential(input: unknown): Promise<CredentialLeaseV1>;
+      leaseModelCredential(input: unknown): Promise<unknown>;
       settleModelCredential(input: unknown): Promise<void>;
     };
     return {
@@ -1501,14 +1506,21 @@ export class ShellBotBackendContribution {
           botId,
           generation,
         }),
-      leaseModelCredential: (userId, connectionId, providerModelId, effectId) =>
-        rpc.leaseModelCredential({
-          schemaVersion: 1,
-          userId,
-          connectionId,
-          providerModelId,
-          effectId,
-        }),
+      leaseModelCredential: async (
+        userId,
+        connectionId,
+        providerModelId,
+        effectId,
+      ) =>
+        decodeCredentialLeaseV1(
+          await rpc.leaseModelCredential({
+            schemaVersion: 1,
+            userId,
+            connectionId,
+            providerModelId,
+            effectId,
+          }),
+        ),
       settleModelCredential: (userId, effectId) =>
         rpc.settleModelCredential({ schemaVersion: 1, userId, effectId }),
     };

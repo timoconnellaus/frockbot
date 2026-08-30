@@ -220,18 +220,22 @@ export class UserSettingsBackendContribution {
       : decodeUserSettingsViewV1(stored);
   }
 
-  async read(userId: string): Promise<UserSettingsViewV1> {
-    await this.assertIdentity(userId);
-    return this.readSnapshot();
+  async read(
+    userId: string,
+    storage: UserSettingsTransaction = this.host.storage,
+  ): Promise<UserSettingsViewV1> {
+    await this.assertIdentity(userId, storage);
+    return this.readSnapshot(storage);
   }
 
   async createConnection(
     userId: string,
     connection: ConnectionView,
+    storage?: UserSettingsTransaction,
   ): Promise<ConnectionView> {
-    await this.assertIdentity(userId);
-    return this.host.storage.transaction(async (storage) => {
-      const current = await this.readSnapshot(storage);
+    const create = async (transaction: UserSettingsTransaction) => {
+      await this.assertIdentity(userId, transaction);
+      const current = await this.readSnapshot(transaction);
       const existing = current.connections.find(
         (candidate) => candidate.connectionId === connection.connectionId,
       );
@@ -241,9 +245,11 @@ export class UserSettingsBackendContribution {
         revision: current.revision + 1,
         connections: [...current.connections, structuredClone(connection)],
       } satisfies UserSettingsViewV1;
-      await storage.put(STATE_KEY, next);
+      await transaction.put(STATE_KEY, next);
       return structuredClone(connection);
-    });
+    };
+    if (storage) return create(storage);
+    return this.host.storage.transaction(create);
   }
 
   async replaceConnection(
@@ -251,10 +257,11 @@ export class UserSettingsBackendContribution {
     connectionId: string,
     expectedGeneration: string | undefined,
     nextConnection: ConnectionView,
+    storage?: UserSettingsTransaction,
   ): Promise<ConnectionView> {
-    await this.assertIdentity(userId);
-    return this.host.storage.transaction(async (storage) => {
-      const current = await this.readSnapshot(storage);
+    const replace = async (transaction: UserSettingsTransaction) => {
+      await this.assertIdentity(userId, transaction);
+      const current = await this.readSnapshot(transaction);
       const existing = current.connections.find(
         (candidate) => candidate.connectionId === connectionId,
       );
@@ -274,16 +281,19 @@ export class UserSettingsBackendContribution {
             : candidate,
         ),
       } satisfies UserSettingsViewV1;
-      await storage.put(STATE_KEY, next);
+      await transaction.put(STATE_KEY, next);
       return structuredClone(nextConnection);
-    });
+    };
+    if (storage) return replace(storage);
+    return this.host.storage.transaction(replace);
   }
 
   async getConnection(
     userId: string,
     connectionId: string,
+    storage: UserSettingsTransaction = this.host.storage,
   ): Promise<ConnectionView | undefined> {
-    const settings = await this.read(userId);
+    const settings = await this.read(userId, storage);
     const connection = settings.connections.find(
       (candidate) => candidate.connectionId === connectionId,
     );
@@ -300,15 +310,18 @@ export class UserSettingsBackendContribution {
     );
   }
 
-  private async assertIdentity(userId: string): Promise<void> {
-    const existing = await this.host.storage.get<unknown>(IDENTITY_KEY);
+  private async assertIdentity(
+    userId: string,
+    storage: UserSettingsTransaction = this.host.storage,
+  ): Promise<void> {
+    const existing = await storage.get<unknown>(IDENTITY_KEY);
     if (existing !== undefined && typeof existing !== "string") {
       throw new Error("Stored User authority is invalid");
     }
     if (existing && existing !== userId) {
       throw new Error("User authority does not match durable identity");
     }
-    if (!existing) await this.host.storage.put(IDENTITY_KEY, userId);
+    if (!existing) await storage.put(IDENTITY_KEY, userId);
   }
 }
 

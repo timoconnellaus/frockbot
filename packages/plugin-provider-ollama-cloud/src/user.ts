@@ -6,10 +6,15 @@ import {
   type CredentialLeaseV1,
 } from "@frockbot/connection-core";
 import type { ConnectionView } from "@frockbot/configuration-core";
-import type { CredentialUserBackendContribution } from "@frockbot/plugin-credentials/user";
+import type {
+  CredentialStorage,
+  CredentialTransaction,
+  CredentialUserBackendContribution,
+} from "@frockbot/plugin-credentials/user";
 import type {
   UserSettingsBackendContribution,
   UserSettingsStorage,
+  UserSettingsTransaction,
 } from "@frockbot/plugin-settings/user";
 import type { Plugin } from "cordis";
 import { OllamaCloudClient } from "./client.js";
@@ -40,9 +45,11 @@ interface StoredCommand {
 }
 
 export interface OllamaUserBackendHost {
-  storage: UserSettingsStorage & {
-    setAlarm(scheduledTime: number | Date): Promise<void>;
-  };
+  storage: UserSettingsStorage &
+    CredentialStorage & {
+      getAlarm?(): Promise<number | null>;
+      setAlarm(scheduledTime: number | Date): Promise<void>;
+    };
   settings: UserSettingsBackendContribution;
   credentials: CredentialUserBackendContribution;
   client?: OllamaCloudClient;
@@ -153,8 +160,36 @@ export class OllamaCloudUserBackendContribution {
         operation: command.type,
         label: command.label,
       };
-      await this.admitRecord(record);
-      await this.ensureAdmittedState(record, command.apiKey);
+      const prepared = await this.host.credentials.prepareApiKey({
+        accountId,
+        connectionId,
+        packageId: PACKAGE_ID,
+        generation,
+        apiKey: command.apiKey,
+      });
+      await this.host.storage.transaction(
+        async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          const settings = await this.host.settings.readSnapshot(storage);
+          if (
+            !settings.packages.some(
+              (pkg) =>
+                pkg.packageId === PACKAGE_ID && pkg.state === "installed",
+            )
+          ) {
+            throw new Error(
+              "Ollama Cloud Package is not installed and enabled",
+            );
+          }
+          await this.host.settings.createConnection(
+            accountId,
+            this.authorizingConnection(record, command.label),
+            storage,
+          );
+          await this.host.credentials.stagePreparedApiKey(prepared, storage);
+          await this.admitRecord(record, storage);
+        },
+      );
+      await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
       return record;
     }
 
@@ -163,6 +198,9 @@ export class OllamaCloudUserBackendContribution {
       command.connectionId,
     );
     if (command.type === "connection/rotate-api-key") {
+      if (connection.state !== "ready" && connection.state !== "disabled") {
+        throw new Error(`Connection is ${connection.state}`);
+      }
       const generation = this.randomId();
       const record: StoredCommand = {
         schemaVersion: 1,
@@ -174,8 +212,32 @@ export class OllamaCloudUserBackendContribution {
         expectedGeneration: connection.generation,
         operation: command.type,
       };
-      await this.admitRecord(record);
-      await this.ensureAdmittedState(record, command.apiKey);
+      const prepared = await this.host.credentials.prepareApiKey({
+        accountId,
+        connectionId: connection.connectionId,
+        packageId: PACKAGE_ID,
+        generation,
+        apiKey: command.apiKey,
+      });
+      await this.host.storage.transaction(
+        async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          const current = await this.host.settings.getConnection(
+            accountId,
+            connection.connectionId,
+            storage,
+          );
+          if (
+            !current ||
+            current.generation !== connection.generation ||
+            (current.state !== "ready" && current.state !== "disabled")
+          ) {
+            throw new Error("Connection changed before credential rotation");
+          }
+          await this.host.credentials.stagePreparedApiKey(prepared, storage);
+          await this.admitRecord(record, storage);
+        },
+      );
+      await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
       return record;
     }
 
@@ -198,6 +260,7 @@ export class OllamaCloudUserBackendContribution {
         : {}),
     };
     await this.admitRecord(record);
+    await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
     return record;
   }
 
@@ -228,18 +291,34 @@ export class OllamaCloudUserBackendContribution {
     }
   }
 
-  private async admitRecord(record: StoredCommand): Promise<void> {
-    await this.host.storage.transaction(async (storage) => {
+  private async admitRecord(
+    record: StoredCommand,
+    storage?: CredentialTransaction,
+  ): Promise<void> {
+    const admit = async (transaction: CredentialTransaction) => {
+      const existing = await transaction.get<StoredCommand>(
+        commandKey(record.commandId),
+      );
+      if (existing) {
+        if (
+          existing.accountId !== record.accountId ||
+          existing.fingerprint !== record.fingerprint
+        ) {
+          throw new Error("Connection command idempotency key was reused");
+        }
+        return;
+      }
       const pending =
-        (await storage.get<string[]>(PENDING_KEY))?.filter(
+        (await transaction.get<string[]>(PENDING_KEY))?.filter(
           (id) => id !== record.commandId,
         ) ?? [];
-      await storage.put({
+      await transaction.put({
         [commandKey(record.commandId)]: record,
         [PENDING_KEY]: [...pending, record.commandId],
       });
-    });
-    await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
+      await transaction.setAlarm?.(this.now() + RECOVERY_DELAY_MS);
+    };
+    await (storage ? admit(storage) : this.host.storage.transaction(admit));
   }
 
   private authorizingConnection(
@@ -309,6 +388,16 @@ export class OllamaCloudUserBackendContribution {
   ): Promise<ConnectionCommandReceiptV1> {
     const generation = record.credentialGeneration;
     if (!generation) throw new Error("Credential generation is unavailable");
+    const projected = await this.requireConnection(
+      record.accountId,
+      record.connectionId,
+    );
+    if (
+      projected.generation === generation &&
+      (projected.state === "ready" || projected.state === "disabled")
+    ) {
+      return this.finishRecord(record, "applied");
+    }
     try {
       const apiKey = await this.host.credentials.readStagedApiKey({
         accountId: record.accountId,
@@ -317,38 +406,57 @@ export class OllamaCloudUserBackendContribution {
         generation,
       });
       const models = await this.client.listModels(apiKey);
-      await this.host.credentials.activate({
-        accountId: record.accountId,
-        connectionId: record.connectionId,
-        packageId: PACKAGE_ID,
-        generation,
-      });
-      const current = await this.requireConnection(
-        record.accountId,
-        record.connectionId,
-      );
-      await this.host.settings.replaceConnection(
-        record.accountId,
-        record.connectionId,
-        record.expectedGeneration ?? current.generation,
-        {
-          ...current,
-          state: "ready",
-          generation,
-          modelCatalog: this.catalog(models),
-          authorization: {
-            schemaVersion: 1,
-            kind: "api-key",
-            credential: {
-              schemaVersion: 1,
-              configured: true,
-              source: "api-key",
-              writable: true,
+      await this.host.storage.transaction(
+        async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          const current = await this.host.settings.getConnection(
+            record.accountId,
+            record.connectionId,
+            storage,
+          );
+          if (!current || current.packageId !== PACKAGE_ID) {
+            throw new Error("Ollama Cloud Connection is unavailable");
+          }
+          if (
+            record.operation === "connection/rotate-api-key" &&
+            current.state !== "ready" &&
+            current.state !== "disabled"
+          ) {
+            throw new Error(`Connection is ${current.state}`);
+          }
+          await this.host.credentials.activate(
+            {
+              accountId: record.accountId,
+              connectionId: record.connectionId,
+              packageId: PACKAGE_ID,
               generation,
-              updatedAt: new Date(this.now()).toISOString(),
             },
-          },
-          failure: undefined,
+            storage,
+          );
+          await this.host.settings.replaceConnection(
+            record.accountId,
+            record.connectionId,
+            record.expectedGeneration ?? current.generation,
+            {
+              ...current,
+              state: current.state === "disabled" ? "disabled" : "ready",
+              generation,
+              modelCatalog: this.catalog(models),
+              authorization: {
+                schemaVersion: 1,
+                kind: "api-key",
+                credential: {
+                  schemaVersion: 1,
+                  configured: true,
+                  source: "api-key",
+                  writable: true,
+                  generation,
+                  updatedAt: new Date(this.now()).toISOString(),
+                },
+              },
+              failure: undefined,
+            },
+            storage,
+          );
         },
       );
       return this.finishRecord(record, "applied");
@@ -564,9 +672,11 @@ export class OllamaCloudUserBackendContribution {
       const deadline = Date.parse(refreshAfter);
       return Number.isFinite(deadline) ? [deadline] : [];
     });
+    const credentialExpiry = await this.host.credentials.nextLeaseExpiry();
     const deadlines = [
       ...(pending.length > 0 ? [this.now() + RECOVERY_DELAY_MS] : []),
       ...catalogDeadlines,
+      ...(credentialExpiry === undefined ? [] : [credentialExpiry]),
     ];
     if (deadlines.length > 0) {
       await this.host.storage.setAlarm(Math.min(...deadlines));

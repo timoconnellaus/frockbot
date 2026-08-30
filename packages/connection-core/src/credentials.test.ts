@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeCredentialLeaseV1,
   openCredentialV1,
   parseCredentialKeyringV1,
   sealCredentialV1,
@@ -57,6 +58,35 @@ describe("Connection credential envelopes", () => {
         context: { ...context, accountId: "another-account" },
       }),
     ).rejects.toThrow("credential envelope authentication failed");
+  });
+
+  test("decodes exact versioned credential leases at RPC seams", async () => {
+    const envelope = await sealCredentialV1({
+      keyring,
+      context,
+      plaintext: "ollama-secret",
+      createdAt: "2026-08-30T00:00:00.000Z",
+    });
+    const lease = {
+      schemaVersion: 1,
+      leaseId: "lease-1",
+      effectId: "effect-1",
+      connectionId: context.connectionId,
+      credentialGeneration: context.credentialGeneration,
+      expiresAt: "2026-08-30T01:00:00.000Z",
+      envelope,
+    } as const;
+
+    expect(decodeCredentialLeaseV1(lease)).toEqual(lease);
+    expect(() =>
+      decodeCredentialLeaseV1({ ...lease, unexpected: true }),
+    ).toThrow("Credential lease is invalid");
+    expect(() =>
+      decodeCredentialLeaseV1({
+        ...lease,
+        credentialGeneration: "generation-2",
+      }),
+    ).toThrow("Credential lease is invalid");
   });
 
   test("requires a versioned 32-byte keyring", () => {

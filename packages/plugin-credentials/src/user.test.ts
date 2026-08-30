@@ -11,6 +11,7 @@ import {
 
 class MemoryStorage implements CredentialStorage {
   readonly values = new Map<string, unknown>();
+  alarm?: number;
 
   get<T>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.values.get(key) as T | undefined);
@@ -38,6 +39,15 @@ class MemoryStorage implements CredentialStorage {
   ): Promise<T> {
     return callback(this);
   }
+
+  getAlarm(): Promise<number | null> {
+    return Promise.resolve(this.alarm ?? null);
+  }
+
+  setAlarm(scheduledTime: number | Date): Promise<void> {
+    this.alarm = Number(scheduledTime);
+    return Promise.resolve();
+  }
 }
 
 const bytes = Uint8Array.from({ length: 32 }, (_, index) => index + 7);
@@ -53,12 +63,16 @@ const serializedKeyring = JSON.stringify({
   keys: { primary: encodedKey },
 });
 
-function contribution(storage = new MemoryStorage()) {
+function contribution(
+  storage = new MemoryStorage(),
+  now: () => number = () => Date.parse("2026-08-30T00:00:00.000Z"),
+) {
   return {
     storage,
     credentials: createCredentialUserBackendContribution({
       storage,
       keyring: serializedKeyring,
+      now,
     }),
   };
 }
@@ -138,6 +152,38 @@ describe("Credential User Contribution", () => {
         expiresAt: "2026-08-30T02:00:00.000Z",
       }),
     ).rejects.toThrow("Credential lease effect id was reused");
+  });
+
+  test("expires durable leases and blocks replay or decryption", async () => {
+    let now = Date.parse("2026-08-30T00:00:00.000Z");
+    const { credentials } = contribution(undefined, () => now);
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "secret",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    const lease = await credentials.lease({
+      ...authority,
+      effectId: "effect-expired",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+
+    now = Date.parse("2026-08-30T01:00:00.000Z");
+    await expect(
+      credentials.openLease({
+        accountId: authority.accountId,
+        packageId: authority.packageId,
+        lease,
+      }),
+    ).rejects.toThrow("Credential lease expired");
+    await expect(
+      credentials.lease({
+        ...authority,
+        effectId: "effect-expired",
+        expiresAt: "2026-08-30T02:00:00.000Z",
+      }),
+    ).rejects.toThrow("Credential lease expired");
   });
 
   test("disconnect blocks new leases while preserving an admitted lease", async () => {

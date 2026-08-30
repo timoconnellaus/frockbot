@@ -8,10 +8,7 @@ import {
   openCredentialV1,
   parseCredentialKeyringV1,
 } from "@frockbot/connection-core";
-import {
-  OpenAICompatibleHttpError,
-  OpenAICompatibleProvider,
-} from "@frockbot/provider-openai-compatible";
+import { OpenAICompatibleProvider } from "@frockbot/provider-openai-compatible";
 import type { Plugin } from "cordis";
 import type { OllamaFetch } from "./client.js";
 
@@ -26,6 +23,7 @@ export interface OllamaCloudRuntimeConfig {
   settleCredential(effectId: string): Promise<void>;
   chatBaseUrl?: string;
   fetch?: OllamaFetch;
+  now?: () => number;
 }
 
 class OllamaCloudProvider implements LlmProvider {
@@ -41,6 +39,9 @@ class OllamaCloudProvider implements LlmProvider {
     let apiKey: string;
     try {
       lease = await this.config.leaseCredential(request.requestId);
+      if (Date.parse(lease.expiresAt) <= (this.config.now ?? Date.now)()) {
+        throw new Error("Ollama Cloud credential lease expired");
+      }
       apiKey = await openCredentialV1({
         keyring: this.keyring,
         context: {
@@ -67,15 +68,6 @@ class OllamaCloudProvider implements LlmProvider {
     });
     try {
       yield* provider.stream(request, signal);
-    } catch (error) {
-      if (
-        error instanceof OpenAICompatibleHttpError &&
-        error.status >= 400 &&
-        error.status < 500
-      ) {
-        throw new LlmEffectNotStartedError(error.message);
-      }
-      throw error;
     } finally {
       await this.config.settleCredential(request.requestId);
     }

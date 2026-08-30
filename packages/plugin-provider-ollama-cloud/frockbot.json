@@ -4,6 +4,10 @@
   "displayName": "Ollama Cloud",
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "credentials": ">=0.0.1",
+    "settings": ">=0.0.1"
+  },
   "contributions": {
     "backend": [{ "entry": "./user", "host": "user" }],
     "runtime": { "entry": "./runtime" }

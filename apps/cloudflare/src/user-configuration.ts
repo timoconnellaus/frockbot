@@ -37,12 +37,24 @@ interface UserConfigurationEnv {
   CREDENTIAL_KEYRING?: string;
 }
 
+interface ConnectionUserBackendContribution {
+  readonly packageId: string;
+  executeConnection(accountId: string, input: unknown): Promise<unknown>;
+  leaseModelCredential(input: {
+    accountId: string;
+    connectionId: string;
+    providerModelId: string;
+    effectId: string;
+  }): Promise<unknown>;
+  alarm?(): Promise<void>;
+}
+
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   private mounted:
     | Promise<{
         settings: UserSettingsBackendContribution;
         credentials: CredentialUserBackendContribution;
-        ollama: OllamaCloudUserBackendContribution;
+        connections: ReadonlyMap<string, ConnectionUserBackendContribution>;
         flock: FlockUserBackendContribution;
         dispose(): Promise<void>;
       }>
@@ -51,7 +63,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   private contributions(): Promise<{
     settings: UserSettingsBackendContribution;
     credentials: CredentialUserBackendContribution;
-    ollama: OllamaCloudUserBackendContribution;
+    connections: ReadonlyMap<string, ConnectionUserBackendContribution>;
     flock: FlockUserBackendContribution;
     dispose(): Promise<void>;
   }> {
@@ -61,6 +73,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         let credentials: CredentialUserBackendContribution | undefined;
         let ollama: OllamaCloudUserBackendContribution | undefined;
         let flock: FlockUserBackendContribution | undefined;
+        const connections = new Map<
+          string,
+          ConnectionUserBackendContribution
+        >();
         const mounted = await createFoundationBackendContributions<
           | UserSettingsBackendContribution
           | CredentialUserBackendContribution
@@ -118,7 +134,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                 {
                   mount(value: OllamaCloudUserBackendContribution) {
                     ollama = value;
-                    return lifecycle.mount(value);
+                    connections.set(value.packageId, value);
+                    const dispose = lifecycle.mount(value);
+                    return () => {
+                      connections.delete(value.packageId);
+                      dispose();
+                    };
                   },
                 },
               );
@@ -162,7 +183,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         return {
           settings,
           credentials,
-          ollama,
+          connections,
           flock,
           dispose: mounted.dispose,
         };
@@ -179,8 +200,16 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return (await this.contributions()).credentials;
   }
 
-  private async ollamaContribution(): Promise<OllamaCloudUserBackendContribution> {
-    return (await this.contributions()).ollama;
+  private async connectionContribution(
+    packageId: string,
+  ): Promise<ConnectionUserBackendContribution> {
+    const contribution = (await this.contributions()).connections.get(
+      packageId,
+    );
+    if (!contribution) {
+      throw new Error(`Connection Package "${packageId}" is unavailable`);
+    }
+    return contribution;
   }
 
   private async flockContribution(): Promise<FlockUserBackendContribution> {
@@ -202,9 +231,21 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       userId: rpcIdentifier,
       command: rpcDecoded(decodeConnectionCommandV1),
     });
-    return (await this.ollamaContribution()).executeConnection(
+    const command = request.command as ReturnType<
+      typeof decodeConnectionCommandV1
+    >;
+    const packageId =
+      command.type === "connection/create-api-key"
+        ? command.packageId
+        : (
+            await (
+              await this.settingsContribution()
+            ).getConnection(request.userId as string, command.connectionId)
+          )?.packageId;
+    if (!packageId) throw new Error("Connection is unavailable");
+    return (await this.connectionContribution(packageId)).executeConnection(
       request.userId as string,
-      request.command,
+      command,
     );
   }
 
@@ -226,7 +267,13 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       providerModelId: rpcString(256),
       effectId: rpcIdentifier,
     });
-    return (await this.ollamaContribution()).leaseModelCredential({
+    const connection = await (
+      await this.settingsContribution()
+    ).getConnection(request.userId as string, request.connectionId as string);
+    if (!connection) throw new Error("Connection is unavailable");
+    return (
+      await this.connectionContribution(connection.packageId)
+    ).leaseModelCredential({
       accountId: request.userId as string,
       connectionId: request.connectionId as string,
       providerModelId: request.providerModelId as string,
@@ -246,7 +293,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   async alarm() {
-    await (await this.ollamaContribution()).alarm();
+    const contributions = await this.contributions();
+    await contributions.credentials.expireLeases();
+    for (const contribution of contributions.connections.values()) {
+      await contribution.alarm?.();
+    }
   }
 
   async listBots(input: unknown) {

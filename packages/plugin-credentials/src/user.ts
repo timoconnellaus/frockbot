@@ -10,12 +10,15 @@ import type { Plugin } from "cordis";
 const CREDENTIAL_PREFIX = "credential:";
 const ACTIVE_PREFIX = "credential-active:";
 const LEASE_PREFIX = "credential-lease:";
+const LEASE_TOMBSTONE_PREFIX = "credential-lease-expired:";
+const LEASE_INDEX_KEY = "credential-lease-index";
 
 export interface CredentialTransaction {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
   put(entries: Record<string, unknown>): Promise<void>;
   delete(key: string): Promise<boolean>;
+  setAlarm?(scheduledTime: number | Date): Promise<void>;
 }
 
 export interface CredentialStorage extends CredentialTransaction {
@@ -25,8 +28,20 @@ export interface CredentialStorage extends CredentialTransaction {
 }
 
 export interface CredentialUserBackendHost {
-  storage: CredentialStorage;
+  storage: CredentialStorage & {
+    getAlarm?(): Promise<number | null>;
+    setAlarm?(scheduledTime: number | Date): Promise<void>;
+  };
   keyring: string;
+  now?: () => number;
+}
+
+export interface PreparedApiKeyCredential {
+  accountId: string;
+  connectionId: string;
+  packageId: string;
+  generation: string;
+  envelope: CredentialEnvelopeV1;
 }
 
 interface StoredCredentialGeneration {
@@ -58,6 +73,10 @@ function leaseKey(effectId: string): string {
   return `${LEASE_PREFIX}${effectId}`;
 }
 
+function leaseTombstoneKey(effectId: string): string {
+  return `${LEASE_TOMBSTONE_PREFIX}${effectId}`;
+}
+
 function requireGeneration(
   value: StoredCredentialGeneration | undefined,
   connectionId: string,
@@ -76,9 +95,65 @@ function requireGeneration(
 
 export class CredentialUserBackendContribution {
   private readonly keyring;
+  private readonly now: () => number;
 
   constructor(private readonly host: CredentialUserBackendHost) {
     this.keyring = parseCredentialKeyringV1(host.keyring);
+    this.now = host.now ?? Date.now;
+  }
+
+  async prepareApiKey(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    generation: string;
+    apiKey: string;
+    now?: string;
+  }): Promise<PreparedApiKeyCredential> {
+    return {
+      accountId: input.accountId,
+      connectionId: input.connectionId,
+      packageId: input.packageId,
+      generation: input.generation,
+      envelope: await sealCredentialV1({
+        keyring: this.keyring,
+        context: {
+          accountId: input.accountId,
+          connectionId: input.connectionId,
+          packageId: input.packageId,
+          credentialGeneration: input.generation,
+        },
+        plaintext: input.apiKey,
+        createdAt: input.now,
+      }),
+    };
+  }
+
+  async stagePreparedApiKey(
+    input: PreparedApiKeyCredential,
+    storage: CredentialTransaction = this.host.storage,
+  ): Promise<void> {
+    const key = credentialKey(input.connectionId, input.generation);
+    const existing = await storage.get<StoredCredentialGeneration>(key);
+    if (existing) {
+      if (
+        existing.accountId !== input.accountId ||
+        existing.packageId !== input.packageId
+      ) {
+        throw new Error("Credential generation authority does not match");
+      }
+      return;
+    }
+    await storage.put(key, {
+      schemaVersion: 1,
+      accountId: input.accountId,
+      connectionId: input.connectionId,
+      packageId: input.packageId,
+      generation: input.generation,
+      state: "pending",
+      envelope: input.envelope,
+      leaseIds: [],
+    } satisfies StoredCredentialGeneration);
   }
 
   async stageApiKey(input: {
@@ -89,39 +164,7 @@ export class CredentialUserBackendContribution {
     apiKey: string;
     now?: string;
   }): Promise<void> {
-    const key = credentialKey(input.connectionId, input.generation);
-    const existing =
-      await this.host.storage.get<StoredCredentialGeneration>(key);
-    if (existing) {
-      if (
-        existing.accountId !== input.accountId ||
-        existing.packageId !== input.packageId
-      ) {
-        throw new Error("Credential generation authority does not match");
-      }
-      return;
-    }
-    const envelope = await sealCredentialV1({
-      keyring: this.keyring,
-      context: {
-        accountId: input.accountId,
-        connectionId: input.connectionId,
-        packageId: input.packageId,
-        credentialGeneration: input.generation,
-      },
-      plaintext: input.apiKey,
-      createdAt: input.now,
-    });
-    await this.host.storage.put(key, {
-      schemaVersion: 1,
-      accountId: input.accountId,
-      connectionId: input.connectionId,
-      packageId: input.packageId,
-      generation: input.generation,
-      state: "pending",
-      envelope,
-      leaseIds: [],
-    } satisfies StoredCredentialGeneration);
+    await this.stagePreparedApiKey(await this.prepareApiKey(input));
   }
 
   async readStagedApiKey(input: {
@@ -156,15 +199,18 @@ export class CredentialUserBackendContribution {
     });
   }
 
-  async activate(input: {
-    accountId: string;
-    connectionId: string;
-    packageId: string;
-    generation: string;
-  }): Promise<void> {
-    await this.host.storage.transaction(async (storage) => {
+  async activate(
+    input: {
+      accountId: string;
+      connectionId: string;
+      packageId: string;
+      generation: string;
+    },
+    storage?: CredentialTransaction,
+  ): Promise<void> {
+    const activate = async (transaction: CredentialTransaction) => {
       const next = requireGeneration(
-        await storage.get<StoredCredentialGeneration>(
+        await transaction.get<StoredCredentialGeneration>(
           credentialKey(input.connectionId, input.generation),
         ),
         input.connectionId,
@@ -176,7 +222,7 @@ export class CredentialUserBackendContribution {
       ) {
         throw new Error("Credential generation authority does not match");
       }
-      const currentGeneration = await storage.get<string>(
+      const currentGeneration = await transaction.get<string>(
         activeKey(input.connectionId),
       );
       const entries: Record<string, unknown> = {
@@ -188,7 +234,7 @@ export class CredentialUserBackendContribution {
       };
       if (currentGeneration && currentGeneration !== input.generation) {
         const current = requireGeneration(
-          await storage.get<StoredCredentialGeneration>(
+          await transaction.get<StoredCredentialGeneration>(
             credentialKey(input.connectionId, currentGeneration),
           ),
           input.connectionId,
@@ -199,8 +245,11 @@ export class CredentialUserBackendContribution {
           state: "retired",
         } satisfies StoredCredentialGeneration;
       }
-      await storage.put(entries);
-    });
+      await transaction.put(entries);
+    };
+    await (storage
+      ? activate(storage)
+      : this.host.storage.transaction(activate));
   }
 
   async discardPending(
@@ -221,7 +270,27 @@ export class CredentialUserBackendContribution {
     effectId: string;
     expiresAt: string;
   }): Promise<CredentialLeaseV1> {
-    return this.host.storage.transaction(async (storage) => {
+    const expiresAt = Date.parse(input.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= this.now()) {
+      throw new Error("Credential lease expiry is invalid");
+    }
+    await this.expireLeases();
+    const result = await this.host.storage.transaction(async (storage) => {
+      const expired = await storage.get<{
+        accountId: string;
+        connectionId: string;
+        packageId: string;
+      }>(leaseTombstoneKey(input.effectId));
+      if (expired) {
+        if (
+          expired.accountId !== input.accountId ||
+          expired.connectionId !== input.connectionId ||
+          expired.packageId !== input.packageId
+        ) {
+          throw new Error("Credential lease effect id was reused");
+        }
+        throw new Error("Credential lease expired");
+      }
       const existing = await storage.get<StoredCredentialLease>(
         leaseKey(input.effectId),
       );
@@ -233,13 +302,7 @@ export class CredentialUserBackendContribution {
         ) {
           throw new Error("Credential lease effect id was reused");
         }
-        const {
-          accountId: _,
-          packageId: __,
-          settled: ___,
-          ...lease
-        } = existing;
-        return lease;
+        return this.publicLease(existing);
       }
       const generation = await storage.get<string>(
         activeKey(input.connectionId),
@@ -272,16 +335,19 @@ export class CredentialUserBackendContribution {
         envelope: stored.envelope,
         settled: false,
       };
+      const leaseIndex = (await storage.get<string[]>(LEASE_INDEX_KEY)) ?? [];
       await storage.put({
         [leaseKey(input.effectId)]: lease,
+        [LEASE_INDEX_KEY]: [...new Set([...leaseIndex, input.effectId])],
         [credentialKey(input.connectionId, generation)]: {
           ...stored,
           leaseIds: [...new Set([...stored.leaseIds, leaseId])],
         } satisfies StoredCredentialGeneration,
       });
-      const { accountId: _, packageId: __, settled: ___, ...result } = lease;
-      return result;
+      return this.publicLease(lease);
     });
+    await this.scheduleLeaseAlarm();
+    return result;
   }
 
   async openLease(input: {
@@ -289,6 +355,22 @@ export class CredentialUserBackendContribution {
     packageId: string;
     lease: CredentialLeaseV1;
   }): Promise<string> {
+    const stored = await this.host.storage.get<StoredCredentialLease>(
+      leaseKey(input.lease.effectId),
+    );
+    if (
+      !stored ||
+      stored.accountId !== input.accountId ||
+      stored.packageId !== input.packageId ||
+      stored.leaseId !== input.lease.leaseId ||
+      JSON.stringify(this.publicLease(stored)) !== JSON.stringify(input.lease)
+    ) {
+      throw new Error("Credential lease is unavailable");
+    }
+    if (Date.parse(stored.expiresAt) <= this.now()) {
+      await this.expireLeases();
+      throw new Error("Credential lease expired");
+    }
     return openCredentialV1({
       keyring: this.keyring,
       context: {
@@ -307,23 +389,87 @@ export class CredentialUserBackendContribution {
         leaseKey(effectId),
       );
       if (!lease || lease.settled) return;
-      const key = credentialKey(lease.connectionId, lease.credentialGeneration);
-      const stored = requireGeneration(
-        await storage.get<StoredCredentialGeneration>(key),
-        lease.connectionId,
-        lease.credentialGeneration,
-      );
-      const next = {
-        ...stored,
-        leaseIds: stored.leaseIds.filter((id) => id !== lease.leaseId),
-      } satisfies StoredCredentialGeneration;
-      await storage.delete(leaseKey(effectId));
-      if (next.state === "retired" && next.leaseIds.length === 0) {
-        await storage.delete(key);
-      } else {
-        await storage.put(key, next);
+      await this.releaseLease(storage, lease, false);
+    });
+    await this.scheduleLeaseAlarm();
+  }
+
+  async expireLeases(now = this.now()): Promise<void> {
+    await this.host.storage.transaction(async (storage) => {
+      const effectIds = (await storage.get<string[]>(LEASE_INDEX_KEY)) ?? [];
+      for (const effectId of effectIds) {
+        const lease = await storage.get<StoredCredentialLease>(
+          leaseKey(effectId),
+        );
+        if (lease && Date.parse(lease.expiresAt) <= now) {
+          await this.releaseLease(storage, lease, true);
+        }
       }
     });
+    await this.scheduleLeaseAlarm();
+  }
+
+  async nextLeaseExpiry(): Promise<number | undefined> {
+    const effectIds =
+      (await this.host.storage.get<string[]>(LEASE_INDEX_KEY)) ?? [];
+    const expiries: number[] = [];
+    for (const effectId of effectIds) {
+      const lease = await this.host.storage.get<StoredCredentialLease>(
+        leaseKey(effectId),
+      );
+      if (lease) expiries.push(Date.parse(lease.expiresAt));
+    }
+    return expiries.length > 0 ? Math.min(...expiries) : undefined;
+  }
+
+  private publicLease(lease: StoredCredentialLease): CredentialLeaseV1 {
+    const { accountId: _, packageId: __, settled: ___, ...result } = lease;
+    return result;
+  }
+
+  private async releaseLease(
+    storage: CredentialTransaction,
+    lease: StoredCredentialLease,
+    expired: boolean,
+  ): Promise<void> {
+    const key = credentialKey(lease.connectionId, lease.credentialGeneration);
+    const stored = requireGeneration(
+      await storage.get<StoredCredentialGeneration>(key),
+      lease.connectionId,
+      lease.credentialGeneration,
+    );
+    const next = {
+      ...stored,
+      leaseIds: stored.leaseIds.filter((id) => id !== lease.leaseId),
+    } satisfies StoredCredentialGeneration;
+    const leaseIndex =
+      (await storage.get<string[]>(LEASE_INDEX_KEY))?.filter(
+        (effectId) => effectId !== lease.effectId,
+      ) ?? [];
+    await storage.delete(leaseKey(lease.effectId));
+    await storage.put(LEASE_INDEX_KEY, leaseIndex);
+    if (expired) {
+      await storage.put(leaseTombstoneKey(lease.effectId), {
+        accountId: lease.accountId,
+        connectionId: lease.connectionId,
+        packageId: lease.packageId,
+      });
+    }
+    if (next.state === "retired" && next.leaseIds.length === 0) {
+      await storage.delete(key);
+    } else {
+      await storage.put(key, next);
+    }
+  }
+
+  private async scheduleLeaseAlarm(): Promise<void> {
+    if (!this.host.storage.setAlarm) return;
+    const next = await this.nextLeaseExpiry();
+    if (next === undefined) return;
+    const current = await this.host.storage.getAlarm?.();
+    if (current === null || current === undefined || next < current) {
+      await this.host.storage.setAlarm(next);
+    }
   }
 
   async disconnect(connectionId: string): Promise<void> {

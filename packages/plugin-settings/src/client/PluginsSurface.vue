@@ -301,7 +301,12 @@ async function disconnect(connectionId: string): Promise<void> {
             >
               Enable
             </UiButton>
-            <UiButton @click="rotatingConnectionId = connection.connectionId">
+            <UiButton
+              v-if="
+                connection.state === 'ready' || connection.state === 'disabled'
+              "
+              @click="rotatingConnectionId = connection.connectionId"
+            >
               Rotate key
             </UiButton>
             <UiButton

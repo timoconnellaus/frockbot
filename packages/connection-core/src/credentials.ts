@@ -43,6 +43,101 @@ export interface CredentialContextV1 {
   credentialGeneration: string;
 }
 
+function credentialRecord(input: unknown): Record<string, unknown> | undefined {
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : undefined;
+}
+
+function hasCredentialKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  return (
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function credentialString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+export function decodeCredentialEnvelopeV1(
+  input: unknown,
+): CredentialEnvelopeV1 {
+  const value = credentialRecord(input);
+  if (
+    !value ||
+    !hasCredentialKeys(value, [
+      "schemaVersion",
+      "algorithm",
+      "keyId",
+      "credentialGeneration",
+      "nonce",
+      "ciphertext",
+      "createdAt",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    value.algorithm !== "AES-GCM" ||
+    !credentialString(value.keyId) ||
+    !credentialString(value.credentialGeneration) ||
+    !credentialString(value.nonce) ||
+    !credentialString(value.ciphertext) ||
+    !credentialString(value.createdAt) ||
+    !Number.isFinite(Date.parse(value.createdAt))
+  ) {
+    throw new Error("Credential envelope is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    algorithm: "AES-GCM",
+    keyId: value.keyId,
+    credentialGeneration: value.credentialGeneration,
+    nonce: value.nonce,
+    ciphertext: value.ciphertext,
+    createdAt: value.createdAt,
+  };
+}
+
+export function decodeCredentialLeaseV1(input: unknown): CredentialLeaseV1 {
+  const value = credentialRecord(input);
+  if (
+    !value ||
+    !hasCredentialKeys(value, [
+      "schemaVersion",
+      "leaseId",
+      "effectId",
+      "connectionId",
+      "credentialGeneration",
+      "expiresAt",
+      "envelope",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    !credentialString(value.leaseId) ||
+    !credentialString(value.effectId) ||
+    !credentialString(value.connectionId) ||
+    !credentialString(value.credentialGeneration) ||
+    !credentialString(value.expiresAt) ||
+    !Number.isFinite(Date.parse(value.expiresAt))
+  ) {
+    throw new Error("Credential lease is invalid");
+  }
+  const envelope = decodeCredentialEnvelopeV1(value.envelope);
+  if (envelope.credentialGeneration !== value.credentialGeneration) {
+    throw new Error("Credential lease is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    leaseId: value.leaseId,
+    effectId: value.effectId,
+    connectionId: value.connectionId,
+    credentialGeneration: value.credentialGeneration,
+    expiresAt: value.expiresAt,
+    envelope,
+  };
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 

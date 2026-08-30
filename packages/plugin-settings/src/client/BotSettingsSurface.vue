@@ -104,8 +104,8 @@ async function save(): Promise<void> {
       <textarea v-model="description" maxlength="10000" rows="7" />
     </UiField>
     <UiField label="Model">
-      <select v-model="selectedModel">
-        <option value="">Foundation default</option>
+      <select v-model="selectedModel" required>
+        <option disabled value="">Select a connected model</option>
         <option
           v-for="model in modelOptions"
           :key="model.value"
