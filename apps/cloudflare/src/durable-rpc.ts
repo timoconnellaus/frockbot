@@ -1,4 +1,4 @@
-import { decodeBotIdV1 } from "@frockbot/configuration-core";
+import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/configuration-core";
 import { decodeRunIdV1 } from "@frockbot/plugin-shell/backend-contracts";
 
 type RpcValueDecoder = (value: unknown, label: string) => unknown;
@@ -61,10 +61,7 @@ export function rpcString(maximum = 4_096): RpcValueDecoder {
 }
 
 export const rpcIdentifier: RpcValueDecoder = (value, label) => {
-  if (
-    typeof value !== "string" ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value)
-  ) {
+  if (!isRpcIdentifier(value)) {
     throw new Error(`${label} must be an identifier`);
   }
   return value;
