@@ -9,10 +9,12 @@ import type {
   ContributionResolver,
   PackageSource,
 } from "@frockbot/plugin-catalog";
+import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import type {
   BotExecutionPlanV1,
   BotSettingsViewV1,
   ConnectionView,
+  ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
 import authManifest from "@frockbot/plugin-auth/manifest";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
@@ -31,6 +33,7 @@ export interface BackendRouteContribution {
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
+import credentialsManifest from "@frockbot/plugin-credentials/manifest";
 // Desktop and mobile Package manifests remain part of the immutable plan.
 import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
 import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
@@ -67,6 +70,8 @@ import foundationProviderPlugin, {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
 } from "@frockbot/plugin-provider-foundation/runtime";
+import ollamaCloudManifest from "@frockbot/plugin-provider-ollama-cloud/manifest";
+import { createOllamaCloudRuntimePlugin } from "@frockbot/plugin-provider-ollama-cloud/runtime";
 import settingsManifest from "@frockbot/plugin-settings/manifest";
 import shellManifest from "@frockbot/plugin-shell/manifest";
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
@@ -79,6 +84,8 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-auth", authManifest],
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
+  ["@frockbot/plugin-credentials", credentialsManifest],
+  ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
@@ -112,6 +119,32 @@ const assignedRuntimeContributionFactories = new Map<
   string,
   AssignedRuntimeContributionFactory
 >();
+
+interface ModelRuntimeContributionConfig {
+  accountId: string;
+  connectionId: string;
+  credentialKeyring: string;
+  leaseCredential(effectId: string): Promise<CredentialLeaseV1>;
+  settleCredential(effectId: string): Promise<void>;
+}
+
+type ModelRuntimeContributionFactory = (
+  config: ModelRuntimeContributionConfig,
+) => Plugin;
+
+const modelRuntimeContributionFactories = new Map<
+  string,
+  ModelRuntimeContributionFactory
+>([
+  [
+    "@frockbot/plugin-provider-ollama-cloud/runtime",
+    (config) =>
+      createOllamaCloudRuntimePlugin({
+        ...config,
+        packageId: "provider-ollama-cloud",
+      }),
+  ],
+]);
 
 const applicationSource: ApplicationSource = {
   schemaVersion: 1,
@@ -333,14 +366,53 @@ export async function createFoundationAssignedRuntimePackages(
   return result;
 }
 
+export function createFoundationModelRuntimePackage(
+  plan: ApplicationPlan,
+  binding: ResolvedModelBindingV1,
+  host: ModelRuntimeContributionConfig,
+): FoundationAssignedRuntimePackage {
+  if (
+    binding.state === "unavailable" ||
+    !binding.connection ||
+    !binding.packageId ||
+    !binding.providerType
+  ) {
+    throw new Error(binding.failure ?? "Bot model Connection is unavailable");
+  }
+  const pkg = plan.packages.find(
+    (candidate) => candidate.id === binding.packageId,
+  );
+  const runtime = pkg?.manifest.contributions.runtime;
+  if (!pkg || !runtime) {
+    throw new Error("Bot model Package runtime is unavailable");
+  }
+  const specifier = contributionSpecifier(pkg.specifier, runtime.entry);
+  const factory = modelRuntimeContributionFactories.get(specifier);
+  if (!factory) {
+    throw new Error(
+      `Bot model provider "${binding.providerType}" is unavailable`,
+    );
+  }
+  return {
+    specifier: pkg.specifier,
+    contributionSpecifier: specifier,
+    manifest: pkg.manifest,
+    plugin: factory({
+      ...host,
+      connectionId: binding.connection.connectionId,
+    }),
+  };
+}
+
 export async function createFoundationRuntimeApplication(): Promise<FoundationRuntimeApplication> {
   const plan = await compileFoundationApplication();
   const runtimeIds = new Set(plan.contributions.runtime);
   // Computer providers require host authority and are added only by a capable runtime.
   runtimeIds.delete("computer");
   runtimeIds.delete("fly-sprite");
-  // Composio mounts only after durable Connections resolve its backend config.
+  // Assigned provider Packages mount only after durable Connections resolve.
   runtimeIds.delete("composio");
+  runtimeIds.delete("provider-ollama-cloud");
   return {
     plan,
     packages: plan.packages

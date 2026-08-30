@@ -73,6 +73,12 @@ export type LlmMessage =
       isError: boolean;
     };
 
+export interface ModelBindingSnapshot {
+  connectionId: string;
+  connectionGeneration?: string;
+  catalogGeneration?: string;
+}
+
 export interface NormalizedModelRequest {
   requestId: string;
   provider: string;
@@ -80,6 +86,7 @@ export interface NormalizedModelRequest {
   system: string;
   messages: LlmMessage[];
   tools: ToolSchema[];
+  modelBinding?: ModelBindingSnapshot;
 }
 
 export type LlmStreamEvent =
@@ -284,7 +291,15 @@ function requireNormalizedModelRequest(value: unknown, label: string): void {
   const request = eventRecord(value, label);
   requireEventKeys(
     request,
-    ["requestId", "provider", "model", "system", "messages", "tools"],
+    [
+      "requestId",
+      "provider",
+      "model",
+      "system",
+      "messages",
+      "tools",
+      ...(Object.hasOwn(request, "modelBinding") ? ["modelBinding"] : []),
+    ],
     label,
   );
   eventString(request.requestId, `${label}.requestId`);
@@ -300,6 +315,35 @@ function requireNormalizedModelRequest(value: unknown, label: string): void {
   request.tools.forEach((tool, index) =>
     requireToolSchema(tool, `${label}.tools[${index}]`),
   );
+  if (request.modelBinding !== undefined) {
+    const binding = eventRecord(request.modelBinding, `${label}.modelBinding`);
+    requireEventKeys(
+      binding,
+      [
+        "connectionId",
+        ...(Object.hasOwn(binding, "connectionGeneration")
+          ? ["connectionGeneration"]
+          : []),
+        ...(Object.hasOwn(binding, "catalogGeneration")
+          ? ["catalogGeneration"]
+          : []),
+      ],
+      `${label}.modelBinding`,
+    );
+    eventString(binding.connectionId, `${label}.modelBinding.connectionId`);
+    if (binding.connectionGeneration !== undefined) {
+      eventString(
+        binding.connectionGeneration,
+        `${label}.modelBinding.connectionGeneration`,
+      );
+    }
+    if (binding.catalogGeneration !== undefined) {
+      eventString(
+        binding.catalogGeneration,
+        `${label}.modelBinding.catalogGeneration`,
+      );
+    }
+  }
 }
 
 const SESSION_EVENT_COMMON_KEYS = ["type", "seq", "timestamp"] as const;

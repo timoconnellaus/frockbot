@@ -74,7 +74,7 @@ export interface ConnectionTypeDefinition {
   displayName: string;
   allowMultiple: boolean;
   authorization: {
-    kind: "oauth2" | "api-key" | "custom";
+    kind: "none" | "api-key" | "ambient-native" | "grant";
     driverId: string;
   };
   capabilities: string[];
@@ -921,9 +921,10 @@ function decodeConfiguration(value: unknown): PackageConfiguration {
       );
       const rawKind = requiredString(connection.authorization, "kind");
       if (
-        rawKind !== "oauth2" &&
+        rawKind !== "none" &&
         rawKind !== "api-key" &&
-        rawKind !== "custom"
+        rawKind !== "ambient-native" &&
+        rawKind !== "grant"
       ) {
         throw new Error(
           "manifest connection authorization kind is unsupported",

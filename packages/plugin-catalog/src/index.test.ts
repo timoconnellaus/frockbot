@@ -406,7 +406,7 @@ describe("decodeFrockBotManifest", () => {
             id: "gmail",
             displayName: "Gmail",
             allowMultiple: true,
-            authorization: { kind: "oauth2", driverId: "composio" },
+            authorization: { kind: "grant", driverId: "composio" },
             capabilities: ["gmail-tools"],
           },
         ],
@@ -423,7 +423,7 @@ describe("decodeFrockBotManifest", () => {
     expect(decoded).toMatchObject({
       schemaVersion: 3,
       configuration: {
-        connectionTypes: [{ id: "gmail", authorization: { kind: "oauth2" } }],
+        connectionTypes: [{ id: "gmail", authorization: { kind: "grant" } }],
         capabilities: [{ id: "gmail-tools", kind: "tool" }],
       },
     });
@@ -545,7 +545,7 @@ describe("decodeFrockBotManifest", () => {
                 id: "mail",
                 displayName: "Mail",
                 allowMultiple: false,
-                authorization: { kind: "oauth2", driverId: "driver" },
+                authorization: { kind: "grant", driverId: "driver" },
                 unexpected: true,
               },
             ],
@@ -563,7 +563,7 @@ describe("decodeFrockBotManifest", () => {
                 displayName: "Mail",
                 allowMultiple: false,
                 authorization: {
-                  kind: "oauth2",
+                  kind: "grant",
                   driverId: "driver",
                   unexpected: true,
                 },

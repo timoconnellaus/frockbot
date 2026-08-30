@@ -100,7 +100,7 @@ async function compileAssignmentTestApplication(): ReturnType<
                 id: "gmail",
                 displayName: "Gmail",
                 allowMultiple: true,
-                authorization: { kind: "oauth2", driverId: "fixture" },
+                authorization: { kind: "grant", driverId: "fixture" },
                 capabilities: ["gmail-tools"],
               },
             ],

@@ -8,11 +8,14 @@ import {
   type ClientTurnEvent,
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+// Connection mutations use the provider-neutral hosted command contract.
+import type { ConnectionCommandV1 } from "@frockbot/connection-core";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNotificationPolicy,
   BotProfile,
   BotSettingsViewV1,
+  ModelAssignment,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import { ref } from "vue";
@@ -362,9 +365,10 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         typeof connection.id !== "string" ||
         typeof connection.displayName !== "string" ||
         typeof connection.allowMultiple !== "boolean" ||
-        (connection.authorization.kind !== "oauth2" &&
+        (connection.authorization.kind !== "none" &&
           connection.authorization.kind !== "api-key" &&
-          connection.authorization.kind !== "custom") ||
+          connection.authorization.kind !== "ambient-native" &&
+          connection.authorization.kind !== "grant") ||
         !Array.isArray(connection.capabilities) ||
         !connection.capabilities.every((item) => typeof item === "string")
       ) {
@@ -650,6 +654,22 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       });
       await web.value.loadBotSettings();
     },
+    async saveBotModel(model: ModelAssignment): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/select-model",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        model,
+      });
+      await web.value.loadBotSettings();
+    },
     async loadUserSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
         web.value.settingsError = "Settings are unavailable";
@@ -790,6 +810,98 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       }
       await ctx.transport.revokeConnection(packageId, connectionId);
       await web.value.loadPluginCatalog();
+    },
+    async createApiKeyConnection(input): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const command: ConnectionCommandV1 = {
+        schemaVersion: 1,
+        type: "connection/create-api-key",
+        commandId: crypto.randomUUID(),
+        ...input,
+      };
+      const result = await ctx.transport.executeConnection(command);
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Connection validation failed");
+      }
+    },
+    async rotateApiKeyConnection(connectionId, apiKey): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const result = await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/rotate-api-key",
+        commandId: crypto.randomUUID(),
+        connectionId,
+        apiKey,
+      });
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Credential validation failed");
+      }
+    },
+    async updateConnectionLabel(connectionId, label): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: crypto.randomUUID(),
+        connectionId,
+        label,
+      });
+      await web.value.loadPluginCatalog();
+    },
+    async refreshConnectionModels(connectionId): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const result = await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId: crypto.randomUUID(),
+        connectionId,
+      });
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Model catalog refresh failed");
+      }
+    },
+    async setConnectionEnabled(connectionId, enabled): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/set-enabled",
+        commandId: crypto.randomUUID(),
+        connectionId,
+        enabled,
+      });
+      await web.value.loadPluginCatalog();
+    },
+    async disconnectConnection(
+      connectionId,
+      revokeUpstream = false,
+    ): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const result = await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/disconnect",
+        commandId: crypto.randomUUID(),
+        connectionId,
+        revokeUpstream,
+      });
+      await web.value.loadPluginCatalog();
+      if (result.status === "reconciliation-required") {
+        throw new Error("Connection revocation requires reconciliation");
+      }
     },
     async openConnectionAuthorization(url: string): Promise<void> {
       const authorizationUrl = decodeExternalAuthorizationUrl(url);

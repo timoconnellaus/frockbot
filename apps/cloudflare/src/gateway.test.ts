@@ -334,6 +334,41 @@ class MemoryConfiguration
     return this.execute(request.command);
   }
 
+  executeConnection(
+    request: Parameters<UserConfigurationBinding["executeConnection"]>[0],
+  ) {
+    const connectionId =
+      "connectionId" in request.command
+        ? request.command.connectionId
+        : "connection-test";
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      connectionId,
+      status: "applied" as const,
+    });
+  }
+
+  getConnection(
+    request: Parameters<UserConfigurationBinding["getConnection"]>[0],
+  ) {
+    return Promise.resolve(
+      this.user.connections.find(
+        (connection) => connection.connectionId === request.connectionId,
+      ),
+    );
+  }
+
+  leaseModelCredential(): ReturnType<
+    UserConfigurationBinding["leaseModelCredential"]
+  > {
+    return Promise.reject(new Error("Credential leases are not configured"));
+  }
+
+  settleModelCredential(): Promise<void> {
+    return Promise.resolve();
+  }
+
   listBots() {
     return Promise.resolve({
       schemaVersion: 1 as const,
@@ -657,6 +692,45 @@ describe("Cloudflare user application gateway", () => {
       "user:alice",
     ]);
     expect(loader.ids).toEqual([]);
+  });
+
+  test("admits API-key Connections only through the authenticated generic seam", async () => {
+    const { gateway } = createTestGateway();
+    const body = JSON.stringify({
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "ollama-connect-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "write-only-secret",
+    });
+
+    expect(
+      (
+        await gateway(
+          new Request("https://bot.frockbot.com/api/connections", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+          }),
+        )
+      ).status,
+    ).toBe(401);
+    const response = await gateway(
+      request("/api/connections", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      commandId: "ollama-connect-1",
+      connectionId: "connection-test",
+      status: "applied",
+    });
   });
 
   test("rejects invalid encoded Bot settings paths before configuration lookup", async () => {

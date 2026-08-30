@@ -4,6 +4,7 @@ import type {
   BotNotificationPolicy,
   BotProfile,
   BotSettingsViewV1,
+  ModelAssignment,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { InjectionKey, Ref } from "vue";
@@ -53,7 +54,7 @@ export interface PluginCatalogItem {
     id: string;
     displayName: string;
     allowMultiple: boolean;
-    authorizationKind: "oauth2" | "api-key" | "custom";
+    authorizationKind: "none" | "api-key" | "ambient-native" | "grant";
     capabilities: string[];
   }>;
 }
@@ -77,6 +78,7 @@ export interface FrockBotWebData {
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;
+  saveBotModel(model: ModelAssignment): Promise<void>;
   loadUserSettings(): Promise<void>;
   saveUserProfile(profile: { name: string; email?: string }): Promise<void>;
   loadPluginCatalog(): Promise<void>;
@@ -87,6 +89,20 @@ export interface FrockBotWebData {
   ): Promise<string | undefined>;
   openConnectionAuthorization(url: string): Promise<void>;
   revokeConnection(packageId: string, connectionId: string): Promise<void>;
+  createApiKeyConnection(input: {
+    packageId: string;
+    connectionTypeId: string;
+    label: string;
+    apiKey: string;
+  }): Promise<void>;
+  rotateApiKeyConnection(connectionId: string, apiKey: string): Promise<void>;
+  updateConnectionLabel(connectionId: string, label: string): Promise<void>;
+  refreshConnectionModels(connectionId: string): Promise<void>;
+  setConnectionEnabled(connectionId: string, enabled: boolean): Promise<void>;
+  disconnectConnection(
+    connectionId: string,
+    revokeUpstream?: boolean,
+  ): Promise<void>;
   sendPrompt(text: string): Promise<SendPromptResult>;
   resumeRun(runId: string): Promise<void>;
   abort(): Promise<void>;

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 3,
+  "id": "credentials",
+  "displayName": "Credential Store",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "contributions": {
+    "backend": [{ "entry": "./user", "host": "user" }]
+  },
+  "permissions": ["credentials:manage"]
+}

@@ -3,13 +3,17 @@ import type {
   BotConfigurationExecuteRpcV1,
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
+  ConnectionView,
   OperationReceiptV1,
   UserConfigurationExecuteRpcV1,
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type {
+  ConnectionCommandReceiptV1,
+  ConnectionCommandV1,
   ConnectionCompletionResult,
+  CredentialLeaseV1,
   RevokeConnectionResult,
   StartConnectionResult,
 } from "@frockbot/connection-core";
@@ -255,6 +259,28 @@ export interface UserConfigurationBinding {
   executeConfiguration(
     request: UserConfigurationExecuteRpcV1,
   ): Promise<OperationReceiptV1>;
+  executeConnection(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: ConnectionCommandV1;
+  }): Promise<ConnectionCommandReceiptV1>;
+  getConnection(request: {
+    schemaVersion: 1;
+    userId: string;
+    connectionId: string;
+  }): Promise<ConnectionView | undefined>;
+  leaseModelCredential(request: {
+    schemaVersion: 1;
+    userId: string;
+    connectionId: string;
+    providerModelId: string;
+    effectId: string;
+  }): Promise<CredentialLeaseV1>;
+  settleModelCredential(request: {
+    schemaVersion: 1;
+    userId: string;
+    effectId: string;
+  }): Promise<void>;
 }
 
 export interface BotConfigurationBinding {

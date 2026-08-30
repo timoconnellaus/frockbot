@@ -4,7 +4,7 @@
 
 The approved non-Codex vertical slice is implemented on this branch: durable User and Bot configuration, manifest v3 Packages, explicit Bot Capability Assignments, the hosted settings and Plugins surfaces, and the Composio Gmail Connection with durable authorization, revocation, reconciliation, and assigned Agent tools.
 
-The authoritative current system shape is in [`docs/architecture.md`](../architecture.md), ownership trade-offs are in [ADR 0003](../adr/0003-split-user-connections-from-bot-assignments.md), and domain terms are in [`CONTEXT.md`](../../CONTEXT.md). This plan does not duplicate those contracts.
+The authoritative current system shape is in [`docs/architecture.md`](../architecture.md), ownership trade-offs are in [ADR 0003](../adr/0003-split-account-connections-from-bot-assignments.md), and domain terms are in [`CONTEXT.md`](../../CONTEXT.md). This plan does not duplicate those contracts.
 
 ## Deferred work
 

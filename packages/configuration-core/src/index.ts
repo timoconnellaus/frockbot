@@ -1,3 +1,11 @@
+import type {
+  ConnectionAuthorizationViewV1,
+  ConnectionModelCatalogV1,
+} from "@frockbot/connection-core";
+import {
+  decodeConnectionAuthorizationViewV1,
+  decodeConnectionModelCatalogV1,
+} from "@frockbot/connection-core";
 import { isBotIdV1 } from "./bot-id.js";
 import { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
 export { isBotIdV1 } from "./bot-id.js";
@@ -50,10 +58,16 @@ export interface ConnectionView {
   state:
     | "authorizing"
     | "ready"
+    | "disabled"
     | "revoking"
     | "revoked"
     | "reconciliation-required"
     | "failed";
+  generation?: string;
+  providerType?: string;
+  authorization?: ConnectionAuthorizationViewV1;
+  modelCatalog?: ConnectionModelCatalogV1;
+  settings?: Record<string, JsonValue>;
   safeMetadata: Record<string, JsonValue>;
   failure?: string;
 }
@@ -270,6 +284,7 @@ export interface ExecutionPackageDefinition {
   version: string;
   capabilities: Array<{
     id: string;
+    kind?: "tool" | "model" | "memory" | "notification";
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{
@@ -330,6 +345,69 @@ export function capabilityAssignmentFailureV1(input: {
     return `Connection "${input.assignment.connectionId}" has an incompatible Connection Type`;
   }
   return undefined;
+}
+
+export interface ResolvedModelBindingV1 {
+  assignment: ModelAssignment;
+  state: "ready" | "requires-resolution" | "unavailable";
+  connection?: ConnectionView;
+  packageId?: string;
+  providerType?: string;
+  failure?: string;
+}
+
+export function resolveBotModelBindingV1(input: {
+  model: ModelAssignment;
+  user: UserSettingsViewV1;
+  packages: readonly ExecutionPackageDefinition[];
+}): ResolvedModelBindingV1 {
+  const unavailable = (failure: string): ResolvedModelBindingV1 => ({
+    assignment: structuredClone(input.model),
+    state: "unavailable",
+    failure,
+  });
+  const connection = input.user.connections.find(
+    (candidate) => candidate.connectionId === input.model.connectionId,
+  );
+  if (!connection) return unavailable("Connection is unavailable");
+  if (connection.state !== "ready") {
+    return unavailable(`Connection is ${connection.state}`);
+  }
+  const installation = input.user.packages.find(
+    (candidate) => candidate.packageId === connection.packageId,
+  );
+  if (!installation || installation.state !== "installed") {
+    return unavailable("Connection Package is not installed and enabled");
+  }
+  const pkg = input.packages.find(
+    (candidate) => candidate.packageId === connection.packageId,
+  );
+  const connectionType = pkg?.connectionTypes.find(
+    (candidate) => candidate.id === connection.connectionTypeId,
+  );
+  const modelCapability = pkg?.capabilities.find(
+    (candidate) =>
+      candidate.kind === "model" &&
+      connectionType?.capabilities.includes(candidate.id) &&
+      candidate.connectionTypes.includes(connection.connectionTypeId),
+  );
+  if (!pkg || !connectionType || !modelCapability) {
+    return unavailable("Connection does not provide models");
+  }
+  if (!connection.providerType) {
+    return unavailable("Connection provider type is unavailable");
+  }
+  const knownModel = connection.modelCatalog?.models.some(
+    (candidate: { providerModelId: string }) =>
+      candidate.providerModelId === input.model.providerModelId,
+  );
+  return {
+    assignment: structuredClone(input.model),
+    state: knownModel ? "ready" : "requires-resolution",
+    connection: structuredClone(connection),
+    packageId: pkg.packageId,
+    providerType: connection.providerType,
+  };
 }
 
 export function resolveBotExecutionPlanV1(input: {
@@ -889,11 +967,19 @@ function connectionView(value: unknown): ConnectionView {
       "state",
       "safeMetadata",
     ],
-    ["failure"],
+    [
+      "failure",
+      "generation",
+      "providerType",
+      "authorization",
+      "modelCatalog",
+      "settings",
+    ],
   );
   const states: ConnectionView["state"][] = [
     "authorizing",
     "ready",
+    "disabled",
     "revoking",
     "revoked",
     "reconciliation-required",
@@ -903,6 +989,10 @@ function connectionView(value: unknown): ConnectionView {
     throw new ConfigurationDecodeError("Connection state is invalid");
   }
   const safeMetadata = record(connection.safeMetadata, "safeMetadata");
+  const settings =
+    connection.settings === undefined
+      ? undefined
+      : record(connection.settings, "settings");
   return {
     connectionId: identifier(connection.connectionId, "connectionId"),
     packageId: identifier(connection.packageId, "packageId"),
@@ -912,6 +1002,30 @@ function connectionView(value: unknown): ConnectionView {
     ),
     displayName: text(connection.displayName, "displayName", 200),
     state: connection.state as ConnectionView["state"],
+    generation: optionalText(connection.generation, "generation", 128),
+    providerType: optionalText(connection.providerType, "providerType", 128),
+    ...(connection.authorization === undefined
+      ? {}
+      : {
+          authorization: decodeConnectionAuthorizationViewV1(
+            connection.authorization,
+          ),
+        }),
+    ...(connection.modelCatalog === undefined
+      ? {}
+      : {
+          modelCatalog: decodeConnectionModelCatalogV1(connection.modelCatalog),
+        }),
+    ...(settings === undefined
+      ? {}
+      : {
+          settings: Object.fromEntries(
+            Object.entries(settings).map(([key, item]) => [
+              key,
+              safeJsonValue(item, `settings.${key}`),
+            ]),
+          ),
+        }),
     safeMetadata: Object.fromEntries(
       Object.entries(safeMetadata).map(([key, item]) => [
         key,

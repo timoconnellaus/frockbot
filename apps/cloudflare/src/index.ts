@@ -57,6 +57,7 @@ interface Env {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   SPRITES_TOKEN?: string;
+  CREDENTIAL_KEYRING?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
 }
@@ -160,6 +161,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     hasBot: (request) => rpc.hasBot(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
+    executeConnection: (request) => rpc.executeConnection(request),
+    getConnection: (request) => rpc.getConnection(request),
+    leaseModelCredential: (request) => rpc.leaseModelCredential(request),
+    settleModelCredential: (request) => rpc.settleModelCredential(request),
   };
 }
 

@@ -590,6 +590,9 @@ class LoopAgent implements Agent {
         system: assembly.text,
         messages: this.session.deriveMessages(),
         tools: this.#ctx.tools.schemas(),
+        ...(this.#options.modelBinding
+          ? { modelBinding: structuredClone(this.#options.modelBinding) }
+          : {}),
       };
       const request = await this.#ctx.waterfall(
         "agent/request",

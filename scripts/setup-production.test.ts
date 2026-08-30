@@ -86,12 +86,18 @@ describe("production setup", () => {
       "Checking environment secrets in timoconnellaus/frockbot…",
     );
     expect(stdout).toContain(
-      "Stage 4/4 · GitHub: verify production configuration",
+      "Stage 5/5 · GitHub: verify production configuration",
     );
     expect(calls).toContain(
       "secret set SPRITES_TOKEN --repo timoconnellaus/frockbot --env production",
     );
     expect(calls).toContain("secret-value:SPRITES_TOKEN:sprites-production");
+    expect(calls).toContain(
+      "secret set CREDENTIAL_KEYRING --repo timoconnellaus/frockbot --env production",
+    );
+    expect(
+      calls.some((call) => call.startsWith("secret-value:CREDENTIAL_KEYRING:")),
+    ).toBe(true);
     expect(calls.join("\n")).not.toContain("COMPOSIO");
     expect(calls.join("\n")).not.toContain(
       "FROCKBOT_AUTHORIZATION_STATE_SECRET",
@@ -127,6 +133,12 @@ describe("production setup", () => {
       "FROCKBOT_AUTHORIZATION_STATE_SECRET",
     );
     expect(deploy?.env?.SPRITES_TOKEN).toBe("${{ secrets.SPRITES_TOKEN }}");
+    expect(validation?.env?.CREDENTIAL_KEYRING).toBe(
+      "${{ secrets.CREDENTIAL_KEYRING }}",
+    );
+    expect(deploy?.env?.CREDENTIAL_KEYRING).toBe(
+      "${{ secrets.CREDENTIAL_KEYRING }}",
+    );
 
     const productionEnvironment = {
       ...process.env,
@@ -139,6 +151,8 @@ describe("production setup", () => {
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       SPRITES_TOKEN: "sprites-production",
+      CREDENTIAL_KEYRING:
+        '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
     };
     const validConfiguration = Bun.spawnSync(
       ["bash", "-c", validation?.run ?? ""],
@@ -202,6 +216,9 @@ exit 1
         }),
     );
     expect(forwarded.SPRITES_TOKEN).toBe("sprites-production");
+    expect(forwarded.CREDENTIAL_KEYRING).toBe(
+      productionEnvironment.CREDENTIAL_KEYRING,
+    );
     expect(forwarded).not.toHaveProperty("COMPOSIO_API_KEY");
     expect(forwarded).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
     expect(forwarded).not.toHaveProperty("FROCKBOT_AUTHORIZATION_STATE_SECRET");

@@ -2,7 +2,7 @@
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiButton, UiField } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
-import { inject, onMounted, ref } from "vue";
+import { computed, inject, onMounted, ref } from "vue";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
 const providedWeb = inject(frockBotWebDataKey);
@@ -16,15 +16,38 @@ const label = ref("");
 const description = ref("");
 const notifications = ref(false);
 const saving = ref(false);
+const selectedModel = ref("");
+const modelOptions = computed(() =>
+  (web.value.userSettings?.connections ?? []).flatMap((connection) =>
+    connection.state === "ready"
+      ? (connection.modelCatalog?.models ?? []).map((model) => ({
+          value: JSON.stringify([
+            connection.connectionId,
+            model.providerModelId,
+          ]),
+          label: `${model.displayName} — ${connection.displayName}`,
+        }))
+      : [],
+  ),
+);
 
 onMounted(async () => {
-  await web.value.loadBotSettings();
+  await Promise.all([
+    web.value.loadBotSettings(),
+    web.value.loadUserSettings(),
+  ]);
   const settings = web.value.botSettings;
   if (!settings) return;
   name.value = settings.profile.name;
   label.value = settings.profile.label ?? "";
   description.value = settings.profile.description ?? "";
   notifications.value = settings.notifications.enabled;
+  selectedModel.value = settings.model
+    ? JSON.stringify([
+        settings.model.connectionId,
+        settings.model.providerModelId,
+      ])
+    : "";
 });
 
 async function save(): Promise<void> {
@@ -35,6 +58,18 @@ async function save(): Promise<void> {
       label: label.value || undefined,
       description: description.value || undefined,
     });
+    if (selectedModel.value) {
+      const [connectionId, providerModelId] = JSON.parse(
+        selectedModel.value,
+      ) as [string, string];
+      const current = web.value.botSettings?.model;
+      if (
+        current?.connectionId !== connectionId ||
+        current.providerModelId !== providerModelId
+      ) {
+        await web.value.saveBotModel({ connectionId, providerModelId });
+      }
+    }
     await web.value.saveBotNotifications({ enabled: notifications.value });
     surfaces?.close();
   } catch (error) {
@@ -67,6 +102,18 @@ async function save(): Promise<void> {
     </UiField>
     <UiField label="Description">
       <textarea v-model="description" maxlength="10000" rows="7" />
+    </UiField>
+    <UiField label="Model">
+      <select v-model="selectedModel">
+        <option value="">Foundation default</option>
+        <option
+          v-for="model in modelOptions"
+          :key="model.value"
+          :value="model.value"
+        >
+          {{ model.label }}
+        </option>
+      </select>
     </UiField>
     <label class="notification-setting">
       <span>

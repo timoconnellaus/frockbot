@@ -5,6 +5,7 @@ import {
   createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
+  createFoundationModelRuntimePackage,
   createFoundationRuntimeApplication,
 } from "./runtime.js";
 import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
@@ -31,6 +32,7 @@ describe("foundation application", () => {
       "shell",
       "clock",
       "computer",
+      "credentials",
       "desktop-clipboard",
       "desktop-directory-picker",
       "desktop-notifications",
@@ -42,10 +44,17 @@ describe("foundation application", () => {
       "mobile-clipboard",
       "mobile-notifications",
       "provider-foundation",
+      "provider-ollama-cloud",
       "settings",
     ]);
     expect(first.contributions).toEqual({
-      backend: ["shell", "flock", "settings"],
+      backend: [
+        "shell",
+        "credentials",
+        "flock",
+        "provider-ollama-cloud",
+        "settings",
+      ],
       runtime: [
         "clock",
         "computer",
@@ -54,6 +63,7 @@ describe("foundation application", () => {
         "identity",
         "memory",
         "provider-foundation",
+        "provider-ollama-cloud",
       ],
       client: [
         "ui-theme",
@@ -83,6 +93,44 @@ describe("foundation application", () => {
         .contributions.backend,
     ).toEqual([{ entry: "./user", host: "user" }]);
     expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
+  });
+
+  test("mounts an assigned Ollama model through its Package runtime Contribution", async () => {
+    const plan = await compileFoundationApplication();
+    const runtimePackage = createFoundationModelRuntimePackage(
+      plan,
+      {
+        assignment: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        state: "ready",
+        packageId: "provider-ollama-cloud",
+        providerType: "ollama-cloud",
+        connection: {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          providerType: "ollama-cloud",
+          safeMetadata: {},
+        },
+      },
+      {
+        accountId: "account-1",
+        connectionId: "ollama-work",
+        credentialKeyring:
+          '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
+        leaseCredential: () => Promise.reject(new Error("not executed")),
+        settleCredential: () => Promise.resolve(),
+      },
+    );
+
+    expect(runtimePackage).toMatchObject({
+      specifier: "@frockbot/plugin-provider-ollama-cloud",
+      contributionSpecifier: "@frockbot/plugin-provider-ollama-cloud/runtime",
+    });
   });
 
   test("exposes only compiled runtime packages to the runtime host", async () => {
@@ -158,7 +206,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(2);
+    expect(userBackend.contributions).toHaveLength(4);
     expect(typeof botBackend.contributions[0]?.executeConfiguration).toBe(
       "function",
     );

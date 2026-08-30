@@ -5,6 +5,7 @@ import {
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
   decodeUserSettingsViewV1,
+  type ConnectionView,
   type OperationReceiptV1,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
@@ -222,6 +223,71 @@ export class UserSettingsBackendContribution {
   async read(userId: string): Promise<UserSettingsViewV1> {
     await this.assertIdentity(userId);
     return this.readSnapshot();
+  }
+
+  async createConnection(
+    userId: string,
+    connection: ConnectionView,
+  ): Promise<ConnectionView> {
+    await this.assertIdentity(userId);
+    return this.host.storage.transaction(async (storage) => {
+      const current = await this.readSnapshot(storage);
+      const existing = current.connections.find(
+        (candidate) => candidate.connectionId === connection.connectionId,
+      );
+      if (existing) return existing;
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        connections: [...current.connections, structuredClone(connection)],
+      } satisfies UserSettingsViewV1;
+      await storage.put(STATE_KEY, next);
+      return structuredClone(connection);
+    });
+  }
+
+  async replaceConnection(
+    userId: string,
+    connectionId: string,
+    expectedGeneration: string | undefined,
+    nextConnection: ConnectionView,
+  ): Promise<ConnectionView> {
+    await this.assertIdentity(userId);
+    return this.host.storage.transaction(async (storage) => {
+      const current = await this.readSnapshot(storage);
+      const existing = current.connections.find(
+        (candidate) => candidate.connectionId === connectionId,
+      );
+      if (!existing) throw new Error("Connection is unavailable");
+      if (existing.generation !== expectedGeneration) {
+        throw new Error("Connection generation changed");
+      }
+      if (nextConnection.connectionId !== connectionId) {
+        throw new Error("Connection identity cannot change");
+      }
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        connections: current.connections.map((candidate) =>
+          candidate.connectionId === connectionId
+            ? structuredClone(nextConnection)
+            : candidate,
+        ),
+      } satisfies UserSettingsViewV1;
+      await storage.put(STATE_KEY, next);
+      return structuredClone(nextConnection);
+    });
+  }
+
+  async getConnection(
+    userId: string,
+    connectionId: string,
+  ): Promise<ConnectionView | undefined> {
+    const settings = await this.read(userId);
+    const connection = settings.connections.find(
+      (candidate) => candidate.connectionId === connectionId,
+    );
+    return connection ? structuredClone(connection) : undefined;
   }
 
   async isPackageInstalled(

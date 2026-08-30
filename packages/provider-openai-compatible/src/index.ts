@@ -14,6 +14,13 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+export class OpenAICompatibleHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Model request failed (${status})`);
+    this.name = "OpenAICompatibleHttpError";
+  }
+}
+
 export interface OpenAICompatibleConfig {
   baseUrl: string;
   apiKey?: string;
@@ -180,8 +187,8 @@ export class OpenAICompatibleProvider implements LlmProvider {
       signal,
     });
     if (!response.ok) {
-      const body = (await response.text()).slice(0, 2_000);
-      throw new Error(`Model request failed (${response.status}): ${body}`);
+      await response.body?.cancel();
+      throw new OpenAICompatibleHttpError(response.status);
     }
     if (!response.body)
       throw new Error("Model response did not include a stream");

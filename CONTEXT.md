@@ -29,19 +29,19 @@ A versioned, installable FrockBot distribution containing a manifest and one or 
 _Avoid_: Plugin, extension
 
 **Connection Type**:
-A Package-declared kind of external authorization, such as Composio Gmail.
+A Package-declared kind of configured external capability. Its authorization is explicitly `none`, `api-key`, `ambient-native`, or `grant`.
 _Avoid_: Plugin, provider account
 
 **Connection**:
-A User-owned authorization for one external account or credential set.
-_Avoid_: Credential, integration, account
+A durable instance of one Connection Type with an opaque identity and editable label. A Connection may reference a separate credential record, ambient authority, a provider grant, or no credentials at all.
+_Avoid_: User Connection, credential, integration, account
 
 **Capability**:
 Behavior made available by an installed Package, such as a model, tool set, memory provider, or notification adapter.
 _Avoid_: Plugin, feature
 
 **Assignment**:
-A Bot-owned grant selecting a Capability and, when required, a User-owned Connection.
+A Bot-owned grant selecting a Capability and, when required, a Connection.
 _Avoid_: Installation, connection
 
 **Contribution**:

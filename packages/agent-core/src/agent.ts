@@ -1,6 +1,6 @@
 import { type Context, Service } from "cordis";
 import type { Session } from "./session.js";
-import type { NormalizedModelRequest } from "./types.js";
+import type { ModelBindingSnapshot, NormalizedModelRequest } from "./types.js";
 
 export type AgentStatus = "idle" | "running" | "disposed";
 
@@ -10,6 +10,7 @@ export interface AgentOptions {
   sessionId: string;
   provider: string;
   model: string;
+  modelBinding?: ModelBindingSnapshot;
 }
 
 export interface AgentInput {

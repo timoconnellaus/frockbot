@@ -3,15 +3,24 @@ import {
   compileFoundationApplication,
   createFoundationBackendContributions,
 } from "@frockbot/application-foundation/runtime";
+import { decodeConnectionCommandV1 } from "@frockbot/connection-core";
 import {
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
 } from "@frockbot/configuration-core";
 import {
+  createCredentialUserBackendPlugin,
+  type CredentialUserBackendContribution,
+} from "@frockbot/plugin-credentials/user";
+import {
   createFlockUserBackendPlugin,
   type FlockUserBackendContribution,
 } from "@frockbot/plugin-flock/user";
 import { decodeCreateBotCommandV1 } from "@frockbot/plugin-flock/shared";
+import {
+  createOllamaCloudUserBackendPlugin,
+  type OllamaCloudUserBackendContribution,
+} from "@frockbot/plugin-provider-ollama-cloud/user";
 import {
   createUserSettingsBackendPlugin,
   type UserSettingsBackendContribution,
@@ -21,12 +30,19 @@ import {
   rpcBotId,
   rpcDecoded,
   rpcIdentifier,
+  rpcString,
 } from "./durable-rpc.js";
 
-export class UserConfiguration extends DurableObject {
+interface UserConfigurationEnv {
+  CREDENTIAL_KEYRING?: string;
+}
+
+export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   private mounted:
     | Promise<{
         settings: UserSettingsBackendContribution;
+        credentials: CredentialUserBackendContribution;
+        ollama: OllamaCloudUserBackendContribution;
         flock: FlockUserBackendContribution;
         dispose(): Promise<void>;
       }>
@@ -34,15 +50,22 @@ export class UserConfiguration extends DurableObject {
 
   private contributions(): Promise<{
     settings: UserSettingsBackendContribution;
+    credentials: CredentialUserBackendContribution;
+    ollama: OllamaCloudUserBackendContribution;
     flock: FlockUserBackendContribution;
     dispose(): Promise<void>;
   }> {
     if (!this.mounted) {
       this.mounted = compileFoundationApplication().then(async (plan) => {
         let settings: UserSettingsBackendContribution | undefined;
+        let credentials: CredentialUserBackendContribution | undefined;
+        let ollama: OllamaCloudUserBackendContribution | undefined;
         let flock: FlockUserBackendContribution | undefined;
         const mounted = await createFoundationBackendContributions<
-          UserSettingsBackendContribution | FlockUserBackendContribution
+          | UserSettingsBackendContribution
+          | CredentialUserBackendContribution
+          | OllamaCloudUserBackendContribution
+          | FlockUserBackendContribution
         >(plan, {
           backendHost: "user",
           resolve: (specifier, lifecycle) => {
@@ -58,6 +81,43 @@ export class UserConfiguration extends DurableObject {
                 {
                   mount(value: UserSettingsBackendContribution) {
                     settings = value;
+                    return lifecycle.mount(value);
+                  },
+                },
+              );
+            }
+            if (specifier === "@frockbot/plugin-credentials/user") {
+              const keyring = this.env.CREDENTIAL_KEYRING;
+              if (!keyring) {
+                throw new Error(
+                  "Credential Store Contribution is not configured",
+                );
+              }
+              return createCredentialUserBackendPlugin(
+                { storage: this.ctx.storage, keyring },
+                {
+                  mount(value: CredentialUserBackendContribution) {
+                    credentials = value;
+                    return lifecycle.mount(value);
+                  },
+                },
+              );
+            }
+            if (specifier === "@frockbot/plugin-provider-ollama-cloud/user") {
+              if (!settings || !credentials) {
+                throw new Error(
+                  "Ollama Cloud requires Settings and Credential Contributions",
+                );
+              }
+              return createOllamaCloudUserBackendPlugin(
+                {
+                  storage: this.ctx.storage,
+                  settings,
+                  credentials,
+                },
+                {
+                  mount(value: OllamaCloudUserBackendContribution) {
+                    ollama = value;
                     return lifecycle.mount(value);
                   },
                 },
@@ -87,13 +147,25 @@ export class UserConfiguration extends DurableObject {
             throw new Error(`Unsupported User Contribution: ${specifier}`);
           },
         });
-        if (!settings || !flock || mounted.contributions.length !== 2) {
+        if (
+          !settings ||
+          !credentials ||
+          !ollama ||
+          !flock ||
+          mounted.contributions.length !== 4
+        ) {
           await mounted.dispose();
           throw new Error(
-            "Foundation requires Settings and Flock User backend Contributions",
+            "Foundation requires Settings, Credentials, Ollama, and Flock User Contributions",
           );
         }
-        return { settings, flock, dispose: mounted.dispose };
+        return {
+          settings,
+          credentials,
+          ollama,
+          flock,
+          dispose: mounted.dispose,
+        };
       });
     }
     return this.mounted;
@@ -101,6 +173,14 @@ export class UserConfiguration extends DurableObject {
 
   private async settingsContribution(): Promise<UserSettingsBackendContribution> {
     return (await this.contributions()).settings;
+  }
+
+  private async credentialContribution(): Promise<CredentialUserBackendContribution> {
+    return (await this.contributions()).credentials;
+  }
+
+  private async ollamaContribution(): Promise<OllamaCloudUserBackendContribution> {
+    return (await this.contributions()).ollama;
   }
 
   private async flockContribution(): Promise<FlockUserBackendContribution> {
@@ -115,6 +195,58 @@ export class UserConfiguration extends DurableObject {
   async executeConfiguration(input: unknown) {
     const request = decodeUserConfigurationExecuteRpcV1(input);
     return (await this.settingsContribution()).executeConfiguration(request);
+  }
+
+  async executeConnection(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeConnectionCommandV1),
+    });
+    return (await this.ollamaContribution()).executeConnection(
+      request.userId as string,
+      request.command,
+    );
+  }
+
+  async getConnection(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+    });
+    return (await this.settingsContribution()).getConnection(
+      request.userId as string,
+      request.connectionId as string,
+    );
+  }
+
+  async leaseModelCredential(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      providerModelId: rpcString(256),
+      effectId: rpcIdentifier,
+    });
+    return (await this.ollamaContribution()).leaseModelCredential({
+      accountId: request.userId as string,
+      connectionId: request.connectionId as string,
+      providerModelId: request.providerModelId as string,
+      effectId: request.effectId as string,
+    });
+  }
+
+  async settleModelCredential(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      effectId: rpcIdentifier,
+    });
+    await (await this.settingsContribution()).read(request.userId as string);
+    await (
+      await this.credentialContribution()
+    ).settle(request.effectId as string);
+  }
+
+  async alarm() {
+    await (await this.ollamaContribution()).alarm();
   }
 
   async listBots(input: unknown) {

@@ -1,0 +1,175 @@
+import { describe, expect, test } from "bun:test";
+import {
+  openCredentialV1,
+  parseCredentialKeyringV1,
+} from "@frockbot/connection-core";
+import {
+  createCredentialUserBackendContribution,
+  type CredentialStorage,
+  type CredentialTransaction,
+} from "./user.js";
+
+class MemoryStorage implements CredentialStorage {
+  readonly values = new Map<string, unknown>();
+
+  get<T>(key: string): Promise<T | undefined> {
+    return Promise.resolve(this.values.get(key) as T | undefined);
+  }
+
+  put<T>(key: string, value: T): Promise<void>;
+  put(entries: Record<string, unknown>): Promise<void>;
+  put<T>(
+    keyOrEntries: string | Record<string, unknown>,
+    value?: T,
+  ): Promise<void> {
+    if (typeof keyOrEntries === "string") this.values.set(keyOrEntries, value);
+    else
+      for (const [key, entry] of Object.entries(keyOrEntries))
+        this.values.set(key, entry);
+    return Promise.resolve();
+  }
+
+  delete(key: string): Promise<boolean> {
+    return Promise.resolve(this.values.delete(key));
+  }
+
+  transaction<T>(
+    callback: (storage: CredentialTransaction) => Promise<T>,
+  ): Promise<T> {
+    return callback(this);
+  }
+}
+
+const bytes = Uint8Array.from({ length: 32 }, (_, index) => index + 7);
+let binary = "";
+for (const byte of bytes) binary += String.fromCharCode(byte);
+const encodedKey = btoa(binary)
+  .replaceAll("+", "-")
+  .replaceAll("/", "_")
+  .replace(/=+$/, "");
+const serializedKeyring = JSON.stringify({
+  schemaVersion: 1,
+  currentKeyId: "primary",
+  keys: { primary: encodedKey },
+});
+
+function contribution(storage = new MemoryStorage()) {
+  return {
+    storage,
+    credentials: createCredentialUserBackendContribution({
+      storage,
+      keyring: serializedKeyring,
+    }),
+  };
+}
+
+const authority = {
+  accountId: "account-1",
+  connectionId: "connection-1",
+  packageId: "provider-ollama-cloud",
+};
+
+describe("Credential User Contribution", () => {
+  test("rotates atomically while admitted effects retain the old generation", async () => {
+    const { credentials } = contribution();
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "old-key",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    const oldLease = await credentials.lease({
+      ...authority,
+      effectId: "effect-1",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-2",
+      apiKey: "new-key",
+    });
+    await credentials.activate({ ...authority, generation: "generation-2" });
+    const newLease = await credentials.lease({
+      ...authority,
+      effectId: "effect-2",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+
+    expect(oldLease.credentialGeneration).toBe("generation-1");
+    expect(newLease.credentialGeneration).toBe("generation-2");
+    const keyring = parseCredentialKeyringV1(serializedKeyring);
+    expect(
+      await openCredentialV1({
+        keyring,
+        context: {
+          ...authority,
+          credentialGeneration: oldLease.credentialGeneration,
+        },
+        envelope: oldLease.envelope,
+      }),
+    ).toBe("old-key");
+  });
+
+  test("replays the same effect lease and rejects cross-Connection reuse", async () => {
+    const { credentials } = contribution();
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "secret",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    const first = await credentials.lease({
+      ...authority,
+      effectId: "effect-1",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+    const replay = await credentials.lease({
+      ...authority,
+      effectId: "effect-1",
+      expiresAt: "2026-08-30T02:00:00.000Z",
+    });
+    expect(replay).toEqual(first);
+    await expect(
+      credentials.lease({
+        ...authority,
+        connectionId: "connection-2",
+        effectId: "effect-1",
+        expiresAt: "2026-08-30T02:00:00.000Z",
+      }),
+    ).rejects.toThrow("Credential lease effect id was reused");
+  });
+
+  test("disconnect blocks new leases while preserving an admitted lease", async () => {
+    const { credentials } = contribution();
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "secret",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    const admitted = await credentials.lease({
+      ...authority,
+      effectId: "effect-1",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+
+    await credentials.disconnect(authority.connectionId);
+
+    expect(
+      await credentials.lease({
+        ...authority,
+        effectId: "effect-1",
+        expiresAt: "2026-08-30T01:00:00.000Z",
+      }),
+    ).toEqual(admitted);
+    await expect(
+      credentials.lease({
+        ...authority,
+        effectId: "effect-2",
+        expiresAt: "2026-08-30T01:00:00.000Z",
+      }),
+    ).rejects.toThrow("Connection credential is unavailable");
+    await credentials.settle("effect-1");
+  });
+});

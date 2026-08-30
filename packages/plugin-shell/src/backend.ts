@@ -1,7 +1,14 @@
 import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
 import type { Plugin } from "cordis";
-import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
+import type {
+  FoundationAgentPackage,
+  RuntimeModelSelection,
+} from "@frockbot/agent-runtime/runtime";
+import type { CredentialLeaseV1 } from "@frockbot/connection-core";
+import {
+  compileFoundationApplication,
+  createFoundationModelRuntimePackage,
+} from "@frockbot/application-foundation/runtime";
 import {
   capabilityAssignmentFailureV1,
   configurationCommandFingerprintV1,
@@ -16,6 +23,7 @@ import {
   type OperationReceiptV1,
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
+  resolveBotModelBindingV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import { createFoundationAssignedRuntimePackages } from "@frockbot/application-foundation/runtime";
@@ -119,6 +127,7 @@ export interface BotStateEnv {
   AI: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   SPRITES_TOKEN?: string;
+  CREDENTIAL_KEYRING?: string;
 }
 
 export interface ShellBotBackendHost {
@@ -854,7 +863,7 @@ export class ShellBotBackendContribution {
         } satisfies StoredRun);
         await this.refreshRecoveryAlarm(transaction);
       });
-      const agentPackages = await this.assignedAgentPackages(command, settings);
+      const runtime = await this.agentRuntime(command, settings);
       const promptParts = [
         `You are ${settings.profile.name}.`,
         settings.profile.label,
@@ -867,7 +876,8 @@ export class ShellBotBackendContribution {
         memory: memoryPluginConfig(this.env, command),
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(command.runId, events),
-        agentPackages,
+        agentPackages: runtime.agentPackages,
+        modelSelection: runtime.modelSelection,
         systemPromptSection: promptParts.join("\n\n"),
       });
       const completed = settings.notifications.enabled
@@ -919,10 +929,7 @@ export class ShellBotBackendContribution {
     requireStoredRunV1(run);
     const previous = latest.slice(0, run.previousEventCount);
     try {
-      const agentPackages = await this.assignedAgentPackages(
-        identity,
-        settings,
-      );
+      const runtime = await this.agentRuntime(identity, settings);
       const promptParts = [
         `You are ${settings.profile.name}.`,
         settings.profile.label,
@@ -940,7 +947,8 @@ export class ShellBotBackendContribution {
         memory: memoryPluginConfig(this.env, identity),
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(run.runId, events),
-        agentPackages,
+        agentPackages: runtime.agentPackages,
+        modelSelection: runtime.modelSelection,
         systemPromptSection: promptParts.join("\n\n"),
         resume: true,
       });
@@ -989,31 +997,36 @@ export class ShellBotBackendContribution {
     }
   }
 
-  private async assignedAgentPackages(
+  private async agentRuntime(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
-  ): Promise<FoundationAgentPackage[]> {
-    const user = await this.userConfiguration(identity).readConfiguration({
+  ): Promise<{
+    agentPackages: FoundationAgentPackage[];
+    modelSelection?: RuntimeModelSelection;
+  }> {
+    const userConfiguration = this.userConfiguration(identity);
+    const user = await userConfiguration.readConfiguration({
       schemaVersion: 1,
       userId: identity.userId,
     });
     const application = await this.compileApplication();
+    const packageDefinitions = application.packages.map((pkg) => ({
+      packageId: pkg.id,
+      version: pkg.version,
+      capabilities: pkg.manifest.configuration?.capabilities ?? [],
+      connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+    }));
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
-      packages: application.packages.map((pkg) => ({
-        packageId: pkg.id,
-        version: pkg.version,
-        capabilities: pkg.manifest.configuration?.capabilities ?? [],
-        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-      })),
+      packages: packageDefinitions,
     });
     const readSecret = (name: string) => {
       // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
       const value = (this.env as unknown as Record<string, unknown>)[name];
       return typeof value === "string" ? value : undefined;
     };
-    return [
+    const agentPackages: FoundationAgentPackage[] = [
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
         readSecret,
@@ -1030,6 +1043,54 @@ export class ShellBotBackendContribution {
         },
       )),
     ];
+    if (!settings.model) return { agentPackages };
+
+    const binding = resolveBotModelBindingV1({
+      model: settings.model,
+      user,
+      packages: packageDefinitions,
+    });
+    if (
+      binding.state === "unavailable" ||
+      !binding.connection ||
+      !binding.providerType
+    ) {
+      throw new Error(binding.failure ?? "Bot model Connection is unavailable");
+    }
+    const credentialKeyring = readSecret("CREDENTIAL_KEYRING");
+    if (!credentialKeyring) {
+      throw new Error("Credential Store Contribution is not configured");
+    }
+    agentPackages.push(
+      createFoundationModelRuntimePackage(application, binding, {
+        accountId: identity.userId,
+        connectionId: binding.connection.connectionId,
+        credentialKeyring,
+        leaseCredential: (effectId): Promise<CredentialLeaseV1> =>
+          userConfiguration.leaseModelCredential(
+            identity.userId,
+            binding.connection!.connectionId,
+            settings.model!.providerModelId,
+            effectId,
+          ),
+        settleCredential: (effectId) =>
+          userConfiguration.settleModelCredential(identity.userId, effectId),
+      }),
+    );
+    return {
+      agentPackages,
+      modelSelection: {
+        provider: binding.providerType,
+        model: settings.model.providerModelId,
+        connectionId: binding.connection.connectionId,
+        ...(binding.connection.generation
+          ? { connectionGeneration: binding.connection.generation }
+          : {}),
+        ...(binding.connection.modelCatalog?.generation
+          ? { catalogGeneration: binding.connection.modelCatalog.generation }
+          : {}),
+      },
+    };
   }
 
   private async authorizeAssignedEffect(
@@ -1376,6 +1437,13 @@ export class ShellBotBackendContribution {
       botId: string,
       generation: string,
     ): Promise<boolean>;
+    leaseModelCredential(
+      userId: string,
+      connectionId: string,
+      providerModelId: string,
+      effectId: string,
+    ): Promise<CredentialLeaseV1>;
+    settleModelCredential(userId: string, effectId: string): Promise<void>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
@@ -1385,6 +1453,8 @@ export class ShellBotBackendContribution {
       claimConnectionDependency(input: unknown): Promise<boolean>;
       acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
       compensateConnectionDependency(input: unknown): Promise<boolean>;
+      leaseModelCredential(input: unknown): Promise<CredentialLeaseV1>;
+      settleModelCredential(input: unknown): Promise<void>;
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
@@ -1431,6 +1501,16 @@ export class ShellBotBackendContribution {
           botId,
           generation,
         }),
+      leaseModelCredential: (userId, connectionId, providerModelId, effectId) =>
+        rpc.leaseModelCredential({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          providerModelId,
+          effectId,
+        }),
+      settleModelCredential: (userId, effectId) =>
+        rpc.settleModelCredential({ schemaVersion: 1, userId, effectId }),
     };
   }
 

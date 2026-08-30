@@ -11,6 +11,9 @@
     "test": "bun test src",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
+  "dependencies": {
+    "@frockbot/connection-core": "workspace:*"
+  },
   "devDependencies": {
     "@types/bun": "1.3.6",
     "typescript": "^7.0.2"

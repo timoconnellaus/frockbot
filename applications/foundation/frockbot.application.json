@@ -37,6 +37,16 @@
       "grants": []
     },
     {
+      "specifier": "@frockbot/plugin-credentials",
+      "version": "0.0.1",
+      "grants": ["credentials:manage"]
+    },
+    {
+      "specifier": "@frockbot/plugin-provider-ollama-cloud",
+      "version": "0.0.1",
+      "grants": ["connections:manage", "models:invoke", "network:ollama-cloud"]
+    },
+    {
       "specifier": "@frockbot/plugin-flock",
       "version": "0.0.1",
       "grants": []

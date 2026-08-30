@@ -16,6 +16,7 @@ import {
   decodeUserSettingsViewV1,
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
+  resolveBotModelBindingV1,
 } from "./index.js";
 import {
   isApplicationDeploymentHash,
@@ -494,6 +495,93 @@ describe("Bot execution-plan authority", () => {
       connectionTypes: [{ id: "gmail", capabilities: ["gmail-tools"] }],
     },
   ];
+
+  test("resolves a Bot model through its explicit ready Connection", () => {
+    const user = {
+      schemaVersion: 1 as const,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed" as const,
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready" as const,
+          providerType: "ollama-cloud",
+          modelCatalog: {
+            schemaVersion: 1 as const,
+            generation: "catalog-1",
+            state: "fresh" as const,
+            models: [
+              {
+                providerModelId: "glm-5.3-flash:cloud",
+                displayName: "GLM 5.3 Flash",
+                capabilities: {
+                  tools: true,
+                  vision: false,
+                  reasoning: true,
+                },
+                source: "discovered" as const,
+              },
+            ],
+          },
+          safeMetadata: {},
+        },
+      ],
+    };
+    const modelPackages = [
+      {
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        capabilities: [
+          {
+            id: "ollama-cloud-models",
+            kind: "model" as const,
+            connectionTypes: ["ollama-cloud-account"],
+          },
+        ],
+        connectionTypes: [
+          {
+            id: "ollama-cloud-account",
+            capabilities: ["ollama-cloud-models"],
+          },
+        ],
+      },
+    ];
+
+    expect(
+      resolveBotModelBindingV1({
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        user,
+        packages: modelPackages,
+      }),
+    ).toMatchObject({
+      state: "ready",
+      providerType: "ollama-cloud",
+      packageId: "provider-ollama-cloud",
+    });
+    expect(
+      resolveBotModelBindingV1({
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "new-model:cloud",
+        },
+        user,
+        packages: modelPackages,
+      }).state,
+    ).toBe("requires-resolution");
+  });
 
   test("requires an enabled installation, declared capability, and ready typed Connection", () => {
     const user = {

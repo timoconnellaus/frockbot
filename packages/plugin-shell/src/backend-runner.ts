@@ -1,6 +1,7 @@
 import {
   createFoundationRuntime,
   type FoundationAgentPackage,
+  type RuntimeModelSelection,
 } from "@frockbot/agent-runtime/runtime";
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
 import type { PersistSessionEvents, SessionEvent } from "@frockbot/agent-core";
@@ -50,6 +51,7 @@ export interface ExecuteBotTurnOptions {
   memory?: MemoryPluginConfig;
   persistSessionEvents?: PersistSessionEvents;
   agentPackages?: readonly FoundationAgentPackage[];
+  modelSelection?: RuntimeModelSelection;
   systemPromptSection?: string;
   resume?: boolean;
 }
@@ -64,6 +66,7 @@ export async function executeBotTurn(
     memory,
     persistSessionEvents,
     agentPackages,
+    modelSelection,
     systemPromptSection,
     resume,
   } = options;
@@ -75,6 +78,7 @@ export async function executeBotTurn(
     memory,
     persistSessionEvents,
     agentPackages,
+    modelSelection,
     systemPromptSection,
   });
 

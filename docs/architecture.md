@@ -254,7 +254,11 @@ The cloud gateway owns the authenticated production settings transport. `@frockb
 
 Manifest v3 lets a Package declare bounded User/Bot setting schemas, Connection Types, and Capabilities. Manifest decoding rejects undeclared fields at every object boundary, along with remote schema references, excessive nesting, and oversized schemas. The hosted Plugins surface accepts only the exact owned version of the immutable application-manifest response before projecting those declarations; installing a Package records durable User availability but does not grant a Bot authority. Notification list and acknowledgement responses use exact shared v1 envelopes; `@frockbot/connection-core` owns provider-neutral Connection transport result contracts.
 
-The Settings User Contribution owns durable User profile, package-installation, and default-model state behind the versioned configuration interface. Flock reads a transaction-local snapshot from that Contribution when registering a Bot, so generic User authority does not depend on any external integration Package.
+The Settings User Contribution owns durable User profile, package-installation, Connection projection, and default-model state behind the versioned configuration interface. Flock reads a transaction-local snapshot from that Contribution when registering a Bot, so generic User authority does not depend on any external integration Package.
+
+`@frockbot/plugin-credentials` owns the account-scoped encrypted credential store. Settings and public Connection DTOs contain only opaque generations and redacted descriptors; versioned AES-GCM envelopes are authenticated to account, Connection, Package, and credential generation. A model effect acquires an idempotent, expiring lease keyed by its durable request ID. Rotation atomically promotes a validated pending generation, admitted effects retain the old generation, and retired ciphertext is purged only after dependent leases settle.
+
+`@frockbot/plugin-provider-ollama-cloud` contributes the Ollama account authorizer in the User Durable Object and the `ollama-cloud` LLM adapter in the Bot runtime. Each ready Connection owns an advisory normalized model catalog with durable generation, freshness, and refresh scheduling. A Bot assignment stores the exact Connection ID and provider model ID; runtime construction rejects unavailable assignments, mounts the selected provider Package, and records Connection and catalog generations in normalized model requests. Catalog absence triggers exact provider resolution rather than fallback. Provider credentials and Ollama wire types never enter the generic Agent loop.
 
 Composio is temporarily absent from the compiled foundation application and production dependency graph while its integration is redesigned around Composio Connect MCP. The dormant package source is not mounted, advertised, configured, or bundled by the hosted production path; CI and the setup wizard require and forward no Composio credentials. Reintroduction requires a complete backend-owned Connection and Agent-runtime vertical slice rather than a second product path.
 
@@ -285,8 +289,10 @@ apps/
 packages/
   agent-core/              Session, LLM, prompt, tool, and Agent contracts
   agent-loop/              Concrete durable loop provider
-  configuration-core/      Versioned settings and Connection contracts
+  configuration-core/      Versioned settings and Connection projections
+  connection-core/         Credential, catalog, and Connection command DTOs
   plugin-catalog/          Package manifest and activation coordinator
+  plugin-credentials/      Encrypted account credential records and leases
   plugin-shell/            Hosted Vue shell and backend shell Contributions
   plugin-*/                First-party feature and provider Packages
   protocol/                Versioned cross-runtime DTOs and decoders

@@ -1,3 +1,4 @@
+import { decodeConnectionCommandV1 } from "@frockbot/connection-core";
 import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
@@ -145,6 +146,26 @@ export function createGateway(dependencies: GatewayDependencies) {
             : "browser",
       });
       if (response) return response;
+    }
+
+    if (url.pathname === "/api/connections") {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      try {
+        const command = decodeConnectionCommandV1(await request.json());
+        return Response.json(
+          await dependencies.userConfigurationFor(userId).executeConnection({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        );
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "Connection command failed",
+        );
+      }
     }
 
     const botSettingsMatch = url.pathname.match(

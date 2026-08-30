@@ -151,7 +151,7 @@ describe("OpenAICompatibleProvider", () => {
     await root.fiber.dispose();
   });
 
-  test("surfaces bounded HTTP errors", async () => {
+  test("redacts provider response bodies from HTTP errors", async () => {
     const provider = new OpenAICompatibleProvider({
       baseUrl: "https://models.example/v1",
       fetch: () =>
@@ -169,8 +169,8 @@ describe("OpenAICompatibleProvider", () => {
     } catch (error) {
       failure = error;
     }
-    expect(failure instanceof Error ? failure.message : "").toContain(
-      "Model request failed (401): bad credentials",
+    expect(failure instanceof Error ? failure.message : "").toBe(
+      "Model request failed (401)",
     );
   });
 });

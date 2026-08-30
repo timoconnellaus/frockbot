@@ -61,6 +61,14 @@ export interface FoundationAgentPackage {
   plugin: Plugin;
 }
 
+export interface RuntimeModelSelection {
+  provider: string;
+  model: string;
+  connectionId?: string;
+  connectionGeneration?: string;
+  catalogGeneration?: string;
+}
+
 export interface FoundationRuntimeOptions {
   botId?: string;
   agentId?: string;
@@ -72,6 +80,7 @@ export interface FoundationRuntimeOptions {
   memory?: MemoryPluginConfig;
   persistSessionEvents?: PersistSessionEvents;
   systemPromptSection?: string;
+  modelSelection?: RuntimeModelSelection;
 }
 
 export async function createFoundationRuntime(
@@ -159,12 +168,30 @@ export async function createFoundationRuntime(
   }
   await root.plugin(AgentLoop, { maxSteps: 8 });
 
+  const selection = options.modelSelection;
+  if (selection) {
+    provider = selection.provider;
+    model = selection.model;
+  }
   const agentOptions: AgentOptions = {
     botId: options.botId?.trim() || options.agentId?.trim() || sessionId,
     agentId: options.agentId,
     sessionId,
     provider,
     model,
+    ...(selection?.connectionId
+      ? {
+          modelBinding: {
+            connectionId: selection.connectionId,
+            ...(selection.connectionGeneration
+              ? { connectionGeneration: selection.connectionGeneration }
+              : {}),
+            ...(selection.catalogGeneration
+              ? { catalogGeneration: selection.catalogGeneration }
+              : {}),
+          },
+        }
+      : {}),
   };
   const agent = await root.agents.create(agentOptions);
   return {
