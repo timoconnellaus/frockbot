@@ -34,6 +34,24 @@ const originalDocument = Object.getOwnPropertyDescriptor(
   "document",
 );
 
+async function secretDerivations(secret: string): Promise<string[]> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)),
+  );
+  const hex = Array.from(digest, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return [
+    hex,
+    hex.toUpperCase(),
+    btoa(String.fromCharCode(...digest)),
+    btoa(String.fromCharCode(...digest))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, ""),
+  ];
+}
+
 function installMemoryStorage(): void {
   const values = new Map<string, string>();
   Object.defineProperty(globalThis, "localStorage", {
@@ -1160,6 +1178,7 @@ describe("Connection operation reconciliation", () => {
       value: { location: { href: "https://app.example/?bot=primary" } },
     });
     const commandIds: string[] = [];
+    const requestBodies: string[] = [];
     let attempts = 0;
     const mount = async (): Promise<Ref<FrockBotWebData>> => {
       let provided: Ref<FrockBotWebData> | undefined;
@@ -1169,6 +1188,7 @@ describe("Connection operation reconciliation", () => {
           readAuthenticatedUserId: () => Promise.resolve("user-a"),
           executeConnection: (command) => {
             commandIds.push(command.commandId);
+            requestBodies.push(JSON.stringify(command));
             attempts += 1;
             if (attempts === 1) {
               return Promise.reject(new Error("response lost"));
@@ -1204,16 +1224,82 @@ describe("Connection operation reconciliation", () => {
     await expect(first.value.createApiKeyConnection(input)).rejects.toThrow(
       "response lost",
     );
-    expect(
+    const retained =
       globalThis.localStorage.getItem(
         "frockbot.pending-connection-operations.v1",
-      ),
-    ).not.toContain(input.apiKey);
+      ) ?? "";
+    expect(retained).not.toContain(input.apiKey);
+    for (const derived of await secretDerivations(input.apiKey)) {
+      expect(retained).not.toContain(derived);
+    }
     const second = await mount();
     await second.value.createApiKeyConnection(input);
 
     expect(commandIds).toHaveLength(2);
     expect(new Set(commandIds).size).toBe(1);
+    expect(requestBodies).toHaveLength(2);
+    for (const body of requestBodies) {
+      const envelope = JSON.parse(body) as Record<string, unknown>;
+      expect(envelope.apiKey).toBe(input.apiKey);
+      const withoutSecret = JSON.stringify({ ...envelope, apiKey: undefined });
+      for (const derived of await secretDerivations(input.apiKey)) {
+        expect(withoutSecret).not.toContain(derived);
+      }
+    }
+  });
+
+  test("mints a fresh operation identity for a settled submission", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    const commandIds: string[] = [];
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readAuthenticatedUserId: () => Promise.resolve("user-a"),
+        executeConnection: (command) => {
+          commandIds.push(command.commandId);
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            connectionId: "connection-1",
+            status: "applied",
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    const input = {
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "super-secret-api-key",
+    };
+
+    await provided.value.createApiKeyConnection(input);
+    await provided.value.createApiKeyConnection({
+      ...input,
+      apiKey: "another-secret-api-key",
+    });
+
+    expect(commandIds).toHaveLength(2);
+    expect(commandIds[1]).not.toBe(commandIds[0]);
+    expect(
+      globalThis.localStorage.getItem(
+        "frockbot.pending-connection-operations.v1",
+      ),
+    ).toBe("{}");
   });
 
   test("retires a lost rotation from its durable command receipt", async () => {
