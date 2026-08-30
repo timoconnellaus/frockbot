@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "bun test src",
+    "test": "bun test src dev-target.test.ts capacitor.config.test.ts",
     "sync": "cap sync"
   },
   "dependencies": {

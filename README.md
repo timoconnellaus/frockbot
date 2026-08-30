@@ -180,6 +180,8 @@ bun run dev:cloudflare:electron
 
 The command builds and seeds the Dynamic Worker artifact, then starts Wrangler on port 8787, the renderer development server on port 5173, and Electron pointed at that renderer. On `localhost`, `127.0.0.1`, or `::1`, the sign-in screen includes **Continue as local developer**; it uses the fixed `development` identity and does not require Google credentials. The identity is accepted by the backend only when local development authentication is enabled.
 
+When one authorized Android device is visible to `adb` and Tailscale has an IPv4 address, the same command also starts the mobile Vite server on port 5174, binds Wrangler to the Mac's Tailscale address, builds and syncs the Capacitor Android project, installs the debug APK with `adb install -r`, and launches it. The phone loads both live-reload UI and gateway traffic over Tailscale; no LAN-wide bind or production deployment is used. Keep Tailscale connected on the Mac and phone. When the same phone appears through both USB and wireless ADB, the wireless endpoint is preferred. If multiple authorized devices are connected, set `ANDROID_SERIAL` to the intended serial. With no eligible device or no Tailscale address, desktop development continues and phone installation is skipped.
+
 For Worker-only development, place the artifact in local R2 before starting Wrangler:
 
 ```bash

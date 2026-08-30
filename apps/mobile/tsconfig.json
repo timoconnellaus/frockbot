@@ -17,11 +17,5 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["bun", "vite/client"]
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.d.ts",
-    "src/**/*.vue",
-    "vite.config.ts",
-    "capacitor.config.ts"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "*.ts"]
 }

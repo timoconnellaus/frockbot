@@ -6,6 +6,8 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const cordisClientRuntime = fileURLToPath(
   new URL("./src/client/cordis-client-runtime.ts", import.meta.url),
 );
+const developmentGatewayUrl =
+  process.env.FROCKBOT_DEV_GATEWAY_URL ?? "http://127.0.0.1:8787";
 
 export default defineConfig({
   root,
@@ -21,11 +23,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8787",
+        target: developmentGatewayUrl,
         headers: { "x-frockbot-user-id": "development" },
       },
       "/app-manifest": {
-        target: "http://127.0.0.1:8787",
+        target: developmentGatewayUrl,
         headers: { "x-frockbot-user-id": "development" },
       },
     },
