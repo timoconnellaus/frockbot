@@ -1,6 +1,7 @@
 import {
   decodeConnectionCommandReceiptV1,
   decodeConnectionCommandV1,
+  decodeConnectionModelCatalogV1,
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
   type ConnectionModelCatalogV1,
@@ -57,6 +58,9 @@ interface StoredCommand {
   mutationSequence?: number;
   settlementEffectId?: string;
   settlementStatus?: "applied" | "failed";
+  validationCatalog?: ConnectionModelCatalogV1;
+  validationFailure?: string;
+  validationStatus?: "applied" | "failed";
 }
 
 type OllamaCredentialContribution = Omit<
@@ -82,6 +86,7 @@ type OllamaCredentialContribution = Omit<
       effectId: string;
       expiresAt: string;
       expectedGeneration: string;
+      credentialState?: "active" | "pending";
     },
     storage?: CredentialTransaction,
   ): Promise<CredentialLeaseV1>;
@@ -223,6 +228,9 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       "mutationSequence",
       "settlementEffectId",
       "settlementStatus",
+      "validationCatalog",
+      "validationFailure",
+      "validationStatus",
     ],
   );
   const operations: StoredCommand["operation"][] = [
@@ -252,7 +260,14 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     (value.settlementStatus !== undefined &&
       value.settlementStatus !== "applied" &&
       value.settlementStatus !== "failed") ||
-    Boolean(value.settlementEffectId) !== Boolean(value.settlementStatus)
+    Boolean(value.settlementEffectId) !== Boolean(value.settlementStatus) ||
+    (value.validationStatus !== undefined &&
+      value.validationStatus !== "applied" &&
+      value.validationStatus !== "failed") ||
+    (value.validationStatus === "applied") !==
+      (value.validationCatalog !== undefined) ||
+    (value.validationStatus === "failed") !==
+      (value.validationFailure !== undefined)
   ) {
     throw new Error("Stored Ollama command is invalid");
   }
@@ -262,6 +277,10 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     value.receipt === undefined
       ? undefined
       : decodeConnectionCommandReceiptV1(value.receipt);
+  const validationCatalog =
+    value.validationCatalog === undefined
+      ? undefined
+      : decodeConnectionModelCatalogV1(value.validationCatalog);
   if (
     decodedReceipt &&
     (decodedReceipt.commandId !== commandId ||
@@ -322,6 +341,21 @@ function decodeStoredCommand(input: unknown): StoredCommand {
             256,
           ),
           settlementStatus: value.settlementStatus as "applied" | "failed",
+        }),
+    ...(value.validationStatus === undefined
+      ? {}
+      : {
+          validationStatus: value.validationStatus as "applied" | "failed",
+          ...(validationCatalog ? { validationCatalog } : {}),
+          ...(value.validationFailure === undefined
+            ? {}
+            : {
+                validationFailure: storedText(
+                  value.validationFailure,
+                  "validationFailure",
+                  500,
+                ),
+              }),
         }),
   };
 }
@@ -745,16 +779,16 @@ export class OllamaCloudUserBackendContribution {
     record: StoredCommand,
     apiKey?: string,
   ): Promise<ConnectionCommandReceiptV1> {
-    const sequenced = await this.ensureMutationSequence(record);
-    const active = this.resumptions.get(sequenced.commandId);
+    const active = this.resumptions.get(record.commandId);
     if (active) {
-      if (active.fingerprint !== sequenced.fingerprint) {
+      if (active.fingerprint !== record.fingerprint) {
         throw new Error("Connection command idempotency key was reused");
       }
       return active.promise;
     }
     const promise = (async () => {
       try {
+        const sequenced = await this.ensureMutationSequence(record);
         await this.ensureAdmittedState(sequenced, apiKey);
         return await this.resume(sequenced);
       } catch (error) {
@@ -762,13 +796,13 @@ export class OllamaCloudUserBackendContribution {
         throw error;
       }
     })();
-    this.resumptions.set(sequenced.commandId, {
-      fingerprint: sequenced.fingerprint,
+    this.resumptions.set(record.commandId, {
+      fingerprint: record.fingerprint,
       promise,
     });
     const release = () => {
-      if (this.resumptions.get(sequenced.commandId)?.promise === promise) {
-        this.resumptions.delete(sequenced.commandId);
+      if (this.resumptions.get(record.commandId)?.promise === promise) {
+        this.resumptions.delete(record.commandId);
       }
     };
     void promise.then(release, release);
@@ -848,24 +882,136 @@ export class OllamaCloudUserBackendContribution {
   ): Promise<ConnectionCommandReceiptV1> {
     const generation = record.credentialGeneration;
     if (!generation) throw new Error("Credential generation is unavailable");
-    const projected = await this.requireConnection(
+    const effectId = `validation:${record.commandId}`;
+    let outcome = record;
+    const existingProjection = await this.requireConnection(
       record.accountId,
       record.connectionId,
     );
     if (
-      projected.generation === generation &&
-      (projected.state === "ready" || projected.state === "disabled")
+      !outcome.validationStatus &&
+      existingProjection.generation === generation &&
+      (existingProjection.state === "ready" ||
+        existingProjection.state === "disabled")
     ) {
       return this.finishRecord(record, "applied");
     }
-    try {
-      const apiKey = await this.host.credentials.readStagedApiKey({
+    if (!outcome.validationStatus) {
+      try {
+        const lease = await this.host.credentials.lease({
+          accountId: record.accountId,
+          connectionId: record.connectionId,
+          packageId: PACKAGE_ID,
+          effectId,
+          expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
+          expectedGeneration: generation,
+          credentialState: "pending",
+        });
+        const apiKey = await this.host.credentials.openLease({
+          accountId: record.accountId,
+          packageId: PACKAGE_ID,
+          lease,
+        });
+        const models = await this.client.listModels(apiKey);
+        outcome = {
+          ...record,
+          validationCatalog: this.catalog(models),
+          validationStatus: "applied",
+        };
+      } catch (error) {
+        outcome = {
+          ...record,
+          validationFailure: (error instanceof Error && error.message
+            ? error.message
+            : "Ollama Cloud validation failed"
+          ).slice(0, 500),
+          validationStatus: "failed",
+        };
+      }
+      await this.host.storage.transaction(async (storage) => {
+        const storedValue = await storage.get<unknown>(
+          commandKey(record.commandId),
+        );
+        if (storedValue === undefined) {
+          throw new Error("Ollama Connection command is unavailable");
+        }
+        const stored = decodeStoredCommand(storedValue);
+        if (!stored.receipt) {
+          await storage.put(commandKey(record.commandId), outcome);
+        }
+      });
+    }
+    const settleValidation = () =>
+      this.host.credentials.settle({
         accountId: record.accountId,
         connectionId: record.connectionId,
         packageId: PACKAGE_ID,
-        generation,
+        effectId,
       });
-      const models = await this.client.listModels(apiKey);
+    let projected: ConnectionView;
+    try {
+      projected = await this.requireConnection(
+        record.accountId,
+        record.connectionId,
+      );
+    } catch (error) {
+      await settleValidation();
+      await this.host.credentials.discardPending(
+        record.connectionId,
+        generation,
+      );
+      const settledValue = await this.host.storage.get<unknown>(
+        commandKey(record.commandId),
+      );
+      const settled =
+        settledValue === undefined
+          ? undefined
+          : decodeStoredCommand(settledValue).receipt;
+      if (settled) return settled;
+      throw error;
+    }
+    if (
+      projected.generation === generation &&
+      (projected.state === "ready" || projected.state === "disabled")
+    ) {
+      await settleValidation();
+      return this.finishRecord(outcome, "applied");
+    }
+    if (outcome.validationStatus === "failed") {
+      await settleValidation();
+      await this.host.credentials.discardPending(
+        record.connectionId,
+        generation,
+      );
+      if (
+        record.operation === "connection/create-api-key" &&
+        projected.state === "authorizing" &&
+        projected.generation === generation
+      ) {
+        await this.host.settings.replaceConnection(
+          record.accountId,
+          record.connectionId,
+          projected.generation,
+          {
+            ...projected,
+            state: "failed",
+            authorization: {
+              schemaVersion: 1,
+              kind: "api-key",
+              credential: {
+                schemaVersion: 1,
+                configured: false,
+                source: "api-key",
+                writable: true,
+              },
+            },
+            failure: outcome.validationFailure,
+          },
+        );
+      }
+      return this.finishRecord(outcome, "failed");
+    }
+    try {
       await this.host.storage.transaction(
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
           const current = await this.host.settings.getConnection(
@@ -907,7 +1053,7 @@ export class OllamaCloudUserBackendContribution {
               ...current,
               state: current.state === "disabled" ? "disabled" : "ready",
               generation,
-              modelCatalog: this.catalog(models),
+              modelCatalog: outcome.validationCatalog,
               authorization: {
                 schemaVersion: 1,
                 kind: "api-key",
@@ -927,6 +1073,7 @@ export class OllamaCloudUserBackendContribution {
         },
       );
     } catch (error) {
+      await settleValidation();
       await this.host.credentials.discardPending(
         record.connectionId,
         generation,
@@ -973,9 +1120,10 @@ export class OllamaCloudUserBackendContribution {
           );
         }
       }
-      return this.finishRecord(record, "failed");
+      return this.finishRecord(outcome, "failed");
     }
-    return this.finishRecord(record, "applied");
+    await settleValidation();
+    return this.finishRecord(outcome, "applied");
   }
 
   private async updateLabel(
@@ -1401,8 +1549,14 @@ export class OllamaCloudUserBackendContribution {
             record.commandId,
           ];
           const retained = ordered.slice(-MAX_MANUAL_RECEIPTS);
+          const {
+            validationCatalog: _validationCatalog,
+            validationFailure: _validationFailure,
+            validationStatus: _validationStatus,
+            ...durableRecord
+          } = stored ?? record;
           const completed = {
-            ...(stored ?? record),
+            ...durableRecord,
             receipt: proposed,
             completedAt: this.now(),
           };

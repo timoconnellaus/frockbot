@@ -125,10 +125,16 @@ export class BotState extends DurableObject<BotStateEnv> {
                           modelBinding: registration.initialModelBinding,
                         },
                       )
-                      .then(async () => {
+                      .then(async (settings) => {
                         if (
                           registration.initialModel &&
-                          registration.initialModelBinding
+                          registration.initialModelBinding &&
+                          settings.assignments.some(
+                            (assignment) =>
+                              assignment.assignmentId ===
+                              registration.initialModelBinding?.assignment
+                                .assignmentId,
+                          )
                         ) {
                           await this.acknowledgeInitialModelBinding(
                             userId,

@@ -156,6 +156,47 @@ describe("OpenAICompatibleProvider", () => {
     );
   });
 
+  test("cancels an oversized unterminated stream", async () => {
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(`data: ${"x".repeat(1_048_577)}`),
+                );
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+    });
+
+    let failure: unknown;
+    try {
+      for await (const _event of provider.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        throw new Error("unexpected stream event");
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure instanceof Error ? failure.message : "").toBe(
+      "Model response stream exceeded its size limit",
+    );
+    expect(cancelled).toBe(true);
+  });
+
   test("reports retrieval unavailable without another provider request", async () => {
     let requests = 0;
     const provider = new OpenAICompatibleProvider({

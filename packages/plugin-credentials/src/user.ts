@@ -576,7 +576,12 @@ export class CredentialUserBackendContribution {
       const storedValue = await transaction.get<unknown>(key);
       if (storedValue === undefined) return;
       const stored = decodeStoredCredentialGeneration(storedValue);
-      if (stored.state === "pending") await transaction.delete(key);
+      if (stored.state !== "pending") return;
+      if (stored.leaseIds.length === 0) {
+        await transaction.delete(key);
+      } else {
+        await transaction.put(key, { ...stored, state: "retired" });
+      }
     };
     if (storage) return discard(storage);
     return this.host.storage.transaction(discard);
@@ -615,6 +620,7 @@ export class CredentialUserBackendContribution {
       effectId: string;
       expiresAt: string;
       expectedGeneration: string;
+      credentialState?: "active" | "pending";
     },
     storage?: CredentialTransaction,
   ): Promise<CredentialLeaseV1> {
@@ -658,13 +664,17 @@ export class CredentialUserBackendContribution {
         }
         return this.publicLease(existing);
       }
-      const generationValue = await transaction.get<unknown>(
-        activeKey(input.connectionId),
-      );
+      const credentialState = input.credentialState ?? "active";
+      const activeGenerationValue =
+        credentialState === "active"
+          ? await transaction.get<unknown>(activeKey(input.connectionId))
+          : undefined;
       const generation =
-        generationValue === undefined
-          ? undefined
-          : decodeStoredGenerationId(generationValue);
+        credentialState === "pending"
+          ? input.expectedGeneration
+          : activeGenerationValue === undefined
+            ? undefined
+            : decodeStoredGenerationId(activeGenerationValue);
       if (!generation || generation !== input.expectedGeneration) {
         throw new Error("Connection credential is unavailable");
       }
@@ -678,7 +688,7 @@ export class CredentialUserBackendContribution {
       if (
         stored.accountId !== input.accountId ||
         stored.packageId !== input.packageId ||
-        stored.state !== "active"
+        stored.state !== credentialState
       ) {
         throw new Error("Connection credential is unavailable");
       }

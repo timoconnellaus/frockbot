@@ -90,18 +90,39 @@ export function requestToWire(
   };
 }
 
+const MAX_SSE_EVENT_CHARACTERS = 1_048_576;
+const MAX_SSE_RESPONSE_BYTES = 16_777_216;
+
+async function rejectOversizedSse(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<never> {
+  await reader.cancel().catch(() => undefined);
+  throw new Error("Model response stream exceeded its size limit");
+}
+
 async function* readSseData(
   body: ReadableStream<Uint8Array>,
 ): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let responseBytes = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
+      responseBytes += value?.byteLength ?? 0;
+      if (responseBytes > MAX_SSE_RESPONSE_BYTES) {
+        await rejectOversizedSse(reader);
+      }
       buffer += decoder.decode(value, { stream: !done });
       const blocks = buffer.split(/\r?\n\r?\n/);
       buffer = blocks.pop() ?? "";
+      if (
+        buffer.length > MAX_SSE_EVENT_CHARACTERS ||
+        blocks.some((block) => block.length > MAX_SSE_EVENT_CHARACTERS)
+      ) {
+        await rejectOversizedSse(reader);
+      }
       for (const block of blocks) {
         const data = block
           .split(/\r?\n/)

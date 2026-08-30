@@ -25,6 +25,7 @@ type ConnectionDependency = {
   generation: string;
   packageId: string;
   capabilityId: string;
+  claimOrder: number;
   status: "pending" | "acknowledged";
 };
 
@@ -113,6 +114,9 @@ function connectionDependencies(
       typeof dependency.generation !== "string" ||
       typeof dependency.packageId !== "string" ||
       typeof dependency.capabilityId !== "string" ||
+      (dependency.claimOrder !== undefined &&
+        (!Number.isSafeInteger(dependency.claimOrder) ||
+          (dependency.claimOrder as number) < 0)) ||
       (dependency.status !== "pending" && dependency.status !== "acknowledged")
     ) {
       return [];
@@ -123,6 +127,10 @@ function connectionDependencies(
         generation: dependency.generation,
         packageId: dependency.packageId,
         capabilityId: dependency.capabilityId,
+        claimOrder:
+          dependency.claimOrder === undefined
+            ? 0
+            : (dependency.claimOrder as number),
         status: dependency.status,
       } satisfies ConnectionDependency,
     ];
@@ -403,10 +411,17 @@ export class UserSettingsBackendContribution {
         ) {
           return undefined;
         }
-        const existing = connectionDependencies(current).filter(
+        const existing = connectionDependencies(current);
+        const replay = existing.find(
           (dependency) =>
-            dependency.botId !== botId || dependency.generation !== generation,
+            dependency.botId === botId && dependency.generation === generation,
         );
+        if (replay) {
+          return replay.packageId === decoded.packageId &&
+            replay.capabilityId === decoded.capabilityId
+            ? current
+            : undefined;
+        }
         if (existing.length >= MAX_CONNECTION_DEPENDENCIES) return undefined;
         return withConnectionDependencies(current, [
           ...existing,
@@ -415,6 +430,7 @@ export class UserSettingsBackendContribution {
             generation,
             packageId: decoded.packageId,
             capabilityId: decoded.capabilityId,
+            claimOrder: settings.revision + 1,
             status: "pending",
           },
         ]);
@@ -447,6 +463,18 @@ export class UserSettingsBackendContribution {
           dependency.botId === botId && dependency.generation === generation,
       );
       if (!matched) return false;
+      const latestClaimOrder = Math.max(
+        ...current.connections.flatMap((connection) =>
+          connectionDependencies(connection).flatMap((dependency) =>
+            dependency.botId === botId &&
+            dependency.packageId === matched.packageId &&
+            dependency.capabilityId === matched.capabilityId
+              ? [dependency.claimOrder]
+              : [],
+          ),
+        ),
+      );
+      if (matched.claimOrder < latestClaimOrder) return false;
       if (
         matched.status === "acknowledged" &&
         !current.connections.some((connection) =>
@@ -576,6 +604,7 @@ export class UserSettingsBackendContribution {
       if (!connection) return false;
       const nextConnection = transition(connection, current);
       if (!nextConnection) return false;
+      if (nextConnection === connection) return true;
       await storage.put(STATE_KEY, {
         ...current,
         revision: current.revision + 1,

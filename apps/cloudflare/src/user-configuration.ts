@@ -53,6 +53,11 @@ interface ConnectionUserBackendContribution {
     effectId: string;
     connectionGeneration: string;
   }): Promise<unknown>;
+  settleModelCredential(input: {
+    accountId: string;
+    connectionId: string;
+    effectId: string;
+  }): Promise<void>;
   alarm?(): Promise<void>;
 }
 
@@ -440,12 +445,15 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       effectId: rpcIdentifier,
     });
     await (await this.settingsContribution()).read(request.userId as string);
-    await (
-      await this.credentialContribution()
-    ).settle({
+    const contribution = (await this.contributions()).connections.get(
+      request.packageId as string,
+    );
+    if (!contribution) {
+      throw new Error("Connection Package Contribution is unavailable");
+    }
+    await contribution.settleModelCredential({
       accountId: request.userId as string,
       connectionId: request.connectionId as string,
-      packageId: request.packageId as string,
       effectId: request.effectId as string,
     });
   }

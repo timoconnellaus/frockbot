@@ -259,6 +259,30 @@ describe("BotState Ollama execution", () => {
         text: "hello",
       },
     });
+    await expect(
+      firstState.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "primary",
+        command: {
+          schemaVersion: 1,
+          type: "bot/assign-capability",
+          commandId: "replace-initial-model",
+          botId: "primary",
+          expectedRevision: 0,
+          assignment: {
+            assignmentId: "replacement-model",
+            packageId: "provider-ollama-cloud",
+            capabilityId: "ollama-cloud-models",
+            connectionId: "ollama-1",
+          },
+          model: {
+            connectionId: "ollama-1",
+            providerModelId: "glm-5.3-flash:cloud",
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
     const second = await state().run({
       schemaVersion: 1,
       userId: "user-1",
@@ -273,7 +297,12 @@ describe("BotState Ollama execution", () => {
 
     expect(first.text).toBe("Ollama reply");
     expect(second.text).toBe("Ollama reply");
-    expect(dependencyEffects).toEqual(["acknowledge", "acknowledge"]);
+    expect(dependencyEffects).toEqual([
+      "acknowledge",
+      "acknowledge",
+      "claim",
+      "acknowledge",
+    ]);
     expect(requests).toHaveLength(2);
     expect(leases).toHaveLength(2);
     expect(settlements).toHaveLength(2);

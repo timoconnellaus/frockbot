@@ -515,6 +515,62 @@ describe("Ollama Cloud User Contribution", () => {
     );
   });
 
+  test("retries staged validation settlement without repeating validation", async () => {
+    let catalogRequests = 0;
+    const { settings, credentials, ollama } = await fixture((input) => {
+      if (String(input).endsWith("/tags")) {
+        catalogRequests += 1;
+        return Promise.resolve(
+          Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] }),
+        );
+      }
+      return Promise.resolve(Response.json({ capabilities: ["tools"] }));
+    });
+    const settle = credentials.settle.bind(credentials);
+    let settlementFailures = 1;
+    credentials.settle = (input) => {
+      if (
+        input.effectId === "validation:connect-validation-settlement" &&
+        settlementFailures > 0
+      ) {
+        settlementFailures -= 1;
+        return Promise.reject(new Error("settlement unavailable"));
+      }
+      return settle(input);
+    };
+    const command = {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-validation-settlement",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "key",
+    } as const;
+
+    await expect(
+      ollama.executeConnection("account-1", command),
+    ).rejects.toThrow("settlement unavailable");
+    expect(catalogRequests).toBe(1);
+    expect((await settings.read("account-1")).connections[0]).toMatchObject({
+      state: "ready",
+    });
+
+    await expect(
+      ollama.executeConnection("account-1", command),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(catalogRequests).toBe(1);
+    await expect(
+      credentials.replayLease({
+        accountId: "account-1",
+        connectionId: (await settings.read("account-1")).connections[0]!
+          .connectionId,
+        packageId: "provider-ollama-cloud",
+        effectId: "validation:connect-validation-settlement",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   test("replays successful activation when receipt finalization fails", async () => {
     let storage: MemoryStorage | undefined;
     const fixtureValue = await fixture(async (input, init) => {

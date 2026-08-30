@@ -246,6 +246,90 @@ describe("User settings backend Contribution", () => {
     ).toMatchObject({ dependentAssignments: [] });
   });
 
+  test("rejects acknowledgement from a superseded dependency claim", async () => {
+    const settings = contribution();
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-fenced-package",
+        expectedRevision: 0,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+      },
+    });
+    for (const connectionId of ["ollama-old", "ollama-new"]) {
+      await settings.createConnection("user-1", {
+        connectionId,
+        packageId: "provider-ollama-cloud",
+        connectionTypeId: "ollama-cloud-account",
+        displayName: connectionId,
+        state: "ready",
+        providerType: "ollama-cloud",
+        generation: `${connectionId}-generation`,
+        safeMetadata: {},
+      });
+    }
+    const requirement = {
+      schemaVersion: 1 as const,
+      packageId: "provider-ollama-cloud",
+      packageVersion: "0.0.1",
+      capabilityId: "ollama-cloud-models",
+      connectionTypeIds: ["ollama-cloud-account"],
+    };
+    await settings.claimConnectionDependency(
+      "user-1",
+      "ollama-old",
+      "bot-1",
+      "assignment-old",
+      requirement,
+    );
+    await settings.claimConnectionDependency(
+      "user-1",
+      "ollama-new",
+      "bot-1",
+      "assignment-new",
+      requirement,
+    );
+    await settings.claimConnectionDependency(
+      "user-1",
+      "ollama-old",
+      "bot-1",
+      "assignment-old",
+      requirement,
+    );
+
+    await expect(
+      settings.acknowledgeConnectionDependency(
+        "user-1",
+        "ollama-old",
+        "bot-1",
+        "assignment-old",
+      ),
+    ).resolves.toBe(false);
+    expect(
+      (await settings.getConnection("user-1", "ollama-new"))?.safeMetadata,
+    ).toMatchObject({
+      dependentAssignments: [
+        { generation: "assignment-new", status: "pending" },
+      ],
+    });
+
+    await expect(
+      settings.acknowledgeConnectionDependency(
+        "user-1",
+        "ollama-new",
+        "bot-1",
+        "assignment-new",
+      ),
+    ).resolves.toBe(true);
+    expect(
+      (await settings.getConnection("user-1", "ollama-old"))?.safeMetadata,
+    ).toMatchObject({ dependentAssignments: [] });
+  });
+
   test("compacts revoked Connections and bounds active Connections", async () => {
     const settings = contribution();
     await settings.read("user-1");
