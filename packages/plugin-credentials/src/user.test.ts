@@ -284,6 +284,39 @@ describe("Credential User Contribution", () => {
     ).resolves.toMatchObject({ effectId: "effect-expired" });
   });
 
+  test("tombstones an expired pending-generation lease", async () => {
+    let now = Date.parse("2026-08-30T00:00:00.000Z");
+    const { storage, credentials } = contribution(undefined, () => now);
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "pending-generation",
+      apiKey: "secret",
+    });
+    await credentials.lease({
+      ...authority,
+      expectedGeneration: "pending-generation",
+      credentialState: "pending",
+      effectId: "validation:connect-1",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+
+    now = Date.parse("2026-08-30T01:00:00.000Z");
+    await credentials.expireLeases();
+
+    expect(
+      storage.values.has("credential-lease-expired:validation:connect-1"),
+    ).toBe(true);
+    await expect(
+      credentials.lease({
+        ...authority,
+        expectedGeneration: "pending-generation",
+        credentialState: "pending",
+        effectId: "validation:connect-1",
+        expiresAt: "2026-08-30T02:00:00.000Z",
+      }),
+    ).rejects.toThrow("Credential lease expired");
+  });
+
   test("bounds expired lease tombstones", async () => {
     let now = Date.parse("2026-08-30T00:00:00.000Z");
     const { storage, credentials } = contribution(

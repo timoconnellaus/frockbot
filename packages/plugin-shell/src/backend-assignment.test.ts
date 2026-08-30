@@ -62,6 +62,6 @@ describe("assignment saga settlement", () => {
     await expect(
       settleAssignmentSaga(saga("committed"), effects(log, false)),
     ).resolves.toBe("rejected");
-    expect(log).toEqual(["acknowledge", "reject-committed"]);
+    expect(log).toEqual(["acknowledge", "compensate", "reject-committed"]);
   });
 });

@@ -36,6 +36,7 @@ export async function settleAssignmentSaga(
     return "compensated";
   }
   if (await effects.acknowledge(saga)) return "acknowledged";
+  await effects.compensate(saga);
   await effects.rejectCommitted(saga);
   return "rejected";
 }

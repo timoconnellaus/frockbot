@@ -316,6 +316,17 @@ describe("User settings backend Contribution", () => {
         { generation: "assignment-new", status: "pending" },
       ],
     });
+    await expect(
+      settings.compensateConnectionDependency(
+        "user-1",
+        "ollama-old",
+        "bot-1",
+        "assignment-old",
+      ),
+    ).resolves.toBe(true);
+    expect(
+      (await settings.getConnection("user-1", "ollama-old"))?.safeMetadata,
+    ).toMatchObject({ dependentAssignments: [] });
 
     await expect(
       settings.acknowledgeConnectionDependency(

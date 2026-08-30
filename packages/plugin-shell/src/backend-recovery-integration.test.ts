@@ -1235,9 +1235,9 @@ describe("Bot recovery", () => {
         },
       ),
     ).resolves.toEqual({ schemaVersion: 1, state: "not-admitted" });
-    expect(
-      await storage.get<boolean>("run-admission-fence:command-fenced"),
-    ).toBe(true);
+    expect(await storage.get<string[]>("run-admission-fences")).toEqual([
+      "command-fenced",
+    ]);
     expect(
       await storage.get<{ userId: string; botId: string }>("identity"),
     ).toEqual({
@@ -1250,9 +1250,9 @@ describe("Bot recovery", () => {
         { schemaVersion: 1, runId: "other-command" },
       ),
     ).rejects.toThrow("Bot authority does not match its durable identity");
-    expect(
-      await storage.get("run-admission-fence:other-command"),
-    ).toBeUndefined();
+    expect(await storage.get<string[]>("run-admission-fences")).toEqual([
+      "command-fenced",
+    ]);
 
     await expect(
       contribution.run({
@@ -1265,6 +1265,18 @@ describe("Bot recovery", () => {
       }),
     ).rejects.toThrow('run "command-fenced" admission was fenced');
     expect(await storage.get("run:command-fenced")).toBeUndefined();
+
+    for (let index = 0; index < 257; index += 1) {
+      await contribution.fenceRunAdmission(
+        { userId: "user-1", botId: "primary" },
+        { schemaVersion: 1, runId: `bounded-fence-${index}` },
+      );
+    }
+    const fences = await storage.get<string[]>("run-admission-fences");
+    expect(fences).toHaveLength(256);
+    expect(fences).not.toContain("command-fenced");
+    expect(fences).not.toContain("bounded-fence-0");
+    expect(fences).toContain("bounded-fence-256");
   });
 
   test("returns admitted state when admission wins the fence transaction", async () => {

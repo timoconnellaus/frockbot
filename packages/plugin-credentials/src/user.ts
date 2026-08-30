@@ -984,7 +984,7 @@ export class CredentialUserBackendContribution {
     ).filter((effectId) => effectId !== lease.effectId);
     await storage.delete(leaseKey(lease.effectId));
     await storage.put(generationLeaseIndexKey, generationLeaseIndex);
-    if (expired && stored.state === "active") {
+    if (expired && stored.state !== "retired") {
       const tombstoneIndexKey = leaseTombstoneIndexKey(
         lease.connectionId,
         lease.credentialGeneration,

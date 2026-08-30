@@ -78,6 +78,8 @@ import {
 const RUN_PREFIX = "run:";
 const RUN_INDEX_PREFIX = "run-index:";
 const RUN_ADMISSION_FENCE_PREFIX = "run-admission-fence:";
+const RUN_ADMISSION_FENCE_INDEX_KEY = "run-admission-fences";
+const MAX_RUN_ADMISSION_FENCES = 256;
 const ACTIVE_RUN_KEY = "active-run";
 const LATEST_EVENTS_KEY = "latest-events";
 const IDENTITY_KEY = "identity";
@@ -93,6 +95,21 @@ const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
 
 function runIndexKey(acceptedAt: string, runId: string): string {
   return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;
+}
+
+function storedRunAdmissionFences(input: unknown): string[] {
+  if (input === undefined) return [];
+  if (
+    !Array.isArray(input) ||
+    input.length > MAX_RUN_ADMISSION_FENCES ||
+    input.some(
+      (runId) =>
+        typeof runId !== "string" || runId.length < 1 || runId.length > 128,
+    )
+  ) {
+    throw new Error("Stored run admission fences are invalid");
+  }
+  return [...new Set(input)];
 }
 
 function assignmentGenerationKey(assignmentId: string): string {
@@ -407,6 +424,22 @@ export class ShellBotBackendContribution {
       }
     }
     if (command.type === "bot/assign-capability") {
+      const existingAssignment = settings.assignments.find(
+        (assignment) =>
+          assignment.assignmentId === command.assignment.assignmentId,
+      );
+      if (
+        existingAssignment &&
+        (existingAssignment.packageId !== command.assignment.packageId ||
+          existingAssignment.capabilityId !== command.assignment.capabilityId)
+      ) {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          "Assignment ID cannot change Package Capability authority",
+        );
+      }
       const [user, application] = await Promise.all([
         this.userConfiguration(identity).readConfiguration({
           schemaVersion: 1,
@@ -1855,10 +1888,17 @@ export class ShellBotBackendContribution {
         throw new Error("stored run does not match its lookup key");
       }
       if (!run) {
+        const storedFences = storedRunAdmissionFences(
+          await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
+        );
         await transaction.put({
-          [`${RUN_ADMISSION_FENCE_PREFIX}${query.runId}`]: true,
+          [RUN_ADMISSION_FENCE_INDEX_KEY]: [
+            ...storedFences.filter((runId) => runId !== query.runId),
+            query.runId,
+          ].slice(-MAX_RUN_ADMISSION_FENCES),
           [IDENTITY_KEY]: durableIdentity ?? identity,
         });
+        await transaction.delete(`${RUN_ADMISSION_FENCE_PREFIX}${query.runId}`);
       }
       return projectClientRunLookupV1(run);
     });
@@ -2087,7 +2127,13 @@ export class ShellBotBackendContribution {
     command: OwnedBotTurnCommand,
   ): Promise<{ previous: SessionEvent[]; settings: BotSettingsViewV1 }> {
     const fenceKey = `${RUN_ADMISSION_FENCE_PREFIX}${command.runId}`;
-    if (await this.ctx.storage.get(fenceKey)) {
+    const fences = storedRunAdmissionFences(
+      await this.ctx.storage.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
+    );
+    if (
+      fences.includes(command.runId) ||
+      (await this.ctx.storage.get(fenceKey))
+    ) {
       throw new Error(`run "${command.runId}" admission was fenced`);
     }
     const context = await this.resolveExecutionContext(command);

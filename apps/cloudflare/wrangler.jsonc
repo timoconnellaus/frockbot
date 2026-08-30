@@ -67,9 +67,8 @@
   ],
   "vars": {
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
-    // Comma-separated webview origins allowed to call /api/* cross-origin,
-    // e.g. "capacitor://localhost,frockbot://localhost". Empty disables CORS.
-    "ALLOWED_CLIENT_ORIGINS": "",
+    // Comma-separated webview origins allowed to call /api/* cross-origin.
+    "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
   },
   "env": {
     "development": {
@@ -124,7 +123,7 @@
       },
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
-        "ALLOWED_CLIENT_ORIGINS": "",
+        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
       },
     },
   },

@@ -102,13 +102,18 @@ async function compileAssignmentTestApplication(): ReturnType<
                 displayName: "Gmail",
                 allowMultiple: true,
                 authorization: { kind: "grant", driverId: "fixture" },
-                capabilities: ["gmail-tools"],
+                capabilities: ["gmail-tools", "gmail-send"],
               },
             ],
             capabilities: [
               {
                 id: "gmail-tools",
                 kind: "model",
+                connectionTypes: ["gmail"],
+              },
+              {
+                id: "gmail-send",
+                kind: "tool",
                 connectionTypes: ["gmail"],
               },
             ],
@@ -484,6 +489,27 @@ describe("Bot capability assignment admission", () => {
         },
       ],
     });
+
+    await expect(
+      execute({
+        schemaVersion: 1,
+        type: "bot/assign-capability",
+        commandId: "reuse-assignment-authority",
+        botId: "primary",
+        expectedRevision: 1,
+        assignment: {
+          assignmentId: "valid-assignment",
+          packageId: "composio",
+          capabilityId: "gmail-send",
+          connectionId: "gmail-1",
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: "rejected",
+      revision: 1,
+      failure: "Assignment ID cannot change Package Capability authority",
+    });
+    expect(dependencyClaims).toBe(2);
   });
 
   test("atomically binds and durably unbinds a Connection model", async () => {
