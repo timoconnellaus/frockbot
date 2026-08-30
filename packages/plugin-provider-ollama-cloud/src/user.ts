@@ -32,6 +32,7 @@ const REFRESH_INTERVAL_MS = 60 * 60 * 1_000;
 const RECOVERY_DELAY_MS = 60_000;
 const MODEL_LEASE_MS = 30 * 60 * 1_000;
 const MAX_CONNECTION_MODELS = 100;
+const MAX_DISCOVERED_MODELS = 90;
 
 interface StoredCommand {
   schemaVersion: 1;
@@ -90,8 +91,11 @@ function commandKey(commandId: string): string {
   return `${COMMAND_PREFIX}${commandId}`;
 }
 
-function mutationSequenceKey(connectionId: string): string {
-  return `${MUTATION_SEQUENCE_PREFIX}${connectionId}`;
+function mutationSequenceKey(
+  connectionId: string,
+  operation: StoredCommand["operation"],
+): string {
+  return `${MUTATION_SEQUENCE_PREFIX}${connectionId}:${operation}`;
 }
 
 async function fingerprint(value: unknown): Promise<string> {
@@ -300,7 +304,7 @@ function retainResolvedModel(
 ): ConnectionModelCatalogV1["models"] {
   const discovered = catalog.models
     .filter((model) => model.source === "discovered")
-    .slice(0, MAX_CONNECTION_MODELS);
+    .slice(0, MAX_DISCOVERED_MODELS);
   const available = MAX_CONNECTION_MODELS - discovered.length;
   if (available === 0) return discovered;
   const exact = [
@@ -588,7 +592,7 @@ export class OllamaCloudUserBackendContribution {
       let sequenceEntry: Record<string, unknown> = {};
       if (isSequencedMutation(record.operation)) {
         const sequenceValue = await transaction.get<unknown>(
-          mutationSequenceKey(record.connectionId),
+          mutationSequenceKey(record.connectionId, record.operation),
         );
         const sequence =
           sequenceValue === undefined
@@ -597,7 +601,7 @@ export class OllamaCloudUserBackendContribution {
         const next = sequence.next + 1;
         admitted = { ...record, mutationSequence: next };
         sequenceEntry = {
-          [mutationSequenceKey(record.connectionId)]: {
+          [mutationSequenceKey(record.connectionId, record.operation)]: {
             schemaVersion: 1,
             next,
             applied: sequence.applied,
@@ -689,7 +693,7 @@ export class OllamaCloudUserBackendContribution {
         const stored = decodeStoredCommand(storedValue);
         if (stored.mutationSequence) return stored;
         const sequenceValue = await storage.get<unknown>(
-          mutationSequenceKey(record.connectionId),
+          mutationSequenceKey(record.connectionId, record.operation),
         );
         const sequence =
           sequenceValue === undefined
@@ -699,7 +703,7 @@ export class OllamaCloudUserBackendContribution {
         const sequenced = { ...stored, mutationSequence: next };
         await storage.put({
           [commandKey(record.commandId)]: sequenced,
-          [mutationSequenceKey(record.connectionId)]: {
+          [mutationSequenceKey(record.connectionId, record.operation)]: {
             schemaVersion: 1,
             next,
             applied: sequence.applied,
@@ -736,7 +740,7 @@ export class OllamaCloudUserBackendContribution {
       schemaVersion: 1,
       generation: this.randomId(),
       state: "fresh",
-      models,
+      models: models.slice(0, MAX_DISCOVERED_MODELS),
       refreshedAt: new Date(now).toISOString(),
       refreshAfter: new Date(now + REFRESH_INTERVAL_MS).toISOString(),
     };
@@ -1014,7 +1018,7 @@ export class OllamaCloudUserBackendContribution {
     return this.host.storage.transaction(
       async (storage: UserSettingsTransaction & CredentialTransaction) => {
         const sequenceValue = await storage.get<unknown>(
-          mutationSequenceKey(record.connectionId),
+          mutationSequenceKey(record.connectionId, record.operation),
         );
         const sequence =
           sequenceValue === undefined
@@ -1042,11 +1046,14 @@ export class OllamaCloudUserBackendContribution {
           updated,
           storage,
         );
-        await storage.put(mutationSequenceKey(record.connectionId), {
-          schemaVersion: 1,
-          next: Math.max(sequence.next, mutationSequence),
-          applied: mutationSequence,
-        });
+        await storage.put(
+          mutationSequenceKey(record.connectionId, record.operation),
+          {
+            schemaVersion: 1,
+            next: Math.max(sequence.next, mutationSequence),
+            applied: mutationSequence,
+          },
+        );
         return true;
       },
     );

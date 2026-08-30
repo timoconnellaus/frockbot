@@ -467,6 +467,42 @@ describe("Ollama Cloud User Contribution", () => {
     ).toMatchObject({ receipt: { status: "failed" } });
   });
 
+  test("recovers independent mutations with per-field ordering", async () => {
+    const { storage, settings, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-independent-sequences",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Original",
+      apiKey: "key",
+    });
+    storage.failNextKey = "user-configuration";
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/set-enabled",
+        commandId: "disable-older",
+        connectionId: created.connectionId,
+        enabled: false,
+      }),
+    ).rejects.toThrow("injected storage failure");
+    await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/update-label",
+      commandId: "label-independent",
+      connectionId: created.connectionId,
+      label: "Renamed",
+    });
+
+    await ollama.alarm();
+
+    expect(
+      await settings.getConnection("account-1", created.connectionId),
+    ).toMatchObject({ displayName: "Renamed", state: "disabled" });
+  });
+
   test("preserves disabled state across credential rotation", async () => {
     const { settings, ollama } = await fixture();
     const created = await ollama.executeConnection("account-1", {
@@ -931,6 +967,58 @@ describe("Ollama Cloud User Contribution", () => {
     );
     expect(models).not.toContainEqual(
       expect.objectContaining({ providerModelId: "exact-0:cloud" }),
+    );
+  });
+
+  test("reserves exact-model capacity in a full discovered catalog", async () => {
+    let showRequests = 0;
+    const { settings, ollama } = await fixture((input) => {
+      if (String(input).endsWith("/tags")) {
+        return Promise.resolve(
+          Response.json({
+            models: Array.from({ length: 100 }, (_, index) => ({
+              model: `discovered-${index}:cloud`,
+            })),
+          }),
+        );
+      }
+      showRequests += 1;
+      return Promise.resolve(Response.json({ capabilities: ["tools"] }));
+    });
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-full-catalog",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "valid-key",
+    });
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!connection?.generation) throw new Error("generation is missing");
+    const baselineShowRequests = showRequests;
+
+    for (const effectId of ["full-exact-1", "full-exact-2"]) {
+      await ollama.leaseModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        providerModelId: "uncatalogued:cloud",
+        effectId,
+        connectionGeneration: connection.generation,
+      });
+      await ollama.settleModelCredential(effectId);
+    }
+    const models = (
+      await settings.getConnection("account-1", created.connectionId)
+    )?.modelCatalog?.models;
+
+    expect(showRequests - baselineShowRequests).toBe(1);
+    expect(models).toHaveLength(91);
+    expect(models).toContainEqual(
+      expect.objectContaining({ providerModelId: "uncatalogued:cloud" }),
     );
   });
 

@@ -58,16 +58,59 @@ afterEach(() => {
 });
 
 describe("application manifest protocol", () => {
-  test("requires the owned manifest response version", () => {
-    expect(decodePluginCatalog({ schemaVersion: 1, packages: [] })).toEqual([]);
+  const emptyManifest = {
+    schemaVersion: 1,
+    deployment: { userId: "user-1", applicationHash: "hash-1" },
+    applicationHash: "hash-1",
+    packages: [],
+  };
+
+  test("requires the exact owned manifest response", () => {
+    expect(decodePluginCatalog(emptyManifest)).toEqual([]);
+    expect(
+      decodePluginCatalog({
+        ...emptyManifest,
+        packages: [
+          {
+            id: "provider-ollama-cloud",
+            displayName: "Ollama Cloud",
+            version: "0.0.1",
+            contributions: ["backend", "runtime", "client"],
+            configuration: {
+              settings: [],
+              capabilities: [],
+              connectionTypes: [
+                {
+                  id: "ollama-cloud-account",
+                  displayName: "Ollama Cloud account",
+                  allowMultiple: true,
+                  authorization: {
+                    kind: "api-key",
+                    driverId: "ollama-api-key",
+                  },
+                  capabilities: ["ollama-cloud-models"],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        packageId: "provider-ollama-cloud",
+        connectionTypes: [
+          expect.objectContaining({ id: "ollama-cloud-account" }),
+        ],
+      }),
+    ]);
     for (const manifest of [
       { packages: [] },
-      { schemaVersion: 2, packages: [] },
-      { schemaVersion: "1", packages: [] },
+      { ...emptyManifest, schemaVersion: 2 },
+      { ...emptyManifest, schemaVersion: "1" },
+      { ...emptyManifest, unexpected: true },
+      { ...emptyManifest, packages: [42] },
     ]) {
-      expect(() => decodePluginCatalog(manifest)).toThrow(
-        "Application manifest is invalid",
-      );
+      expect(() => decodePluginCatalog(manifest)).toThrow();
     }
   });
 });

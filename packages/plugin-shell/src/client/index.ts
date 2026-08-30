@@ -13,6 +13,7 @@ import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
 } from "@frockbot/connection-core";
+import { decodeFrockBotManifest } from "@frockbot/plugin-catalog";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNotificationPolicy,
@@ -353,42 +354,85 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function hasExactFields(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+): boolean {
+  return (
+    Object.keys(value).length === fields.length &&
+    fields.every((field) => Object.hasOwn(value, field))
+  );
+}
+
 export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   if (
     !isRecord(value) ||
+    !hasExactFields(value, [
+      "schemaVersion",
+      "deployment",
+      "applicationHash",
+      "packages",
+    ]) ||
     value.schemaVersion !== 1 ||
-    !Array.isArray(value.packages)
+    !isRecord(value.deployment) ||
+    !hasExactFields(value.deployment, ["userId", "applicationHash"]) ||
+    typeof value.deployment.userId !== "string" ||
+    value.deployment.userId.length === 0 ||
+    value.deployment.userId.length > 256 ||
+    typeof value.deployment.applicationHash !== "string" ||
+    value.deployment.applicationHash.length === 0 ||
+    value.deployment.applicationHash.length > 256 ||
+    typeof value.applicationHash !== "string" ||
+    value.applicationHash.length === 0 ||
+    value.applicationHash.length > 256 ||
+    value.deployment.applicationHash !== value.applicationHash ||
+    !Array.isArray(value.packages) ||
+    value.packages.length > 256
   ) {
     throw new Error("Application manifest is invalid");
   }
   return value.packages.flatMap((candidate) => {
-    if (!isRecord(candidate) || !isRecord(candidate.configuration)) return [];
-    const connectionTypes = candidate.configuration.connectionTypes;
-    if (!Array.isArray(connectionTypes) || connectionTypes.length === 0) {
-      return [];
-    }
     if (
+      !isRecord(candidate) ||
+      !hasExactFields(candidate, [
+        "id",
+        "displayName",
+        "version",
+        "contributions",
+        "configuration",
+      ]) ||
       typeof candidate.id !== "string" ||
-      typeof candidate.version !== "string"
+      typeof candidate.displayName !== "string" ||
+      typeof candidate.version !== "string" ||
+      !Array.isArray(candidate.contributions) ||
+      candidate.contributions.length > 5 ||
+      new Set(candidate.contributions).size !==
+        candidate.contributions.length ||
+      !candidate.contributions.every(
+        (kind) =>
+          kind === "backend" ||
+          kind === "runtime" ||
+          kind === "client" ||
+          kind === "desktop" ||
+          kind === "mobile",
+      )
     ) {
       throw new Error("Application Package metadata is invalid");
     }
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 3,
+      id: candidate.id,
+      displayName: candidate.displayName,
+      version: candidate.version,
+      compatibility: { frockbot: "*" },
+      dependencies: {},
+      contributions: { runtime: { entry: "./manifest-validation.js" } },
+      permissions: [],
+      configuration: candidate.configuration,
+    });
+    const connectionTypes = decoded.configuration?.connectionTypes ?? [];
+    if (connectionTypes.length === 0) return [];
     const decodedConnections = connectionTypes.map((connection) => {
-      if (
-        !isRecord(connection) ||
-        !isRecord(connection.authorization) ||
-        typeof connection.id !== "string" ||
-        typeof connection.displayName !== "string" ||
-        typeof connection.allowMultiple !== "boolean" ||
-        (connection.authorization.kind !== "none" &&
-          connection.authorization.kind !== "api-key" &&
-          connection.authorization.kind !== "ambient-native" &&
-          connection.authorization.kind !== "grant") ||
-        !Array.isArray(connection.capabilities) ||
-        !connection.capabilities.every((item) => typeof item === "string")
-      ) {
-        throw new Error("Application Connection Type metadata is invalid");
-      }
       const authorizationKind: PluginCatalogItem["connectionTypes"][number]["authorizationKind"] =
         connection.authorization.kind;
       return {
@@ -396,7 +440,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         displayName: connection.displayName,
         allowMultiple: connection.allowMultiple,
         authorizationKind,
-        capabilities: connection.capabilities as string[],
+        capabilities: connection.capabilities,
       };
     });
     return [

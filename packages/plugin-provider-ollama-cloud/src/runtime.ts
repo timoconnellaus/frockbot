@@ -115,9 +115,10 @@ class OllamaCloudProvider implements LlmProvider {
     if (!this.authorized.has(requestId)) return;
     try {
       await this.config.settleCredential(requestId);
-      this.authorized.delete(requestId);
     } catch {
       return;
+    } finally {
+      this.authorized.delete(requestId);
     }
   }
 
@@ -155,21 +156,12 @@ export function createOllamaCloudRuntimePlugin(
   const plugin: Plugin.Function = (ctx) => {
     const provider = new OllamaCloudProvider(config);
     const disposeProvider = ctx.llm.register(provider);
-    const disposeAuthorization = ctx.on(
-      "agent/request",
-      async (_agent, _request, _signal, next) => {
-        const request = await next();
-        if (request.provider === provider.id) await provider.authorize(request);
-        return request;
-      },
-    );
     const disposeSettlement = ctx.on(
       "agent/model-outcome-committed",
       async (_agent, requestId) => provider.settle(requestId),
     );
     return () => {
       disposeSettlement();
-      disposeAuthorization();
       disposeProvider();
     };
   };

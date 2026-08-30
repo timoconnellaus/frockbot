@@ -371,6 +371,7 @@ export class CredentialUserBackendContribution {
         } satisfies StoredCredentialGeneration,
         [activeKey(input.connectionId)]: input.generation,
       };
+      let obsoleteGenerationKey: string | undefined;
       if (currentGeneration && currentGeneration !== input.generation) {
         const current = requireGeneration(
           await transaction.get<unknown>(
@@ -379,12 +380,19 @@ export class CredentialUserBackendContribution {
           input.connectionId,
           currentGeneration,
         );
-        entries[credentialKey(input.connectionId, currentGeneration)] = {
-          ...current,
-          state: "retired",
-        } satisfies StoredCredentialGeneration;
+        const currentKey = credentialKey(input.connectionId, currentGeneration);
+        if (current.leaseIds.length === 0) {
+          obsoleteGenerationKey = currentKey;
+        } else {
+          entries[currentKey] = {
+            ...current,
+            state: "retired",
+          } satisfies StoredCredentialGeneration;
+        }
       }
       await transaction.put(entries);
+      if (obsoleteGenerationKey)
+        await transaction.delete(obsoleteGenerationKey);
     };
     await (storage
       ? activate(storage)

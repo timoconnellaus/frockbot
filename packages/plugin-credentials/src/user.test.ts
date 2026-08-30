@@ -131,8 +131,31 @@ describe("Credential User Contribution", () => {
     ).rejects.toThrow("Stored credential lease is invalid");
   });
 
+  test("deletes an unleased credential generation during rotation", async () => {
+    const { storage, credentials } = contribution();
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "old-key",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-2",
+      apiKey: "new-key",
+    });
+    await credentials.activate({ ...authority, generation: "generation-2" });
+
+    expect(storage.values.has("credential:connection-1:generation-1")).toBe(
+      false,
+    );
+    expect(storage.values.has("credential:connection-1:generation-2")).toBe(
+      true,
+    );
+  });
+
   test("rotates atomically while admitted effects retain the old generation", async () => {
-    const { credentials } = contribution();
+    const { storage, credentials } = contribution();
     await credentials.stageApiKey({
       ...authority,
       generation: "generation-1",
@@ -159,6 +182,9 @@ describe("Credential User Contribution", () => {
 
     expect(oldLease.credentialGeneration).toBe("generation-1");
     expect(newLease.credentialGeneration).toBe("generation-2");
+    expect(storage.values.has("credential:connection-1:generation-1")).toBe(
+      true,
+    );
     const keyring = parseCredentialKeyringV1(serializedKeyring);
     expect(
       await openCredentialV1({

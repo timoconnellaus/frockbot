@@ -108,6 +108,7 @@ describe("Ollama Cloud runtime Contribution", () => {
       signal,
       () => Promise.resolve(request),
     );
+    expect(leasedGenerations).toEqual([]);
     const events = [];
     for await (const event of root.llm.stream(authorizedRequest, signal)) {
       events.push(event);
@@ -127,6 +128,10 @@ describe("Ollama Cloud runtime Contribution", () => {
       "completed",
     );
     expect(settled).toEqual(["effect-1"]);
+    for await (const event of root.llm.stream(authorizedRequest, signal)) {
+      void event;
+    }
+    expect(leasedGenerations).toEqual(["generation-1", "generation-1"]);
     await root.fiber.dispose();
   });
 
