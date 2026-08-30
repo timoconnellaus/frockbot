@@ -2,20 +2,14 @@ import type { Plugin } from "cordis";
 import {
   PackagePublisherConflictError,
   PackagePublisherDecodeError,
-  decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
   type PackagePublicationReceiptV1,
   type PackageRevisionHistoryV1,
-  type PublishPackageCommandV1,
   type RollbackPackageCommandV1,
 } from "./shared.js";
 
 export interface PackagePublisherGatewayHost {
   read(userId: string): Promise<PackageRevisionHistoryV1>;
-  publish(
-    userId: string,
-    command: PublishPackageCommandV1,
-  ): Promise<PackagePublicationReceiptV1>;
   rollback(
     userId: string,
     command: RollbackPackageCommandV1,
@@ -110,13 +104,7 @@ export function createPackagePublisherBackendContribution(
             ),
           );
         }
-        return Response.json(
-          await host.publish(
-            context.userId,
-            decodePublishPackageCommandV1(await request.json()),
-          ),
-          { status: 201 },
-        );
+        return Response.json({ error: "method not allowed" }, { status: 405 });
       } catch (error) {
         return errorResponse(error);
       }

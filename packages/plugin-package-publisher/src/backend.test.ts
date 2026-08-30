@@ -40,16 +40,12 @@ function receipt(commandId: string): PackagePublicationReceiptV1 {
 }
 
 describe("Package Publisher gateway contribution", () => {
-  test("exposes authenticated history, publish, and rollback routes", async () => {
+  test("exposes authenticated history and rollback without direct publication", async () => {
     const calls: unknown[] = [];
     const host: PackagePublisherGatewayHost = {
       read: (userId) => {
         calls.push(["read", userId]);
         return Promise.resolve(history);
-      },
-      publish: (userId, command) => {
-        calls.push(["publish", userId, command]);
-        return Promise.resolve(receipt(command.commandId));
       },
       rollback: (userId, command) => {
         calls.push(["rollback", userId, command]);
@@ -98,11 +94,10 @@ describe("Package Publisher gateway contribution", () => {
     );
 
     expect(await listed?.json()).toEqual(history);
-    expect(published?.status).toBe(201);
+    expect(published?.status).toBe(405);
     expect(await rolledBack?.json()).toEqual(receipt("rollback-1"));
     expect(calls.map((call) => (call as unknown[])[0])).toEqual([
       "read",
-      "publish",
       "rollback",
     ]);
   });
@@ -111,7 +106,6 @@ describe("Package Publisher gateway contribution", () => {
     const unexpected = () => Promise.reject(new Error("unexpected host call"));
     const contribution = createPackagePublisherBackendContribution({
       read: unexpected,
-      publish: unexpected,
       rollback: unexpected,
     });
     const url = new URL("https://bot.test/api/package-revisions");
@@ -130,6 +124,6 @@ describe("Package Publisher gateway contribution", () => {
       url,
       { userId: "user-1", client: "browser" },
     );
-    expect(response?.status).toBe(400);
+    expect(response?.status).toBe(405);
   });
 });

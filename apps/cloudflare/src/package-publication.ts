@@ -1,4 +1,4 @@
-import { type PackagePublisherUserHost } from "@frockbot/plugin-package-publisher/user";
+import type { PackagePublisherUserHost } from "@frockbot/plugin-package-publisher/user";
 import type {
   UserApplicationEnv,
   WorkerCode,
@@ -41,6 +41,59 @@ async function putImmutable(
   await bucket.put(key, value);
 }
 
+function validManifest(
+  value: unknown,
+  userId: string,
+  applicationHash: string,
+): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const manifest = value as Record<string, unknown>;
+  const deployment = manifest.deployment;
+  if (
+    !deployment ||
+    typeof deployment !== "object" ||
+    Array.isArray(deployment)
+  ) {
+    return false;
+  }
+  const identity = deployment as Record<string, unknown>;
+  if (
+    manifest.schemaVersion !== 1 ||
+    identity.userId !== userId ||
+    identity.applicationHash !== applicationHash ||
+    typeof manifest.applicationHash !== "string" ||
+    !Array.isArray(manifest.packages)
+  ) {
+    return false;
+  }
+  return manifest.packages.some((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return false;
+    const pkg = value as Record<string, unknown>;
+    return (
+      pkg.id === "package-publisher" &&
+      Array.isArray(pkg.contributions) &&
+      pkg.contributions.includes("backend") &&
+      pkg.contributions.includes("client")
+    );
+  });
+}
+
+async function requireHostedAsset(
+  fetch: (request: Request) => Promise<Response>,
+  path: string,
+  contentType: string,
+): Promise<void> {
+  const response = await fetch(new Request(`https://verify.invalid${path}`));
+  if (
+    !response.ok ||
+    !response.headers.get("content-type")?.startsWith(contentType) ||
+    (await response.arrayBuffer()).byteLength === 0
+  ) {
+    throw new Error(`candidate health check failed for ${path}`);
+  }
+}
+
 export function createPackagePublicationHost(
   env: PublicationEnvironment,
   storage: PackagePublisherUserHost["storage"] & {
@@ -51,7 +104,6 @@ export function createPackagePublicationHost(
   return {
     storage,
     hash: candidateHash,
-    scheduleRecovery: () => storage.setAlarm(Date.now() + 60_000),
     async storeAndVerify({ userId, applicationHash, candidate }) {
       await putImmutable(
         env.APPLICATION_ARTIFACTS,
@@ -82,26 +134,28 @@ export function createPackagePublicationHost(
           return code;
         },
       );
-      const response = await worker
-        .getEntrypoint()
-        .fetch(new Request("https://verify.invalid/app-manifest"));
+      const entrypoint = worker.getEntrypoint();
+      const fetch = (request: Request) => entrypoint.fetch(request);
+      const response = await fetch(
+        new Request("https://verify.invalid/app-manifest"),
+      );
       if (!response.ok) {
         throw new Error(`candidate health check returned ${response.status}`);
       }
-      const value: unknown = await response.json();
-      if (
-        !value ||
-        typeof value !== "object" ||
-        Array.isArray(value) ||
-        !("deployment" in value) ||
-        !value.deployment ||
-        typeof value.deployment !== "object" ||
-        Array.isArray(value.deployment) ||
-        !("applicationHash" in value.deployment) ||
-        value.deployment.applicationHash !== applicationHash
-      ) {
-        throw new Error("candidate health check returned the wrong deployment");
+      let value: unknown;
+      try {
+        value = await response.json();
+      } catch {
+        throw new Error("candidate health check returned an invalid manifest");
       }
+      if (!validManifest(value, userId, applicationHash)) {
+        throw new Error("candidate health check returned an invalid manifest");
+      }
+      await Promise.all([
+        requireHostedAsset(fetch, "/", "text/html"),
+        requireHostedAsset(fetch, "/app.js", "text/javascript"),
+        requireHostedAsset(fetch, "/app.css", "text/css"),
+      ]);
     },
   };
 }

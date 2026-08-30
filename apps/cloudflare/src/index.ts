@@ -348,12 +348,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           schemaVersion: 1,
           userId,
         }),
-      publish: (userId, command) =>
-        userConfigurationStub(env, userId).publishPackage({
-          schemaVersion: 1,
-          userId,
-          command,
-        }),
       rollback: (userId, command) =>
         userConfigurationStub(env, userId).rollbackPackage({
           schemaVersion: 1,

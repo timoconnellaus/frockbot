@@ -54,6 +54,7 @@ async function execute(
 describe("Package Publisher Agent contribution", () => {
   test("lets any Bot list, publish, and roll back its User's shared setup", async () => {
     const commands: unknown[] = [];
+    const executedCommands: string[] = [];
     const active = (commandId: string): PackagePublicationReceiptV1 => ({
       schemaVersion: 1,
       commandId,
@@ -75,7 +76,8 @@ describe("Package Publisher Agent contribution", () => {
           exec: {
             execute: (request) => {
               const command = (request.args ?? []).join(" ");
-              const content = command.includes("git -C")
+              executedCommands.push(command);
+              const content = command.includes("archive --format=tar")
                 ? "source snapshot"
                 : "application artifact";
               return Promise.resolve({
@@ -126,6 +128,8 @@ describe("Package Publisher Agent contribution", () => {
       packageRevision: 1,
     });
     expect(commands).toHaveLength(2);
+    expect(executedCommands[0]).toContain("git -C /home/box/setup init");
+    expect(executedCommands.slice(1)).toHaveLength(2);
     expect(commands[0]).toMatchObject({
       expectedRevision: 1,
       candidate: {

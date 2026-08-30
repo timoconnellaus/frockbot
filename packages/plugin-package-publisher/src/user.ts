@@ -14,6 +14,7 @@ import {
 
 const STATE_KEY = "package-publisher:state:v1";
 const RECEIPT_PREFIX = "package-publisher:receipt:";
+const RECOVERY_DELAY_MS = 60_000;
 
 interface PendingPublication {
   userId: string;
@@ -37,6 +38,7 @@ interface StoredReceipt {
 export interface PackagePublisherTransaction {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
+  setAlarm(scheduledTime: number | Date): Promise<void>;
   transaction?<T>(
     callback: (storage: PackagePublisherTransaction) => Promise<T>,
   ): Promise<T>;
@@ -56,7 +58,6 @@ export interface PackagePublisherUserHost {
     applicationHash: string;
     candidate: PackageCandidateV1;
   }): Promise<void>;
-  scheduleRecovery?(): Promise<void>;
   now?: () => Date;
 }
 
@@ -214,6 +215,11 @@ function cloneHistory(state: StoredState): PackageRevisionHistoryV1 {
 }
 
 export class PackagePublisherUserContribution {
+  private readonly pendingExecutions = new Map<
+    string,
+    Promise<PackagePublicationReceiptV1>
+  >();
+
   constructor(private readonly host: PackagePublisherUserHost) {}
 
   async read(): Promise<PackageRevisionHistoryV1> {
@@ -273,6 +279,9 @@ export class PackagePublisherUserContribution {
         candidate: structuredClone(command.candidate),
       };
       await storage.put(STATE_KEY, { ...state, pending: publication });
+      await storage.setAlarm(
+        (this.host.now?.() ?? new Date()).getTime() + RECOVERY_DELAY_MS,
+      );
       return publication;
     });
     if ("status" in pending) return structuredClone(pending);
@@ -285,11 +294,24 @@ export class PackagePublisherUserContribution {
     return this.executePending(state.pending);
   }
 
-  private async executePending(
+  private executePending(
+    pending: PendingPublication,
+  ): Promise<PackagePublicationReceiptV1> {
+    const existing = this.pendingExecutions.get(pending.commandId);
+    if (existing) return existing;
+    const execution = this.performPending(pending).finally(() => {
+      if (this.pendingExecutions.get(pending.commandId) === execution) {
+        this.pendingExecutions.delete(pending.commandId);
+      }
+    });
+    this.pendingExecutions.set(pending.commandId, execution);
+    return execution;
+  }
+
+  private async performPending(
     pending: PendingPublication,
   ): Promise<PackagePublicationReceiptV1> {
     try {
-      await this.host.scheduleRecovery?.();
       await this.host.storeAndVerify({
         userId: pending.userId,
         applicationHash: pending.applicationHash,

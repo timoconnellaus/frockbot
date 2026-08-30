@@ -4,6 +4,12 @@ import type { PackagePublisherTransaction } from "./user.js";
 
 class MemoryStorage implements PackagePublisherTransaction {
   readonly values = new Map<string, unknown>();
+  readonly alarmTransactions: boolean[] = [];
+  private transactionActive = false;
+
+  constructor(
+    private readonly onAlarm?: (scheduledTime: number | Date) => void,
+  ) {}
 
   get<T>(key: string): Promise<T | undefined> {
     return Promise.resolve(
@@ -16,10 +22,21 @@ class MemoryStorage implements PackagePublisherTransaction {
     return Promise.resolve();
   }
 
-  transaction<T>(
+  async transaction<T>(
     callback: (storage: PackagePublisherTransaction) => Promise<T>,
   ): Promise<T> {
-    return callback(this);
+    this.transactionActive = true;
+    try {
+      return await callback(this);
+    } finally {
+      this.transactionActive = false;
+    }
+  }
+
+  setAlarm(scheduledTime: number | Date): Promise<void> {
+    this.alarmTransactions.push(this.transactionActive);
+    this.onAlarm?.(scheduledTime);
+    return Promise.resolve();
   }
 }
 
@@ -31,8 +48,10 @@ const candidate = {
 
 describe("Package Publisher User contribution", () => {
   test("publishes a verified immutable revision and replays the command", async () => {
-    const storage = new MemoryStorage();
     const effects: string[] = [];
+    const storage = new MemoryStorage((scheduledTime) => {
+      effects.push(`scheduled:${new Date(scheduledTime).toISOString()}`);
+    });
     const contribution = createPackagePublisherUserContribution({
       storage,
       now: () => new Date("2026-09-01T00:00:00.000Z"),
@@ -60,7 +79,11 @@ describe("Package Publisher User contribution", () => {
       applicationHash: "sha256:artifact-one",
     });
     expect(replay).toEqual(first);
-    expect(effects).toEqual(["sha256:artifact-one"]);
+    expect(effects).toEqual([
+      "scheduled:2026-09-01T00:01:00.000Z",
+      "sha256:artifact-one",
+    ]);
+    expect(storage.alarmTransactions).toEqual([true]);
     expect(await contribution.read()).toEqual({
       schemaVersion: 1,
       revision: 1,
@@ -96,10 +119,6 @@ describe("Package Publisher User contribution", () => {
     const contribution = createPackagePublisherUserContribution({
       storage,
       hash: () => Promise.resolve("sha256:artifact-one"),
-      scheduleRecovery: () => {
-        order.push("scheduled");
-        return Promise.resolve();
-      },
       storeAndVerify: () => {
         order.push("verified");
         return Promise.resolve();
@@ -108,10 +127,44 @@ describe("Package Publisher User contribution", () => {
 
     const receipt = await contribution.recover();
 
-    expect(order).toEqual(["scheduled", "verified"]);
+    expect(order).toEqual(["verified"]);
     expect(receipt).toMatchObject({ status: "active", packageRevision: 1 });
     expect((await contribution.read()).activePackageRevision).toBe(1);
     expect(await contribution.recover()).toBeUndefined();
+  });
+
+  test("deduplicates concurrent delivery of a pending publication effect", async () => {
+    const storage = new MemoryStorage();
+    let releaseVerification: (() => void) | undefined;
+    const verificationStarted = Promise.withResolvers<void>();
+    const verificationReleased = new Promise<void>((resolve) => {
+      releaseVerification = resolve;
+    });
+    let effects = 0;
+    const contribution = createPackagePublisherUserContribution({
+      storage,
+      hash: () => Promise.resolve("sha256:artifact-one"),
+      storeAndVerify: async () => {
+        effects += 1;
+        verificationStarted.resolve();
+        await verificationReleased;
+      },
+    });
+    const command = {
+      schemaVersion: 1 as const,
+      commandId: "publish-concurrent",
+      expectedRevision: 0,
+      candidate,
+    };
+
+    const publication = contribution.publish("user-1", command);
+    await verificationStarted.promise;
+    const recovery = contribution.recover();
+    releaseVerification?.();
+    const [published, recovered] = await Promise.all([publication, recovery]);
+
+    expect(recovered).toEqual(published);
+    expect(effects).toBe(1);
   });
 
   test("rejects malformed publication state at the durable storage seam", async () => {

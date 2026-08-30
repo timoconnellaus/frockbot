@@ -169,6 +169,12 @@ export function createPackagePublisherAgentPlugin(
         });
         let candidate: PackageCandidateV1;
         try {
+          await executeText(
+            computer,
+            `mkdir -p ${SETUP_DIRECTORY} && (git -C ${SETUP_DIRECTORY} rev-parse --git-dir >/dev/null 2>&1 || git -C ${SETUP_DIRECTORY} init)`,
+            10_000,
+            context.signal,
+          );
           const [source, applicationArtifact] = await Promise.all([
             executeText(
               computer,

@@ -27,13 +27,42 @@ class VerifyingLoader implements WorkerLoader {
   ids: string[] = [];
   code?: WorkerCode;
 
+  constructor(private readonly validManifest = true) {}
+
   get(id: string, callback: () => Promise<WorkerCode>): LoadedWorker {
     this.ids.push(id);
     return {
       getEntrypoint: () => ({
-        fetch: async () => {
+        fetch: async (request) => {
           this.code = await callback();
-          return Response.json({ deployment: this.code.env.DEPLOYMENT });
+          const path = new URL(request.url).pathname;
+          if (path === "/app-manifest") {
+            if (!this.validManifest) {
+              return Response.json({ deployment: this.code.env.DEPLOYMENT });
+            }
+            return Response.json({
+              schemaVersion: 1,
+              deployment: this.code.env.DEPLOYMENT,
+              applicationHash: "sha256:foundation-plan",
+              packages: [
+                {
+                  id: "package-publisher",
+                  displayName: "Package Publisher",
+                  version: "0.0.1",
+                  contributions: ["backend", "runtime", "client"],
+                },
+              ],
+            });
+          }
+          const contentType =
+            path === "/"
+              ? "text/html"
+              : path === "/app.js"
+                ? "text/javascript"
+                : "text/css";
+          return new Response("healthy", {
+            headers: { "content-type": contentType },
+          });
         },
       }),
     };
@@ -103,5 +132,28 @@ describe("Cloudflare package publication effects", () => {
       `verify:user-1:${applicationHash}`,
     ]);
     expect(loader.code?.globalOutbound).toBeUndefined();
+  });
+
+  test("rejects an artifact that only echoes the deployment identity", async () => {
+    const host = createPackagePublicationHost(
+      {
+        APPLICATION_ARTIFACTS: new MemoryBucket() as unknown as R2Bucket,
+        USER_APPLICATIONS: new VerifyingLoader(false),
+      },
+      storage,
+    );
+    const candidate = {
+      source: "git source snapshot",
+      applicationArtifact: "export default { fetch() {} }",
+      checks: [{ name: "test", status: "passed" as const }],
+    };
+
+    await expect(
+      host.storeAndVerify({
+        userId: "user-1",
+        applicationHash: await host.hash(candidate),
+        candidate,
+      }),
+    ).rejects.toThrow("invalid manifest");
   });
 });

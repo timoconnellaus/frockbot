@@ -304,6 +304,14 @@ const API_ROUTES: Array<{
     methods: new Set(["GET", "POST"]),
   },
   {
+    matches: exactRoute(/^\/api\/package-revisions$/),
+    methods: new Set(["GET"]),
+  },
+  {
+    matches: exactRoute(/^\/api\/package-revisions\/rollback$/),
+    methods: new Set(["POST"]),
+  },
+  {
     matches: exactRoute(/^\/api\/bots$/),
     methods: new Set(["GET", "POST"]),
   },
