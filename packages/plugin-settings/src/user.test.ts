@@ -35,6 +35,7 @@ function contribution(storage = new MemoryStorage()) {
     availablePackages: [
       { packageId: "flock", version: "0.0.1" },
       { packageId: "settings", version: "0.0.1" },
+      { packageId: "provider-ollama-cloud", version: "0.0.1" },
     ],
   });
 }
@@ -111,6 +112,111 @@ describe("User settings backend Contribution", () => {
         },
       }),
     ).rejects.toThrow("Package is not available in this application");
+  });
+
+  test("coordinates Connection dependencies in provider-neutral User state", async () => {
+    const settings = contribution();
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-ollama",
+        expectedRevision: 0,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+      },
+    });
+    await settings.createConnection("user-1", {
+      connectionId: "ollama-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      displayName: "Work",
+      state: "ready",
+      providerType: "ollama-cloud",
+      generation: "connection-generation",
+      safeMetadata: {},
+    });
+    const requirement = {
+      schemaVersion: 1 as const,
+      packageId: "provider-ollama-cloud",
+      packageVersion: "0.0.1",
+      capabilityId: "ollama-cloud-models",
+      connectionTypeIds: ["ollama-cloud-account"],
+    };
+
+    await expect(
+      settings.claimConnectionDependency(
+        "user-1",
+        "ollama-1",
+        "bot-1",
+        "assignment-1",
+        requirement,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      settings.acknowledgeConnectionDependency(
+        "user-1",
+        "ollama-1",
+        "bot-1",
+        "assignment-1",
+      ),
+    ).resolves.toBe(true);
+    expect(
+      (await settings.getConnection("user-1", "ollama-1"))?.safeMetadata,
+    ).toMatchObject({
+      dependentAssignments: [
+        {
+          botId: "bot-1",
+          generation: "assignment-1",
+          status: "acknowledged",
+        },
+      ],
+    });
+    await expect(
+      settings.compensateConnectionDependency(
+        "user-1",
+        "ollama-1",
+        "bot-1",
+        "assignment-1",
+      ),
+    ).resolves.toBe(false);
+  });
+
+  test("compacts revoked Connections and bounds active Connections", async () => {
+    const settings = contribution();
+    await settings.read("user-1");
+    const connection = (connectionId: string, state: "ready" | "revoked") =>
+      ({
+        connectionId,
+        packageId: "provider-ollama-cloud",
+        connectionTypeId: "ollama-cloud-account",
+        displayName: connectionId,
+        state,
+        providerType: "ollama-cloud",
+        generation: `generation-${connectionId}`,
+        safeMetadata: {},
+      }) as const;
+    await settings.createConnection(
+      "user-1",
+      connection("revoked-1", "revoked"),
+    );
+    await settings.createConnection("user-1", connection("ready-0", "ready"));
+    expect((await settings.read("user-1")).connections).toHaveLength(1);
+
+    for (let index = 1; index < 100; index += 1) {
+      await settings.createConnection(
+        "user-1",
+        connection(`ready-${index}`, "ready"),
+      );
+    }
+    await expect(
+      settings.createConnection(
+        "user-1",
+        connection("ready-over-limit", "ready"),
+      ),
+    ).rejects.toThrow("User Connection limit reached");
   });
 
   test("binds one durable state object to one User authority", async () => {

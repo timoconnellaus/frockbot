@@ -1,10 +1,13 @@
 import {
   configurationCommandFingerprintV1,
   ConfigurationConflictError,
+  decodeConnectionDependencyRequirementV1,
   decodeOperationReceiptV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
   decodeUserSettingsViewV1,
+  MAX_USER_CONNECTIONS_V1,
+  type ConnectionDependencyRequirementV1,
   type ConnectionView,
   type OperationReceiptV1,
   type UserConfigurationCommandV1,
@@ -15,6 +18,13 @@ import type { Plugin } from "cordis";
 const STATE_KEY = "user-configuration";
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
+const MAX_CONNECTION_DEPENDENCIES = 256;
+
+type ConnectionDependency = {
+  botId: string;
+  generation: string;
+  status: "pending" | "acknowledged";
+};
 
 interface StoredConfigurationReceipt {
   commandFingerprint: string;
@@ -80,6 +90,50 @@ function requireMatchingConfigurationReceipt(
     );
   }
   return stored.receipt;
+}
+
+function connectionDependencies(
+  connection: ConnectionView,
+): ConnectionDependency[] {
+  const value = connection.safeMetadata.dependentAssignments;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
+      return [];
+    }
+    const dependency = candidate as Record<string, unknown>;
+    if (
+      typeof dependency.botId !== "string" ||
+      typeof dependency.generation !== "string" ||
+      (dependency.status !== "pending" && dependency.status !== "acknowledged")
+    ) {
+      return [];
+    }
+    return [
+      {
+        botId: dependency.botId,
+        generation: dependency.generation,
+        status: dependency.status,
+      } satisfies ConnectionDependency,
+    ];
+  });
+}
+
+function withConnectionDependencies(
+  connection: ConnectionView,
+  dependencies: ConnectionDependency[],
+): ConnectionView {
+  return {
+    ...connection,
+    safeMetadata: {
+      ...connection.safeMetadata,
+      dependentAssignments: dependencies,
+    },
+  };
 }
 
 function applyUserCommand(
@@ -240,10 +294,16 @@ export class UserSettingsBackendContribution {
         (candidate) => candidate.connectionId === connection.connectionId,
       );
       if (existing) return existing;
+      const retained = current.connections.filter(
+        (candidate) => candidate.state !== "revoked",
+      );
+      if (retained.length >= MAX_USER_CONNECTIONS_V1) {
+        throw new Error("User Connection limit reached");
+      }
       const next = {
         ...current,
         revision: current.revision + 1,
-        connections: [...current.connections, structuredClone(connection)],
+        connections: [...retained, structuredClone(connection)],
       } satisfies UserSettingsViewV1;
       await transaction.put(STATE_KEY, next);
       return structuredClone(connection);
@@ -308,6 +368,130 @@ export class UserSettingsBackendContribution {
     return settings.packages.some(
       (pkg) => pkg.packageId === packageId && pkg.state === "installed",
     );
+  }
+
+  async claimConnectionDependency(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    generation: string,
+    requirement: ConnectionDependencyRequirementV1,
+  ): Promise<boolean> {
+    const decoded = decodeConnectionDependencyRequirementV1(requirement);
+    return this.transitionConnectionDependency(
+      userId,
+      connectionId,
+      (current, settings) => {
+        const installation = settings.packages.find(
+          (pkg) =>
+            pkg.packageId === decoded.packageId &&
+            pkg.version === decoded.packageVersion &&
+            pkg.state === "installed",
+        );
+        if (
+          !installation ||
+          current.state !== "ready" ||
+          current.packageId !== decoded.packageId ||
+          !decoded.connectionTypeIds.includes(current.connectionTypeId)
+        ) {
+          return undefined;
+        }
+        const existing = connectionDependencies(current).filter(
+          (dependency) =>
+            dependency.botId !== botId || dependency.generation !== generation,
+        );
+        if (existing.length >= MAX_CONNECTION_DEPENDENCIES) return undefined;
+        return withConnectionDependencies(current, [
+          ...existing,
+          { botId, generation, status: "pending" },
+        ]);
+      },
+    );
+  }
+
+  async acknowledgeConnectionDependency(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    generation: string,
+  ): Promise<boolean> {
+    return this.transitionConnectionDependency(
+      userId,
+      connectionId,
+      (current) => {
+        if (current.state === "revoking" || current.state === "revoked") {
+          return undefined;
+        }
+        let matched = false;
+        const dependencies = connectionDependencies(current).flatMap(
+          (dependency) => {
+            if (
+              dependency.botId === botId &&
+              dependency.generation === generation
+            ) {
+              matched = true;
+              return [{ ...dependency, status: "acknowledged" as const }];
+            }
+            return dependency.botId === botId ? [] : [dependency];
+          },
+        );
+        return matched
+          ? withConnectionDependencies(current, dependencies)
+          : undefined;
+      },
+    );
+  }
+
+  async compensateConnectionDependency(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    generation: string,
+  ): Promise<boolean> {
+    return this.transitionConnectionDependency(
+      userId,
+      connectionId,
+      (current) => {
+        const existing = connectionDependencies(current);
+        const remaining = existing.filter(
+          (dependency) =>
+            dependency.botId !== botId ||
+            dependency.generation !== generation ||
+            dependency.status !== "pending",
+        );
+        return remaining.length === existing.length
+          ? undefined
+          : withConnectionDependencies(current, remaining);
+      },
+    );
+  }
+
+  private async transitionConnectionDependency(
+    userId: string,
+    connectionId: string,
+    transition: (
+      connection: ConnectionView,
+      settings: UserSettingsViewV1,
+    ) => ConnectionView | undefined,
+  ): Promise<boolean> {
+    return this.host.storage.transaction(async (storage) => {
+      await this.assertIdentity(userId, storage);
+      const current = await this.readSnapshot(storage);
+      const connection = current.connections.find(
+        (candidate) => candidate.connectionId === connectionId,
+      );
+      if (!connection) return false;
+      const nextConnection = transition(connection, current);
+      if (!nextConnection) return false;
+      await storage.put(STATE_KEY, {
+        ...current,
+        revision: current.revision + 1,
+        connections: current.connections.map((candidate) =>
+          candidate.connectionId === connectionId ? nextConnection : candidate,
+        ),
+      } satisfies UserSettingsViewV1);
+      return true;
+    });
   }
 
   private async assertIdentity(

@@ -856,6 +856,90 @@ describe("Connection operation reconciliation", () => {
     expect(new Set(commandIds).size).toBe(1);
   });
 
+  test("retires a lost rotation from its durable command receipt", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    let generation = "generation-1";
+    const commandIds: string[] = [];
+    const receipts = new Map<
+      string,
+      {
+        schemaVersion: 1;
+        commandId: string;
+        connectionId: string;
+        status: "applied";
+      }
+    >();
+    let first = true;
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readAuthenticatedUserId: () => Promise.resolve("user-a"),
+        readConfiguration: () =>
+          Promise.resolve({
+            schemaVersion: 1,
+            revision: 1,
+            profile: { name: "User" },
+            packages: [],
+            connections: [
+              {
+                connectionId: "connection-1",
+                packageId: "provider-ollama-cloud",
+                connectionTypeId: "ollama-cloud-account",
+                displayName: "Work",
+                state: "ready",
+                providerType: "ollama-cloud",
+                generation,
+                safeMetadata: {},
+              },
+            ],
+          }),
+        executeConnection: (command) => {
+          commandIds.push(command.commandId);
+          generation = `generation-${commandIds.length + 1}`;
+          receipts.set(command.commandId, {
+            schemaVersion: 1,
+            commandId: command.commandId,
+            connectionId: "connection-1",
+            status: "applied",
+          });
+          if (first) {
+            first = false;
+            return Promise.reject(new Error("response lost"));
+          }
+          return Promise.resolve(receipts.get(command.commandId)!);
+        },
+        lookupConnectionCommand: (_packageId, commandId) =>
+          Promise.resolve(receipts.get(commandId)),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    await provided.value.loadUserSettings();
+
+    await expect(
+      provided.value.rotateApiKeyConnection("connection-1", "key-a"),
+    ).rejects.toThrow("response lost");
+    const lostCommandId = commandIds[0];
+    await provided.value.loadUserSettings();
+    await provided.value.rotateApiKeyConnection("connection-1", "key-b");
+    await provided.value.rotateApiKeyConnection("connection-1", "key-a");
+
+    expect(commandIds).toHaveLength(3);
+    expect(commandIds[2]).not.toBe(lostCommandId);
+  });
+
   test("retires a lost API-key create from its durable Connection projection", async () => {
     installMemoryStorage();
     Object.defineProperty(globalThis, "window", {

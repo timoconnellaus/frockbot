@@ -151,6 +151,47 @@ export function createGateway(dependencies: GatewayDependencies) {
       if (response) return response;
     }
 
+    if (url.pathname === "/api/connection-commands") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      const queryFields = [...url.searchParams.keys()];
+      const packageId = url.searchParams.get("packageId");
+      const commandId = url.searchParams.get("commandId");
+      if (
+        queryFields.length !== 2 ||
+        url.searchParams.getAll("packageId").length !== 1 ||
+        url.searchParams.getAll("commandId").length !== 1 ||
+        queryFields.some(
+          (field) => field !== "packageId" && field !== "commandId",
+        ) ||
+        !isPublicIdentifier(packageId) ||
+        !isPublicIdentifier(commandId)
+      ) {
+        return jsonError(400, "invalid Connection command lookup");
+      }
+      try {
+        const receipt = await dependencies
+          .userConfigurationFor(userId)
+          .lookupConnectionCommand({
+            schemaVersion: 1,
+            userId,
+            packageId,
+            commandId,
+          });
+        return Response.json(
+          receipt === undefined
+            ? null
+            : decodeConnectionCommandReceiptV1(receipt),
+        );
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error
+            ? error.message
+            : "Connection command lookup failed",
+        );
+      }
+    }
+
     if (url.pathname === "/api/connections") {
       if (request.method !== "POST")
         return jsonError(405, "method not allowed");

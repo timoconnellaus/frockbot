@@ -2,6 +2,7 @@
 
 import {
   decodeExternalAuthorizationUrl,
+  type AgentTransport,
   type ClientNotificationIntent,
   type ClientPlugin,
   type ClientRun,
@@ -207,6 +208,8 @@ interface PendingConnectionOperation {
   createdAt: number;
   expiresAt?: number;
   nativeReturnNonce?: string;
+  packageId?: string;
+  connectionId?: string;
 }
 
 const CONNECTION_OPERATION_STORAGE_KEY =
@@ -233,13 +236,26 @@ function readConnectionOperations(): Record<
           return [];
         }
         const operation = candidate as Record<string, unknown>;
+        const allowed = new Set([
+          "commandId",
+          "createdAt",
+          "expiresAt",
+          "nativeReturnNonce",
+          "packageId",
+          "connectionId",
+        ]);
         if (
+          Object.keys(operation).some((field) => !allowed.has(field)) ||
           typeof operation.commandId !== "string" ||
           typeof operation.createdAt !== "number" ||
           (operation.expiresAt !== undefined &&
             typeof operation.expiresAt !== "number") ||
           (operation.nativeReturnNonce !== undefined &&
-            typeof operation.nativeReturnNonce !== "string")
+            typeof operation.nativeReturnNonce !== "string") ||
+          (operation.packageId !== undefined &&
+            typeof operation.packageId !== "string") ||
+          (operation.connectionId !== undefined &&
+            typeof operation.connectionId !== "string")
         ) {
           return [];
         }
@@ -254,6 +270,12 @@ function readConnectionOperations(): Record<
                 : {}),
               ...(typeof operation.nativeReturnNonce === "string"
                 ? { nativeReturnNonce: operation.nativeReturnNonce }
+                : {}),
+              ...(typeof operation.packageId === "string"
+                ? { packageId: operation.packageId }
+                : {}),
+              ...(typeof operation.connectionId === "string"
+                ? { connectionId: operation.connectionId }
                 : {}),
             },
           ],
@@ -313,6 +335,7 @@ function retireSettledConnectionOperations(
   synchronizeConnectionOperations(operations);
   let changed = false;
   for (const [key, operation] of Object.entries(operations)) {
+    if (operation.connectionId !== undefined) continue;
     const connection = settings.connections.find(
       (candidate) =>
         candidate.connectionId === operation.commandId ||
@@ -327,6 +350,25 @@ function retireSettledConnectionOperations(
       delete operations[key];
       changed = true;
     }
+  }
+  if (changed) writeConnectionOperations(operations);
+}
+
+async function reconcileRetainedConnectionCommands(
+  operations: Record<string, PendingConnectionOperation>,
+  lookup: AgentTransport["lookupConnectionCommand"] | undefined,
+): Promise<void> {
+  if (!lookup) return;
+  synchronizeConnectionOperations(operations);
+  let changed = false;
+  for (const [key, operation] of Object.entries(operations)) {
+    if (!operation.packageId || !operation.connectionId) continue;
+    try {
+      const receipt = await lookup(operation.packageId, operation.commandId);
+      if (!receipt) continue;
+      delete operations[key];
+      changed = true;
+    } catch {}
   }
   if (changed) writeConnectionOperations(operations);
 }
@@ -472,6 +514,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     identity: readonly string[],
     apiKey: string,
     create: (commandId: string) => ConnectionCommandV1,
+    pending: Pick<
+      PendingConnectionOperation,
+      "packageId" | "connectionId"
+    > = {},
   ): Promise<ConnectionCommandReceiptV1> {
     if (!ctx.transport.executeConnection) {
       throw new Error("Connections are unavailable");
@@ -489,7 +535,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     const operation = await reserveConnectionOperation(
       connectionOperations,
       operationKey,
-      () => ({ commandId: crypto.randomUUID(), createdAt: Date.now() }),
+      () => ({
+        commandId: crypto.randomUUID(),
+        createdAt: Date.now(),
+        ...pending,
+      }),
     );
     try {
       const result = await ctx.transport.executeConnection(
@@ -804,6 +854,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           type: "user/get",
         })) as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, settings);
+        await reconcileRetainedConnectionCommands(
+          connectionOperations,
+          ctx.transport.lookupConnectionCommand,
+        );
         web.value.userSettings = settings;
         updateModelLabel();
         web.value.settingsError = undefined;
@@ -848,6 +902,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         web.value.pluginCatalog = decodePluginCatalog(manifest);
         const userSettings = settings as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, userSettings);
+        await reconcileRetainedConnectionCommands(
+          connectionOperations,
+          ctx.transport.lookupConnectionCommand,
+        );
         web.value.userSettings = userSettings;
         updateModelLabel();
         web.value.settingsError = undefined;
@@ -953,6 +1011,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       }
     },
     async rotateApiKeyConnection(connectionId, apiKey): Promise<void> {
+      const connection = web.value.userSettings?.connections.find(
+        (candidate) => candidate.connectionId === connectionId,
+      );
+      if (!connection) {
+        throw new Error("Connection is unavailable");
+      }
       const result = await executeRetainedApiKeyCommand(
         ["rotate", connectionId],
         apiKey,
@@ -963,6 +1027,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           connectionId,
           apiKey,
         }),
+        {
+          packageId: connection.packageId,
+          connectionId,
+        },
       );
       await web.value.loadPluginCatalog();
       if (result.status !== "applied") {

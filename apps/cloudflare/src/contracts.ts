@@ -264,6 +264,12 @@ export interface UserConfigurationBinding {
     userId: string;
     command: ConnectionCommandV1;
   }): Promise<ConnectionCommandReceiptV1>;
+  lookupConnectionCommand(request: {
+    schemaVersion: 1;
+    userId: string;
+    packageId: string;
+    commandId: string;
+  }): Promise<ConnectionCommandReceiptV1 | undefined>;
   getConnection(request: {
     schemaVersion: 1;
     userId: string;

@@ -276,6 +276,26 @@ describe("Ollama Cloud User Contribution", () => {
     });
   });
 
+  test("projects durable Connection command receipts for hosted recovery", async () => {
+    const { ollama } = await fixture();
+    const receipt = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-receipt-lookup",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "valid-key",
+    });
+
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "connect-receipt-lookup"),
+    ).resolves.toEqual(receipt);
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "unknown-command"),
+    ).resolves.toBeUndefined();
+  });
+
   test("keeps the active generation when rotation validation fails", async () => {
     const { settings, ollama, rejectCatalog } = await fixture();
     const created = await ollama.executeConnection("account-1", {
@@ -331,6 +351,7 @@ describe("Ollama Cloud User Contribution", () => {
       accountId: "account-1",
       connectionId: created.connectionId,
       packageId: "provider-ollama-cloud",
+      expectedGeneration: before.generation,
       effectId: "effect-after-failure",
       expiresAt: "2026-08-30T01:00:00.000Z",
     });
@@ -534,6 +555,45 @@ describe("Ollama Cloud User Contribution", () => {
     expect((await settings.read("account-1")).connections[0]?.state).toBe(
       "disabled",
     );
+  });
+
+  test("rejects disconnect while a Bot assignment depends on the Connection", async () => {
+    const { settings, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-dependent",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "key",
+    });
+    await settings.claimConnectionDependency(
+      "account-1",
+      created.connectionId,
+      "bot-1",
+      "assignment-1",
+      {
+        schemaVersion: 1,
+        packageId: "provider-ollama-cloud",
+        packageVersion: "0.0.1",
+        capabilityId: "ollama-cloud-models",
+        connectionTypeIds: ["ollama-cloud-account"],
+      },
+    );
+
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/disconnect",
+        commandId: "disconnect-dependent",
+        connectionId: created.connectionId,
+        revokeUpstream: false,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(
+      await settings.getConnection("account-1", created.connectionId),
+    ).toMatchObject({ state: "ready" });
   });
 
   test("does not reactivate a Connection disconnected during authorization", async () => {

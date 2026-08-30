@@ -162,6 +162,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
+    lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),

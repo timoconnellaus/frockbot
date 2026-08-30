@@ -306,6 +306,12 @@ const application = new ClientApplication({
       decodeConnectionCommandReceiptV1,
     );
   },
+  async lookupConnectionCommand(packageId: string, commandId: string) {
+    const value = await apiRequest(
+      `/api/connection-commands?packageId=${encodeURIComponent(packageId)}&commandId=${encodeURIComponent(commandId)}`,
+    );
+    return value === null ? undefined : decodeConnectionCommandReceiptV1(value);
+  },
   readApplicationManifest() {
     return apiRequest("/app-manifest");
   },

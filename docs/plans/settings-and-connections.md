@@ -8,8 +8,8 @@ The authoritative current system shape is in [`docs/architecture.md`](../archite
 
 ## Deferred work
 
-- Model-provider and Codex Connections are outside this change. Any later provider vertical slice must keep provider configuration in **Profile → Settings**, model selection in Bot settings, and User defaults limited to newly created Bots.
-- Mobile must keep **Plugins** hidden until a native OAuth/deep-link return adapter can complete the hosted Connection protocol.
+- Ollama Cloud model-provider Connections now use **Profile → Plugins** for account-scoped credentials and catalogs, Bot settings for exact Connection and model binding, and User defaults only for newly created Bots. Codex Connections remain outside this change.
+- Mobile exposes hosted API-key Connection workflows. OAuth-based Packages still require a native deep-link return adapter before their authorization controls can be enabled.
 - External Package discovery, signed distribution, sandboxed third-party settings views, and production secret-vault/KMS support for future write-only credentials remain separate vertical slices.
 
 ## Constraints for follow-up slices

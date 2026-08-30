@@ -81,6 +81,7 @@ const authority = {
   accountId: "account-1",
   connectionId: "connection-1",
   packageId: "provider-ollama-cloud",
+  expectedGeneration: "generation-1",
 };
 
 describe("Credential User Contribution", () => {
@@ -176,6 +177,7 @@ describe("Credential User Contribution", () => {
     await credentials.activate({ ...authority, generation: "generation-2" });
     const newLease = await credentials.lease({
       ...authority,
+      expectedGeneration: "generation-2",
       effectId: "effect-2",
       expiresAt: "2026-08-30T01:00:00.000Z",
     });
@@ -257,6 +259,69 @@ describe("Credential User Contribution", () => {
         expiresAt: "2026-08-30T02:00:00.000Z",
       }),
     ).rejects.toThrow("Credential lease expired");
+  });
+
+  test("bounds expired lease tombstones", async () => {
+    let now = Date.parse("2026-08-30T00:00:00.000Z");
+    const { storage, credentials } = contribution(
+      new MemoryStorage(),
+      () => now,
+    );
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "secret",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    for (let index = 0; index < 64; index += 1) {
+      await credentials.lease({
+        ...authority,
+        effectId: `effect-${index}`,
+        expiresAt: "2026-08-30T01:00:00.000Z",
+      });
+    }
+    await expect(
+      credentials.lease({
+        ...authority,
+        effectId: "effect-over-capacity",
+        expiresAt: "2026-08-30T01:00:00.000Z",
+      }),
+    ).rejects.toThrow("Credential lease capacity requires rotation");
+
+    now = Date.parse("2026-08-30T01:00:00.000Z");
+    await credentials.expireLeases();
+
+    expect(
+      [...storage.values.keys()].filter((key) =>
+        key.startsWith("credential-lease-expired:effect-"),
+      ),
+    ).toHaveLength(64);
+    await expect(
+      credentials.lease({
+        ...authority,
+        effectId: "effect-0",
+        expiresAt: "2026-08-30T02:00:00.000Z",
+      }),
+    ).rejects.toThrow("Credential lease expired");
+
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-2",
+      apiKey: "replacement",
+    });
+    await credentials.activate({ ...authority, generation: "generation-2" });
+    expect(
+      [...storage.values.keys()].filter((key) =>
+        key.startsWith("credential-lease-expired:effect-"),
+      ),
+    ).toHaveLength(0);
+    await expect(
+      credentials.lease({
+        ...authority,
+        effectId: "effect-0",
+        expiresAt: "2026-08-30T02:00:00.000Z",
+      }),
+    ).rejects.toThrow("Connection credential is unavailable");
   });
 
   test("disconnect blocks new leases while preserving an admitted lease", async () => {

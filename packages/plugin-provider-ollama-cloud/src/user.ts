@@ -345,6 +345,20 @@ export class OllamaCloudUserBackendContribution {
     );
   }
 
+  async lookupConnectionCommand(
+    accountId: string,
+    commandId: string,
+  ): Promise<ConnectionCommandReceiptV1 | undefined> {
+    await this.host.settings.read(accountId);
+    const value = await this.host.storage.get<unknown>(commandKey(commandId));
+    if (value === undefined) return undefined;
+    const record = decodeStoredCommand(value);
+    if (record.accountId !== accountId) {
+      throw new Error("Connection command authority does not match");
+    }
+    return record.receipt;
+  }
+
   private async executeCommand(
     accountId: string,
     command: ConnectionCommandV1,
@@ -1077,6 +1091,12 @@ export class OllamaCloudUserBackendContribution {
         if (current.state === "reconciliation-required") {
           return "reconciliation-required";
         }
+        if (
+          Array.isArray(current.safeMetadata.dependentAssignments) &&
+          current.safeMetadata.dependentAssignments.length > 0
+        ) {
+          return "dependent";
+        }
         if (current.state !== "revoking") {
           await this.host.settings.replaceConnection(
             record.accountId,
@@ -1089,7 +1109,9 @@ export class OllamaCloudUserBackendContribution {
         return "revoking";
       },
     );
-    if (transition === "stale") return this.finishRecord(record, "failed");
+    if (transition === "stale" || transition === "dependent") {
+      return this.finishRecord(record, "failed");
+    }
     if (transition === "revoked") return this.finishRecord(record, "applied");
     if (transition === "reconciliation-required") {
       return this.finishRecord(record, "reconciliation-required");

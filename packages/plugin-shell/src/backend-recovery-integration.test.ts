@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
-import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
+import {
+  parseCredentialKeyringV1,
+  sealCredentialV1,
+} from "@frockbot/connection-core";
+import {
+  initializeBotSettingsV1,
+  type UserSettingsViewV1,
+} from "@frockbot/configuration-core";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,
@@ -79,6 +86,197 @@ class MemoryStorage {
 }
 
 describe("Bot recovery", () => {
+  test("executes and reconstructs an Ollama-bound Bot without Foundation fallback", async () => {
+    const storage = new MemoryStorage();
+    const credentialKeyring =
+      '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}';
+    const envelope = await sealCredentialV1({
+      keyring: parseCredentialKeyringV1(credentialKeyring),
+      context: {
+        accountId: "user-1",
+        connectionId: "ollama-1",
+        packageId: "provider-ollama-cloud",
+        credentialGeneration: "generation-1",
+      },
+      plaintext: "ollama-secret",
+    });
+    const userSettings: UserSettingsViewV1 = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-1",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          providerType: "ollama-cloud",
+          generation: "generation-1",
+          safeMetadata: {},
+          modelCatalog: {
+            schemaVersion: 1,
+            generation: "catalog-1",
+            state: "fresh",
+            models: [
+              {
+                providerModelId: "glm-5.3-flash:cloud",
+                displayName: "GLM",
+                capabilities: {
+                  tools: true,
+                  vision: false,
+                  reasoning: false,
+                },
+                source: "discovered",
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const leasedRequests: Array<Record<string, unknown>> = [];
+    const settledEffects: string[] = [];
+    const rpc = {
+      readConfiguration: () => Promise.resolve(structuredClone(userSettings)),
+      getConnection: () =>
+        Promise.resolve(structuredClone(userSettings.connections[0])),
+      claimConnectionDependency: () => Promise.resolve(true),
+      acknowledgeConnectionDependency: () => Promise.resolve(true),
+      compensateConnectionDependency: () => Promise.resolve(true),
+      leaseModelCredential: (input: unknown) => {
+        leasedRequests.push(input as Record<string, unknown>);
+        const request = input as { effectId: string };
+        return Promise.resolve({
+          schemaVersion: 1,
+          leaseId: `lease-${leasedRequests.length}`,
+          effectId: request.effectId,
+          connectionId: "ollama-1",
+          credentialGeneration: "generation-1",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          envelope,
+        });
+      },
+      settleModelCredential: (input: unknown) => {
+        settledEffects.push((input as { effectId: string }).effectId);
+        return Promise.resolve();
+      },
+    };
+    const requests: Request[] = [];
+    const outboundFetch = ((input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      if (!request.url.startsWith("https://ollama.com/")) {
+        return Promise.reject(new Error("Foundation fallback invoked"));
+      }
+      return Promise.resolve(
+        new Response(
+          'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+            "data: [DONE]\n\n",
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        ),
+      );
+    }) as typeof fetch;
+    const host = () =>
+      createShellBotBackendContribution({
+        state: { storage } as unknown as DurableObjectState,
+        env: {
+          CREDENTIAL_KEYRING: credentialKeyring,
+          USER_CONFIGURATIONS: {
+            idFromName: () => "user-configuration-id",
+            get: () => rpc,
+          },
+          MEMORY_FILES: {},
+          MEMORY_INDEX: {},
+          AI: {},
+        } as unknown as Parameters<
+          typeof createShellBotBackendContribution
+        >[0]["env"],
+        outboundFetch,
+      });
+
+    await host().materializeSettings(
+      { userId: "user-1", botId: "primary" },
+      {
+        name: "Ollama Bot",
+        model: {
+          connectionId: "ollama-1",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+      },
+    );
+    const first = await host().run({
+      userId: "user-1",
+      botId: "primary",
+      runId: "ollama-run-1",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-08-30T00:00:00.000Z",
+      text: "hello",
+    });
+    const second = await host().run({
+      userId: "user-1",
+      botId: "primary",
+      runId: "ollama-run-2",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-08-30T00:01:00.000Z",
+      text: "again",
+    });
+
+    expect(first.text).toBe("Ollama reply");
+    expect(second.text).toBe("Ollama reply");
+    expect(requests).toHaveLength(2);
+    expect(
+      await Promise.all(requests.map((request) => request.clone().json())),
+    ).toEqual([
+      expect.objectContaining({ model: "glm-5.3-flash:cloud" }),
+      expect.objectContaining({ model: "glm-5.3-flash:cloud" }),
+    ]);
+    expect(
+      leasedRequests.map((request) => ({
+        connectionId: request.connectionId,
+        providerModelId: request.providerModelId,
+        connectionGeneration: request.connectionGeneration,
+      })),
+    ).toEqual([
+      {
+        connectionId: "ollama-1",
+        providerModelId: "glm-5.3-flash:cloud",
+        connectionGeneration: "generation-1",
+      },
+      {
+        connectionId: "ollama-1",
+        providerModelId: "glm-5.3-flash:cloud",
+        connectionGeneration: "generation-1",
+      },
+    ]);
+    expect(settledEffects).toHaveLength(2);
+    for (const runId of ["ollama-run-1", "ollama-run-2"]) {
+      const run = await storage.get<StoredRun>(`run:${runId}`);
+      expect(
+        run?.events.find((event) => event.type === "model/request"),
+      ).toMatchObject({
+        request: {
+          provider: "ollama-cloud",
+          model: "glm-5.3-flash:cloud",
+          modelBinding: {
+            connectionId: "ollama-1",
+            connectionGeneration: "generation-1",
+          },
+        },
+      });
+    }
+  });
+
   test("does not clear active work whose durable run is malformed", async () => {
     const storage = new MemoryStorage();
     await storage.put({

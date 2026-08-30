@@ -238,7 +238,7 @@ Cordis contexts provide composition and lifecycle ownership, not security isolat
 
 ## Current limitations
 
-- model configuration currently uses environment variables rather than onboarding UI;
+- Ollama Cloud model onboarding uses hosted account Connections and explicit per-Bot model bindings; standalone Foundation provider defaults still use environment configuration;
 - Fly Sprite live provisioning requires a valid Sprites token and has not been exercised by repository CI;
 - Fly uses one Sprite per Bot, but live isolation still depends on Fly's VM and network enforcement and has not been exercised by repository CI;
 - the local derived memory vector index is process-local and rebuilt through canonical-file fallback; cloud Vectorize remains durable;

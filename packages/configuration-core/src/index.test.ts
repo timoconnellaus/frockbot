@@ -425,6 +425,22 @@ describe("configuration DTO seam", () => {
         ],
       }),
     ).toThrow(ConfigurationDecodeError);
+    expect(() =>
+      decodeUserSettingsViewV1({
+        schemaVersion: 1,
+        revision: 0,
+        profile: { name: "User" },
+        packages: [],
+        connections: Array.from({ length: 101 }, (_, index) => ({
+          connectionId: `connection-${index}`,
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: `Connection ${index}`,
+          state: "ready",
+          safeMetadata: {},
+        })),
+      }),
+    ).toThrow(ConfigurationDecodeError);
     for (const value of [
       {
         schemaVersion: 1,

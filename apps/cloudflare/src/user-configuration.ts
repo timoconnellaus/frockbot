@@ -5,8 +5,10 @@ import {
 } from "@frockbot/application-foundation/runtime";
 import { decodeConnectionCommandV1 } from "@frockbot/connection-core";
 import {
+  decodeConnectionDependencyRequirementV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
+  type ConnectionDependencyRequirementV1,
 } from "@frockbot/configuration-core";
 import {
   createCredentialUserBackendPlugin,
@@ -40,6 +42,10 @@ interface UserConfigurationEnv {
 interface ConnectionUserBackendContribution {
   readonly packageId: string;
   executeConnection(accountId: string, input: unknown): Promise<unknown>;
+  lookupConnectionCommand(
+    accountId: string,
+    commandId: string,
+  ): Promise<unknown>;
   leaseModelCredential(input: {
     accountId: string;
     connectionId: string;
@@ -250,6 +256,20 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     );
   }
 
+  async lookupConnectionCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      packageId: rpcIdentifier,
+      commandId: rpcIdentifier,
+    });
+    return (
+      await this.connectionContribution(request.packageId as string)
+    ).lookupConnectionCommand(
+      request.userId as string,
+      request.commandId as string,
+    );
+  }
+
   async getConnection(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
@@ -282,6 +302,53 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       effectId: request.effectId as string,
       connectionGeneration: request.connectionGeneration as string,
     });
+  }
+
+  async claimConnectionDependency(input: unknown): Promise<boolean> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      botId: rpcBotId,
+      generation: rpcIdentifier,
+      requirement: rpcDecoded(decodeConnectionDependencyRequirementV1),
+    });
+    return (await this.settingsContribution()).claimConnectionDependency(
+      request.userId as string,
+      request.connectionId as string,
+      request.botId as string,
+      request.generation as string,
+      request.requirement as ConnectionDependencyRequirementV1,
+    );
+  }
+
+  async acknowledgeConnectionDependency(input: unknown): Promise<boolean> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      botId: rpcBotId,
+      generation: rpcIdentifier,
+    });
+    return (await this.settingsContribution()).acknowledgeConnectionDependency(
+      request.userId as string,
+      request.connectionId as string,
+      request.botId as string,
+      request.generation as string,
+    );
+  }
+
+  async compensateConnectionDependency(input: unknown): Promise<boolean> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      botId: rpcBotId,
+      generation: rpcIdentifier,
+    });
+    return (await this.settingsContribution()).compensateConnectionDependency(
+      request.userId as string,
+      request.connectionId as string,
+      request.botId as string,
+      request.generation as string,
+    );
   }
 
   async settleModelCredential(input: unknown) {

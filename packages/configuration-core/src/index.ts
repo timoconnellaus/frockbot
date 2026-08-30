@@ -86,6 +86,8 @@ export interface RevokeConnectionCommandV1 {
   type: "connection/revoke";
 }
 
+export const MAX_USER_CONNECTIONS_V1 = 100;
+
 export interface UserSettingsViewV1 {
   schemaVersion: 1;
   revision: number;
@@ -1082,9 +1084,13 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
   );
   schemaVersion(value);
   const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
-  if (!Array.isArray(value.packages) || !Array.isArray(value.connections)) {
+  if (
+    !Array.isArray(value.packages) ||
+    !Array.isArray(value.connections) ||
+    value.connections.length > MAX_USER_CONNECTIONS_V1
+  ) {
     throw new ConfigurationDecodeError(
-      "User settings Packages and Connections must be arrays",
+      "User settings Packages and Connections must be bounded arrays",
     );
   }
   return {

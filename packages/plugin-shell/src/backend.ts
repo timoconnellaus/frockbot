@@ -137,6 +137,7 @@ export interface ShellBotBackendHost {
   state: DurableObjectState;
   env: BotStateEnv;
   compileApplication?: typeof compileFoundationApplication;
+  outboundFetch?: typeof fetch;
 }
 
 function optionalStoredRun(input: unknown): StoredRun | undefined {
@@ -211,6 +212,7 @@ export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
   private readonly compileApplication: typeof compileFoundationApplication;
+  private readonly outboundFetch?: typeof fetch;
   private executingRunId: string | undefined;
   private readonly assignmentActivities = new Map<string, AssignmentActivity>();
 
@@ -219,6 +221,7 @@ export class ShellBotBackendContribution {
     this.env = host.env;
     this.compileApplication =
       host.compileApplication ?? compileFoundationApplication;
+    this.outboundFetch = host.outboundFetch;
   }
 
   async materializeSettings(
@@ -1090,6 +1093,7 @@ export class ShellBotBackendContribution {
         },
         settleCredential: (effectId) =>
           userConfiguration.settleModelCredential(identity.userId, effectId),
+        fetch: this.outboundFetch,
       }),
     );
     return {

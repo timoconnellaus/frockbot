@@ -129,6 +129,7 @@ interface ModelRuntimeContributionConfig {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential(effectId: string): Promise<void>;
+  fetch?: typeof fetch;
 }
 
 type ModelRuntimeContributionFactory = (

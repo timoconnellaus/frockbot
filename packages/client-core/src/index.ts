@@ -91,6 +91,10 @@ export interface AgentTransport {
   executeConnection?(
     command: ConnectionCommandV1,
   ): Promise<ConnectionCommandReceiptV1>;
+  lookupConnectionCommand?(
+    packageId: string,
+    commandId: string,
+  ): Promise<ConnectionCommandReceiptV1 | undefined>;
   readApplicationManifest?(): Promise<unknown>;
   readAuthenticatedUserId?(): Promise<string>;
   startConnection?(input: {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
+import type { ConnectionCommandReceiptV1 } from "@frockbot/connection-core";
 import type {
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
@@ -207,6 +208,10 @@ class MemoryConfiguration
   };
   private readonly bots = new Map<string, BotSettingsViewV1>();
   private readonly receipts = new Map<string, OperationReceiptV1>();
+  private readonly connectionReceipts = new Map<
+    string,
+    ConnectionCommandReceiptV1
+  >();
   private connectionReceiptOverride: unknown;
 
   setConnectionReceiptOverride(receipt: unknown): void {
@@ -351,12 +356,20 @@ class MemoryConfiguration
       "connectionId" in request.command
         ? request.command.connectionId
         : "connection-test";
-    return Promise.resolve({
+    const receipt = {
       schemaVersion: 1 as const,
       commandId: request.command.commandId,
       connectionId,
       status: "applied" as const,
-    });
+    };
+    this.connectionReceipts.set(request.command.commandId, receipt);
+    return Promise.resolve(receipt);
+  }
+
+  lookupConnectionCommand(
+    request: Parameters<UserConfigurationBinding["lookupConnectionCommand"]>[0],
+  ): ReturnType<UserConfigurationBinding["lookupConnectionCommand"]> {
+    return Promise.resolve(this.connectionReceipts.get(request.commandId));
   }
 
   getConnection(
@@ -736,6 +749,27 @@ describe("Cloudflare user application gateway", () => {
     );
     expect(response.status).toBe(200);
     expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      commandId: "ollama-connect-1",
+      connectionId: "connection-test",
+      status: "applied",
+    });
+    expect(
+      (
+        await gateway(
+          new Request(
+            "https://bot.frockbot.com/api/connection-commands?packageId=provider-ollama-cloud&commandId=ollama-connect-1",
+          ),
+        )
+      ).status,
+    ).toBe(401);
+    const lookup = await gateway(
+      request(
+        "/api/connection-commands?packageId=provider-ollama-cloud&commandId=ollama-connect-1",
+        "alice",
+      ),
+    );
+    expect((await lookup.json()) as unknown).toEqual({
       schemaVersion: 1,
       commandId: "ollama-connect-1",
       connectionId: "connection-test",
