@@ -251,7 +251,7 @@
     padding: 10px;
   }
   .flock-dialog {
-    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
     grid-template-columns: 1fr;
     grid-template-rows: 220px 1fr;
     border-radius: 20px;
