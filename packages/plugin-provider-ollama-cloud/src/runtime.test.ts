@@ -33,7 +33,11 @@ function serializedKeyring(): string {
 class TestCredentialLeaseRuntime extends Service {
   private readonly keyring;
 
-  constructor(ctx: Context, serializedKeyring: string) {
+  constructor(
+    ctx: Context,
+    serializedKeyring: string,
+    private readonly onOpen: () => void = () => undefined,
+  ) {
     super(ctx, "credentialLease");
     this.keyring = parseCredentialKeyringV1(serializedKeyring);
   }
@@ -44,6 +48,7 @@ class TestCredentialLeaseRuntime extends Service {
     packageId: string;
     lease: CredentialLeaseV1;
   }): Promise<string> {
+    this.onOpen();
     return openCredentialV1({
       keyring: this.keyring,
       context: {
@@ -60,9 +65,10 @@ class TestCredentialLeaseRuntime extends Service {
 async function mountCredentialRuntime(
   root: Context,
   keyring = serializedKeyring(),
+  onOpen?: () => void,
 ): Promise<void> {
   await root.plugin((ctx) => {
-    new TestCredentialLeaseRuntime(ctx, keyring);
+    new TestCredentialLeaseRuntime(ctx, keyring, onOpen);
   });
 }
 
@@ -172,6 +178,114 @@ describe("Ollama Cloud runtime Contribution", () => {
       void event;
     }
     expect(leasedGenerations).toEqual(["generation-1", "generation-1"]);
+    await root.fiber.dispose();
+  });
+
+  test.each([
+    { effectId: "different-effect", connectionId: "connection-1" },
+    { effectId: "effect-1", connectionId: "connection-2" },
+  ])(
+    "rejects a lease outside the request authority tuple",
+    async ({ effectId, connectionId }) => {
+      const keyringText = serializedKeyring();
+      const envelope = await sealCredentialV1({
+        keyring: parseCredentialKeyringV1(keyringText),
+        context: {
+          accountId: "account-1",
+          connectionId: "connection-1",
+          packageId: "provider-ollama-cloud",
+          credentialGeneration: "generation-1",
+        },
+        plaintext: "account-secret",
+      });
+      let openCount = 0;
+      const settled: string[] = [];
+      const root = new Context();
+      await root.plugin(LlmRegistry);
+      await mountCredentialRuntime(root, keyringText, () => {
+        openCount += 1;
+      });
+      await root.plugin(
+        createOllamaCloudRuntimePlugin({
+          accountId: "account-1",
+          connectionId: "connection-1",
+          packageId: "provider-ollama-cloud",
+          now: () => Date.parse("2026-08-30T00:00:00.000Z"),
+          leaseCredential: () =>
+            Promise.resolve({
+              schemaVersion: 1,
+              leaseId: "lease-1",
+              effectId,
+              connectionId,
+              credentialGeneration: "generation-1",
+              expiresAt: "2026-08-30T01:00:00.000Z",
+              envelope,
+            }),
+          settleCredential: (settledEffectId) => {
+            settled.push(settledEffectId);
+            return Promise.resolve();
+          },
+        }),
+      );
+
+      let failure: unknown;
+      try {
+        for await (const event of root.llm.stream(
+          request,
+          new AbortController().signal,
+        )) {
+          void event;
+        }
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(openCount).toBe(0);
+      expect(settled).toEqual(["effect-1"]);
+      await root.fiber.dispose();
+    },
+  );
+
+  test("rejects a request bound to another Connection before leasing", async () => {
+    let leaseCount = 0;
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await mountCredentialRuntime(root);
+    await root.plugin(
+      createOllamaCloudRuntimePlugin({
+        accountId: "account-1",
+        connectionId: "connection-1",
+        packageId: "provider-ollama-cloud",
+        leaseCredential: () => {
+          leaseCount += 1;
+          return Promise.reject(new Error("must not lease"));
+        },
+        settleCredential: () => Promise.resolve(),
+      }),
+    );
+
+    const mismatchedRequest = {
+      ...request,
+      modelBinding: {
+        ...request.modelBinding,
+        connectionId: "connection-2",
+      },
+    };
+    let failure: unknown;
+    try {
+      for await (const event of root.llm.stream(
+        mismatchedRequest,
+        new AbortController().signal,
+      )) {
+        void event;
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect(leaseCount).toBe(0);
     await root.fiber.dispose();
   });
 

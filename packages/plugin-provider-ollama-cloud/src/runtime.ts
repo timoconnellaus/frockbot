@@ -66,10 +66,14 @@ class OllamaCloudProvider implements LlmProvider {
   ) {}
 
   async authorize(request: NormalizedModelRequest): Promise<void> {
-    const expectedGeneration = request.modelBinding?.connectionGeneration;
-    if (!expectedGeneration) {
+    const binding = request.modelBinding;
+    const expectedGeneration = binding?.connectionGeneration;
+    if (
+      !expectedGeneration ||
+      binding.connectionId !== this.config.connectionId
+    ) {
       throw new LlmEffectNotStartedError(
-        "Ollama Cloud request is missing its Connection generation",
+        "Ollama Cloud request has invalid Connection authority",
       );
     }
     const existing = this.authorized.get(request.requestId);
@@ -89,6 +93,8 @@ class OllamaCloudProvider implements LlmProvider {
         expectedGeneration,
       );
       if (
+        lease.effectId !== request.requestId ||
+        lease.connectionId !== this.config.connectionId ||
         lease.credentialGeneration !== expectedGeneration ||
         Date.parse(lease.expiresAt) <= (this.config.now ?? Date.now)()
       ) {

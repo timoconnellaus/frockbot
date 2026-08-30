@@ -1,14 +1,26 @@
+import { plugin } from "bun";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   initializeBotSettingsV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import {
+
+plugin({
+  name: "shell-client-vue-test-loader",
+  setup(build) {
+    build.onLoad({ filter: /FrockBotApp\.vue$/ }, () => ({
+      contents: "export default {};",
+      loader: "js",
+    }));
+  },
+});
+
+const {
   decodePluginCatalog,
   projectCompletedRuns,
   projectDurableRuns,
   shellClientPlugin,
-} from "./index.js";
+} = await import("./index.js");
 import type { FrockBotWebData } from "../shared.js";
 import type { Ref } from "vue";
 
@@ -276,6 +288,70 @@ describe("Bot selection", () => {
 
     expect(provided.value.userSettings?.profile.name).toBe("Newer");
     expect(provided.value.settingsError).toBe("Bot settings unavailable");
+  });
+
+  test("commits a catalog without overwriting newer User settings", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const catalogManifest = Promise.withResolvers<unknown>();
+    const catalogUser = Promise.withResolvers<UserSettingsViewV1>();
+    const directUser = Promise.withResolvers<UserSettingsViewV1>();
+    let userReads = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readApplicationManifest: () => catalogManifest.promise,
+        readConfiguration: () => {
+          userReads += 1;
+          return userReads === 1 ? catalogUser.promise : directUser.promise;
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.pluginCatalog = [
+      {
+        packageId: "stale-package",
+        displayName: "Stale",
+        version: "0.0.1",
+        capabilities: [],
+        connectionTypes: [],
+      },
+    ];
+
+    const catalogLoad = provided.value.loadPluginCatalog();
+    const userLoad = provided.value.loadUserSettings();
+    directUser.resolve({
+      schemaVersion: 1,
+      revision: 2,
+      profile: { name: "Newer" },
+      packages: [],
+      connections: [],
+    });
+    await userLoad;
+    catalogUser.resolve({
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "Older" },
+      packages: [],
+      connections: [],
+    });
+    catalogManifest.resolve({
+      schemaVersion: 1,
+      deployment: { userId: "user-1", applicationHash: "hash-1" },
+      applicationHash: "hash-1",
+      packages: [],
+    });
+    await catalogLoad;
+
+    expect(provided.value.pluginCatalog).toEqual([]);
+    expect(provided.value.userSettings?.profile.name).toBe("Newer");
   });
 
   test("labels an explicitly bound Ollama Bot by its provider", async () => {

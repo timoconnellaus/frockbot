@@ -521,6 +521,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   let admissionObserver: AbortController | undefined;
   let selectionGeneration = 0;
   let userSettingsGeneration = 0;
+  let pluginCatalogGeneration = 0;
   const settingsLoadErrors = new Map<"bot" | "user" | "catalog", string>();
   const connectionOperations = readConnectionOperations();
   const authorizationOperations = new Map<
@@ -1043,7 +1044,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         updateSettingsLoadError("catalog", "Plugins are unavailable");
         return;
       }
-      const generation = ++userSettingsGeneration;
+      const userGeneration = ++userSettingsGeneration;
+      const catalogGeneration = ++pluginCatalogGeneration;
       try {
         const [manifest, settings] = await Promise.all([
           ctx.transport.readApplicationManifest(),
@@ -1059,14 +1061,20 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           connectionOperations,
           ctx.transport.lookupConnectionCommand,
         );
-        if (generation !== userSettingsGeneration) return;
-        web.value.pluginCatalog = pluginCatalog;
-        web.value.userSettings = userSettings;
-        updateModelLabel();
-        updateSettingsLoadError("user");
-        updateSettingsLoadError("catalog");
+        let committed = false;
+        if (catalogGeneration === pluginCatalogGeneration) {
+          web.value.pluginCatalog = pluginCatalog;
+          updateSettingsLoadError("catalog");
+          committed = true;
+        }
+        if (userGeneration === userSettingsGeneration) {
+          web.value.userSettings = userSettings;
+          updateSettingsLoadError("user");
+          committed = true;
+        }
+        if (committed) updateModelLabel();
       } catch (error) {
-        if (generation !== userSettingsGeneration) return;
+        if (catalogGeneration !== pluginCatalogGeneration) return;
         updateSettingsLoadError(
           "catalog",
           error instanceof Error ? error.message : "Could not load Plugins",
