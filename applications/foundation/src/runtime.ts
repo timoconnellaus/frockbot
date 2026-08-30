@@ -74,6 +74,19 @@ import foundationProviderPlugin, {
 import ollamaCloudManifest from "@frockbot/plugin-provider-ollama-cloud/manifest";
 import { createOllamaCloudRuntimePlugin } from "@frockbot/plugin-provider-ollama-cloud/runtime";
 import settingsManifest from "@frockbot/plugin-settings/manifest";
+// Provider-neutral Connection transport is owned by the Settings gateway Contribution.
+import {
+  createSettingsBackendContribution,
+  type SettingsConnectionGatewayHost,
+} from "@frockbot/plugin-settings/backend";
+const createSettingsGatewayPlugin = (
+  createSettingsBackendContribution as typeof createSettingsBackendContribution & {
+    plugin(
+      host: SettingsConnectionGatewayHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
 import shellManifest from "@frockbot/plugin-shell/manifest";
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
@@ -212,9 +225,14 @@ export interface MountedFoundationBackend<T> {
 }
 
 /** Mount every declared backend Contribution into one owned Cordis root. */
+export type FoundationGatewayHost = {
+  backendHost: "gateway";
+} & FlockGatewayHost &
+  SettingsConnectionGatewayHost;
+
 export async function createFoundationBackendContributions(
   plan: ApplicationPlan,
-  host: { backendHost: "gateway" } & FlockGatewayHost,
+  host: FoundationGatewayHost,
 ): Promise<MountedFoundationBackend<BackendRouteContribution>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
@@ -222,9 +240,7 @@ export async function createFoundationBackendContributions<T>(
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
-  host:
-    | ({ backendHost: "gateway" } & FlockGatewayHost)
-    | FoundationBackendPluginHost<T>,
+  host: FoundationGatewayHost | FoundationBackendPluginHost<T>,
 ): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
   const root = new Context();
   const contributions: Array<BackendRouteContribution | T> = [];
@@ -253,6 +269,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-flock/backend"
         ) {
           plugin = createFlockGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-settings/backend"
+        ) {
+          plugin = createSettingsGatewayPlugin(host, lifecycle);
         } else if (host.backendHost === "gateway") {
           throw new Error(
             `unknown foundation backend contribution: ${specifier}`,

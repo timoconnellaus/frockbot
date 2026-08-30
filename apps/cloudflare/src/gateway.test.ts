@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/agent-core";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/connection-core";
+import { createSettingsBackendContribution } from "@frockbot/plugin-settings/backend";
 import type {
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
@@ -591,6 +592,29 @@ function createTestGateway(
       return configuration;
     },
     backendContributions: [
+      createSettingsBackendContribution({
+        executeConnection: (userId, command) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.executeConnection({
+            schemaVersion: 1,
+            userId,
+            command,
+          });
+        },
+        lookupConnectionCommand: (userId, packageId, commandId) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.lookupConnectionCommand({
+            schemaVersion: 1,
+            userId,
+            packageId,
+            commandId,
+          });
+        },
+      }),
       {
         packageId: "composio",
         async route(request, url, context) {

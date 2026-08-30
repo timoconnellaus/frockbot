@@ -128,15 +128,19 @@ export async function createFoundationUserBackendContributions(
             "Ollama Cloud requires Settings and Credential Contributions",
           );
         }
+        const userSettings = settings;
         return createOllamaCloudUserBackendPlugin(
           { storage: host.storage, settings, credentials },
           {
             mount(value: OllamaCloudUserBackendContribution) {
               ollama = value;
               connections.set(value.packageId, value);
+              const unregister =
+                userSettings.registerConnectionCommandOwner(value);
               const dispose = lifecycle.mount(value);
               return () => {
                 connections.delete(value.packageId);
+                unregister();
                 dispose();
               };
             },

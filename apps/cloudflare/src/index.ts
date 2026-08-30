@@ -336,6 +336,19 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             botId,
           }),
         ),
+      executeConnection: (userId, command) =>
+        userConfigurationStub(env, userId).executeConnection({
+          schemaVersion: 1,
+          userId,
+          command,
+        }),
+      lookupConnectionCommand: (userId, packageId, commandId) =>
+        userConfigurationStub(env, userId).lookupConnectionCommand({
+          schemaVersion: 1,
+          userId,
+          packageId,
+          commandId,
+        }),
       updateSheep: async (userId, botId, command) =>
         decodeFlockReceiptV1(
           await botStateStub(env, userId, botId).updateSheep({

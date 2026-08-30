@@ -67,27 +67,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return (await this.contributions()).flock;
   }
 
-  private async contributionForRetainedCommand(
-    accountId: string,
-    commandId: string,
-  ): Promise<FoundationConnectionUserBackendContribution | undefined> {
-    const matches: FoundationConnectionUserBackendContribution[] = [];
-    for (const contribution of (
-      await this.contributions()
-    ).connections.values()) {
-      if (
-        (await contribution.lookupConnectionCommand(accountId, commandId)) !==
-        undefined
-      ) {
-        matches.push(contribution);
-      }
-    }
-    if (matches.length > 1) {
-      throw new Error("Connection command authority is ambiguous");
-    }
-    return matches[0];
-  }
-
   async readConfiguration(input: unknown) {
     const request = decodeUserConfigurationReadRpcV1(input);
     return (await this.settingsContribution()).readConfiguration(request);
@@ -107,19 +86,13 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       typeof decodeConnectionCommandV1
     >;
     const accountId = request.userId as string;
-    const packageId =
-      command.type === "connection/create-api-key"
-        ? command.packageId
-        : (
-            await (
-              await this.settingsContribution()
-            ).getConnection(accountId, command.connectionId)
-          )?.packageId;
-    const contribution = packageId
-      ? await this.connectionContribution(packageId)
-      : await this.contributionForRetainedCommand(accountId, command.commandId);
-    if (!contribution) throw new Error("Connection is unavailable");
-    return contribution.executeConnection(accountId, command);
+    const packageId = await (
+      await this.settingsContribution()
+    ).resolveConnectionCommandOwner(accountId, command);
+    return (await this.connectionContribution(packageId)).executeConnection(
+      accountId,
+      command,
+    );
   }
 
   async lookupConnectionCommand(input: unknown) {

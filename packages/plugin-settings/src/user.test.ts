@@ -376,6 +376,97 @@ describe("User settings backend Contribution", () => {
     ).rejects.toThrow("User Connection limit reached");
   });
 
+  test("adjudicates Connection command authority without naming a provider", async () => {
+    const settings = contribution();
+    await settings.read("user-1");
+    await settings.createConnection("user-1", {
+      connectionId: "connection-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      displayName: "Work",
+      state: "ready",
+      providerType: "ollama-cloud",
+      generation: "generation-1",
+      safeMetadata: {},
+    });
+    const owner = (packageId: string, retained: readonly string[]) => ({
+      packageId,
+      lookupConnectionCommand: (_accountId: string, commandId: string) =>
+        Promise.resolve(retained.includes(commandId) ? {} : undefined),
+    });
+    const release = settings.registerConnectionCommandOwner(
+      owner("provider-ollama-cloud", ["retained-1"]),
+    );
+
+    await expect(
+      settings.resolveConnectionCommandOwner("user-1", {
+        schemaVersion: 1,
+        type: "connection/create-api-key",
+        commandId: "create-1",
+        packageId: "provider-other",
+        connectionTypeId: "other-account",
+        label: "Other",
+        apiKey: "secret",
+      }),
+    ).resolves.toBe("provider-other");
+    await expect(
+      settings.resolveConnectionCommandOwner("user-1", {
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId: "refresh-1",
+        connectionId: "connection-1",
+      }),
+    ).resolves.toBe("provider-ollama-cloud");
+    await expect(
+      settings.resolveConnectionCommandOwner("user-1", {
+        schemaVersion: 1,
+        type: "connection/disconnect",
+        commandId: "retained-1",
+        connectionId: "connection-compacted",
+        revokeUpstream: false,
+      }),
+    ).resolves.toBe("provider-ollama-cloud");
+    await expect(
+      settings.resolveConnectionCommandOwner("user-1", {
+        schemaVersion: 1,
+        type: "connection/disconnect",
+        commandId: "unknown-1",
+        connectionId: "connection-compacted",
+        revokeUpstream: false,
+      }),
+    ).rejects.toThrow("Connection is unavailable");
+
+    const releaseSecond = settings.registerConnectionCommandOwner(
+      owner("provider-other", ["retained-1"]),
+    );
+    expect(() =>
+      settings.registerConnectionCommandOwner(
+        owner("provider-other", ["retained-1"]),
+      ),
+    ).toThrow('Connection Package "provider-other" is already registered');
+    await expect(
+      settings.resolveConnectionCommandOwner("user-1", {
+        schemaVersion: 1,
+        type: "connection/disconnect",
+        commandId: "retained-1",
+        connectionId: "connection-compacted",
+        revokeUpstream: false,
+      }),
+    ).rejects.toThrow("Connection command authority is ambiguous");
+
+    releaseSecond();
+    release();
+    await expect(
+      settings.resolveConnectionCommandOwner("user-1", {
+        schemaVersion: 1,
+        type: "connection/disconnect",
+        commandId: "retained-1",
+        connectionId: "connection-compacted",
+        revokeUpstream: false,
+      }),
+    ).rejects.toThrow("Connection is unavailable");
+  });
+
   test("binds one durable state object to one User authority", async () => {
     const settings = contribution();
     await settings.readConfiguration({ schemaVersion: 1, userId: "user-1" });

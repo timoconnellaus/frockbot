@@ -13,6 +13,7 @@ import {
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import type { ConnectionCommandV1 } from "@frockbot/connection-core";
 import type { Plugin } from "cordis";
 
 const STATE_KEY = "user-configuration";
@@ -44,6 +45,19 @@ export interface UserSettingsStorage extends UserSettingsTransaction {
   transaction<T>(
     callback: (storage: UserSettingsTransaction) => Promise<T>,
   ): Promise<T>;
+}
+
+/**
+ * A provider Package registers one Connection command owner per Package so the
+ * Settings Contribution can adjudicate Connection command authority without
+ * naming any provider.
+ */
+export interface ConnectionCommandOwner {
+  readonly packageId: string;
+  lookupConnectionCommand(
+    accountId: string,
+    commandId: string,
+  ): Promise<unknown>;
 }
 
 export interface UserSettingsBackendHost {
@@ -206,6 +220,8 @@ function applyUserCommand(
 
 export class UserSettingsBackendContribution {
   private readonly availablePackages: ReadonlySet<string>;
+
+  private readonly connectionOwners = new Map<string, ConnectionCommandOwner>();
 
   constructor(private readonly host: UserSettingsBackendHost) {
     this.availablePackages = new Set(
@@ -372,6 +388,51 @@ export class UserSettingsBackendContribution {
       (candidate) => candidate.connectionId === connectionId,
     );
     return connection ? structuredClone(connection) : undefined;
+  }
+
+  registerConnectionCommandOwner(owner: ConnectionCommandOwner): () => void {
+    if (this.connectionOwners.has(owner.packageId)) {
+      throw new Error(
+        `Connection Package "${owner.packageId}" is already registered`,
+      );
+    }
+    this.connectionOwners.set(owner.packageId, owner);
+    return () => {
+      if (this.connectionOwners.get(owner.packageId) === owner) {
+        this.connectionOwners.delete(owner.packageId);
+      }
+    };
+  }
+
+  /**
+   * Resolve the Package that owns a Connection command from the durable
+   * Connection projection, falling back to the unique registered owner that
+   * still retains the command receipt after its projection was compacted.
+   */
+  async resolveConnectionCommandOwner(
+    userId: string,
+    command: ConnectionCommandV1,
+  ): Promise<string> {
+    const projected =
+      command.type === "connection/create-api-key"
+        ? command.packageId
+        : (await this.getConnection(userId, command.connectionId))?.packageId;
+    if (projected) return projected;
+    const retained: string[] = [];
+    for (const owner of this.connectionOwners.values()) {
+      if (
+        (await owner.lookupConnectionCommand(userId, command.commandId)) !==
+        undefined
+      ) {
+        retained.push(owner.packageId);
+      }
+    }
+    if (retained.length > 1) {
+      throw new Error("Connection command authority is ambiguous");
+    }
+    const [ownerPackageId] = retained;
+    if (!ownerPackageId) throw new Error("Connection is unavailable");
+    return ownerPackageId;
   }
 
   async isPackageInstalled(

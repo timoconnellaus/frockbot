@@ -92,7 +92,10 @@ describe("foundation application", () => {
     expect(
       first.packages.find((pkg) => pkg.id === "settings")?.manifest
         .contributions.backend,
-    ).toEqual([{ entry: "./user", host: "user" }]);
+    ).toEqual([
+      { entry: "./backend", host: "gateway" },
+      { entry: "./user", host: "user" },
+    ]);
     expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
   });
 
@@ -212,10 +215,16 @@ describe("foundation application", () => {
         }),
       readSheep: () => Promise.reject(new Error("not used while composing")),
       updateSheep: () => Promise.reject(new Error("not used while composing")),
+      executeConnection: () =>
+        Promise.reject(new Error("not used while composing")),
+      lookupConnectionCommand: () =>
+        Promise.reject(new Error("not used while composing")),
     });
     expect(
-      backend.contributions.map((contribution) => contribution.packageId),
-    ).toEqual(["flock"]);
+      backend.contributions
+        .map((contribution) => contribution.packageId)
+        .sort(),
+    ).toEqual(["flock", "settings"]);
     interface TestContribution {
       specifier: string;
       executeConfiguration?(): void;

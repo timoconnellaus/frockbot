@@ -68,21 +68,12 @@ describe("UserConfiguration Connection routing", () => {
       connections: [],
     });
   });
-  test("replays a retained command after its Connection projection is compacted", async () => {
+  test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {
     const executed: unknown[] = [];
+    const resolved: unknown[] = [];
     const contribution = {
       packageId: "provider-ollama-cloud",
-      lookupConnectionCommand: (_accountId: string, commandId: string) =>
-        Promise.resolve(
-          commandId === "disconnect-1"
-            ? {
-                schemaVersion: 1,
-                commandId,
-                connectionId: "connection-revoked",
-                status: "applied",
-              }
-            : undefined,
-        ),
+      lookupConnectionCommand: () => Promise.resolve(undefined),
       executeConnection: (_accountId: string, command: unknown) => {
         executed.push(command);
         return Promise.resolve({
@@ -102,7 +93,13 @@ describe("UserConfiguration Connection routing", () => {
       "mounted",
       Promise.resolve({
         settings: {
-          getConnection: () => Promise.resolve(undefined),
+          resolveConnectionCommandOwner: (
+            _userId: string,
+            command: unknown,
+          ) => {
+            resolved.push(command);
+            return Promise.resolve(contribution.packageId);
+          },
         },
         credentials: {},
         connections: new Map([[contribution.packageId, contribution]]),
@@ -124,6 +121,7 @@ describe("UserConfiguration Connection routing", () => {
         },
       }),
     ).resolves.toMatchObject({ status: "applied" });
+    expect(resolved).toHaveLength(1);
     expect(executed).toHaveLength(1);
   });
 });

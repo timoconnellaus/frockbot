@@ -1,9 +1,4 @@
 import {
-  decodeConnectionCommandIdV1,
-  decodeConnectionCommandReceiptV1,
-  decodeConnectionCommandV1,
-} from "@frockbot/connection-core";
-import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
   decodeBotIdV1,
@@ -159,69 +154,6 @@ export function createGateway(dependencies: GatewayDependencies) {
             : "browser",
       });
       if (response) return response;
-    }
-
-    if (url.pathname === "/api/connection-commands") {
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      const queryFields = [...url.searchParams.keys()];
-      const packageId = url.searchParams.get("packageId");
-      const commandId = url.searchParams.get("commandId");
-      if (
-        queryFields.length !== 2 ||
-        url.searchParams.getAll("packageId").length !== 1 ||
-        url.searchParams.getAll("commandId").length !== 1 ||
-        queryFields.some(
-          (field) => field !== "packageId" && field !== "commandId",
-        ) ||
-        !isPublicIdentifier(packageId)
-      ) {
-        return jsonError(400, "invalid Connection command lookup");
-      }
-      try {
-        const decodedCommandId = decodeConnectionCommandIdV1(commandId);
-        const receipt = await dependencies
-          .userConfigurationFor(userId)
-          .lookupConnectionCommand({
-            schemaVersion: 1,
-            userId,
-            packageId,
-            commandId: decodedCommandId,
-          });
-        return Response.json(
-          receipt === undefined
-            ? null
-            : decodeConnectionCommandReceiptV1(receipt),
-        );
-      } catch (error) {
-        return jsonError(
-          400,
-          error instanceof Error
-            ? error.message
-            : "Connection command lookup failed",
-        );
-      }
-    }
-
-    if (url.pathname === "/api/connections") {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      try {
-        const command = decodeConnectionCommandV1(await request.json());
-        return Response.json(
-          decodeConnectionCommandReceiptV1(
-            await dependencies.userConfigurationFor(userId).executeConnection({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        );
-      } catch (error) {
-        return jsonError(
-          400,
-          error instanceof Error ? error.message : "Connection command failed",
-        );
-      }
     }
 
     const botSettingsMatch = url.pathname.match(
