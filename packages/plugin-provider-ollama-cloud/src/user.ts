@@ -26,6 +26,7 @@ const CONNECTION_TYPE_ID = "ollama-cloud-account";
 const COMMAND_PREFIX = "ollama-connection-command:";
 const PENDING_KEY = "ollama-pending-connection-commands";
 const ACCOUNT_KEY = "ollama-connection-account";
+const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
 const REFRESH_INTERVAL_MS = 60 * 60 * 1_000;
 const RECOVERY_DELAY_MS = 60_000;
 const MODEL_LEASE_MS = 30 * 60 * 1_000;
@@ -43,6 +44,7 @@ interface StoredCommand {
   enabled?: boolean;
   revokeUpstream?: boolean;
   receipt?: ConnectionCommandReceiptV1;
+  automaticRefresh?: boolean;
 }
 
 type OllamaCredentialContribution = Omit<
@@ -170,6 +172,7 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       "enabled",
       "revokeUpstream",
       "receipt",
+      "automaticRefresh",
     ],
   );
   const operations: StoredCommand["operation"][] = [
@@ -185,7 +188,9 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     !operations.includes(value.operation as never) ||
     (value.enabled !== undefined && typeof value.enabled !== "boolean") ||
     (value.revokeUpstream !== undefined &&
-      typeof value.revokeUpstream !== "boolean")
+      typeof value.revokeUpstream !== "boolean") ||
+    (value.automaticRefresh !== undefined &&
+      typeof value.automaticRefresh !== "boolean")
   ) {
     throw new Error("Stored Ollama command is invalid");
   }
@@ -237,6 +242,9 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       ? {}
       : { revokeUpstream: value.revokeUpstream as boolean }),
     ...(decodedReceipt === undefined ? {} : { receipt: decodedReceipt }),
+    ...(value.automaticRefresh === undefined
+      ? {}
+      : { automaticRefresh: value.automaticRefresh as boolean }),
   };
 }
 
@@ -245,6 +253,10 @@ export class OllamaCloudUserBackendContribution {
   private readonly client: OllamaCloudClient;
   private readonly now: () => number;
   private readonly randomId: () => string;
+  private readonly resumptions = new Map<
+    string,
+    { fingerprint: string; promise: Promise<ConnectionCommandReceiptV1> }
+  >();
 
   constructor(private readonly host: OllamaUserBackendHost) {
     this.client = host.client ?? new OllamaCloudClient();
@@ -256,7 +268,18 @@ export class OllamaCloudUserBackendContribution {
     accountId: string,
     input: unknown,
   ): Promise<ConnectionCommandReceiptV1> {
-    const command = decodeConnectionCommandV1(input);
+    return this.executeCommand(
+      accountId,
+      decodeConnectionCommandV1(input),
+      false,
+    );
+  }
+
+  private async executeCommand(
+    accountId: string,
+    command: ConnectionCommandV1,
+    automaticRefresh: boolean,
+  ): Promise<ConnectionCommandReceiptV1> {
     const storedAccountValue =
       await this.host.storage.get<unknown>(ACCOUNT_KEY);
     const storedAccount =
@@ -283,24 +306,29 @@ export class OllamaCloudUserBackendContribution {
         throw new Error("Connection command idempotency key was reused");
       }
       if (existing.receipt) return existing.receipt;
-      await this.ensureAdmittedState(
+      return this.resumeOnce(
         existing,
         command.type === "connection/create-api-key" ||
           command.type === "connection/rotate-api-key"
           ? command.apiKey
           : undefined,
       );
-      return this.resume(existing);
     }
 
-    const record = await this.admit(accountId, command, commandFingerprint);
-    return this.resume(record);
+    const record = await this.admit(
+      accountId,
+      command,
+      commandFingerprint,
+      automaticRefresh,
+    );
+    return this.resumeOnce(record);
   }
 
   private async admit(
     accountId: string,
     command: ConnectionCommandV1,
     commandFingerprint: string,
+    automaticRefresh: boolean,
   ): Promise<StoredCommand> {
     if (command.type === "connection/create-api-key") {
       if (
@@ -428,6 +456,7 @@ export class OllamaCloudUserBackendContribution {
       ...(command.type === "connection/disconnect"
         ? { revokeUpstream: command.revokeUpstream }
         : {}),
+      ...(automaticRefresh ? { automaticRefresh: true } : {}),
     };
     const admitted = await this.admitRecord(record);
     await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
@@ -524,6 +553,34 @@ export class OllamaCloudUserBackendContribution {
       settings: {},
       safeMetadata: {},
     };
+  }
+
+  private async resumeOnce(
+    record: StoredCommand,
+    apiKey?: string,
+  ): Promise<ConnectionCommandReceiptV1> {
+    const active = this.resumptions.get(record.commandId);
+    if (active) {
+      if (active.fingerprint !== record.fingerprint) {
+        throw new Error("Connection command idempotency key was reused");
+      }
+      return active.promise;
+    }
+    const promise = (async () => {
+      await this.ensureAdmittedState(record, apiKey);
+      return this.resume(record);
+    })();
+    this.resumptions.set(record.commandId, {
+      fingerprint: record.fingerprint,
+      promise,
+    });
+    const release = () => {
+      if (this.resumptions.get(record.commandId)?.promise === promise) {
+        this.resumptions.delete(record.commandId);
+      }
+    };
+    void promise.then(release, release);
+    return promise;
   }
 
   private async resume(
@@ -711,14 +768,29 @@ export class OllamaCloudUserBackendContribution {
     let lease: CredentialLeaseV1 | undefined;
     let failed = false;
     try {
-      lease = await this.host.credentials.lease({
-        accountId: record.accountId,
-        connectionId: record.connectionId,
-        packageId: PACKAGE_ID,
-        effectId,
-        expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
-        expectedGeneration,
-      });
+      lease = await this.host.storage.transaction(
+        async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          await this.requireModelAuthority(
+            {
+              accountId: record.accountId,
+              connectionId: record.connectionId,
+              connectionGeneration: expectedGeneration,
+            },
+            storage,
+          );
+          return this.host.credentials.lease(
+            {
+              accountId: record.accountId,
+              connectionId: record.connectionId,
+              packageId: PACKAGE_ID,
+              effectId,
+              expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
+              expectedGeneration,
+            },
+            storage,
+          );
+        },
+      );
       const apiKey = await this.host.credentials.openLease({
         accountId: record.accountId,
         packageId: PACKAGE_ID,
@@ -727,19 +799,14 @@ export class OllamaCloudUserBackendContribution {
       const models = await this.client.listModels(apiKey);
       await this.host.storage.transaction(
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
-          const current = await this.host.settings.getConnection(
-            record.accountId,
-            record.connectionId,
+          const current = await this.requireModelAuthority(
+            {
+              accountId: record.accountId,
+              connectionId: record.connectionId,
+              connectionGeneration: expectedGeneration,
+            },
             storage,
           );
-          if (
-            !current ||
-            current.packageId !== PACKAGE_ID ||
-            current.generation !== expectedGeneration ||
-            current.state !== "ready"
-          ) {
-            throw new Error("Connection changed during catalog refresh");
-          }
           await this.host.settings.replaceConnection(
             record.accountId,
             record.connectionId,
@@ -757,15 +824,19 @@ export class OllamaCloudUserBackendContribution {
       failed = true;
       await this.host.storage.transaction(
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
-          const current = await this.host.settings.getConnection(
-            record.accountId,
-            record.connectionId,
-            storage,
+          const settings = await this.host.settings.readSnapshot(storage);
+          const current = settings.connections.find(
+            (connection) => connection.connectionId === record.connectionId,
           );
           if (
+            !settings.packages.some(
+              (pkg) =>
+                pkg.packageId === PACKAGE_ID && pkg.state === "installed",
+            ) ||
             !current ||
             current.packageId !== PACKAGE_ID ||
             current.generation !== expectedGeneration ||
+            current.state !== "ready" ||
             !current.modelCatalog
           ) {
             return;
@@ -892,28 +963,44 @@ export class OllamaCloudUserBackendContribution {
     status: ConnectionCommandReceiptV1["status"],
   ): Promise<ConnectionCommandReceiptV1> {
     const proposed = receipt(record, status);
-    const result = await this.host.storage.transaction(async (storage) => {
-      const storedValue = await storage.get<unknown>(
-        commandKey(record.commandId),
-      );
-      const stored =
-        storedValue === undefined
-          ? undefined
-          : decodeStoredCommand(storedValue);
-      if (stored?.receipt) return stored.receipt;
-      const pendingValue = await storage.get<unknown>(PENDING_KEY);
-      const pending = (
-        pendingValue === undefined ? [] : decodePendingCommands(pendingValue)
-      ).filter((id) => id !== record.commandId);
-      await storage.put({
-        [commandKey(record.commandId)]: {
-          ...(stored ?? record),
-          receipt: proposed,
-        },
-        [PENDING_KEY]: pending,
-      });
-      return proposed;
-    });
+    const result = await this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        const storedValue = await storage.get<unknown>(
+          commandKey(record.commandId),
+        );
+        const stored =
+          storedValue === undefined
+            ? undefined
+            : decodeStoredCommand(storedValue);
+        if (stored?.receipt) return stored.receipt;
+        const pendingValue = await storage.get<unknown>(PENDING_KEY);
+        const pending = (
+          pendingValue === undefined ? [] : decodePendingCommands(pendingValue)
+        ).filter((id) => id !== record.commandId);
+        if (record.automaticRefresh) {
+          await storage.delete(commandKey(record.commandId));
+          await storage.put({
+            [`${AUTOMATIC_REFRESH_RECEIPT_PREFIX}${record.connectionId}`]: {
+              schemaVersion: 1,
+              commandId: record.commandId,
+              connectionId: record.connectionId,
+              status: proposed.status,
+              completedAt: new Date(this.now()).toISOString(),
+            },
+            [PENDING_KEY]: pending,
+          });
+        } else {
+          await storage.put({
+            [commandKey(record.commandId)]: {
+              ...(stored ?? record),
+              receipt: proposed,
+            },
+            [PENDING_KEY]: pending,
+          });
+        }
+        return proposed;
+      },
+    );
     await this.scheduleNextAlarm(record.accountId);
     return result;
   }
@@ -923,18 +1010,23 @@ export class OllamaCloudUserBackendContribution {
     const pending =
       pendingValue === undefined ? [] : decodePendingCommands(pendingValue);
     const settings = await this.host.settings.read(accountId);
-    const catalogDeadlines = settings.connections.flatMap((connection) => {
-      const refreshAfter = connection.modelCatalog?.refreshAfter;
-      if (
-        connection.packageId !== PACKAGE_ID ||
-        connection.state !== "ready" ||
-        !refreshAfter
-      ) {
-        return [];
-      }
-      const deadline = Date.parse(refreshAfter);
-      return Number.isFinite(deadline) ? [deadline] : [];
-    });
+    const packageInstalled = settings.packages.some(
+      (pkg) => pkg.packageId === PACKAGE_ID && pkg.state === "installed",
+    );
+    const catalogDeadlines = packageInstalled
+      ? settings.connections.flatMap((connection) => {
+          const refreshAfter = connection.modelCatalog?.refreshAfter;
+          if (
+            connection.packageId !== PACKAGE_ID ||
+            connection.state !== "ready" ||
+            !refreshAfter
+          ) {
+            return [];
+          }
+          const deadline = Date.parse(refreshAfter);
+          return Number.isFinite(deadline) ? [deadline] : [];
+        })
+      : [];
     const credentialExpiry = await this.host.credentials.nextLeaseExpiry();
     const deadlines = [
       ...(pending.length > 0 ? [this.now() + RECOVERY_DELAY_MS] : []),
@@ -1089,15 +1181,19 @@ export class OllamaCloudUserBackendContribution {
       );
       if (recordValue === undefined) continue;
       const record = decodeStoredCommand(recordValue);
-      if (!record.receipt) {
-        await this.ensureAdmittedState(record);
-        await this.resume(record);
-      }
+      if (!record.receipt) await this.resumeOnce(record);
     }
     const accountValue = await this.host.storage.get<unknown>(ACCOUNT_KEY);
     if (accountValue === undefined) return;
     const accountId = decodeStoredAccount(accountValue);
     const settings = await this.host.settings.read(accountId);
+    const packageInstalled = settings.packages.some(
+      (pkg) => pkg.packageId === PACKAGE_ID && pkg.state === "installed",
+    );
+    if (!packageInstalled) {
+      await this.scheduleNextAlarm(accountId);
+      return;
+    }
     for (const connection of settings.connections) {
       const refreshAfter = connection.modelCatalog?.refreshAfter;
       if (
@@ -1106,12 +1202,16 @@ export class OllamaCloudUserBackendContribution {
         refreshAfter &&
         Date.parse(refreshAfter) <= this.now()
       ) {
-        await this.executeConnection(accountId, {
-          schemaVersion: 1,
-          type: "connection/refresh-models",
-          commandId: `refresh-${connection.connectionId}-${Date.parse(refreshAfter)}`,
-          connectionId: connection.connectionId,
-        });
+        await this.executeCommand(
+          accountId,
+          decodeConnectionCommandV1({
+            schemaVersion: 1,
+            type: "connection/refresh-models",
+            commandId: `refresh-${connection.connectionId}-${Date.parse(refreshAfter)}`,
+            connectionId: connection.connectionId,
+          }),
+          true,
+        );
       }
     }
     await this.scheduleNextAlarm(accountId);

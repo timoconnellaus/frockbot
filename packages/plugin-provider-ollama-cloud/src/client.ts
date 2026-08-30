@@ -14,6 +14,11 @@ export interface OllamaCloudClientConfig {
   fetch?: OllamaFetch;
 }
 
+const MAX_CATALOG_RESPONSE_BYTES = 512 * 1024;
+const MAX_MODEL_RESPONSE_BYTES = 256 * 1024;
+const MAX_CATALOG_MODELS = 100;
+const MODEL_LOOKUP_CONCURRENCY = 4;
+
 function object(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} is invalid`);
@@ -36,6 +41,62 @@ function modelId(value: unknown): string {
     throw new Error("Ollama Cloud model id is invalid");
   }
   return normalized;
+}
+
+async function boundedJson(
+  response: Response,
+  maximum: number,
+): Promise<unknown> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maximum) {
+    throw new Error("Ollama Cloud response is too large");
+  }
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  const reader = response.body?.getReader();
+  if (reader) {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      if (length > maximum) {
+        await reader.cancel();
+        throw new Error("Ollama Cloud response is too large");
+      }
+      chunks.push(chunk.value);
+    }
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new Error("Ollama Cloud returned invalid JSON");
+  }
+}
+
+async function mapConcurrent<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  transform: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < values.length) {
+      const index = next;
+      next += 1;
+      results[index] = await transform(values[index] as T);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, worker),
+  );
+  return results;
 }
 
 export class OllamaCloudClient {
@@ -66,11 +127,10 @@ export class OllamaCloudClient {
     if (!response.ok) {
       throw new Error(`Ollama Cloud request failed (${response.status})`);
     }
-    try {
-      return await response.json();
-    } catch {
-      throw new Error("Ollama Cloud returned invalid JSON");
-    }
+    return boundedJson(
+      response,
+      path === "/tags" ? MAX_CATALOG_RESPONSE_BYTES : MAX_MODEL_RESPONSE_BYTES,
+    );
   }
 
   async listModels(
@@ -81,17 +141,20 @@ export class OllamaCloudClient {
       await this.request("/tags", apiKey, { method: "GET", signal }),
       "Ollama Cloud model catalog",
     );
-    if (!Array.isArray(payload.models)) {
+    if (
+      !Array.isArray(payload.models) ||
+      payload.models.length > MAX_CATALOG_MODELS
+    ) {
       throw new Error("Ollama Cloud model catalog is invalid");
     }
     const modelIds = payload.models.map((candidate) => {
       const model = object(candidate, "Ollama Cloud model");
       return modelId(model.model ?? model.name);
     });
-    return Promise.all(
-      [...new Set(modelIds)].map((modelId) =>
-        this.resolveModel(apiKey, modelId, signal, "discovered"),
-      ),
+    return mapConcurrent(
+      [...new Set(modelIds)],
+      MODEL_LOOKUP_CONCURRENCY,
+      (id) => this.resolveModel(apiKey, id, signal, "discovered"),
     );
   }
 

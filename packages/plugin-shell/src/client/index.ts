@@ -9,7 +9,10 @@ import {
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 // Connection mutations use the provider-neutral hosted command contract.
-import type { ConnectionCommandV1 } from "@frockbot/connection-core";
+import type {
+  ConnectionCommandReceiptV1,
+  ConnectionCommandV1,
+} from "@frockbot/connection-core";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNotificationPolicy,
@@ -334,6 +337,16 @@ function isDefinitiveConnectionFailure(error: unknown): boolean {
   );
 }
 
+async function operationSecretFingerprint(secret: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(secret),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -408,6 +421,45 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     string,
     { nativeReturnNonce?: string }
   >();
+
+  async function executeRetainedApiKeyCommand(
+    identity: readonly string[],
+    apiKey: string,
+    create: (commandId: string) => ConnectionCommandV1,
+  ): Promise<ConnectionCommandReceiptV1> {
+    if (!ctx.transport.executeConnection) {
+      throw new Error("Connections are unavailable");
+    }
+    const userId = await ctx.transport.readAuthenticatedUserId?.();
+    if (!userId) {
+      throw new Error("Authenticated User identity is unavailable");
+    }
+    const operationKey = JSON.stringify([
+      "api-key",
+      userId,
+      ...identity,
+      await operationSecretFingerprint(apiKey),
+    ]);
+    const operation = await reserveConnectionOperation(
+      connectionOperations,
+      operationKey,
+      () => ({ commandId: crypto.randomUUID(), createdAt: Date.now() }),
+    );
+    try {
+      const result = await ctx.transport.executeConnection(
+        create(operation.commandId),
+      );
+      delete connectionOperations[operationKey];
+      writeConnectionOperations(connectionOperations);
+      return result;
+    } catch (error) {
+      if (isDefinitiveConnectionFailure(error)) {
+        delete connectionOperations[operationKey];
+        writeConnectionOperations(connectionOperations);
+      }
+      throw error;
+    }
+  }
 
   async function waitForRunLookup(
     delayMs: number,
@@ -830,32 +882,33 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       await web.value.loadPluginCatalog();
     },
     async createApiKeyConnection(input): Promise<void> {
-      if (!ctx.transport.executeConnection) {
-        throw new Error("Connections are unavailable");
-      }
-      const command: ConnectionCommandV1 = {
-        schemaVersion: 1,
-        type: "connection/create-api-key",
-        commandId: crypto.randomUUID(),
-        ...input,
-      };
-      const result = await ctx.transport.executeConnection(command);
+      const result = await executeRetainedApiKeyCommand(
+        ["create", input.packageId, input.connectionTypeId, input.label],
+        input.apiKey,
+        (commandId) => ({
+          schemaVersion: 1,
+          type: "connection/create-api-key",
+          commandId,
+          ...input,
+        }),
+      );
       await web.value.loadPluginCatalog();
       if (result.status !== "applied") {
         throw new Error("Connection validation failed");
       }
     },
     async rotateApiKeyConnection(connectionId, apiKey): Promise<void> {
-      if (!ctx.transport.executeConnection) {
-        throw new Error("Connections are unavailable");
-      }
-      const result = await ctx.transport.executeConnection({
-        schemaVersion: 1,
-        type: "connection/rotate-api-key",
-        commandId: crypto.randomUUID(),
-        connectionId,
+      const result = await executeRetainedApiKeyCommand(
+        ["rotate", connectionId],
         apiKey,
-      });
+        (commandId) => ({
+          schemaVersion: 1,
+          type: "connection/rotate-api-key",
+          commandId,
+          connectionId,
+          apiKey,
+        }),
+      );
       await web.value.loadPluginCatalog();
       if (result.status !== "applied") {
         throw new Error("Credential validation failed");

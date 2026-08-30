@@ -108,7 +108,10 @@ function keyring(): string {
   });
 }
 
-async function fixture(fetchOverride?: OllamaFetch) {
+async function fixture(
+  fetchOverride?: OllamaFetch,
+  now: () => number = () => Date.parse("2026-08-30T00:00:00.000Z"),
+) {
   const storage = new MemoryStorage();
   const settings = createUserSettingsBackendContribution({
     storage,
@@ -131,7 +134,7 @@ async function fixture(fetchOverride?: OllamaFetch) {
   const credentials = createCredentialUserBackendContribution({
     storage,
     keyring: keyring(),
-    now: () => Date.parse("2026-08-30T00:00:00.000Z"),
+    now,
   });
   let rejectCatalog = false;
   const client = new OllamaCloudClient({
@@ -151,7 +154,7 @@ async function fixture(fetchOverride?: OllamaFetch) {
     settings,
     credentials: credentials as unknown as OllamaUserBackendHost["credentials"],
     client,
-    now: () => Date.parse("2026-08-30T00:00:00.000Z"),
+    now,
     randomId: () => `id-${++id}`,
   });
   return {
@@ -385,23 +388,17 @@ describe("Ollama Cloud User Contribution", () => {
     ).resolves.toMatchObject({ status: "applied" });
   });
 
-  test("preserves the first terminal receipt across concurrent delivery", async () => {
-    const firstCatalogStarted = Promise.withResolvers<void>();
-    const secondCatalogStarted = Promise.withResolvers<void>();
-    const firstCatalogResponse = Promise.withResolvers<Response>();
-    const secondCatalogResponse = Promise.withResolvers<Response>();
+  test("single-flights concurrent delivery through one validation effect", async () => {
+    const catalogStarted = Promise.withResolvers<void>();
+    const catalogResponse = Promise.withResolvers<Response>();
     let catalogRequests = 0;
     const { ollama } = await fixture((input) => {
       if (!String(input).endsWith("/tags")) {
         return Promise.resolve(Response.json({ capabilities: ["tools"] }));
       }
       catalogRequests += 1;
-      if (catalogRequests === 1) {
-        firstCatalogStarted.resolve();
-        return firstCatalogResponse.promise;
-      }
-      secondCatalogStarted.resolve();
-      return secondCatalogResponse.promise;
+      catalogStarted.resolve();
+      return catalogResponse.promise;
     });
     const command = {
       schemaVersion: 1,
@@ -414,19 +411,18 @@ describe("Ollama Cloud User Contribution", () => {
     } as const;
 
     const first = ollama.executeConnection("account-1", command);
-    await firstCatalogStarted.promise;
+    await catalogStarted.promise;
     const second = ollama.executeConnection("account-1", command);
-    await secondCatalogStarted.promise;
-    firstCatalogResponse.resolve(
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(catalogRequests).toBe(1);
+    catalogResponse.resolve(
       Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] }),
     );
-    const applied = await first;
-    secondCatalogResponse.resolve(
-      Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] }),
-    );
+    const [firstReceipt, secondReceipt] = await Promise.all([first, second]);
 
-    expect(applied.status).toBe("applied");
-    await expect(second).resolves.toEqual(applied);
+    expect(catalogRequests).toBe(1);
+    expect(firstReceipt.status).toBe("applied");
+    expect(secondReceipt).toEqual(firstReceipt);
   });
 
   test("preserves disabled state across credential rotation", async () => {
@@ -602,6 +598,138 @@ describe("Ollama Cloud User Contribution", () => {
     ).toContainEqual(
       expect.objectContaining({ providerModelId: "new-model:cloud" }),
     );
+  });
+
+  test("rejects catalog refresh before provider access without authority", async () => {
+    let currentTime = Date.parse("2026-08-30T00:00:00.000Z");
+    let providerRequests = 0;
+    const { settings, ollama } = await fixture(
+      (input) => {
+        providerRequests += 1;
+        return Promise.resolve(
+          String(input).endsWith("/tags")
+            ? Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] })
+            : Response.json({ capabilities: ["tools"] }),
+        );
+      },
+      () => currentTime,
+    );
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-refresh-authority",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "key",
+    });
+    await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/set-enabled",
+      commandId: "disable-connection",
+      connectionId: created.connectionId,
+      enabled: false,
+    });
+    const beforeDisabledRefresh = providerRequests;
+
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId: "refresh-disabled-connection",
+        connectionId: created.connectionId,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(providerRequests).toBe(beforeDisabledRefresh);
+
+    await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/set-enabled",
+      commandId: "enable-connection",
+      connectionId: created.connectionId,
+      enabled: true,
+    });
+    const current = await settings.read("account-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "account-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "disable-package-before-refresh",
+        expectedRevision: current.revision,
+        packageId: "provider-ollama-cloud",
+        enabled: false,
+      },
+    });
+    const beforePackageRefresh = providerRequests;
+    const refreshAfter = (
+      await settings.getConnection("account-1", created.connectionId)
+    )?.modelCatalog?.refreshAfter;
+    if (!refreshAfter) throw new Error("refresh deadline is missing");
+    currentTime = Date.parse(refreshAfter);
+    await ollama.alarm();
+    expect(providerRequests).toBe(beforePackageRefresh);
+
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId: "refresh-disabled-package",
+        connectionId: created.connectionId,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(providerRequests).toBe(beforePackageRefresh);
+  });
+
+  test("compacts automatic refresh commands into one durable receipt", async () => {
+    let currentTime = Date.parse("2026-08-30T00:00:00.000Z");
+    const { storage, settings, ollama } = await fixture(
+      undefined,
+      () => currentTime,
+    );
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-refresh-compaction",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "key",
+    });
+    const firstDeadline = (
+      await settings.getConnection("account-1", created.connectionId)
+    )?.modelCatalog?.refreshAfter;
+    if (!firstDeadline) throw new Error("refresh deadline is missing");
+    currentTime = Date.parse(firstDeadline);
+
+    await ollama.alarm();
+    const receiptKey = `ollama-refresh-receipt:${created.connectionId}`;
+    const firstReceipt = storage.values.get(receiptKey) as
+      { commandId: string; status: string } | undefined;
+    expect(firstReceipt?.status).toBe("applied");
+    expect(
+      [...storage.values.keys()].filter((key) =>
+        key.startsWith("ollama-connection-command:refresh-"),
+      ),
+    ).toEqual([]);
+
+    const secondDeadline = (
+      await settings.getConnection("account-1", created.connectionId)
+    )?.modelCatalog?.refreshAfter;
+    if (!secondDeadline) throw new Error("refresh deadline is missing");
+    currentTime = Date.parse(secondDeadline);
+    await ollama.alarm();
+    const secondReceipt = storage.values.get(receiptKey) as
+      { commandId: string; status: string } | undefined;
+
+    expect(secondReceipt?.status).toBe("applied");
+    expect(secondReceipt?.commandId).not.toBe(firstReceipt?.commandId);
+    expect(
+      [...storage.values.keys()].filter((key) =>
+        key.startsWith("ollama-refresh-receipt:"),
+      ),
+    ).toEqual([receiptKey]);
   });
 
   test("terminally fails an admitted create whose credential was never sealed", async () => {

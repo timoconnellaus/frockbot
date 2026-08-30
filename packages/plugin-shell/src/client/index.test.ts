@@ -742,6 +742,69 @@ describe("uncertain Turn admission", () => {
 });
 
 describe("Connection operation reconciliation", () => {
+  test("reuses API-key command identity after an ambiguous response loss", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    const commandIds: string[] = [];
+    let attempts = 0;
+    const mount = async (): Promise<Ref<FrockBotWebData>> => {
+      let provided: Ref<FrockBotWebData> | undefined;
+      await shellClientPlugin({
+        transport: {
+          turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+          readAuthenticatedUserId: () => Promise.resolve("user-a"),
+          executeConnection: (command) => {
+            commandIds.push(command.commandId);
+            attempts += 1;
+            if (attempts === 1) {
+              return Promise.reject(new Error("response lost"));
+            }
+            return Promise.resolve({
+              schemaVersion: 1,
+              commandId: command.commandId,
+              connectionId: "connection-1",
+              status: "applied",
+            });
+          },
+        },
+        slot: () => () => {},
+        inject: () => {
+          throw new Error("unexpected client provider injection");
+        },
+        provide: (_key, value) => {
+          provided = value as Ref<FrockBotWebData>;
+          return () => {};
+        },
+      });
+      if (!provided) throw new Error("shell data was not provided");
+      return provided;
+    };
+    const input = {
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "super-secret-api-key",
+    };
+
+    const first = await mount();
+    await expect(first.value.createApiKeyConnection(input)).rejects.toThrow(
+      "response lost",
+    );
+    expect(
+      globalThis.localStorage.getItem(
+        "frockbot.pending-connection-operations.v1",
+      ),
+    ).not.toContain(input.apiKey);
+    const second = await mount();
+    await second.value.createApiKeyConnection(input);
+
+    expect(commandIds).toHaveLength(2);
+    expect(new Set(commandIds).size).toBe(1);
+  });
+
   test("surfaces failed disable and disconnect receipts", async () => {
     const commands: string[] = [];
     let provided: Ref<FrockBotWebData> | undefined;
