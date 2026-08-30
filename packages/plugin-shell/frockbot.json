@@ -6,6 +6,9 @@
   "compatibility": {
     "frockbot": ">=0.0.1"
   },
+  "dependencies": {
+    "ui-theme": ">=0.0.1"
+  },
   "contributions": {
     "backend": [
       {
@@ -25,6 +28,9 @@
         "frockbot.right-panel",
         "frockbot.computer",
         "frockbot.sidebar-bots",
+        "frockbot.sidebar-actions",
+        "frockbot.user-profile",
+        "frockbot.bot-actions",
         "frockbot.overlays",
         "frockbot.bot-identity"
       ]

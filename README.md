@@ -60,6 +60,8 @@ node apps/desktop/node_modules/electron/install.js
 ## Checks
 
 ```bash
+bun run format:check
+bun run lint:ui-styles
 bun run typecheck
 bun test
 bun run build
@@ -144,6 +146,7 @@ packages/
   agent-core/       Session, LLM, prompt, tool, and agent Cordis services
   agent-loop/       Concrete event-sourced custom agent-loop plugin
   client-core/      Shared client runtime helpers and brand typography stylesheet
+  client-ui/        Cordis-free reusable Vue primitives and surface registry
   computer-core/    Provider registry and capability interfaces for Computers
   configuration-core/ Versioned durable User/Bot settings and Connection contracts
   plugin-catalog/   Manifest decoding, scoped activation, and rollback
@@ -153,7 +156,9 @@ packages/
   plugin-flock/     Durable Bot directory and composable sheep identity Package
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
   plugin-memory/    Computer-workspace or R2-backed durable Markdown memory
-  plugin-shell/     FrockBot Cordis WebUI/Vue client plugin
+  plugin-settings/  Plugin-owned Bot, Package, and User settings surfaces
+  plugin-shell/     Hosted application geometry and surface presenter
+  plugin-ui-theme/  Global semantic tokens for hosted client Contributions
   protocol/         Commands and events shared across process seams
   provider-openai-compatible/  Streaming production model adapter
 docs/

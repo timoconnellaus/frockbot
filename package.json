@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "build:cordis-agent": "bun run --filter @frockbot/agent-runtime build",
-    "build:webui": "bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-flock build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-computer build",
+    "build:webui": "bun run --filter @frockbot/plugin-ui-theme build && bun run --filter @frockbot/plugin-shell build && bun run --filter @frockbot/plugin-settings build && bun run --filter @frockbot/plugin-flock build && bun run --filter @frockbot/plugin-clock build && bun run --filter @frockbot/plugin-computer build",
     "build:agents": "bun run build:cordis-agent",
     "build:cloudflare": "bun run --filter @frockbot/cloudflare build",
     "build:marketing": "bun run --filter @frockbot/marketing build",
@@ -25,6 +25,7 @@
     "build": "bun run build:webui && bun run --filter @frockbot/desktop build && bun run build:cloudflare && bun run build:marketing",
     "proof:cordis": "bun run --filter @frockbot/cordis-poc typecheck && bun run --filter @frockbot/cordis-poc test && bun run --filter @frockbot/agent-runtime build && bun run --filter @frockbot/cordis-poc smoke",
     "typecheck": "bun run --filter '*' typecheck",
+    "lint:ui-styles": "bun scripts/check-ui-styles.ts",
     "test": "bun test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -33,6 +34,9 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
+    "@types/css-tree": "2.3.11",
+    "@vue/compiler-sfc": "3.5.41",
+    "css-tree": "3.2.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.4.1",
     "prettier": "^3.9.6",

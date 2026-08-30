@@ -7,6 +7,8 @@ import {
   type ClientRun,
   type ClientTurnEvent,
 } from "@frockbot/client-core";
+import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNotificationPolicy,
   BotProfile,
@@ -393,6 +395,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
 }
 
 export const shellClientPlugin: ClientPlugin = (ctx) => {
+  const surfaces = createClientSurfaceRegistry();
   let activeRequest: AbortController | undefined;
   let admissionObserver: AbortController | undefined;
   let selectionGeneration = 0;
@@ -967,6 +970,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   });
 
   return [
+    ctx.provide(clientSurfaceRegistryKey, surfaces),
     ctx.provide(frockBotWebDataKey, web),
     ctx.slot({
       slot: "authenticated-root",

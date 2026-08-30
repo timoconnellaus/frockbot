@@ -2,6 +2,11 @@
   "schemaVersion": 1,
   "packages": [
     {
+      "specifier": "@frockbot/plugin-ui-theme",
+      "version": "0.0.1",
+      "grants": []
+    },
+    {
       "specifier": "@frockbot/plugin-auth",
       "version": "0.0.1",
       "grants": ["identity:authenticate"]
@@ -30,6 +35,11 @@
       "specifier": "@frockbot/plugin-shell",
       "version": "0.0.1",
       "grants": ["agent:turn"]
+    },
+    {
+      "specifier": "@frockbot/plugin-settings",
+      "version": "0.0.1",
+      "grants": []
     },
     {
       "specifier": "@frockbot/plugin-flock",

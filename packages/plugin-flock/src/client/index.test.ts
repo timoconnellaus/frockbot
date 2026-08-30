@@ -46,6 +46,9 @@ function mount(
       hostedRequest,
     },
     slot: () => () => undefined,
+    inject: () => {
+      throw new Error("unexpected client provider injection");
+    },
     provide: (_key, value) => {
       provided = value as Ref<FlockWebData>;
       return () => undefined;

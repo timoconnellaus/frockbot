@@ -26,7 +26,9 @@ describe("foundation application", () => {
 
     expect(first.applicationHash).toBe(second.applicationHash);
     expect(first.packages.map((pkg) => pkg.id)).toEqual([
+      "ui-theme",
       "auth",
+      "shell",
       "clock",
       "composio",
       "computer",
@@ -41,10 +43,10 @@ describe("foundation application", () => {
       "mobile-clipboard",
       "mobile-notifications",
       "provider-foundation",
-      "shell",
+      "settings",
     ]);
     expect(first.contributions).toEqual({
-      backend: ["composio", "flock", "shell"],
+      backend: ["shell", "composio", "flock"],
       runtime: [
         "clock",
         "composio",
@@ -55,7 +57,15 @@ describe("foundation application", () => {
         "memory",
         "provider-foundation",
       ],
-      client: ["auth", "clock", "computer", "flock", "shell"],
+      client: [
+        "ui-theme",
+        "auth",
+        "shell",
+        "clock",
+        "computer",
+        "flock",
+        "settings",
+      ],
       desktop: [
         "auth",
         "clock",

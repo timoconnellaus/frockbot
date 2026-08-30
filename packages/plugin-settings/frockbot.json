@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 3,
+  "id": "settings",
+  "displayName": "FrockBot Settings",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": { "shell": ">=0.0.1", "ui-theme": ">=0.0.1" },
+  "contributions": {
+    "client": {
+      "entry": "./client",
+      "mounts": [
+        { "slot": "frockbot.sidebar-actions", "order": 10 },
+        { "slot": "frockbot.user-profile", "order": 10 },
+        { "slot": "frockbot.bot-actions", "order": 10 }
+      ],
+      "outlets": []
+    }
+  },
+  "permissions": []
+}

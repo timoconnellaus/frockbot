@@ -74,12 +74,15 @@ import foundationProviderPlugin, {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
 } from "@frockbot/plugin-provider-foundation/runtime";
+import settingsManifest from "@frockbot/plugin-settings/manifest";
 import shellManifest from "@frockbot/plugin-shell/manifest";
+import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 
 const manifests = new Map<string, unknown>([
+  ["@frockbot/plugin-ui-theme", uiThemeManifest],
   ["@frockbot/plugin-auth", authManifest],
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
@@ -96,6 +99,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-desktop-directory-picker", directoryPickerManifest],
   ["@frockbot/plugin-desktop-notifications", notificationsManifest],
   ["@frockbot/plugin-shell", shellManifest],
+  ["@frockbot/plugin-settings", settingsManifest],
 ]);
 
 const runtimeContributions = new Map([
