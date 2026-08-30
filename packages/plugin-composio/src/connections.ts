@@ -1,4 +1,7 @@
-import type { ConnectionView } from "@frockbot/configuration-core";
+import {
+  isPublicIdentifier,
+  type ConnectionView,
+} from "@frockbot/configuration-core";
 import type {
   ComposioClient,
   ConnectLink,
@@ -233,7 +236,7 @@ export class ComposioConnectionCoordinator {
       nativeReturnNonce?: string;
     },
   ): Promise<StartConnectionResult | undefined> {
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.commandId)) {
+    if (!isPublicIdentifier(input.commandId)) {
       throw new Error("Connection commandId is invalid");
     }
     const commandFingerprint = connectionStartCommandFingerprintV1(userId, {
@@ -283,7 +286,7 @@ export class ComposioConnectionCoordinator {
     }
     const terminalReplay = await this.replayStart(userId, input);
     if (terminalReplay) return terminalReplay;
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.commandId)) {
+    if (!isPublicIdentifier(input.commandId)) {
       throw new Error("Connection commandId is invalid");
     }
     const connectionId = input.commandId;
