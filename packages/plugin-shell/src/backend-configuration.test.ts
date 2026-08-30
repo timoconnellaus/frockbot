@@ -5,7 +5,20 @@ import type {
   BotSettingsViewV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import { createShellBotBackendContribution } from "./backend.js";
+import {
+  createShellBotBackendContribution as createContribution,
+  type ShellBotBackendHost,
+} from "./backend.js";
+import type { BotResidentExecution } from "./backend-execution.js";
+
+const testExecution: BotResidentExecution = {
+  project: () => Promise.resolve(),
+  execute: () => Promise.reject(new Error("unexpected resident execution")),
+  generation: () => 0,
+};
+const createShellBotBackendContribution = (
+  host: Omit<ShellBotBackendHost, "execution">,
+) => createContribution({ ...host, execution: testExecution });
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();

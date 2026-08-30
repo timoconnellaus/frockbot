@@ -9,6 +9,7 @@
     "./client": "./src/client/index.ts",
     "./backend": "./src/backend.ts",
     "./backend-contracts": "./src/backend-contracts.ts",
+    "./backend-execution": "./src/backend-execution.ts",
     "./backend-recovery": "./src/backend-recovery.ts",
     "./backend-runner": "./src/backend-runner.ts",
     "./manifest": "./src/manifest.ts",

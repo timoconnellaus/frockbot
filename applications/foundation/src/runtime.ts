@@ -67,9 +67,9 @@ import foundationProviderPlugin, {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
 } from "@frockbot/plugin-provider-foundation/runtime";
-import settingsManifest from "@frockbot/plugin-settings/manifest";
+import settingsManifest from "../../../packages/plugin-settings/src/manifest.js";
 import shellManifest from "@frockbot/plugin-shell/manifest";
-import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
+import uiThemeManifest from "../../../packages/plugin-ui-theme/src/manifest.js";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
@@ -178,14 +178,18 @@ export async function createFoundationBackendContributions(
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host: FoundationBackendPluginHost<T>,
+  root?: Context,
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host:
     | ({ backendHost: "gateway" } & FlockGatewayHost)
     | FoundationBackendPluginHost<T>,
+  residentRoot?: Context,
 ): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
-  const root = new Context();
+  const ownsRoot = !residentRoot;
+  const root = residentRoot ?? new Context();
+  const fibers: Array<ReturnType<Context["plugin"]>> = [];
   const contributions: Array<BackendRouteContribution | T> = [];
   const lifecycle: BackendContributionLifecycle<BackendRouteContribution | T> =
     {
@@ -219,11 +223,14 @@ export async function createFoundationBackendContributions<T>(
         } else {
           plugin = host.resolve(specifier, lifecycle);
         }
-        await root.plugin(plugin);
+        const fiber = root.plugin(plugin);
+        fibers.push(fiber);
+        await fiber;
       }
     }
   } catch (error) {
-    await root.fiber.dispose();
+    await Promise.allSettled(fibers.reverse().map((fiber) => fiber.dispose()));
+    if (ownsRoot) await root.fiber.dispose();
     throw error;
   }
   let disposed = false;
@@ -232,7 +239,10 @@ export async function createFoundationBackendContributions<T>(
     async dispose() {
       if (disposed) return;
       disposed = true;
-      await root.fiber.dispose();
+      await Promise.allSettled(
+        fibers.reverse().map((fiber) => fiber.dispose()),
+      );
+      if (ownsRoot) await root.fiber.dispose();
     },
   };
 }

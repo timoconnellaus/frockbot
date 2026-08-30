@@ -1,6 +1,5 @@
 import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
 import type { Plugin } from "cordis";
-import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
   capabilityAssignmentFailureV1,
@@ -18,9 +17,8 @@ import {
   resolveBotExecutionPlanV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import { createFoundationAssignedRuntimePackages } from "@frockbot/application-foundation/runtime";
-import { createFoundationHostedRuntimePackages } from "@frockbot/application-foundation/runtime";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
+import type { BotResidentExecution } from "./backend-execution.js";
 import {
   settleAssignmentSaga,
   type StoredAssignmentSaga,
@@ -30,10 +28,7 @@ import {
   failStoredRun,
   requireStoredRunReconciliation,
 } from "./backend-completion.js";
-import {
-  BotTurnReconciliationRequiredError,
-  executeBotTurn,
-} from "./backend-runner.js";
+import { BotTurnReconciliationRequiredError } from "./backend-runner.js";
 import {
   eventsForFailedRun,
   latestModelRequestJournalState,
@@ -70,6 +65,7 @@ const ACTIVE_RUN_KEY = "active-run";
 const LATEST_EVENTS_KEY = "latest-events";
 const IDENTITY_KEY = "identity";
 const BOT_CONFIGURATION_KEY = "bot-configuration";
+const RUNTIME_PROJECTION_KEY = "runtime-projection";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const ASSIGNMENT_GENERATION_PREFIX = "assignment-generation:";
 const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
@@ -91,6 +87,22 @@ interface BotIdentity {
 interface StoredConfigurationReceipt {
   commandFingerprint: string;
   receipt: OperationReceiptV1;
+}
+
+export interface StoredRuntimeProjection {
+  schemaVersion: 1;
+  desiredGeneration: number;
+  status: "pending" | "applied" | "failed";
+  appliedGeneration?: number;
+  failedGeneration?: number;
+  failure?: string;
+}
+
+class BotRuntimeProjectionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BotRuntimeProjectionError";
+  }
 }
 
 interface AssignmentActivity {
@@ -124,6 +136,7 @@ export interface BotStateEnv {
 export interface ShellBotBackendHost {
   state: DurableObjectState;
   env: BotStateEnv;
+  execution: BotResidentExecution;
   compileApplication?: typeof compileFoundationApplication;
 }
 
@@ -199,6 +212,7 @@ export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
   private readonly compileApplication: typeof compileFoundationApplication;
+  private readonly execution: BotResidentExecution;
   private executingRunId: string | undefined;
   private readonly assignmentActivities = new Map<string, AssignmentActivity>();
 
@@ -207,6 +221,7 @@ export class ShellBotBackendContribution {
     this.env = host.env;
     this.compileApplication =
       host.compileApplication ?? compileFoundationApplication;
+    this.execution = host.execution;
   }
 
   async materializeSettings(
@@ -233,7 +248,13 @@ export class ShellBotBackendContribution {
       await transaction.put({
         [IDENTITY_KEY]: durableIdentity ?? identity,
         [BOT_CONFIGURATION_KEY]: settings,
+        [RUNTIME_PROJECTION_KEY]: {
+          schemaVersion: 1,
+          desiredGeneration: settings.revision,
+          status: "pending",
+        } satisfies StoredRuntimeProjection,
       });
+      await this.refreshRecoveryAlarm(transaction);
       return settings;
     });
   }
@@ -617,6 +638,11 @@ export class ShellBotBackendContribution {
       await transaction.put({
         [BOT_CONFIGURATION_KEY]: next,
         [receiptKey]: { commandFingerprint, receipt },
+        [RUNTIME_PROJECTION_KEY]: {
+          schemaVersion: 1,
+          desiredGeneration: revision,
+          status: "pending",
+        } satisfies StoredRuntimeProjection,
       });
       if (
         command.type === "bot/assign-capability" &&
@@ -634,8 +660,8 @@ export class ShellBotBackendContribution {
           deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
           receipt,
         } satisfies StoredAssignmentSaga);
-        await this.refreshRecoveryAlarm(transaction);
       }
+      await this.refreshRecoveryAlarm(transaction);
       return receipt;
     });
   }
@@ -716,14 +742,21 @@ export class ShellBotBackendContribution {
   private async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
-    const [activeRunId, sagas] = await Promise.all([
+    const [activeRunId, sagas, projection] = await Promise.all([
       transaction.get<string>(ACTIVE_RUN_KEY),
       transaction.list<StoredAssignmentSaga>({
         prefix: ASSIGNMENT_SAGA_PREFIX,
       }),
+      transaction.get<StoredRuntimeProjection>(RUNTIME_PROJECTION_KEY),
     ]);
     const deadlines = [...sagas.values()].map((saga) => saga.deadlineAt);
-    if (activeRunId) deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
+    if (
+      activeRunId ||
+      projection?.status === "pending" ||
+      projection?.status === "failed"
+    ) {
+      deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
+    }
     if (deadlines.length === 0) await transaction.deleteAlarm();
     else await transaction.setAlarm(Math.min(...deadlines));
   }
@@ -760,15 +793,24 @@ export class ShellBotBackendContribution {
         }
       }
       if (enabled) {
-        await transaction.put(BOT_CONFIGURATION_KEY, {
-          ...current,
-          revision: current.revision + 1,
-          assignments: current.assignments.map((assignment) =>
-            assignment.connectionId === connectionId
-              ? { ...assignment, state: "unavailable" }
-              : assignment,
-          ),
-        } satisfies BotSettingsViewV1);
+        const revision = current.revision + 1;
+        await transaction.put({
+          [BOT_CONFIGURATION_KEY]: {
+            ...current,
+            revision,
+            assignments: current.assignments.map((assignment) =>
+              assignment.connectionId === connectionId
+                ? { ...assignment, state: "unavailable" }
+                : assignment,
+            ),
+          } satisfies BotSettingsViewV1,
+          [RUNTIME_PROJECTION_KEY]: {
+            schemaVersion: 1,
+            desiredGeneration: revision,
+            status: "pending",
+          } satisfies StoredRuntimeProjection,
+        });
+        await this.refreshRecoveryAlarm(transaction);
       }
       await transaction.put(receiptKey, "applied");
       return "applied";
@@ -779,6 +821,22 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
   ): Promise<BotExecutionPlanV1> {
     return (await this.resolveExecutionContext(identity)).plan;
+  }
+
+  async readRuntimeProjection(): Promise<StoredRuntimeProjection> {
+    const projection = await this.ctx.storage.get<StoredRuntimeProjection>(
+      RUNTIME_PROJECTION_KEY,
+    );
+    if (!projection) throw new Error("Bot runtime projection is unavailable");
+    return structuredClone(projection);
+  }
+
+  private async reconcileRuntimeProjection(
+    identity: BotIdentity,
+  ): Promise<void> {
+    if (await this.ctx.storage.get<string>(ACTIVE_RUN_KEY)) return;
+    const settings = await this.ensureBotSettings(identity);
+    await this.projectRuntime(identity, settings, true);
   }
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
@@ -854,21 +912,13 @@ export class ShellBotBackendContribution {
         } satisfies StoredRun);
         await this.refreshRecoveryAlarm(transaction);
       });
-      const agentPackages = await this.assignedAgentPackages(command, settings);
-      const promptParts = [
-        `You are ${settings.profile.name}.`,
-        settings.profile.label,
-        settings.profile.description,
-      ].filter((part): part is string => Boolean(part?.trim()));
-      const result = await executeBotTurn({
+      await this.projectRuntime(command, settings, false);
+      const result = await this.execution.execute({
         botId: command.botId,
         command,
         previousEvents: previous,
-        memory: memoryPluginConfig(this.env, command),
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(command.runId, events),
-        agentPackages,
-        systemPromptSection: promptParts.join("\n\n"),
       });
       const completed = settings.notifications.enabled
         ? {
@@ -879,6 +929,7 @@ export class ShellBotBackendContribution {
       await this.completeRun(command.runId, previous, completed);
       return completed;
     } catch (error) {
+      if (error instanceof BotRuntimeProjectionError) throw error;
       const durableRun = optionalStoredRun(
         await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
       );
@@ -919,16 +970,8 @@ export class ShellBotBackendContribution {
     requireStoredRunV1(run);
     const previous = latest.slice(0, run.previousEventCount);
     try {
-      const agentPackages = await this.assignedAgentPackages(
-        identity,
-        settings,
-      );
-      const promptParts = [
-        `You are ${settings.profile.name}.`,
-        settings.profile.label,
-        settings.profile.description,
-      ].filter((part): part is string => Boolean(part?.trim()));
-      const result = await executeBotTurn({
+      await this.projectRuntime(identity, settings, false);
+      const result = await this.execution.execute({
         botId: identity.botId,
         command: {
           runId: run.runId,
@@ -937,11 +980,8 @@ export class ShellBotBackendContribution {
           text: run.input,
         },
         previousEvents: latest,
-        memory: memoryPluginConfig(this.env, identity),
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(run.runId, events),
-        agentPackages,
-        systemPromptSection: promptParts.join("\n\n"),
         resume: true,
       });
       const durableRun = optionalStoredRun(
@@ -961,6 +1001,7 @@ export class ShellBotBackendContribution {
       await this.completeRun(run.runId, previous, completed);
       return completed;
     } catch (error) {
+      if (error instanceof BotRuntimeProjectionError) throw error;
       const durableRun = optionalStoredRun(
         await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
       );
@@ -989,47 +1030,92 @@ export class ShellBotBackendContribution {
     }
   }
 
-  private async assignedAgentPackages(
+  private async projectRuntime(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
-  ): Promise<FoundationAgentPackage[]> {
-    const user = await this.userConfiguration(identity).readConfiguration({
-      schemaVersion: 1,
-      userId: identity.userId,
-    });
-    const application = await this.compileApplication();
-    const plan = resolveBotExecutionPlanV1({
-      bot: settings,
-      user,
-      packages: application.packages.map((pkg) => ({
-        packageId: pkg.id,
-        version: pkg.version,
-        capabilities: pkg.manifest.configuration?.capabilities ?? [],
-        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-      })),
-    });
-    const readSecret = (name: string) => {
-      // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
-      const value = (this.env as unknown as Record<string, unknown>)[name];
-      return typeof value === "string" ? value : undefined;
-    };
-    return [
-      ...createFoundationHostedRuntimePackages(application, {
-        userId: identity.userId,
-        readSecret,
-      }),
-      ...(await createFoundationAssignedRuntimePackages(
-        application,
-        settings,
-        plan,
-        {
+    commitDesired: boolean,
+  ): Promise<void> {
+    try {
+      const [user, application] = await Promise.all([
+        this.userConfiguration(identity).readConfiguration({
+          schemaVersion: 1,
           userId: identity.userId,
-          readSecret,
-          authorizeConnection: (assignment) =>
-            this.authorizeAssignedEffect(identity, assignment),
-        },
-      )),
-    ];
+        }),
+        this.compileApplication(),
+      ]);
+      const executionPlan = resolveBotExecutionPlanV1({
+        bot: settings,
+        user,
+        packages: application.packages.map((pkg) => ({
+          packageId: pkg.id,
+          version: pkg.version,
+          capabilities: pkg.manifest.configuration?.capabilities ?? [],
+          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+        })),
+      });
+      const prompt = [
+        `You are ${settings.profile.name}.`,
+        settings.profile.label,
+        settings.profile.description,
+      ]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join("\n\n");
+      await this.execution.project({
+        generation: settings.revision,
+        userId: identity.userId,
+        botId: identity.botId,
+        settings,
+        executionPlan,
+        memory: memoryPluginConfig(this.env, identity),
+        systemPromptSection: prompt,
+        authorizeConnection: (assignment) =>
+          this.authorizeAssignedEffect(identity, assignment),
+      });
+    } catch (error) {
+      const failure = (
+        error instanceof Error ? error.message : "Runtime projection failed"
+      ).slice(0, 1_000);
+      await this.ctx.storage.transaction(async (transaction) => {
+        const current = await transaction.get<StoredRuntimeProjection>(
+          RUNTIME_PROJECTION_KEY,
+        );
+        if (
+          current &&
+          (!commitDesired || current.desiredGeneration === settings.revision)
+        ) {
+          await transaction.put(RUNTIME_PROJECTION_KEY, {
+            schemaVersion: 1,
+            desiredGeneration: current.desiredGeneration,
+            status: "failed",
+            failedGeneration: commitDesired ? undefined : settings.revision,
+            failure,
+          } satisfies StoredRuntimeProjection);
+        }
+        await this.refreshRecoveryAlarm(transaction);
+      });
+      throw commitDesired ? error : new BotRuntimeProjectionError(failure);
+    }
+    await this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<StoredRuntimeProjection>(
+        RUNTIME_PROJECTION_KEY,
+      );
+      if (!current) return;
+      if (current.desiredGeneration === settings.revision) {
+        await transaction.put(RUNTIME_PROJECTION_KEY, {
+          schemaVersion: 1,
+          desiredGeneration: settings.revision,
+          status: "applied",
+          appliedGeneration: settings.revision,
+        } satisfies StoredRuntimeProjection);
+      } else if (!commitDesired) {
+        await transaction.put(RUNTIME_PROJECTION_KEY, {
+          schemaVersion: 1,
+          desiredGeneration: current.desiredGeneration,
+          status: "pending",
+        } satisfies StoredRuntimeProjection);
+      }
+      await this.refreshRecoveryAlarm(transaction);
+    });
   }
 
   private async authorizeAssignedEffect(
@@ -1206,6 +1292,20 @@ export class ShellBotBackendContribution {
       }
     }
     await this.recoverActiveRun();
+    const [remainingActive, identity] = await Promise.all([
+      this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
+      this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
+    ]);
+    if (!remainingActive && identity) {
+      try {
+        await this.reconcileRuntimeProjection(identity);
+      } catch (error) {
+        console.error(
+          "Bot runtime projection remains durably scheduled after reconciliation failure",
+          error instanceof Error ? error.message : "unknown failure",
+        );
+      }
+    }
   }
 
   async listRuns(
@@ -1482,7 +1582,15 @@ export class ShellBotBackendContribution {
           revision: current.revision + 1,
           assignments: plan.assignments,
         } satisfies BotSettingsViewV1;
-        await transaction.put(BOT_CONFIGURATION_KEY, next);
+        await transaction.put({
+          [BOT_CONFIGURATION_KEY]: next,
+          [RUNTIME_PROJECTION_KEY]: {
+            schemaVersion: 1,
+            desiredGeneration: next.revision,
+            status: "pending",
+          } satisfies StoredRuntimeProjection,
+        });
+        await this.refreshRecoveryAlarm(transaction);
         return next;
       });
       plan = {
@@ -1517,6 +1625,7 @@ export class ShellBotBackendContribution {
       ...context.settings,
       assignments: context.plan.assignments,
     } satisfies BotSettingsViewV1;
+    await this.projectRuntime(command, settings, true);
     const key = `${RUN_PREFIX}${command.runId}`;
     return this.ctx.storage.transaction(async (transaction) => {
       const existing = optionalStoredRun(await transaction.get<unknown>(key));
@@ -1545,6 +1654,20 @@ export class ShellBotBackendContribution {
       }
       if (await transaction.get(ACTIVE_RUN_KEY)) {
         throw new Error("bot already has an active run");
+      }
+      const currentSettings = await transaction.get<BotSettingsViewV1>(
+        BOT_CONFIGURATION_KEY,
+      );
+      const projection = await transaction.get<StoredRuntimeProjection>(
+        RUNTIME_PROJECTION_KEY,
+      );
+      if (
+        currentSettings?.revision !== settings.revision ||
+        projection?.desiredGeneration !== settings.revision ||
+        projection.status !== "applied" ||
+        projection.appliedGeneration !== settings.revision
+      ) {
+        throw new Error("Bot runtime projection is not ready for admission");
       }
       const latestEvents = (
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []

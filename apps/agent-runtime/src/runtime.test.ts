@@ -1,14 +1,25 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { Context, type Plugin } from "cordis";
 import { desktopComputerRuntimePackages } from "../../../applications/foundation/src/desktop-runtime.js";
 import type {
   MemoryBucketObject,
   MemoryPluginConfig,
   MemoryVector,
 } from "@frockbot/plugin-memory";
-import type { FoundationRuntime } from "./runtime.js";
-import { createFoundationRuntime } from "./runtime.js";
+import type {
+  FoundationResidentRuntime,
+  FoundationRuntime,
+} from "./runtime.js";
+import {
+  createFoundationResidentRuntime,
+  createFoundationRuntime,
+} from "./runtime.js";
 
 const runtimes: FoundationRuntime[] = [];
+const residentRuntimes: Array<{
+  runtime: FoundationResidentRuntime;
+  root: Context;
+}> = [];
 
 async function createRuntime(): Promise<FoundationRuntime> {
   const runtime = await createFoundationRuntime(undefined, {
@@ -20,6 +31,228 @@ async function createRuntime(): Promise<FoundationRuntime> {
 
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+  await Promise.all(
+    residentRuntimes.splice(0).map(async ({ runtime, root }) => {
+      await runtime.dispose();
+      await root.fiber.dispose();
+    }),
+  );
+});
+
+describe("resident foundation Bot runtime", () => {
+  test("serializes duplicate projections and mounts one owned registration", async () => {
+    const root = new Context();
+    const runtime = await createFoundationResidentRuntime(root);
+    residentRuntimes.push({ runtime, root });
+    let releaseSetup: (() => void) | undefined;
+    let reportStarted: (() => void) | undefined;
+    const setupStarted = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    const setupRelease = new Promise<void>((resolve) => {
+      releaseSetup = resolve;
+    });
+    let mounts = 0;
+    let disposals = 0;
+    const owned: Plugin.Function = async () => {
+      mounts += 1;
+      reportStarted?.();
+      await setupRelease;
+      return () => {
+        disposals += 1;
+      };
+    };
+    const projection = {
+      generation: 4,
+      agentPackages: [
+        {
+          specifier: "fixture-owned",
+          contributionSpecifier: "fixture-owned/agent",
+          manifest: {},
+          plugin: owned,
+        },
+      ],
+    };
+
+    const first = runtime.project(projection);
+    await setupStarted;
+    const duplicate = runtime.project(projection);
+    releaseSetup?.();
+    await Promise.all([first, duplicate]);
+
+    expect(runtime.generation).toBe(4);
+    expect(mounts).toBe(1);
+    expect(disposals).toBe(0);
+    await runtime.dispose();
+    expect(disposals).toBe(1);
+  });
+
+  test("orders different projection generations and disposes each registration once", async () => {
+    const root = new Context();
+    const runtime = await createFoundationResidentRuntime(root);
+    residentRuntimes.push({ runtime, root });
+    let releaseFirst: (() => void) | undefined;
+    let reportFirstStarted: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      reportFirstStarted = resolve;
+    });
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const lifecycle: string[] = [];
+    const firstPlugin: Plugin.Function = async () => {
+      lifecycle.push("mount-1");
+      reportFirstStarted?.();
+      await firstRelease;
+      return () => lifecycle.push("dispose-1");
+    };
+    const secondPlugin: Plugin.Function = () => {
+      lifecycle.push("mount-2");
+      return () => lifecycle.push("dispose-2");
+    };
+
+    const first = runtime.project({
+      generation: 1,
+      agentPackages: [
+        {
+          specifier: "fixture-first",
+          contributionSpecifier: "fixture-first/agent",
+          manifest: {},
+          plugin: firstPlugin,
+        },
+      ],
+    });
+    await firstStarted;
+    const second = runtime.project({
+      generation: 2,
+      agentPackages: [
+        {
+          specifier: "fixture-second",
+          contributionSpecifier: "fixture-second/agent",
+          manifest: {},
+          plugin: secondPlugin,
+        },
+      ],
+    });
+    await Bun.sleep(1);
+    const beforeRelease = [...lifecycle];
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(beforeRelease).toEqual(["mount-1"]);
+    expect(runtime.generation).toBe(2);
+    expect(lifecycle).toEqual(["mount-1", "dispose-1", "mount-2"]);
+    await runtime.dispose();
+    expect(lifecycle).toEqual(["mount-1", "dispose-1", "mount-2", "dispose-2"]);
+  });
+
+  test("remounts runtime generations inside one Cordis root and keeps durable history", async () => {
+    const root = new Context();
+    const runtime = await createFoundationResidentRuntime(root);
+    residentRuntimes.push({ runtime, root });
+    await runtime.project({
+      generation: 1,
+      agentPackages: [],
+      systemPromptSection: "Generation one",
+    });
+    const durableEvents: Parameters<
+      NonNullable<Parameters<typeof runtime.execute>[0]["persistSessionEvents"]>
+    >[1][] = [];
+    const persist = (
+      _sessionId: string,
+      events: (typeof durableEvents)[number],
+    ) => {
+      durableEvents.push(events);
+      return Promise.resolve();
+    };
+
+    const first = await runtime.execute({
+      botId: "primary",
+      sessionId: "alice:primary",
+      previousEvents: [],
+      persistSessionEvents: persist,
+      text: "hello",
+    });
+    const firstEvents = [...first.agent.session.events];
+    await runtime.project({
+      generation: 2,
+      agentPackages: [],
+      systemPromptSection: "Generation two",
+    });
+    const second = await runtime.execute({
+      botId: "primary",
+      sessionId: "alice:primary",
+      previousEvents: firstEvents,
+      persistSessionEvents: persist,
+      text: "again",
+    });
+
+    expect(runtime.root).toBe(root);
+    expect(runtime.generation).toBe(2);
+    expect(second).toBe(first);
+    const requests = second.agent.session.events.filter(
+      (event) => event.type === "model/request",
+    );
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({
+      request: { system: expect.stringContaining("Generation one") },
+    });
+    expect(requests[1]).toMatchObject({
+      request: { system: expect.stringContaining("Generation two") },
+    });
+    expect(durableEvents.flat()).toEqual([...second.agent.session.events]);
+  });
+
+  test("rolls back a partial projection and permits exact retry", async () => {
+    const root = new Context();
+    const runtime = await createFoundationResidentRuntime(root);
+    residentRuntimes.push({ runtime, root });
+    let active = 0;
+    const owned: Plugin.Function = () => {
+      active += 1;
+      return () => {
+        active -= 1;
+      };
+    };
+    const failing: Plugin.Function = () => {
+      throw new Error("projection failed");
+    };
+
+    await expect(
+      runtime.project({
+        generation: 3,
+        agentPackages: [
+          {
+            specifier: "fixture-owned",
+            contributionSpecifier: "fixture-owned/agent",
+            manifest: {},
+            plugin: owned,
+          },
+          {
+            specifier: "fixture-failing",
+            contributionSpecifier: "fixture-failing/agent",
+            manifest: {},
+            plugin: failing,
+          },
+        ],
+      }),
+    ).rejects.toThrow("projection failed");
+    expect(active).toBe(0);
+    expect(runtime.generation).toBeUndefined();
+
+    await runtime.project({
+      generation: 3,
+      agentPackages: [
+        {
+          specifier: "fixture-owned",
+          contributionSpecifier: "fixture-owned/agent",
+          manifest: {},
+          plugin: owned,
+        },
+      ],
+    });
+    expect(runtime.generation).toBe(3);
+    expect(active).toBe(1);
+  });
 });
 
 describe("foundation Cordis runtime", () => {

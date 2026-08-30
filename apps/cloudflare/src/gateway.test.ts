@@ -1,4 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { Context } from "cordis";
+import {
+  createFoundationResidentRuntime,
+  type FoundationResidentRuntime,
+} from "@frockbot/agent-runtime/runtime";
 import type { SessionEvent } from "@frockbot/agent-core";
 import type {
   BotConfigurationReadRpcV1,
@@ -38,7 +43,7 @@ import type {
   WorkerCode,
   WorkerLoader,
 } from "./contracts.js";
-import { executeBotTurn } from "./bot-runner.js";
+import { executeResidentBotTurn } from "./bot-runner.js";
 import { applicationDeploymentId, createGateway } from "./gateway.js";
 import { createUserApplication } from "./user-application.js";
 
@@ -46,7 +51,29 @@ class MemoryBotState implements BotStateBinding {
   private readonly runs = new Map<string, StoredRun[]>();
   private readonly sessions = new Map<string, SessionEvent[]>();
   private readonly admissionFences = new Set<string>();
+  private readonly residentRuntimes = new Map<
+    string,
+    Promise<FoundationResidentRuntime>
+  >();
   readonly notifications = new Map<string, BotNotificationIntent[]>();
+
+  private residentRuntime(botId: string): Promise<FoundationResidentRuntime> {
+    let runtime = this.residentRuntimes.get(botId);
+    if (!runtime) {
+      runtime = createFoundationResidentRuntime(new Context()).then(
+        async (created) => {
+          await created.project({
+            generation: 0,
+            agentPackages: [],
+            systemPromptSection: "You are Internal Bot configuration.",
+          });
+          return created;
+        },
+      );
+      this.residentRuntimes.set(botId, runtime);
+    }
+    return runtime;
+  }
 
   async run(botId: string, command: BotTurnCommand): Promise<BotTurnResult> {
     if (this.admissionFences.has(`${botId}:${command.runId}`)) {
@@ -90,11 +117,15 @@ class MemoryBotState implements BotStateBinding {
     runs.push(run);
     this.runs.set(botId, runs);
     try {
-      const result = await executeBotTurn({
-        botId,
-        command,
-        previousEvents,
-      });
+      const result = await executeResidentBotTurn(
+        await this.residentRuntime(botId),
+        {
+          botId,
+          command,
+          previousEvents,
+          persistSessionEvents: () => Promise.resolve(),
+        },
+      );
       run.events = structuredClone(result.events);
       run.status = "completed";
       run.responseText = result.text;

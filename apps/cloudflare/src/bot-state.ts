@@ -1,8 +1,16 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   compileFoundationApplication,
+  createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
+  createFoundationHostedRuntimePackages,
+  createFoundationRuntimeApplication,
 } from "@frockbot/application-foundation/runtime";
+import {
+  createFoundationResidentRuntime,
+  type FoundationResidentRuntime,
+} from "@frockbot/agent-runtime/runtime";
+import { Context } from "cordis";
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
@@ -12,6 +20,11 @@ import type {
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
 } from "@frockbot/plugin-shell/backend";
+import type {
+  BotResidentExecution,
+  BotResidentProjection,
+} from "@frockbot/plugin-shell/backend-execution";
+import { executeResidentBotTurn } from "@frockbot/plugin-shell/backend-runner";
 import { createShellBotBackendPlugin } from "@frockbot/plugin-shell/backend";
 import {
   createFlockBotBackendPlugin,
@@ -54,6 +67,9 @@ function decodeBotIdentityRpcV1(input: unknown): {
 }
 
 export class BotState extends DurableObject<BotStateEnv> {
+  private residentRuntime: Promise<FoundationResidentRuntime> | undefined;
+  private residentGeneration: number | undefined;
+
   private mounted:
     | Promise<{
         shell: ShellBotBackendContribution;
@@ -68,61 +84,140 @@ export class BotState extends DurableObject<BotStateEnv> {
     dispose(): Promise<void>;
   }> {
     if (!this.mounted) {
-      this.mounted = compileFoundationApplication().then(async (plan) => {
+      const creating = compileFoundationApplication().then(async (plan) => {
+        const root = new Context();
+        const readSecret = (name: string) => {
+          // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
+          const value = (this.env as unknown as Record<string, unknown>)[name];
+          return typeof value === "string" ? value : undefined;
+        };
+        const runtimeFor = (projection: BotResidentProjection) => {
+          if (!this.residentRuntime) {
+            const creating = Promise.all([
+              createFoundationRuntimeApplication(),
+              Promise.resolve(
+                createFoundationHostedRuntimePackages(plan, {
+                  userId: projection.userId,
+                  readSecret,
+                }),
+              ),
+            ])
+              .then(([application, stableAgentPackages]) =>
+                createFoundationResidentRuntime(root, {
+                  application,
+                  memory: projection.memory,
+                  stableAgentPackages,
+                }),
+              )
+              .catch((error) => {
+                if (this.residentRuntime === creating) {
+                  this.residentRuntime = undefined;
+                }
+                throw error;
+              });
+            this.residentRuntime = creating;
+          }
+          return this.residentRuntime;
+        };
+        const execution: BotResidentExecution = {
+          project: async (projection) => {
+            const runtime = await runtimeFor(projection);
+            const assigned = await createFoundationAssignedRuntimePackages(
+              plan,
+              projection.settings,
+              projection.executionPlan,
+              {
+                userId: projection.userId,
+                readSecret,
+                authorizeConnection: projection.authorizeConnection,
+              },
+            );
+            await runtime.project({
+              generation: projection.generation,
+              agentPackages: assigned,
+              systemPromptSection: projection.systemPromptSection,
+            });
+            this.residentGeneration = projection.generation;
+          },
+          execute: async (input) => {
+            const runtime = await this.residentRuntime;
+            if (!runtime) {
+              throw new Error("resident Bot runtime projection is unavailable");
+            }
+            return executeResidentBotTurn(runtime, input);
+          },
+          generation: () => this.residentGeneration,
+        };
         let shell: ShellBotBackendContribution | undefined;
         let flock: FlockBotBackendContribution | undefined;
         const mounted = await createFoundationBackendContributions<
           ShellBotBackendContribution | FlockBotBackendContribution
-        >(plan, {
-          backendHost: "bot",
-          resolve: (specifier, lifecycle) => {
-            if (specifier === "@frockbot/plugin-shell/backend") {
-              return createShellBotBackendPlugin(
-                { state: this.ctx, env: this.env },
-                {
-                  mount(value) {
-                    shell = value;
-                    return lifecycle.mount(value);
+        >(
+          plan,
+          {
+            backendHost: "bot",
+            resolve: (specifier, lifecycle) => {
+              if (specifier === "@frockbot/plugin-shell/backend") {
+                return createShellBotBackendPlugin(
+                  { state: this.ctx, env: this.env, execution },
+                  {
+                    mount(value) {
+                      shell = value;
+                      return lifecycle.mount(value);
+                    },
                   },
-                },
-              );
-            }
-            if (specifier === "@frockbot/plugin-flock/bot") {
-              return createFlockBotBackendPlugin(
-                {
-                  storage: this.ctx.storage,
-                  materializeSettings: (registration, userId) => {
-                    if (!shell)
-                      throw new Error("Shell Bot Contribution is unavailable");
-                    return shell
-                      .materializeSettings(
-                        { userId, botId: registration.botId },
-                        {
-                          name: registration.initialName,
-                          model: registration.initialModel,
-                        },
-                      )
-                      .then(() => undefined);
+                );
+              }
+              if (specifier === "@frockbot/plugin-flock/bot") {
+                return createFlockBotBackendPlugin(
+                  {
+                    storage: this.ctx.storage,
+                    materializeSettings: (registration, userId) => {
+                      if (!shell)
+                        throw new Error(
+                          "Shell Bot Contribution is unavailable",
+                        );
+                      return shell
+                        .materializeSettings(
+                          { userId, botId: registration.botId },
+                          {
+                            name: registration.initialName,
+                            model: registration.initialModel,
+                          },
+                        )
+                        .then(() => undefined);
+                    },
                   },
-                },
-                {
-                  mount(value) {
-                    flock = value;
-                    return lifecycle.mount(value);
+                  {
+                    mount(value) {
+                      flock = value;
+                      return lifecycle.mount(value);
+                    },
                   },
-                },
-              );
-            }
-            throw new Error(`Unsupported Bot Contribution: ${specifier}`);
+                );
+              }
+              throw new Error(`Unsupported Bot Contribution: ${specifier}`);
+            },
           },
-        });
+          root,
+        );
         if (!shell || !flock || mounted.contributions.length !== 2) {
           await mounted.dispose();
           throw new Error(
             "Foundation requires Shell and Flock Bot backend Contributions",
           );
         }
-        return { shell, flock, dispose: mounted.dispose };
+        return {
+          shell,
+          flock,
+          async dispose() {
+            await Promise.allSettled([mounted.dispose(), root.fiber.dispose()]);
+          },
+        };
+      });
+      this.mounted = creating;
+      void creating.catch(() => {
+        if (this.mounted === creating) this.mounted = undefined;
       });
     }
     return this.mounted;
@@ -221,6 +316,13 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     return shell.resolveConfiguration(identity);
+  }
+
+  async readRuntimeProjection(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.readRuntimeProjection();
   }
 
   async run(input: unknown) {

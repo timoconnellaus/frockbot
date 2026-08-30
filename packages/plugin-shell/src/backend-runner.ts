@@ -1,10 +1,8 @@
-import {
-  createFoundationRuntime,
-  type FoundationAgentPackage,
-} from "@frockbot/agent-runtime/runtime";
-import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
-import type { PersistSessionEvents, SessionEvent } from "@frockbot/agent-core";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
+import type {
+  AgentHandle,
+  PersistSessionEvents,
+  SessionEvent,
+} from "@frockbot/agent-core";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 
 function appendedSessionEvents(
@@ -47,42 +45,38 @@ export interface ExecuteBotTurnOptions {
   botId: string;
   command: BotTurnCommand;
   previousEvents: readonly SessionEvent[];
-  memory?: MemoryPluginConfig;
-  persistSessionEvents?: PersistSessionEvents;
-  agentPackages?: readonly FoundationAgentPackage[];
-  systemPromptSection?: string;
+  persistSessionEvents: PersistSessionEvents;
   resume?: boolean;
 }
 
-export async function executeBotTurn(
+export interface ResidentTurnRuntime {
+  execute(input: {
+    botId: string;
+    sessionId: string;
+    previousEvents: readonly SessionEvent[];
+    persistSessionEvents: PersistSessionEvents;
+    resume?: boolean;
+    text: string;
+  }): Promise<AgentHandle>;
+}
+
+export async function executeResidentBotTurn(
+  runtime: ResidentTurnRuntime,
   options: ExecuteBotTurnOptions,
 ): Promise<BotTurnCompletion> {
-  const {
-    botId,
-    command,
-    previousEvents,
-    memory,
-    persistSessionEvents,
-    agentPackages,
-    systemPromptSection,
-    resume,
-  } = options;
-  const runtime = await createFoundationRuntime(undefined, {
-    agentId: botId,
-    sessionId: command.sessionId,
-    sessionEvents: previousEvents,
-    application: await createFoundationRuntimeApplication(),
-    memory,
-    persistSessionEvents,
-    agentPackages,
-    systemPromptSection,
-  });
-
+  const { botId, command, previousEvents, persistSessionEvents, resume } =
+    options;
+  let handle: AgentHandle | undefined;
   try {
-    if (resume) runtime.agent.agent.resume();
-    else runtime.agent.agent.send(command.text);
-    await runtime.agent.agent.whenIdle();
-    const events = [...runtime.agent.agent.session.events];
+    handle = await runtime.execute({
+      botId,
+      sessionId: command.sessionId,
+      previousEvents,
+      persistSessionEvents,
+      resume,
+      text: command.text,
+    });
+    const events = [...handle.agent.session.events];
     const turnStart = events.findLast((event) => event.type === "turn/start");
     const currentTurn =
       turnStart?.type === "turn/start" ? turnStart.turn : undefined;
@@ -112,7 +106,7 @@ export async function executeBotTurn(
         appendedSessionEvents(previousEvents, events),
       );
     }
-    const message = runtime.agent.agent.session.deriveMessages().at(-1);
+    const message = handle.agent.session.deriveMessages().at(-1);
     return {
       runId: command.runId,
       text: message?.role === "assistant" ? message.content : "",
@@ -125,12 +119,12 @@ export async function executeBotTurn(
     ) {
       throw error;
     }
-    const events = [...runtime.agent.agent.session.events];
+    const events = handle
+      ? [...handle.agent.session.events]
+      : [...previousEvents];
     throw new BotTurnExecutionError(
       error instanceof Error ? error.message : "Bot turn failed",
       appendedSessionEvents(previousEvents, events),
     );
-  } finally {
-    await runtime.dispose();
   }
 }

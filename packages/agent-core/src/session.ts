@@ -393,6 +393,13 @@ export class SessionStore extends Service {
   private sessions = new Map<string, Session>();
   private initialSessions: Readonly<Record<string, readonly SessionEvent[]>>;
   private persistEvents?: PersistSessionEvents;
+  private preparedSessions = new Map<
+    string,
+    {
+      initialEvents?: readonly SessionEvent[];
+      persistEvents?: PersistSessionEvents;
+    }
+  >();
 
   constructor(ctx: Context, config: SessionStoreConfig = {}) {
     super(ctx, "sessions");
@@ -400,17 +407,37 @@ export class SessionStore extends Service {
     this.persistEvents = config.persistEvents;
   }
 
+  prepare(
+    sessionId: string,
+    options: {
+      initialEvents?: readonly SessionEvent[];
+      persistEvents?: PersistSessionEvents;
+    },
+  ): () => void {
+    if (this.sessions.has(sessionId) || this.preparedSessions.has(sessionId)) {
+      throw new Error(`session "${sessionId}" already exists`);
+    }
+    this.preparedSessions.set(sessionId, options);
+    return () => {
+      if (this.preparedSessions.get(sessionId) === options) {
+        this.preparedSessions.delete(sessionId);
+      }
+    };
+  }
+
   create(sessionId: string): Session {
     if (this.sessions.has(sessionId)) {
       throw new Error(`session "${sessionId}" already exists`);
     }
+    const prepared = this.preparedSessions.get(sessionId);
+    this.preparedSessions.delete(sessionId);
     const session = new Session(
       sessionId,
       (envelope) => {
         this.ctx.emit("session/event", envelope);
       },
-      this.initialSessions[sessionId],
-      this.persistEvents,
+      prepared?.initialEvents ?? this.initialSessions[sessionId],
+      prepared?.persistEvents ?? this.persistEvents,
     );
     this.sessions.set(sessionId, session);
     return session;
@@ -435,6 +462,7 @@ export class SessionStore extends Service {
     return () => {
       for (const session of this.sessions.values()) session.dispose();
       this.sessions.clear();
+      this.preparedSessions.clear();
     };
   }
 }
