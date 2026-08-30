@@ -87,6 +87,8 @@ describe("desktop hosted protocol", () => {
       "/api/connection-commands?packageId=provider-ollama-cloud",
       "/api/connection-commands?packageId=provider-ollama-cloud&commandId=connect-1&extra=true",
       "/api/connection-commands?packageId=bad%2Fpackage&commandId=connect-1",
+      "/api/connection-commands?packageId=provider-ollama-cloud&commandId=lost%20response",
+      "/api/connection-commands?packageId=provider-ollama-cloud&commandId=connect@1",
     ]) {
       expect(() =>
         decodeDesktopApiRequest({ schemaVersion: 1, path, method: "GET" }),

@@ -29,6 +29,18 @@ const context = {
 };
 
 describe("Connection credential envelopes", () => {
+  test("requires the current key to be an own keyring entry", () => {
+    expect(() =>
+      parseCredentialKeyringV1(
+        JSON.stringify({
+          schemaVersion: 1,
+          currentKeyId: "toString",
+          keys: { primary: encoded },
+        }),
+      ),
+    ).toThrow("credential keyring current key is unavailable");
+  });
+
   test("round-trips a secret without placing plaintext in the envelope", async () => {
     const envelope = await sealCredentialV1({
       keyring,

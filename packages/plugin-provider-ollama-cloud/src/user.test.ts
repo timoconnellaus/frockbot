@@ -635,7 +635,7 @@ describe("Ollama Cloud User Contribution", () => {
     const catalogStarted = Promise.withResolvers<void>();
     const catalogResponse = Promise.withResolvers<Response>();
     let catalogRequests = 0;
-    const { ollama } = await fixture((input) => {
+    const { storage, ollama } = await fixture((input) => {
       if (!String(input).endsWith("/tags")) {
         return Promise.resolve(Response.json({ capabilities: ["tools"] }));
       }
@@ -655,6 +655,9 @@ describe("Ollama Cloud User Contribution", () => {
 
     const first = ollama.executeConnection("account-1", command);
     await catalogStarted.promise;
+    expect(
+      storage.values.get("ollama-connection-command:connect-concurrent"),
+    ).toMatchObject({ providerRetryPolicy: "safe-metadata-read" });
     const second = ollama.executeConnection("account-1", command);
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(catalogRequests).toBe(1);
@@ -1574,6 +1577,69 @@ describe("Ollama Cloud User Contribution", () => {
     await expect(authorization).rejects.toThrow(
       "Connection changed before model authorization",
     );
+  });
+
+  test("journals safe exact-resolution retry before provider metadata", async () => {
+    let storage: MemoryStorage | undefined;
+    let resolutionRequests = 0;
+    let failOutcomeWrite = true;
+    const fixtureValue = await fixture((input, init) => {
+      if (String(input).endsWith("/tags")) {
+        return Promise.resolve(
+          Response.json({ models: [{ model: "known:cloud" }] }),
+        );
+      }
+      const body = JSON.parse(String(init?.body)) as { model: string };
+      if (body.model === "new-model:cloud") {
+        resolutionRequests += 1;
+        if (failOutcomeWrite) {
+          failOutcomeWrite = false;
+          storage!.failNextKey =
+            "ollama-model-resolution:effect-safe-resolution";
+        }
+      }
+      return Promise.resolve(Response.json({ capabilities: ["tools"] }));
+    });
+    storage = fixtureValue.storage;
+    const { settings, ollama } = fixtureValue;
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-safe-resolution",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "valid-key",
+    });
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!connection?.generation) throw new Error("generation is missing");
+    const input = {
+      accountId: "account-1",
+      connectionId: created.connectionId,
+      providerModelId: "new-model:cloud",
+      effectId: "effect-safe-resolution",
+      connectionGeneration: connection.generation,
+    };
+
+    await expect(ollama.leaseModelCredential(input)).rejects.toThrow(
+      "injected storage failure",
+    );
+    expect(
+      storage.values.get("ollama-model-resolution:effect-safe-resolution"),
+    ).toMatchObject({
+      retryPolicy: "safe-metadata-read",
+      status: "pending",
+    });
+    await expect(ollama.leaseModelCredential(input)).resolves.toMatchObject({
+      effectId: "effect-safe-resolution",
+    });
+    expect(resolutionRequests).toBe(2);
+    expect(
+      storage.values.has("ollama-model-resolution:effect-safe-resolution"),
+    ).toBe(false);
   });
 
   test("advances catalog generation after exact model resolution", async () => {

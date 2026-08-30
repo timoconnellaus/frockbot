@@ -37,6 +37,7 @@ const MAX_CATALOG_REFRESHES_PER_ALARM = 1;
 const ACCOUNT_KEY = "ollama-connection-account";
 const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
 const MUTATION_SEQUENCE_PREFIX = "ollama-mutation-sequence:";
+const MODEL_RESOLUTION_PREFIX = "ollama-model-resolution:";
 const REFRESH_INTERVAL_MS = 60 * 60 * 1_000;
 const RECOVERY_DELAY_MS = 60_000;
 const MODEL_LEASE_MS = 30 * 60 * 1_000;
@@ -64,6 +65,20 @@ interface StoredCommand {
   validationCatalog?: ConnectionModelCatalogV1;
   validationFailure?: string;
   validationStatus?: "applied" | "failed";
+  providerRetryPolicy?: "safe-metadata-read";
+}
+
+interface StoredModelResolution {
+  schemaVersion: 1;
+  effectId: string;
+  accountId: string;
+  connectionId: string;
+  connectionGeneration: string;
+  providerModelId: string;
+  retryPolicy: "safe-metadata-read";
+  status: "pending" | "applied" | "failed";
+  model?: ConnectionModelCatalogV1["models"][number];
+  failure?: string;
 }
 
 type StoredCommandTombstone = StoredCommand & {
@@ -121,6 +136,10 @@ export interface OllamaUserBackendHost {
 
 function commandKey(commandId: string): string {
   return `${COMMAND_PREFIX}${commandId}`;
+}
+
+function modelResolutionKey(effectId: string): string {
+  return `${MODEL_RESOLUTION_PREFIX}${effectId}`;
 }
 
 function mutationSequenceKey(
@@ -252,6 +271,7 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       "validationCatalog",
       "validationFailure",
       "validationStatus",
+      "providerRetryPolicy",
     ],
   );
   const operations: StoredCommand["operation"][] = [
@@ -288,7 +308,9 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     (value.validationStatus === "applied") !==
       (value.validationCatalog !== undefined) ||
     (value.validationStatus === "failed") !==
-      (value.validationFailure !== undefined)
+      (value.validationFailure !== undefined) ||
+    (value.providerRetryPolicy !== undefined &&
+      value.providerRetryPolicy !== "safe-metadata-read")
   ) {
     throw new Error("Stored Ollama command is invalid");
   }
@@ -378,6 +400,64 @@ function decodeStoredCommand(input: unknown): StoredCommand {
                 ),
               }),
         }),
+    ...(value.providerRetryPolicy === undefined
+      ? {}
+      : { providerRetryPolicy: "safe-metadata-read" as const }),
+  };
+}
+
+function decodeStoredModelResolution(input: unknown): StoredModelResolution {
+  const value = storedRecord(
+    input,
+    "Stored Ollama model resolution",
+    [
+      "schemaVersion",
+      "effectId",
+      "accountId",
+      "connectionId",
+      "connectionGeneration",
+      "providerModelId",
+      "retryPolicy",
+      "status",
+    ],
+    ["model", "failure"],
+  );
+  const status = value.status;
+  if (
+    value.schemaVersion !== 1 ||
+    value.retryPolicy !== "safe-metadata-read" ||
+    (status !== "pending" && status !== "applied" && status !== "failed") ||
+    (status === "applied") !== (value.model !== undefined) ||
+    (status === "failed") !== (value.failure !== undefined)
+  ) {
+    throw new Error("Stored Ollama model resolution is invalid");
+  }
+  const model =
+    value.model === undefined
+      ? undefined
+      : decodeConnectionModelCatalogV1({
+          schemaVersion: 1,
+          generation: "resolution-journal",
+          state: "fresh",
+          models: [value.model],
+        }).models[0];
+  return {
+    schemaVersion: 1,
+    effectId: storedText(value.effectId, "effectId", 256),
+    accountId: storedText(value.accountId, "accountId", 256),
+    connectionId: storedText(value.connectionId, "connectionId", 128),
+    connectionGeneration: storedText(
+      value.connectionGeneration,
+      "connectionGeneration",
+      128,
+    ),
+    providerModelId: storedText(value.providerModelId, "providerModelId", 256),
+    retryPolicy: "safe-metadata-read",
+    status,
+    ...(model ? { model } : {}),
+    ...(value.failure === undefined
+      ? {}
+      : { failure: storedText(value.failure, "failure", 500) }),
   };
 }
 
@@ -596,6 +676,7 @@ export class OllamaCloudUserBackendContribution {
         credentialGeneration: generation,
         operation: command.type,
         label: command.label,
+        providerRetryPolicy: "safe-metadata-read",
       };
       const prepared = await this.host.credentials.prepareApiKey({
         accountId,
@@ -650,6 +731,7 @@ export class OllamaCloudUserBackendContribution {
         credentialGeneration: generation,
         expectedGeneration: connection.generation,
         operation: command.type,
+        providerRetryPolicy: "safe-metadata-read",
       };
       const prepared = await this.host.credentials.prepareApiKey({
         accountId,
@@ -693,6 +775,9 @@ export class OllamaCloudUserBackendContribution {
       connectionId: connection.connectionId,
       expectedGeneration: connection.generation,
       operation: command.type,
+      ...(command.type === "connection/refresh-models"
+        ? { providerRetryPolicy: "safe-metadata-read" as const }
+        : {}),
       ...(command.type === "connection/update-label"
         ? { label: command.label }
         : {}),
@@ -981,6 +1066,9 @@ export class OllamaCloudUserBackendContribution {
     }
     if (!outcome.validationStatus) {
       try {
+        if (outcome.providerRetryPolicy !== "safe-metadata-read") {
+          throw new Error("Ollama validation retry policy is unavailable");
+        }
         const lease = await this.host.credentials.lease({
           accountId: record.accountId,
           connectionId: record.connectionId,
@@ -1234,6 +1322,9 @@ export class OllamaCloudUserBackendContribution {
         effectId: record.settlementEffectId,
       });
       return this.finishRecord(record, record.settlementStatus);
+    }
+    if (record.providerRetryPolicy !== "safe-metadata-read") {
+      return this.finishRecord(record, "failed");
     }
     const effectId = `catalog:${record.commandId}`;
     let lease: CredentialLeaseV1 | undefined;
@@ -1820,12 +1911,31 @@ export class OllamaCloudUserBackendContribution {
       (model) => model.providerModelId === input.providerModelId,
     );
     let resolvedModel: ConnectionModelCatalogV1["models"][number] | undefined;
+    const resolutionKey = modelResolutionKey(input.effectId);
     if (!known) {
       const discoveryEffectId = `resolve:${input.effectId}`;
-      const discoveryLease = await this.host.storage.transaction(
+      const resolution = await this.host.storage.transaction(
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
           await this.requireModelAuthority(input, storage);
-          return this.host.credentials.lease(
+          const storedValue = await storage.get<unknown>(resolutionKey);
+          const stored =
+            storedValue === undefined
+              ? undefined
+              : decodeStoredModelResolution(storedValue);
+          if (
+            stored &&
+            (stored.effectId !== input.effectId ||
+              stored.accountId !== input.accountId ||
+              stored.connectionId !== input.connectionId ||
+              stored.connectionGeneration !== admittedGeneration ||
+              stored.providerModelId !== input.providerModelId)
+          ) {
+            throw new Error("Stored Ollama model resolution authority changed");
+          }
+          if (stored?.status === "applied" || stored?.status === "failed") {
+            return { journal: stored };
+          }
+          const lease = await this.host.credentials.lease(
             {
               accountId: input.accountId,
               connectionId: input.connectionId,
@@ -1836,26 +1946,70 @@ export class OllamaCloudUserBackendContribution {
             },
             storage,
           );
+          const journal: StoredModelResolution = stored ?? {
+            schemaVersion: 1,
+            effectId: input.effectId,
+            accountId: input.accountId,
+            connectionId: input.connectionId,
+            connectionGeneration: admittedGeneration,
+            providerModelId: input.providerModelId,
+            retryPolicy: "safe-metadata-read",
+            status: "pending",
+          };
+          if (!stored) await storage.put(resolutionKey, journal);
+          return { journal, lease };
         },
       );
-      try {
-        const apiKey = await this.host.credentials.openLease({
-          accountId: input.accountId,
-          packageId: PACKAGE_ID,
-          lease: discoveryLease,
-        });
-        resolvedModel = await this.client.resolveModel(
-          apiKey,
-          input.providerModelId,
-        );
-      } finally {
-        await this.host.credentials.settle({
-          accountId: input.accountId,
-          connectionId: input.connectionId,
-          packageId: PACKAGE_ID,
-          effectId: discoveryEffectId,
+      let journal = resolution.journal;
+      if (journal.status === "pending") {
+        if (!resolution.lease) {
+          throw new Error("Ollama model resolution lease is unavailable");
+        }
+        let outcome: StoredModelResolution;
+        try {
+          const apiKey = await this.host.credentials.openLease({
+            accountId: input.accountId,
+            packageId: PACKAGE_ID,
+            lease: resolution.lease,
+          });
+          const model = await this.client.resolveModel(
+            apiKey,
+            input.providerModelId,
+          );
+          outcome = { ...journal, status: "applied", model };
+        } catch (error) {
+          outcome = {
+            ...journal,
+            status: "failed",
+            failure: (error instanceof Error && error.message
+              ? error.message
+              : "Ollama Cloud model resolution failed"
+            ).slice(0, 500),
+          };
+        }
+        journal = await this.host.storage.transaction(async (storage) => {
+          const storedValue = await storage.get<unknown>(resolutionKey);
+          if (storedValue === undefined) {
+            throw new Error("Ollama model resolution journal is unavailable");
+          }
+          const stored = decodeStoredModelResolution(storedValue);
+          if (stored.status === "pending") {
+            await storage.put(resolutionKey, outcome);
+            return outcome;
+          }
+          return stored;
         });
       }
+      await this.host.credentials.settle({
+        accountId: input.accountId,
+        connectionId: input.connectionId,
+        packageId: PACKAGE_ID,
+        effectId: discoveryEffectId,
+      });
+      if (journal.status === "failed") {
+        throw new Error(journal.failure);
+      }
+      resolvedModel = journal.model;
     }
 
     return this.host.storage.transaction(
@@ -1883,7 +2037,7 @@ export class OllamaCloudUserBackendContribution {
             storage,
           );
         }
-        return this.host.credentials.lease(
+        const lease = await this.host.credentials.lease(
           {
             accountId: input.accountId,
             connectionId: input.connectionId,
@@ -1894,6 +2048,8 @@ export class OllamaCloudUserBackendContribution {
           },
           storage,
         );
+        if (!known) await storage.delete(resolutionKey);
+        return lease;
       },
     );
   }
@@ -1940,6 +2096,7 @@ export class OllamaCloudUserBackendContribution {
         effectId,
       });
     }
+    await this.host.storage.delete(modelResolutionKey(input.effectId));
   }
 
   async alarm(): Promise<void> {

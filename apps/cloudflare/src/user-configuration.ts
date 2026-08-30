@@ -1,32 +1,21 @@
 import { DurableObject } from "cloudflare:workers";
 import {
-  compileFoundationApplication,
-  createFoundationBackendContributions,
-} from "@frockbot/application-foundation/runtime";
-import { decodeConnectionCommandV1 } from "@frockbot/connection-core";
+  createFoundationUserBackendContributions,
+  type FoundationConnectionUserBackendContribution,
+  type MountedFoundationUserBackend,
+} from "@frockbot/application-foundation/user";
+import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
+import {
+  decodeConnectionCommandIdV1,
+  decodeConnectionCommandV1,
+} from "@frockbot/connection-core";
 import {
   decodeConnectionDependencyRequirementV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
   type ConnectionDependencyRequirementV1,
 } from "@frockbot/configuration-core";
-import {
-  createCredentialUserBackendPlugin,
-  type CredentialUserBackendContribution,
-} from "@frockbot/plugin-credentials/user";
-import {
-  createFlockUserBackendPlugin,
-  type FlockUserBackendContribution,
-} from "@frockbot/plugin-flock/user";
 import { decodeCreateBotCommandV1 } from "@frockbot/plugin-flock/shared";
-import {
-  createOllamaCloudUserBackendPlugin,
-  type OllamaCloudUserBackendContribution,
-} from "@frockbot/plugin-provider-ollama-cloud/user";
-import {
-  createUserSettingsBackendPlugin,
-  type UserSettingsBackendContribution,
-} from "@frockbot/plugin-settings/user";
 import {
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -39,248 +28,30 @@ interface UserConfigurationEnv {
   CREDENTIAL_KEYRING?: string;
 }
 
-interface ConnectionUserBackendContribution {
-  readonly packageId: string;
-  executeConnection(accountId: string, input: unknown): Promise<unknown>;
-  lookupConnectionCommand(
-    accountId: string,
-    commandId: string,
-  ): Promise<unknown>;
-  leaseModelCredential(input: {
-    accountId: string;
-    connectionId: string;
-    providerModelId: string;
-    effectId: string;
-    connectionGeneration: string;
-  }): Promise<unknown>;
-  settleModelCredential(input: {
-    accountId: string;
-    connectionId: string;
-    effectId: string;
-  }): Promise<void>;
-  alarm?(): Promise<void>;
-}
-
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
-  private mounted:
-    | Promise<{
-        settings: UserSettingsBackendContribution;
-        credentials: CredentialUserBackendContribution;
-        connections: ReadonlyMap<string, ConnectionUserBackendContribution>;
-        flock: FlockUserBackendContribution;
-        dispose(): Promise<void>;
-      }>
-    | undefined;
+  private mounted: Promise<MountedFoundationUserBackend> | undefined;
 
-  private contributions(): Promise<{
-    settings: UserSettingsBackendContribution;
-    credentials: CredentialUserBackendContribution;
-    connections: ReadonlyMap<string, ConnectionUserBackendContribution>;
-    flock: FlockUserBackendContribution;
-    dispose(): Promise<void>;
-  }> {
+  private contributions(): Promise<MountedFoundationUserBackend> {
     if (!this.mounted) {
-      this.mounted = compileFoundationApplication().then(async (plan) => {
-        let settings: UserSettingsBackendContribution | undefined;
-        let credentials: CredentialUserBackendContribution | undefined;
-        let ollama: OllamaCloudUserBackendContribution | undefined;
-        let flock: FlockUserBackendContribution | undefined;
-        const connections = new Map<
-          string,
-          ConnectionUserBackendContribution
-        >();
-        const mounted = await createFoundationBackendContributions<
-          | UserSettingsBackendContribution
-          | CredentialUserBackendContribution
-          | OllamaCloudUserBackendContribution
-          | FlockUserBackendContribution
-        >(plan, {
-          backendHost: "user",
-          resolve: (specifier, lifecycle) => {
-            if (specifier === "@frockbot/plugin-settings/user") {
-              return createUserSettingsBackendPlugin(
-                {
-                  storage: this.ctx.storage,
-                  availablePackages: plan.packages.map((pkg) => ({
-                    packageId: pkg.id,
-                    version: pkg.version,
-                  })),
-                },
-                {
-                  mount(value: UserSettingsBackendContribution) {
-                    settings = value;
-                    return lifecycle.mount(value);
-                  },
-                },
-              );
-            }
-            if (specifier === "@frockbot/plugin-credentials/user") {
-              const keyring = this.env.CREDENTIAL_KEYRING;
-              if (!keyring) {
-                throw new Error(
-                  "Credential Store Contribution is not configured",
-                );
-              }
-              return createCredentialUserBackendPlugin(
-                { storage: this.ctx.storage, keyring },
-                {
-                  mount(value: CredentialUserBackendContribution) {
-                    credentials = value;
-                    return lifecycle.mount(value);
-                  },
-                },
-              );
-            }
-            if (specifier === "@frockbot/plugin-provider-ollama-cloud/user") {
-              if (!settings || !credentials) {
-                throw new Error(
-                  "Ollama Cloud requires Settings and Credential Contributions",
-                );
-              }
-              return createOllamaCloudUserBackendPlugin(
-                {
-                  storage: this.ctx.storage,
-                  settings,
-                  credentials,
-                },
-                {
-                  mount(value: OllamaCloudUserBackendContribution) {
-                    ollama = value;
-                    connections.set(value.packageId, value);
-                    const dispose = lifecycle.mount(value);
-                    return () => {
-                      connections.delete(value.packageId);
-                      dispose();
-                    };
-                  },
-                },
-              );
-            }
-            if (specifier === "@frockbot/plugin-flock/user") {
-              return createFlockUserBackendPlugin(
-                {
-                  storage: this.ctx.storage,
-                  readUserSettings: (storage) => {
-                    if (!settings) {
-                      throw new Error(
-                        "User settings Contribution is unavailable",
-                      );
-                    }
-                    return settings.readSnapshot(storage);
-                  },
-                  claimInitialModelBinding: async (storage, input) => {
-                    if (!settings) {
-                      throw new Error(
-                        "User settings Contribution is unavailable",
-                      );
-                    }
-                    const user = await settings.readSnapshot(storage);
-                    const connection = user.connections.find(
-                      (candidate) =>
-                        candidate.connectionId === input.model.connectionId,
-                    );
-                    const installation = user.packages.find(
-                      (candidate) =>
-                        candidate.packageId === connection?.packageId &&
-                        candidate.state === "installed",
-                    );
-                    const pkg = plan.packages.find(
-                      (candidate) =>
-                        candidate.id === connection?.packageId &&
-                        candidate.version === installation?.version,
-                    );
-                    const connectionType =
-                      pkg?.manifest.configuration?.connectionTypes.find(
-                        (candidate) =>
-                          candidate.id === connection?.connectionTypeId,
-                      );
-                    const capability =
-                      pkg?.manifest.configuration?.capabilities.find(
-                        (candidate) =>
-                          candidate.kind === "model" &&
-                          connectionType?.capabilities.includes(candidate.id) &&
-                          candidate.connectionTypes.includes(connectionType.id),
-                      );
-                    if (
-                      connection?.state !== "ready" ||
-                      !installation ||
-                      !pkg ||
-                      !connectionType ||
-                      !capability
-                    ) {
-                      return undefined;
-                    }
-                    const claimed = await settings.claimConnectionDependency(
-                      input.userId,
-                      connection.connectionId,
-                      input.botId,
-                      input.generation,
-                      {
-                        schemaVersion: 1,
-                        packageId: pkg.id,
-                        packageVersion: pkg.version,
-                        capabilityId: capability.id,
-                        connectionTypeIds: [...capability.connectionTypes],
-                      },
-                      storage,
-                    );
-                    return claimed
-                      ? {
-                          assignmentId: input.generation,
-                          packageId: pkg.id,
-                          capabilityId: capability.id,
-                          connectionId: connection.connectionId,
-                          state: "enabled" as const,
-                        }
-                      : undefined;
-                  },
-                },
-                {
-                  mount(value: FlockUserBackendContribution) {
-                    flock = value;
-                    return lifecycle.mount(value);
-                  },
-                },
-              );
-            }
-            throw new Error(`Unsupported User Contribution: ${specifier}`);
-          },
-        });
-        if (
-          !settings ||
-          !credentials ||
-          !ollama ||
-          !flock ||
-          mounted.contributions.length !== 4
-        ) {
-          await mounted.dispose();
-          throw new Error(
-            "Foundation requires Settings, Credentials, Ollama, and Flock User Contributions",
-          );
-        }
-        return {
-          settings,
-          credentials,
-          connections,
-          flock,
-          dispose: mounted.dispose,
-        };
-      });
+      this.mounted = compileFoundationApplication().then((plan) =>
+        createFoundationUserBackendContributions(plan, {
+          storage: this.ctx.storage,
+          readSecret: () => this.env.CREDENTIAL_KEYRING,
+        }),
+      );
     }
     return this.mounted;
   }
 
-  private async settingsContribution(): Promise<UserSettingsBackendContribution> {
+  private async settingsContribution(): Promise<
+    MountedFoundationUserBackend["settings"]
+  > {
     return (await this.contributions()).settings;
-  }
-
-  private async credentialContribution(): Promise<CredentialUserBackendContribution> {
-    return (await this.contributions()).credentials;
   }
 
   private async connectionContribution(
     packageId: string,
-  ): Promise<ConnectionUserBackendContribution> {
+  ): Promise<FoundationConnectionUserBackendContribution> {
     const contribution = (await this.contributions()).connections.get(
       packageId,
     );
@@ -290,15 +61,17 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return contribution;
   }
 
-  private async flockContribution(): Promise<FlockUserBackendContribution> {
+  private async flockContribution(): Promise<
+    MountedFoundationUserBackend["flock"]
+  > {
     return (await this.contributions()).flock;
   }
 
   private async contributionForRetainedCommand(
     accountId: string,
     commandId: string,
-  ): Promise<ConnectionUserBackendContribution | undefined> {
-    const matches: ConnectionUserBackendContribution[] = [];
+  ): Promise<FoundationConnectionUserBackendContribution | undefined> {
+    const matches: FoundationConnectionUserBackendContribution[] = [];
     for (const contribution of (
       await this.contributions()
     ).connections.values()) {
@@ -359,7 +132,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       await this.connectionContribution(request.packageId as string)
     ).lookupConnectionCommand(
       request.userId as string,
-      request.commandId as string,
+      decodeConnectionCommandIdV1(request.commandId),
     );
   }
 

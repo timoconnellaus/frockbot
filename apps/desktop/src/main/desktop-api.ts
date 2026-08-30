@@ -297,7 +297,7 @@ function connectionCommandRoute(path: string): boolean {
   return (
     parameters.size === 2 &&
     isPublicIdentifier(parameters.get("packageId")) &&
-    isRpcIdentifier(parameters.get("commandId"))
+    isPublicIdentifier(parameters.get("commandId"))
   );
 }
 

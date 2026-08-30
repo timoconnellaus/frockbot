@@ -866,6 +866,32 @@ describe("Cloudflare user application gateway", () => {
       connectionId: "connection-test",
       status: "applied",
     });
+    expect(
+      (
+        await gateway(
+          request("/api/connections", "alice", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              schemaVersion: 1,
+              type: "connection/refresh-models",
+              commandId: "lost response",
+              connectionId: "connection-test",
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await gateway(
+          request(
+            "/api/connection-commands?packageId=provider-ollama-cloud&commandId=lost%20response",
+            "alice",
+          ),
+        )
+      ).status,
+    ).toBe(400);
   });
 
   test("rejects malformed Connection receipts from the User Durable Object", async () => {

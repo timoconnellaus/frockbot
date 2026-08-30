@@ -34,6 +34,7 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
+import { modelRuntimeLabel } from "./model-presentation.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";
 
@@ -773,14 +774,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       packageInstalled &&
       capabilityAssigned,
     );
-    web.value.modelLabel =
-      connection?.providerType === "ollama-cloud"
-        ? "Ollama Cloud · Dynamic Worker"
-        : connection
-          ? `${connection.displayName} · Dynamic Worker`
-          : model
-            ? "Connected model · Dynamic Worker"
-            : "Model not configured · Dynamic Worker";
+    web.value.modelLabel = modelRuntimeLabel({
+      packageDisplayName: catalogPackage?.displayName,
+      connectionDisplayName: connection?.displayName,
+      hasModel: Boolean(model),
+    });
   }
 
   const web = ref<FrockBotWebData>({

@@ -132,9 +132,10 @@ interface ModelRuntimeContributionConfig {
   fetch?: typeof fetch;
 }
 
-type ModelRuntimeContributionFactory = (
-  config: ModelRuntimeContributionConfig,
-) => Plugin;
+interface ModelRuntimeContributionFactory {
+  providerType: string;
+  create(config: ModelRuntimeContributionConfig): Plugin;
+}
 
 const modelRuntimeContributionFactories = new Map<
   string,
@@ -142,11 +143,14 @@ const modelRuntimeContributionFactories = new Map<
 >([
   [
     "@frockbot/plugin-provider-ollama-cloud/runtime",
-    (config) =>
-      createOllamaCloudRuntimePlugin({
-        ...config,
-        packageId: "provider-ollama-cloud",
-      } as Parameters<typeof createOllamaCloudRuntimePlugin>[0]),
+    {
+      providerType: "ollama-cloud",
+      create: (config) =>
+        createOllamaCloudRuntimePlugin({
+          ...config,
+          packageId: "provider-ollama-cloud",
+        } as Parameters<typeof createOllamaCloudRuntimePlugin>[0]),
+    },
   ],
 ]);
 
@@ -397,7 +401,7 @@ export function createFoundationModelRuntimePackage(
   }
   const specifier = contributionSpecifier(pkg.specifier, runtime.entry);
   const factory = modelRuntimeContributionFactories.get(specifier);
-  if (!factory) {
+  if (!factory || factory.providerType !== binding.providerType) {
     throw new Error(
       `Bot model provider "${binding.providerType}" is unavailable`,
     );
@@ -406,7 +410,7 @@ export function createFoundationModelRuntimePackage(
     specifier: pkg.specifier,
     contributionSpecifier: specifier,
     manifest: pkg.manifest,
-    plugin: factory({
+    plugin: factory.create({
       ...host,
       connectionId: binding.connection.connectionId,
     }),

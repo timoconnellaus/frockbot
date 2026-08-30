@@ -130,6 +130,35 @@ describe("foundation application", () => {
       specifier: "@frockbot/plugin-provider-ollama-cloud",
       contributionSpecifier: "@frockbot/plugin-provider-ollama-cloud/runtime",
     });
+    expect(() =>
+      createFoundationModelRuntimePackage(
+        plan,
+        {
+          assignment: {
+            connectionId: "ollama-work",
+            providerModelId: "glm-5.3-flash:cloud",
+          },
+          state: "ready",
+          packageId: "provider-ollama-cloud",
+          providerType: "foundation",
+          connection: {
+            connectionId: "ollama-work",
+            packageId: "provider-ollama-cloud",
+            connectionTypeId: "ollama-cloud-account",
+            displayName: "Work",
+            state: "ready",
+            providerType: "foundation",
+            safeMetadata: {},
+          },
+        },
+        {
+          accountId: "account-1",
+          connectionId: "ollama-work",
+          leaseCredential: () => Promise.reject(new Error("not executed")),
+          settleCredential: () => Promise.resolve(),
+        },
+      ),
+    ).toThrow('Bot model provider "foundation" is unavailable');
   });
 
   test("exposes only compiled runtime packages to the runtime host", async () => {

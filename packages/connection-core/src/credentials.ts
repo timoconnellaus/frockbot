@@ -193,7 +193,10 @@ function decodeKeyring(input: string): CredentialKeyringV1 {
   }
   const entries = Object.entries(value.keys as Record<string, unknown>);
   if (entries.length === 0) throw new Error("credential keyring is empty");
-  const keys: Record<string, string> = {};
+  const keys: Record<string, string> = Object.create(null) as Record<
+    string,
+    string
+  >;
   for (const [keyId, encoded] of entries) {
     if (!keyId || typeof encoded !== "string") {
       throw new Error("credential keyring is invalid");
@@ -204,7 +207,7 @@ function decodeKeyring(input: string): CredentialKeyringV1 {
     }
     keys[keyId] = encoded;
   }
-  if (!keys[value.currentKeyId]) {
+  if (!Object.hasOwn(keys, value.currentKeyId)) {
     throw new Error("credential keyring current key is unavailable");
   }
   return {

@@ -119,6 +119,15 @@ function exact(
   }
 }
 
+const CONNECTION_COMMAND_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
+export function decodeConnectionCommandIdV1(value: unknown): string {
+  if (typeof value !== "string" || !CONNECTION_COMMAND_ID_PATTERN.test(value)) {
+    throw new Error("commandId is invalid");
+  }
+  return value;
+}
+
 function text(value: unknown, label: string, maximum: number): string {
   if (
     typeof value !== "string" ||
@@ -139,7 +148,7 @@ function common(value: Record<string, unknown>): {
   }
   return {
     schemaVersion: 1,
-    commandId: text(value.commandId, "commandId", 128),
+    commandId: decodeConnectionCommandIdV1(value.commandId),
   };
 }
 
@@ -306,7 +315,7 @@ export function decodeConnectionCommandReceiptV1(
   }
   return {
     schemaVersion: 1,
-    commandId: text(value.commandId, "commandId", 128),
+    commandId: decodeConnectionCommandIdV1(value.commandId),
     connectionId: text(value.connectionId, "connectionId", 128),
     status: value.status as ConnectionCommandReceiptV1["status"],
   };

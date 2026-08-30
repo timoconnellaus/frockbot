@@ -1,4 +1,5 @@
 import {
+  decodeConnectionCommandIdV1,
   decodeConnectionCommandReceiptV1,
   decodeConnectionCommandV1,
 } from "@frockbot/connection-core";
@@ -172,19 +173,19 @@ export function createGateway(dependencies: GatewayDependencies) {
         queryFields.some(
           (field) => field !== "packageId" && field !== "commandId",
         ) ||
-        !isPublicIdentifier(packageId) ||
-        !isPublicIdentifier(commandId)
+        !isPublicIdentifier(packageId)
       ) {
         return jsonError(400, "invalid Connection command lookup");
       }
       try {
+        const decodedCommandId = decodeConnectionCommandIdV1(commandId);
         const receipt = await dependencies
           .userConfigurationFor(userId)
           .lookupConnectionCommand({
             schemaVersion: 1,
             userId,
             packageId,
-            commandId,
+            commandId: decodedCommandId,
           });
         return Response.json(
           receipt === undefined

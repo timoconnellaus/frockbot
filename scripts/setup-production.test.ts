@@ -222,6 +222,7 @@ describe("production setup", () => {
     for (const invalidKeyring of [
       "not-json",
       '{"schemaVersion":1,"currentKeyId":"missing","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
+      '{"schemaVersion":1,"currentKeyId":"toString","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
       '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"c2hvcnQ"}}',
     ]) {
       const invalidConfiguration = Bun.spawnSync(
