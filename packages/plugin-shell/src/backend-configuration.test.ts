@@ -14,6 +14,7 @@ import type { BotResidentExecution } from "./backend-execution.js";
 const testExecution: BotResidentExecution = {
   project: () => Promise.resolve(),
   execute: () => Promise.reject(new Error("unexpected resident execution")),
+  cancel: () => Promise.resolve(false),
   generation: () => 0,
 };
 const createShellBotBackendContribution = (

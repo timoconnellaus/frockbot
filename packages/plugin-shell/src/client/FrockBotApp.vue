@@ -179,7 +179,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             v-if="isRunning"
             type="button"
             class="stop-button"
-            @click="web.abort()"
+            @click="web.stopRun()"
           >
             Stop
           </button>

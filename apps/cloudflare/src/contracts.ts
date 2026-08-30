@@ -29,6 +29,8 @@ import type {
   ClientRunLookupV1,
   ClientRunListQueryV1,
   ClientRunListV1,
+  ClientRunStopCommandV1,
+  ClientRunStopReceiptV1,
   ClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
 
@@ -106,6 +108,10 @@ export interface BotStateBinding {
   listNotifications(botId: string): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
   reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;
+  stopRun(
+    botId: string,
+    command: ClientRunStopCommandV1,
+  ): Promise<ClientRunStopReceiptV1>;
 }
 
 export interface MemoryBinding {
@@ -165,6 +171,11 @@ export interface UserBotStateBinding {
     botId: string;
     runId: string;
   }): Promise<BotTurnResult>;
+  stopRun(input: {
+    schemaVersion: 1;
+    botId: string;
+    command: ClientRunStopCommandV1;
+  }): Promise<ClientRunStopReceiptV1>;
 }
 
 export interface UserApplicationEnv {

@@ -24,7 +24,7 @@ export async function completeStoredRun(
   runId: string,
   previous: readonly SessionEvent[],
   result: BotTurnCompletion,
-): Promise<void> {
+): Promise<"completed" | "cancelled"> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
   const stored = await storage.get<StoredRun>(keys.run);
@@ -32,6 +32,21 @@ export async function completeStoredRun(
   const run = requireStoredRunV1(stored);
   const events = result.events.map(decodeSessionEvent);
   const latestEvents = [...previous, ...events].map(decodeSessionEvent);
+  if (run.stopRequestedAt) {
+    const { responseText: _text, failure: _failure, ...settled } = run;
+    const cancelled = requireStoredRunV1({
+      ...settled,
+      events,
+      status: "cancelled",
+      phase: settled.phase === "reconciling" ? "executing" : settled.phase,
+    } satisfies StoredRun);
+    await storage.put({
+      [keys.run]: structuredClone(cancelled),
+      [keys.latestEvents]: structuredClone(latestEvents),
+    });
+    await storage.delete(keys.activeRun);
+    return "cancelled";
+  }
   const completed = requireStoredRunV1({
     ...run,
     events,
@@ -48,6 +63,7 @@ export async function completeStoredRun(
   }
   await storage.put(records);
   await storage.delete(keys.activeRun);
+  return "completed";
 }
 
 export async function failStoredRun(
@@ -57,11 +73,21 @@ export async function failStoredRun(
   previous: readonly SessionEvent[],
   events: readonly SessionEvent[],
   failure: string,
-): Promise<"failed" | "preserved-completion" | "missing"> {
+): Promise<"failed" | "cancelled" | "preserved-completion" | "missing"> {
   const stored = await storage.get<StoredRun>(keys.run);
   if (!stored) return "missing";
   const run = requireStoredRunV1(stored);
   if (run.status === "completed") return "preserved-completion";
+  if (run.stopRequestedAt) {
+    const cancelled = await cancelStoredRun(
+      storage,
+      keys,
+      runId,
+      previous,
+      events,
+    );
+    return cancelled;
+  }
   const decodedEvents = events.map(decodeSessionEvent);
   const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
   const failed = requireStoredRunV1({
@@ -78,6 +104,43 @@ export async function failStoredRun(
     await storage.delete(keys.activeRun);
   }
   return "failed";
+}
+
+/**
+ * Settles a stopped run as terminal `cancelled` and clears its active marker.
+ * A cancelled run produces no response text, no failure, and no notification.
+ */
+export async function cancelStoredRun(
+  storage: RunTerminalStorage,
+  keys: RunTerminalKeys,
+  runId: string,
+  previous: readonly SessionEvent[],
+  events: readonly SessionEvent[],
+): Promise<"cancelled" | "preserved-completion" | "missing"> {
+  const stored = await storage.get<StoredRun>(keys.run);
+  if (!stored) return "missing";
+  const run = requireStoredRunV1(stored);
+  if (run.status === "completed") return "preserved-completion";
+  if (!run.stopRequestedAt) {
+    throw new Error(`run "${runId}" has no durable stop intent`);
+  }
+  const decodedEvents = events.map(decodeSessionEvent);
+  const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
+  const { responseText: _text, failure: _failure, ...settled } = run;
+  const cancelled = requireStoredRunV1({
+    ...settled,
+    events: decodedEvents,
+    status: "cancelled",
+    phase: settled.phase === "reconciling" ? "executing" : settled.phase,
+  } satisfies StoredRun);
+  await storage.put({
+    [keys.run]: structuredClone(cancelled),
+    [keys.latestEvents]: structuredClone(latestEvents),
+  });
+  if ((await storage.get<string>(keys.activeRun)) === runId) {
+    await storage.delete(keys.activeRun);
+  }
+  return "cancelled";
 }
 
 export async function requireStoredRunReconciliation(
@@ -99,7 +162,7 @@ export async function requireStoredRunReconciliation(
     ...run,
     events: decodedEvents,
     status: "reconciliation-required",
-    phase: "reconciliation-required",
+    phase: "reconciling",
     failure,
   } satisfies StoredRun);
   await storage.put({

@@ -334,6 +334,9 @@ export class Session {
       if (event.type === "model/request") {
         unresolvedModelRequests.add(event.request.requestId);
       }
+      if (event.type === "model/effect-not-started") {
+        unresolvedModelRequests.delete(event.requestId);
+      }
       if (event.type === "assistant/message") {
         unresolvedModelRequests.delete(event.requestId);
         if (openStep?.turn === event.turn && openStep.step === event.step) {
@@ -343,19 +346,21 @@ export class Session {
     }
 
     const repairs: SessionEventInput[] = [];
-    for (const entry of journal.values()) {
-      if (!entry.intent || entry.result) continue;
-      const event = entry.intent;
-      repairs.push({
-        type: "tool/result",
-        turn: event.turn,
-        step: event.step,
-        occurrenceId: event.occurrenceId,
-        name: event.name,
-        content: "Interrupted before a durable result was recorded.",
-        isError: true,
-        status: "interrupted",
-      });
+    if (closeTurn) {
+      for (const entry of journal.values()) {
+        if (!entry.intent || entry.result) continue;
+        const event = entry.intent;
+        repairs.push({
+          type: "tool/result",
+          turn: event.turn,
+          step: event.step,
+          occurrenceId: event.occurrenceId,
+          name: event.name,
+          content: "Interrupted before a durable result was recorded.",
+          isError: true,
+          status: "interrupted",
+        });
+      }
     }
     if (
       openStep &&

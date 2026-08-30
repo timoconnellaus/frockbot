@@ -18,16 +18,21 @@ import type {
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import {
+  createClientRunStopReceiptV1,
   decodeClientRunLookupV1,
   decodeClientRunListV1,
+  decodeClientRunStopReceiptV1,
   decodeClientTurnV1,
   projectClientRunLookupV1,
   projectClientRunListV1,
+  projectClientRunV1,
   projectClientTurnV1,
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
+  type ClientRunStopCommandV1,
+  type ClientRunStopReceiptV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import type {
   BotNotificationIntent,
@@ -102,6 +107,7 @@ class MemoryBotState implements BotStateBinding {
       acceptedAt: command.acceptedAt,
       input: command.text,
       events: [],
+      effectAdmissions: [],
       status: "running",
       phase: "admitted",
       configurationSnapshot: {
@@ -124,6 +130,8 @@ class MemoryBotState implements BotStateBinding {
           command,
           previousEvents,
           persistSessionEvents: () => Promise.resolve(),
+          beforeStart: () => Promise.resolve(true),
+          admitEffect: () => Promise.resolve(true),
         },
       );
       run.events = structuredClone(result.events);
@@ -194,6 +202,27 @@ class MemoryBotState implements BotStateBinding {
     return Promise.resolve();
   }
 
+  stopRun(
+    botId: string,
+    command: ClientRunStopCommandV1,
+  ): Promise<ClientRunStopReceiptV1> {
+    const run = (this.runs.get(botId) ?? []).find(
+      (candidate) => candidate.runId === command.runId,
+    );
+    if (!run) {
+      return Promise.reject(
+        new Error(`run "${command.runId}" was not admitted`),
+      );
+    }
+    run.stopRequestedAt = run.stopRequestedAt ?? new Date().toISOString();
+    return Promise.resolve(
+      createClientRunStopReceiptV1(
+        command,
+        projectClientRunV1(structuredClone(run)),
+      ),
+    );
+  }
+
   reconcileRun(botId: string, runId: string): Promise<BotTurnResult> {
     const run = (this.runs.get(botId) ?? []).find(
       (candidate) => candidate.runId === runId,
@@ -223,6 +252,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
+    stopRun: ({ botId, command }) => state.stopRun(botId, command),
   };
 }
 
@@ -956,6 +986,75 @@ describe("Cloudflare user application gateway", () => {
       run: { runId: "lookup-turn-1", status: "completed" },
     });
     expect(states.get("alice")?.storedRuns("primary")).toHaveLength(1);
+  });
+
+  test("routes an authenticated Stop to the owning Bot and back", async () => {
+    const { gateway, states } = createTestGateway();
+    await gateway(
+      request("/api/bots/primary/turns", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          text: "hello",
+          commandId: "stop-turn-1",
+        }),
+      }),
+    );
+
+    const stop = (userId: string, body: unknown) =>
+      gateway(
+        request("/api/bots/primary/turns/stop-turn-1/stop", userId, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const accepted = await stop("alice", {
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-command-1",
+      runId: "stop-turn-1",
+    });
+    expect(accepted.status).toBe(200);
+    expect(decodeClientRunStopReceiptV1(await accepted.json())).toMatchObject({
+      commandId: "stop-command-1",
+      runId: "stop-turn-1",
+    });
+    expect(
+      states.get("alice")?.storedRuns("primary")[0]?.stopRequestedAt,
+    ).toBeString();
+
+    // Another authenticated user reaches only their own isolated Bot state.
+    const isolated = await stop("bob", {
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-command-1",
+      runId: "stop-turn-1",
+    });
+    expect(isolated.status).toBe(409);
+    expect((await isolated.json()) as { error: string }).toEqual({
+      error: 'run "stop-turn-1" was not admitted',
+    });
+
+    for (const invalid of [
+      { schemaVersion: 1, action: "stop", commandId: "stop-command-2" },
+      {
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop-command-2",
+        runId: "other-run",
+      },
+      {
+        schemaVersion: 2,
+        action: "stop",
+        commandId: "stop-command-2",
+        runId: "stop-turn-1",
+      },
+    ]) {
+      expect((await stop("alice", invalid)).status).toBe(400);
+    }
   });
 
   test("returns only the versioned client run wire contract", async () => {

@@ -14,8 +14,10 @@ import {
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
   decodeClientRunReconciliationCommandV1,
+  decodeClientRunStopCommandV1,
   decodeClientTurnCommandV1,
   type ClientRunLookupQueryV1,
+  type ClientRunStopCommandV1,
   type ClientTurnCommandV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import type { UserApplicationEnv } from "./contracts.js";
@@ -230,14 +232,23 @@ export function createUserApplication() {
     const fenceMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/fence$/,
     );
-    if (!turnMatch && !lookupMatch && !reconcileMatch && !fenceMatch) {
+    const stopMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/stop$/,
+    );
+    if (
+      !turnMatch &&
+      !lookupMatch &&
+      !reconcileMatch &&
+      !fenceMatch &&
+      !stopMatch
+    ) {
       return jsonError(404, "not found");
     }
     let botId: string;
     try {
-      botId = decodeURIComponent(
-        (turnMatch ?? lookupMatch ?? reconcileMatch ?? fenceMatch)![1],
-      );
+      const matched =
+        turnMatch ?? lookupMatch ?? reconcileMatch ?? fenceMatch ?? stopMatch;
+      botId = decodeURIComponent(matched![1]);
     } catch {
       return jsonError(400, "invalid bot id");
     }
@@ -314,6 +325,35 @@ export function createUserApplication() {
         return jsonError(
           500,
           error instanceof Error ? error.message : "admission fence failed",
+        );
+      }
+    }
+
+    if (stopMatch) {
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let command: ClientRunStopCommandV1;
+      try {
+        const body: unknown = await request.json();
+        command = decodeClientRunStopCommandV1(body);
+        if (command.runId !== decodeURIComponent(stopMatch[2])) {
+          throw new Error("run stop command does not match the request path");
+        }
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid stop command",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.stopRun({ schemaVersion: 1, botId, command }),
+        );
+      } catch (error) {
+        return jsonError(
+          409,
+          error instanceof Error ? error.message : "Stop failed",
         );
       }
     }

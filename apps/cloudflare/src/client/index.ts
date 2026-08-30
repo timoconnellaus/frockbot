@@ -22,6 +22,7 @@ import {
 import {
   decodeClientRunListV1,
   decodeClientRunLookupV1,
+  decodeClientRunStopReceiptV1,
   decodeClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
 
@@ -274,6 +275,21 @@ const application = new ClientApplication({
       ),
     );
     return lookup.state === "not-admitted" ? undefined : lookup.run;
+  },
+  async stopRun(botId: string, runId: string, commandId: string) {
+    const receipt = decodeClientRunStopReceiptV1(
+      await apiRequest(
+        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/stop`,
+        "POST",
+        JSON.stringify({
+          schemaVersion: 1,
+          action: "stop",
+          commandId,
+          runId,
+        }),
+      ),
+    );
+    return receipt.run;
   },
   async reconcileRun(botId: string, runId: string) {
     return decodeClientTurnV1(

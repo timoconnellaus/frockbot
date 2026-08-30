@@ -6,6 +6,7 @@ import {
 } from "@frockbot/application-foundation/runtime";
 import {
   AgentRegistry,
+  type AgentEffectAdmission,
   type AgentHandle,
   type AgentOptions,
   LlmRegistry,
@@ -70,10 +71,20 @@ export interface FoundationResidentProjection {
 export interface FoundationResidentExecution {
   botId: string;
   sessionId: string;
+  runId: string;
   previousEvents: readonly SessionEvent[];
   persistSessionEvents: PersistSessionEvents;
+  beforeStart(): Promise<boolean>;
+  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   resume?: boolean;
   text: string;
+}
+
+/** Narrow cancellation request bound to one exact resident run. */
+export interface FoundationResidentCancellation {
+  sessionId: string;
+  runId: string;
+  reason?: "user" | "shutdown";
 }
 
 export interface FoundationResidentRuntime {
@@ -81,6 +92,11 @@ export interface FoundationResidentRuntime {
   readonly generation: number | undefined;
   project(projection: FoundationResidentProjection): Promise<void>;
   execute(execution: FoundationResidentExecution): Promise<AgentHandle>;
+  /**
+   * Cancels the resident Agent only while it executes that exact session and
+   * run, so a late Stop can never reach a different run.
+   */
+  cancel(cancellation: FoundationResidentCancellation): boolean;
   dispose(): Promise<void>;
 }
 
@@ -95,6 +111,8 @@ export interface FoundationRuntimeOptions {
   memory?: MemoryPluginConfig;
   persistSessionEvents?: PersistSessionEvents;
   systemPromptSection?: string;
+  /** Explicit effect adapter for the standalone development/test runtime. */
+  admitEffect: AgentOptions["admitEffect"];
 }
 
 async function mountFoundationRuntimeServices(
@@ -180,7 +198,10 @@ export async function createFoundationResidentRuntime(
   let dynamicFibers: Fiber[] = [];
   let agent: AgentHandle | undefined;
   let sessionId: string | undefined;
+  let activeRunId: string | undefined;
   let activePersist: PersistSessionEvents | undefined;
+  let activeEffectAdmission:
+    FoundationResidentExecution["admitEffect"] | undefined;
   let disposed = false;
   let projectionQueue: Promise<void> = Promise.resolve();
 
@@ -270,9 +291,11 @@ export async function createFoundationResidentRuntime(
           );
         }
         activePersist = execution.persistSessionEvents;
+        activeEffectAdmission = execution.admitEffect;
       } else {
         sessionId = execution.sessionId;
         activePersist = execution.persistSessionEvents;
+        activeEffectAdmission = execution.admitEffect;
         const sessionStore = root.sessions as SessionStore & {
           prepare(
             sessionId: string,
@@ -296,12 +319,20 @@ export async function createFoundationResidentRuntime(
             sessionId: execution.sessionId,
             provider: FOUNDATION_PROVIDER,
             model: FOUNDATION_MODEL,
+            admitEffect: (effect) => {
+              const admit = activeEffectAdmission;
+              return admit ? admit(effect) : Promise.resolve(false);
+            },
           });
         } finally {
           cancelPreparation();
         }
       }
+      activeRunId = execution.runId;
       try {
+        if (!(await execution.beforeStart())) {
+          throw new Error("resident Bot execution was durably fenced");
+        }
         if (execution.resume) agent.agent.resume();
         else agent.agent.send(execution.text);
         await agent.agent.whenIdle();
@@ -309,7 +340,21 @@ export async function createFoundationResidentRuntime(
         return agent;
       } finally {
         activePersist = undefined;
+        activeEffectAdmission = undefined;
+        activeRunId = undefined;
       }
+    },
+    cancel(cancellation) {
+      if (
+        disposed ||
+        !agent ||
+        sessionId !== cancellation.sessionId ||
+        activeRunId !== cancellation.runId
+      ) {
+        return false;
+      }
+      agent.agent.cancel(cancellation.reason ?? "user");
+      return true;
     },
     async dispose() {
       if (disposed) return;
@@ -324,8 +369,8 @@ export async function createFoundationResidentRuntime(
 }
 
 export async function createFoundationRuntime(
-  modelConfig?: RuntimeModelConfig,
-  options: FoundationRuntimeOptions = {},
+  modelConfig: RuntimeModelConfig | undefined,
+  options: FoundationRuntimeOptions,
 ): Promise<FoundationRuntime> {
   const sessionId = options.sessionId?.trim() || "barebones";
   const application =
@@ -414,6 +459,7 @@ export async function createFoundationRuntime(
     sessionId,
     provider,
     model,
+    admitEffect: options.admitEffect,
   };
   const agent = await root.agents.create(agentOptions);
   return {

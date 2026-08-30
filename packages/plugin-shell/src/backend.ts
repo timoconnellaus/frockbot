@@ -1,4 +1,10 @@
-import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
+import {
+  type AgentEffectAdmission,
+  decodeSessionEvent,
+  type PersistSessionEvents,
+  type SessionEvent,
+  validateToolOccurrenceJournal,
+} from "@frockbot/agent-core";
 import type { Plugin } from "cordis";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
@@ -24,6 +30,7 @@ import {
   type StoredAssignmentSaga,
 } from "./backend-assignment.js";
 import {
+  cancelStoredRun,
   completeStoredRun,
   failStoredRun,
   requireStoredRunReconciliation,
@@ -33,29 +40,35 @@ import {
   eventsForFailedRun,
   latestModelRequestJournalState,
   planBotRunRecovery,
+  planStoppedRunRecovery,
 } from "./backend-recovery.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
   clientRunListWireBytes,
   createClientRunListV1,
+  createClientRunStopReceiptV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
+  decodeClientRunStopCommandV1,
   projectClientRunLookupV1,
   projectClientRunV1,
   projectClientTurnV1,
   type ClientRunLookupV1,
   type ClientRunListV1,
+  type ClientRunStopReceiptV1,
   type ClientRunV1,
   type ClientTurnV1,
 } from "./run-protocol.js";
 import {
+  botStopCommandFingerprintV1,
   botTurnCommandFingerprintV1,
   requireStoredRunV1,
   type BotNotificationIntent,
   type BotTurnCommand,
   type BotTurnCompletion,
   type StoredRun,
+  type StoredRunStatus,
 } from "./backend-contracts.js";
 
 const RUN_PREFIX = "run:";
@@ -72,6 +85,7 @@ const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
 const ASSIGNMENT_TOMBSTONE_PREFIX = "assignment-tombstone:";
 const ASSIGNMENT_SAGA_PREFIX = "assignment-saga:";
 const NOTIFICATION_PREFIX = "notification:";
+const STOP_RECEIPT_PREFIX = "stop-receipt:";
 const RECOVERY_ALARM_DELAY_MS = 60_000;
 const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
 
@@ -87,6 +101,21 @@ interface BotIdentity {
 interface StoredConfigurationReceipt {
   commandFingerprint: string;
   receipt: OperationReceiptV1;
+}
+
+/** Durable idempotency receipt for one exact Stop command. */
+interface StoredStopReceipt {
+  schemaVersion: 1;
+  commandFingerprint: string;
+  commandId: string;
+  runId: string;
+  stopRequestedAt: string;
+}
+
+function isTerminalStoredRunStatus(status: StoredRunStatus): boolean {
+  return (
+    status === "completed" || status === "failed" || status === "cancelled"
+  );
 }
 
 export interface StoredRuntimeProjection {
@@ -854,6 +883,79 @@ export class ShellBotBackendContribution {
     );
   }
 
+  /**
+   * Durably records Stop intent and an idempotency receipt before signalling
+   * the resident Agent. The acknowledged projection reports the run's current
+   * durable state and never claims terminal cancellation.
+   */
+  async stopRun(
+    identity: BotIdentity,
+    input: unknown,
+  ): Promise<ClientRunStopReceiptV1> {
+    const command = decodeClientRunStopCommandV1(input);
+    await this.validateIdentity(identity);
+    const commandFingerprint = botStopCommandFingerprintV1({
+      userId: identity.userId,
+      botId: identity.botId,
+      commandId: command.commandId,
+      runId: command.runId,
+    });
+    const key = `${RUN_PREFIX}${command.runId}`;
+    const receiptKey = `${STOP_RECEIPT_PREFIX}${command.commandId}`;
+    const admitted = await this.ctx.storage.transaction(async (transaction) => {
+      const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
+      if (
+        durableIdentity &&
+        (durableIdentity.userId !== identity.userId ||
+          durableIdentity.botId !== identity.botId)
+      ) {
+        throw new Error("Bot authority does not match its durable identity");
+      }
+      const existing = await transaction.get<StoredStopReceipt>(receiptKey);
+      if (existing && existing.commandFingerprint !== commandFingerprint) {
+        throw new Error(
+          `Stop idempotency key "${command.commandId}" was reused for a different command`,
+        );
+      }
+      const run = optionalStoredRun(await transaction.get<unknown>(key));
+      if (!run) throw new Error(`run "${command.runId}" was not admitted`);
+      if (existing) return run;
+      if (
+        isTerminalStoredRunStatus(run.status) ||
+        run.events.some((event) => event.type === "turn/end")
+      ) {
+        throw new Error(`run "${command.runId}" is already terminal`);
+      }
+      const stopRequestedAt = run.stopRequestedAt ?? new Date().toISOString();
+      const stopped = requireStoredRunV1({
+        ...run,
+        stopRequestedAt,
+      } satisfies StoredRun);
+      await transaction.put({
+        [key]: structuredClone(stopped),
+        [receiptKey]: {
+          schemaVersion: 1,
+          commandFingerprint,
+          commandId: command.commandId,
+          runId: command.runId,
+          stopRequestedAt,
+        } satisfies StoredStopReceipt,
+      });
+      await this.refreshRecoveryAlarm(transaction);
+      return stopped;
+    });
+    // The Agent signal is advisory and always follows the durable intent.
+    await this.execution.cancel({
+      botId: identity.botId,
+      sessionId: admitted.sessionId,
+      runId: command.runId,
+      reason: "user",
+    });
+    const current =
+      optionalStoredRun(await this.ctx.storage.get<unknown>(key)) ?? admitted;
+    return createClientRunStopReceiptV1(command, projectClientRunV1(current));
+  }
+
   async reconcileRun(
     identity: BotIdentity,
     runId: string,
@@ -874,12 +976,8 @@ export class ShellBotBackendContribution {
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
       const settings = run.configurationSnapshot;
-      await transaction.put(key, {
-        ...run,
-        status: "running",
-        phase: "executing",
-        failure: undefined,
-      } satisfies StoredRun);
+      // Retrieval is itself reconciliation. Keep that durable state visible
+      // until the original effect is settled or remains explicitly unresolved.
       await this.refreshRecoveryAlarm(transaction);
       return { run, latest, settings };
     });
@@ -917,8 +1015,17 @@ export class ShellBotBackendContribution {
         botId: command.botId,
         command,
         previousEvents: previous,
-        persistSessionEvents: (_sessionId, events) =>
-          this.persistRunEvents(command.runId, events),
+        persistSessionEvents: async (_sessionId, events) => {
+          await this.persistRunEvents(command.runId, events);
+        },
+        beforeStart: () => this.activateAdmittedRun(command.runId, previous),
+        admitEffect: (effect) =>
+          this.admitRunEffect(
+            { userId: command.userId, botId: command.botId },
+            command.runId,
+            command.sessionId,
+            effect,
+          ),
       });
       const completed = settings.notifications.enabled
         ? {
@@ -926,16 +1033,26 @@ export class ShellBotBackendContribution {
             notification: this.createNotification(settings, result),
           }
         : result;
-      await this.completeRun(command.runId, previous, completed);
+      const settlement = await this.completeRun(
+        command.runId,
+        previous,
+        completed,
+      );
+      if (settlement === "cancelled") throw new Error("Bot turn was cancelled");
       return completed;
     } catch (error) {
       if (error instanceof BotRuntimeProjectionError) throw error;
+      const message =
+        error instanceof Error ? error.message : "Bot turn failed";
+      const stoppedSettlement = await this.settleStoppedRunFailure(
+        command.runId,
+        message,
+      );
+      if (stoppedSettlement !== "not-stopped") throw new Error(message);
       const durableRun = optionalStoredRun(
         await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
       );
       const events = eventsForFailedRun(durableRun, error);
-      const message =
-        error instanceof Error ? error.message : "Bot turn failed";
       const modelState = latestModelRequestJournalState(events);
       if (
         error instanceof BotTurnReconciliationRequiredError ||
@@ -980,8 +1097,10 @@ export class ShellBotBackendContribution {
           text: run.input,
         },
         previousEvents: latest,
-        persistSessionEvents: (_sessionId, events) =>
-          this.persistRunEvents(run.runId, events),
+        persistSessionEvents: this.runPersistence(run, identity),
+        beforeStart: () => this.activateReconciliationRun(run.runId),
+        admitEffect: (effect) =>
+          this.admitRunEffect(identity, run.runId, run.sessionId, effect),
         resume: true,
       });
       const durableRun = optionalStoredRun(
@@ -992,22 +1111,33 @@ export class ShellBotBackendContribution {
         ...result,
         events: durableRun.events,
       } satisfies BotTurnCompletion;
+      if (durableRun.stopRequestedAt) {
+        // The reconciled outcome is journaled; a stopped run never completes.
+        await this.cancelRun(run.runId, previous, durableRun.events);
+        return { ...fullResult, text: "" };
+      }
       const completed = settings.notifications.enabled
         ? {
             ...fullResult,
             notification: this.createNotification(settings, fullResult),
           }
         : fullResult;
-      await this.completeRun(run.runId, previous, completed);
+      const settlement = await this.completeRun(run.runId, previous, completed);
+      if (settlement === "cancelled") throw new Error("Bot turn was cancelled");
       return completed;
     } catch (error) {
       if (error instanceof BotRuntimeProjectionError) throw error;
+      const message =
+        error instanceof Error ? error.message : "Bot turn failed";
+      const stoppedSettlement = await this.settleStoppedRunFailure(
+        run.runId,
+        message,
+      );
+      if (stoppedSettlement !== "not-stopped") throw new Error(message);
       const durableRun = optionalStoredRun(
         await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
       );
       const events = durableRun?.events ?? run.events;
-      const message =
-        error instanceof Error ? error.message : "Bot turn failed";
       const modelState = latestModelRequestJournalState(events);
       if (
         error instanceof BotTurnReconciliationRequiredError ||
@@ -1682,6 +1812,7 @@ export class ShellBotBackendContribution {
         acceptedAt: command.acceptedAt,
         input: command.text,
         events: [],
+        effectAdmissions: [],
         status: "running",
         phase: "admitted",
         configurationSnapshot: structuredClone(admittedSettings),
@@ -1701,16 +1832,182 @@ export class ShellBotBackendContribution {
     });
   }
 
+  /**
+   * Fences initial Agent activation after the exact resident run is
+   * addressable. This closes the projection/activation window where Stop can
+   * be durable before an Agent exists to receive its advisory signal.
+   */
+  private async activateAdmittedRun(
+    runId: string,
+    previous: SessionEvent[],
+  ): Promise<boolean> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = `${RUN_PREFIX}${runId}`;
+      const run = optionalStoredRun(await transaction.get<unknown>(key));
+      const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
+      if (!run || activeRunId !== runId || run.status !== "running") {
+        return false;
+      }
+      if (!run.stopRequestedAt) {
+        await transaction.put(key, {
+          ...run,
+          phase: "executing",
+        } satisfies StoredRun);
+        return true;
+      }
+      await cancelStoredRun(
+        transaction,
+        {
+          run: key,
+          activeRun: ACTIVE_RUN_KEY,
+          latestEvents: LATEST_EVENTS_KEY,
+          notificationPrefix: NOTIFICATION_PREFIX,
+        },
+        runId,
+        previous,
+        run.events,
+      );
+      await this.refreshRecoveryAlarm(transaction);
+      return false;
+    });
+  }
+
+  private async activateReconciliationRun(runId: string): Promise<boolean> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const [activeRunId, run] = await Promise.all([
+        transaction.get<string>(ACTIVE_RUN_KEY),
+        transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
+      ]);
+      const stored = optionalStoredRun(run);
+      return (
+        activeRunId === runId &&
+        stored?.status === "reconciliation-required" &&
+        stored.phase === "reconciling"
+      );
+    });
+  }
+
+  /**
+   * Linearizes one new external effect against durable Stop. The Agent has
+   * already journaled intent; this transaction atomically persists the exact
+   * admitted/fenced outcome used before the provider/tool invocation.
+   */
+  private async admitRunEffect(
+    identity: BotIdentity,
+    runId: string,
+    sessionId: string,
+    effect: AgentEffectAdmission,
+  ): Promise<boolean> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const [activeRunId, durableIdentity, candidate] = await Promise.all([
+        transaction.get<string>(ACTIVE_RUN_KEY),
+        transaction.get<BotIdentity>(IDENTITY_KEY),
+        transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
+      ]);
+      const run = optionalStoredRun(candidate);
+      if (
+        activeRunId !== runId ||
+        !run ||
+        run.sessionId !== sessionId ||
+        durableIdentity?.userId !== identity.userId ||
+        durableIdentity.botId !== identity.botId ||
+        !(
+          (run.status === "running" && run.phase === "executing") ||
+          (run.status === "reconciliation-required" &&
+            run.phase === "reconciling")
+        )
+      ) {
+        return false;
+      }
+      const prior = run.effectAdmissions.find(
+        (admission) => admission.effectId === effect.effectId,
+      );
+      if (prior) {
+        if (prior.kind !== effect.kind) {
+          throw new Error(
+            `effect admission "${effect.effectId}" collides with ${prior.kind}`,
+          );
+        }
+        return prior.outcome === "admitted";
+      }
+      let matchesIntent = false;
+      if (effect.kind === "model") {
+        const model = latestModelRequestJournalState(run.events);
+        matchesIntent =
+          model.status === "unresolved" &&
+          model.request.request.requestId === effect.effectId;
+      } else {
+        try {
+          const tool = validateToolOccurrenceJournal(run.events).get(
+            effect.effectId,
+          );
+          matchesIntent = Boolean(tool?.intent && !tool.result);
+        } catch {
+          matchesIntent = false;
+        }
+      }
+      if (!matchesIntent) {
+        throw new Error(
+          `effect admission "${effect.effectId}" does not match durable intent`,
+        );
+      }
+      const outcome = run.stopRequestedAt ? "fenced" : "admitted";
+      const next = requireStoredRunV1({
+        ...run,
+        effectAdmissions: [
+          ...run.effectAdmissions,
+          { kind: effect.kind, effectId: effect.effectId, outcome },
+        ],
+      } satisfies StoredRun);
+      await transaction.put(`${RUN_PREFIX}${runId}`, structuredClone(next));
+      return outcome === "admitted";
+    });
+  }
+
+  /**
+   * Persists a run's journal. A run carrying Stop intent is cancelled as soon
+   * as its uncertain model effect is durably resolved, so reconciliation
+   * journals the original outcome and no further effect is started.
+   */
+  private runPersistence(
+    run: StoredRun,
+    identity: BotIdentity,
+  ): PersistSessionEvents {
+    if (!run.stopRequestedAt) {
+      return async (_sessionId, events) => {
+        await this.persistRunEvents(run.runId, events);
+      };
+    }
+    let signalled = false;
+    return async (_sessionId, events) => {
+      const journal = await this.persistRunEvents(run.runId, events);
+      if (
+        signalled ||
+        !journal ||
+        latestModelRequestJournalState(journal).status === "unresolved"
+      ) {
+        return;
+      }
+      signalled = true;
+      await this.execution.cancel({
+        botId: identity.botId,
+        sessionId: run.sessionId,
+        runId: run.runId,
+        reason: "user",
+      });
+    };
+  }
+
   private async persistRunEvents(
     runId: string,
     events: readonly SessionEvent[],
-  ): Promise<void> {
+  ): Promise<SessionEvent[] | undefined> {
     const durableEvents = events
       .filter((event) => event.type !== "session/disposed")
       .map(decodeSessionEvent);
-    if (durableEvents.length === 0) return;
+    if (durableEvents.length === 0) return undefined;
     const key = `${RUN_PREFIX}${runId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
+    return this.ctx.storage.transaction(async (transaction) => {
       const run = optionalStoredRun(await transaction.get<unknown>(key));
       if (!run) throw new Error(`run "${runId}" was not accepted`);
       const latest = (
@@ -1731,6 +2028,7 @@ export class ShellBotBackendContribution {
         [key]: structuredClone(next),
         [LATEST_EVENTS_KEY]: structuredClone([...latest, ...durableEvents]),
       });
+      return next.events;
     });
   }
 
@@ -1738,10 +2036,10 @@ export class ShellBotBackendContribution {
     runId: string,
     previous: SessionEvent[],
     result: BotTurnCompletion,
-  ): Promise<void> {
+  ): Promise<"completed" | "cancelled"> {
     const key = `${RUN_PREFIX}${runId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
-      await completeStoredRun(
+    return this.ctx.storage.transaction(async (transaction) => {
+      const settlement = await completeStoredRun(
         transaction,
         {
           run: key,
@@ -1754,6 +2052,7 @@ export class ShellBotBackendContribution {
         result,
       );
       await this.refreshRecoveryAlarm(transaction);
+      return settlement;
     });
   }
 
@@ -1777,6 +2076,78 @@ export class ShellBotBackendContribution {
         previous,
         events,
         failure,
+      );
+      await this.refreshRecoveryAlarm(transaction);
+    });
+  }
+
+  /**
+   * Settles a failed stopped run from one exact durable snapshot. This keeps
+   * pre-admission journal repair, terminal cancellation, and conservative
+   * reconciliation in the same transaction as the Stop classification.
+   */
+  private async settleStoppedRunFailure(
+    runId: string,
+    failure: string,
+  ): Promise<"not-stopped" | "cancelled" | "reconciliation-required"> {
+    const key = `${RUN_PREFIX}${runId}`;
+    return this.ctx.storage.transaction(async (transaction) => {
+      const run = optionalStoredRun(await transaction.get<unknown>(key));
+      if (!run?.stopRequestedAt) return "not-stopped";
+      const latest = (
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
+      ).map(decodeSessionEvent);
+      const stopRecovery = planStoppedRunRecovery(run, latest);
+      const keys = {
+        run: key,
+        activeRun: ACTIVE_RUN_KEY,
+        latestEvents: LATEST_EVENTS_KEY,
+        notificationPrefix: NOTIFICATION_PREFIX,
+      };
+      if (stopRecovery.kind === "cancel") {
+        await cancelStoredRun(
+          transaction,
+          keys,
+          runId,
+          latest.slice(0, run.previousEventCount),
+          stopRecovery.events,
+        );
+        await this.refreshRecoveryAlarm(transaction);
+        return "cancelled";
+      }
+      const modelState = latestModelRequestJournalState(run.events);
+      await requireStoredRunReconciliation(
+        transaction,
+        keys,
+        runId,
+        latest.slice(0, run.previousEventCount),
+        run.events,
+        modelState.status === "unresolved"
+          ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
+          : failure,
+      );
+      await this.refreshRecoveryAlarm(transaction);
+      return "reconciliation-required";
+    });
+  }
+
+  private async cancelRun(
+    runId: string,
+    previous: SessionEvent[],
+    events: SessionEvent[],
+  ): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      await cancelStoredRun(
+        transaction,
+        {
+          run: `${RUN_PREFIX}${runId}`,
+          activeRun: ACTIVE_RUN_KEY,
+          latestEvents: LATEST_EVENTS_KEY,
+          notificationPrefix: NOTIFICATION_PREFIX,
+        },
+        runId,
+        previous,
+        events,
       );
       await this.refreshRecoveryAlarm(transaction);
     });
@@ -1828,6 +2199,25 @@ export class ShellBotBackendContribution {
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
       const plan = planBotRunRecovery(run, latest);
+      if (run.stopRequestedAt) {
+        const stopRecovery = planStoppedRunRecovery(run, latest);
+        if (stopRecovery.kind === "cancel") {
+          await cancelStoredRun(
+            transaction,
+            {
+              run: key,
+              activeRun: ACTIVE_RUN_KEY,
+              latestEvents: LATEST_EVENTS_KEY,
+              notificationPrefix: NOTIFICATION_PREFIX,
+            },
+            run.runId,
+            latest.slice(0, run.previousEventCount),
+            stopRecovery.events,
+          );
+          await this.refreshRecoveryAlarm(transaction);
+          return undefined;
+        }
+      }
       if (plan.kind === "complete") {
         const result = {
           runId: run.runId,
@@ -1907,7 +2297,7 @@ export class ShellBotBackendContribution {
           ...run,
           events: [...run.events, ...plan.repairs],
           status: "reconciliation-required",
-          phase: "reconciliation-required",
+          phase: "reconciling",
           failure:
             "Execution outcome requires reconciliation before it can resume",
         } satisfies StoredRun,

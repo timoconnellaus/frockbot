@@ -109,6 +109,7 @@ describe("resident Bot runtime projection", () => {
           : Promise.resolve();
       },
       execute: () => Promise.reject(new Error("must not execute")),
+      cancel: () => Promise.resolve(false),
       generation: () => undefined,
     };
     const contribution = createShellBotBackendContribution(
@@ -150,6 +151,7 @@ describe("resident Bot runtime projection", () => {
       acceptedAt: turn.acceptedAt,
       input: turn.text,
       events: [],
+      effectAdmissions: [],
       status: "running",
       phase: "admitted",
       configurationSnapshot: settings,
@@ -181,6 +183,7 @@ describe("resident Bot runtime projection", () => {
         executions += 1;
         return Promise.reject(new Error("fixture execution ended"));
       },
+      cancel: () => Promise.resolve(false),
       generation: () => (projectionAttempts > 1 ? 0 : undefined),
     };
     const contribution = createShellBotBackendContribution(
@@ -230,6 +233,7 @@ describe("resident Bot runtime projection", () => {
         return Promise.resolve();
       },
       execute: () => executing,
+      cancel: () => Promise.resolve(false),
       generation: () => projected.at(-1),
     };
     const contribution = createShellBotBackendContribution(

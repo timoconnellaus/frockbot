@@ -62,6 +62,7 @@ describe("echo plugin", () => {
       botId: "echo-bot",
       agentId: "echo-agent",
       sessionId: "session",
+      effectId: "tool:1:1:0",
       signal: controller.signal,
     });
     if (preparation.kind !== "ready") throw new Error("echo tool was denied");
@@ -70,6 +71,7 @@ describe("echo plugin", () => {
         botId: "echo-bot",
         agentId: "echo-agent",
         sessionId: "session",
+        effectId: "tool:1:1:0",
         signal: controller.signal,
       }),
     ).toEqual({ content: "hello plugins", isError: false });

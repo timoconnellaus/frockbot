@@ -38,8 +38,10 @@ import {
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
+  decodeClientRunStopCommandV1,
   type ClientRunListQueryV1,
   type ClientRunLookupQueryV1,
+  type ClientRunStopCommandV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import {
   decodeBotRunRpcV1,
@@ -145,6 +147,16 @@ export class BotState extends DurableObject<BotStateEnv> {
               throw new Error("resident Bot runtime projection is unavailable");
             }
             return executeResidentBotTurn(runtime, input);
+          },
+          cancel: async (cancellation) => {
+            const runtime = await this.residentRuntime?.catch(() => undefined);
+            return (
+              runtime?.cancel({
+                sessionId: cancellation.sessionId,
+                runId: cancellation.runId,
+                reason: cancellation.reason,
+              }) ?? false
+            );
           },
           generation: () => this.residentGeneration,
         };
@@ -336,6 +348,20 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId,
       ...request.command,
     });
+  }
+
+  async stopRun(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeClientRunStopCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.stopRun(identity, request.command as ClientRunStopCommandV1);
   }
 
   async reconcileRun(input: unknown) {

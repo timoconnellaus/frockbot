@@ -21,6 +21,7 @@ async function execute(
     botId: "bot-1",
     agentId: "run-9",
     sessionId: "session-1",
+    effectId: "tool:1:1:0",
     signal: new AbortController().signal,
   };
   const prepared = await harness.root.tools.prepare(

@@ -60,7 +60,9 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
     return {
       runId: run.runId,
       status: run.status,
-      message: "This Turn is still running in the backend.",
+      message: run.stopRequestedAt
+        ? "Stop accepted; waiting for durable settlement."
+        : "This Turn is still running in the backend.",
       canResume: false,
     };
   }
@@ -68,14 +70,23 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
     return {
       runId: run.runId,
       status: run.status,
-      message:
-        run.recovery?.message ??
-        run.failure ??
-        "This Turn requires provider reconciliation before it can continue.",
-      canResume: run.recovery?.action === "resume",
+      message: run.stopRequestedAt
+        ? "Stop accepted; reconciling the provider outcome before cancelling."
+        : (run.recovery?.message ??
+          run.failure ??
+          "This Turn requires provider reconciliation before it can continue."),
+      canResume: !run.stopRequestedAt && run.recovery?.action === "resume",
     };
   }
   return undefined;
+}
+
+function isTerminalRun(run: ClientRun): boolean {
+  return (
+    run.status === "completed" ||
+    run.status === "failed" ||
+    run.status === "cancelled"
+  );
 }
 
 function assistantMessage(
@@ -102,6 +113,16 @@ function assistantMessage(
         run.failure ??
         "Provider reconciliation is required before this Turn can continue.",
       status: "reconciliation-required",
+      tools: toolsFrom(run.events),
+    };
+  }
+  if (run.status === "cancelled") {
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text: run.failure ?? "Stopped by an authenticated Stop command.",
+      status: "aborted",
       tools: toolsFrom(run.events),
     };
   }
@@ -152,10 +173,7 @@ export function projectDurableRuns(
     else state.messages.push(assistant);
 
     activeRun = activeRunView(run) ?? activeRun;
-    if (
-      notification &&
-      (run.status === "completed" || run.status === "failed")
-    ) {
+    if (notification && isTerminalRun(run)) {
       projected.add(notification.notificationId);
     }
   }
@@ -169,9 +187,7 @@ export function projectDurableRuns(
     state.activeRun = activeRun;
   } else {
     const terminalRunIds = new Set(
-      runs
-        .filter((run) => run.status === "completed" || run.status === "failed")
-        .map((run) => run.runId),
+      runs.filter(isTerminalRun).map((run) => run.runId),
     );
     if (state.activeRunId && terminalRunIds.has(state.activeRunId)) {
       state.activeRunId = undefined;
@@ -191,7 +207,7 @@ export function projectCompletedRuns(
   return projectDurableRuns(
     { messages },
     notifications,
-    runs.filter((run) => run.status === "completed" || run.status === "failed"),
+    runs.filter(isTerminalRun),
   );
 }
 
@@ -398,8 +414,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   const surfaces = createClientSurfaceRegistry();
   let activeRequest: AbortController | undefined;
   let admissionObserver: AbortController | undefined;
+  let runObserver: AbortController | undefined;
   let selectionGeneration = 0;
   const connectionOperations = readConnectionOperations();
+  const stopCommands = new Map<string, string>();
   const authorizationOperations = new Map<
     string,
     { nativeReturnNonce?: string }
@@ -480,9 +498,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           return "not-admitted";
         }
         projectDurableRuns(web.value, [], [run]);
-        if (run.status === "completed" || run.status === "failed") {
-          return "admitted";
-        }
+        if (isTerminalRun(run)) return "admitted";
       } catch (error) {
         if (signal.aborted) return "detached";
         reconciliationError = `${
@@ -496,6 +512,47 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       delayMs = Math.min(delayMs * 2, 5_000);
     }
     return "detached";
+  }
+
+  async function observeRunUntilTerminal(
+    botId: string,
+    runId: string,
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!ctx.transport.lookupRun) return;
+    let delayMs = 250;
+    let observationError: string | undefined;
+    while (!signal.aborted) {
+      try {
+        const run = await observeWhileAttached(
+          ctx.transport.lookupRun(botId, runId),
+          signal,
+        );
+        if (
+          signal.aborted ||
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        ) {
+          return;
+        }
+        if (!run) throw new Error("Stopped Turn is unavailable");
+        if (web.value.settingsError === observationError) {
+          web.value.settingsError = undefined;
+        }
+        observationError = undefined;
+        projectDurableRuns(web.value, [], [run]);
+        if (isTerminalRun(run)) return;
+      } catch (error) {
+        if (signal.aborted) return;
+        observationError = `${
+          error instanceof Error ? error.message : "Turn lookup failed"
+        } Retrying…`;
+        web.value.settingsError = observationError;
+      }
+      await waitForRunLookup(delayMs, signal);
+      delayMs = Math.min(delayMs * 2, 5_000);
+    }
   }
 
   async function deliverNotifications(
@@ -560,6 +617,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     async selectBot(botId: string): Promise<void> {
       activeRequest?.abort();
       admissionObserver?.abort();
+      runObserver?.abort();
       selectionGeneration += 1;
       web.value.activeBotId = botId;
       web.value.composerContext = botId;
@@ -964,6 +1022,51 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             : "Could not refresh the reconciled Turn";
       }
     },
+    async stopRun(): Promise<void> {
+      const botId = web.value.activeBotId;
+      const runId = web.value.activeRun?.runId ?? web.value.activeRunId;
+      if (!botId || !runId) return;
+      if (!ctx.transport.stopRun) {
+        web.value.settingsError = "Stop is unavailable";
+        return;
+      }
+      const generation = selectionGeneration;
+      // One durable command per observed run, so repeated Stops replay exactly.
+      const commandId = stopCommands.get(runId) ?? crypto.randomUUID();
+      stopCommands.set(runId, commandId);
+      try {
+        const run = await ctx.transport.stopRun(botId, runId, commandId);
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        projectDurableRuns(web.value, [], [run]);
+        if (!isTerminalRun(run) && ctx.transport.lookupRun) {
+          runObserver?.abort();
+          const observer = new AbortController();
+          runObserver = observer;
+          try {
+            await observeRunUntilTerminal(
+              botId,
+              runId,
+              generation,
+              observer.signal,
+            );
+          } finally {
+            if (runObserver === observer) runObserver = undefined;
+          }
+        }
+      } catch (error) {
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.settingsError =
+          error instanceof Error ? error.message : "Stop failed";
+      }
+    },
     async abort() {
       activeRequest?.abort();
     },
@@ -980,6 +1083,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     () => {
       activeRequest?.abort();
       admissionObserver?.abort();
+      runObserver?.abort();
     },
   ];
 };

@@ -3,10 +3,13 @@ import type { SessionEvent } from "@frockbot/agent-core";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
 import {
+  createClientRunStopReceiptV1,
   decodeClientNotificationAcknowledgementCommandV1,
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunReconciliationCommandV1,
+  decodeClientRunStopCommandV1,
+  decodeClientRunStopReceiptV1,
   decodeClientTurnCommandV1,
   decodeClientRunLookupV1,
   decodeClientTurnV1,
@@ -15,6 +18,7 @@ import {
   decodeClientRunListQueryV1,
   projectClientRunLookupV1,
   projectClientRunListV1,
+  projectClientRunV1,
   projectClientTurnV1,
 } from "./run-protocol.js";
 
@@ -62,12 +66,16 @@ function storedRun(
     acceptedAt: timestamp,
     input: "continue",
     events,
+    effectAdmissions: [],
     status,
-    phase: status === "reconciliation-required" ? status : "executing",
+    phase: status === "reconciliation-required" ? "reconciling" : "executing",
     configurationSnapshot: initializeBotSettingsV1("primary"),
     previousEventCount: 0,
     ...(status === "completed" ? { responseText: "done" } : {}),
     ...(status === "failed" ? { failure: "failed" } : {}),
+    ...(status === "cancelled"
+      ? { stopRequestedAt: "2026-08-28T00:00:05.000Z" }
+      : {}),
   };
 }
 
@@ -171,6 +179,119 @@ describe("client run protocol v1", () => {
         commandFingerprint: "private",
       }),
     ).toThrow("run lookup.commandFingerprint is not allowed");
+  });
+
+  test("strictly decodes exact Stop commands that target one run", () => {
+    expect(
+      decodeClientRunStopCommandV1({
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop-1",
+        runId: "run-1",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-1",
+      runId: "run-1",
+    });
+    for (const invalid of [
+      { schemaVersion: 2, action: "stop", commandId: "stop-1", runId: "run-1" },
+      {
+        schemaVersion: 1,
+        action: "cancel",
+        commandId: "stop-1",
+        runId: "run-1",
+      },
+      { schemaVersion: 1, action: "stop", commandId: "stop-1" },
+      { schemaVersion: 1, action: "stop", runId: "run-1" },
+      {
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop/1",
+        runId: "run-1",
+      },
+      {
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop-1",
+        runId: "run/1",
+      },
+      {
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop-1",
+        runId: "run-1",
+        reason: "user",
+      },
+    ]) {
+      expect(() => decodeClientRunStopCommandV1(invalid)).toThrow();
+    }
+  });
+
+  test("projects Stop intent and cancellation without claiming terminality", () => {
+    const command = decodeClientRunStopCommandV1({
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-1",
+      runId: "run-events",
+    });
+    const stopping = {
+      ...storedRun([], "running"),
+      stopRequestedAt: "2026-08-29T00:00:05.000Z",
+    } satisfies StoredRun;
+
+    const accepted = createClientRunStopReceiptV1(
+      command,
+      projectClientRunV1(stopping),
+    );
+    expect(accepted).toMatchObject({
+      schemaVersion: 1,
+      status: "accepted",
+      commandId: "stop-1",
+      runId: "run-events",
+      run: { status: "running", stopRequestedAt: "2026-08-29T00:00:05.000Z" },
+    });
+    expect(
+      decodeClientRunStopReceiptV1(structuredClone(accepted)).run,
+    ).toMatchObject({ status: "running" });
+
+    const cancelled = projectClientRunV1(storedRun([], "cancelled"));
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      stopRequestedAt: "2026-08-28T00:00:05.000Z",
+      outcome: {
+        type: "cancelled",
+        message: "Stopped by an authenticated Stop command.",
+      },
+    });
+    expect(projectClientRunLookupV1(storedRun([], "cancelled"))).toMatchObject({
+      state: "terminal",
+    });
+    expect(
+      decodeClientRunStopReceiptV1(
+        createClientRunStopReceiptV1(command, cancelled),
+      ).run,
+    ).toMatchObject({
+      status: "cancelled",
+      failure: "Stopped by an authenticated Stop command.",
+    });
+
+    expect(() =>
+      createClientRunStopReceiptV1(
+        command,
+        projectClientRunV1({ ...storedRun([], "running"), runId: "other-run" }),
+      ),
+    ).toThrow("run stop receipt does not match its command");
+    expect(() =>
+      decodeClientRunStopReceiptV1({ ...accepted, status: "cancelled" }),
+    ).toThrow("run stop receipt is invalid");
+    expect(() =>
+      decodeClientRunStopReceiptV1({
+        ...accepted,
+        run: { ...accepted.run, status: "cancelled" },
+      }),
+    ).toThrow();
   });
 
   test("strictly decodes run lookup queries", () => {
@@ -420,9 +541,10 @@ describe("client run protocol v1", () => {
           status: "completed",
         }),
       ],
+      effectAdmissions: [],
       status: "reconciliation-required",
       failure: "Provider confirmation required",
-      phase: "reconciliation-required",
+      phase: "reconciling",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 17,
     } satisfies StoredRun;
@@ -565,6 +687,7 @@ describe("client run protocol v1", () => {
       acceptedAt: timestamp,
       input: "🧪".repeat(8_000),
       events: toolEvents(300),
+      effectAdmissions: [],
       status: "failed",
       phase: "executing",
       configurationSnapshot: initializeBotSettingsV1("primary"),

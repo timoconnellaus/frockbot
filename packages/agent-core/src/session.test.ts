@@ -312,6 +312,45 @@ describe("SessionStore", () => {
     );
   });
 
+  test("preserves open tool intents for effect reconciliation on resume", async () => {
+    const root = await createStore();
+    const session = root.sessions.create("session-resume-tool");
+    session.appendBatch([
+      { type: "turn/start", turn: 1 },
+      { type: "input/admitted", messageId: "message-1", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "",
+        toolCalls: [{ id: "call-1", name: "write", input: { value: "x" } }],
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "write",
+        input: { value: "x" },
+      },
+    ]);
+
+    expect(session.reconcileForResume()).toEqual([]);
+    expect(
+      validateToolOccurrenceJournal(session.events).get("tool:1:1:0"),
+    ).toMatchObject({ intent: { occurrenceId: "tool:1:1:0" } });
+    expect(
+      session.events.some(
+        (event) =>
+          event.type === "tool/result" ||
+          event.type === "step/end" ||
+          event.type === "turn/end",
+      ),
+    ).toBe(false);
+  });
+
   test("reconciles unmatched tools, steps, and turns in order", async () => {
     const root = await createStore();
     const session = root.sessions.create("session-2");

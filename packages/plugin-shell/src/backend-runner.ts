@@ -1,7 +1,9 @@
-import type {
-  AgentHandle,
-  PersistSessionEvents,
-  SessionEvent,
+import {
+  type AgentEffectAdmission,
+  type AgentHandle,
+  type PersistSessionEvents,
+  type SessionEvent,
+  validateToolOccurrenceJournal,
 } from "@frockbot/agent-core";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 
@@ -46,6 +48,8 @@ export interface ExecuteBotTurnOptions {
   command: BotTurnCommand;
   previousEvents: readonly SessionEvent[];
   persistSessionEvents: PersistSessionEvents;
+  beforeStart(): Promise<boolean>;
+  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   resume?: boolean;
 }
 
@@ -53,8 +57,11 @@ export interface ResidentTurnRuntime {
   execute(input: {
     botId: string;
     sessionId: string;
+    runId: string;
     previousEvents: readonly SessionEvent[];
     persistSessionEvents: PersistSessionEvents;
+    beforeStart(): Promise<boolean>;
+    admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
     resume?: boolean;
     text: string;
   }): Promise<AgentHandle>;
@@ -64,15 +71,25 @@ export async function executeResidentBotTurn(
   runtime: ResidentTurnRuntime,
   options: ExecuteBotTurnOptions,
 ): Promise<BotTurnCompletion> {
-  const { botId, command, previousEvents, persistSessionEvents, resume } =
-    options;
+  const {
+    botId,
+    command,
+    previousEvents,
+    persistSessionEvents,
+    beforeStart,
+    admitEffect,
+    resume,
+  } = options;
   let handle: AgentHandle | undefined;
   try {
     handle = await runtime.execute({
       botId,
       sessionId: command.sessionId,
+      runId: command.runId,
       previousEvents,
       persistSessionEvents,
+      beforeStart,
+      admitEffect,
       resume,
       text: command.text,
     });
@@ -84,6 +101,15 @@ export async function executeResidentBotTurn(
       (event) => event.type === "turn/end" && event.turn === currentTurn,
     );
     if (!terminalTurn || terminalTurn.type !== "turn/end") {
+      const unresolvedTool = [
+        ...validateToolOccurrenceJournal(events).values(),
+      ].find((entry) => entry.intent && !entry.result);
+      if (unresolvedTool) {
+        throw new BotTurnReconciliationRequiredError(
+          `Tool effect "${unresolvedTool.occurrence.occurrenceId}" requires reconciliation`,
+          appendedSessionEvents(previousEvents, events),
+        );
+      }
       const reconciliation = events.findLast(
         (event) =>
           event.type === "model/reconciliation-required" &&

@@ -164,6 +164,7 @@ async function executeTool(
     botId: "alpha",
     agentId: "alpha",
     sessionId: "owner:alpha",
+    effectId: call.id,
     signal: new AbortController().signal,
   };
   const preparation = await harness.root.tools.prepare(call, context);

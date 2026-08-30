@@ -12,10 +12,13 @@ import {
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
+  decodeClientRunStopCommandV1,
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
+  type ClientRunStopCommandV1,
+  type ClientRunStopReceiptV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
@@ -84,6 +87,7 @@ interface BotStateRpc extends BotConfigurationBinding {
     identity: { userId: string; botId: string },
     runId: string,
   ): Promise<BotTurnResult>;
+  stopRun(command: ClientRunStopCommandV1): Promise<ClientRunStopReceiptV1>;
   markConnectionUnavailable(
     identity: { userId: string; botId: string },
     connectionId: string,
@@ -137,6 +141,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       }),
     reconcileRun: (identity, runId) =>
       rpc.reconcileRun({ schemaVersion: 1, ...identity, runId }),
+    stopRun: (command) =>
+      rpc.stopRun({ schemaVersion: 1, userId, botId, command }),
     markConnectionUnavailable: (identity, connectionId, compensation) =>
       rpc.markConnectionUnavailable({
         schemaVersion: 1,
@@ -266,6 +272,18 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).acknowledgeNotification(request.notificationId as string);
+  }
+
+  async stopRun(input: unknown): Promise<ClientRunStopReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      command: rpcDecoded(decodeClientRunStopCommandV1),
+    });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).stopRun(request.command as ClientRunStopCommandV1);
   }
 
   async reconcileRun(input: unknown): Promise<BotTurnResult> {

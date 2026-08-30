@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { ClientRun } from "@frockbot/client-core";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import {
   decodePluginCatalog,
@@ -491,6 +492,205 @@ describe("active durable Turn projection", () => {
       text: "Done",
       status: "completed",
     });
+  });
+});
+
+describe("hosted Stop", () => {
+  test("sends one durable command and projects accepted, reconciling, then cancelled", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const commands: {
+      botId: string;
+      runId: string;
+      commandId: string;
+    }[] = [];
+    const projections: ClientRun[] = [
+      {
+        runId: "run-1",
+        input: "Continue",
+        events: [],
+        status: "running",
+        stopRequestedAt: "2026-08-30T00:00:01.000Z",
+      },
+      {
+        runId: "run-1",
+        input: "Continue",
+        events: [],
+        status: "reconciliation-required",
+        stopRequestedAt: "2026-08-30T00:00:01.000Z",
+        recovery: { action: "resume", message: "Provider confirmation" },
+      },
+      {
+        runId: "run-1",
+        input: "Continue",
+        events: [],
+        status: "cancelled",
+        stopRequestedAt: "2026-08-30T00:00:01.000Z",
+        failure: "Stopped by an authenticated Stop command.",
+      },
+    ];
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: () =>
+          Promise.resolve(initializeBotSettingsV1("default")),
+        listRuns: () =>
+          Promise.resolve([
+            {
+              runId: "run-1",
+              input: "Continue",
+              events: [],
+              status: "running",
+            },
+          ]),
+        listNotifications: () => Promise.resolve([]),
+        stopRun: (botId, runId, commandId) => {
+          commands.push({ botId, runId, commandId });
+          return Promise.resolve(projections[commands.length - 1]);
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "default";
+    provided.value.composerContext = "default";
+    await provided.value.loadBotSettings();
+    expect(provided.value.activeRunId).toBe("run-1");
+
+    await provided.value.stopRun();
+    expect(provided.value.activeRun).toMatchObject({
+      runId: "run-1",
+      status: "running",
+      message: "Stop accepted; waiting for durable settlement.",
+      canResume: false,
+    });
+
+    await provided.value.stopRun();
+    expect(provided.value.activeRun).toMatchObject({
+      status: "reconciliation-required",
+      message:
+        "Stop accepted; reconciling the provider outcome before cancelling.",
+      canResume: false,
+    });
+
+    await provided.value.stopRun();
+    expect(provided.value.activeRun).toBeUndefined();
+    expect(provided.value.activeRunId).toBeUndefined();
+    expect(provided.value.messages[1]).toMatchObject({
+      text: "Stopped by an authenticated Stop command.",
+      status: "aborted",
+    });
+
+    // Repeated Stops replay exactly one durable command identifier.
+    expect(commands).toHaveLength(3);
+    expect(new Set(commands.map((command) => command.commandId)).size).toBe(1);
+    expect(commands[0]).toMatchObject({ botId: "default", runId: "run-1" });
+  });
+
+  test("observes an accepted Stop until the durable run is terminal", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    let lookups = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        stopRun: () =>
+          Promise.resolve({
+            runId: "run-1",
+            input: "Continue",
+            events: [],
+            status: "running",
+            stopRequestedAt: "2026-08-30T00:00:01.000Z",
+          }),
+        lookupRun: () => {
+          lookups += 1;
+          return Promise.resolve({
+            runId: "run-1",
+            input: "Continue",
+            events: [],
+            status: "cancelled",
+            stopRequestedAt: "2026-08-30T00:00:01.000Z",
+            failure: "Stopped by an authenticated Stop command.",
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "default";
+    provided.value.activeRunId = "run-1";
+    provided.value.activeRun = {
+      runId: "run-1",
+      status: "running",
+      message: "Running",
+      canResume: false,
+    };
+
+    await provided.value.stopRun();
+
+    expect(lookups).toBe(1);
+    expect(provided.value.activeRun).toBeUndefined();
+    expect(provided.value.activeRunId).toBeUndefined();
+    expect(provided.value.messages.at(-1)).toMatchObject({
+      runId: "run-1",
+      text: "Stopped by an authenticated Stop command.",
+      status: "aborted",
+    });
+  });
+
+  test("detaches without commanding the backend when switching Bots", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/" },
+        history: { replaceState: () => {} },
+      },
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    let stops = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: () =>
+          Promise.resolve(initializeBotSettingsV1("other")),
+        listRuns: () => Promise.resolve([]),
+        listNotifications: () => Promise.resolve([]),
+        stopRun: () => {
+          stops += 1;
+          return Promise.reject(new Error("must not command a Stop"));
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "default";
+    provided.value.activeRunId = "run-1";
+
+    await provided.value.abort();
+    await provided.value.selectBot("other");
+
+    expect(stops).toBe(0);
+    expect(provided.value.activeBotId).toBe("other");
+    expect(provided.value.activeRunId).toBeUndefined();
   });
 });
 

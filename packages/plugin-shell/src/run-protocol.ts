@@ -53,7 +53,9 @@ function decodeRunCursor(value: string): string {
 export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
 export type ClientRunStatusV1 =
-  "running" | "completed" | "failed" | "reconciliation-required";
+  "running" | "completed" | "failed" | "cancelled" | "reconciliation-required";
+
+const CANCELLED_RUN_MESSAGE = "Stopped by an authenticated Stop command.";
 
 export type ClientRunEventV1 =
   | {
@@ -72,7 +74,9 @@ export type ClientRunEventV1 =
     };
 
 export type ClientRunOutcomeV1 =
-  { type: "completed"; text: string } | { type: "failed"; message: string };
+  | { type: "completed"; text: string }
+  | { type: "failed"; message: string }
+  | { type: "cancelled"; message: string };
 
 export interface ClientRunRecoveryV1 {
   action: "resume";
@@ -86,6 +90,8 @@ export interface ClientRunV1 {
   input: string;
   status: ClientRunStatusV1;
   events: ClientRunEventV1[];
+  /** Durable Stop intent, projected independently of the run status. */
+  stopRequestedAt?: string;
   outcome?: ClientRunOutcomeV1;
   recovery?: ClientRunRecoveryV1;
 }
@@ -121,6 +127,26 @@ export interface ClientNotificationAcknowledgementCommandV1 {
 export interface ClientRunReconciliationCommandV1 {
   schemaVersion: 1;
   action: "resume";
+}
+
+/** Exact authenticated Stop command; one command targets exactly one run. */
+export interface ClientRunStopCommandV1 {
+  schemaVersion: 1;
+  action: "stop";
+  commandId: string;
+  runId: string;
+}
+
+/**
+ * Stop acknowledgement. `accepted` reports a durable receipt, never a claim of
+ * terminal cancellation; `run` carries the authoritative projection.
+ */
+export interface ClientRunStopReceiptV1 {
+  schemaVersion: 1;
+  status: "accepted";
+  commandId: string;
+  runId: string;
+  run: ClientRunV1;
 }
 
 export interface ClientRunLookupQueryV1 {
@@ -195,6 +221,12 @@ function publicEventId(value: string, label: string): string {
   return value;
 }
 
+function isTerminalRunStatus(status: ClientRunStatusV1): boolean {
+  return (
+    status === "completed" || status === "failed" || status === "cancelled"
+  );
+}
+
 type ClientToolCallV1 = Extract<ClientRunEventV1, { type: "tool/call" }>;
 type ClientToolResultV1 = Extract<ClientRunEventV1, { type: "tool/result" }>;
 
@@ -248,7 +280,7 @@ function toolInteractions(
       };
     }
   }
-  if (status === "completed" || status === "failed") {
+  if (isTerminalRunStatus(status)) {
     const orphaned = interactions.find((interaction) => !interaction.result);
     if (orphaned) {
       throw new Error(
@@ -343,7 +375,12 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
               MAX_FAILURE_BYTES,
             ),
           } satisfies ClientRunOutcomeV1)
-        : undefined;
+        : status === "cancelled"
+          ? ({
+              type: "cancelled",
+              message: CANCELLED_RUN_MESSAGE,
+            } satisfies ClientRunOutcomeV1)
+          : undefined;
   const recovery =
     status === "reconciliation-required"
       ? ({
@@ -362,6 +399,11 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     input: truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
     events: visibleEvents(run.events, status),
+    ...(run.stopRequestedAt
+      ? {
+          stopRequestedAt: truncate(run.stopRequestedAt, MAX_TIMESTAMP_LENGTH),
+        }
+      : {}),
     ...(outcome ? { outcome } : {}),
     ...(recovery ? { recovery } : {}),
   };
@@ -370,7 +412,9 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
 function lookupState(
   status: ClientRunStatusV1,
 ): Exclude<ClientRunLookupStateV1, "not-admitted"> {
-  if (status === "completed" || status === "failed") return "terminal";
+  if (status === "completed" || status === "failed" || status === "cancelled") {
+    return "terminal";
+  }
   if (status === "reconciliation-required") {
     return "reconciliation-required";
   }
@@ -483,6 +527,7 @@ function status(value: unknown): ClientRunStatusV1 {
     value !== "running" &&
     value !== "completed" &&
     value !== "failed" &&
+    value !== "cancelled" &&
     value !== "reconciliation-required"
   ) {
     throw new Error("run.status is invalid");
@@ -576,7 +621,7 @@ function decodeEvents(
       index += 2;
       continue;
     }
-    if (runStatus === "completed" || runStatus === "failed") {
+    if (isTerminalRunStatus(runStatus)) {
       throw new Error(`terminal run has no result for tool call "${id}"`);
     }
     index += 1;
@@ -589,7 +634,7 @@ function decodeOutcome(
   runStatus: ClientRunStatusV1,
 ): ClientRunOutcomeV1 | undefined {
   if (value === undefined) {
-    if (runStatus === "completed" || runStatus === "failed") {
+    if (isTerminalRunStatus(runStatus)) {
       throw new Error("terminal run.outcome is required");
     }
     return undefined;
@@ -606,6 +651,13 @@ function decodeOutcome(
     exactKeys(outcome, ["type", "message"], "run.outcome");
     return {
       type: "failed",
+      message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
+    };
+  }
+  if (outcome.type === "cancelled" && runStatus === "cancelled") {
+    exactKeys(outcome, ["type", "message"], "run.outcome");
+    return {
+      type: "cancelled",
       message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
     };
   }
@@ -647,6 +699,7 @@ function decodeRun(value: unknown): ClientRun {
       "input",
       "status",
       "events",
+      "stopRequestedAt",
       "outcome",
       "recovery",
     ],
@@ -669,14 +722,31 @@ function decodeRun(value: unknown): ClientRun {
   const runStatus = status(run.status);
   const outcome = decodeOutcome(run.outcome, runStatus);
   const recovery = decodeRecovery(run.recovery, runStatus);
+  let stopRequestedAt: string | undefined;
+  if (run.stopRequestedAt !== undefined) {
+    stopRequestedAt = string(
+      run,
+      "stopRequestedAt",
+      MAX_TIMESTAMP_LENGTH,
+      "run",
+    );
+    if (!Number.isFinite(Date.parse(stopRequestedAt))) {
+      throw new Error("run.stopRequestedAt is invalid");
+    }
+  }
+  if (runStatus === "cancelled" && stopRequestedAt === undefined) {
+    throw new Error("cancelled run.stopRequestedAt is required");
+  }
   return {
     runId,
     admittedAt,
     input: wireString(run, "input", MAX_INPUT_BYTES, "run"),
     status: runStatus,
     events: decodeEvents(run.events, runStatus),
+    ...(stopRequestedAt ? { stopRequestedAt } : {}),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
     ...(outcome?.type === "failed" ? { failure: outcome.message } : {}),
+    ...(outcome?.type === "cancelled" ? { failure: outcome.message } : {}),
     ...(recovery ? { failure: recovery.message, recovery } : {}),
   };
 }
@@ -872,6 +942,88 @@ export function decodeClientRunReconciliationCommandV1(
     throw new Error("run reconciliation command is invalid");
   }
   return { schemaVersion: 1, action: "resume" };
+}
+
+export function decodeClientRunStopCommandV1(
+  input: unknown,
+): ClientRunStopCommandV1 {
+  const command = record(input, "run stop command");
+  exactKeys(
+    command,
+    ["schemaVersion", "action", "commandId", "runId"],
+    "run stop command",
+  );
+  if (command.schemaVersion !== 1 || command.action !== "stop") {
+    throw new Error("run stop command is invalid");
+  }
+  const commandId = string(
+    command,
+    "commandId",
+    MAX_RUN_ID_LENGTH,
+    "run stop command",
+  );
+  if (!isPublicIdentifier(commandId)) {
+    throw new Error("run stop command.commandId is invalid");
+  }
+  let runId: string;
+  try {
+    runId = decodeRunIdV1(
+      string(command, "runId", MAX_RUN_ID_LENGTH, "run stop command"),
+    );
+  } catch {
+    throw new Error("run stop command.runId is invalid");
+  }
+  return { schemaVersion: 1, action: "stop", commandId, runId };
+}
+
+export function createClientRunStopReceiptV1(
+  command: ClientRunStopCommandV1,
+  run: ClientRunV1,
+): ClientRunStopReceiptV1 {
+  if (run.runId !== command.runId) {
+    throw new Error("run stop receipt does not match its command");
+  }
+  return {
+    schemaVersion: 1,
+    status: "accepted",
+    commandId: command.commandId,
+    runId: command.runId,
+    run,
+  };
+}
+
+export function decodeClientRunStopReceiptV1(input: unknown): {
+  commandId: string;
+  runId: string;
+  run: ClientRun;
+} {
+  const receipt = record(input, "run stop receipt");
+  exactKeys(
+    receipt,
+    ["schemaVersion", "status", "commandId", "runId", "run"],
+    "run stop receipt",
+  );
+  if (receipt.schemaVersion !== 1 || receipt.status !== "accepted") {
+    throw new Error("run stop receipt is invalid");
+  }
+  if (wireBytes(input) > CLIENT_RUN_LIST_MAX_BYTES) {
+    throw new Error("run stop receipt exceeds the wire byte limit");
+  }
+  const commandId = string(
+    receipt,
+    "commandId",
+    MAX_RUN_ID_LENGTH,
+    "run stop receipt",
+  );
+  if (!isPublicIdentifier(commandId)) {
+    throw new Error("run stop receipt.commandId is invalid");
+  }
+  const runId = string(receipt, "runId", MAX_RUN_ID_LENGTH, "run stop receipt");
+  const run = decodeRun(receipt.run);
+  if (run.runId !== runId) {
+    throw new Error("run stop receipt.run does not match run stop receipt");
+  }
+  return { commandId, runId, run };
 }
 
 export function decodeClientRunLookupQueryV1(
