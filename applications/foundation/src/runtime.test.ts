@@ -141,7 +141,6 @@ describe("foundation application", () => {
       updateSheep: () => Promise.reject(new Error("not used while composing")),
       read: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
-      publish: () => Promise.reject(new Error("not used while composing")),
       rollback: () => Promise.reject(new Error("not used while composing")),
     });
     expect(
