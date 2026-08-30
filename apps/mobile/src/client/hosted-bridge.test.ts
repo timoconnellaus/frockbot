@@ -21,7 +21,7 @@ describe("hosted mobile bridge", () => {
       event({
         schemaVersion: 1,
         type: "frockbot/mobile-api-request",
-        id: "request-1",
+        id: "person@example.com",
         path: "/api/bots",
         method: "GET",
       }),
@@ -46,10 +46,48 @@ describe("hosted mobile bridge", () => {
       {
         schemaVersion: 1,
         type: "frockbot/mobile-api-response",
-        id: "request-1",
+        id: "person@example.com",
         status: 200,
         contentType: "application/json",
         body: '{"schemaVersion":1}',
+      },
+    ]);
+  });
+
+  test("accepts canonical RPC command identifiers", async () => {
+    const invoked: Array<{ commandId: string; input: unknown }> = [];
+    const posted: Array<Record<string, unknown>> = [];
+    await handleHostedMobileMessage(
+      event({
+        schemaVersion: 1,
+        type: "frockbot/mobile-command",
+        id: "command@example.com",
+        commandId: "clipboard:write@example.com",
+        input: { text: "hello" },
+      }),
+      {
+        hostedOrigin: origin,
+        frameWindow: source,
+        authorizedFetch: () => Promise.reject(new Error("not used")),
+        invoke: (commandId, input) => {
+          invoked.push({ commandId, input });
+          return Promise.resolve("done");
+        },
+        post: (message) => posted.push(message),
+      },
+    );
+    expect(invoked).toEqual([
+      {
+        commandId: "clipboard:write@example.com",
+        input: { text: "hello" },
+      },
+    ]);
+    expect(posted).toEqual([
+      {
+        schemaVersion: 1,
+        type: "frockbot/mobile-command-result",
+        id: "command@example.com",
+        result: "done",
       },
     ]);
   });

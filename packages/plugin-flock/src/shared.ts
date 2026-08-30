@@ -1,13 +1,16 @@
 // Shared configuration types remain provider-neutral at this package seam.
 import {
   decodeBotIdV1,
-  BOT_ID_PATTERN_V1,
+  isPublicIdentifier,
   type ModelAssignment,
 } from "@frockbot/configuration-core";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
 
 export const FLOCK_DIRECTORY_LIMIT = 100;
-export const FLOCK_ID_PATTERN = BOT_ID_PATTERN_V1;
+
+export function isFlockIdentifier(value: unknown): value is string {
+  return isPublicIdentifier(value);
+}
 
 type Band = "upper" | "middle" | "lower";
 export interface SheepRecipeV1 {
@@ -132,7 +135,7 @@ function exact(
     throw new FlockDecodeError("unknown or missing field");
 }
 function identifier(value: unknown, label: string): string {
-  if (typeof value !== "string" || !FLOCK_ID_PATTERN.test(value))
+  if (!isFlockIdentifier(value))
     throw new FlockDecodeError(`${label} is invalid`);
   return value;
 }

@@ -4,6 +4,8 @@ import {
   decodeBotIdV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
+  isApplicationDeploymentHash,
+  isPublicIdentifier,
 } from "@frockbot/configuration-core";
 import type {
   GatewayDependencies,
@@ -11,18 +13,16 @@ import type {
   WorkerCode,
 } from "./contracts.js";
 
-const USER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-const HASH_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/;
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
 const PUBLIC_ASSET_PATHS = new Set(["/", "/app.js", "/app.css"]);
 
 export function applicationDeploymentId(
   identity: UserApplicationIdentity,
 ): string {
-  if (!USER_ID_PATTERN.test(identity.userId)) {
+  if (!isPublicIdentifier(identity.userId)) {
     throw new Error("invalid user id");
   }
-  if (!HASH_PATTERN.test(identity.applicationHash)) {
+  if (!isApplicationDeploymentHash(identity.applicationHash)) {
     throw new Error("invalid application hash");
   }
   return `${identity.userId}:${identity.applicationHash}`;

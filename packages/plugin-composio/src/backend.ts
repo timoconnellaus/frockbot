@@ -2,6 +2,8 @@ import {
   ConfigurationDecodeError,
   decodeRevokeConnectionCommandV1,
   decodeStartConnectionCommandV1,
+  isConnectionIdentifier,
+  isPublicIdentifier,
   type ConnectionView,
   type StartConnectionCommandV1,
 } from "@frockbot/configuration-core";
@@ -19,37 +21,13 @@ import {
   type ComposioConnectionTypeConfig,
 } from "./connections.js";
 
-const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH = 32;
 const MINIMUM_AUTHORIZATION_STATE_SECRET_UNIQUE_CHARACTERS = 8;
 const FORBIDDEN_AUTHORIZATION_STATE_SECRETS = new Set([
   "replace-with-an-independent-random-secret",
 ]);
-const RESERVED_CONNECTION_IDENTIFIERS = new Set([
-  "__defineGetter__",
-  "__defineSetter__",
-  "__lookupGetter__",
-  "__lookupSetter__",
-  "__proto__",
-  "constructor",
-  "hasOwnProperty",
-  "isPrototypeOf",
-  "propertyIsEnumerable",
-  "prototype",
-  "toLocaleString",
-  "toString",
-  "valueOf",
-]);
-
 function decodeConnectionIdentifier(value: unknown): string | undefined {
-  if (
-    typeof value !== "string" ||
-    !ID_PATTERN.test(value) ||
-    RESERVED_CONNECTION_IDENTIFIERS.has(value)
-  ) {
-    return undefined;
-  }
-  return value;
+  return isConnectionIdentifier(value) ? value : undefined;
 }
 
 function decodeConnectionPathIdentifier(value: string): string | undefined {
@@ -256,18 +234,14 @@ export async function decodeAuthorizationState(
   const state = decoded as Partial<AuthorizationState>;
   if (
     state.schemaVersion !== 1 ||
-    typeof state.authorizationStateId !== "string" ||
-    !ID_PATTERN.test(state.authorizationStateId) ||
-    typeof state.userId !== "string" ||
-    !ID_PATTERN.test(state.userId) ||
-    typeof state.connectionId !== "string" ||
-    !ID_PATTERN.test(state.connectionId) ||
+    !isPublicIdentifier(state.authorizationStateId) ||
+    !isPublicIdentifier(state.userId) ||
+    !isPublicIdentifier(state.connectionId) ||
     (state.returnTarget !== "browser" && state.returnTarget !== "desktop") ||
     !Number.isSafeInteger(state.expiresAt) ||
     (state.expiresAt as number) <= Date.now() ||
     (state.nativeReturnNonce !== undefined &&
-      (typeof state.nativeReturnNonce !== "string" ||
-        !ID_PATTERN.test(state.nativeReturnNonce)))
+      !isPublicIdentifier(state.nativeReturnNonce))
   ) {
     throw new Error("Composio authorization state is invalid or expired");
   }

@@ -1,4 +1,4 @@
-const ID = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
+import { isRpcIdentifier } from "@frockbot/configuration-core";
 
 function exact(
   value: Record<string, unknown>,
@@ -34,12 +34,7 @@ export async function handleHostedMobileMessage(
   )
     return;
   const value = event.data as Record<string, unknown>;
-  if (
-    value.schemaVersion !== 1 ||
-    typeof value.id !== "string" ||
-    !ID.test(value.id)
-  )
-    return;
+  if (value.schemaVersion !== 1 || !isRpcIdentifier(value.id)) return;
   if (
     value.type === "frockbot/mobile-api-request" &&
     exact(value, ["schemaVersion", "type", "id", "path", "method"], ["body"])
@@ -81,8 +76,7 @@ export async function handleHostedMobileMessage(
   if (
     value.type !== "frockbot/mobile-command" ||
     !exact(value, ["schemaVersion", "type", "id", "commandId", "input"]) ||
-    typeof value.commandId !== "string" ||
-    !ID.test(value.commandId)
+    !isRpcIdentifier(value.commandId)
   )
     return;
   try {

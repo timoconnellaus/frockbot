@@ -2,8 +2,8 @@
   display: grid;
   gap: 6px;
   padding: 14px 0;
-  border-top: 1px solid #e7e0d9;
-  color: #1e1d27;
+  border-top: 1px solid var(--frock-border);
+  color: var(--frock-text);
 }
 
 .clock-heading {
@@ -16,10 +16,10 @@
 .clock-heading button {
   width: 22px;
   height: 22px;
-  border: 1px solid #e7e0d9;
+  border: 1px solid var(--frock-border);
   border-radius: 8px;
-  color: #6d6974;
-  background: #fff;
+  color: var(--frock-text-muted);
+  background: var(--frock-surface);
   cursor: pointer;
 }
 
@@ -33,16 +33,16 @@
 }
 
 .clock-card small {
-  color: #6d6974;
+  color: var(--frock-text-muted);
   font-size: 12px;
 }
 
 .clock-card code {
   justify-self: start;
   padding: 3px 6px;
-  border: 1px solid #cbe4d8;
+  border: 1px solid var(--frock-success-border);
   border-radius: 5px;
-  color: #2f7c5c;
-  background: #eef7f2;
+  color: var(--frock-success);
+  background: var(--frock-success-surface);
   font-size: 12px;
 }

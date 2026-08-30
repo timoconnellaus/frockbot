@@ -15,7 +15,7 @@ export default defineConfig({
       formats: ["es"],
     },
     rollupOptions: {
-      external: ["vue", "@cordisjs/client"],
+      external: ["vue", "@cordisjs/client", "@frockbot/client-core"],
       output: {
         entryFileNames: "assets/frockbot-[hash].js",
         chunkFileNames: "assets/chunk-[hash].js",

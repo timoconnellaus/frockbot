@@ -1,9 +1,13 @@
-import { BOT_ID_PATTERN_V1 } from "@frockbot/configuration-core/bot-id";
+import {
+  isBotIdV1,
+  isConnectionIdentifier,
+  isPublicIdentifier,
+  isRpcIdentifier,
+} from "@frockbot/configuration-core";
 
 export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 const MAX_BODY_BYTES = 64 * 1024;
-const NONCE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const AUTH_CALLBACK_PREFIX = "com.frockbot.desktop://auth/callback#";
 
 export interface DesktopApiRequest {
@@ -270,15 +274,23 @@ export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {
   };
 }
 
-const RPC_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
 const exactRoute = (pattern: RegExp) => (path: string) => pattern.test(path);
 function botRoute(path: string, pattern: RegExp, runIdIndex?: number): boolean {
   const match = pattern.exec(path);
   const botId = match?.[1];
-  if (!botId || !BOT_ID_PATTERN_V1.test(botId)) return false;
+  if (!isBotIdV1(botId)) return false;
   if (runIdIndex === undefined) return true;
-  const runId = match[runIdIndex];
-  return runId !== undefined && RPC_ID_PATTERN.test(runId);
+  return isRpcIdentifier(match?.[runIdIndex]);
+}
+
+function pluginConnectionRoute(path: string, revoke: boolean): boolean {
+  const match = (
+    revoke
+      ? /^\/api\/plugins\/([^/]+)\/connections\/([^/]+)\/revoke$/
+      : /^\/api\/plugins\/([^/]+)\/connections$/
+  ).exec(path);
+  if (!isPublicIdentifier(match?.[1])) return false;
+  return !revoke || isConnectionIdentifier(match?.[2]);
 }
 
 const API_ROUTES: Array<{
@@ -318,13 +330,11 @@ const API_ROUTES: Array<{
     methods: new Set(["POST"]),
   },
   {
-    matches: exactRoute(/^\/api\/plugins\/[a-zA-Z0-9._-]+\/connections$/),
+    matches: (path) => pluginConnectionRoute(path, false),
     methods: new Set(["POST"]),
   },
   {
-    matches: exactRoute(
-      /^\/api\/plugins\/[a-zA-Z0-9._-]+\/connections\/[a-zA-Z0-9._-]+\/revoke$/,
-    ),
+    matches: (path) => pluginConnectionRoute(path, true),
     methods: new Set(["POST"]),
   },
 ];
@@ -371,8 +381,7 @@ export function decodeDesktopExternalAuthorizationRequest(
     !hasExactKeys(request, ["schemaVersion", "url", "nativeReturnNonce"]) ||
     request.schemaVersion !== 1 ||
     typeof request.url !== "string" ||
-    typeof request.nativeReturnNonce !== "string" ||
-    !NONCE_PATTERN.test(request.nativeReturnNonce)
+    !isPublicIdentifier(request.nativeReturnNonce)
   ) {
     throw new Error("invalid external authorization request");
   }

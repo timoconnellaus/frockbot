@@ -4,6 +4,7 @@
   "displayName": "Authentication",
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": { "ui-theme": ">=0.0.1" },
   "contributions": {
     "client": {
       "entry": "./client",

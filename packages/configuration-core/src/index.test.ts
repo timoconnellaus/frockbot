@@ -17,7 +17,12 @@ import {
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
 } from "./index.js";
-import { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
+import {
+  isApplicationDeploymentHash,
+  isConnectionIdentifier,
+  isPublicIdentifier,
+  isRpcIdentifier,
+} from "./identifiers.js";
 
 describe("shared public identifier policy", () => {
   test("accepts the bounded cross-runtime identifier grammar", () => {
@@ -33,6 +38,15 @@ describe("shared public identifier policy", () => {
     ]) {
       expect(isPublicIdentifier(candidate)).toBe(false);
     }
+  });
+
+  test("defines bounded RPC identifiers and deployment hashes", () => {
+    expect(isRpcIdentifier("user:person@example.com")).toBe(true);
+    expect(isRpcIdentifier("bad/value")).toBe(false);
+    expect(isRpcIdentifier("r".repeat(129))).toBe(false);
+    expect(isApplicationDeploymentHash("sha256:abc-123")).toBe(true);
+    expect(isApplicationDeploymentHash("bad@hash")).toBe(false);
+    expect(isApplicationDeploymentHash("h".repeat(257))).toBe(false);
   });
 
   test("excludes object-prototype names from Connection identifiers", () => {

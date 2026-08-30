@@ -6,20 +6,20 @@
   height: 34px;
   overflow: hidden;
   border-radius: 11px;
-  background: #fce2ea;
+  background: var(--frock-surface-accent);
 }
 .flock-avatar--large {
   width: 188px;
   height: 188px;
   border-radius: 42px;
-  box-shadow: 0 15px 35px #70263d25;
+  box-shadow: var(--frock-shadow-avatar);
 }
 .flock-sidebar-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 3px 5px 8px;
-  color: #d92d5f;
+  color: var(--frock-action-primary-hover);
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -30,8 +30,8 @@
   height: 24px;
   border: 0;
   border-radius: 50%;
-  background: #ec386b;
-  color: #fff;
+  background: var(--frock-action-primary);
+  color: var(--frock-on-accent);
   font-size: 16px;
 }
 .flock-bot-row {
@@ -50,7 +50,7 @@
 }
 .flock-bot-row:hover,
 .flock-bot-row.active {
-  background: #fff;
+  background: var(--frock-surface);
 }
 .flock-bot-row strong,
 .flock-bot-row small {
@@ -64,22 +64,22 @@
 }
 .flock-bot-row small {
   margin-top: 2px;
-  color: #79727c;
+  color: var(--frock-text-muted);
   font-size: 7px;
 }
 .flock-bot-row i {
-  color: #49c88b;
+  color: var(--frock-success-bright);
   font-size: 7px;
 }
 .flock-empty,
 .flock-error {
   padding: 8px;
-  color: #79727c;
+  color: var(--frock-text-muted);
   font-size: 8px;
   line-height: 1.45;
 }
 .flock-error {
-  color: #b42342;
+  color: var(--frock-danger-text);
 }
 .flock-identity-button {
   display: grid;
@@ -101,7 +101,7 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: #160d18a6;
+  background: var(--frock-overlay-tint);
   backdrop-filter: blur(2px);
 }
 .flock-dialog {
@@ -110,11 +110,11 @@
   display: grid;
   grid-template-columns: 250px 1fr;
   overflow: hidden;
-  border: 1px solid #ffffff40;
+  border: 1px solid var(--frock-overlay-border);
   border-radius: 24px;
-  background: #fff;
-  color: #1e1d27;
-  box-shadow: 0 30px 90px #10081070;
+  background: var(--frock-surface);
+  color: var(--frock-text);
+  box-shadow: var(--frock-shadow-dialog);
 }
 .flock-preview {
   display: flex;
@@ -122,7 +122,7 @@
   align-items: center;
   justify-content: center;
   padding: 28px;
-  background: linear-gradient(160deg, #fce2ea, #faf7f2);
+  background: var(--frock-flock-preview);
 }
 .flock-preview h2 {
   margin-top: 18px;
@@ -131,16 +131,16 @@
 }
 .flock-preview p {
   margin-top: 4px;
-  color: #6d6974;
+  color: var(--frock-text-muted);
   font-size: 10px;
 }
 .flock-reroll {
   margin-top: 14px;
   padding: 9px 14px;
-  border: 1px solid #ecc7d3;
+  border: 1px solid var(--frock-accent-border);
   border-radius: 999px;
-  background: #fff;
-  color: #d92d5f;
+  background: var(--frock-surface);
+  color: var(--frock-action-primary-hover);
   font-size: 9px;
   font-weight: 800;
 }
@@ -149,7 +149,7 @@
   padding: 27px 30px;
 }
 .flock-eyebrow {
-  color: #d92d5f;
+  color: var(--frock-action-primary-hover);
   font-size: 7px;
   font-weight: 900;
   letter-spacing: 0.15em;
@@ -162,7 +162,7 @@
 }
 .flock-form > p {
   margin-top: 5px;
-  color: #6d6974;
+  color: var(--frock-text-muted);
   font-size: 9px;
   line-height: 1.5;
 }
@@ -177,7 +177,7 @@
   height: 39px;
   margin-top: 6px;
   padding: 0 12px;
-  border: 1px solid #e7e0d9;
+  border: 1px solid var(--frock-border);
   border-radius: 10px;
   font: inherit;
 }
@@ -198,9 +198,9 @@
 .flock-select-grid label {
   height: 54px;
   padding: 7px 10px;
-  border: 1px solid #e7e0d9;
+  border: 1px solid var(--frock-border);
   border-radius: 12px;
-  color: #6d6974;
+  color: var(--frock-text-muted);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -211,7 +211,7 @@
   margin-top: 5px;
   border: 0;
   background: transparent;
-  color: #1e1d27;
+  color: var(--frock-text);
   font:
     700 12px Manrope,
     system-ui;
@@ -220,8 +220,8 @@
   margin-top: 12px;
   padding: 8px 10px;
   border-radius: 9px;
-  background: #fff6f8;
-  color: #8d5768;
+  background: var(--frock-accent-surface);
+  color: var(--frock-accent-text);
   font-size: 11px;
   line-height: 1.45;
 }
@@ -235,16 +235,16 @@
 .flock-actions button {
   height: 36px;
   padding: 0 17px;
-  border: 1px solid #e7e0d9;
+  border: 1px solid var(--frock-border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--frock-surface);
   font-size: 9px;
   font-weight: 800;
 }
 .flock-actions .primary {
-  border-color: #ec386b;
-  background: #ec386b;
-  color: #fff;
+  border-color: var(--frock-action-primary);
+  background: var(--frock-action-primary);
+  color: var(--frock-on-accent);
 }
 @media (max-width: 600px) {
   .flock-backdrop {
@@ -292,7 +292,7 @@
     justify-content: flex-end;
     margin-top: 18px;
     padding: 10px 0;
-    background: #fff;
+    background: var(--frock-surface);
   }
   .flock-select-grid label {
     height: 50px;

@@ -1,4 +1,7 @@
 const PUBLIC_IDENTIFIER_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const RPC_IDENTIFIER_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
+const APPLICATION_DEPLOYMENT_HASH_PATTERN =
+  /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/;
 
 const RESERVED_CONNECTION_IDENTIFIERS = new Set([
   "__defineGetter__",
@@ -18,6 +21,16 @@ const RESERVED_CONNECTION_IDENTIFIERS = new Set([
 
 export function isPublicIdentifier(value: unknown): value is string {
   return typeof value === "string" && PUBLIC_IDENTIFIER_PATTERN.test(value);
+}
+
+export function isRpcIdentifier(value: unknown): value is string {
+  return typeof value === "string" && RPC_IDENTIFIER_PATTERN.test(value);
+}
+
+export function isApplicationDeploymentHash(value: unknown): value is string {
+  return (
+    typeof value === "string" && APPLICATION_DEPLOYMENT_HASH_PATTERN.test(value)
+  );
 }
 
 export function isConnectionIdentifier(value: unknown): value is string {

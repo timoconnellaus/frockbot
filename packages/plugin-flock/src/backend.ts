@@ -1,8 +1,8 @@
 import type { Plugin } from "cordis";
 import {
   BotNotFoundError,
-  FLOCK_ID_PATTERN,
   FlockConflictError,
+  isFlockIdentifier,
   FlockDecodeError,
   decodeCreateBotCommandV1,
   decodeUpdateSheepCommandV1,
@@ -102,7 +102,7 @@ function decodePathId(value: string): string {
   } catch {
     throw new FlockDecodeError("botId is invalid");
   }
-  if (!FLOCK_ID_PATTERN.test(decoded))
+  if (!isFlockIdentifier(decoded))
     throw new FlockDecodeError("botId is invalid");
   return decoded;
 }

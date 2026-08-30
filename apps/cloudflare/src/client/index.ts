@@ -5,6 +5,7 @@ import {
   decodeBotSettingsViewV1,
   decodeOperationReceiptV1,
   decodeUserSettingsViewV1,
+  isRpcIdentifier,
   type ConfigurationCommandV1,
   type ConfigurationQueryV1,
   type RevokeConnectionCommandV1,
@@ -24,18 +25,13 @@ import {
   decodeClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
 
-const AUTHENTICATED_USER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
 const MOBILE_SHELL_ORIGINS = new Set([
   "capacitor://localhost",
   "frockbot://localhost",
 ]);
 
 function requireAuthenticatedUserId(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    !AUTHENTICATED_USER_ID_PATTERN.test(value) ||
-    value === "anonymous"
-  ) {
+  if (!isRpcIdentifier(value) || value === "anonymous") {
     throw new Error("Authenticated User identity is unavailable");
   }
   return value;
@@ -57,10 +53,14 @@ function decodeAuthenticatedIdentity(value: unknown): string {
 }
 
 function usesMobileShell(): boolean {
-  return (
-    window.parent !== window &&
-    new URL(window.location.href).searchParams.get("mobile_shell") === "1"
-  );
+  if (window.parent === window) return false;
+  try {
+    return (
+      new URL(window.location.href).searchParams.get("mobile_shell") === "1"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function mobileShellRequest(

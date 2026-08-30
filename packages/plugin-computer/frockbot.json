@@ -1,14 +1,16 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "id": "computer",
   "displayName": "Computer",
   "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": { "shell": ">=0.0.1", "ui-theme": ">=0.0.1" },
   "contributions": {
-    "agent": "./agent",
-    "web": {
-      "entry": "./src/client/index.ts",
-      "manifest": "./dist/manifest.json",
-      "slots": ["frockbot.computer"]
+    "runtime": { "entry": "./agent" },
+    "client": {
+      "entry": "./client",
+      "mounts": [{ "slot": "frockbot.computer" }],
+      "outlets": []
     }
   },
   "permissions": ["computer:execute", "computer:browser", "webui:remote-frame"]
