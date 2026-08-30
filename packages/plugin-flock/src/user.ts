@@ -109,6 +109,7 @@ export class FlockUserBackendContribution {
         };
       } else {
         const registration: BotRegistrationV1 = {
+          schemaVersion: 1,
           botId: command.botId,
           registeredAt: (this.host.now?.() ?? new Date()).toISOString(),
           initialName: command.name,

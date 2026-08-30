@@ -162,6 +162,24 @@ describe("user application Bot seam", () => {
     expect(dispatches).toBe(0);
   });
 
+  test("keeps registration infrastructure failures retryable", async () => {
+    const env = {
+      BOT_STATE: {
+        assertRegistered: () =>
+          Promise.reject(new Error("User directory unavailable")),
+      } as unknown as UserBotStateBinding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    } satisfies UserApplicationEnv;
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/turns"),
+      env,
+    );
+    expect(response.status).toBe(503);
+    expect((await response.json()) as { error: string }).toEqual({
+      error: "User directory unavailable",
+    });
+  });
+
   test("rejects noncanonical Bot path identifiers before authority lookup", async () => {
     let authorityChecks = 0;
     const env = {

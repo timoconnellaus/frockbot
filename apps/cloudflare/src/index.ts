@@ -5,6 +5,7 @@ import {
   type FoundationConnectionStore,
 } from "@frockbot/application-foundation/runtime";
 import {
+  decodeBotMembershipViewV1,
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
   decodeSheepIdentityViewV1,
@@ -31,6 +32,7 @@ import type {
 import { createGateway } from "./gateway.js";
 import {
   decodeRpcEnvelopeV1,
+  rpcBotId,
   rpcDecoded,
   rpcIdentifier,
   rpcObject,
@@ -244,7 +246,7 @@ function decodeUserBotRunLookupRpcV1(input: unknown): {
   query: ClientRunLookupQueryV1;
 } {
   const request = decodeRpcEnvelopeV1(input, {
-    botId: rpcIdentifier,
+    botId: rpcBotId,
     query: rpcDecoded(decodeClientRunLookupQueryV1),
   });
   return {
@@ -255,17 +257,16 @@ function decodeUserBotRunLookupRpcV1(input: unknown): {
 
 export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   async assertRegistered(input: unknown): Promise<void> {
-    const request = decodeRpcEnvelopeV1(input, { botId: rpcIdentifier });
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     const botId = request.botId as string;
-    const registered = await userConfigurationStub(
-      this.env,
-      this.ctx.props.userId,
-    ).hasBot({
-      schemaVersion: 1,
-      userId: this.ctx.props.userId,
-      botId,
-    });
-    if (!registered) {
+    const membership = decodeBotMembershipViewV1(
+      await userConfigurationStub(this.env, this.ctx.props.userId).hasBot({
+        schemaVersion: 1,
+        userId: this.ctx.props.userId,
+        botId,
+      }),
+    );
+    if (!membership.registered) {
       const error = new Error(`Bot "${botId}" is not registered`);
       error.name = "BotNotFoundError";
       throw error;
@@ -274,7 +275,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async run(input: unknown): Promise<BotTurnResult> {
     const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       command: rpcObject({
         runId: rpcIdentifier,
         sessionId: rpcString(257),
@@ -296,7 +297,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async listRuns(input: unknown): Promise<ClientRunListV1> {
     const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       query: rpcDecoded(decodeClientRunListQueryV1),
     });
     return botStateStub(
@@ -325,7 +326,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   }
 
   async listNotifications(input: unknown): Promise<BotNotificationIntent[]> {
-    const request = decodeRpcEnvelopeV1(input, { botId: rpcIdentifier });
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -335,7 +336,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async acknowledgeNotification(input: unknown): Promise<void> {
     const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       notificationId: rpcIdentifier,
     });
     return botStateStub(
@@ -347,7 +348,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async reconcileRun(input: unknown): Promise<BotTurnResult> {
     const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       runId: rpcIdentifier,
     });
     return botStateStub(

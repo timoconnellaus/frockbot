@@ -17,6 +17,7 @@ import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
   BotDirectoryViewV1,
+  BotMembershipViewV1,
   BotRegistrationV1,
   CreateBotCommandV1,
   FlockReceiptV1,
@@ -247,7 +248,7 @@ export interface UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
     botId: string;
-  }): Promise<boolean>;
+  }): Promise<BotMembershipViewV1>;
   readConfiguration(
     request: UserConfigurationReadRpcV1,
   ): Promise<UserSettingsViewV1>;

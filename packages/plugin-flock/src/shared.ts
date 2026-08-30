@@ -1,7 +1,7 @@
 // Shared configuration types remain provider-neutral at this package seam.
 import {
-  BOT_ID_PATTERN_V1,
   decodeBotIdV1,
+  BOT_ID_PATTERN_V1,
   type ModelAssignment,
 } from "@frockbot/configuration-core";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
@@ -18,11 +18,17 @@ export interface SheepRecipeV1 {
   lower: string;
 }
 export interface BotRegistrationV1 {
+  schemaVersion: 1;
   botId: string;
   registeredAt: string;
   initialName: string;
   initialModel?: ModelAssignment;
   sheep: SheepRecipeV1;
+}
+export interface BotMembershipViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  registered: boolean;
 }
 export interface BotDirectoryViewV1 {
   schemaVersion: 1;
@@ -64,7 +70,12 @@ export interface StoredFlockReceiptV1 {
   receipt: FlockReceiptV1;
 }
 
-export class FlockDecodeError extends Error {}
+export class FlockDecodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FlockDecodeError";
+  }
+}
 export class FlockConflictError extends Error {
   constructor(readonly currentRevision: number) {
     super(`flock revision is ${currentRevision}`);
@@ -234,10 +245,13 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   const bot = record(input, "Bot registration");
   exact(
     bot,
-    ["botId", "registeredAt", "initialName", "sheep"],
+    ["schemaVersion", "botId", "registeredAt", "initialName", "sheep"],
     ["initialModel"],
   );
+  if (bot.schemaVersion !== 1)
+    throw new FlockDecodeError("unsupported Bot registration");
   return {
+    schemaVersion: 1,
     botId: botIdentifier(bot.botId),
     registeredAt: boundedText(bot.registeredAt, "registeredAt", 64),
     initialName: boundedText(bot.initialName, "initialName", 100),
@@ -246,6 +260,18 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
         ? undefined
         : modelAssignment(bot.initialModel),
     sheep: decodeSheepRecipeV1(bot.sheep),
+  };
+}
+
+export function decodeBotMembershipViewV1(input: unknown): BotMembershipViewV1 {
+  const value = record(input, "Bot membership");
+  exact(value, ["schemaVersion", "botId", "registered"]);
+  if (value.schemaVersion !== 1 || typeof value.registered !== "boolean")
+    throw new FlockDecodeError("Bot membership is invalid");
+  return {
+    schemaVersion: 1,
+    botId: botIdentifier(value.botId),
+    registered: value.registered,
   };
 }
 

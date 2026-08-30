@@ -31,6 +31,7 @@ import {
 import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
+  rpcBotId,
   rpcDecoded,
   rpcIdentifier,
   rpcObject,
@@ -44,7 +45,7 @@ function decodeBotIdentityRpcV1(input: unknown): {
 } {
   const request = decodeRpcEnvelopeV1(input, {
     userId: rpcIdentifier,
-    botId: rpcIdentifier,
+    botId: rpcBotId,
   });
   return {
     userId: request.userId as string,
@@ -179,7 +180,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async updateSheep(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       command: rpcDecoded(decodeUpdateSheepCommandV1),
     });
     const identity = {
@@ -197,7 +198,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async markConnectionUnavailable(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       connectionId: rpcIdentifier,
       compensation: rpcObject({
         id: rpcIdentifier,
@@ -238,7 +239,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async reconcileRun(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       runId: rpcIdentifier,
     });
     const identity = {
@@ -259,7 +260,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async acknowledgeNotification(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       notificationId: rpcIdentifier,
     });
     const identity = {
@@ -274,7 +275,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async listRuns(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       query: rpcDecoded(decodeClientRunListQueryV1),
     });
     const identity = {
@@ -289,7 +290,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async lookupRun(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       query: rpcDecoded(decodeClientRunLookupQueryV1),
     });
     const identity = {
@@ -304,7 +305,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   async fenceRunAdmission(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       query: rpcDecoded(decodeClientRunLookupQueryV1),
     });
     const identity = {
@@ -319,10 +320,6 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async alarm(): Promise<void> {
-    const shell = await this.contribution();
-    const identity = await shell.readDurableIdentity();
-    if (!identity) return;
-    const materialized = await this.materialized(identity);
-    await materialized.shell.alarm();
+    await (await this.contribution()).alarm();
   }
 }

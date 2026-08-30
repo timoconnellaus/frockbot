@@ -21,6 +21,7 @@ class MemoryStorage {
   }
 }
 const registration = {
+  schemaVersion: 1 as const,
   botId: "alpha",
   registeredAt: "2026-08-29T00:00:00.000Z",
   initialName: "Alpha",

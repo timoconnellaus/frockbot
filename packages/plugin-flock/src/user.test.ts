@@ -56,6 +56,7 @@ describe("Flock User contribution", () => {
     const replay = await contribution.createBot("user-1", command());
     expect(replay).toEqual(first);
     expect(await contribution.registration("alpha")).toMatchObject({
+      schemaVersion: 1,
       initialName: "Alpha",
       initialModel: settings.newBotModelTemplate,
       registeredAt: "2026-08-29T00:00:00.000Z",
@@ -117,6 +118,7 @@ describe("Flock User contribution", () => {
       schemaVersion: 1,
       revision: 100,
       bots: Array.from({ length: 100 }, (_, index) => ({
+        schemaVersion: 1,
         botId: `bot-${index}`,
         registeredAt: "2026-08-29T00:00:00.000Z",
         initialName: `Bot ${index}`,

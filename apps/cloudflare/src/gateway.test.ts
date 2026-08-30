@@ -339,6 +339,7 @@ class MemoryConfiguration
       schemaVersion: 1 as const,
       revision: this.bots.size,
       bots: [...this.bots.keys()].map((botId) => ({
+        schemaVersion: 1 as const,
         botId,
         registeredAt: "2026-08-29T00:00:00.000Z",
         initialName: botId,
@@ -363,14 +364,19 @@ class MemoryConfiguration
     request: Parameters<UserConfigurationBinding["getBotRegistration"]>[0],
   ) {
     return Promise.resolve({
+      schemaVersion: 1 as const,
       botId: request.botId,
       registeredAt: "2026-08-29T00:00:00.000Z",
       initialName: request.botId,
       sheep: randomSheepRecipeV1(() => 0),
     });
   }
-  hasBot() {
-    return Promise.resolve(true);
+  hasBot(request: Parameters<UserConfigurationBinding["hasBot"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      registered: true,
+    });
   }
   readSheep(request: Parameters<BotConfigurationBinding["readSheep"]>[0]) {
     return Promise.resolve({

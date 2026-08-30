@@ -38,6 +38,17 @@ function slug(name: string): string {
   return `${base}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+function replacePreferredBot(botId: string): void {
+  let url: URL;
+  try {
+    url = new URL(window.location.href);
+  } catch {
+    throw new Error("Hosted application URL is invalid");
+  }
+  url.searchParams.set("bot", botId);
+  window.history.replaceState(window.history.state, "", url);
+}
+
 export const flockClientPlugin: ClientPlugin = (ctx) => {
   if (!ctx.transport.hostedRequest)
     throw new Error("Flock hosted transport is unavailable");
@@ -78,17 +89,23 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           if (directory.bots.some((bot) => bot.botId === pending.botId)) {
             clearPendingCreate(userId);
           } else {
+            let receipt;
             try {
-              const receipt = decodeFlockReceiptV1(
+              receipt = decodeFlockReceiptV1(
                 await request("/api/bots", "POST", JSON.stringify(pending)),
               );
+            } catch (error) {
+              if (isDefinitiveFlockFailure(error)) {
+                clearPendingCreate(userId);
+                throw error;
+              }
+            }
+            if (receipt) {
               clearPendingCreate(userId);
               if (receipt.status === "rejected")
-                state.value.error =
-                  receipt.failure ?? "Pending Bot creation was rejected";
-            } catch (error) {
-              if (isDefinitiveFlockFailure(error)) clearPendingCreate(userId);
-              /* Uncertain delivery keeps the exact User-bound command. */
+                throw new Error(
+                  receipt.failure ?? "Pending Bot creation was rejected",
+                );
             }
             state.value.directory = decodeDirectoryViewV1(
               await request("/api/bots"),
@@ -171,19 +188,55 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       state.value.overlay = "create";
       state.value.error = undefined;
     },
-    openEdit() {
+    async openEdit() {
       const botId = shell?.value.activeBotId;
-      const identity = botId ? state.value.identities[botId] : undefined;
-      if (!identity) return;
-      const pending =
-        authenticatedUserId && botId
-          ? readPendingSheep(authenticatedUserId, botId)
-          : undefined;
-      state.value.draftSheep = structuredClone(
-        pending?.sheep ?? identity.sheep,
-      );
+      let identity = botId ? state.value.identities[botId] : undefined;
+      if (!identity || !botId) return;
+      const userId = await requireAuthenticatedUserId();
+      authenticatedUserId = userId;
+      const pending = readPendingSheep(userId, botId);
+      let reconciliationFailure: string | undefined;
+      if (pending) {
+        try {
+          const receipt = decodeFlockReceiptV1(
+            await request(
+              `/api/bots/${encodeURIComponent(botId)}/sheep`,
+              "POST",
+              JSON.stringify(pending),
+            ),
+          );
+          clearPendingSheep(userId, botId);
+          if (receipt.status === "rejected")
+            reconciliationFailure =
+              receipt.failure ?? "Pending sheep update was rejected";
+        } catch (error) {
+          if (!isDefinitiveFlockFailure(error)) {
+            state.value.error =
+              "A previous sheep update could not be reconciled. Try again before editing.";
+            return;
+          }
+          clearPendingSheep(userId, botId);
+          reconciliationFailure =
+            error instanceof Error
+              ? error.message
+              : "Pending sheep update was rejected";
+        }
+        try {
+          identity = decodeSheepIdentityViewV1(
+            await request(`/api/bots/${encodeURIComponent(botId)}/sheep`),
+          );
+          state.value.identities[botId] = identity;
+        } catch (error) {
+          state.value.error =
+            error instanceof Error
+              ? error.message
+              : "Could not reconcile the previous sheep update";
+          return;
+        }
+      }
+      state.value.draftSheep = structuredClone(identity.sheep);
       state.value.overlay = "edit";
-      state.value.error = undefined;
+      state.value.error = reconciliationFailure;
     },
     closeOverlay() {
       state.value.overlay = undefined;
@@ -216,6 +269,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           throw new Error(receipt.failure ?? "Bot creation was rejected");
         }
         clearPendingCreate(userId);
+        replacePreferredBot(command.botId);
         state.value.overlay = undefined;
         await state.value.load();
         await state.value.select(command.botId);

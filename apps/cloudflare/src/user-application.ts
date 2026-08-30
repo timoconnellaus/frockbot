@@ -75,9 +75,21 @@ async function requireRegisteredBot(
     await env.BOT_STATE.assertRegistered({ schemaVersion: 1, botId });
     return undefined;
   } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      error.name === "BotNotFoundError"
+    )
+      return jsonError(
+        404,
+        error instanceof Error ? error.message : "Bot not found",
+      );
     return jsonError(
-      404,
-      error instanceof Error ? error.message : "Bot not found",
+      503,
+      error instanceof Error
+        ? error.message
+        : "Bot registration is temporarily unavailable",
     );
   }
 }

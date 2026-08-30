@@ -24,6 +24,7 @@ import { decodeCreateBotCommandV1 } from "@frockbot/plugin-flock/shared";
 import {
   decodeRpcEnvelopeV1,
   decodeStartConnectionRpcV1,
+  rpcBotId,
   rpcDecoded,
   rpcEnum,
   rpcIdentifier,
@@ -78,7 +79,7 @@ function decodeDependencyRequest(input: unknown): {
   const request = decodeRpcEnvelopeV1(input, {
     userId: rpcIdentifier,
     connectionId: rpcIdentifier,
-    botId: rpcIdentifier,
+    botId: rpcBotId,
     generation: rpcIdentifier,
   });
   return {
@@ -214,7 +215,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async getBotRegistration(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
     });
     await this.assertFlockIdentity(request.userId as string);
     return (await this.flockContribution()).registration(
@@ -225,10 +226,15 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async hasBot(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
     });
     await this.assertFlockIdentity(request.userId as string);
-    return (await this.flockContribution()).hasBot(request.botId as string);
+    const botId = request.botId as string;
+    return {
+      schemaVersion: 1,
+      botId,
+      registered: await (await this.flockContribution()).hasBot(botId),
+    } as const;
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {
@@ -334,7 +340,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       connectionId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       generation: rpcIdentifier,
       requirement: rpcDecoded(decodeConnectionDependencyRequirementV1),
     });

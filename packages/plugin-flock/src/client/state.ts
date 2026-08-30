@@ -19,7 +19,7 @@ export interface FlockWebData {
   load(): Promise<void>;
   select(botId: string): Promise<void>;
   openCreate(): void;
-  openEdit(): void;
+  openEdit(): Promise<void>;
   closeOverlay(): void;
   reroll(): void;
   create(): Promise<void>;

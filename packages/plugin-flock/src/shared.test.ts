@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeBotMembershipViewV1,
+  decodeBotRegistrationV1,
   decodeCreateBotCommandV1,
   decodeDirectoryViewV1,
   decodeSheepRecipeV1,
@@ -39,6 +41,7 @@ describe("Flock v1 contracts", () => {
         revision: 1,
         bots: [
           {
+            schemaVersion: 1,
             botId: "alpha",
             registeredAt: new Date(0).toISOString(),
             initialName: "Alpha",
@@ -59,6 +62,38 @@ describe("Flock v1 contracts", () => {
         expectedRevision: 1,
         botId: "invalid@desktop",
         name: "Invalid",
+      }),
+    ).toThrow("botId is invalid");
+  });
+
+  test("exactly decodes versioned registration and membership DTOs", () => {
+    const sheep = randomSheepRecipeV1(() => 0);
+    const registration = {
+      schemaVersion: 1 as const,
+      botId: "alpha",
+      registeredAt: new Date(0).toISOString(),
+      initialName: "Alpha",
+      sheep,
+    };
+    expect(decodeBotRegistrationV1(registration)).toEqual(registration);
+    expect(
+      decodeBotMembershipViewV1({
+        schemaVersion: 1,
+        botId: "alpha",
+        registered: true,
+      }),
+    ).toEqual({ schemaVersion: 1, botId: "alpha", registered: true });
+    for (const invalid of [
+      { ...registration, schemaVersion: 2 },
+      { ...registration, botId: "bad:bot" },
+      { ...registration, extra: true },
+    ])
+      expect(() => decodeBotRegistrationV1(invalid)).toThrow();
+    expect(() =>
+      decodeBotMembershipViewV1({
+        schemaVersion: 1,
+        botId: "bad:bot",
+        registered: true,
       }),
     ).toThrow("botId is invalid");
   });

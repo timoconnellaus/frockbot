@@ -35,9 +35,20 @@ export interface FlockBackendRouteContribution {
   ): Promise<Response | undefined>;
 }
 function errorResponse(error: unknown): Response {
-  if (error instanceof FlockDecodeError)
+  if (
+    error instanceof FlockDecodeError ||
+    (typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      error.name === "FlockDecodeError")
+  )
     return Response.json(
-      { error: error.message, code: "invalid-request", definitive: true },
+      {
+        error:
+          error instanceof Error ? error.message : "Flock request is invalid",
+        code: "invalid-request",
+        definitive: true,
+      },
       { status: 400 },
     );
   if (

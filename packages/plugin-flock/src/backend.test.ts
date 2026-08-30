@@ -12,6 +12,36 @@ function request(path: string, body?: unknown) {
 }
 
 describe("Flock gateway Contribution", () => {
+  test("maps RPC-serialized decode failures to definitive requests", async () => {
+    const contribution = createFlockBackendContribution({
+      listBots: () =>
+        Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
+      createBot: () =>
+        Promise.reject({ name: "FlockDecodeError", message: "collision" }),
+      readSheep: () => Promise.reject(new Error("not used")),
+      updateSheep: () => Promise.reject(new Error("not used")),
+    });
+    const response = await contribution.route(
+      request("/api/bots", {
+        schemaVersion: 1,
+        type: "bot/create",
+        commandId: "create-1",
+        expectedRevision: 0,
+        botId: "alpha",
+        name: "Alpha",
+        sheep,
+      }),
+      new URL("https://bot.example/api/bots"),
+      { userId: "user-1", client: "browser" },
+    );
+    expect(response?.status).toBe(400);
+    expect(await response?.json()).toEqual({
+      error: "Flock request is invalid",
+      code: "invalid-request",
+      definitive: true,
+    });
+  });
+
   test("routes exact authenticated create/read/update DTOs", async () => {
     const contribution = createFlockBackendContribution({
       listBots: () =>
