@@ -6,9 +6,10 @@ The current vertical slice includes:
 
 - a hosted Cordis WebUI/Vue client composed from declared Package Contributions;
 - backend-owned Bot Durable Objects running the event-sourced custom agent loop;
-- durable User and Bot settings with explicit Package, Connection, and Capability Assignment ownership;
+- a durable User-owned Bot directory with Bot-owned settings, sessions, and composable sheep identities;
+- explicit Package, Connection, and Capability Assignment ownership;
 - a Composio Gmail Connection with durable authorization, revocation, and reconciliation;
-- a sandboxed Electron window that loads the hosted application and brokers narrow optional platform capabilities;
+- thin Electron and Capacitor shells that load the hosted application and broker narrow optional platform capabilities;
 - streamed text, journaled tool calls, durable recovery, and lifecycle cleanup;
 - an executable Cordis loader, dependency, isolation, WebSocket, CSP, and Electron foundation proof.
 
@@ -38,7 +39,7 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs Packages, authorizes external accounts, and explicitly assigns their Capabilities to Bots. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser and desktop expose these hosted flows; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
+The left sidebar lists the authenticated User's Bots and switches the active workspace. **Add sheep** creates a Bot with a durable random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs Packages, authorizes external accounts, and explicitly assigns their Capabilities to Bots. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser, desktop, and mobile render the same hosted Bot and sheep UI; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
 
 To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory. `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names for standalone development; the hosted backend supplies durable User and Bot identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
 
@@ -134,6 +135,7 @@ FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot-chat.png" \
 ```text
 apps/
   desktop/          Electron hosted-window shell and optional platform adapters
+  mobile/           Capacitor hosted-WebUI auth and native-capability shell
   agent-runtime/    Transport-neutral backend Agent composition
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
   marketing/        Public frockbot.com site and static-assets Worker
@@ -148,6 +150,7 @@ packages/
   plugin-clock/     Reference package with agent, host, and WebUI contributions
   plugin-composio/  Composio Connection, reconciliation, and assigned Agent tools
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
+  plugin-flock/     Durable Bot directory and composable sheep identity Package
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
   plugin-memory/    Computer-workspace or R2-backed durable Markdown memory
   plugin-shell/     FrockBot Cordis WebUI/Vue client plugin

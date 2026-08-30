@@ -4,7 +4,7 @@ status: accepted
 
 # Separate Bot registration from Bot materialization
 
-A Bot will exist when the Flock Package atomically registers it in the User Durable Object, while its Bot Durable Object settings and sheep identity materialize idempotently from that immutable registration seed on first use. This rejects arbitrary `?bot=` lazy creation, keeps User ownership enumerable and authoritative, avoids a distributed creation transaction, and lets every Bot-scoped path prove membership before writing Bot state.
+A Bot exists when the Flock Package atomically registers it in the User Durable Object, while its Bot Durable Object settings and sheep identity materialize idempotently from that immutable registration seed on first use. This rejects arbitrary `?bot=` lazy creation, keeps User ownership enumerable and authoritative, avoids a distributed creation transaction, and lets every Bot-scoped path prove membership before writing Bot state.
 
 ## Considered options
 
