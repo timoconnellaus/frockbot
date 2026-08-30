@@ -436,7 +436,7 @@
   overflow: hidden;
   border: 1px solid var(--frock-border);
   border-radius: 10px;
-  background: var(--frock-surface) 7f9;
+  background: var(--frock-surface-accent-soft);
   font-size: 12px;
 }
 
@@ -493,7 +493,7 @@
   border: 1px solid var(--frock-danger-border);
   border-radius: 12px;
   color: var(--frock-danger-text);
-  background: var(--frock-surface) 0f2;
+  background: var(--frock-danger-surface);
   font-size: 12px;
 }
 

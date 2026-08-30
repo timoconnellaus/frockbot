@@ -34,6 +34,7 @@ if (!surfaces || !web)
   color: var(--frock-text-muted);
   background: var(--frock-surface);
   cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 
 .bot-settings-trigger:hover {

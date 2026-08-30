@@ -220,7 +220,7 @@
   margin-top: 12px;
   padding: 8px 10px;
   border-radius: 9px;
-  background: var(--frock-surface) 6f8;
+  background: var(--frock-accent-surface);
   color: var(--frock-accent-text);
   font-size: 11px;
   line-height: 1.45;
