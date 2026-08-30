@@ -1,4 +1,8 @@
-import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
+import {
+  decodeSessionEvent,
+  type NormalizedModelRequest,
+  type SessionEvent,
+} from "@frockbot/agent-core";
 import type { Plugin } from "cordis";
 import type {
   FoundationAgentPackage,
@@ -24,6 +28,7 @@ import {
   type ConnectionView,
   type ConfigurationCommandV1,
   type OperationReceiptV1,
+  type ResolvedModelBindingV1,
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
   resolveBotModelBindingV1,
@@ -1062,6 +1067,13 @@ export class ShellBotBackendContribution {
               stored.generation,
             );
           },
+          release: (stored) =>
+            userConfiguration.releaseConnectionDependency(
+              stored.userId,
+              stored.connectionId,
+              stored.botId,
+              stored.generation,
+            ),
           rejectCommitted: async (stored) => {
             await this.markConnectionUnavailable(
               { userId: stored.userId, botId: stored.botId },
@@ -1074,7 +1086,7 @@ export class ShellBotBackendContribution {
           },
         });
         if (
-          settlement === "acknowledged" &&
+          settlement !== "compensated" &&
           saga.supersededAssignmentId &&
           saga.supersededConnectionId &&
           saga.supersededGeneration
@@ -1386,7 +1398,14 @@ export class ShellBotBackendContribution {
     requireStoredRunV1(run);
     const previous = latest.slice(0, run.previousEventCount);
     try {
-      const runtime = await this.agentRuntime(identity, settings);
+      const modelState = latestModelRequestJournalState(latest);
+      const runtime = await this.agentRuntime(
+        identity,
+        settings,
+        modelState.status === "completed"
+          ? modelState.request.request
+          : undefined,
+      );
       const promptParts = [
         `You are ${settings.profile.name}.`,
         settings.profile.label,
@@ -1477,6 +1496,7 @@ export class ShellBotBackendContribution {
   private async agentRuntime(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
+    admittedRequest?: NormalizedModelRequest,
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
     modelSelection: RuntimeModelSelection;
@@ -1493,11 +1513,13 @@ export class ShellBotBackendContribution {
       capabilities: pkg.manifest.configuration?.capabilities ?? [],
       connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
     }));
-    const plan = resolveBotExecutionPlanV1({
-      bot: settings,
-      user,
-      packages: packageDefinitions,
-    });
+    const plan = admittedRequest
+      ? undefined
+      : resolveBotExecutionPlanV1({
+          bot: settings,
+          user,
+          packages: packageDefinitions,
+        });
     const readSecret = (name: string) => {
       // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
       const value = (this.env as unknown as Record<string, unknown>)[name];
@@ -1508,28 +1530,73 @@ export class ShellBotBackendContribution {
         userId: identity.userId,
         readSecret,
       }),
-      ...(await createFoundationAssignedRuntimePackages(
-        application,
-        settings,
-        plan,
-        {
-          userId: identity.userId,
-          readSecret,
-          authorizeConnection: (assignment) =>
-            this.authorizeAssignedEffect(identity, assignment),
-        },
-      )),
+      ...(plan
+        ? await createFoundationAssignedRuntimePackages(
+            application,
+            settings,
+            plan,
+            {
+              userId: identity.userId,
+              readSecret,
+              authorizeConnection: (assignment) =>
+                this.authorizeAssignedEffect(identity, assignment),
+            },
+          )
+        : []),
     ];
     if (!settings.model) {
       throw new Error("Bot model Connection is not configured");
     }
 
-    const binding = resolveBotModelBindingV1({
-      model: settings.model,
-      assignments: settings.assignments,
-      user,
-      packages: packageDefinitions,
-    });
+    let binding: ResolvedModelBindingV1;
+    if (admittedRequest) {
+      const admittedBinding = admittedRequest.modelBinding;
+      const assignment = settings.assignments.find(
+        (candidate) =>
+          candidate.connectionId === admittedBinding?.connectionId &&
+          candidate.state === "enabled",
+      );
+      const pkg = application.packages.find(
+        (candidate) => candidate.id === assignment?.packageId,
+      );
+      const capability = pkg?.manifest.configuration?.capabilities.find(
+        (candidate) => candidate.id === assignment?.capabilityId,
+      );
+      const connectionTypeId = capability?.connectionTypes[0];
+      if (
+        !admittedBinding?.connectionGeneration ||
+        !assignment?.connectionId ||
+        !pkg ||
+        !connectionTypeId ||
+        settings.model.connectionId !== admittedBinding.connectionId ||
+        settings.model.providerModelId !== admittedRequest.model
+      ) {
+        throw new Error("Admitted model binding is unavailable");
+      }
+      binding = {
+        state: "ready",
+        assignment: structuredClone(settings.model),
+        packageId: pkg.id,
+        providerType: admittedRequest.provider,
+        connection: {
+          connectionId: admittedBinding.connectionId,
+          packageId: pkg.id,
+          connectionTypeId,
+          displayName: "Admitted model Connection",
+          state: "ready",
+          providerType: admittedRequest.provider,
+          generation: admittedBinding.connectionGeneration,
+          safeMetadata: {},
+        },
+      };
+    } else {
+      binding = resolveBotModelBindingV1({
+        model: settings.model,
+        assignments: settings.assignments,
+        user,
+        packages: packageDefinitions,
+      });
+    }
     if (
       binding.state === "unavailable" ||
       !binding.connection ||
@@ -1584,8 +1651,13 @@ export class ShellBotBackendContribution {
         ...(binding.connection.generation
           ? { connectionGeneration: binding.connection.generation }
           : {}),
-        ...(binding.connection.modelCatalog?.generation
-          ? { catalogGeneration: binding.connection.modelCatalog.generation }
+        ...((admittedRequest?.modelBinding?.catalogGeneration ??
+        binding.connection.modelCatalog?.generation)
+          ? {
+              catalogGeneration:
+                admittedRequest?.modelBinding?.catalogGeneration ??
+                binding.connection.modelCatalog!.generation,
+            }
           : {}),
       },
     };
@@ -1891,11 +1963,17 @@ export class ShellBotBackendContribution {
         const storedFences = storedRunAdmissionFences(
           await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
         );
+        if (
+          !storedFences.includes(query.runId) &&
+          storedFences.length >= MAX_RUN_ADMISSION_FENCES
+        ) {
+          throw new Error("Run admission fence capacity reached");
+        }
         await transaction.put({
           [RUN_ADMISSION_FENCE_INDEX_KEY]: [
             ...storedFences.filter((runId) => runId !== query.runId),
             query.runId,
-          ].slice(-MAX_RUN_ADMISSION_FENCES),
+          ],
           [IDENTITY_KEY]: durableIdentity ?? identity,
         });
         await transaction.delete(`${RUN_ADMISSION_FENCE_PREFIX}${query.runId}`);
@@ -2157,7 +2235,10 @@ export class ShellBotBackendContribution {
         }
         throw new Error(`run "${command.runId}" already exists`);
       }
-      if (await transaction.get(fenceKey)) {
+      const fences = storedRunAdmissionFences(
+        await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
+      );
+      if (fences.includes(command.runId) || (await transaction.get(fenceKey))) {
         throw new Error(`run "${command.runId}" admission was fenced`);
       }
       const identity = await transaction.get<BotIdentity>(IDENTITY_KEY);

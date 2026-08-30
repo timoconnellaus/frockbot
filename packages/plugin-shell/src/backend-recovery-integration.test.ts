@@ -320,6 +320,10 @@ describe("Bot recovery", () => {
       "ollama-run-settlement",
     );
     expect(requests).toHaveLength(3);
+    userSettings.packages[0] = {
+      ...userSettings.packages[0]!,
+      state: "disabled",
+    };
 
     await host().alarm();
 
@@ -329,6 +333,10 @@ describe("Bot recovery", () => {
     expect(await storage.get("active-run")).toBeUndefined();
     expect(requests).toHaveLength(3);
     expect(settledEffects).toHaveLength(4);
+    userSettings.packages[0] = {
+      ...userSettings.packages[0]!,
+      state: "installed",
+    };
 
     failRequests = true;
     await expect(
@@ -1266,17 +1274,102 @@ describe("Bot recovery", () => {
     ).rejects.toThrow('run "command-fenced" admission was fenced');
     expect(await storage.get("run:command-fenced")).toBeUndefined();
 
-    for (let index = 0; index < 257; index += 1) {
+    for (let index = 0; index < 255; index += 1) {
       await contribution.fenceRunAdmission(
         { userId: "user-1", botId: "primary" },
         { schemaVersion: 1, runId: `bounded-fence-${index}` },
       );
     }
+    await expect(
+      contribution.fenceRunAdmission(
+        { userId: "user-1", botId: "primary" },
+        { schemaVersion: 1, runId: "fence-over-capacity" },
+      ),
+    ).rejects.toThrow("Run admission fence capacity reached");
     const fences = await storage.get<string[]>("run-admission-fences");
     expect(fences).toHaveLength(256);
-    expect(fences).not.toContain("command-fenced");
-    expect(fences).not.toContain("bounded-fence-0");
-    expect(fences).toContain("bounded-fence-256");
+    expect(fences).toContain("command-fenced");
+    expect(fences).toContain("bounded-fence-0");
+    expect(fences).not.toContain("fence-over-capacity");
+  });
+
+  test("rechecks a fence committed during execution-context resolution", async () => {
+    const storage = new MemoryStorage();
+    const contextStarted = Promise.withResolvers<void>();
+    const continueContext = Promise.withResolvers<void>();
+    const user: UserSettingsViewV1 = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-race",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Race",
+          state: "ready",
+          providerType: "ollama-cloud",
+          generation: "generation-race",
+          safeMetadata: {},
+        },
+      ],
+    };
+    const settings = {
+      ...initializeBotSettingsV1("primary"),
+      model: {
+        connectionId: "ollama-race",
+        providerModelId: "model:cloud",
+      },
+      assignments: [
+        {
+          assignmentId: "model-race",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "ollama-race",
+          state: "enabled" as const,
+        },
+      ],
+    };
+    await storage.put("bot-configuration", settings);
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {
+        USER_CONFIGURATIONS: {
+          idFromName: () => "user-1",
+          get: () => ({
+            readConfiguration: async () => {
+              contextStarted.resolve();
+              await continueContext.promise;
+              return user;
+            },
+          }),
+        },
+      } as never,
+    });
+    const run = contribution.run({
+      userId: "user-1",
+      botId: "primary",
+      runId: "fence-race",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-08-29T00:00:00.000Z",
+      text: "must remain fenced",
+    });
+    await contextStarted.promise;
+    await contribution.fenceRunAdmission(
+      { userId: "user-1", botId: "primary" },
+      { schemaVersion: 1, runId: "fence-race" },
+    );
+    continueContext.resolve();
+
+    await expect(run).rejects.toThrow('run "fence-race" admission was fenced');
+    expect(await storage.get("run:fence-race")).toBeUndefined();
   });
 
   test("returns admitted state when admission wins the fence transaction", async () => {

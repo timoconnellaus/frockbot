@@ -325,6 +325,16 @@ describe("Ollama Cloud User Contribution", () => {
       });
     }
 
+    for (let index = 257; index < 383; index += 1) {
+      await ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: `label-retention-${index}`,
+        connectionId: created.connectionId,
+        label: `Label ${index}`,
+      });
+    }
+
     await expect(
       ollama.lookupConnectionCommand("account-1", "connect-receipt-retention"),
     ).resolves.toEqual(created);
@@ -341,22 +351,25 @@ describe("Ollama Cloud User Contribution", () => {
     ).resolves.toEqual(created);
     expect((await settings.read("account-1")).connections).toHaveLength(1);
     expect(
-      storage.values.get("ollama-connection-command:connect-receipt-retention"),
-    ).toEqual({
-      schemaVersion: 1,
-      commandId: "connect-receipt-retention",
-      fingerprint: expect.any(String),
-      accountId: "account-1",
-      connectionId: created.connectionId,
-      operation: "connection/create-api-key",
-      receipt: created,
-      completedAt: expect.any(Number),
-    });
+      storage.values.has("ollama-connection-command:connect-receipt-retention"),
+    ).toBe(false);
+    expect(
+      storage.values.get("ollama-connection-command-tombstones"),
+    ).toHaveLength(128);
     expect(
       [...storage.values.keys()].filter((key) =>
         key.startsWith("ollama-connection-command:"),
       ),
-    ).toHaveLength(258);
+    ).toHaveLength(256);
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: "label-history-over-capacity",
+        connectionId: created.connectionId,
+        label: "Over capacity",
+      }),
+    ).rejects.toThrow("Ollama Connection command history capacity reached");
   });
 
   test("bounds pending command admission before durable recovery grows", async () => {
@@ -1169,6 +1182,68 @@ describe("Ollama Cloud User Contribution", () => {
       }),
     ).resolves.toMatchObject({ status: "failed" });
     expect(providerRequests).toBe(beforePackageRefresh);
+  });
+
+  test("does not let an older refresh overwrite a newer catalog", async () => {
+    const older = Promise.withResolvers<Response>();
+    const newer = Promise.withResolvers<Response>();
+    const olderStarted = Promise.withResolvers<void>();
+    const newerStarted = Promise.withResolvers<void>();
+    let catalogRequests = 0;
+    const { settings, ollama } = await fixture((input) => {
+      if (!String(input).endsWith("/tags")) {
+        return Promise.resolve(Response.json({ capabilities: ["tools"] }));
+      }
+      catalogRequests += 1;
+      if (catalogRequests === 1) {
+        return Promise.resolve(
+          Response.json({ models: [{ model: "initial:cloud" }] }),
+        );
+      }
+      if (catalogRequests === 2) {
+        olderStarted.resolve();
+        return older.promise;
+      }
+      newerStarted.resolve();
+      return newer.promise;
+    });
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-refresh-order",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "key",
+    });
+    const olderRefresh = ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/refresh-models",
+      commandId: "refresh-older",
+      connectionId: created.connectionId,
+    });
+    await olderStarted.promise;
+    const newerRefresh = ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/refresh-models",
+      commandId: "refresh-newer",
+      connectionId: created.connectionId,
+    });
+    await newerStarted.promise;
+    newer.resolve(Response.json({ models: [{ model: "newer:cloud" }] }));
+    await newerRefresh;
+    older.resolve(Response.json({ models: [{ model: "older:cloud" }] }));
+    await olderRefresh;
+
+    const catalog = (
+      await settings.getConnection("account-1", created.connectionId)
+    )?.modelCatalog;
+    expect(catalog?.models).toContainEqual(
+      expect.objectContaining({ providerModelId: "newer:cloud" }),
+    );
+    expect(catalog?.models).not.toContainEqual(
+      expect.objectContaining({ providerModelId: "older:cloud" }),
+    );
   });
 
   test("retries catalog lease settlement without repeating the catalog read", async () => {

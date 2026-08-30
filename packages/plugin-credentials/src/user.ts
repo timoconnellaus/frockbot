@@ -578,6 +578,39 @@ export class CredentialUserBackendContribution {
       const stored = decodeStoredCredentialGeneration(storedValue);
       if (stored.state !== "pending") return;
       if (stored.leaseIds.length === 0) {
+        const tombstoneIndexKey = leaseTombstoneIndexKey(
+          connectionId,
+          generation,
+        );
+        const tombstoneIndexValue =
+          await transaction.get<unknown>(tombstoneIndexKey);
+        const tombstoneIndex =
+          tombstoneIndexValue === undefined
+            ? []
+            : decodeStoredStringList(
+                tombstoneIndexValue,
+                "credential lease tombstone index",
+              );
+        for (const effectId of tombstoneIndex) {
+          const tombstoneValue = await transaction.get<unknown>(
+            leaseTombstoneKey(effectId),
+          );
+          if (tombstoneValue === undefined) continue;
+          const tombstone = decodeLeaseTombstone(tombstoneValue);
+          if (
+            tombstone.accountId !== stored.accountId ||
+            tombstone.connectionId !== connectionId ||
+            tombstone.packageId !== stored.packageId ||
+            tombstone.credentialGeneration !== generation
+          ) {
+            throw new Error("Credential lease tombstone index is invalid");
+          }
+          await transaction.delete(leaseTombstoneKey(effectId));
+        }
+        await transaction.delete(tombstoneIndexKey);
+        await transaction.delete(
+          leaseGenerationIndexKey(connectionId, generation),
+        );
         await transaction.delete(key);
       } else {
         await transaction.put(key, { ...stored, state: "retired" });

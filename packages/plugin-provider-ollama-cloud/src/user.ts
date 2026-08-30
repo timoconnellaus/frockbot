@@ -27,7 +27,10 @@ const CONNECTION_TYPE_ID = "ollama-cloud-account";
 const COMMAND_PREFIX = "ollama-connection-command:";
 const PENDING_KEY = "ollama-pending-connection-commands";
 const RECEIPT_INDEX_KEY = "ollama-connection-receipt-index";
+const COMMAND_TOMBSTONES_KEY = "ollama-connection-command-tombstones";
 const MAX_MANUAL_RECEIPTS = 256;
+const MAX_COMMAND_TOMBSTONES = 128;
+const MAX_MANUAL_COMMANDS = MAX_MANUAL_RECEIPTS + MAX_COMMAND_TOMBSTONES;
 const MAX_PENDING_COMMANDS = 64;
 const MAX_PENDING_RECOVERIES_PER_ALARM = 1;
 const MAX_CATALOG_REFRESHES_PER_ALARM = 1;
@@ -62,6 +65,11 @@ interface StoredCommand {
   validationFailure?: string;
   validationStatus?: "applied" | "failed";
 }
+
+type StoredCommandTombstone = StoredCommand & {
+  receipt: ConnectionCommandReceiptV1;
+  completedAt: number;
+};
 
 type OllamaCredentialContribution = Omit<
   CredentialUserBackendContribution,
@@ -202,6 +210,19 @@ function decodeReceiptIndex(input: unknown): string[] {
     throw new Error("Stored Ollama receipt index is invalid");
   }
   return index;
+}
+
+function decodeCommandTombstones(input: unknown): StoredCommandTombstone[] {
+  if (!Array.isArray(input) || input.length > MAX_COMMAND_TOMBSTONES) {
+    throw new Error("Stored Ollama command tombstones are invalid");
+  }
+  return input.map((value) => {
+    const command = decodeStoredCommand(value);
+    if (!command.receipt || command.completedAt === undefined) {
+      throw new Error("Stored Ollama command tombstone is invalid");
+    }
+    return command as StoredCommandTombstone;
+  });
 }
 
 function decodeStoredCommand(input: unknown): StoredCommand {
@@ -384,7 +405,9 @@ function decodeMutationSequence(input: unknown): {
   return { next: value.next, applied: value.applied };
 }
 
-function compactCompletedCommand(record: StoredCommand): StoredCommand {
+function compactCompletedCommand(
+  record: StoredCommand,
+): StoredCommandTombstone {
   if (!record.receipt || record.completedAt === undefined) {
     throw new Error("Completed Ollama command receipt is unavailable");
   }
@@ -403,7 +426,8 @@ function compactCompletedCommand(record: StoredCommand): StoredCommand {
 function isSequencedMutation(operation: StoredCommand["operation"]): boolean {
   return (
     operation === "connection/update-label" ||
-    operation === "connection/set-enabled"
+    operation === "connection/set-enabled" ||
+    operation === "connection/refresh-models"
   );
 }
 
@@ -460,8 +484,17 @@ export class OllamaCloudUserBackendContribution {
   ): Promise<ConnectionCommandReceiptV1 | undefined> {
     await this.host.settings.read(accountId);
     const value = await this.host.storage.get<unknown>(commandKey(commandId));
-    if (value === undefined) return undefined;
-    const record = decodeStoredCommand(value);
+    const tombstonesValue = await this.host.storage.get<unknown>(
+      COMMAND_TOMBSTONES_KEY,
+    );
+    const record =
+      value === undefined
+        ? (tombstonesValue === undefined
+            ? []
+            : decodeCommandTombstones(tombstonesValue)
+          ).find((candidate) => candidate.commandId === commandId)
+        : decodeStoredCommand(value);
+    if (!record) return undefined;
     if (record.accountId !== accountId) {
       throw new Error("Connection command authority does not match");
     }
@@ -507,6 +540,23 @@ export class OllamaCloudUserBackendContribution {
           : undefined,
       );
     }
+    const tombstonesValue = await this.host.storage.get<unknown>(
+      COMMAND_TOMBSTONES_KEY,
+    );
+    const tombstone = (
+      tombstonesValue === undefined
+        ? []
+        : decodeCommandTombstones(tombstonesValue)
+    ).find((candidate) => candidate.commandId === command.commandId);
+    if (tombstone) {
+      if (
+        tombstone.accountId !== accountId ||
+        tombstone.fingerprint !== commandFingerprint
+      ) {
+        throw new Error("Connection command idempotency key was reused");
+      }
+      return tombstone.receipt;
+    }
 
     const record = await this.admit(
       accountId,
@@ -514,7 +564,7 @@ export class OllamaCloudUserBackendContribution {
       commandFingerprint,
       automaticRefresh,
     );
-    return this.resumeOnce(record);
+    return record.receipt ?? this.resumeOnce(record);
   }
 
   private async admit(
@@ -694,6 +744,25 @@ export class OllamaCloudUserBackendContribution {
       const existingValue = await transaction.get<unknown>(
         commandKey(record.commandId),
       );
+      const tombstonesValue = await transaction.get<unknown>(
+        COMMAND_TOMBSTONES_KEY,
+      );
+      const tombstones =
+        tombstonesValue === undefined
+          ? []
+          : decodeCommandTombstones(tombstonesValue);
+      const tombstone = tombstones.find(
+        (candidate) => candidate.commandId === record.commandId,
+      );
+      if (tombstone) {
+        if (
+          tombstone.accountId !== record.accountId ||
+          tombstone.fingerprint !== record.fingerprint
+        ) {
+          throw new Error("Connection command idempotency key was reused");
+        }
+        return { record: tombstone, created: false };
+      }
       const existing =
         existingValue === undefined
           ? undefined
@@ -713,6 +782,20 @@ export class OllamaCloudUserBackendContribution {
       ).filter((id) => id !== record.commandId);
       if (pending.length >= MAX_PENDING_COMMANDS) {
         throw new Error("Ollama Connection command capacity reached");
+      }
+      if (!record.automaticRefresh) {
+        const receiptIndexValue =
+          await transaction.get<unknown>(RECEIPT_INDEX_KEY);
+        const receiptIndex =
+          receiptIndexValue === undefined
+            ? []
+            : decodeReceiptIndex(receiptIndexValue);
+        if (
+          receiptIndex.length + tombstones.length + pending.length >=
+          MAX_MANUAL_COMMANDS
+        ) {
+          throw new Error("Ollama Connection command history capacity reached");
+        }
       }
       let admitted = record;
       let sequenceEntry: Record<string, unknown> = {};
@@ -1194,6 +1277,19 @@ export class OllamaCloudUserBackendContribution {
         let outcomeModels = models;
         let outcomeFailure = failure;
         let authorized: ConnectionView | undefined;
+        const mutationSequenceValue = record.mutationSequence
+          ? await storage.get<unknown>(
+              mutationSequenceKey(record.connectionId, record.operation),
+            )
+          : undefined;
+        const mutationSequence =
+          mutationSequenceValue === undefined
+            ? undefined
+            : decodeMutationSequence(mutationSequenceValue);
+        const appliesProjection =
+          !record.mutationSequence ||
+          !mutationSequence ||
+          record.mutationSequence === mutationSequence.next;
         if (outcomeModels) {
           try {
             authorized = await this.requireModelAuthority(
@@ -1218,7 +1314,7 @@ export class OllamaCloudUserBackendContribution {
               settlementStatus: status,
             }
           : undefined;
-        if (outcomeModels && authorized) {
+        if (appliesProjection && outcomeModels && authorized) {
           await this.host.settings.replaceConnection(
             record.accountId,
             record.connectionId,
@@ -1230,7 +1326,7 @@ export class OllamaCloudUserBackendContribution {
             },
             storage,
           );
-        } else {
+        } else if (appliesProjection) {
           const settings = await this.host.settings.readSnapshot(storage);
           const current = settings.connections.find(
             (connection) => connection.connectionId === record.connectionId,
@@ -1266,6 +1362,19 @@ export class OllamaCloudUserBackendContribution {
               storage,
             );
           }
+        }
+        if (appliesProjection && record.mutationSequence && mutationSequence) {
+          await storage.put(
+            mutationSequenceKey(record.connectionId, record.operation),
+            {
+              schemaVersion: 1,
+              next: mutationSequence.next,
+              applied: Math.max(
+                mutationSequence.applied,
+                record.mutationSequence,
+              ),
+            },
+          );
         }
         if (pendingSettlement) {
           const storedValue = await storage.get<unknown>(
@@ -1403,15 +1512,29 @@ export class OllamaCloudUserBackendContribution {
       ...receiptIndex.filter((commandId) => !completedIds.includes(commandId)),
       ...completedIds,
     ];
+    const tombstonesValue = await storage.get<unknown>(COMMAND_TOMBSTONES_KEY);
+    let tombstones =
+      tombstonesValue === undefined
+        ? []
+        : decodeCommandTombstones(tombstonesValue);
     for (const commandId of ordered.slice(0, -MAX_MANUAL_RECEIPTS)) {
-      const value = await storage.get<unknown>(commandKey(commandId));
+      const key = commandKey(commandId);
+      const value = completed[key] ?? (await storage.get<unknown>(key));
       if (value === undefined) continue;
-      completed[commandKey(commandId)] = compactCompletedCommand(
-        decodeStoredCommand(value),
-      );
+      const compacted = compactCompletedCommand(decodeStoredCommand(value));
+      tombstones = [
+        ...tombstones.filter((candidate) => candidate.commandId !== commandId),
+        compacted,
+      ];
+      delete completed[key];
+      await storage.delete(key);
+    }
+    if (tombstones.length > MAX_COMMAND_TOMBSTONES) {
+      throw new Error("Ollama Connection command history capacity reached");
     }
     await storage.put({
       ...completed,
+      [COMMAND_TOMBSTONES_KEY]: tombstones,
       [PENDING_KEY]: retained,
       [RECEIPT_INDEX_KEY]: ordered.slice(-MAX_MANUAL_RECEIPTS),
     });
@@ -1560,17 +1683,35 @@ export class OllamaCloudUserBackendContribution {
             receipt: proposed,
             completedAt: this.now(),
           };
-          const compacted: Record<string, unknown> = {};
+          const tombstonesValue = await storage.get<unknown>(
+            COMMAND_TOMBSTONES_KEY,
+          );
+          let tombstones =
+            tombstonesValue === undefined
+              ? []
+              : decodeCommandTombstones(tombstonesValue);
           for (const commandId of ordered.slice(0, -MAX_MANUAL_RECEIPTS)) {
             const value = await storage.get<unknown>(commandKey(commandId));
             if (value === undefined) continue;
-            compacted[commandKey(commandId)] = compactCompletedCommand(
+            const compacted = compactCompletedCommand(
               decodeStoredCommand(value),
+            );
+            tombstones = [
+              ...tombstones.filter(
+                (candidate) => candidate.commandId !== commandId,
+              ),
+              compacted,
+            ];
+            await storage.delete(commandKey(commandId));
+          }
+          if (tombstones.length > MAX_COMMAND_TOMBSTONES) {
+            throw new Error(
+              "Ollama Connection command history capacity reached",
             );
           }
           await storage.put({
-            ...compacted,
             [commandKey(record.commandId)]: completed,
+            [COMMAND_TOMBSTONES_KEY]: tombstones,
             [RECEIPT_INDEX_KEY]: retained,
             [PENDING_KEY]: pending,
           });

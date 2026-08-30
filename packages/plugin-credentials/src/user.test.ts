@@ -315,6 +315,17 @@ describe("Credential User Contribution", () => {
         expiresAt: "2026-08-30T02:00:00.000Z",
       }),
     ).rejects.toThrow("Credential lease expired");
+
+    await credentials.discardPending("connection-1", "pending-generation");
+
+    expect(
+      storage.values.has("credential-lease-expired:validation:connect-1"),
+    ).toBe(false);
+    expect(
+      storage.values.has(
+        "credential-lease-expired-index:connection-1:pending-generation",
+      ),
+    ).toBe(false);
   });
 
   test("bounds expired lease tombstones", async () => {

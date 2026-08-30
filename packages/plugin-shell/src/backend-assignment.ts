@@ -24,6 +24,7 @@ export type AssignmentSagaSettlement =
 export interface AssignmentSagaEffects {
   acknowledge(saga: StoredAssignmentSaga): Promise<boolean>;
   compensate(saga: StoredAssignmentSaga): Promise<void>;
+  release(saga: StoredAssignmentSaga): Promise<boolean>;
   rejectCommitted(saga: StoredAssignmentSaga): Promise<void>;
 }
 
@@ -37,6 +38,9 @@ export async function settleAssignmentSaga(
   }
   if (await effects.acknowledge(saga)) return "acknowledged";
   await effects.compensate(saga);
+  if (!(await effects.release(saga))) {
+    throw new Error("Rejected Connection dependency was not released");
+  }
   await effects.rejectCommitted(saga);
   return "rejected";
 }

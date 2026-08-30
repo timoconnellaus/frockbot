@@ -30,6 +30,10 @@ function effects(log: string[], acknowledge = true): AssignmentSagaEffects {
       log.push("compensate");
       return Promise.resolve();
     },
+    release: () => {
+      log.push("release");
+      return Promise.resolve(true);
+    },
     rejectCommitted: () => {
       log.push("reject-committed");
       return Promise.resolve();
@@ -62,6 +66,11 @@ describe("assignment saga settlement", () => {
     await expect(
       settleAssignmentSaga(saga("committed"), effects(log, false)),
     ).resolves.toBe("rejected");
-    expect(log).toEqual(["acknowledge", "compensate", "reject-committed"]);
+    expect(log).toEqual([
+      "acknowledge",
+      "compensate",
+      "release",
+      "reject-committed",
+    ]);
   });
 });
