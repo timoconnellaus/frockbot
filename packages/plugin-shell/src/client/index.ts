@@ -735,11 +735,26 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       (pkg) =>
         pkg.packageId === connection?.packageId && pkg.state === "installed",
     );
+    const catalogPackage = web.value.pluginCatalog.find(
+      (pkg) => pkg.packageId === connection?.packageId,
+    );
+    const connectionType = catalogPackage?.connectionTypes.find(
+      (candidate) => candidate.id === connection?.connectionTypeId,
+    );
+    const modelCapabilities = new Set(
+      catalogPackage?.capabilities.flatMap((capability) =>
+        capability.kind === "model" &&
+        connectionType?.capabilities.includes(capability.id)
+          ? [capability.id]
+          : [],
+      ) ?? [],
+    );
     const capabilityAssigned = web.value.botSettings?.assignments.some(
       (assignment) =>
         assignment.connectionId === model?.connectionId &&
         assignment.packageId === connection?.packageId &&
-        assignment.state === "enabled",
+        assignment.state === "enabled" &&
+        modelCapabilities.has(assignment.capabilityId),
     );
     web.value.modelReady = Boolean(
       model &&

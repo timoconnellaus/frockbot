@@ -55,6 +55,8 @@ interface StoredCommand {
   completedAt?: number;
   automaticRefresh?: boolean;
   mutationSequence?: number;
+  settlementEffectId?: string;
+  settlementStatus?: "applied" | "failed";
 }
 
 type OllamaCredentialContribution = Omit<
@@ -219,6 +221,8 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       "completedAt",
       "automaticRefresh",
       "mutationSequence",
+      "settlementEffectId",
+      "settlementStatus",
     ],
   );
   const operations: StoredCommand["operation"][] = [
@@ -244,7 +248,11 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     (value.mutationSequence !== undefined &&
       (typeof value.mutationSequence !== "number" ||
         !Number.isSafeInteger(value.mutationSequence) ||
-        value.mutationSequence <= 0))
+        value.mutationSequence <= 0)) ||
+    (value.settlementStatus !== undefined &&
+      value.settlementStatus !== "applied" &&
+      value.settlementStatus !== "failed") ||
+    Boolean(value.settlementEffectId) !== Boolean(value.settlementStatus)
   ) {
     throw new Error("Stored Ollama command is invalid");
   }
@@ -305,6 +313,16 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     ...(value.mutationSequence === undefined
       ? {}
       : { mutationSequence: value.mutationSequence as number }),
+    ...(value.settlementEffectId === undefined
+      ? {}
+      : {
+          settlementEffectId: storedText(
+            value.settlementEffectId,
+            "settlementEffectId",
+            256,
+          ),
+          settlementStatus: value.settlementStatus as "applied" | "failed",
+        }),
   };
 }
 
@@ -736,8 +754,13 @@ export class OllamaCloudUserBackendContribution {
       return active.promise;
     }
     const promise = (async () => {
-      await this.ensureAdmittedState(sequenced, apiKey);
-      return this.resume(sequenced);
+      try {
+        await this.ensureAdmittedState(sequenced, apiKey);
+        return await this.resume(sequenced);
+      } catch (error) {
+        await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
+        throw error;
+      }
     })();
     this.resumptions.set(sequenced.commandId, {
       fingerprint: sequenced.fingerprint,
@@ -972,6 +995,15 @@ export class OllamaCloudUserBackendContribution {
   ): Promise<ConnectionCommandReceiptV1> {
     const expectedGeneration = record.expectedGeneration;
     if (!expectedGeneration) return this.finishRecord(record, "failed");
+    if (record.settlementEffectId && record.settlementStatus) {
+      await this.host.credentials.settle({
+        accountId: record.accountId,
+        connectionId: record.connectionId,
+        packageId: PACKAGE_ID,
+        effectId: record.settlementEffectId,
+      });
+      return this.finishRecord(record, record.settlementStatus);
+    }
     const effectId = `catalog:${record.commandId}`;
     let lease: CredentialLeaseV1 | undefined;
     let failed = false;
@@ -1071,19 +1103,32 @@ export class OllamaCloudUserBackendContribution {
           );
         },
       );
-    } finally {
-      if (lease) {
-        await this.host.credentials
-          .settle({
-            accountId: record.accountId,
-            connectionId: record.connectionId,
-            packageId: PACKAGE_ID,
-            effectId,
-          })
-          .catch(() => undefined);
-      }
     }
-    return this.finishRecord(record, failed ? "failed" : "applied");
+    const status = failed ? "failed" : "applied";
+    if (!lease) return this.finishRecord(record, status);
+    const pendingSettlement: StoredCommand = {
+      ...record,
+      settlementEffectId: effectId,
+      settlementStatus: status,
+    };
+    await this.host.storage.transaction(async (storage) => {
+      const storedValue = await storage.get<unknown>(
+        commandKey(record.commandId),
+      );
+      if (storedValue === undefined) {
+        throw new Error("Ollama Connection command is unavailable");
+      }
+      const stored = decodeStoredCommand(storedValue);
+      if (stored.receipt) return;
+      await storage.put(commandKey(record.commandId), pendingSettlement);
+    });
+    await this.host.credentials.settle({
+      accountId: record.accountId,
+      connectionId: record.connectionId,
+      packageId: PACKAGE_ID,
+      effectId,
+    });
+    return this.finishRecord(pendingSettlement, status);
   }
 
   private async setEnabled(

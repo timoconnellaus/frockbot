@@ -12,6 +12,7 @@ function saga(phase: StoredAssignmentSaga["phase"]): StoredAssignmentSaga {
     commandFingerprint: "configuration-command-v1:test",
     userId: "user-1",
     botId: "bot-1",
+    assignmentId: "assignment-1",
     connectionId: "connection-1",
     generation: "generation-1",
     phase,

@@ -285,12 +285,39 @@ describe("Bot selection", () => {
     });
     if (!provided) throw new Error("shell data was not provided");
     provided.value.activeBotId = bot.botId;
+    provided.value.pluginCatalog = [
+      {
+        packageId: "provider-ollama-cloud",
+        displayName: "Ollama Cloud",
+        version: "0.0.1",
+        capabilities: [
+          { id: "ollama-cloud-models", kind: "model" },
+          { id: "ollama-cloud-tools", kind: "tool" },
+        ],
+        connectionTypes: [
+          {
+            id: "ollama-cloud-account",
+            displayName: "Ollama Cloud account",
+            allowMultiple: true,
+            authorizationKind: "api-key",
+            capabilities: ["ollama-cloud-models", "ollama-cloud-tools"],
+          },
+        ],
+      },
+    ];
 
     await provided.value.loadBotSettings();
     await provided.value.loadUserSettings();
 
     expect(provided.value.modelLabel).toBe("Ollama Cloud · Dynamic Worker");
     expect(provided.value.modelReady).toBe(true);
+
+    bot.assignments[0] = {
+      ...bot.assignments[0]!,
+      capabilityId: "ollama-cloud-tools",
+    };
+    await provided.value.loadBotSettings();
+    expect(provided.value.modelReady).toBe(false);
   });
 
   test("assigns a newly connected model capability before model selection", async () => {

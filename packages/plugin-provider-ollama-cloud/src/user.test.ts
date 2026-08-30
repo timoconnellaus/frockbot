@@ -1071,6 +1071,58 @@ describe("Ollama Cloud User Contribution", () => {
     expect(providerRequests).toBe(beforePackageRefresh);
   });
 
+  test("retries catalog lease settlement without repeating the catalog read", async () => {
+    let catalogRequests = 0;
+    const { credentials, ollama } = await fixture(async (input) => {
+      if (String(input).endsWith("/tags")) {
+        catalogRequests += 1;
+        return Response.json({
+          models: [{ model: "glm-5.3-flash:cloud" }],
+        });
+      }
+      return Response.json({ capabilities: ["tools"] });
+    });
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-settlement-retry",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "key",
+    });
+    const beforeRefresh = catalogRequests;
+    const settle = credentials.settle.bind(credentials);
+    let settlementFailures = 1;
+    credentials.settle = (input) => {
+      if (settlementFailures > 0) {
+        settlementFailures -= 1;
+        return Promise.reject(new Error("settlement unavailable"));
+      }
+      return settle(input);
+    };
+
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId: "refresh-settlement-retry",
+        connectionId: created.connectionId,
+      }),
+    ).rejects.toThrow("settlement unavailable");
+    expect(catalogRequests).toBe(beforeRefresh + 1);
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "refresh-settlement-retry"),
+    ).resolves.toBeUndefined();
+
+    await ollama.alarm();
+
+    expect(catalogRequests).toBe(beforeRefresh + 1);
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "refresh-settlement-retry"),
+    ).resolves.toMatchObject({ status: "applied" });
+  });
+
   test("compacts automatic refresh commands into one durable receipt", async () => {
     let currentTime = Date.parse("2026-08-30T00:00:00.000Z");
     const { storage, settings, ollama } = await fixture(

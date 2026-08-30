@@ -95,6 +95,14 @@ function runIndexKey(acceptedAt: string, runId: string): string {
   return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;
 }
 
+function assignmentGenerationKey(assignmentId: string): string {
+  return `${ASSIGNMENT_GENERATION_PREFIX}${assignmentId}`;
+}
+
+function capabilityKey(packageId: string, capabilityId: string): string {
+  return `${packageId}:${capabilityId}`;
+}
+
 interface BotIdentity {
   userId: string;
   botId: string;
@@ -342,6 +350,7 @@ export class ShellBotBackendContribution {
       throw new ConfigurationConflictError(settings.revision);
     }
     let dependencyRequirement: ConnectionDependencyRequirementV1 | undefined;
+    let modelCapabilities = new Set<string>();
     if (command.type === "bot/select-model") {
       const [user, application] = await Promise.all([
         this.userConfiguration(identity).readConfiguration({
@@ -350,6 +359,16 @@ export class ShellBotBackendContribution {
         }),
         this.compileApplication(),
       ]);
+      modelCapabilities = new Set(
+        application.packages.flatMap((pkg) =>
+          (pkg.manifest.configuration?.capabilities ?? []).flatMap(
+            (capability) =>
+              capability.kind === "model"
+                ? [capabilityKey(pkg.id, capability.id)]
+                : [],
+          ),
+        ),
+      );
       const binding = resolveBotModelBindingV1({
         model: command.model,
         assignments: settings.assignments,
@@ -378,6 +397,16 @@ export class ShellBotBackendContribution {
         }),
         this.compileApplication(),
       ]);
+      modelCapabilities = new Set(
+        application.packages.flatMap((pkg) =>
+          (pkg.manifest.configuration?.capabilities ?? []).flatMap(
+            (capability) =>
+              capability.kind === "model"
+                ? [capabilityKey(pkg.id, capability.id)]
+                : [],
+          ),
+        ),
+      );
       const failure = capabilityAssignmentFailureV1({
         assignment: command.assignment,
         user,
@@ -459,6 +488,63 @@ export class ShellBotBackendContribution {
         }
       }
     }
+    if (
+      command.type === "bot/select-model" &&
+      settings.model?.connectionId &&
+      settings.model.connectionId !== command.model.connectionId
+    ) {
+      const superseded = settings.assignments.find(
+        (assignment) =>
+          assignment.connectionId === settings.model?.connectionId &&
+          modelCapabilities.has(
+            capabilityKey(assignment.packageId, assignment.capabilityId),
+          ),
+      );
+      if (!superseded?.connectionId) {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          "Superseded model assignment is unavailable",
+        );
+      }
+      const generation = await this.ctx.storage.get<string>(
+        assignmentGenerationKey(superseded.assignmentId),
+      );
+      if (!generation) {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          "Superseded model assignment generation is unavailable",
+        );
+      }
+      const saga: StoredAssignmentSaga = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        commandFingerprint,
+        userId: identity.userId,
+        botId: identity.botId,
+        assignmentId: superseded.assignmentId,
+        connectionId: superseded.connectionId,
+        generation,
+        mode: "release",
+        phase: "committed",
+        deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
+      };
+      const receipt = await this.applyConfigurationCommand(
+        identity,
+        command,
+        commandFingerprint,
+        saga,
+      );
+      await this.reconcileStoredAssignmentSaga(
+        identity,
+        command.commandId,
+        commandFingerprint,
+      );
+      return receipt;
+    }
     if (command.type === "bot/unbind-model") {
       const assignment = settings.assignments.find(
         (candidate) =>
@@ -482,7 +568,7 @@ export class ShellBotBackendContribution {
         );
       }
       const generation = await this.ctx.storage.get<string>(
-        `${ASSIGNMENT_GENERATION_PREFIX}${assignment.connectionId}`,
+        assignmentGenerationKey(assignment.assignmentId),
       );
       if (!generation) {
         return this.rejectConfigurationCommand(
@@ -498,9 +584,10 @@ export class ShellBotBackendContribution {
         commandFingerprint,
         userId: identity.userId,
         botId: identity.botId,
+        assignmentId: assignment.assignmentId,
         connectionId: assignment.connectionId,
         generation,
-        mode: "unassign",
+        mode: "release",
         phase: "committed",
         deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
       };
@@ -567,26 +654,39 @@ export class ShellBotBackendContribution {
         ) {
           throw new Error("Connection assignment was revoked before admission");
         }
+        let supersededAssignmentId: string | undefined;
         let supersededConnectionId: string | undefined;
         let supersededGeneration: string | undefined;
         const previousConnectionId = current.model?.connectionId;
+        const superseded = current.assignments.find(
+          (assignment) =>
+            command.model &&
+            previousConnectionId &&
+            previousConnectionId !== connectionAssignment.connectionId &&
+            assignment.connectionId === previousConnectionId &&
+            modelCapabilities.has(
+              capabilityKey(assignment.packageId, assignment.capabilityId),
+            ),
+        );
         if (
           command.model &&
           previousConnectionId &&
           previousConnectionId !== connectionAssignment.connectionId &&
-          current.assignments.some(
-            (assignment) => assignment.connectionId === previousConnectionId,
-          )
+          !superseded
         ) {
+          throw new Error("Superseded model assignment is unavailable");
+        }
+        if (superseded?.connectionId) {
           supersededGeneration = await transaction.get<string>(
-            `${ASSIGNMENT_GENERATION_PREFIX}${previousConnectionId}`,
+            assignmentGenerationKey(superseded.assignmentId),
           );
           if (!supersededGeneration) {
             throw new Error(
               "Superseded model assignment generation is unavailable",
             );
           }
-          supersededConnectionId = previousConnectionId;
+          supersededAssignmentId = superseded.assignmentId;
+          supersededConnectionId = superseded.connectionId;
         }
         const saga: StoredAssignmentSaga = {
           schemaVersion: 1,
@@ -594,10 +694,17 @@ export class ShellBotBackendContribution {
           commandFingerprint,
           userId: identity.userId,
           botId: identity.botId,
+          assignmentId: command.assignment.assignmentId,
           connectionId: connectionAssignment.connectionId,
           generation: connectionAssignment.generation,
-          ...(supersededConnectionId && supersededGeneration
-            ? { supersededConnectionId, supersededGeneration }
+          ...(supersededAssignmentId &&
+          supersededConnectionId &&
+          supersededGeneration
+            ? {
+                supersededAssignmentId,
+                supersededConnectionId,
+                supersededGeneration,
+              }
             : {}),
           phase: "claiming",
           deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
@@ -744,7 +851,7 @@ export class ShellBotBackendContribution {
       }
       if (
         saga &&
-        saga.mode !== "unassign" &&
+        saga.mode !== "release" &&
         (await transaction.get(
           `${ASSIGNMENT_TOMBSTONE_PREFIX}${saga.connectionId}:${saga.generation}`,
         ))
@@ -758,7 +865,20 @@ export class ShellBotBackendContribution {
           : command.type === "bot/update-notifications"
             ? { ...current, revision, notifications: command.notifications }
             : command.type === "bot/select-model"
-              ? { ...current, revision, model: command.model }
+              ? {
+                  ...current,
+                  revision,
+                  model: command.model,
+                  ...(saga?.mode === "release"
+                    ? {
+                        assignments: current.assignments.map((assignment) =>
+                          assignment.assignmentId === saga.assignmentId
+                            ? { ...assignment, state: "unavailable" as const }
+                            : assignment,
+                        ),
+                      }
+                    : {}),
+                }
               : command.type === "bot/unbind-model"
                 ? {
                     ...current,
@@ -786,9 +906,8 @@ export class ShellBotBackendContribution {
                             command.assignment.packageId &&
                             assignment.capabilityId ===
                               command.assignment.capabilityId) ||
-                          (command.model &&
-                            assignment.connectionId ===
-                              current.model?.connectionId)
+                          assignment.assignmentId ===
+                            saga?.supersededAssignmentId
                             ? { ...assignment, state: "unavailable" as const }
                             : assignment,
                         ),
@@ -810,7 +929,7 @@ export class ShellBotBackendContribution {
         command.assignment.connectionId
       ) {
         await transaction.put(
-          `${ASSIGNMENT_GENERATION_PREFIX}${command.assignment.connectionId}`,
+          assignmentGenerationKey(command.assignment.assignmentId),
           command.commandId,
         );
       }
@@ -839,8 +958,11 @@ export class ShellBotBackendContribution {
       throw new Error("Assignment saga does not match its durable identity");
     }
     if (
-      Boolean(saga.supersededConnectionId) !==
-      Boolean(saga.supersededGeneration)
+      new Set([
+        Boolean(saga.supersededAssignmentId),
+        Boolean(saga.supersededConnectionId),
+        Boolean(saga.supersededGeneration),
+      ]).size !== 1
     ) {
       throw new Error("Assignment saga superseded dependency is invalid");
     }
@@ -855,7 +977,7 @@ export class ShellBotBackendContribution {
     const userConfiguration = this.userConfiguration(identity);
     let releasedSuperseded = false;
     try {
-      if (saga.mode === "unassign") {
+      if (saga.mode === "release") {
         if (
           !(await userConfiguration.releaseConnectionDependency(
             saga.userId,
@@ -898,6 +1020,7 @@ export class ShellBotBackendContribution {
         });
         if (
           settlement === "acknowledged" &&
+          saga.supersededAssignmentId &&
           saga.supersededConnectionId &&
           saga.supersededGeneration
         ) {
@@ -924,25 +1047,25 @@ export class ShellBotBackendContribution {
         ) {
           await transaction.delete(key);
           if (
-            saga.mode === "unassign" &&
+            saga.mode === "release" &&
             (await transaction.get(
-              `${ASSIGNMENT_GENERATION_PREFIX}${saga.connectionId}`,
+              assignmentGenerationKey(saga.assignmentId),
             )) === saga.generation
           ) {
             await transaction.delete(
-              `${ASSIGNMENT_GENERATION_PREFIX}${saga.connectionId}`,
+              assignmentGenerationKey(saga.assignmentId),
             );
           }
           if (
             releasedSuperseded &&
-            saga.supersededConnectionId &&
+            saga.supersededAssignmentId &&
             saga.supersededGeneration &&
             (await transaction.get(
-              `${ASSIGNMENT_GENERATION_PREFIX}${saga.supersededConnectionId}`,
+              assignmentGenerationKey(saga.supersededAssignmentId),
             )) === saga.supersededGeneration
           ) {
             await transaction.delete(
-              `${ASSIGNMENT_GENERATION_PREFIX}${saga.supersededConnectionId}`,
+              assignmentGenerationKey(saga.supersededAssignmentId),
             );
           }
         }
@@ -1001,7 +1124,7 @@ export class ShellBotBackendContribution {
       const current =
         (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
         this.initialBotSettings(identity.botId);
-      const enabled = current.assignments.some(
+      const enabled = current.assignments.filter(
         (assignment) =>
           assignment.connectionId === connectionId &&
           assignment.state === "enabled",
@@ -1010,16 +1133,22 @@ export class ShellBotBackendContribution {
         `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionId}:${compensation.expectedGeneration}`,
         compensation.id,
       );
-      if (enabled) {
-        const generation = await transaction.get<string>(
-          `${ASSIGNMENT_GENERATION_PREFIX}${connectionId}`,
-        );
-        if (generation !== compensation.expectedGeneration) {
-          await transaction.put(receiptKey, "stale");
-          return "stale";
+      let generationMatches = false;
+      for (const assignment of enabled) {
+        if (
+          (await transaction.get<string>(
+            assignmentGenerationKey(assignment.assignmentId),
+          )) === compensation.expectedGeneration
+        ) {
+          generationMatches = true;
+          break;
         }
       }
-      if (enabled) {
+      if (enabled.length > 0 && !generationMatches) {
+        await transaction.put(receiptKey, "stale");
+        return "stale";
+      }
+      if (enabled.length > 0) {
         await transaction.put(BOT_CONFIGURATION_KEY, {
           ...current,
           revision: current.revision + 1,

@@ -380,6 +380,46 @@ describe("Credential User Contribution", () => {
     ).rejects.toThrow("Connection credential is unavailable");
   });
 
+  test("disconnect purges the active generation expiry ledger", async () => {
+    let now = Date.parse("2026-08-30T00:00:00.000Z");
+    const { storage, credentials } = contribution(
+      new MemoryStorage(),
+      () => now,
+    );
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "secret",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    await credentials.lease({
+      ...authority,
+      effectId: "expired-before-disconnect",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+    now = Date.parse("2026-08-30T01:00:00.000Z");
+    await credentials.expireLeases();
+    expect(
+      storage.values.has("credential-lease-expired:expired-before-disconnect"),
+    ).toBe(true);
+
+    await credentials.disconnect(authority.connectionId);
+
+    expect(
+      storage.values.has("credential-lease-expired:expired-before-disconnect"),
+    ).toBe(false);
+    expect(
+      storage.values.has(
+        "credential-lease-expired-index:connection-1:generation-1",
+      ),
+    ).toBe(false);
+    expect(
+      storage.values.has(
+        "credential-lease-generation-index:connection-1:generation-1",
+      ),
+    ).toBe(false);
+  });
+
   test("disconnect blocks new leases while preserving an admitted lease", async () => {
     const { credentials } = contribution();
     await credentials.stageApiKey({

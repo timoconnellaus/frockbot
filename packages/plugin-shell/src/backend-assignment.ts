@@ -6,9 +6,11 @@ export interface StoredAssignmentSaga {
   commandFingerprint: string;
   userId: string;
   botId: string;
+  assignmentId: string;
   connectionId: string;
   generation: string;
-  mode?: "assign" | "unassign";
+  mode?: "assign" | "release";
+  supersededAssignmentId?: string;
   supersededConnectionId?: string;
   supersededGeneration?: string;
   phase: "claiming" | "committed";

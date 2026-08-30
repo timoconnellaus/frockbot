@@ -597,7 +597,7 @@ describe("Bot capability assignment admission", () => {
       connectionId: "gmail-2",
       displayName: "Gmail 2",
     });
-    const generations = new Map<string, string>();
+    const generations = new Set<string>();
     const released: Array<{ connectionId: string; generation: string }> = [];
     let releaseAttempts = 0;
     const userConfiguration = {
@@ -606,7 +606,7 @@ describe("Bot capability assignment admission", () => {
         connectionId: string;
         generation: string;
       }) => {
-        generations.set(request.connectionId, request.generation);
+        generations.add(request.generation);
         return Promise.resolve(true);
       },
       acknowledgeConnectionDependency: () => Promise.resolve(true),
@@ -620,7 +620,7 @@ describe("Bot capability assignment admission", () => {
           connectionId: request.connectionId,
           generation: request.generation,
         });
-        generations.delete(request.connectionId);
+        generations.delete(request.generation);
         return Promise.resolve(true);
       },
       compensateConnectionDependency: () => Promise.resolve(true),
@@ -661,6 +661,25 @@ describe("Bot capability assignment admission", () => {
         providerModelId: "fixture-model:latest",
       },
     });
+    const beforeSwitch = await contribution.getSettings(identity);
+    await storage.put({
+      "bot-configuration": {
+        ...beforeSwitch,
+        assignments: [
+          ...beforeSwitch.assignments,
+          {
+            assignmentId: "gmail-tool",
+            packageId: "composio",
+            capabilityId: "gmail-send",
+            connectionId: "gmail-1",
+            state: "enabled" as const,
+          },
+        ],
+      },
+      "assignment-generation:gmail-tool": "tool-generation",
+    });
+    generations.add("tool-generation");
+
     const switchModel: BotConfigurationCommandV1 = {
       schemaVersion: 1,
       type: "bot/assign-capability",
@@ -690,14 +709,60 @@ describe("Bot capability assignment admission", () => {
     expect(released).toEqual([
       { connectionId: "gmail-1", generation: "bind-gmail-1" },
     ]);
-    expect(generations.has("gmail-1")).toBe(false);
-    expect(generations.get("gmail-2")).toBe("bind-gmail-2");
+    expect(generations.has("bind-gmail-1")).toBe(false);
+    expect(generations.has("tool-generation")).toBe(true);
+    expect(generations.has("bind-gmail-2")).toBe(true);
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 2,
       model: { connectionId: "gmail-2" },
       assignments: [
         { assignmentId: "gmail-model-1", state: "unavailable" },
+        { assignmentId: "gmail-tool", state: "enabled" },
         { assignmentId: "gmail-model-2", state: "enabled" },
+      ],
+    });
+
+    const beforeSelect = await contribution.getSettings(identity);
+    await storage.put({
+      "bot-configuration": {
+        ...beforeSelect,
+        assignments: beforeSelect.assignments.map((assignment) =>
+          assignment.assignmentId === "gmail-model-1"
+            ? { ...assignment, state: "enabled" as const }
+            : assignment,
+        ),
+      },
+      "assignment-generation:gmail-model-1": "rebound-gmail-1",
+    });
+    generations.add("rebound-gmail-1");
+
+    await expect(
+      execute({
+        schemaVersion: 1,
+        type: "bot/select-model",
+        commandId: "select-gmail-1",
+        botId: "primary",
+        expectedRevision: 2,
+        model: {
+          connectionId: "gmail-1",
+          providerModelId: "fixture-model:latest",
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied", revision: 3 });
+
+    expect(released.at(-1)).toEqual({
+      connectionId: "gmail-2",
+      generation: "bind-gmail-2",
+    });
+    expect(generations.has("bind-gmail-2")).toBe(false);
+    expect(generations.has("tool-generation")).toBe(true);
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      revision: 3,
+      model: { connectionId: "gmail-1" },
+      assignments: [
+        { assignmentId: "gmail-model-1", state: "enabled" },
+        { assignmentId: "gmail-tool", state: "enabled" },
+        { assignmentId: "gmail-model-2", state: "unavailable" },
       ],
     });
   });
