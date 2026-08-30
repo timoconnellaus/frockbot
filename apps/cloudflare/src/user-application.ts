@@ -1,5 +1,9 @@
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
-import { decodeBotIdV1 } from "@frockbot/configuration-core";
+import {
+  decodeBotIdV1,
+  isApplicationDeploymentHash,
+  isRpcIdentifier,
+} from "@frockbot/configuration-core";
 import type {
   ClientNotificationAcknowledgementV1,
   ClientNotificationListV1,
@@ -16,9 +20,6 @@ import {
 } from "@frockbot/plugin-shell/run-protocol";
 import type { UserApplicationEnv } from "./contracts.js";
 
-const RPC_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
-const USER_ID_PATTERN = RPC_ID_PATTERN;
-const APPLICATION_HASH_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/;
 const MAX_INPUT_LENGTH = 32_000;
 
 declare const __FROCKBOT_CLIENT_JS__: string;
@@ -32,8 +33,8 @@ const APP_CSS =
   typeof __FROCKBOT_CLIENT_CSS__ === "string" ? __FROCKBOT_CLIENT_CSS__ : "";
 
 function appHtml(userId: string, applicationHash: string): string {
-  if (!USER_ID_PATTERN.test(userId)) throw new Error("invalid user id");
-  if (!APPLICATION_HASH_PATTERN.test(applicationHash)) {
+  if (!isRpcIdentifier(userId)) throw new Error("invalid user id");
+  if (!isApplicationDeploymentHash(applicationHash)) {
     throw new Error("invalid application hash");
   }
   return `<!doctype html>
@@ -257,7 +258,7 @@ export function createUserApplication() {
       } catch {
         return jsonError(400, "invalid run id");
       }
-      if (!RPC_ID_PATTERN.test(runId)) return jsonError(400, "invalid run id");
+      if (!isRpcIdentifier(runId)) return jsonError(400, "invalid run id");
       try {
         decodeClientRunReconciliationCommandV1(await request.json());
       } catch (error) {
