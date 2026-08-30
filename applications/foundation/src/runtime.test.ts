@@ -177,17 +177,14 @@ describe("foundation application", () => {
     expect(backend.contributions).toHaveLength(0);
     expect(botBackend.contributions).toHaveLength(0);
     expect(userBackend.contributions).toHaveLength(0);
-    const requestedSecrets: string[] = [];
     expect(
       createFoundationHostedRuntimePackages(plan, {
         userId: "user-1",
-        readSecret: (name) => {
-          requestedSecrets.push(name);
-          return undefined;
+        computerHost: {
+          effect: () => Promise.reject(new Error("not invoked while mounting")),
         },
       }).map((pkg) => pkg.specifier),
     ).toEqual(["@frockbot/plugin-fly-sprite", "@frockbot/plugin-computer"]);
-    expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
 
     const assignment = {
       assignmentId: "unavailable-assignment",

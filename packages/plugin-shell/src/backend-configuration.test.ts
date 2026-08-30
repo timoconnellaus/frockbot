@@ -206,6 +206,42 @@ describe("Bot capability assignment admission", () => {
     });
   });
 
+  test("rechecks lifecycle admission in the configuration mutation transaction", async () => {
+    const storage = new MemoryStorage();
+    let admissions = 0;
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+      assertLifecycleActive: (_transaction, botId) => {
+        admissions += 1;
+        return admissions === 1
+          ? Promise.resolve()
+          : Promise.reject(new Error(`Bot "${botId}" is archived`));
+      },
+    });
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    await expect(
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        userId: identity.userId,
+        botId: identity.botId,
+        command: {
+          schemaVersion: 1,
+          type: "bot/update-profile",
+          commandId: "racing-profile",
+          botId: identity.botId,
+          expectedRevision: 0,
+          profile: { name: "Changed" },
+        },
+      }),
+    ).rejects.toThrow("archived");
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      revision: 0,
+      profile: { name: "Primary" },
+    });
+  });
+
   test("validates notification authority without changing settings", async () => {
     const storage = new MemoryStorage();
     const settings = {

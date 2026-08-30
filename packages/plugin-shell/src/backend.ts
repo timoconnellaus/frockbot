@@ -159,7 +159,7 @@ export interface BotStateEnv {
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
-  SPRITES_TOKEN?: string;
+  COMPUTER_HOST: Fetcher;
 }
 
 export interface ShellBotBackendHost {
@@ -248,6 +248,10 @@ export class ShellBotBackendContribution {
   private readonly execution: BotResidentExecution;
   private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
   private executingRunId: string | undefined;
+  private readonly reconciliationActivities = new Map<
+    string,
+    Promise<ClientTurnV1>
+  >();
   private readonly assignmentActivities = new Map<string, AssignmentActivity>();
 
   constructor(host: ShellBotBackendHost) {
@@ -440,6 +444,7 @@ export class ShellBotBackendContribution {
     commandFingerprint: string,
   ): Promise<OperationReceiptV1> {
     return this.ctx.storage.transaction(async (transaction) => {
+      await this.lifecycleAdmission?.(transaction, identity.botId);
       const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
       const existing =
         await transaction.get<StoredConfigurationReceipt>(receiptKey);
@@ -647,6 +652,7 @@ export class ShellBotBackendContribution {
           ? "replacing"
           : "unassigning";
     await this.ctx.storage.transaction(async (transaction) => {
+      await this.lifecycleAdmission?.(transaction, identity.botId);
       const existing = await transaction.get<StoredAssignmentSaga>(
         `${ASSIGNMENT_SAGA_PREFIX}${command.commandId}`,
       );
@@ -748,6 +754,7 @@ export class ShellBotBackendContribution {
     failure: string,
   ): Promise<OperationReceiptV1> {
     return this.ctx.storage.transaction(async (transaction) => {
+      await this.lifecycleAdmission?.(transaction, identity.botId);
       const current =
         (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
         this.initialBotSettings(identity.botId);
@@ -1346,6 +1353,23 @@ export class ShellBotBackendContribution {
   }
 
   async reconcileRun(
+    identity: BotIdentity,
+    runId: string,
+  ): Promise<ClientTurnV1> {
+    const active = this.reconciliationActivities.get(runId);
+    if (active) return active;
+    const operation = this.executeRunReconciliation(identity, runId).finally(
+      () => {
+        if (this.reconciliationActivities.get(runId) === operation) {
+          this.reconciliationActivities.delete(runId);
+        }
+      },
+    );
+    this.reconciliationActivities.set(runId, operation);
+    return operation;
+  }
+
+  private async executeRunReconciliation(
     identity: BotIdentity,
     runId: string,
   ): Promise<ClientTurnV1> {
@@ -2074,8 +2098,22 @@ export class ShellBotBackendContribution {
 
   async archiveEligible(storage: {
     get<T>(key: string): Promise<T | undefined>;
+    list<T>(options: { prefix: string }): Promise<Map<string, T>>;
   }): Promise<boolean> {
-    return (await storage.get<string>(ACTIVE_RUN_KEY)) === undefined;
+    const [activeRunId, settings, runtimeProjection, sagas] = await Promise.all(
+      [
+        storage.get<string>(ACTIVE_RUN_KEY),
+        storage.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY),
+        storage.get<StoredRuntimeProjection>(RUNTIME_PROJECTION_KEY),
+        storage.list<unknown>({ prefix: ASSIGNMENT_SAGA_PREFIX }),
+      ],
+    );
+    return (
+      activeRunId === undefined &&
+      (settings?.assignmentOperations.length ?? 0) === 0 &&
+      runtimeProjection?.status !== "pending" &&
+      sagas.size === 0
+    );
   }
 
   async assertLifecycleActive(botId: string): Promise<void> {

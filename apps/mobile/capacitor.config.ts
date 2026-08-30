@@ -13,6 +13,7 @@ const config: CapacitorConfig = {
     url: hostedApplicationUrl,
     cleartext: hostedApplicationUrl.startsWith("http://"),
   },
+  includePlugins: [],
   plugins: {
     SystemBars: {
       insetsHandling: "css",

@@ -16,6 +16,12 @@
       "binding": "USER_APPLICATIONS",
     },
   ],
+  "services": [
+    {
+      "binding": "COMPUTER_HOST",
+      "service": "frockbot-computer-host",
+    },
+  ],
   "r2_buckets": [
     {
       "binding": "APPLICATION_ARTIFACTS",
@@ -73,6 +79,12 @@
       "worker_loaders": [
         {
           "binding": "USER_APPLICATIONS",
+        },
+      ],
+      "services": [
+        {
+          "binding": "COMPUTER_HOST",
+          "service": "frockbot-computer-host",
         },
       ],
       "r2_buckets": [

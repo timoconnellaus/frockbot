@@ -57,6 +57,7 @@ export function normalizeComputerPath(path: string): string {
 
 export interface ComputerOperationOptions {
   signal?: AbortSignal;
+  effectId?: string;
 }
 
 export interface ComputerFileInfo {

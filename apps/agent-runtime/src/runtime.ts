@@ -202,6 +202,7 @@ export async function createFoundationResidentRuntime(
   let activePersist: PersistSessionEvents | undefined;
   let activeEffectAdmission:
     FoundationResidentExecution["admitEffect"] | undefined;
+  let activeExecution: symbol | undefined;
   let disposed = false;
   let projectionQueue: Promise<void> = Promise.resolve();
 
@@ -270,66 +271,71 @@ export async function createFoundationResidentRuntime(
     },
     async execute(execution) {
       if (disposed) throw new Error("resident Bot runtime is disposed");
-      if (generation === undefined) {
-        throw new Error("resident Bot runtime projection is not applied");
+      if (activeExecution) {
+        throw new Error("resident Bot runtime already has active work");
       }
-      if (agent) {
-        if (sessionId !== execution.sessionId) {
-          throw new Error("resident Bot runtime session identity changed");
+      const executionOwner = Symbol(execution.runId);
+      activeExecution = executionOwner;
+      try {
+        if (generation === undefined) {
+          throw new Error("resident Bot runtime projection is not applied");
         }
-        const current = agent.agent.session.events;
-        if (
-          current.length !== execution.previousEvents.length ||
-          current.some(
-            (event, index) =>
-              JSON.stringify(event) !==
-              JSON.stringify(execution.previousEvents[index]),
-          )
-        ) {
-          throw new Error(
-            "resident Bot runtime history diverged from durable state",
-          );
-        }
-        activePersist = execution.persistSessionEvents;
-        activeEffectAdmission = execution.admitEffect;
-      } else {
-        sessionId = execution.sessionId;
-        activePersist = execution.persistSessionEvents;
-        activeEffectAdmission = execution.admitEffect;
-        const sessionStore = root.sessions as SessionStore & {
-          prepare(
-            sessionId: string,
-            options: {
-              initialEvents: readonly SessionEvent[];
-              persistEvents: PersistSessionEvents;
-            },
-          ): () => void;
-        };
-        const cancelPreparation = sessionStore.prepare(execution.sessionId, {
-          initialEvents: execution.previousEvents,
-          persistEvents: (id: string, events: readonly SessionEvent[]) => {
-            const persist = activePersist;
-            return persist ? persist(id, events) : Promise.resolve();
-          },
-        });
-        try {
-          agent = await root.agents.create({
-            botId: execution.botId,
-            agentId: execution.botId,
-            sessionId: execution.sessionId,
-            provider: FOUNDATION_PROVIDER,
-            model: FOUNDATION_MODEL,
-            admitEffect: (effect) => {
-              const admit = activeEffectAdmission;
-              return admit ? admit(effect) : Promise.resolve(false);
+        if (agent) {
+          if (sessionId !== execution.sessionId) {
+            throw new Error("resident Bot runtime session identity changed");
+          }
+          const current = agent.agent.session.events;
+          if (
+            current.length !== execution.previousEvents.length ||
+            current.some(
+              (event, index) =>
+                JSON.stringify(event) !==
+                JSON.stringify(execution.previousEvents[index]),
+            )
+          ) {
+            throw new Error(
+              "resident Bot runtime history diverged from durable state",
+            );
+          }
+          activePersist = execution.persistSessionEvents;
+          activeEffectAdmission = execution.admitEffect;
+        } else {
+          sessionId = execution.sessionId;
+          activePersist = execution.persistSessionEvents;
+          activeEffectAdmission = execution.admitEffect;
+          const sessionStore = root.sessions as SessionStore & {
+            prepare(
+              sessionId: string,
+              options: {
+                initialEvents: readonly SessionEvent[];
+                persistEvents: PersistSessionEvents;
+              },
+            ): () => void;
+          };
+          const cancelPreparation = sessionStore.prepare(execution.sessionId, {
+            initialEvents: execution.previousEvents,
+            persistEvents: (id: string, events: readonly SessionEvent[]) => {
+              const persist = activePersist;
+              return persist ? persist(id, events) : Promise.resolve();
             },
           });
-        } finally {
-          cancelPreparation();
+          try {
+            agent = await root.agents.create({
+              botId: execution.botId,
+              agentId: execution.botId,
+              sessionId: execution.sessionId,
+              provider: FOUNDATION_PROVIDER,
+              model: FOUNDATION_MODEL,
+              admitEffect: (effect) => {
+                const admit = activeEffectAdmission;
+                return admit ? admit(effect) : Promise.resolve(false);
+              },
+            });
+          } finally {
+            cancelPreparation();
+          }
         }
-      }
-      activeRunId = execution.runId;
-      try {
+        activeRunId = execution.runId;
         if (!(await execution.beforeStart())) {
           throw new Error("resident Bot execution was durably fenced");
         }
@@ -339,9 +345,12 @@ export async function createFoundationResidentRuntime(
         await agent.agent.session.flush();
         return agent;
       } finally {
-        activePersist = undefined;
-        activeEffectAdmission = undefined;
-        activeRunId = undefined;
+        if (activeExecution === executionOwner) {
+          activePersist = undefined;
+          activeEffectAdmission = undefined;
+          activeRunId = undefined;
+          activeExecution = undefined;
+        }
       }
     },
     cancel(cancellation) {

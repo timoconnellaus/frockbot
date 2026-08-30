@@ -1,55 +1,58 @@
-import { Clipboard } from "@capacitor/clipboard";
-import { LocalNotifications } from "@capacitor/local-notifications";
+import { registerPlugin } from "@capacitor/core";
 import type { MobileNotificationRequest } from "@frockbot/mobile-core";
 import type { MobilePlatformAdapters } from "./adapters.ts";
 
-async function showNativeNotification(
-  request: MobileNotificationRequest,
-): Promise<void> {
-  const permission = await LocalNotifications.checkPermissions();
-  if (permission.display !== "granted") {
-    const requested = await LocalNotifications.requestPermissions();
-    if (requested.display !== "granted") {
-      throw new Error("notification permission was denied");
-    }
-  }
-  await LocalNotifications.schedule({
-    notifications: [
-      {
-        id: Math.floor(Math.random() * 2_147_483_647),
-        title: request.title,
-        body: request.body ?? "",
-        ongoing: false,
-        autoCancel: true,
-      },
-    ],
-  });
+const READ_CLIPBOARD = "mobile.clipboard.readText";
+const WRITE_CLIPBOARD = "mobile.clipboard.writeText";
+const SHOW_NOTIFICATION = "mobile.notifications.show";
+
+interface NativeBroker {
+  invoke(options: {
+    schemaVersion: 1;
+    commandId:
+      typeof READ_CLIPBOARD | typeof WRITE_CLIPBOARD | typeof SHOW_NOTIFICATION;
+    input: Record<string, unknown>;
+  }): Promise<Record<string, unknown>>;
 }
 
-/** Narrow Capacitor adapters; these are never exposed directly to hosted code. */
+const broker = registerPlugin<NativeBroker>("FrockBotMobile");
+
+async function invoke(
+  commandId: Parameters<NativeBroker["invoke"]>[0]["commandId"],
+  input: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<Record<string, unknown>> {
+  signal.throwIfAborted();
+  const result = await broker.invoke({ schemaVersion: 1, commandId, input });
+  signal.throwIfAborted();
+  return result;
+}
+
 export function createCapacitorAdapters(): MobilePlatformAdapters {
   return {
     notifications: {
       async show(request, signal) {
-        signal.throwIfAborted();
-        await showNativeNotification(request);
-        signal.throwIfAborted();
+        await invoke(
+          SHOW_NOTIFICATION,
+          {
+            title: request.title,
+            ...(request.body === undefined ? {} : { body: request.body }),
+            urgency: request.urgency,
+          },
+          signal,
+        );
       },
     },
     clipboard: {
       async readText(signal) {
-        signal.throwIfAborted();
-        const result = await Clipboard.read();
-        signal.throwIfAborted();
-        if (result.type !== "text/plain" && !result.value) {
-          throw new Error("the clipboard does not hold text");
+        const result = await invoke(READ_CLIPBOARD, {}, signal);
+        if (typeof result.text !== "string") {
+          throw new Error("native clipboard response is invalid");
         }
-        return result.value;
+        return result.text;
       },
       async writeText(text, signal) {
-        signal.throwIfAborted();
-        await Clipboard.write({ string: text });
-        signal.throwIfAborted();
+        await invoke(WRITE_CLIPBOARD, { text }, signal);
       },
     },
   };

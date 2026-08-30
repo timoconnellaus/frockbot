@@ -1155,6 +1155,66 @@ describe("durable Stop", () => {
     expect(fixture.executions).toHaveLength(2);
   });
 
+  test("coalesces concurrent reconciliation for one durable run", async () => {
+    let release: (() => void) | undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixture = await materializedFixture((input) => {
+      if (!input.resume) throw new Error("reconciliation must resume");
+      return (async () => {
+        await blocked;
+        throw new BotTurnReconciliationRequiredError(
+          "provider result is still pending",
+          [],
+        );
+      })();
+    });
+    const settings = {
+      ...initializeBotSettingsV1(identity.botId),
+      profile: { name: "Primary" },
+    };
+    fixture.storage.values.set(`run:${turn.runId}`, {
+      runId: turn.runId,
+      commandFingerprint: botTurnCommandFingerprintV1(turn),
+      sessionId: turn.sessionId,
+      acceptedAt: turn.acceptedAt,
+      input: turn.text,
+      events: [modelRequestEvent(0)],
+      effectAdmissions: [
+        { kind: "model", effectId: "request-1", outcome: "admitted" },
+      ],
+      status: "reconciliation-required",
+      phase: "reconciling",
+      failure: "provider result is still pending",
+      configurationSnapshot: settings,
+      previousEventCount: 0,
+    } satisfies StoredRun);
+    fixture.storage.values.set("active-run", turn.runId);
+    fixture.storage.values.set("latest-events", [modelRequestEvent(0)]);
+
+    const first = fixture.contribution.reconcileRun(identity, turn.runId);
+    const second = fixture.contribution.reconcileRun(identity, turn.runId);
+    await waitFor(() => fixture.executions.length === 1);
+    release?.();
+    const outcomes = await Promise.allSettled([first, second]);
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({
+          message: "provider result is still pending",
+        }),
+      }),
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({
+          message: "provider result is still pending",
+        }),
+      }),
+    ]);
+    expect(fixture.executions).toHaveLength(1);
+  });
+
   test("retries an unavailable stopped effect by alarm without terminalizing it", async () => {
     let retrievals = 0;
     const fixture = await materializedFixture((input) => {

@@ -1,8 +1,15 @@
 import { Container, ContainerProxy } from "@cloudflare/containers";
+import { decodeComputerHostEffectRequestV1 } from "@frockbot/computer-core/host-protocol";
+import {
+  ComputerEffectJournal,
+  shardCount,
+  type ComputerEffectJournalEnv,
+} from "./effect-journal.ts";
 import { routeFlyHostRequest } from "./router.ts";
 
-interface FlyHostEnv {
+interface FlyHostEnv extends ComputerEffectJournalEnv {
   FLY_HOST: DurableObjectNamespace<FlyHostContainer>;
+  COMPUTER_EFFECTS: DurableObjectNamespace;
   FLY_HOST_SHARDS: string;
   PROTOTYPE_CREDENTIAL_REF: string;
   SPRITES_TOKEN: string;
@@ -17,7 +24,7 @@ export class FlyHostContainer extends Container<FlyHostEnv> {
 
   static outboundByHost = {
     "credential-broker.invalid": () =>
-      new Response("prototype broker is not configured", { status: 503 }),
+      new Response("credential broker is not configured", { status: 503 }),
   };
 
   constructor(ctx: DurableObjectState<{}>, env: FlyHostEnv) {
@@ -29,15 +36,40 @@ export class FlyHostContainer extends Container<FlyHostEnv> {
   }
 }
 
-export { ContainerProxy };
+export { ComputerEffectJournal, ContainerProxy };
 
-function shardCount(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
+function requestUrl(request: Request): URL {
+  try {
+    return new URL(request.url);
+  } catch {
+    throw new Error("Computer host request URL is invalid");
+  }
 }
 
 export default {
-  fetch(request: Request, env: FlyHostEnv): Promise<Response> {
+  async fetch(request: Request, env: FlyHostEnv): Promise<Response> {
+    const url = requestUrl(request);
+    if (url.pathname === "/v1/effects" && request.method === "POST") {
+      let effect;
+      try {
+        effect = decodeComputerHostEffectRequestV1(
+          await request.clone().json(),
+        );
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof Error ? error.message : "invalid request" },
+          { status: 400 },
+        );
+      }
+      const journal = env.COMPUTER_EFFECTS.getByName(
+        JSON.stringify([
+          effect.target.userId,
+          effect.target.botId,
+          effect.effectId,
+        ]),
+      );
+      return journal.fetch(request);
+    }
     return routeFlyHostRequest(
       request,
       {

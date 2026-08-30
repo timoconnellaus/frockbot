@@ -1,4 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import {
+  computerHostEffectRequestWireV1,
+  computerHostEffectResponseWireV1,
+} from "@frockbot/computer-core/host-protocol";
+import { ComputerEffectJournal } from "./effect-journal.ts";
 import { routeFlyHostRequest } from "./router.ts";
 
 const requestBody = {
@@ -36,6 +41,74 @@ describe("shared Fly host Worker", () => {
     expect(response.status).toBe(200);
     expect(selectedShard).toBe("shared-2");
     expect(forwarded).toEqual(requestBody);
+  });
+
+  test("journals one shared-host effect and replays its durable outcome", async () => {
+    const values = new Map<string, unknown>();
+    const storage = {
+      get: <T>(key: string) =>
+        Promise.resolve(values.get(key) as T | undefined),
+      put: (key: string, value: unknown) => {
+        values.set(key, structuredClone(value));
+        return Promise.resolve();
+      },
+      transaction: async <T>(
+        run: (transaction: {
+          get<V>(key: string): Promise<V | undefined>;
+          put(key: string, value: unknown): Promise<void>;
+        }) => Promise<T>,
+      ) => run(storage),
+    };
+    let executions = 0;
+    const env = {
+      FLY_HOST_SHARDS: "1",
+      FLY_HOST: {
+        getByName: () => ({
+          fetch: async () => {
+            executions += 1;
+            return Response.json(
+              computerHostEffectResponseWireV1({
+                schemaVersion: 1,
+                effectId: "tool:1:1:0",
+                status: "completed",
+                result: {
+                  type: "browser",
+                  result: { accessibilitySnapshot: "ready" },
+                },
+              }),
+            );
+          },
+        }),
+      },
+    };
+    const journal = new ComputerEffectJournal(
+      { storage } as unknown as DurableObjectState,
+      env as never,
+    );
+    const effect = computerHostEffectRequestWireV1({
+      schemaVersion: 1,
+      effectId: "tool:1:1:0",
+      target: { userId: "user-1", botId: "bot-1" },
+      assignment: { providerId: "shared-computer", generation: 1 },
+      operation: { type: "browser", action: { type: "snapshot" } },
+    });
+    const invoke = () =>
+      journal.fetch(
+        new Request("https://computer-host.internal/v1/effects", {
+          method: "POST",
+          body: JSON.stringify(effect),
+        }),
+      );
+
+    expect(await (await invoke()).json()).toMatchObject({
+      status: "completed",
+      effectId: "tool:1:1:0",
+    });
+    expect(await (await invoke()).json()).toMatchObject({
+      status: "completed",
+      effectId: "tool:1:1:0",
+    });
+    expect(executions).toBe(1);
   });
 
   test("rejects invalid routes, DTOs, and credential references", async () => {

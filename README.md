@@ -78,9 +78,10 @@ For the first publication, add a granular npm automation token with access to th
 
 ## Production deployment
 
-After CI succeeds on a push to `main`, `ci.yml` deploys two Cloudflare Workers through the GitHub `production` environment:
+After CI succeeds on a push to `main`, `ci.yml` deploys three Cloudflare Workers through the GitHub `production` environment:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
+- `apps/fly-host-prototype` deploys the internal shared Computer host with no public route;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
 The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
@@ -102,7 +103,7 @@ Configure these GitHub `production` environment values:
 | Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                         |
 | Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
 | Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
-| Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                  |
+| Secret   | `SPRITES_TOKEN`             | Fly Sprites token delivered only to the shared Computer host                  |
 
 Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
 

@@ -206,6 +206,61 @@ describe("hosted Assignment commands", () => {
       },
     ]);
   });
+
+  test("surfaces rejected and retrying Assignment receipts", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const receipts = [
+      {
+        schemaVersion: 1 as const,
+        commandId: "rejected",
+        revision: 0,
+        status: "rejected" as const,
+        failure: "Connection is unavailable",
+      },
+      {
+        schemaVersion: 1 as const,
+        commandId: "pending",
+        revision: 0,
+        status: "pending" as const,
+      },
+    ];
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: () =>
+          Promise.resolve(initializeBotSettingsV1("primary")),
+        executeConfiguration: () => Promise.resolve(receipts.shift()!),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    provided.value.botSettings = initializeBotSettingsV1("primary");
+    const assignment = {
+      assignmentId: "mail",
+      packageId: "mail",
+      capabilityId: "send",
+      connectionId: "mail-1",
+    };
+
+    await expect(provided.value.assignCapability(assignment)).rejects.toThrow(
+      "Connection is unavailable",
+    );
+    expect(provided.value.settingsError).toBe("Connection is unavailable");
+    await expect(provided.value.assignCapability(assignment)).resolves.toBe(
+      undefined,
+    );
+    expect(provided.value.settingsError).toBe(
+      "Assignment operation is retrying.",
+    );
+  });
 });
 
 describe("Bot selection", () => {

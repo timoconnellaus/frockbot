@@ -195,6 +195,20 @@ describe("client run protocol v1", () => {
       commandId: "stop-1",
       runId: "run-1",
     });
+    const hidden = {
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-1",
+      runId: "run-1",
+    };
+    Object.defineProperty(hidden, "reason", { value: "user" });
+    const symbol = {
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-1",
+      runId: "run-1",
+      [Symbol("reason")]: "user",
+    };
     for (const invalid of [
       { schemaVersion: 2, action: "stop", commandId: "stop-1", runId: "run-1" },
       {
@@ -224,6 +238,8 @@ describe("client run protocol v1", () => {
         runId: "run-1",
         reason: "user",
       },
+      hidden,
+      symbol,
     ]) {
       expect(() => decodeClientRunStopCommandV1(invalid)).toThrow();
     }

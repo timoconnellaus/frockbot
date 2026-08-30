@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage } from "node:http";
 import { SpritesClient } from "@fly/sprites";
+import {
+  computerHostEffectResponseWireV1,
+  decodeComputerHostEffectRequestV1,
+  type ComputerHostEffectResponseV1,
+} from "@frockbot/computer-core/host-protocol";
+import { FlySpriteComputerProvider } from "@frockbot/plugin-fly-sprite/provider";
 import WebSocket from "ws";
 import {
   decodeSmokeHttpRequest,
@@ -213,7 +219,83 @@ const token: string = configuredToken;
 
 Object.defineProperty(globalThis, "WebSocket", { value: WebSocket });
 
+async function executeEffect(request: Request): Promise<Response> {
+  let effect;
+  try {
+    effect = decodeComputerHostEffectRequestV1(await request.json());
+  } catch (error) {
+    return problem(
+      400,
+      error instanceof Error ? error.message : "invalid Computer effect",
+    );
+  }
+  let response: ComputerHostEffectResponseV1;
+  const provider = new FlySpriteComputerProvider(undefined, token);
+  try {
+    const computer = await provider.open(effect.target, {
+      providerId: "fly-sprite",
+      generation: effect.assignment.generation,
+    });
+    try {
+      if (effect.operation.type === "exec") {
+        if (!computer.exec) throw new Error("Computer exec is unavailable");
+        response = {
+          schemaVersion: 1,
+          effectId: effect.effectId,
+          status: "completed",
+          result: {
+            type: "exec",
+            result: await computer.exec.execute(effect.operation.request, {
+              signal: request.signal,
+              effectId: effect.effectId,
+            }),
+          },
+        };
+      } else {
+        if (!computer.browser) {
+          throw new Error("Computer browser is unavailable");
+        }
+        response = {
+          schemaVersion: 1,
+          effectId: effect.effectId,
+          status: "completed",
+          result: {
+            type: "browser",
+            result: await computer.browser.perform(effect.operation.action, {
+              signal: request.signal,
+              effectId: effect.effectId,
+            }),
+          },
+        };
+      }
+    } finally {
+      await computer.close();
+    }
+  } catch (error) {
+    response = {
+      schemaVersion: 1,
+      effectId: effect.effectId,
+      status: "rejected",
+      failure:
+        error instanceof Error ? error.message : "Computer effect failed",
+    };
+  }
+  return Response.json(computerHostEffectResponseWireV1(response));
+}
+
+function requestUrl(request: Request): URL {
+  try {
+    return new URL(request.url);
+  } catch {
+    throw new Error("Computer host request URL is invalid");
+  }
+}
+
 async function handle(request: Request): Promise<Response> {
+  const url = requestUrl(request);
+  if (url.pathname === "/v1/effects" && request.method === "POST") {
+    return executeEffect(request);
+  }
   const decoded = await decodeSmokeHttpRequest(request);
   if (!decoded.ok) return decoded.response;
   try {

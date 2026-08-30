@@ -9,6 +9,7 @@ import type { Plugin } from "cordis";
 export interface ComputerAgentPluginConfig {
   userId: string;
   defaultProviderId: string;
+  idempotentEffects?: boolean;
 }
 
 interface ExecInput {
@@ -121,6 +122,7 @@ export function createComputerAgentPlugin(
 
     const execTool: ToolDefinition = {
       name: "computer_exec",
+      idempotent: config.idempotentEffects === true,
       description:
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
       inputSchema: {
@@ -156,7 +158,7 @@ export function createComputerAgentPlugin(
                   timeoutMs: 120_000,
                   maxOutputBytes: 30_000,
                 },
-                { signal: context.signal },
+                { signal: context.signal, effectId: context.effectId },
               );
               return {
                 content: [text(result.stdout), text(result.stderr)]
@@ -174,6 +176,7 @@ export function createComputerAgentPlugin(
 
     const browserTool: ToolDefinition = {
       name: "computer_browser",
+      idempotent: config.idempotentEffects === true,
       description:
         "Control the browser in the Bot's selected Computer and return an accessibility snapshot.",
       inputSchema: {
@@ -212,6 +215,7 @@ export function createComputerAgentPlugin(
               }
               const result = await computer.browser.perform(action, {
                 signal: context.signal,
+                effectId: context.effectId,
               });
               return {
                 content: result.accessibilitySnapshot,

@@ -1,4 +1,5 @@
 import type { SessionEvent } from "@frockbot/agent-core";
+
 import { isPublicIdentifier } from "@frockbot/configuration-core";
 import type {
   ClientNotificationIntent,
@@ -492,8 +493,17 @@ function exactKeys(
   label: string,
 ): void {
   const allowedKeys = new Set(allowed);
-  const unexpected = Object.keys(value).find((key) => !allowedKeys.has(key));
-  if (unexpected) throw new Error(`${label}.${unexpected} is not allowed`);
+  const unexpected = Reflect.ownKeys(value).find(
+    (key) =>
+      typeof key !== "string" ||
+      !allowedKeys.has(key) ||
+      !Object.prototype.propertyIsEnumerable.call(value, key),
+  );
+  if (unexpected !== undefined) {
+    const field =
+      typeof unexpected === "symbol" ? unexpected.toString() : unexpected;
+    throw new Error(`${label}.${field} is not allowed`);
+  }
 }
 
 function string(

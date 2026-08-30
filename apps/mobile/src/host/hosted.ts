@@ -79,6 +79,14 @@ function exactRecord(
   return input as Record<string, unknown>;
 }
 
+function parseSerializedJson<T>(serialized: string): T {
+  try {
+    return JSON.parse(serialized) as T;
+  } catch {
+    throw new Error("mobile capability JSON snapshot is invalid");
+  }
+}
+
 function decodeInvokeRequest(input: unknown): HostedMobileInvokeRequestV1 {
   const value = exactRecord(input, [
     "schemaVersion",
@@ -111,7 +119,8 @@ function decodeInvokeRequest(input: unknown): HostedMobileInvokeRequestV1 {
     schemaVersion: 1,
     action: "invoke",
     commandId: value.commandId,
-    input: value.input,
+    input:
+      parseSerializedJson<HostedMobileInvokeRequestV1["input"]>(serialized),
   };
 }
 
@@ -128,7 +137,7 @@ function normalizedResult(result: MobileCommandResult): MobileCommandResult {
       `mobile capability result exceeds ${MAX_RESULT_BYTES} bytes`,
     );
   }
-  return JSON.parse(serialized) as MobileCommandResult;
+  return parseSerializedJson<MobileCommandResult>(serialized);
 }
 
 function boundedError(error: unknown): string {

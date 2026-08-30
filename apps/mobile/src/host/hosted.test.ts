@@ -141,6 +141,23 @@ describe("hosted mobile capability mounting", () => {
     ).toMatchObject({ status: "error" });
     expect(invocations).toEqual([]);
 
+    const inheritedInput = Object.create({ value: "inherited" }) as object;
+    expect(
+      await capabilities?.invoke({
+        schemaVersion: 1,
+        action: "invoke",
+        commandId: "mobile.declared.action",
+        input: inheritedInput,
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "ok",
+      result: { handled: true },
+    });
+    expect(invocations).toEqual([
+      { commandId: "mobile.declared.action", value: {} },
+    ]);
+
     expect(
       await capabilities?.invoke({
         schemaVersion: 1,
@@ -154,6 +171,7 @@ describe("hosted mobile capability mounting", () => {
       result: { handled: true },
     });
     expect(invocations).toEqual([
+      { commandId: "mobile.declared.action", value: {} },
       { commandId: "mobile.declared.action", value: { value: 1 } },
     ]);
   });

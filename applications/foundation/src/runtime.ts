@@ -31,6 +31,11 @@ export interface BackendRouteContribution {
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
+import {
+  createSharedComputerProviderPlugin,
+  SHARED_COMPUTER_PROVIDER_ID,
+  type SharedComputerHostClient,
+} from "@frockbot/plugin-computer/shared-provider";
 // Desktop and mobile Package manifests remain part of the immutable plan.
 import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
 import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
@@ -39,7 +44,6 @@ import notificationsManifest from "@frockbot/plugin-desktop-notifications/manife
 // Runtime implementations are statically bound by the immutable application.
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
-import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
 // Flock contributes lifecycle routes and durable User/Bot state.
 import flockManifest from "@frockbot/plugin-flock/manifest";
 // Gateway Flock behavior is resolved as a lifecycle-owned Plugin.
@@ -276,23 +280,22 @@ export function createFoundationHostedRuntimePackages(
   plan: ApplicationPlan,
   host: {
     userId: string;
-    readSecret(name: string): string | undefined;
+    computerHost: SharedComputerHostClient;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
     runtimePackage(
       plan,
       "fly-sprite",
-      createFlySpriteProviderPlugin(undefined, {
-        token: host.readSecret("SPRITES_TOKEN"),
-      }),
+      createSharedComputerProviderPlugin(host.computerHost),
     ),
     runtimePackage(
       plan,
       "computer",
       createComputerAgentPlugin({
         userId: host.userId,
-        defaultProviderId: "fly-sprite",
+        defaultProviderId: SHARED_COMPUTER_PROVIDER_ID,
+        idempotentEffects: true,
       }),
     ),
   ];

@@ -56,13 +56,13 @@ interface Env {
   AI: Ai;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
+  COMPUTER_HOST: Fetcher;
   AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  SPRITES_TOKEN?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
 }
 

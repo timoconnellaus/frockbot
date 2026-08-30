@@ -25,6 +25,7 @@ const LIFECYCLE_KEY = "flock:lifecycle:v1";
 const LIFECYCLE_RECEIPT_PREFIX = "flock:lifecycle-receipt:";
 export interface FlockBotTransaction {
   get<T>(key: string): Promise<T | undefined>;
+  list<T>(options: { prefix: string }): Promise<Map<string, T>>;
   put<T>(key: string, value: T): Promise<void>;
   put(entries: Record<string, unknown>): Promise<void>;
 }

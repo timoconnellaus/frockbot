@@ -5,6 +5,7 @@ import {
   type ClientNotificationIntent,
   type ClientPlugin,
   type ClientRun,
+  type ClientStartConnectionResult,
   type ClientTurnEvent,
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
@@ -13,6 +14,8 @@ import type {
   BotNotificationPolicy,
   BotProfile,
   BotSettingsViewV1,
+  ConfigurationCommandV1,
+  OperationReceiptV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import { ref } from "vue";
@@ -628,6 +631,31 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     }
   }
 
+  async function executeAssignmentOperation(
+    command: Extract<
+      ConfigurationCommandV1,
+      {
+        type:
+          | "bot/assign-capability"
+          | "bot/replace-capability"
+          | "bot/unassign-capability";
+      }
+    >,
+  ): Promise<void> {
+    const execute = ctx.transport.executeConfiguration;
+    if (!execute) throw new Error("Settings are unavailable");
+    const receipt = (await execute(command)) as OperationReceiptV1;
+    await web.value.loadBotSettings();
+    if (receipt.status === "rejected") {
+      const failure = receipt.failure ?? "Assignment operation was rejected";
+      web.value.settingsError = failure;
+      throw new Error(failure);
+    }
+    if (receipt.status === "pending") {
+      web.value.settingsError = "Assignment operation is retrying.";
+    }
+  }
+
   const web = ref<FrockBotWebData>({
     connection: "ready",
     modelLabel: "Foundation · Dynamic Worker",
@@ -737,7 +765,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!current || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
       }
-      await ctx.transport.executeConfiguration({
+      await executeAssignmentOperation({
         schemaVersion: 1,
         type: "bot/assign-capability",
         commandId: crypto.randomUUID(),
@@ -745,7 +773,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         expectedRevision: current.revision,
         assignment,
       });
-      await web.value.loadBotSettings();
     },
     async replaceCapability(assignment): Promise<void> {
       const current = web.value.botSettings;
@@ -753,7 +780,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!current || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
       }
-      await ctx.transport.executeConfiguration({
+      await executeAssignmentOperation({
         schemaVersion: 1,
         type: "bot/replace-capability",
         commandId: crypto.randomUUID(),
@@ -761,7 +788,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         expectedRevision: current.revision,
         assignment,
       });
-      await web.value.loadBotSettings();
     },
     async unassignCapability(assignmentId): Promise<void> {
       const current = web.value.botSettings;
@@ -769,7 +795,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!current || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
       }
-      await ctx.transport.executeConfiguration({
+      await executeAssignmentOperation({
         schemaVersion: 1,
         type: "bot/unassign-capability",
         commandId: crypto.randomUUID(),
@@ -777,7 +803,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         expectedRevision: current.revision,
         assignmentId,
       });
-      await web.value.loadBotSettings();
     },
     async loadUserSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
@@ -882,7 +907,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             : {}),
         }),
       );
-      let result;
+      let result: ClientStartConnectionResult;
       try {
         result = await ctx.transport.startConnection({
           commandId: operation.commandId,
@@ -1024,11 +1049,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           status: "interrupted",
           tools: [],
         });
-        web.value.error = aborted
-          ? undefined
-          : error instanceof Error
-            ? error.message
-            : "Agent request failed";
+        if (aborted) {
+          web.value.error = undefined;
+        } else {
+          web.value.error =
+            error instanceof Error ? error.message : "Agent request failed";
+        }
         const observer = new AbortController();
         admissionObserver = observer;
         let disposition: "admitted" | "not-admitted" | "detached";

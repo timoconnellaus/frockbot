@@ -12,6 +12,10 @@ import {
 } from "@frockbot/agent-runtime/runtime";
 import { Context } from "cordis";
 import {
+  computerHostEffectRequestWireV1,
+  decodeComputerHostEffectResponseV1,
+} from "@frockbot/computer-core/host-protocol";
+import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
 } from "@frockbot/configuration-core";
@@ -102,7 +106,30 @@ export class BotState extends DurableObject<BotStateEnv> {
               Promise.resolve(
                 createFoundationHostedRuntimePackages(plan, {
                   userId: projection.userId,
-                  readSecret,
+                  computerHost: {
+                    effect: async (request, options) => {
+                      const response = await this.env.COMPUTER_HOST.fetch(
+                        "https://computer-host.internal/v1/effects",
+                        {
+                          method: "POST",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify(
+                            computerHostEffectRequestWireV1(request),
+                          ),
+                          signal: options?.signal,
+                        },
+                      );
+                      const result = decodeComputerHostEffectResponseV1(
+                        await response.json(),
+                      );
+                      if (result.effectId !== request.effectId) {
+                        throw new Error(
+                          "Computer host response identity does not match",
+                        );
+                      }
+                      return result;
+                    },
+                  },
                 }),
               ),
             ])
