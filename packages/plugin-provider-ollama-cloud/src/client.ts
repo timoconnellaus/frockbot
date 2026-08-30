@@ -1,5 +1,8 @@
 // Provider metadata is normalized at the shared Connection seam.
-import type { ConnectionModelV1 } from "@frockbot/connection-core";
+import {
+  decodeConnectionModelCatalogV1,
+  type ConnectionModelV1,
+} from "@frockbot/connection-core";
 
 export type OllamaFetch = (
   input: string | URL | Request,
@@ -22,6 +25,17 @@ function positiveInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0
     ? value
     : undefined;
+}
+
+function modelId(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("Ollama Cloud model id is invalid");
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > 256) {
+    throw new Error("Ollama Cloud model id is invalid");
+  }
+  return normalized;
 }
 
 export class OllamaCloudClient {
@@ -72,14 +86,7 @@ export class OllamaCloudClient {
     }
     const modelIds = payload.models.map((candidate) => {
       const model = object(candidate, "Ollama Cloud model");
-      const id =
-        typeof model.model === "string"
-          ? model.model
-          : typeof model.name === "string"
-            ? model.name
-            : undefined;
-      if (!id?.trim()) throw new Error("Ollama Cloud model id is invalid");
-      return id;
+      return modelId(model.model ?? model.name);
     });
     return Promise.all(
       [...new Set(modelIds)].map((modelId) =>
@@ -94,11 +101,11 @@ export class OllamaCloudClient {
     signal?: AbortSignal,
     source: ConnectionModelV1["source"] = "exact-resolution",
   ): Promise<ConnectionModelV1> {
-    if (!providerModelId.trim()) throw new Error("Ollama model id is required");
+    const normalizedProviderModelId = modelId(providerModelId);
     const payload = object(
       await this.request("/show", apiKey, {
         method: "POST",
-        body: JSON.stringify({ model: providerModelId }),
+        body: JSON.stringify({ model: normalizedProviderModelId }),
         signal,
       }),
       "Ollama Cloud model details",
@@ -118,9 +125,9 @@ export class OllamaCloudClient {
       .filter(([key]) => key.endsWith(".context_length"))
       .map(([, value]) => positiveInteger(value))
       .find((value): value is number => value !== undefined);
-    return {
-      providerModelId,
-      displayName: providerModelId.replace(/:cloud$/, ""),
+    const normalized = {
+      providerModelId: normalizedProviderModelId,
+      displayName: normalizedProviderModelId.replace(/:cloud$/, ""),
       ...(contextWindow === undefined ? {} : { contextWindow }),
       capabilities: {
         tools: capabilities.includes("tools"),
@@ -131,5 +138,13 @@ export class OllamaCloudClient {
       },
       source,
     };
+    const validated = decodeConnectionModelCatalogV1({
+      schemaVersion: 1,
+      generation: "validation",
+      state: "fresh",
+      models: [normalized],
+    }).models[0];
+    if (!validated) throw new Error("Ollama Cloud model is invalid");
+    return validated;
   }
 }

@@ -742,6 +742,48 @@ describe("uncertain Turn admission", () => {
 });
 
 describe("Connection operation reconciliation", () => {
+  test("surfaces failed disable and disconnect receipts", async () => {
+    const commands: string[] = [];
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        executeConnection: (command) => {
+          commands.push(command.type);
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            connectionId:
+              "connectionId" in command
+                ? command.connectionId
+                : "created-connection",
+            status: "failed",
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    await expect(
+      provided.value.setConnectionEnabled("connection-1", false),
+    ).rejects.toThrow("Connection state update failed");
+    await expect(
+      provided.value.disconnectConnection("connection-1"),
+    ).rejects.toThrow("Connection revocation failed");
+    expect(commands).toEqual([
+      "connection/set-enabled",
+      "connection/disconnect",
+    ]);
+  });
+
   test("reuses the desktop command ID and nonce until durable settlement", async () => {
     installMemoryStorage();
     Object.defineProperty(globalThis, "window", {

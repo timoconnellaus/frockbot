@@ -681,7 +681,7 @@ function model(value: unknown): ModelAssignment {
     providerModelId: text(
       assignment.providerModelId,
       "model.providerModelId",
-      200,
+      256,
     ),
   };
 }

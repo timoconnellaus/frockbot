@@ -188,7 +188,7 @@ async function apiRequest(
 }
 
 const application = new ClientApplication({
-  connectionsAvailable: !usesMobileShell(),
+  connectionsAvailable: true,
   async turn(
     botId: string,
     text: string,

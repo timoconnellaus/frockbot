@@ -160,6 +160,11 @@ jobs:
             printf 'Missing production configuration: %s\n' "${missing[*]}" >&2
             exit 1
           fi
+
+          bun -e '
+            import { parseCredentialKeyringV1 } from "./packages/connection-core/src/index.ts";
+            parseCredentialKeyringV1(process.env.CREDENTIAL_KEYRING ?? "");
+          '
       - name: Configure production D1 database
         working-directory: apps/cloudflare
         env:

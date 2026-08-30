@@ -36,6 +36,25 @@ describe("Ollama Cloud client", () => {
     ).toBe(true);
   });
 
+  test("rejects provider model metadata outside the catalog contract", async () => {
+    let requests = 0;
+    const client = new OllamaCloudClient({
+      fetch: (input) => {
+        requests += 1;
+        return Promise.resolve(
+          String(input).endsWith("/tags")
+            ? Response.json({ models: [{ model: "x".repeat(257) }] })
+            : Response.json({ capabilities: [] }),
+        );
+      },
+    });
+
+    await expect(client.listModels("account-key")).rejects.toThrow(
+      "Ollama Cloud model id is invalid",
+    );
+    expect(requests).toBe(1);
+  });
+
   test("does not expose provider response bodies in errors", async () => {
     const client = new OllamaCloudClient({
       fetch: () =>

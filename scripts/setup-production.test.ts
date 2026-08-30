@@ -199,6 +199,25 @@ describe("production setup", () => {
       "Missing production configuration: SPRITES_TOKEN",
     );
 
+    for (const invalidKeyring of [
+      "not-json",
+      '{"schemaVersion":1,"currentKeyId":"missing","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
+      '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"c2hvcnQ"}}',
+    ]) {
+      const invalidConfiguration = Bun.spawnSync(
+        ["bash", "-c", validation?.run ?? ""],
+        {
+          env: {
+            ...productionEnvironment,
+            CREDENTIAL_KEYRING: invalidKeyring,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(invalidConfiguration.exitCode).not.toBe(0);
+    }
+
     const directory = await temporaryDirectory("frockbot-workflow-");
     const runner = join(directory, "runner");
     const bin = join(directory, "bin");

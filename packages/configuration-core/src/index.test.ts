@@ -93,6 +93,21 @@ describe("configuration DTO seam", () => {
     });
   });
 
+  test("accepts provider model IDs through the catalog limit", () => {
+    const providerModelId = "m".repeat(256);
+
+    expect(
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        type: "bot/select-model",
+        commandId: "command-model",
+        botId: "primary",
+        expectedRevision: 3,
+        model: { connectionId: "connection-1", providerModelId },
+      }),
+    ).toMatchObject({ model: { providerModelId } });
+  });
+
   test("rejects unversioned, malformed, and unknown commands", () => {
     for (const value of [
       { type: "bot/update-profile" },

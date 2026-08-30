@@ -1,4 +1,6 @@
 import {
+  decodeCredentialEnvelopeV1,
+  decodeCredentialLeaseV1,
   type CredentialEnvelopeV1,
   type CredentialLeaseV1,
   openCredentialV1,
@@ -78,20 +80,148 @@ function leaseTombstoneKey(effectId: string): string {
   return `${LEASE_TOMBSTONE_PREFIX}${effectId}`;
 }
 
+function storedRecord(
+  input: unknown,
+  label: string,
+  fields: readonly string[],
+): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error(`${label} is invalid`);
+  }
+  const value = input as Record<string, unknown>;
+  if (
+    !fields.every((field) => Object.hasOwn(value, field)) ||
+    Object.keys(value).some((field) => !fields.includes(field))
+  ) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
+function storedText(value: unknown, label: string, maximum = 256): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > maximum
+  ) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
+function decodeStoredStringList(input: unknown, label: string): string[] {
+  if (!Array.isArray(input)) throw new Error(`${label} is invalid`);
+  return [...new Set(input.map((value) => storedText(value, label)))];
+}
+
+function decodeStoredCredentialGeneration(
+  input: unknown,
+): StoredCredentialGeneration {
+  const value = storedRecord(input, "Stored credential generation", [
+    "schemaVersion",
+    "accountId",
+    "connectionId",
+    "packageId",
+    "generation",
+    "state",
+    "envelope",
+    "leaseIds",
+  ]);
+  if (
+    value.schemaVersion !== 1 ||
+    (value.state !== "pending" &&
+      value.state !== "active" &&
+      value.state !== "retired")
+  ) {
+    throw new Error("Stored credential generation is invalid");
+  }
+  const generation = storedText(value.generation, "generation", 128);
+  const envelope = decodeCredentialEnvelopeV1(value.envelope);
+  if (envelope.credentialGeneration !== generation) {
+    throw new Error("Stored credential generation is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    accountId: storedText(value.accountId, "accountId"),
+    connectionId: storedText(value.connectionId, "connectionId", 128),
+    packageId: storedText(value.packageId, "packageId", 128),
+    generation,
+    state: value.state,
+    envelope,
+    leaseIds: decodeStoredStringList(value.leaseIds, "leaseIds"),
+  };
+}
+
+function decodeStoredCredentialLease(input: unknown): StoredCredentialLease {
+  const value = storedRecord(input, "Stored credential lease", [
+    "schemaVersion",
+    "leaseId",
+    "effectId",
+    "accountId",
+    "connectionId",
+    "packageId",
+    "credentialGeneration",
+    "expiresAt",
+    "envelope",
+    "settled",
+  ]);
+  if (typeof value.settled !== "boolean") {
+    throw new Error("Stored credential lease is invalid");
+  }
+  const lease = decodeCredentialLeaseV1({
+    schemaVersion: value.schemaVersion,
+    leaseId: value.leaseId,
+    effectId: value.effectId,
+    connectionId: value.connectionId,
+    credentialGeneration: value.credentialGeneration,
+    expiresAt: value.expiresAt,
+    envelope: value.envelope,
+  });
+  return {
+    ...lease,
+    accountId: storedText(value.accountId, "accountId"),
+    packageId: storedText(value.packageId, "packageId", 128),
+    settled: value.settled,
+  };
+}
+
+function decodeLeaseTombstone(input: unknown): {
+  accountId: string;
+  connectionId: string;
+  packageId: string;
+} {
+  const value = storedRecord(input, "Stored credential lease tombstone", [
+    "accountId",
+    "connectionId",
+    "packageId",
+  ]);
+  return {
+    accountId: storedText(value.accountId, "accountId"),
+    connectionId: storedText(value.connectionId, "connectionId", 128),
+    packageId: storedText(value.packageId, "packageId", 128),
+  };
+}
+
+function decodeStoredGenerationId(input: unknown): string {
+  return storedText(input, "Stored credential generation id", 128);
+}
+
 function requireGeneration(
-  value: StoredCredentialGeneration | undefined,
+  value: unknown,
   connectionId: string,
   generation: string,
 ): StoredCredentialGeneration {
+  if (value === undefined) {
+    throw new Error("Credential generation is unavailable");
+  }
+  const decoded = decodeStoredCredentialGeneration(value);
   if (
-    !value ||
-    value.schemaVersion !== 1 ||
-    value.connectionId !== connectionId ||
-    value.generation !== generation
+    decoded.connectionId !== connectionId ||
+    decoded.generation !== generation
   ) {
     throw new Error("Credential generation is unavailable");
   }
-  return value;
+  return decoded;
 }
 
 export class CredentialUserBackendContribution {
@@ -135,7 +265,11 @@ export class CredentialUserBackendContribution {
     storage: CredentialTransaction = this.host.storage,
   ): Promise<void> {
     const key = credentialKey(input.connectionId, input.generation);
-    const existing = await storage.get<StoredCredentialGeneration>(key);
+    const existingValue = await storage.get<unknown>(key);
+    const existing =
+      existingValue === undefined
+        ? undefined
+        : decodeStoredCredentialGeneration(existingValue);
     if (existing) {
       if (
         existing.accountId !== input.accountId ||
@@ -175,7 +309,7 @@ export class CredentialUserBackendContribution {
     generation: string;
   }): Promise<string> {
     const stored = requireGeneration(
-      await this.host.storage.get<StoredCredentialGeneration>(
+      await this.host.storage.get<unknown>(
         credentialKey(input.connectionId, input.generation),
       ),
       input.connectionId,
@@ -211,7 +345,7 @@ export class CredentialUserBackendContribution {
   ): Promise<void> {
     const activate = async (transaction: CredentialTransaction) => {
       const next = requireGeneration(
-        await transaction.get<StoredCredentialGeneration>(
+        await transaction.get<unknown>(
           credentialKey(input.connectionId, input.generation),
         ),
         input.connectionId,
@@ -223,9 +357,13 @@ export class CredentialUserBackendContribution {
       ) {
         throw new Error("Credential generation authority does not match");
       }
-      const currentGeneration = await transaction.get<string>(
+      const currentGenerationValue = await transaction.get<unknown>(
         activeKey(input.connectionId),
       );
+      const currentGeneration =
+        currentGenerationValue === undefined
+          ? undefined
+          : decodeStoredGenerationId(currentGenerationValue);
       const entries: Record<string, unknown> = {
         [credentialKey(input.connectionId, input.generation)]: {
           ...next,
@@ -235,7 +373,7 @@ export class CredentialUserBackendContribution {
       };
       if (currentGeneration && currentGeneration !== input.generation) {
         const current = requireGeneration(
-          await transaction.get<StoredCredentialGeneration>(
+          await transaction.get<unknown>(
             credentialKey(input.connectionId, currentGeneration),
           ),
           input.connectionId,
@@ -259,9 +397,36 @@ export class CredentialUserBackendContribution {
   ): Promise<void> {
     await this.host.storage.transaction(async (storage) => {
       const key = credentialKey(connectionId, generation);
-      const stored = await storage.get<StoredCredentialGeneration>(key);
-      if (stored?.state === "pending") await storage.delete(key);
+      const storedValue = await storage.get<unknown>(key);
+      if (storedValue === undefined) return;
+      const stored = decodeStoredCredentialGeneration(storedValue);
+      if (stored.state === "pending") await storage.delete(key);
     });
+  }
+
+  async replayLease(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    effectId: string;
+  }): Promise<CredentialLeaseV1 | undefined> {
+    const storedValue = await this.host.storage.get<unknown>(
+      leaseKey(input.effectId),
+    );
+    if (storedValue === undefined) return undefined;
+    const stored = decodeStoredCredentialLease(storedValue);
+    if (
+      stored.accountId !== input.accountId ||
+      stored.connectionId !== input.connectionId ||
+      stored.packageId !== input.packageId
+    ) {
+      throw new Error("Credential lease effect id was reused");
+    }
+    if (Date.parse(stored.expiresAt) <= this.now()) {
+      await this.expireLeases();
+      throw new Error("Credential lease expired");
+    }
+    return this.publicLease(stored);
   }
 
   async lease(
@@ -281,11 +446,13 @@ export class CredentialUserBackendContribution {
     }
     if (!storage) await this.expireLeases();
     const issue = async (transaction: CredentialTransaction) => {
-      const expired = await transaction.get<{
-        accountId: string;
-        connectionId: string;
-        packageId: string;
-      }>(leaseTombstoneKey(input.effectId));
+      const expiredValue = await transaction.get<unknown>(
+        leaseTombstoneKey(input.effectId),
+      );
+      const expired =
+        expiredValue === undefined
+          ? undefined
+          : decodeLeaseTombstone(expiredValue);
       if (expired) {
         if (
           expired.accountId !== input.accountId ||
@@ -296,9 +463,13 @@ export class CredentialUserBackendContribution {
         }
         throw new Error("Credential lease expired");
       }
-      const existing = await transaction.get<StoredCredentialLease>(
+      const existingValue = await transaction.get<unknown>(
         leaseKey(input.effectId),
       );
+      const existing =
+        existingValue === undefined
+          ? undefined
+          : decodeStoredCredentialLease(existingValue);
       if (existing) {
         if (
           existing.accountId !== input.accountId ||
@@ -309,9 +480,13 @@ export class CredentialUserBackendContribution {
         }
         return this.publicLease(existing);
       }
-      const generation = await transaction.get<string>(
+      const generationValue = await transaction.get<unknown>(
         activeKey(input.connectionId),
       );
+      const generation =
+        generationValue === undefined
+          ? undefined
+          : decodeStoredGenerationId(generationValue);
       if (
         !generation ||
         (input.expectedGeneration !== undefined &&
@@ -320,7 +495,7 @@ export class CredentialUserBackendContribution {
         throw new Error("Connection credential is unavailable");
       }
       const stored = requireGeneration(
-        await transaction.get<StoredCredentialGeneration>(
+        await transaction.get<unknown>(
           credentialKey(input.connectionId, generation),
         ),
         input.connectionId,
@@ -346,8 +521,11 @@ export class CredentialUserBackendContribution {
         envelope: stored.envelope,
         settled: false,
       };
+      const leaseIndexValue = await transaction.get<unknown>(LEASE_INDEX_KEY);
       const leaseIndex =
-        (await transaction.get<string[]>(LEASE_INDEX_KEY)) ?? [];
+        leaseIndexValue === undefined
+          ? []
+          : decodeStoredStringList(leaseIndexValue, "credential lease index");
       await transaction.put({
         [leaseKey(input.effectId)]: lease,
         [LEASE_INDEX_KEY]: [...new Set([...leaseIndex, input.effectId])],
@@ -370,9 +548,13 @@ export class CredentialUserBackendContribution {
     packageId: string;
     lease: CredentialLeaseV1;
   }): Promise<string> {
-    const stored = await this.host.storage.get<StoredCredentialLease>(
+    const storedValue = await this.host.storage.get<unknown>(
       leaseKey(input.lease.effectId),
     );
+    const stored =
+      storedValue === undefined
+        ? undefined
+        : decodeStoredCredentialLease(storedValue);
     if (
       !stored ||
       stored.accountId !== input.accountId ||
@@ -400,10 +582,10 @@ export class CredentialUserBackendContribution {
 
   async settle(effectId: string): Promise<void> {
     await this.host.storage.transaction(async (storage) => {
-      const lease = await storage.get<StoredCredentialLease>(
-        leaseKey(effectId),
-      );
-      if (!lease || lease.settled) return;
+      const leaseValue = await storage.get<unknown>(leaseKey(effectId));
+      if (leaseValue === undefined) return;
+      const lease = decodeStoredCredentialLease(leaseValue);
+      if (lease.settled) return;
       await this.releaseLease(storage, lease, false);
     });
     await this.scheduleLeaseAlarm();
@@ -411,11 +593,17 @@ export class CredentialUserBackendContribution {
 
   async expireLeases(now = this.now()): Promise<void> {
     await this.host.storage.transaction(async (storage) => {
-      const effectIds = (await storage.get<string[]>(LEASE_INDEX_KEY)) ?? [];
+      const effectIdsValue = await storage.get<unknown>(LEASE_INDEX_KEY);
+      const effectIds =
+        effectIdsValue === undefined
+          ? []
+          : decodeStoredStringList(effectIdsValue, "credential lease index");
       for (const effectId of effectIds) {
-        const lease = await storage.get<StoredCredentialLease>(
-          leaseKey(effectId),
-        );
+        const leaseValue = await storage.get<unknown>(leaseKey(effectId));
+        const lease =
+          leaseValue === undefined
+            ? undefined
+            : decodeStoredCredentialLease(leaseValue);
         if (lease && Date.parse(lease.expiresAt) <= now) {
           await this.releaseLease(storage, lease, true);
         }
@@ -427,13 +615,18 @@ export class CredentialUserBackendContribution {
   async nextLeaseExpiry(
     storage: CredentialTransaction = this.host.storage,
   ): Promise<number | undefined> {
-    const effectIds = (await storage.get<string[]>(LEASE_INDEX_KEY)) ?? [];
+    const effectIdsValue = await storage.get<unknown>(LEASE_INDEX_KEY);
+    const effectIds =
+      effectIdsValue === undefined
+        ? []
+        : decodeStoredStringList(effectIdsValue, "credential lease index");
     const expiries: number[] = [];
     for (const effectId of effectIds) {
-      const lease = await storage.get<StoredCredentialLease>(
-        leaseKey(effectId),
-      );
-      if (lease) expiries.push(Date.parse(lease.expiresAt));
+      const leaseValue = await storage.get<unknown>(leaseKey(effectId));
+      if (leaseValue !== undefined) {
+        const lease = decodeStoredCredentialLease(leaseValue);
+        expiries.push(Date.parse(lease.expiresAt));
+      }
     }
     return expiries.length > 0 ? Math.min(...expiries) : undefined;
   }
@@ -450,7 +643,7 @@ export class CredentialUserBackendContribution {
   ): Promise<void> {
     const key = credentialKey(lease.connectionId, lease.credentialGeneration);
     const stored = requireGeneration(
-      await storage.get<StoredCredentialGeneration>(key),
+      await storage.get<unknown>(key),
       lease.connectionId,
       lease.credentialGeneration,
     );
@@ -458,10 +651,12 @@ export class CredentialUserBackendContribution {
       ...stored,
       leaseIds: stored.leaseIds.filter((id) => id !== lease.leaseId),
     } satisfies StoredCredentialGeneration;
-    const leaseIndex =
-      (await storage.get<string[]>(LEASE_INDEX_KEY))?.filter(
-        (effectId) => effectId !== lease.effectId,
-      ) ?? [];
+    const leaseIndexValue = await storage.get<unknown>(LEASE_INDEX_KEY);
+    const leaseIndex = (
+      leaseIndexValue === undefined
+        ? []
+        : decodeStoredStringList(leaseIndexValue, "credential lease index")
+    ).filter((effectId) => effectId !== lease.effectId);
     await storage.delete(leaseKey(lease.effectId));
     await storage.put(LEASE_INDEX_KEY, leaseIndex);
     if (expired) {
@@ -492,11 +687,14 @@ export class CredentialUserBackendContribution {
 
   async disconnect(connectionId: string): Promise<void> {
     await this.host.storage.transaction(async (storage) => {
-      const generation = await storage.get<string>(activeKey(connectionId));
-      if (!generation) return;
+      const generationValue = await storage.get<unknown>(
+        activeKey(connectionId),
+      );
+      if (generationValue === undefined) return;
+      const generation = decodeStoredGenerationId(generationValue);
       const key = credentialKey(connectionId, generation);
       const stored = requireGeneration(
-        await storage.get<StoredCredentialGeneration>(key),
+        await storage.get<unknown>(key),
         connectionId,
         generation,
       );

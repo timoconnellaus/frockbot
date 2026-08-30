@@ -140,7 +140,7 @@ class OllamaCloudProvider implements LlmProvider {
     } catch (error) {
       if (
         error instanceof OpenAICompatibleHttpError &&
-        (error.status === 401 || error.status === 403)
+        (error.status === 401 || error.status === 403 || error.status === 404)
       ) {
         throw new LlmEffectNotStartedError(error.message);
       }

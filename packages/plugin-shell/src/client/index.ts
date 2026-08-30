@@ -893,7 +893,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!ctx.transport.executeConnection) {
         throw new Error("Connections are unavailable");
       }
-      await ctx.transport.executeConnection({
+      const result = await ctx.transport.executeConnection({
         schemaVersion: 1,
         type: "connection/set-enabled",
         commandId: crypto.randomUUID(),
@@ -901,6 +901,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         enabled,
       });
       await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Connection state update failed");
+      }
     },
     async disconnectConnection(
       connectionId,
@@ -917,8 +920,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         revokeUpstream,
       });
       await web.value.loadPluginCatalog();
-      if (result.status === "reconciliation-required") {
-        throw new Error("Connection revocation requires reconciliation");
+      if (result.status !== "applied") {
+        throw new Error(
+          result.status === "reconciliation-required"
+            ? "Connection revocation requires reconciliation"
+            : "Connection revocation failed",
+        );
       }
     },
     async openConnectionAuthorization(url: string): Promise<void> {

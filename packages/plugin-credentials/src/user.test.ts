@@ -84,6 +84,53 @@ const authority = {
 };
 
 describe("Credential User Contribution", () => {
+  test("rejects malformed durable credential generations and leases", async () => {
+    const { storage, credentials } = contribution();
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "secret",
+    });
+    const generationKey = "credential:connection-1:generation-1";
+    storage.values.set(generationKey, {
+      ...(storage.values.get(generationKey) as Record<string, unknown>),
+      unexpected: true,
+    });
+
+    await expect(
+      credentials.readStagedApiKey({
+        ...authority,
+        generation: "generation-1",
+      }),
+    ).rejects.toThrow("Stored credential generation is invalid");
+
+    storage.values.delete(generationKey);
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "secret",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    const lease = await credentials.lease({
+      ...authority,
+      effectId: "effect-1",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+    const leaseKey = "credential-lease:effect-1";
+    storage.values.set(leaseKey, {
+      ...(storage.values.get(leaseKey) as Record<string, unknown>),
+      settled: "no",
+    });
+
+    await expect(
+      credentials.openLease({
+        accountId: authority.accountId,
+        packageId: authority.packageId,
+        lease,
+      }),
+    ).rejects.toThrow("Stored credential lease is invalid");
+  });
+
   test("rotates atomically while admitted effects retain the old generation", async () => {
     const { credentials } = contribution();
     await credentials.stageApiKey({

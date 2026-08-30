@@ -130,69 +130,72 @@ describe("Ollama Cloud runtime Contribution", () => {
     await root.fiber.dispose();
   });
 
-  test("settles definitive HTTP rejections after durable no-effect outcome", async () => {
-    const keyringText = serializedKeyring();
-    const envelope = await sealCredentialV1({
-      keyring: parseCredentialKeyringV1(keyringText),
-      context: {
-        accountId: "account-1",
-        connectionId: "connection-1",
-        packageId: "provider-ollama-cloud",
-        credentialGeneration: "generation-1",
-      },
-      plaintext: "account-secret",
-    });
-    const settled: string[] = [];
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await root.plugin(
-      createOllamaCloudRuntimePlugin({
-        accountId: "account-1",
-        connectionId: "connection-1",
-        packageId: "provider-ollama-cloud",
-        credentialKeyring: keyringText,
-        now: () => Date.parse("2026-08-30T00:00:00.000Z"),
-        leaseCredential: (effectId) =>
-          Promise.resolve({
-            schemaVersion: 1,
-            leaseId: "lease-1",
-            effectId,
-            connectionId: "connection-1",
-            credentialGeneration: "generation-1",
-            expiresAt: "2026-08-30T01:00:00.000Z",
-            envelope,
-          }),
-        settleCredential: (effectId) => {
-          settled.push(effectId);
-          return Promise.resolve();
+  test.each([401, 403, 404])(
+    "settles definitive HTTP %i rejections after durable no-effect outcome",
+    async (status) => {
+      const keyringText = serializedKeyring();
+      const envelope = await sealCredentialV1({
+        keyring: parseCredentialKeyringV1(keyringText),
+        context: {
+          accountId: "account-1",
+          connectionId: "connection-1",
+          packageId: "provider-ollama-cloud",
+          credentialGeneration: "generation-1",
         },
-        fetch: () =>
-          Promise.resolve(new Response("unauthorized", { status: 401 })),
-      }),
-    );
+        plaintext: "account-secret",
+      });
+      const settled: string[] = [];
+      const root = new Context();
+      await root.plugin(LlmRegistry);
+      await root.plugin(
+        createOllamaCloudRuntimePlugin({
+          accountId: "account-1",
+          connectionId: "connection-1",
+          packageId: "provider-ollama-cloud",
+          credentialKeyring: keyringText,
+          now: () => Date.parse("2026-08-30T00:00:00.000Z"),
+          leaseCredential: (effectId) =>
+            Promise.resolve({
+              schemaVersion: 1,
+              leaseId: "lease-1",
+              effectId,
+              connectionId: "connection-1",
+              credentialGeneration: "generation-1",
+              expiresAt: "2026-08-30T01:00:00.000Z",
+              envelope,
+            }),
+          settleCredential: (effectId) => {
+            settled.push(effectId);
+            return Promise.resolve();
+          },
+          fetch: () =>
+            Promise.resolve(new Response("definitive rejection", { status })),
+        }),
+      );
 
-    let failure: unknown;
-    try {
-      for await (const event of root.llm.stream(
-        request,
-        new AbortController().signal,
-      )) {
-        void event;
+      let failure: unknown;
+      try {
+        for await (const event of root.llm.stream(
+          request,
+          new AbortController().signal,
+        )) {
+          void event;
+        }
+      } catch (error) {
+        failure = error;
       }
-    } catch (error) {
-      failure = error;
-    }
-    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
-    expect(settled).toEqual([]);
-    await root.serial(
-      "agent/model-outcome-committed",
-      {} as Agent,
-      request.requestId,
-      "not-started",
-    );
-    expect(settled).toEqual(["effect-1"]);
-    await root.fiber.dispose();
-  });
+      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(settled).toEqual([]);
+      await root.serial(
+        "agent/model-outcome-committed",
+        {} as Agent,
+        request.requestId,
+        "not-started",
+      );
+      expect(settled).toEqual(["effect-1"]);
+      await root.fiber.dispose();
+    },
+  );
 
   test("requires reconciliation for ambiguous HTTP failures", async () => {
     const keyringText = serializedKeyring();

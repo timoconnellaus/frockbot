@@ -10,7 +10,10 @@ import {
   type UserSettingsTransaction,
 } from "@frockbot/plugin-settings/user";
 import { OllamaCloudClient, type OllamaFetch } from "./client.js";
-import { createOllamaCloudUserBackendContribution } from "./user.js";
+import {
+  createOllamaCloudUserBackendContribution,
+  type OllamaUserBackendHost,
+} from "./user.js";
 
 class MemoryStorage implements UserSettingsStorage, CredentialStorage {
   readonly values = new Map<string, unknown>();
@@ -146,7 +149,7 @@ async function fixture(fetchOverride?: OllamaFetch) {
   const ollama = createOllamaCloudUserBackendContribution({
     storage,
     settings,
-    credentials,
+    credentials: credentials as unknown as OllamaUserBackendHost["credentials"],
     client,
     now: () => Date.parse("2026-08-30T00:00:00.000Z"),
     randomId: () => `id-${++id}`,
@@ -163,6 +166,55 @@ async function fixture(fetchOverride?: OllamaFetch) {
 }
 
 describe("Ollama Cloud User Contribution", () => {
+  test("rejects malformed durable account, command, and pending records", async () => {
+    const accountFixture = await fixture();
+    accountFixture.storage.values.set("ollama-connection-account", {
+      accountId: "account-1",
+    });
+    await expect(
+      accountFixture.ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/create-api-key",
+        commandId: "connect-malformed-account",
+        packageId: "provider-ollama-cloud",
+        connectionTypeId: "ollama-cloud-account",
+        label: "Work",
+        apiKey: "secret",
+      }),
+    ).rejects.toThrow("Stored Ollama account is invalid");
+
+    const commandFixture = await fixture();
+    const command = {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-malformed-command",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "secret",
+    } as const;
+    await commandFixture.ollama.executeConnection("account-1", command);
+    const commandKey = `ollama-connection-command:${command.commandId}`;
+    commandFixture.storage.values.set(commandKey, {
+      ...(commandFixture.storage.values.get(commandKey) as Record<
+        string,
+        unknown
+      >),
+      unexpected: true,
+    });
+    await expect(
+      commandFixture.ollama.executeConnection("account-1", command),
+    ).rejects.toThrow("Stored Ollama command is invalid");
+
+    const pendingFixture = await fixture();
+    pendingFixture.storage.values.set("ollama-pending-connection-commands", [
+      { commandId: "invalid" },
+    ]);
+    await expect(pendingFixture.ollama.alarm()).rejects.toThrow(
+      "commandId is invalid",
+    );
+  });
+
   test("creates multiple account-scoped Connections with write-only credentials", async () => {
     const { storage, settings, ollama } = await fixture();
 
@@ -331,6 +383,50 @@ describe("Ollama Cloud User Contribution", () => {
     await expect(
       ollama.executeConnection("account-1", command),
     ).resolves.toMatchObject({ status: "applied" });
+  });
+
+  test("preserves the first terminal receipt across concurrent delivery", async () => {
+    const firstCatalogStarted = Promise.withResolvers<void>();
+    const secondCatalogStarted = Promise.withResolvers<void>();
+    const firstCatalogResponse = Promise.withResolvers<Response>();
+    const secondCatalogResponse = Promise.withResolvers<Response>();
+    let catalogRequests = 0;
+    const { ollama } = await fixture((input) => {
+      if (!String(input).endsWith("/tags")) {
+        return Promise.resolve(Response.json({ capabilities: ["tools"] }));
+      }
+      catalogRequests += 1;
+      if (catalogRequests === 1) {
+        firstCatalogStarted.resolve();
+        return firstCatalogResponse.promise;
+      }
+      secondCatalogStarted.resolve();
+      return secondCatalogResponse.promise;
+    });
+    const command = {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-concurrent",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "secret",
+    } as const;
+
+    const first = ollama.executeConnection("account-1", command);
+    await firstCatalogStarted.promise;
+    const second = ollama.executeConnection("account-1", command);
+    await secondCatalogStarted.promise;
+    firstCatalogResponse.resolve(
+      Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] }),
+    );
+    const applied = await first;
+    secondCatalogResponse.resolve(
+      Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] }),
+    );
+
+    expect(applied.status).toBe("applied");
+    await expect(second).resolves.toEqual(applied);
   });
 
   test("preserves disabled state across credential rotation", async () => {
@@ -657,6 +753,82 @@ describe("Ollama Cloud User Contribution", () => {
         connectionGeneration: before.generation,
       }),
     ).rejects.toThrow("Connection changed before model authorization");
+  });
+
+  test("blocks new leases after Package disable while preserving replay", async () => {
+    let providerRequests = 0;
+    const { settings, ollama } = await fixture((input) => {
+      providerRequests += 1;
+      return Promise.resolve(
+        String(input).endsWith("/tags")
+          ? Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] })
+          : Response.json({ capabilities: ["tools"] }),
+      );
+    });
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "valid-key",
+    });
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!connection?.generation) throw new Error("generation is missing");
+    const first = await ollama.leaseModelCredential({
+      accountId: "account-1",
+      connectionId: created.connectionId,
+      providerModelId: "glm-5.3-flash:cloud",
+      effectId: "effect-before-disable",
+      connectionGeneration: connection.generation,
+    });
+    const current = await settings.read("account-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "account-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "disable-package",
+        expectedRevision: current.revision,
+        packageId: "provider-ollama-cloud",
+        enabled: false,
+      },
+    });
+    const requestsBeforeAuthorization = providerRequests;
+
+    await expect(
+      ollama.leaseModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        providerModelId: "glm-5.3-flash:cloud",
+        effectId: "effect-before-disable",
+        connectionGeneration: connection.generation,
+      }),
+    ).resolves.toEqual(first);
+    await expect(
+      ollama.leaseModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        providerModelId: "glm-5.3-flash:cloud",
+        effectId: "effect-after-disable",
+        connectionGeneration: connection.generation,
+      }),
+    ).rejects.toThrow("Ollama Cloud Package is not installed and enabled");
+    await expect(
+      ollama.leaseModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        providerModelId: "uncatalogued:cloud",
+        effectId: "exact-after-disable",
+        connectionGeneration: connection.generation,
+      }),
+    ).rejects.toThrow("Ollama Cloud Package is not installed and enabled");
+    expect(providerRequests).toBe(requestsBeforeAuthorization);
   });
 
   test("pins one credential lease to the exact model effect", async () => {

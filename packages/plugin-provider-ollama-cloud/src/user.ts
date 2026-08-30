@@ -1,4 +1,5 @@
 import {
+  decodeConnectionCommandReceiptV1,
   decodeConnectionCommandV1,
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
@@ -46,8 +47,14 @@ interface StoredCommand {
 
 type OllamaCredentialContribution = Omit<
   CredentialUserBackendContribution,
-  "lease"
+  "lease" | "replayLease"
 > & {
+  replayLease(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    effectId: string;
+  }): Promise<CredentialLeaseV1 | undefined>;
   lease(
     input: {
       accountId: string;
@@ -100,6 +107,139 @@ function receipt(
   };
 }
 
+function storedRecord(
+  input: unknown,
+  label: string,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error(`${label} is invalid`);
+  }
+  const value = input as Record<string, unknown>;
+  const allowed = new Set([...required, ...optional]);
+  if (
+    !required.every((key) => Object.hasOwn(value, key)) ||
+    Object.keys(value).some((key) => !allowed.has(key))
+  ) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
+function storedText(value: unknown, label: string, maximum: number): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > maximum
+  ) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
+function decodeStoredAccount(input: unknown): string {
+  return storedText(input, "Stored Ollama account", 256);
+}
+
+function decodePendingCommands(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    throw new Error("Stored Ollama pending commands are invalid");
+  }
+  return [
+    ...new Set(input.map((value) => storedText(value, "commandId", 128))),
+  ];
+}
+
+function decodeStoredCommand(input: unknown): StoredCommand {
+  const value = storedRecord(
+    input,
+    "Stored Ollama command",
+    [
+      "schemaVersion",
+      "commandId",
+      "fingerprint",
+      "accountId",
+      "connectionId",
+      "operation",
+    ],
+    [
+      "credentialGeneration",
+      "expectedGeneration",
+      "label",
+      "enabled",
+      "revokeUpstream",
+      "receipt",
+    ],
+  );
+  const operations: StoredCommand["operation"][] = [
+    "connection/create-api-key",
+    "connection/rotate-api-key",
+    "connection/update-label",
+    "connection/refresh-models",
+    "connection/set-enabled",
+    "connection/disconnect",
+  ];
+  if (
+    value.schemaVersion !== 1 ||
+    !operations.includes(value.operation as never) ||
+    (value.enabled !== undefined && typeof value.enabled !== "boolean") ||
+    (value.revokeUpstream !== undefined &&
+      typeof value.revokeUpstream !== "boolean")
+  ) {
+    throw new Error("Stored Ollama command is invalid");
+  }
+  const commandId = storedText(value.commandId, "commandId", 128);
+  const connectionId = storedText(value.connectionId, "connectionId", 128);
+  const decodedReceipt =
+    value.receipt === undefined
+      ? undefined
+      : decodeConnectionCommandReceiptV1(value.receipt);
+  if (
+    decodedReceipt &&
+    (decodedReceipt.commandId !== commandId ||
+      decodedReceipt.connectionId !== connectionId)
+  ) {
+    throw new Error("Stored Ollama command receipt is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    commandId,
+    fingerprint: storedText(value.fingerprint, "fingerprint", 64),
+    accountId: storedText(value.accountId, "accountId", 256),
+    connectionId,
+    operation: value.operation as StoredCommand["operation"],
+    ...(value.credentialGeneration === undefined
+      ? {}
+      : {
+          credentialGeneration: storedText(
+            value.credentialGeneration,
+            "credentialGeneration",
+            128,
+          ),
+        }),
+    ...(value.expectedGeneration === undefined
+      ? {}
+      : {
+          expectedGeneration: storedText(
+            value.expectedGeneration,
+            "expectedGeneration",
+            128,
+          ),
+        }),
+    ...(value.label === undefined
+      ? {}
+      : { label: storedText(value.label, "label", 120) }),
+    ...(value.enabled === undefined
+      ? {}
+      : { enabled: value.enabled as boolean }),
+    ...(value.revokeUpstream === undefined
+      ? {}
+      : { revokeUpstream: value.revokeUpstream as boolean }),
+    ...(decodedReceipt === undefined ? {} : { receipt: decodedReceipt }),
+  };
+}
+
 export class OllamaCloudUserBackendContribution {
   readonly packageId = PACKAGE_ID;
   private readonly client: OllamaCloudClient;
@@ -117,15 +257,24 @@ export class OllamaCloudUserBackendContribution {
     input: unknown,
   ): Promise<ConnectionCommandReceiptV1> {
     const command = decodeConnectionCommandV1(input);
-    const storedAccount = await this.host.storage.get<string>(ACCOUNT_KEY);
+    const storedAccountValue =
+      await this.host.storage.get<unknown>(ACCOUNT_KEY);
+    const storedAccount =
+      storedAccountValue === undefined
+        ? undefined
+        : decodeStoredAccount(storedAccountValue);
     if (storedAccount && storedAccount !== accountId) {
       throw new Error("Ollama Connection authority does not match");
     }
     if (!storedAccount) await this.host.storage.put(ACCOUNT_KEY, accountId);
     const commandFingerprint = await fingerprint(command);
-    const existing = await this.host.storage.get<StoredCommand>(
+    const existingValue = await this.host.storage.get<unknown>(
       commandKey(command.commandId),
     );
+    const existing =
+      existingValue === undefined
+        ? undefined
+        : decodeStoredCommand(existingValue);
     if (existing) {
       if (
         existing.accountId !== accountId ||
@@ -184,8 +333,10 @@ export class OllamaCloudUserBackendContribution {
         generation,
         apiKey: command.apiKey,
       });
-      await this.host.storage.transaction(
+      const admitted = await this.host.storage.transaction(
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          const admission = await this.admitRecord(record, storage);
+          if (!admission.created) return admission.record;
           const settings = await this.host.settings.readSnapshot(storage);
           if (
             !settings.packages.some(
@@ -203,11 +354,11 @@ export class OllamaCloudUserBackendContribution {
             storage,
           );
           await this.host.credentials.stagePreparedApiKey(prepared, storage);
-          await this.admitRecord(record, storage);
+          return record;
         },
       );
       await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
-      return record;
+      return admitted;
     }
 
     const connection = await this.requireConnection(
@@ -236,8 +387,10 @@ export class OllamaCloudUserBackendContribution {
         generation,
         apiKey: command.apiKey,
       });
-      await this.host.storage.transaction(
+      const admitted = await this.host.storage.transaction(
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          const admission = await this.admitRecord(record, storage);
+          if (!admission.created) return admission.record;
           const current = await this.host.settings.getConnection(
             accountId,
             connection.connectionId,
@@ -251,11 +404,11 @@ export class OllamaCloudUserBackendContribution {
             throw new Error("Connection changed before credential rotation");
           }
           await this.host.credentials.stagePreparedApiKey(prepared, storage);
-          await this.admitRecord(record, storage);
+          return record;
         },
       );
       await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
-      return record;
+      return admitted;
     }
 
     const record: StoredCommand = {
@@ -276,9 +429,9 @@ export class OllamaCloudUserBackendContribution {
         ? { revokeUpstream: command.revokeUpstream }
         : {}),
     };
-    await this.admitRecord(record);
+    const admitted = await this.admitRecord(record);
     await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
-    return record;
+    return admitted.record;
   }
 
   private async ensureAdmittedState(
@@ -311,11 +464,15 @@ export class OllamaCloudUserBackendContribution {
   private async admitRecord(
     record: StoredCommand,
     storage?: CredentialTransaction,
-  ): Promise<void> {
+  ): Promise<{ record: StoredCommand; created: boolean }> {
     const admit = async (transaction: CredentialTransaction) => {
-      const existing = await transaction.get<StoredCommand>(
+      const existingValue = await transaction.get<unknown>(
         commandKey(record.commandId),
       );
+      const existing =
+        existingValue === undefined
+          ? undefined
+          : decodeStoredCommand(existingValue);
       if (existing) {
         if (
           existing.accountId !== record.accountId ||
@@ -323,19 +480,20 @@ export class OllamaCloudUserBackendContribution {
         ) {
           throw new Error("Connection command idempotency key was reused");
         }
-        return;
+        return { record: existing, created: false };
       }
-      const pending =
-        (await transaction.get<string[]>(PENDING_KEY))?.filter(
-          (id) => id !== record.commandId,
-        ) ?? [];
+      const pendingValue = await transaction.get<unknown>(PENDING_KEY);
+      const pending = (
+        pendingValue === undefined ? [] : decodePendingCommands(pendingValue)
+      ).filter((id) => id !== record.commandId);
       await transaction.put({
         [commandKey(record.commandId)]: record,
         [PENDING_KEY]: [...pending, record.commandId],
       });
       await transaction.setAlarm?.(this.now() + RECOVERY_DELAY_MS);
+      return { record, created: true };
     };
-    await (storage ? admit(storage) : this.host.storage.transaction(admit));
+    return storage ? admit(storage) : this.host.storage.transaction(admit);
   }
 
   private authorizingConnection(
@@ -733,23 +891,37 @@ export class OllamaCloudUserBackendContribution {
     record: StoredCommand,
     status: ConnectionCommandReceiptV1["status"],
   ): Promise<ConnectionCommandReceiptV1> {
-    const result = receipt(record, status);
-    await this.host.storage.transaction(async (storage) => {
-      const pending =
-        (await storage.get<string[]>(PENDING_KEY))?.filter(
-          (id) => id !== record.commandId,
-        ) ?? [];
+    const proposed = receipt(record, status);
+    const result = await this.host.storage.transaction(async (storage) => {
+      const storedValue = await storage.get<unknown>(
+        commandKey(record.commandId),
+      );
+      const stored =
+        storedValue === undefined
+          ? undefined
+          : decodeStoredCommand(storedValue);
+      if (stored?.receipt) return stored.receipt;
+      const pendingValue = await storage.get<unknown>(PENDING_KEY);
+      const pending = (
+        pendingValue === undefined ? [] : decodePendingCommands(pendingValue)
+      ).filter((id) => id !== record.commandId);
       await storage.put({
-        [commandKey(record.commandId)]: { ...record, receipt: result },
+        [commandKey(record.commandId)]: {
+          ...(stored ?? record),
+          receipt: proposed,
+        },
         [PENDING_KEY]: pending,
       });
+      return proposed;
     });
     await this.scheduleNextAlarm(record.accountId);
     return result;
   }
 
   private async scheduleNextAlarm(accountId: string): Promise<void> {
-    const pending = (await this.host.storage.get<string[]>(PENDING_KEY)) ?? [];
+    const pendingValue = await this.host.storage.get<unknown>(PENDING_KEY);
+    const pending =
+      pendingValue === undefined ? [] : decodePendingCommands(pendingValue);
     const settings = await this.host.settings.read(accountId);
     const catalogDeadlines = settings.connections.flatMap((connection) => {
       const refreshAfter = connection.modelCatalog?.refreshAfter;
@@ -781,31 +953,43 @@ export class OllamaCloudUserBackendContribution {
     effectId: string;
     connectionGeneration: string;
   }): Promise<CredentialLeaseV1> {
-    const connection = await this.requireConnection(
-      input.accountId,
-      input.connectionId,
-    );
-    if (
-      connection.state !== "ready" ||
-      connection.generation !== input.connectionGeneration
-    ) {
-      throw new Error("Connection changed before model authorization");
-    }
+    await this.host.credentials.expireLeases();
+    const replay = await this.host.credentials.replayLease({
+      accountId: input.accountId,
+      connectionId: input.connectionId,
+      packageId: PACKAGE_ID,
+      effectId: input.effectId,
+    });
+    if (replay) return replay;
+
     const admittedGeneration = input.connectionGeneration;
+    const connection = await this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        return this.requireModelAuthority(input, storage);
+      },
+    );
     const known = connection.modelCatalog?.models.some(
       (model) => model.providerModelId === input.providerModelId,
     );
     let resolvedModel: ConnectionModelCatalogV1["models"][number] | undefined;
     if (!known) {
       const discoveryEffectId = `resolve:${input.effectId}`;
-      const discoveryLease = await this.host.credentials.lease({
-        accountId: input.accountId,
-        connectionId: input.connectionId,
-        packageId: PACKAGE_ID,
-        effectId: discoveryEffectId,
-        expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
-        expectedGeneration: admittedGeneration,
-      });
+      const discoveryLease = await this.host.storage.transaction(
+        async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          await this.requireModelAuthority(input, storage);
+          return this.host.credentials.lease(
+            {
+              accountId: input.accountId,
+              connectionId: input.connectionId,
+              packageId: PACKAGE_ID,
+              effectId: discoveryEffectId,
+              expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
+              expectedGeneration: admittedGeneration,
+            },
+            storage,
+          );
+        },
+      );
       try {
         const apiKey = await this.host.credentials.openLease({
           accountId: input.accountId,
@@ -821,22 +1005,9 @@ export class OllamaCloudUserBackendContribution {
       }
     }
 
-    await this.host.credentials.expireLeases();
     return this.host.storage.transaction(
       async (storage: UserSettingsTransaction & CredentialTransaction) => {
-        const current = await this.host.settings.getConnection(
-          input.accountId,
-          input.connectionId,
-          storage,
-        );
-        if (
-          !current ||
-          current.packageId !== PACKAGE_ID ||
-          current.state !== "ready" ||
-          current.generation !== admittedGeneration
-        ) {
-          throw new Error("Connection changed before model authorization");
-        }
+        const current = await this.requireModelAuthority(input, storage);
         if (
           resolvedModel &&
           !current.modelCatalog?.models.some(
@@ -874,23 +1045,58 @@ export class OllamaCloudUserBackendContribution {
     );
   }
 
+  private async requireModelAuthority(
+    input: {
+      accountId: string;
+      connectionId: string;
+      connectionGeneration: string;
+    },
+    storage: UserSettingsTransaction,
+  ): Promise<ConnectionView> {
+    const settings = await this.host.settings.readSnapshot(storage);
+    if (
+      !settings.packages.some(
+        (pkg) => pkg.packageId === PACKAGE_ID && pkg.state === "installed",
+      )
+    ) {
+      throw new Error("Ollama Cloud Package is not installed and enabled");
+    }
+    const connection = settings.connections.find(
+      (candidate) => candidate.connectionId === input.connectionId,
+    );
+    if (
+      !connection ||
+      connection.packageId !== PACKAGE_ID ||
+      connection.state !== "ready" ||
+      connection.generation !== input.connectionGeneration
+    ) {
+      throw new Error("Connection changed before model authorization");
+    }
+    return connection;
+  }
+
   async settleModelCredential(effectId: string): Promise<void> {
     await this.host.credentials.settle(effectId);
   }
 
   async alarm(): Promise<void> {
-    const pending = (await this.host.storage.get<string[]>(PENDING_KEY)) ?? [];
+    const pendingValue = await this.host.storage.get<unknown>(PENDING_KEY);
+    const pending =
+      pendingValue === undefined ? [] : decodePendingCommands(pendingValue);
     for (const commandId of pending) {
-      const record = await this.host.storage.get<StoredCommand>(
+      const recordValue = await this.host.storage.get<unknown>(
         commandKey(commandId),
       );
-      if (record && !record.receipt) {
+      if (recordValue === undefined) continue;
+      const record = decodeStoredCommand(recordValue);
+      if (!record.receipt) {
         await this.ensureAdmittedState(record);
         await this.resume(record);
       }
     }
-    const accountId = await this.host.storage.get<string>(ACCOUNT_KEY);
-    if (!accountId) return;
+    const accountValue = await this.host.storage.get<unknown>(ACCOUNT_KEY);
+    if (accountValue === undefined) return;
+    const accountId = decodeStoredAccount(accountValue);
     const settings = await this.host.settings.read(accountId);
     for (const connection of settings.connections) {
       const refreshAfter = connection.modelCatalog?.refreshAfter;
