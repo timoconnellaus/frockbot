@@ -19,6 +19,15 @@ class MemoryStorage {
   transaction<T>(callback: (storage: MemoryStorage) => Promise<T>): Promise<T> {
     return callback(this);
   }
+  list<T>({ prefix }: { prefix: string }): Promise<Map<string, T>> {
+    return Promise.resolve(
+      new Map(
+        [...this.values.entries()].filter(([key]) =>
+          key.startsWith(prefix),
+        ) as Array<[string, T]>,
+      ),
+    );
+  }
 }
 const registration = {
   schemaVersion: 1 as const,
