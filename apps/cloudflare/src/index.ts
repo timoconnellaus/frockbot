@@ -147,6 +147,18 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   };
 }
 
+function rpcJsonSnapshot<T>(value: T): T {
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) {
+      throw new Error("RPC response is not a JSON value");
+    }
+    return JSON.parse(serialized) as T;
+  } catch (error) {
+    throw new Error("RPC response is not valid JSON", { cause: error });
+  }
+}
+
 function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its RPC surface.
@@ -340,53 +352,65 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
       backendHost: "gateway",
       listBots: async (userId) =>
         decodeDirectoryViewV1(
-          await userConfigurationStub(env, userId).listBots({
-            schemaVersion: 1,
-            userId,
-          }),
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).listBots({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
         ),
       listBotLifecycles: async (userId: string) =>
         decodeBotLifecycleDirectoryViewV1(
-          await userConfigurationStub(env, userId).listBotLifecycles({
-            schemaVersion: 1,
-            userId,
-          }),
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).listBotLifecycles({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
         ),
       executeBotLifecycle: async (
         userId: string,
         command: BotLifecycleCommandV1,
       ) =>
         decodeBotLifecycleReceiptV1(
-          await userConfigurationStub(env, userId).executeBotLifecycle({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).executeBotLifecycle({
+              schemaVersion: 1,
+              userId,
+              command,
+            }),
+          ),
         ),
       createBot: async (userId, command) =>
         decodeFlockReceiptV1(
-          await userConfigurationStub(env, userId).createBot({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).createBot({
+              schemaVersion: 1,
+              userId,
+              command,
+            }),
+          ),
         ),
       readSheep: async (userId, botId) =>
         decodeSheepIdentityViewV1(
-          await botStateStub(env, userId, botId).readSheep({
-            schemaVersion: 1,
-            userId,
-            botId,
-          }),
+          rpcJsonSnapshot(
+            await botStateStub(env, userId, botId).readSheep({
+              schemaVersion: 1,
+              userId,
+              botId,
+            }),
+          ),
         ),
       updateSheep: async (userId, botId, command) =>
         decodeFlockReceiptV1(
-          await botStateStub(env, userId, botId).updateSheep({
-            schemaVersion: 1,
-            userId,
-            botId,
-            command,
-          }),
+          rpcJsonSnapshot(
+            await botStateStub(env, userId, botId).updateSheep({
+              schemaVersion: 1,
+              userId,
+              botId,
+              command,
+            }),
+          ),
         ),
     }),
 );
