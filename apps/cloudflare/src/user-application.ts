@@ -34,7 +34,25 @@ const APP_JS =
 const APP_CSS =
   typeof __FROCKBOT_CLIENT_CSS__ === "string" ? __FROCKBOT_CLIENT_CSS__ : "";
 
-function appHtml(userId: string, applicationHash: string): string {
+type HostedAuthModeV1 = "anonymous" | "better-auth" | "development";
+
+function hostedAuthMode(request: Request): HostedAuthModeV1 {
+  const mode = request.headers.get("x-frockbot-auth-session-v1");
+  if (
+    mode !== "anonymous" &&
+    mode !== "better-auth" &&
+    mode !== "development"
+  ) {
+    throw new Error("hosted auth session projection is invalid");
+  }
+  return mode;
+}
+
+function appHtml(
+  userId: string,
+  applicationHash: string,
+  authMode: HostedAuthModeV1,
+): string {
   if (!isRpcIdentifier(userId)) throw new Error("invalid user id");
   if (!isApplicationDeploymentHash(applicationHash)) {
     throw new Error("invalid application hash");
@@ -48,7 +66,7 @@ function appHtml(userId: string, applicationHash: string): string {
   <title>FrockBot</title>
   <link rel="stylesheet" href="/app.css">
 </head>
-<body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}">
+<body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}" data-frockbot-auth-mode="${authMode}">
   <div id="app"></div>
   <script type="module" src="/app.js"></script>
 </body>
@@ -121,7 +139,11 @@ export function createUserApplication() {
     if (request.method === "GET" && url.pathname === "/") {
       return withSecurityHeaders(
         new Response(
-          appHtml(env.DEPLOYMENT.userId, env.DEPLOYMENT.applicationHash),
+          appHtml(
+            env.DEPLOYMENT.userId,
+            env.DEPLOYMENT.applicationHash,
+            hostedAuthMode(request),
+          ),
           {
             headers: { "content-type": "text/html; charset=utf-8" },
           },

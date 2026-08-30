@@ -39,6 +39,29 @@ const securityEnv = {
 } as unknown as UserApplicationEnv;
 
 describe("user application security headers", () => {
+  test("strictly projects the gateway-owned auth mode into the hosted shell", async () => {
+    const fetchUserApplication = createUserApplication();
+    const response = await fetchUserApplication(
+      new Request("https://app.example/", {
+        headers: { "x-frockbot-auth-session-v1": "development" },
+      }),
+      securityEnv,
+    );
+    expect(await response.text()).toContain(
+      'data-frockbot-auth-mode="development"',
+    );
+
+    for (const mode of [undefined, "desktop", "development,better-auth"]) {
+      const headers = mode ? { "x-frockbot-auth-session-v1": mode } : undefined;
+      await expect(
+        fetchUserApplication(
+          new Request("https://app.example/", { headers }),
+          securityEnv,
+        ),
+      ).rejects.toThrow("hosted auth session projection is invalid");
+    }
+  });
+
   test("serves the stylesheet with a policy that allows the embedded fonts", async () => {
     const fetchUserApplication = createUserApplication();
 

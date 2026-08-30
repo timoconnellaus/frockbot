@@ -113,15 +113,15 @@ function record(value: unknown): Record<string, unknown> | undefined {
 }
 
 function hasExactKeys(
-  value: Record<string, unknown>,
+  value: Record<PropertyKey, unknown>,
   required: readonly string[],
   optional: readonly string[] = [],
 ): boolean {
-  const keys = Object.keys(value);
+  const keys = Reflect.ownKeys(value);
   const allowed = new Set([...required, ...optional]);
   return (
     required.every((key) => Object.hasOwn(value, key)) &&
-    keys.every((key) => allowed.has(key))
+    keys.every((key) => typeof key === "string" && allowed.has(key))
   );
 }
 

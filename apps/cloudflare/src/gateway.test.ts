@@ -1232,6 +1232,9 @@ describe("Cloudflare user application gateway", () => {
       new Request("https://frockbot.test/?as_user=alice"),
     );
     expect(page.status).toBe(200);
+    expect(await page.clone().text()).toContain(
+      'data-frockbot-auth-mode="development"',
+    );
     expect(page.headers.get("set-cookie")).toContain("frockbot_dev_user=alice");
     const script = await gateway(
       new Request("https://frockbot.test/app.js", {
@@ -1258,7 +1261,9 @@ describe("Cloudflare user application gateway", () => {
     const { gateway } = createTestGateway();
     const page = await gateway(new Request("https://frockbot.test/"));
     expect(page.status).toBe(200);
-    expect(await page.text()).toContain('data-frockbot-user-id="anonymous"');
+    const publicHtml = await page.text();
+    expect(publicHtml).toContain('data-frockbot-user-id="anonymous"');
+    expect(publicHtml).toContain('data-frockbot-auth-mode="anonymous"');
 
     const response = await gateway(
       new Request("https://frockbot.test/api/bots/default/turns"),
@@ -1285,14 +1290,53 @@ describe("Cloudflare user application gateway", () => {
     expect(loader.ids).toEqual([]);
   });
 
+  test("routes hosted sign-out only through Better Auth", async () => {
+    const requests: Array<{ method: string; pathname: string }> = [];
+    const auth: GatewayAuth = {
+      handler: (request) => {
+        const url = new URL(request.url);
+        requests.push({ method: request.method, pathname: url.pathname });
+        return Promise.resolve(
+          Response.json(
+            { success: true },
+            { headers: { "set-cookie": "session=; Max-Age=0" } },
+          ),
+        );
+      },
+      getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
+    };
+    const { gateway, loader } = createTestGateway(undefined, auth);
+
+    const response = await gateway(
+      new Request("https://frockbot.test/api/auth/sign-out", {
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: unknown = await response.json();
+    expect(body).toEqual({ success: true });
+    expect(requests).toEqual([
+      { method: "POST", pathname: "/api/auth/sign-out" },
+    ]);
+    expect(loader.ids).toEqual([]);
+  });
+
   test("derives the application identity from the Better Auth session", async () => {
     const auth: GatewayAuth = {
       handler: unauthenticatedAuth.handler,
       getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
     };
     const { gateway, loader } = createTestGateway(undefined, auth);
-    const response = await gateway(new Request("https://frockbot.test/"));
+    const response = await gateway(
+      new Request("https://frockbot.test/", {
+        headers: { "x-frockbot-auth-session-v1": "development" },
+      }),
+    );
     expect(response.status).toBe(200);
+    expect(await response.text()).toContain(
+      'data-frockbot-auth-mode="better-auth"',
+    );
     expect(loader.ids).toEqual(["signed-in-user:foundation-v1"]);
   });
 

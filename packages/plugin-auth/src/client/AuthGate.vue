@@ -1,32 +1,28 @@
 <script setup lang="ts">
-import { electronProxyClient } from "@better-auth/electron/proxy";
-import { createAuthClient } from "better-auth/client";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import {
-  developmentLoginUrl,
-  developmentUserFromUrl,
-  isLoopbackHost,
-} from "./development-login";
+import { authSessionClientKey } from "../shared.js";
+import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { hostedAuthClient } from "./browser.js";
+import { developmentLoginUrl, isLoopbackHost } from "./development-login";
 
-const authClient = createAuthClient({
-  plugins: [
-    electronProxyClient({
-      clientID: "frockbot-desktop",
-      protocol: { scheme: "com.frockbot.desktop" },
-    }),
-  ],
-});
-const loading = ref(true);
+const providedSession = inject(authSessionClientKey);
+if (!providedSession) throw new Error("auth session client was not provided");
+const session = providedSession;
+
 const signingIn = ref(false);
-const user = ref<{ id: string; name: string; email: string } | null>(null);
 const error = ref<string>();
+const user = computed(() =>
+  session.projection.value.status === "authenticated"
+    ? session.projection.value.user
+    : null,
+);
+const loading = computed(() => session.projection.value.status === "loading");
 const isDesktop = computed(() => Boolean(window.frockbotDesktop));
 const isLocalDevelopment = computed(() =>
   isLoopbackHost(window.location.hostname),
 );
 const unsubscribers: Array<() => void> = [];
 let electronRedirectTimer: ReturnType<
-  typeof authClient.ensureElectronRedirect
+  typeof hostedAuthClient.ensureElectronRedirect
 > | null = null;
 
 function electronAuthQuery(): Record<string, string> | null {
@@ -43,57 +39,30 @@ function electronAuthQuery(): Record<string, string> | null {
     : null;
 }
 
-function embeddedUserId(): string | undefined {
-  const value = document.body.dataset.frockbotUserId;
-  return value && value !== "anonymous" ? value : undefined;
+async function refreshSession(): Promise<void> {
+  try {
+    await session.refresh();
+    error.value = undefined;
+  } catch (cause) {
+    error.value =
+      cause instanceof Error ? cause.message : "Could not check your session";
+  }
 }
 
 async function loadUser(): Promise<void> {
-  const developmentUser = developmentUserFromUrl(new URL(window.location.href));
-  if (developmentUser) {
-    user.value = {
-      id: developmentUser,
-      name: "Local developer",
-      email: "dev@localhost",
-    };
-    return;
-  }
-
-  if (isDesktop.value) {
-    const current = await window.getUser();
-    user.value = current
-      ? { id: current.id, name: current.name, email: current.email }
-      : null;
-    return;
-  }
-
+  await session.refresh();
   const query = electronAuthQuery();
-  const embedded = embeddedUserId();
-  if (!query && embedded) {
-    user.value = {
-      id: embedded ?? "development",
-      name: "FrockBot user",
-      email: "",
-    };
-    return;
-  }
-
-  const session = await authClient.getSession();
-  if (query && session.data?.user) {
+  if (
+    query &&
+    session.projection.value.status === "authenticated" &&
+    session.projection.value.mode === "better-auth"
+  ) {
     signingIn.value = true;
-    const transfer = await authClient.electron.transferUser({
+    const transfer = await hostedAuthClient.electron.transferUser({
       fetchOptions: { query },
     });
     if (transfer.error) throw new Error(transfer.error.message);
-    return;
   }
-  user.value = session.data?.user
-    ? {
-        id: session.data.user.id,
-        name: session.data.user.name,
-        email: session.data.user.email,
-      }
-    : null;
 }
 
 function signInForDevelopment(): void {
@@ -116,7 +85,7 @@ async function signIn(): Promise<void> {
       }
     }
     const callback = callbackURL.toString();
-    const result = await authClient.signIn.social({
+    const result = await hostedAuthClient.signIn.social({
       provider: "google",
       callbackURL: callback,
       newUserCallbackURL: callback,
@@ -134,23 +103,12 @@ onMounted(async () => {
   try {
     if (isDesktop.value) {
       unsubscribers.push(
-        window.onAuthenticated((authenticatedUser) => {
-          user.value = {
-            id: authenticatedUser.id,
-            name: authenticatedUser.name,
-            email: authenticatedUser.email,
-          };
+        window.onAuthenticated(() => {
           signingIn.value = false;
-          error.value = undefined;
+          void refreshSession();
         }),
-        window.onUserUpdated((updatedUser) => {
-          user.value = updatedUser
-            ? {
-                id: updatedUser.id,
-                name: updatedUser.name,
-                email: updatedUser.email,
-              }
-            : null;
+        window.onUserUpdated(() => {
+          void refreshSession();
         }),
         window.onAuthError((context) => {
           error.value = context.message ?? "Sign-in failed";
@@ -158,14 +116,12 @@ onMounted(async () => {
         }),
       );
     } else if (electronAuthQuery()) {
-      electronRedirectTimer = authClient.ensureElectronRedirect();
+      electronRedirectTimer = hostedAuthClient.ensureElectronRedirect();
     }
     await loadUser();
   } catch (cause) {
     error.value =
       cause instanceof Error ? cause.message : "Could not check your session";
-  } finally {
-    loading.value = false;
   }
 });
 
