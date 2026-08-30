@@ -1,4 +1,5 @@
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
+import { decodeBotIdV1 } from "@frockbot/configuration-core";
 import type {
   ClientNotificationAcknowledgementV1,
   ClientNotificationListV1,
@@ -15,8 +16,8 @@ import {
 } from "@frockbot/plugin-shell/run-protocol";
 import type { UserApplicationEnv } from "./contracts.js";
 
-const BOT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-const USER_ID_PATTERN = BOT_ID_PATTERN;
+const RPC_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$/;
+const USER_ID_PATTERN = RPC_ID_PATTERN;
 const APPLICATION_HASH_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/;
 const MAX_INPUT_LENGTH = 32_000;
 
@@ -57,13 +58,40 @@ function withSecurityHeaders(response: Response): Response {
   secured.headers.set("referrer-policy", "no-referrer");
   secured.headers.set(
     "content-security-policy",
-    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors capacitor://localhost frockbot://localhost; base-uri 'none'",
   );
   return secured;
 }
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+async function requireRegisteredBot(
+  env: UserApplicationEnv,
+  botId: string,
+): Promise<Response | undefined> {
+  try {
+    await env.BOT_STATE.assertRegistered({ schemaVersion: 1, botId });
+    return undefined;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      error.name === "BotNotFoundError"
+    )
+      return jsonError(
+        404,
+        error instanceof Error ? error.message : "Bot not found",
+      );
+    return jsonError(
+      503,
+      error instanceof Error
+        ? error.message
+        : "Bot registration is temporarily unavailable",
+    );
+  }
 }
 
 async function readTurnCommand(request: Request): Promise<ClientTurnCommandV1> {
@@ -148,9 +176,13 @@ export function createUserApplication() {
       } catch {
         return jsonError(400, "invalid bot id");
       }
-      if (!BOT_ID_PATTERN.test(notificationBotId)) {
+      try {
+        notificationBotId = decodeBotIdV1(notificationBotId);
+      } catch {
         return jsonError(400, "invalid bot id");
       }
+      const missingBot = await requireRegisteredBot(env, notificationBotId);
+      if (missingBot) return missingBot;
       if (request.method === "GET") {
         return Response.json({
           schemaVersion: 1,
@@ -208,7 +240,13 @@ export function createUserApplication() {
     } catch {
       return jsonError(400, "invalid bot id");
     }
-    if (!BOT_ID_PATTERN.test(botId)) return jsonError(400, "invalid bot id");
+    try {
+      botId = decodeBotIdV1(botId);
+    } catch {
+      return jsonError(400, "invalid bot id");
+    }
+    const missingBot = await requireRegisteredBot(env, botId);
+    if (missingBot) return missingBot;
 
     if (reconcileMatch) {
       if (request.method !== "POST")
@@ -219,7 +257,7 @@ export function createUserApplication() {
       } catch {
         return jsonError(400, "invalid run id");
       }
-      if (!BOT_ID_PATTERN.test(runId)) return jsonError(400, "invalid run id");
+      if (!RPC_ID_PATTERN.test(runId)) return jsonError(400, "invalid run id");
       try {
         decodeClientRunReconciliationCommandV1(await request.json());
       } catch (error) {

@@ -1,4 +1,5 @@
 import { decodeSessionEvent, type SessionEvent } from "@frockbot/agent-core";
+import type { Plugin } from "cordis";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
@@ -203,6 +204,35 @@ export class ShellBotBackendContribution {
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
     this.env = host.env;
+  }
+
+  async materializeSettings(
+    identity: BotIdentity,
+    initial: { name: string; model?: BotSettingsViewV1["model"] },
+  ): Promise<BotSettingsViewV1> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
+      if (
+        durableIdentity &&
+        (durableIdentity.userId !== identity.userId ||
+          durableIdentity.botId !== identity.botId)
+      ) {
+        throw new Error("Bot authority does not match its durable identity");
+      }
+      const existing = await transaction.get<BotSettingsViewV1>(
+        BOT_CONFIGURATION_KEY,
+      );
+      if (existing) return existing;
+      const settings = {
+        ...this.initialBotSettings(identity.botId, initial.model),
+        profile: { name: initial.name },
+      } satisfies BotSettingsViewV1;
+      await transaction.put({
+        [IDENTITY_KEY]: durableIdentity ?? identity,
+        [BOT_CONFIGURATION_KEY]: settings,
+      });
+      return settings;
+    });
   }
 
   async getSettings(identity: BotIdentity): Promise<BotSettingsViewV1> {
@@ -1088,6 +1118,10 @@ export class ShellBotBackendContribution {
     }
   }
 
+  async readDurableIdentity(): Promise<BotIdentity | undefined> {
+    return this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+  }
+
   async validateIdentity(identity: BotIdentity): Promise<void> {
     const existing = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
     if (
@@ -1149,7 +1183,12 @@ export class ShellBotBackendContribution {
           { userId: saga.userId, botId: saga.botId },
           saga.commandId,
         );
-      } catch {}
+      } catch (error) {
+        console.error(
+          "Assignment saga remains durably scheduled after reconciliation failure",
+          error instanceof Error ? error.message : "unknown failure",
+        );
+      }
     }
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
     if (activeRunId) {
@@ -1395,27 +1434,13 @@ export class ShellBotBackendContribution {
   private async ensureBotSettings(
     identity: BotIdentity,
   ): Promise<BotSettingsViewV1> {
-    await this.assertIdentity(identity);
+    await this.validateIdentity(identity);
     const existing = await this.ctx.storage.get<BotSettingsViewV1>(
       BOT_CONFIGURATION_KEY,
     );
-    if (existing) return existing;
-    const user = await this.userConfiguration(identity).readConfiguration({
-      schemaVersion: 1,
-      userId: identity.userId,
-    });
-    const initial = this.initialBotSettings(
-      identity.botId,
-      user.newBotModelTemplate,
-    );
-    return this.ctx.storage.transaction(async (transaction) => {
-      const concurrent = await transaction.get<BotSettingsViewV1>(
-        BOT_CONFIGURATION_KEY,
-      );
-      if (concurrent) return concurrent;
-      await transaction.put(BOT_CONFIGURATION_KEY, initial);
-      return initial;
-    });
+    if (!existing)
+      throw new Error(`Bot "${identity.botId}" is not materialized`);
+    return existing;
   }
 
   private async resolveExecutionContext(identity: BotIdentity): Promise<{
@@ -1795,4 +1820,11 @@ export function createShellBotBackendContribution(
   host: ShellBotBackendHost,
 ): ShellBotBackendContribution {
   return new ShellBotBackendContribution(host);
+}
+
+export function createShellBotBackendPlugin(
+  host: ShellBotBackendHost,
+  lifecycle: { mount(value: ShellBotBackendContribution): () => void },
+): Plugin {
+  return () => lifecycle.mount(createShellBotBackendContribution(host));
 }

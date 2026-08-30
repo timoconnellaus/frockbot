@@ -63,6 +63,7 @@ export interface FrockBotWebData {
   modelLabel: string;
   settingsAvailable: boolean;
   connectionsAvailable: boolean;
+  activeBotId?: string;
   composerContext?: unknown;
   messages: WebChatMessage[];
   activeRunId?: string;
@@ -72,6 +73,7 @@ export interface FrockBotWebData {
   userSettings?: UserSettingsViewV1;
   pluginCatalog: PluginCatalogItem[];
   settingsError?: string;
+  selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;

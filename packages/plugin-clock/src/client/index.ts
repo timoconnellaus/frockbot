@@ -11,7 +11,10 @@ export const clockClientPlugin: ClientPlugin = (ctx) => {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     lastTime: "Not requested yet",
     async refresh() {
+      const botId = new URL(window.location.href).searchParams.get("bot");
+      if (!botId) throw new Error("Select a Bot before requesting the time");
       const result = await ctx.transport.turn(
+        botId,
         "/time",
         new AbortController().signal,
         crypto.randomUUID(),

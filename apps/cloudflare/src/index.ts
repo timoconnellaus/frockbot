@@ -5,6 +5,12 @@ import {
   type FoundationConnectionStore,
 } from "@frockbot/application-foundation/runtime";
 import {
+  decodeBotMembershipViewV1,
+  decodeDirectoryViewV1,
+  decodeFlockReceiptV1,
+  decodeSheepIdentityViewV1,
+} from "@frockbot/plugin-flock/shared";
+import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
   type ClientRunLookupQueryV1,
@@ -26,6 +32,7 @@ import type {
 import { createGateway } from "./gateway.js";
 import {
   decodeRpcEnvelopeV1,
+  rpcBotId,
   rpcDecoded,
   rpcIdentifier,
   rpcObject,
@@ -102,6 +109,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   // SAFETY: Wrangler binds BOT_STATES to BotState; workers-types cannot infer its generated RPC surface.
   const rpc = env.BOT_STATES.get(id) as unknown as RpcBoundary<BotStateRpc>;
   return {
+    readSheep: (request) => rpc.readSheep(request),
+    updateSheep: (request) => rpc.updateSheep(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     run: (command) =>
@@ -150,6 +159,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     id,
   ) as unknown as RpcBoundary<UserConfigurationRpc>;
   return {
+    listBots: (request) => rpc.listBots(request),
+    createBot: (request) => rpc.createBot(request),
+    getBotRegistration: (request) => rpc.getBotRegistration(request),
+    hasBot: (request) => rpc.hasBot(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     isPackageInstalled: (owner, packageId) =>
@@ -233,7 +246,7 @@ function decodeUserBotRunLookupRpcV1(input: unknown): {
   query: ClientRunLookupQueryV1;
 } {
   const request = decodeRpcEnvelopeV1(input, {
-    botId: rpcIdentifier,
+    botId: rpcBotId,
     query: rpcDecoded(decodeClientRunLookupQueryV1),
   });
   return {
@@ -243,9 +256,26 @@ function decodeUserBotRunLookupRpcV1(input: unknown): {
 }
 
 export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
+  async assertRegistered(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    const botId = request.botId as string;
+    const membership = decodeBotMembershipViewV1(
+      await userConfigurationStub(this.env, this.ctx.props.userId).hasBot({
+        schemaVersion: 1,
+        userId: this.ctx.props.userId,
+        botId,
+      }),
+    );
+    if (!membership.registered) {
+      const error = new Error(`Bot "${botId}" is not registered`);
+      error.name = "BotNotFoundError";
+      throw error;
+    }
+  }
+
   async run(input: unknown): Promise<BotTurnResult> {
     const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       command: rpcObject({
         runId: rpcIdentifier,
         sessionId: rpcString(257),
@@ -267,7 +297,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async listRuns(input: unknown): Promise<ClientRunListV1> {
     const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       query: rpcDecoded(decodeClientRunListQueryV1),
     });
     return botStateStub(
@@ -296,7 +326,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   }
 
   async listNotifications(input: unknown): Promise<BotNotificationIntent[]> {
-    const request = decodeRpcEnvelopeV1(input, { botId: rpcIdentifier });
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -306,7 +336,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async acknowledgeNotification(input: unknown): Promise<void> {
     const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       notificationId: rpcIdentifier,
     });
     return botStateStub(
@@ -318,7 +348,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async reconcileRun(input: unknown): Promise<BotTurnResult> {
     const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       runId: rpcIdentifier,
     });
     return botStateStub(
@@ -362,6 +392,38 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         return typeof value === "string" ? value : undefined;
       },
       storeFor: (userId) => userConfigurationStub(env, userId),
+      listBots: async (userId) =>
+        decodeDirectoryViewV1(
+          await userConfigurationStub(env, userId).listBots({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      createBot: async (userId, command) =>
+        decodeFlockReceiptV1(
+          await userConfigurationStub(env, userId).createBot({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
+      readSheep: async (userId, botId) =>
+        decodeSheepIdentityViewV1(
+          await botStateStub(env, userId, botId).readSheep({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      updateSheep: async (userId, botId, command) =>
+        decodeFlockReceiptV1(
+          await botStateStub(env, userId, botId).updateSheep({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        ),
       markConnectionUnavailable: (userId, botId, connectionId, compensation) =>
         botStateStub(env, userId, botId).markConnectionUnavailable(
           { userId, botId },
@@ -376,7 +438,7 @@ export default {
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
     const runtimeExports = ctx.exports as unknown as RuntimeExports;
-    const backendContributions = await createGatewayBackendContributions(env);
+    const mountedBackend = await createGatewayBackendContributions(env);
     const gateway = createGateway({
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
@@ -388,10 +450,14 @@ export default {
         userConfigurationStub(env, userId),
       botConfigurationFor: (userId, botId): BotConfigurationBinding =>
         botStateStub(env, userId, botId),
-      backendContributions,
+      backendContributions: [...mountedBackend.contributions],
       allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });
-    return gateway(request);
+    try {
+      return await gateway(request);
+    } finally {
+      await mountedBackend.dispose();
+    }
   },
 } satisfies ExportedHandler<Env>;

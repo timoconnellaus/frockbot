@@ -10,11 +10,9 @@ function bot(name: string) {
   return env.BOT_STATES.getByName(name);
 }
 
-const identity = {
-  schemaVersion: 1 as const,
-  userId: "workerd-user",
-  botId: "workerd-bot",
-};
+function user(name: string) {
+  return env.USER_CONFIGURATIONS.getByName(name);
+}
 
 describe("Fly provider Workerd compatibility", () => {
   test("mounts through the provider-neutral Computer interface", async () => {
@@ -49,12 +47,30 @@ describe("Fly provider Workerd compatibility", () => {
 
 describe("production Bot durability in Workerd", () => {
   test("persists session events in sequence across eviction", async () => {
-    const stub = bot(`events-${crypto.randomUUID()}`);
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `workerd-user-${suffix}`,
+      botId: `workerd-bot-${suffix}`,
+    };
+    await user(identity.userId).createBot({
+      schemaVersion: 1,
+      userId: identity.userId,
+      command: {
+        schemaVersion: 1,
+        type: "bot/create",
+        commandId: `create-${suffix}`,
+        expectedRevision: 0,
+        botId: identity.botId,
+        name: "Workerd Bot",
+      },
+    });
+    const stub = bot(`events-${suffix}`);
     const result = await stub.run({
       ...identity,
       command: {
         runId: "run-1",
-        sessionId: "workerd-user:workerd-bot",
+        sessionId: `${identity.userId}:${identity.botId}`,
         acceptedAt: "2026-08-29T00:00:00.000Z",
         text: "hello from Workerd",
       },

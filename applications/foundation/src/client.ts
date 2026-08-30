@@ -5,11 +5,13 @@ import authClientPlugin from "@frockbot/plugin-auth/client";
 // pi-lens-ignore: ts:2307
 import clockClientPlugin from "@frockbot/plugin-clock/client";
 import computerClientPlugin from "../../../packages/plugin-computer/src/client/application.js";
+import flockClientPlugin from "@frockbot/plugin-flock/client";
 import shellClientPlugin from "@frockbot/plugin-shell/client";
 
 export const foundationClientPlugins: readonly ClientPlugin[] = [
   authClientPlugin,
   shellClientPlugin,
+  flockClientPlugin,
   clockClientPlugin,
   computerClientPlugin,
 ];

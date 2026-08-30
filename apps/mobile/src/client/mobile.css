@@ -298,3 +298,11 @@ body {
   color: #a83241;
   font-size: 13px;
 }
+
+.hosted-mobile-app {
+  width: 100%;
+  height: 100dvh;
+  display: block;
+  border: 0;
+  background: #fff;
+}

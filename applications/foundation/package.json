@@ -30,6 +30,7 @@
     "@frockbot/plugin-desktop-notifications": "workspace:*",
     "@frockbot/plugin-echo": "workspace:*",
     "@frockbot/plugin-fly-sprite": "workspace:*",
+    "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-identity": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-mobile-clipboard": "workspace:*",

@@ -21,7 +21,13 @@
           "order": 10000
         }
       ],
-      "outlets": ["frockbot.right-panel", "frockbot.computer"]
+      "outlets": [
+        "frockbot.right-panel",
+        "frockbot.computer",
+        "frockbot.sidebar-bots",
+        "frockbot.overlays",
+        "frockbot.bot-identity"
+      ]
     }
   },
   "permissions": ["agent:turn"]

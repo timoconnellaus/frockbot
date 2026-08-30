@@ -35,6 +35,9 @@ export default defineConfig({
     emptyOutDir: true,
     manifest: true,
     cssCodeSplit: false,
+    // The immutable application artifact stores one JS and one CSS payload.
+    // Inline package-owned sheep rasters so no emitted asset can be omitted.
+    assetsInlineLimit: Number.POSITIVE_INFINITY,
     rollupOptions: {
       input: fileURLToPath(new URL("./index.html", import.meta.url)),
     },

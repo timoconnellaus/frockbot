@@ -1,3 +1,6 @@
+import { BOT_ID_PATTERN_V1 } from "./bot-id.js";
+export { BOT_ID_PATTERN_V1, isBotIdV1 } from "./bot-id.js";
+
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -382,7 +385,13 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const ID_PATTERN = BOT_ID_PATTERN_V1;
+
+export function decodeBotIdV1(value: unknown, label = "botId"): string {
+  if (typeof value !== "string" || !BOT_ID_PATTERN_V1.test(value))
+    throw new ConfigurationDecodeError(`${label} is invalid`);
+  return value;
+}
 const RESERVED_CONNECTION_IDENTIFIERS = new Set([
   "__defineGetter__",
   "__defineSetter__",

@@ -12,7 +12,16 @@ import type {
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
 } from "@frockbot/plugin-shell/backend";
-import { createShellBotBackendContribution } from "@frockbot/plugin-shell/backend";
+import { createShellBotBackendPlugin } from "@frockbot/plugin-shell/backend";
+import {
+  createFlockBotBackendPlugin,
+  type FlockBotBackendContribution,
+} from "@frockbot/plugin-flock/bot";
+import {
+  decodeBotRegistrationV1,
+  decodeUpdateSheepCommandV1,
+  type BotRegistrationV1,
+} from "@frockbot/plugin-flock/shared";
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
@@ -22,6 +31,7 @@ import {
 import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
+  rpcBotId,
   rpcDecoded,
   rpcIdentifier,
   rpcObject,
@@ -35,7 +45,7 @@ function decodeBotIdentityRpcV1(input: unknown): {
 } {
   const request = decodeRpcEnvelopeV1(input, {
     userId: rpcIdentifier,
-    botId: rpcIdentifier,
+    botId: rpcBotId,
   });
   return {
     userId: request.userId as string,
@@ -44,54 +54,164 @@ function decodeBotIdentityRpcV1(input: unknown): {
 }
 
 export class BotState extends DurableObject<BotStateEnv> {
-  private mounted: Promise<ShellBotBackendContribution> | undefined;
+  private mounted:
+    | Promise<{
+        shell: ShellBotBackendContribution;
+        flock: FlockBotBackendContribution;
+        dispose(): Promise<void>;
+      }>
+    | undefined;
 
-  private contribution(): Promise<ShellBotBackendContribution> {
+  private contributions(): Promise<{
+    shell: ShellBotBackendContribution;
+    flock: FlockBotBackendContribution;
+    dispose(): Promise<void>;
+  }> {
     if (!this.mounted) {
-      this.mounted = compileFoundationApplication().then((plan) => {
-        const contributions = createFoundationBackendContributions(plan, {
+      this.mounted = compileFoundationApplication().then(async (plan) => {
+        let shell: ShellBotBackendContribution | undefined;
+        let flock: FlockBotBackendContribution | undefined;
+        const mounted = await createFoundationBackendContributions<
+          ShellBotBackendContribution | FlockBotBackendContribution
+        >(plan, {
           backendHost: "bot",
-          mount: (specifier) => {
-            if (specifier !== "@frockbot/plugin-shell/backend") {
-              throw new Error(`Unsupported Bot Contribution: ${specifier}`);
+          resolve: (specifier, lifecycle) => {
+            if (specifier === "@frockbot/plugin-shell/backend") {
+              return createShellBotBackendPlugin(
+                { state: this.ctx, env: this.env },
+                {
+                  mount(value) {
+                    shell = value;
+                    return lifecycle.mount(value);
+                  },
+                },
+              );
             }
-            return createShellBotBackendContribution({
-              state: this.ctx,
-              env: this.env,
-            });
+            if (specifier === "@frockbot/plugin-flock/bot") {
+              return createFlockBotBackendPlugin(
+                {
+                  storage: this.ctx.storage,
+                  materializeSettings: (registration, userId) => {
+                    if (!shell)
+                      throw new Error("Shell Bot Contribution is unavailable");
+                    return shell
+                      .materializeSettings(
+                        { userId, botId: registration.botId },
+                        {
+                          name: registration.initialName,
+                          model: registration.initialModel,
+                        },
+                      )
+                      .then(() => undefined);
+                  },
+                },
+                {
+                  mount(value) {
+                    flock = value;
+                    return lifecycle.mount(value);
+                  },
+                },
+              );
+            }
+            throw new Error(`Unsupported Bot Contribution: ${specifier}`);
           },
         });
-        if (contributions.length !== 1) {
-          throw new Error("Foundation requires one Bot backend Contribution");
+        if (!shell || !flock || mounted.contributions.length !== 2) {
+          await mounted.dispose();
+          throw new Error(
+            "Foundation requires Shell and Flock Bot backend Contributions",
+          );
         }
-        return contributions[0]!;
+        return { shell, flock, dispose: mounted.dispose };
       });
     }
     return this.mounted;
   }
 
+  private async registration(identity: {
+    userId: string;
+    botId: string;
+  }): Promise<BotRegistrationV1> {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    // SAFETY: USER_CONFIGURATIONS binds UserConfiguration; workers-types cannot infer its generated Flock RPC surface.
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      getBotRegistration(input: unknown): Promise<BotRegistrationV1>;
+    };
+    return decodeBotRegistrationV1(
+      await rpc.getBotRegistration({ schemaVersion: 1, ...identity }),
+    );
+  }
+
+  private async materialized(identity: { userId: string; botId: string }) {
+    const contributions = await this.contributions();
+    const registration = await this.registration(identity);
+    await contributions.flock.materialize(registration, identity.userId);
+    return { ...contributions, registration };
+  }
+
+  private async contribution(): Promise<ShellBotBackendContribution> {
+    return (await this.contributions()).shell;
+  }
+
   async readConfiguration(input: unknown) {
     const request = decodeBotConfigurationReadRpcV1(input);
-    return (await this.contribution()).readConfiguration(request);
+    const { shell } = await this.materialized({
+      userId: request.userId,
+      botId: request.botId,
+    });
+    return shell.readConfiguration(request);
   }
 
   async executeConfiguration(input: unknown) {
     const request = decodeBotConfigurationExecuteRpcV1(input);
-    return (await this.contribution()).executeConfiguration(request);
+    const { shell } = await this.materialized({
+      userId: request.userId,
+      botId: request.botId,
+    });
+    return shell.executeConfiguration(request);
+  }
+
+  async readSheep(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { flock, registration } = await this.materialized(identity);
+    return flock.read(registration, identity.userId);
+  }
+
+  async updateSheep(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeUpdateSheepCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { flock, registration } = await this.materialized(identity);
+    return flock.update(
+      registration,
+      identity.userId,
+      request.command as ReturnType<typeof decodeUpdateSheepCommandV1>,
+    );
   }
 
   async markConnectionUnavailable(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       connectionId: rpcIdentifier,
       compensation: rpcObject({
         id: rpcIdentifier,
         expectedGeneration: rpcIdentifier,
       }),
     });
-    return (await this.contribution()).markConnectionUnavailable(
-      { userId: request.userId as string, botId: request.botId as string },
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.markConnectionUnavailable(
+      identity,
       request.connectionId as string,
       request.compensation as { id: string; expectedGeneration: string },
     );
@@ -99,12 +219,17 @@ export class BotState extends DurableObject<BotStateEnv> {
 
   async resolveConfiguration(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
-    return (await this.contribution()).resolveConfiguration(identity);
+    const { shell } = await this.materialized(identity);
+    return shell.resolveConfiguration(identity);
   }
 
   async run(input: unknown) {
     const request = decodeBotRunRpcV1(input);
-    return (await this.contribution()).run({
+    const { shell } = await this.materialized({
+      userId: request.userId,
+      botId: request.botId,
+    });
+    return shell.run({
       userId: request.userId,
       botId: request.botId,
       ...request.command,
@@ -114,80 +239,81 @@ export class BotState extends DurableObject<BotStateEnv> {
   async reconcileRun(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       runId: rpcIdentifier,
     });
-    return (await this.contribution()).reconcileRun(
-      { userId: request.userId as string, botId: request.botId as string },
-      request.runId as string,
-    );
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.reconcileRun(identity, request.runId as string);
   }
 
   async listNotifications(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
-    const contribution = await this.contribution();
-    await contribution.validateIdentity(identity);
-    return contribution.listNotifications();
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.listNotifications();
   }
 
   async acknowledgeNotification(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       notificationId: rpcIdentifier,
     });
-    const contribution = await this.contribution();
-    await contribution.validateIdentity({
+    const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
-    });
-    return contribution.acknowledgeNotification(
-      request.notificationId as string,
-    );
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.acknowledgeNotification(request.notificationId as string);
   }
 
   async listRuns(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       query: rpcDecoded(decodeClientRunListQueryV1),
     });
     const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
     };
-    const contribution = await this.contribution();
-    await contribution.validateIdentity(identity);
-    return contribution.listRuns(request.query as ClientRunListQueryV1);
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.listRuns(request.query as ClientRunListQueryV1);
   }
 
   async lookupRun(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       query: rpcDecoded(decodeClientRunLookupQueryV1),
     });
     const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
     };
-    const contribution = await this.contribution();
-    await contribution.validateIdentity(identity);
-    return contribution.lookupRun(request.query as ClientRunLookupQueryV1);
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.lookupRun(request.query as ClientRunLookupQueryV1);
   }
 
   async fenceRunAdmission(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcIdentifier,
+      botId: rpcBotId,
       query: rpcDecoded(decodeClientRunLookupQueryV1),
     });
     const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
     };
-    const contribution = await this.contribution();
-    return contribution.fenceRunAdmission(
+    const { shell } = await this.materialized(identity);
+    return shell.fenceRunAdmission(
       identity,
       request.query as ClientRunLookupQueryV1,
     );

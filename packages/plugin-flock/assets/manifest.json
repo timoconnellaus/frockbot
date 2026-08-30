@@ -1,0 +1,769 @@
+{
+  "schemaVersion": 1,
+  "source": "artifacts/sheep-dependency-tree-prototype/tree-manifest.json",
+  "sourceCanvas": [1024, 1024],
+  "renderCanvas": [256, 256],
+  "canonical": "canonical",
+  "backgrounds": [
+    {
+      "id": "hot-pink",
+      "label": "Hot pink"
+    },
+    {
+      "id": "electric-blue",
+      "label": "Electric blue"
+    },
+    {
+      "id": "lime-green",
+      "label": "Lime green"
+    },
+    {
+      "id": "canary-yellow",
+      "label": "Canary yellow"
+    },
+    {
+      "id": "bright-orange",
+      "label": "Bright orange"
+    },
+    {
+      "id": "vivid-purple",
+      "label": "Vivid purple"
+    }
+  ],
+  "trees": {
+    "upper": [
+      {
+        "id": "upper-neutral",
+        "label": "Neutral crown",
+        "parent": null,
+        "kind": "root"
+      },
+      {
+        "id": "terracotta-beanie",
+        "label": "Terracotta beanie",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "canary-rain-cap",
+        "label": "Canary rain cap",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "matte-black-top-hat",
+        "label": "Matte-black top hat \u00b7 Qwen layer",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "navy-wizard-hat",
+        "label": "Navy wizard hat",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "coral-bucket-hat",
+        "label": "Coral bucket hat",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "lilac-flower-crown",
+        "label": "Lilac flower crown",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "canary-party-hat",
+        "label": "Canary party hat",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "forest-ranger-fedora",
+        "label": "Forest ranger fedora",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "purple-witch-hat",
+        "label": "Purple witch hat",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "blue-sailor-cap",
+        "label": "Blue sailor cap",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "gold-royal-crown",
+        "label": "Gold royal crown",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "chef-toque",
+        "label": "Chef toque",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "rainbow-propeller-cap",
+        "label": "Rainbow propeller cap",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "burgundy-beret",
+        "label": "Burgundy beret",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "silver-space-helmet",
+        "label": "Silver space helmet",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "straw-boater",
+        "label": "Straw boater",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "graduation-cap",
+        "label": "Graduation cap",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "orange-hard-hat",
+        "label": "Orange hard hat",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      },
+      {
+        "id": "ranger-fedora-feather",
+        "label": "Ranger fedora + feather",
+        "parent": "forest-ranger-fedora",
+        "kind": "derived-headwear"
+      },
+      {
+        "id": "witch-hat-moon",
+        "label": "Witch hat + moon brooch",
+        "parent": "purple-witch-hat",
+        "kind": "derived-headwear"
+      },
+      {
+        "id": "sailor-cap-anchor",
+        "label": "Sailor cap + anchor pin",
+        "parent": "blue-sailor-cap",
+        "kind": "derived-headwear"
+      },
+      {
+        "id": "royal-crown-rubies",
+        "label": "Royal crown + rubies",
+        "parent": "gold-royal-crown",
+        "kind": "derived-headwear"
+      },
+      {
+        "id": "white-tennis-visor",
+        "label": "White tennis visor",
+        "parent": "upper-neutral",
+        "kind": "headwear"
+      }
+    ],
+    "middle": [
+      {
+        "id": "middle-neutral",
+        "label": "Neutral face",
+        "parent": null,
+        "kind": "root"
+      },
+      {
+        "id": "teal-glasses",
+        "label": "Teal glasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "amber-glasses",
+        "label": "Amber round glasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "plum-glasses",
+        "label": "Plum cat-eye glasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "rose-heart-sunglasses",
+        "label": "Rose heart sunglasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "bronze-aviator-goggles",
+        "label": "Bronze aviator goggles",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "cobalt-round-glasses",
+        "label": "Cobalt round glasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "green-square-glasses",
+        "label": "Green square glasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "yellow-star-glasses",
+        "label": "Yellow star glasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "tortoiseshell-readers",
+        "label": "Tortoiseshell reading glasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "rainbow-visor",
+        "label": "Rainbow visor",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "violet-masquerade-mask",
+        "label": "Violet masquerade mask",
+        "parent": "middle-neutral",
+        "kind": "facewear"
+      },
+      {
+        "id": "white-snow-goggles",
+        "label": "White snow goggles",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      },
+      {
+        "id": "retro-3d-glasses",
+        "label": "Retro 3D glasses",
+        "parent": "middle-neutral",
+        "kind": "eyewear"
+      }
+    ],
+    "lower": [
+      {
+        "id": "lower-neutral",
+        "label": "Neutral lower face",
+        "parent": null,
+        "kind": "root"
+      },
+      {
+        "id": "teal-bowtie",
+        "label": "Teal satin bow tie",
+        "parent": "lower-neutral",
+        "kind": "neckwear"
+      },
+      {
+        "id": "purple-scarf",
+        "label": "Purple silk scarf \u00b7 Qwen layer",
+        "parent": "lower-neutral",
+        "kind": "neckwear"
+      },
+      {
+        "id": "red-polka-bowtie",
+        "label": "Red polka-dot bow tie",
+        "parent": "lower-neutral",
+        "kind": "neckwear"
+      },
+      {
+        "id": "turquoise-bandana",
+        "label": "Turquoise bandana",
+        "parent": "lower-neutral",
+        "kind": "neckwear"
+      },
+      {
+        "id": "gold-sun-medallion",
+        "label": "Gold sun medallion collar",
+        "parent": "lower-neutral",
+        "kind": "neckwear"
+      },
+      {
+        "id": "emerald-necktie",
+        "label": "Emerald necktie",
+        "parent": "lower-neutral",
+        "kind": "neckwear"
+      },
+      {
+        "id": "leather-bell",
+        "label": "Leather bell collar",
+        "parent": "lower-neutral",
+        "kind": "neckwear"
+      }
+    ]
+  },
+  "assets": [
+    {
+      "id": "canonical",
+      "file": "canonical.webp",
+      "kind": "canonical",
+      "width": 256,
+      "height": 256,
+      "sha256": "54debe1370c376a4b1987b2889b1bf3afb6960eba2e523fb637054b28e2629f6",
+      "sourceSha256": "cbacaf02ee87d572a813412164556669b2652dba1a02d14be050e71fa6591bdb"
+    },
+    {
+      "id": "background-hot-pink",
+      "file": "background-hot-pink.webp",
+      "kind": "background",
+      "width": 256,
+      "height": 256,
+      "sha256": "bdcf575546de179453757a547047b13170e60a044e12ac644f546daa02072b10",
+      "sourceSha256": "bf1a436dca9af5e692b36107d19dd4cc753a1ffcb5dea1ab691ba1a1b4bd0c04"
+    },
+    {
+      "id": "background-electric-blue",
+      "file": "background-electric-blue.webp",
+      "kind": "background",
+      "width": 256,
+      "height": 256,
+      "sha256": "58f69930c03ecfb5dd8e0c18ed4632fffb445ab3909ad28145ad8abb0c31188f",
+      "sourceSha256": "7e945997db8c86a3d542ca86439c122ee956ac0791ca560e24ba6c25e837a386"
+    },
+    {
+      "id": "background-lime-green",
+      "file": "background-lime-green.webp",
+      "kind": "background",
+      "width": 256,
+      "height": 256,
+      "sha256": "4e4410270c9082040adc71391d104fdad8acc312ce13492fa7c8747139261cca",
+      "sourceSha256": "0130c85d815e9b0fcc08aa36f31495478eabb7a71e76649081bba37214c67945"
+    },
+    {
+      "id": "background-canary-yellow",
+      "file": "background-canary-yellow.webp",
+      "kind": "background",
+      "width": 256,
+      "height": 256,
+      "sha256": "69fb96f94bdc1dbb25c59495ba2fbae561c9a9792fe4151ee0b2aeb9d59e5e97",
+      "sourceSha256": "c0a19961b8e0d9af38e217d3d75c4d316f3720225de1d1a95321e93aaa37bfb6"
+    },
+    {
+      "id": "background-bright-orange",
+      "file": "background-bright-orange.webp",
+      "kind": "background",
+      "width": 256,
+      "height": 256,
+      "sha256": "06fe22c7f5954ad08eba9c379ce1d34d3837a6b6cf2116c92b78a53008536431",
+      "sourceSha256": "973962f9512de611cbabdf6da3720be81c8bf3102f429754036a05fed8a49fe3"
+    },
+    {
+      "id": "background-vivid-purple",
+      "file": "background-vivid-purple.webp",
+      "kind": "background",
+      "width": 256,
+      "height": 256,
+      "sha256": "1ca171708568868bdda1d24590c4aa4266badebdba45f6ff9423a2184aa35682",
+      "sourceSha256": "98b7927df7f5a083e22d29fd77fcd5e87a95797fda6dc5fc790f52d295057609"
+    },
+    {
+      "id": "terracotta-beanie",
+      "file": "terracotta-beanie.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "a4411ca38892faceaefa5807661aed4615ab8a8816186a44325f0279645d53e3",
+      "sourceSha256": "b106f721e85895ad534a9334d9c9a63e90e340822967805f1ae4217ee342966b"
+    },
+    {
+      "id": "canary-rain-cap",
+      "file": "canary-rain-cap.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "3c9739254f8efe34412a0720cee2b17269626521b574843cd6edb2c0ffda062f",
+      "sourceSha256": "19da3c25bbd56ed33cd430ed3c0fc9b8ef472e3f56b7c6d87d5e953acd946d40"
+    },
+    {
+      "id": "matte-black-top-hat",
+      "file": "matte-black-top-hat.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "4ce6768c2d6182a04373898348c37589e1f7b44d1b92e73c69e7d88e927a4f30",
+      "sourceSha256": "d38ade28854bf6010f8263a02395e82b8846a6372640f5b41adb96bc4736125f"
+    },
+    {
+      "id": "navy-wizard-hat",
+      "file": "navy-wizard-hat.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "07ea9efa4d94a6abb4c651f9f593d1a3269a0d806d8f39f1c0227a62ac5c1eb8",
+      "sourceSha256": "a67cf5eb8d150a741a0b5b3b36f5ba133bd997083c06ff2f136ac8b5a3c80b22"
+    },
+    {
+      "id": "coral-bucket-hat",
+      "file": "coral-bucket-hat.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "23b618bbd61410854074bc84fc2b99755271fd30e7cedbe0fe0567ef3a8e5501",
+      "sourceSha256": "c7517e4cbd8d9a28d041726555917568cf36b9f9831f6d559fca3dc05aa1efdf"
+    },
+    {
+      "id": "lilac-flower-crown",
+      "file": "lilac-flower-crown.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "52eaa3c7421917801e153918a9036ded1fb533e3e4486e53b78c57ed0f298c34",
+      "sourceSha256": "cdb2c5d3f65a22f708c745c7bea2f9a6c70328a075ec9311d6bbb237240ddfff"
+    },
+    {
+      "id": "canary-party-hat",
+      "file": "canary-party-hat.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "a087aceeb4897c5a708245c9b22726a0f62e7d6916b23e843ad8ff172bf549c6",
+      "sourceSha256": "1f0c3bc1945ab33299fbd0dd20cb98b8eeef3df174f1bbb2afb871c612307cb3"
+    },
+    {
+      "id": "forest-ranger-fedora",
+      "file": "forest-ranger-fedora.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "e96d3ef4262fdc9580268043c32b543d9a6b45e226bb8749f07024bd3ffd4410",
+      "sourceSha256": "2e3867648780fb169d3e4f7845184bd50686350b74df135b725e409b2e2e53c6"
+    },
+    {
+      "id": "purple-witch-hat",
+      "file": "purple-witch-hat.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "61bd35482f110e28cbaa3acda0dfaca45105de51878b75efe25d3b1d4aca41e4",
+      "sourceSha256": "f546f65f97566b4e2480f7617f1f758df694046b1acbfdcc2d719970dea1928d"
+    },
+    {
+      "id": "blue-sailor-cap",
+      "file": "blue-sailor-cap.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "35b49a8649db82fd89c98c6ab3e3fec605d6d496d5a845186c2ee3b14b26f9fb",
+      "sourceSha256": "7ba721dac3a30ab957b550689646dafb5d775a19cebb57ecdc4b9a5a1a18b7bd"
+    },
+    {
+      "id": "gold-royal-crown",
+      "file": "gold-royal-crown.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "88aad76f5a6767824ed3bab26b774fd4d95067db83e89f689633d92b929b5a9b",
+      "sourceSha256": "d0b31bb6ac692953574ea9e9a8109048709251ca720f2ade8aad69de9555d8e6"
+    },
+    {
+      "id": "chef-toque",
+      "file": "chef-toque.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "2cdd39879546b6ec76b9d32746be8cd9f46eb4f14b3e67c016753f2e7622f9b0",
+      "sourceSha256": "59b51c0cdeca85e9e88bcbd0a3fb911b75dbfc33160f5abe2b6592220f96c2c4"
+    },
+    {
+      "id": "rainbow-propeller-cap",
+      "file": "rainbow-propeller-cap.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "3959fa7c3c7a211a836d0d717c8f39ffb01f4cb0fec6628ecd575a1c049974e7",
+      "sourceSha256": "cce7ab9d39c73850a66f3ebe30f6e2989b72c7a2e5556bb7cb8719e56c40db78"
+    },
+    {
+      "id": "burgundy-beret",
+      "file": "burgundy-beret.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "953f3ce3641d0a0dc346de6c08c30f91103f0239dd082d576117cc27a7eee6f1",
+      "sourceSha256": "2d7e7841f782f563353fc1ff8676fec27e5aa8ef8f3bfe2a3d1c0fba085532f9"
+    },
+    {
+      "id": "silver-space-helmet",
+      "file": "silver-space-helmet.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "19cc9dbde7bac11cfac7cb5b3cc774b05956aec8332b1c81d1938d1eaea22081",
+      "sourceSha256": "9ac52c63b959f882534685ec125f97be6be5f2efed679f555c62b044196859c2"
+    },
+    {
+      "id": "straw-boater",
+      "file": "straw-boater.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "36adb9cfc250acc0423b5850a65af4f51f39eb2958d0152e9ca3ca8ef307b47f",
+      "sourceSha256": "1e3c2378a8b2aad2c355859a15ff9643b3b6f2f34b905429ec314a6ba43f3143"
+    },
+    {
+      "id": "graduation-cap",
+      "file": "graduation-cap.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "d4c0598dff4041dd5ad5f170066c89f95939e751b9ef7ed54e1157e5d321b46f",
+      "sourceSha256": "f6284548238a570c30c63fbf97111c728c00868bbff50ae16799c35b95030e3c"
+    },
+    {
+      "id": "orange-hard-hat",
+      "file": "orange-hard-hat.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "2850e8c21056e9f1666690ddb564293525ed35077ab8d342edbe12405f5e53f8",
+      "sourceSha256": "a05a1207c19d12c636efc921b2c7b28473c5865c2e488d32c2600923758678fe"
+    },
+    {
+      "id": "ranger-fedora-feather",
+      "file": "ranger-fedora-feather.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "0a51f2a7033ed2124a1fbbec000ac4a36130b93a1f20dc6a1181da3fc50924f5",
+      "sourceSha256": "a6667a1c19022de95352226c3c19ba1c5cd7517ba3d5189ad87dc26c1d66ae52"
+    },
+    {
+      "id": "witch-hat-moon",
+      "file": "witch-hat-moon.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "2786d388452361936b68dda538171d9da259b1b4a5f93de45efb84170150b822",
+      "sourceSha256": "57ad664950ed8d64279945fd2ef6bdab2d9091b0a8fc3b1b096db34c8123220a"
+    },
+    {
+      "id": "sailor-cap-anchor",
+      "file": "sailor-cap-anchor.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "82e9892952fa67bf3d8d1eede4366df5320d3c2b912de8d1062816740fdfdd38",
+      "sourceSha256": "2219cf2e908e82c58d0bad03997beb93caa5724a478203e17971b763420df6ba"
+    },
+    {
+      "id": "royal-crown-rubies",
+      "file": "royal-crown-rubies.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "9e52ac2f2faad18a93f5361e7cf6690bf8e80ab13a5560c43307ec8b98d7e7c7",
+      "sourceSha256": "2d19cffa21a4b71c49a3d3e185795a7602de2656abe67426b4d77a1f14b43e20"
+    },
+    {
+      "id": "white-tennis-visor",
+      "file": "white-tennis-visor.webp",
+      "kind": "upper",
+      "width": 256,
+      "height": 256,
+      "sha256": "1893348cf791bead33513bb6d1a6c1222c119e48d37665fcedec3da37c308a83",
+      "sourceSha256": "5525e53c80af4f2a30328247832cfb29e26709b3f2f8c2908ea5c97c588614ac"
+    },
+    {
+      "id": "teal-glasses",
+      "file": "teal-glasses.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "c23d48db179c8acce8c6f4a0cffdb45de8d41229a7b058b586d98771d0d113b9",
+      "sourceSha256": "019ce34efe61ef4a178b8a43bd21f6b52c814991a59ba73821697cef5922236f"
+    },
+    {
+      "id": "amber-glasses",
+      "file": "amber-glasses.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "6150583ff9bea4cd8d5e4f2e87d6cb790ace8fd652b93507b1c3c98b8de51312",
+      "sourceSha256": "0ff52ad5f3eabf3d0bf1df0cbb27a7f3a03fd3a863264d148a8c970c384888e4"
+    },
+    {
+      "id": "plum-glasses",
+      "file": "plum-glasses.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "54eb95d0e68866816b714e9356f15e6ad028c54ec5c608db991540d7effcc3e2",
+      "sourceSha256": "c9293b212f39837d80451d7a890260c8680c5a3a26e853261a22e2af2714115c"
+    },
+    {
+      "id": "rose-heart-sunglasses",
+      "file": "rose-heart-sunglasses.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "0f713c9770a99e5994cca55041d42c50464926ca93138692e274af81ec2fa049",
+      "sourceSha256": "54ad37704bb4082a2accd10d63be046c58ac4e024db70dd8252802178e399977"
+    },
+    {
+      "id": "bronze-aviator-goggles",
+      "file": "bronze-aviator-goggles.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "016bb075f463bcd1cf90e915fa0bc8a88a463cfbdb323a586e780096a4632f00",
+      "sourceSha256": "e5776461446aa910f040feb1d499969c2218e5928d8344748179c6f61c4b2851"
+    },
+    {
+      "id": "cobalt-round-glasses",
+      "file": "cobalt-round-glasses.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "3917e17f63adcafd3fabba34e809001fd2ba77ee91bd5d9de461c7a2d433b725",
+      "sourceSha256": "4067b8a1ca4beb1f5dd9d2a0ea9e1ffabaa2e4c833d2a81746ea6d41c5433d4f"
+    },
+    {
+      "id": "green-square-glasses",
+      "file": "green-square-glasses.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "c058a221daf7e9bfa0f63a2df49b828089f8404a15bc3d9482a806ec3b63f69d",
+      "sourceSha256": "a250af9ce4f9655cd1db800cc83c19f81a032f8761922e23acb14b5471f3c489"
+    },
+    {
+      "id": "yellow-star-glasses",
+      "file": "yellow-star-glasses.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "9800c18457f9750c21e14d64fca2a74e5489bb2f4f76d901b9f5e7f8df470a46",
+      "sourceSha256": "624d2e44f420bfda2df115296a81a8b27dff272dba1f8adec6347ca45a895ad2"
+    },
+    {
+      "id": "tortoiseshell-readers",
+      "file": "tortoiseshell-readers.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "588230940738b0f01d841654148c7295f085026c0df15cb76dae65e9bccca7ea",
+      "sourceSha256": "aff1255fb98a2abc58630ca33955e22b4d19dca3347f371a0f289f2bfed4594b"
+    },
+    {
+      "id": "rainbow-visor",
+      "file": "rainbow-visor.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "dea55517d56e0306f2dae614c986f23ab6472d1bd9072c94b97ce7c8c24b73f8",
+      "sourceSha256": "772ac52220a2a78863eccce001d19443bbf1ac9b6d2283e19447b809427fbb20"
+    },
+    {
+      "id": "violet-masquerade-mask",
+      "file": "violet-masquerade-mask.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "ff3dfe60f327b0d52393af39879fbb374c5a519b33d6676821158db866c04562",
+      "sourceSha256": "68bc1c24e9cc31a8bd4ef5afc5e35ae0d9a272e202bd44992d251ea319b2d4d2"
+    },
+    {
+      "id": "white-snow-goggles",
+      "file": "white-snow-goggles.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "0855050fe373e8f138a40d3cf095822224d7c024846eeb9373d37dadfea15931",
+      "sourceSha256": "9ea4b8beddd3b818d8b260fcaece5665333a7d71d1184aa55a84ceff823fc49f"
+    },
+    {
+      "id": "retro-3d-glasses",
+      "file": "retro-3d-glasses.webp",
+      "kind": "middle",
+      "width": 256,
+      "height": 256,
+      "sha256": "7019c01505c2ae0249d5df101d51b18b540ad7a204b20a2d10814f471b2f3ed9",
+      "sourceSha256": "a2d55ea52df9e6009cdcc509832d85f719e73f1e8ca9c4daaf356114961f3c67"
+    },
+    {
+      "id": "teal-bowtie",
+      "file": "teal-bowtie.webp",
+      "kind": "lower",
+      "width": 256,
+      "height": 256,
+      "sha256": "3f29c9e3981e2206edc2447325a89b8f2966823028666d7af53d6178afa275e2",
+      "sourceSha256": "fd7b545020b66c26471b77bfa3c11157c2e23cece6288b9d4515cb57014f45e3"
+    },
+    {
+      "id": "purple-scarf",
+      "file": "purple-scarf.webp",
+      "kind": "lower",
+      "width": 256,
+      "height": 256,
+      "sha256": "b1d2a8a9d6095d1b67a4eb8e91cd37b922b64c81c1c01adde264df533f9d7fed",
+      "sourceSha256": "317038c9e2b94cf506386e157847d03b8c1907e279227988d836594afa93c05c"
+    },
+    {
+      "id": "red-polka-bowtie",
+      "file": "red-polka-bowtie.webp",
+      "kind": "lower",
+      "width": 256,
+      "height": 256,
+      "sha256": "bc88058969627414a4acda1ff331825762a78a850b1957fc82d90ad07fca4e0e",
+      "sourceSha256": "51f57e3d7d2b60c099be5619922e626c98a7b0f829e1be86518c793cb1c822cf"
+    },
+    {
+      "id": "turquoise-bandana",
+      "file": "turquoise-bandana.webp",
+      "kind": "lower",
+      "width": 256,
+      "height": 256,
+      "sha256": "fba774794d60fcee133eb1f7ec74ed34ef4615ea827aa76248ccabae1c849473",
+      "sourceSha256": "054d06da139a0d7b1835b66fc958c77e9ba6a929a21f43a8707b311d1c3c411c"
+    },
+    {
+      "id": "gold-sun-medallion",
+      "file": "gold-sun-medallion.webp",
+      "kind": "lower",
+      "width": 256,
+      "height": 256,
+      "sha256": "ee7e91dfe71471c0068505a7c35f641f2144ac524a8cfad0c56fa556a7057537",
+      "sourceSha256": "4dc5c14918e8ddbd291fe3456fa9c21f6a4cf5ba1cf5e55b4792346cba0432c4"
+    },
+    {
+      "id": "emerald-necktie",
+      "file": "emerald-necktie.webp",
+      "kind": "lower",
+      "width": 256,
+      "height": 256,
+      "sha256": "4fc6d500c7390d333df78c246ad3a921eb3fefa56fe070c6ca3502818226ed73",
+      "sourceSha256": "483a5b4d82eca9471f68b097c38887c0f36f0c73885e0437fd871078c62cf99d"
+    },
+    {
+      "id": "leather-bell",
+      "file": "leather-bell.webp",
+      "kind": "lower",
+      "width": 256,
+      "height": 256,
+      "sha256": "dd4037c6188acea6a10bf6d715b80b397fee4862998d35b71473f8efe0fd3b6e",
+      "sourceSha256": "9aaa1763ba6cf94b30a23fe279bde72d03f04b8dd0a947c35aef9187971bfa7b"
+    }
+  ]
+}

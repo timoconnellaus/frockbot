@@ -1,3 +1,4 @@
+import { decodeBotIdV1 } from "@frockbot/configuration-core";
 import { decodeRunIdV1 } from "@frockbot/plugin-shell/backend-contracts";
 
 type RpcValueDecoder = (value: unknown, label: string) => unknown;
@@ -67,6 +68,14 @@ export const rpcIdentifier: RpcValueDecoder = (value, label) => {
     throw new Error(`${label} must be an identifier`);
   }
   return value;
+};
+
+export const rpcBotId: RpcValueDecoder = (value, label) => {
+  try {
+    return decodeBotIdV1(value);
+  } catch {
+    throw new Error(`${label} must be a Bot ID`);
+  }
 };
 
 export function rpcEnum<const T extends readonly string[]>(
@@ -203,7 +212,7 @@ export interface DecodedBotRunRpcV1 {
 export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
   const request = decodeRpcEnvelopeV1(input, {
     userId: rpcIdentifier,
-    botId: rpcIdentifier,
+    botId: rpcBotId,
     command: rpcObject({
       runId: rpcString(128),
       sessionId: rpcString(257),

@@ -4,6 +4,7 @@ import {
   ConfigurationDecodeError,
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
+  decodeBotIdV1,
   decodeConnectionDependencyRequirementV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
@@ -18,6 +19,12 @@ import {
 } from "./index.js";
 
 describe("configuration DTO seam", () => {
+  test("uses one bounded Bot identifier grammar across hosted seams", () => {
+    expect(decodeBotIdV1("bot-1.alpha_beta")).toBe("bot-1.alpha_beta");
+    for (const value of ["bad:bot", "bad@bot", "b".repeat(129)])
+      expect(() => decodeBotIdV1(value)).toThrow("botId is invalid");
+  });
+
   test("decodes a versioned Bot profile command", () => {
     expect(
       decodeConfigurationCommandV1({

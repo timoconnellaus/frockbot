@@ -162,20 +162,6 @@ summary:focus-visible {
   scrollbar-width: thin;
 }
 
-.bot-list::before {
-  position: sticky;
-  z-index: 1;
-  top: 0;
-  display: block;
-  padding: 0 9px 8px;
-  color: var(--frock-pink-dark);
-  background: var(--frock-cream);
-  content: "YOUR FLOCK";
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-}
-
 .bot-row {
   display: grid;
   width: 100%;

@@ -23,6 +23,7 @@
     "@frockbot/client-core": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/plugin-composio": "workspace:*",
+    "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "better-auth": "1.7.2",

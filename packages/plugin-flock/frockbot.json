@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 3,
+  "id": "flock",
+  "displayName": "Flock",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "contributions": {
+    "backend": [
+      { "entry": "./backend", "host": "gateway" },
+      { "entry": "./user", "host": "user" },
+      { "entry": "./bot", "host": "bot" }
+    ],
+    "client": {
+      "entry": "./client",
+      "mounts": [
+        { "slot": "frockbot.sidebar-bots", "order": 10 },
+        { "slot": "frockbot.overlays", "order": 10 },
+        { "slot": "frockbot.bot-identity", "order": 10 }
+      ],
+      "outlets": []
+    }
+  },
+  "permissions": []
+}

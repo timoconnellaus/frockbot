@@ -34,6 +34,7 @@ describe("foundation application", () => {
       "desktop-directory-picker",
       "desktop-notifications",
       "echo",
+      "flock",
       "fly-sprite",
       "identity",
       "memory",
@@ -43,7 +44,7 @@ describe("foundation application", () => {
       "shell",
     ]);
     expect(first.contributions).toEqual({
-      backend: ["composio", "shell"],
+      backend: ["composio", "flock", "shell"],
       runtime: [
         "clock",
         "composio",
@@ -54,7 +55,7 @@ describe("foundation application", () => {
         "memory",
         "provider-foundation",
       ],
-      client: ["auth", "clock", "computer", "shell"],
+      client: ["auth", "clock", "computer", "flock", "shell"],
       desktop: [
         "auth",
         "clock",
@@ -122,7 +123,7 @@ describe("foundation application", () => {
       FROCKBOT_AUTHORIZATION_STATE_SECRET:
         "test-authorization-state-secret-0001",
     };
-    const backend = createFoundationBackendContributions(plan, {
+    const backend = await createFoundationBackendContributions(plan, {
       backendHost: "gateway",
       callbackBaseUrl: "https://bot.frockbot.com",
       readSecret: (name) => secrets[name],
@@ -130,22 +131,54 @@ describe("foundation application", () => {
         throw new Error("not used while composing");
       },
       markConnectionUnavailable: () => Promise.resolve("applied"),
+      listBots: () =>
+        Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
+      createBot: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          commandId: "test",
+          status: "applied",
+          revision: 1,
+        }),
+      readSheep: () => Promise.reject(new Error("not used while composing")),
+      updateSheep: () => Promise.reject(new Error("not used while composing")),
     });
-    expect(backend.map((contribution) => contribution.packageId)).toEqual([
-      "composio",
+    expect(
+      backend.contributions.map((contribution) => contribution.packageId),
+    ).toEqual(["composio", "flock"]);
+    interface TestContribution {
+      specifier: string;
+      executeConfiguration?(): void;
+      startConnection?(): void;
+    }
+    const botBackend =
+      await createFoundationBackendContributions<TestContribution>(plan, {
+        backendHost: "bot",
+        resolve: (specifier, lifecycle) => () =>
+          lifecycle.mount({ specifier, executeConfiguration() {} }),
+      });
+    const userBackend =
+      await createFoundationBackendContributions<TestContribution>(plan, {
+        backendHost: "user",
+        resolve: (specifier, lifecycle) => () =>
+          lifecycle.mount({ specifier, startConnection() {} }),
+      });
+    expect(botBackend.contributions).toHaveLength(2);
+    expect(userBackend.contributions).toHaveLength(2);
+    expect(typeof botBackend.contributions[0]?.executeConfiguration).toBe(
+      "function",
+    );
+    expect(typeof userBackend.contributions[0]?.startConnection).toBe(
+      "function",
+    );
+    await Promise.all([
+      backend.dispose(),
+      botBackend.dispose(),
+      userBackend.dispose(),
     ]);
-    const botBackend = createFoundationBackendContributions(plan, {
-      backendHost: "bot",
-      mount: (specifier) => ({ specifier, executeConfiguration() {} }),
-    });
-    const userBackend = createFoundationBackendContributions(plan, {
-      backendHost: "user",
-      mount: (specifier) => ({ specifier, startConnection() {} }),
-    });
-    expect(botBackend).toHaveLength(1);
-    expect(userBackend).toHaveLength(1);
-    expect(typeof botBackend[0]?.executeConfiguration).toBe("function");
-    expect(typeof userBackend[0]?.startConnection).toBe("function");
+    expect(backend.contributions).toHaveLength(0);
+    expect(botBackend.contributions).toHaveLength(0);
+    expect(userBackend.contributions).toHaveLength(0);
     const requestedSecrets: string[] = [];
     expect(
       createFoundationHostedRuntimePackages(plan, {

@@ -5,7 +5,7 @@ import {
   injectRequired,
   mobileBotIdKey,
 } from "./app-context.ts";
-import MobileShell from "./MobileShell.vue";
+import HostedMobileApp from "./HostedMobileApp.vue";
 import { openExternalUrl } from "./system-browser.ts";
 
 const auth = injectRequired(authSessionKey, "the mobile auth session");
@@ -113,7 +113,7 @@ onBeforeUnmount(() => releaseUnauthorized?.());
 </script>
 
 <template>
-  <MobileShell v-if="ready" />
+  <HostedMobileApp v-if="ready" :gateway-url="gatewayUrl" />
   <main v-else class="mobile-auth">
     <section class="mobile-auth-card" aria-labelledby="mobile-auth-title">
       <div class="mobile-auth-mark" aria-hidden="true">⌁</div>
