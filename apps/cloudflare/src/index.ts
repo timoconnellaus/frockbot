@@ -2,7 +2,6 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import {
   compileFoundationApplication,
   createFoundationBackendContributions,
-  type FoundationConnectionStore,
 } from "@frockbot/application-foundation/runtime";
 import {
   decodeBotMembershipViewV1,
@@ -57,9 +56,6 @@ interface Env {
   BETTER_AUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  COMPOSIO_API_KEY?: string;
-  COMPOSIO_GMAIL_AUTH_CONFIG_ID?: string;
-  FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
   SPRITES_TOKEN?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
@@ -95,8 +91,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   ): Promise<"applied" | "stale">;
 }
 
-interface UserConfigurationRpc
-  extends FoundationConnectionStore, UserConfigurationBinding {}
+interface UserConfigurationRpc extends UserConfigurationBinding {}
 
 type RpcBoundary<T> = {
   [Key in keyof T]: T[Key] extends (...args: never[]) => infer Result
@@ -165,79 +160,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     hasBot: (request) => rpc.hasBot(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
-    isPackageInstalled: (owner, packageId) =>
-      rpc.isPackageInstalled({ schemaVersion: 1, userId: owner, packageId }),
-    getConnection: (owner, connectionId) =>
-      rpc.getConnection({ schemaVersion: 1, userId: owner, connectionId }),
-    startConnection: (owner, connection) =>
-      rpc.startConnection({ schemaVersion: 1, userId: owner, connection }),
-    recordConnectLinkResult: (owner, connectionId, safeMetadata) =>
-      rpc.recordConnectLinkResult({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        safeMetadata,
-      }),
-    recordLinkReconciliationIdentity: (owner, connectionId, safeMetadata) =>
-      rpc.recordLinkReconciliationIdentity({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        safeMetadata,
-      }),
-    claimLostLinkCleanup: (owner, connectionId, safeMetadata) =>
-      rpc.claimLostLinkCleanup({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        safeMetadata,
-      }),
-    finishConnectionAuthorization: (owner, connectionId, update) =>
-      rpc.finishConnectionAuthorization({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        update,
-      }),
-    recordAssignmentCompensated: (owner, connectionId, compensationId) =>
-      rpc.recordAssignmentCompensated({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        compensationId,
-      }),
-    requireConnectionReconciliation: (
-      owner,
-      connectionId,
-      operation,
-      failure,
-    ) =>
-      rpc.requireConnectionReconciliation({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        operation,
-        failure,
-      }),
-    claimConnectionRevocation: (owner, connectionId, recoveredSafeMetadata) =>
-      rpc.claimConnectionRevocation({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-        ...(recoveredSafeMetadata ? { recoveredSafeMetadata } : {}),
-      }),
-    recordRevocationProviderCompleted: (owner, connectionId) =>
-      rpc.recordRevocationProviderCompleted({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-      }),
-    finishConnectionRevocation: (owner, connectionId) =>
-      rpc.finishConnectionRevocation({
-        schemaVersion: 1,
-        userId: owner,
-        connectionId,
-      }),
   };
 }
 
@@ -385,13 +307,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
   (application, env: Env) =>
     createFoundationBackendContributions(application, {
       backendHost: "gateway",
-      callbackBaseUrl: env.BETTER_AUTH_URL ?? "https://bot.frockbot.com",
-      readSecret: (name) => {
-        // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
-        const value = (env as unknown as Record<string, unknown>)[name];
-        return typeof value === "string" ? value : undefined;
-      },
-      storeFor: (userId) => userConfigurationStub(env, userId),
       listBots: async (userId) =>
         decodeDirectoryViewV1(
           await userConfigurationStub(env, userId).listBots({
@@ -423,12 +338,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             botId,
             command,
           }),
-        ),
-      markConnectionUnavailable: (userId, botId, connectionId, compensation) =>
-        botStateStub(env, userId, botId).markConnectionUnavailable(
-          { userId, botId },
-          connectionId,
-          compensation,
         ),
     }),
 );

@@ -34,7 +34,6 @@
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/plugin-composio": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "cordis": "4.0.0-rc.8",

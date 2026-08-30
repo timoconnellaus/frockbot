@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import type {
   BotConfigurationCommandV1,
   BotSettingsViewV1,
@@ -64,6 +65,54 @@ function installedUser(): UserSettingsViewV1 {
         displayName: "Gmail",
         state: "ready",
         safeMetadata: {},
+      },
+    ],
+  };
+}
+
+async function compileAssignmentTestApplication(): ReturnType<
+  typeof compileFoundationApplication
+> {
+  const application = await compileFoundationApplication();
+  const template = application.packages.find((pkg) => pkg.id === "settings");
+  if (!template) throw new Error("Settings fixture Package is unavailable");
+  return {
+    ...application,
+    packages: [
+      ...application.packages,
+      {
+        ...template,
+        id: "composio",
+        specifier: "@test/composio",
+        version: "0.0.1",
+        manifest: {
+          ...template.manifest,
+          id: "composio",
+          displayName: "Connection fixture",
+          version: "0.0.1",
+          dependencies: {},
+          contributions: {},
+          permissions: [],
+          configuration: {
+            settings: [],
+            connectionTypes: [
+              {
+                id: "gmail",
+                displayName: "Gmail",
+                allowMultiple: true,
+                authorization: { kind: "oauth2", driverId: "fixture" },
+                capabilities: ["gmail-tools"],
+              },
+            ],
+            capabilities: [
+              {
+                id: "gmail-tools",
+                kind: "tool",
+                connectionTypes: ["gmail"],
+              },
+            ],
+          },
+        },
       },
     ],
   };
@@ -299,6 +348,7 @@ describe("Bot capability assignment admission", () => {
           get: () => userConfiguration,
         },
       } as never,
+      compileApplication: compileAssignmentTestApplication,
     });
     const identity = { userId: "user-1", botId: "primary" };
     await contribution.materializeSettings(identity, { name: "Primary" });
@@ -460,6 +510,7 @@ describe("Bot capability assignment admission", () => {
           get: () => userConfiguration,
         },
       } as never,
+      compileApplication: compileAssignmentTestApplication,
     });
     await contribution.materializeSettings(
       { userId: "user-1", botId: "primary" },

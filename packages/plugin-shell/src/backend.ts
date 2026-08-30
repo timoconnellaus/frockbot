@@ -118,13 +118,13 @@ export interface BotStateEnv {
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
-  COMPOSIO_API_KEY?: string;
   SPRITES_TOKEN?: string;
 }
 
 export interface ShellBotBackendHost {
   state: DurableObjectState;
   env: BotStateEnv;
+  compileApplication?: typeof compileFoundationApplication;
 }
 
 function optionalStoredRun(input: unknown): StoredRun | undefined {
@@ -198,12 +198,15 @@ function memoryPluginConfig(
 export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
+  private readonly compileApplication: typeof compileFoundationApplication;
   private executingRunId: string | undefined;
   private readonly assignmentActivities = new Map<string, AssignmentActivity>();
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
     this.env = host.env;
+    this.compileApplication =
+      host.compileApplication ?? compileFoundationApplication;
   }
 
   async materializeSettings(
@@ -328,7 +331,7 @@ export class ShellBotBackendContribution {
           schemaVersion: 1,
           userId: identity.userId,
         }),
-        compileFoundationApplication(),
+        this.compileApplication(),
       ]);
       const failure = capabilityAssignmentFailureV1({
         assignment: command.assignment,
@@ -994,7 +997,7 @@ export class ShellBotBackendContribution {
       schemaVersion: 1,
       userId: identity.userId,
     });
-    const application = await compileFoundationApplication();
+    const application = await this.compileApplication();
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
@@ -1037,7 +1040,7 @@ export class ShellBotBackendContribution {
       schemaVersion: 1,
       userId: identity.userId,
     });
-    const application = await compileFoundationApplication();
+    const application = await this.compileApplication();
     const admittedBot = {
       ...this.initialBotSettings(identity.botId),
       assignments: [admittedAssignment],
@@ -1453,7 +1456,7 @@ export class ShellBotBackendContribution {
       schemaVersion: 1,
       userId: identity.userId,
     });
-    const application = await compileFoundationApplication();
+    const application = await this.compileApplication();
     let plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,

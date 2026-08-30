@@ -27,11 +27,6 @@
       "grants": []
     },
     {
-      "specifier": "@frockbot/plugin-composio",
-      "version": "0.0.1",
-      "grants": ["connections:manage", "tools:execute"]
-    },
-    {
       "specifier": "@frockbot/plugin-shell",
       "version": "0.0.1",
       "grants": ["agent:turn"]
