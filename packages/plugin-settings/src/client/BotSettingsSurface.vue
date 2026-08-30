@@ -17,17 +17,20 @@ const description = ref("");
 const notifications = ref(false);
 const saving = ref(false);
 const selectedModel = ref("");
+const useExactModel = ref(false);
+const exactConnectionId = ref("");
+const exactProviderModelId = ref("");
+const readyConnections = computed(() =>
+  (web.value.userSettings?.connections ?? []).filter(
+    (connection) => connection.state === "ready",
+  ),
+);
 const modelOptions = computed(() =>
-  (web.value.userSettings?.connections ?? []).flatMap((connection) =>
-    connection.state === "ready"
-      ? (connection.modelCatalog?.models ?? []).map((model) => ({
-          value: JSON.stringify([
-            connection.connectionId,
-            model.providerModelId,
-          ]),
-          label: `${model.displayName} — ${connection.displayName}`,
-        }))
-      : [],
+  readyConnections.value.flatMap((connection) =>
+    (connection.modelCatalog?.models ?? []).map((model) => ({
+      value: JSON.stringify([connection.connectionId, model.providerModelId]),
+      label: `${model.displayName} — ${connection.displayName}`,
+    })),
   ),
 );
 
@@ -48,6 +51,15 @@ onMounted(async () => {
         settings.model.providerModelId,
       ])
     : "";
+  exactConnectionId.value =
+    settings.model?.connectionId ??
+    readyConnections.value[0]?.connectionId ??
+    "";
+  exactProviderModelId.value = settings.model?.providerModelId ?? "";
+  useExactModel.value = Boolean(
+    settings.model &&
+    !modelOptions.value.some((model) => model.value === selectedModel.value),
+  );
 });
 
 async function save(): Promise<void> {
@@ -58,17 +70,18 @@ async function save(): Promise<void> {
       label: label.value || undefined,
       description: description.value || undefined,
     });
-    if (selectedModel.value) {
-      const [connectionId, providerModelId] = JSON.parse(
-        selectedModel.value,
-      ) as [string, string];
-      const current = web.value.botSettings?.model;
-      if (
-        current?.connectionId !== connectionId ||
-        current.providerModelId !== providerModelId
-      ) {
-        await web.value.saveBotModel({ connectionId, providerModelId });
-      }
+    const [connectionId, providerModelId] = useExactModel.value
+      ? [exactConnectionId.value, exactProviderModelId.value.trim()]
+      : (JSON.parse(selectedModel.value) as [string, string]);
+    if (!connectionId || !providerModelId) {
+      throw new Error("A Connection and model ID are required");
+    }
+    const current = web.value.botSettings?.model;
+    if (
+      current?.connectionId !== connectionId ||
+      current.providerModelId !== providerModelId
+    ) {
+      await web.value.saveBotModel({ connectionId, providerModelId });
     }
     await web.value.saveBotNotifications({ enabled: notifications.value });
     surfaces?.close();
@@ -103,7 +116,36 @@ async function save(): Promise<void> {
     <UiField label="Description">
       <textarea v-model="description" maxlength="10000" rows="7" />
     </UiField>
-    <UiField label="Model">
+    <label class="exact-model-setting">
+      <span>
+        <strong>Use exact model ID</strong>
+        <small>Choose a model not listed in the advisory catalog.</small>
+      </span>
+      <input v-model="useExactModel" type="checkbox" />
+    </label>
+    <template v-if="useExactModel">
+      <UiField label="Connection">
+        <select v-model="exactConnectionId" required>
+          <option disabled value="">Select a Connection</option>
+          <option
+            v-for="connection in readyConnections"
+            :key="connection.connectionId"
+            :value="connection.connectionId"
+          >
+            {{ connection.displayName }}
+          </option>
+        </select>
+      </UiField>
+      <UiField label="Exact provider model ID">
+        <input
+          v-model="exactProviderModelId"
+          maxlength="256"
+          placeholder="model-name:cloud"
+          required
+        />
+      </UiField>
+    </template>
+    <UiField v-else label="Model">
       <select v-model="selectedModel" required>
         <option disabled value="">Select a connected model</option>
         <option
@@ -176,6 +218,7 @@ async function save(): Promise<void> {
   line-height: 1.45;
 }
 
+.exact-model-setting,
 .notification-setting {
   display: flex;
   align-items: center;
@@ -187,17 +230,21 @@ async function save(): Promise<void> {
   background: var(--frock-surface-subtle);
 }
 
+.exact-model-setting strong,
+.exact-model-setting small,
 .notification-setting strong,
 .notification-setting small {
   display: block;
 }
 
+.exact-model-setting small,
 .notification-setting small {
   margin-top: 4px;
   color: var(--frock-text-muted);
   font-size: 11px;
 }
 
+.exact-model-setting input,
 .notification-setting input {
   width: 19px;
   height: 19px;

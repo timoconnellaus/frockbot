@@ -21,7 +21,10 @@ afterEach(async () => {
   );
 });
 
-async function runProductionSetup(stdin: string): Promise<{
+async function runProductionSetup(
+  stdin: string,
+  secretListMode: "missing" | "existing" | "failure" = "missing",
+): Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -39,6 +42,13 @@ async function runProductionSetup(stdin: string): Promise<{
 set -euo pipefail
 printf '%s\n' "$*" >> "$GH_LOG"
 if [[ "$1 $2" == "auth status" ]]; then exit 0; fi
+if [[ "$1 $2" == "secret list" ]]; then
+  case "$GH_SECRET_LIST_MODE" in
+    existing) printf 'CREDENTIAL_KEYRING\tUpdated\n' ;;
+    failure) exit 42 ;;
+  esac
+  exit 0
+fi
 if [[ "$1 $2" == "secret set" ]]; then
   value="$(cat)"
   printf 'secret-value:%s:%s\n' "$3" "$value" >> "$GH_LOG"
@@ -56,6 +66,7 @@ fi
         ...process.env,
         ENV_FILE: join(directory, ".env"),
         GH_LOG: ghLog,
+        GH_SECRET_LIST_MODE: secretListMode,
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       },
       stdin: "pipe",
@@ -103,6 +114,21 @@ describe("production setup", () => {
       "FROCKBOT_AUTHORIZATION_STATE_SECRET",
     );
     expect(stdout).not.toContain("Composio");
+  });
+
+  test("aborts when the production keyring cannot be inspected", async () => {
+    const { exitCode, calls } = await runProductionSetup(
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\nsprites-production\n\n",
+      "failure",
+    );
+
+    expect(exitCode).not.toBe(0);
+    expect(calls).not.toContain(
+      "secret set CREDENTIAL_KEYRING --repo timoconnellaus/frockbot --env production",
+    );
+    expect(
+      calls.some((call) => call.startsWith("secret-value:CREDENTIAL_KEYRING:")),
+    ).toBe(false);
   });
 
   test("deploys without Composio configuration and forwards active secrets", async () => {

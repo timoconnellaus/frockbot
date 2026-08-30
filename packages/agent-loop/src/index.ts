@@ -21,6 +21,16 @@ import {
 } from "@frockbot/agent-core";
 import { type Context, Service } from "cordis";
 
+declare module "cordis" {
+  interface Events {
+    "agent/model-outcome-committed": (
+      agent: Agent,
+      requestId: string,
+      outcome: "completed" | "not-started",
+    ) => Promise<void>;
+  }
+}
+
 export interface AgentLoopConfig {
   maxSteps?: number;
 }
@@ -301,6 +311,7 @@ class LoopAgent implements Agent {
           toolCalls: response.toolCalls,
         });
         await this.session.flush();
+        await this.#notifyModelOutcome(response.request.requestId, "completed");
         if (response.toolCalls.length === 0) {
           this.session.append({
             type: "step/end",
@@ -401,6 +412,7 @@ class LoopAgent implements Agent {
           toolCalls: response.toolCalls,
         });
         await this.session.flush();
+        await this.#notifyModelOutcome(response.request.requestId, "completed");
         if (response.toolCalls.length === 0) {
           this.session.append({
             type: "step/end",
@@ -513,6 +525,7 @@ class LoopAgent implements Agent {
           toolCalls: response.toolCalls,
         });
         await this.session.flush();
+        await this.#notifyModelOutcome(response.request.requestId, "completed");
 
         if (response.toolCalls.length === 0) {
           this.session.append({
@@ -568,6 +581,15 @@ class LoopAgent implements Agent {
       await this.session.flush();
       await this.#ctx.serial("agent/turn-stopping", this, turn);
     }
+  }
+
+  async #notifyModelOutcome(
+    requestId: string,
+    outcome: "completed" | "not-started",
+  ): Promise<void> {
+    await this.#ctx
+      .serial("agent/model-outcome-committed", this, requestId, outcome)
+      .catch(() => undefined);
   }
 
   async #requestModel(
@@ -631,6 +653,7 @@ class LoopAgent implements Agent {
           reason: modelFailureMessage(error),
         });
         await this.session.flush();
+        await this.#notifyModelOutcome(request.requestId, "not-started");
         const action = await this.#ctx.waterfall(
           "agent/request-error",
           this,

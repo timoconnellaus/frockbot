@@ -483,7 +483,6 @@ export class OllamaCloudUserBackendContribution {
           );
         },
       );
-      return this.finishRecord(record, "applied");
     } catch (error) {
       await this.host.credentials.discardPending(
         record.connectionId,
@@ -525,6 +524,7 @@ export class OllamaCloudUserBackendContribution {
       }
       return this.finishRecord(record, "failed");
     }
+    return this.finishRecord(record, "applied");
   }
 
   private async updateLabel(
@@ -547,8 +547,11 @@ export class OllamaCloudUserBackendContribution {
   private async refreshCatalog(
     record: StoredCommand,
   ): Promise<ConnectionCommandReceiptV1> {
+    const expectedGeneration = record.expectedGeneration;
+    if (!expectedGeneration) return this.finishRecord(record, "failed");
     const effectId = `catalog:${record.commandId}`;
     let lease: CredentialLeaseV1 | undefined;
+    let failed = false;
     try {
       lease = await this.host.credentials.lease({
         accountId: record.accountId,
@@ -556,6 +559,7 @@ export class OllamaCloudUserBackendContribution {
         packageId: PACKAGE_ID,
         effectId,
         expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
+        expectedGeneration,
       });
       const apiKey = await this.host.credentials.openLease({
         accountId: record.accountId,
@@ -563,47 +567,79 @@ export class OllamaCloudUserBackendContribution {
         lease,
       });
       const models = await this.client.listModels(apiKey);
-      const current = await this.requireConnection(
-        record.accountId,
-        record.connectionId,
-      );
-      await this.host.settings.replaceConnection(
-        record.accountId,
-        record.connectionId,
-        current.generation,
-        { ...current, modelCatalog: this.catalog(models), failure: undefined },
-      );
-      return this.finishRecord(record, "applied");
-    } catch (error) {
-      const current = await this.requireConnection(
-        record.accountId,
-        record.connectionId,
-      );
-      if (current.modelCatalog) {
-        await this.host.settings.replaceConnection(
-          record.accountId,
-          record.connectionId,
-          current.generation,
-          {
-            ...current,
-            modelCatalog: {
-              ...current.modelCatalog,
-              state: "stale",
-              refreshAfter: new Date(
-                this.now() + REFRESH_INTERVAL_MS,
-              ).toISOString(),
-              failure:
-                error instanceof Error
-                  ? error.message
-                  : "Ollama Cloud catalog refresh failed",
+      await this.host.storage.transaction(
+        async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          const current = await this.host.settings.getConnection(
+            record.accountId,
+            record.connectionId,
+            storage,
+          );
+          if (
+            !current ||
+            current.packageId !== PACKAGE_ID ||
+            current.generation !== expectedGeneration ||
+            current.state !== "ready"
+          ) {
+            throw new Error("Connection changed during catalog refresh");
+          }
+          await this.host.settings.replaceConnection(
+            record.accountId,
+            record.connectionId,
+            expectedGeneration,
+            {
+              ...current,
+              modelCatalog: this.catalog(models),
+              failure: undefined,
             },
-          },
-        );
-      }
-      return this.finishRecord(record, "failed");
+            storage,
+          );
+        },
+      );
+    } catch (error) {
+      failed = true;
+      await this.host.storage.transaction(
+        async (storage: UserSettingsTransaction & CredentialTransaction) => {
+          const current = await this.host.settings.getConnection(
+            record.accountId,
+            record.connectionId,
+            storage,
+          );
+          if (
+            !current ||
+            current.packageId !== PACKAGE_ID ||
+            current.generation !== expectedGeneration ||
+            !current.modelCatalog
+          ) {
+            return;
+          }
+          await this.host.settings.replaceConnection(
+            record.accountId,
+            record.connectionId,
+            expectedGeneration,
+            {
+              ...current,
+              modelCatalog: {
+                ...current.modelCatalog,
+                state: "stale",
+                refreshAfter: new Date(
+                  this.now() + REFRESH_INTERVAL_MS,
+                ).toISOString(),
+                failure:
+                  error instanceof Error
+                    ? error.message
+                    : "Ollama Cloud catalog refresh failed",
+              },
+            },
+            storage,
+          );
+        },
+      );
     } finally {
-      if (lease) await this.host.credentials.settle(effectId);
+      if (lease) {
+        await this.host.credentials.settle(effectId).catch(() => undefined);
+      }
     }
+    return this.finishRecord(record, failed ? "failed" : "applied");
   }
 
   private async setEnabled(
@@ -743,15 +779,19 @@ export class OllamaCloudUserBackendContribution {
     connectionId: string;
     providerModelId: string;
     effectId: string;
+    connectionGeneration: string;
   }): Promise<CredentialLeaseV1> {
     const connection = await this.requireConnection(
       input.accountId,
       input.connectionId,
     );
-    if (connection.state !== "ready" || !connection.generation) {
-      throw new Error(`Connection is ${connection.state}`);
+    if (
+      connection.state !== "ready" ||
+      connection.generation !== input.connectionGeneration
+    ) {
+      throw new Error("Connection changed before model authorization");
     }
-    const admittedGeneration = connection.generation;
+    const admittedGeneration = input.connectionGeneration;
     const known = connection.modelCatalog?.models.some(
       (model) => model.providerModelId === input.providerModelId,
     );

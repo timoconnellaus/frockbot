@@ -85,6 +85,47 @@ afterEach(async () => {
 });
 
 describe("AgentLoop", () => {
+  test("announces model settlement only after the outcome is durable", async () => {
+    let durableEvents: readonly SessionEvent[] = [];
+    const committed: Array<{ requestId: string; durable: boolean }> = [];
+    const provider: LlmProvider = {
+      id: "settlement-order",
+      async *stream() {
+        yield { type: "text-delta", text: "done" };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(
+      provider,
+      undefined,
+      (_sessionId, events) => {
+        durableEvents = [...events];
+        return Promise.resolve();
+      },
+    );
+    root.on("agent/model-outcome-committed", async (_agent, requestId) => {
+      committed.push({
+        requestId,
+        durable: durableEvents.some(
+          (event) =>
+            event.type === "assistant/message" && event.requestId === requestId,
+        ),
+      });
+    });
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "session-1",
+      provider: provider.id,
+      model: "test-model",
+    });
+
+    handle.agent.send("Run once");
+    await handle.agent.whenIdle();
+
+    expect(committed).toHaveLength(1);
+    expect(committed[0]?.durable).toBe(true);
+  });
+
   test("reconciles an admitted model request by its durable id", async () => {
     let streams = 0;
     const reconciled: string[] = [];

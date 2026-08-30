@@ -77,6 +77,11 @@ declare module "cordis" {
       signal: AbortSignal,
       next: () => Promise<RequestErrorAction>,
     ) => Promise<RequestErrorAction>;
+    "agent/model-outcome-committed": (
+      agent: Agent,
+      requestId: string,
+      outcome: "completed" | "not-started",
+    ) => Promise<void>;
     "agent/turn-stopping": (agent: Agent, turn: number) => Promise<void>;
     "agent/cancel-requested": (
       agent: Agent,

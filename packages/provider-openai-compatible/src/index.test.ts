@@ -124,6 +124,38 @@ describe("OpenAICompatibleProvider", () => {
     ]);
   });
 
+  test("rejects a truncated stream without a terminal marker", async () => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+            { status: 200 },
+          ),
+        ),
+    });
+    const events = [];
+    let failure: unknown;
+
+    try {
+      for await (const event of provider.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(events).toEqual([{ type: "text-delta", text: "partial" }]);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure instanceof Error ? failure.message : "").toBe(
+      "Model response stream ended before a terminal marker",
+    );
+  });
+
   test("reports retrieval unavailable without another provider request", async () => {
     let requests = 0;
     const provider = new OpenAICompatibleProvider({

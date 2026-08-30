@@ -45,6 +45,7 @@ interface ConnectionUserBackendContribution {
     connectionId: string;
     providerModelId: string;
     effectId: string;
+    connectionGeneration: string;
   }): Promise<unknown>;
   alarm?(): Promise<void>;
 }
@@ -266,6 +267,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       connectionId: rpcIdentifier,
       providerModelId: rpcString(256),
       effectId: rpcIdentifier,
+      connectionGeneration: rpcIdentifier,
     });
     const connection = await (
       await this.settingsContribution()
@@ -278,6 +280,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       connectionId: request.connectionId as string,
       providerModelId: request.providerModelId as string,
       effectId: request.effectId as string,
+      connectionGeneration: request.connectionGeneration as string,
     });
   }
 

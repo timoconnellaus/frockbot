@@ -195,9 +195,13 @@ export class OpenAICompatibleProvider implements LlmProvider {
 
     const tools = new Map<number, ToolAccumulator>();
     let finishReason: string | undefined;
+    let terminal = false;
     for await (const data of readSseData(response.body)) {
       signal.throwIfAborted();
-      if (data === "[DONE]") break;
+      if (data === "[DONE]") {
+        terminal = true;
+        break;
+      }
       const payload = asRecord(
         parseJson(data, "Model returned an invalid stream event"),
       );
@@ -208,8 +212,13 @@ export class OpenAICompatibleProvider implements LlmProvider {
         yield { type: "text-delta", text: delta.content };
       }
       applyToolDeltas(delta?.tool_calls, tools);
-      if (typeof choice?.finish_reason === "string")
+      if (typeof choice?.finish_reason === "string") {
         finishReason = choice.finish_reason;
+        terminal = true;
+      }
+    }
+    if (!terminal) {
+      throw new Error("Model response stream ended before a terminal marker");
     }
 
     for (const tool of [...tools.values()].sort(

@@ -124,7 +124,10 @@ interface ModelRuntimeContributionConfig {
   accountId: string;
   connectionId: string;
   credentialKeyring: string;
-  leaseCredential(effectId: string): Promise<CredentialLeaseV1>;
+  leaseCredential(
+    effectId: string,
+    expectedGeneration?: string,
+  ): Promise<CredentialLeaseV1>;
   settleCredential(effectId: string): Promise<void>;
 }
 

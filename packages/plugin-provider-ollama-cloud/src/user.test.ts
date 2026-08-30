@@ -286,6 +286,53 @@ describe("Ollama Cloud User Contribution", () => {
     );
   });
 
+  test("replays successful activation when receipt finalization fails", async () => {
+    let storage: MemoryStorage | undefined;
+    const fixtureValue = await fixture(async (input, init) => {
+      const authorization = new Headers(init?.headers).get("authorization");
+      if (
+        authorization === "Bearer new-key" &&
+        String(input).endsWith("/tags")
+      ) {
+        storage!.failNextEntriesContaining =
+          "ollama-connection-command:rotate-finalize";
+      }
+      return String(input).endsWith("/tags")
+        ? Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] })
+        : Response.json({ capabilities: ["tools"] });
+    });
+    storage = fixtureValue.storage;
+    const { settings, ollama } = fixtureValue;
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "old-key",
+    });
+    const command = {
+      schemaVersion: 1,
+      type: "connection/rotate-api-key",
+      commandId: "rotate-finalize",
+      connectionId: created.connectionId,
+      apiKey: "new-key",
+    } as const;
+
+    await expect(
+      ollama.executeConnection("account-1", command),
+    ).rejects.toThrow("injected storage failure");
+    const promoted = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    expect(promoted?.state).toBe("ready");
+    await expect(
+      ollama.executeConnection("account-1", command),
+    ).resolves.toMatchObject({ status: "applied" });
+  });
+
   test("preserves disabled state across credential rotation", async () => {
     const { settings, ollama } = await fixture();
     const created = await ollama.executeConnection("account-1", {
@@ -406,6 +453,61 @@ describe("Ollama Cloud User Contribution", () => {
     });
   });
 
+  test("does not project a stale catalog across credential rotation", async () => {
+    const refreshStarted = Promise.withResolvers<void>();
+    const refreshResponse = Promise.withResolvers<Response>();
+    let oldTagRequests = 0;
+    const { settings, ollama } = await fixture(async (input, init) => {
+      if (!String(input).endsWith("/tags")) {
+        return Response.json({ capabilities: ["tools"] });
+      }
+      const authorization = new Headers(init?.headers).get("authorization");
+      if (authorization === "Bearer old-key") {
+        oldTagRequests += 1;
+        if (oldTagRequests === 2) {
+          refreshStarted.resolve();
+          return refreshResponse.promise;
+        }
+        return Response.json({ models: [{ model: "old-model:cloud" }] });
+      }
+      return Response.json({ models: [{ model: "new-model:cloud" }] });
+    });
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "old-key",
+    });
+    const refreshing = ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/refresh-models",
+      commandId: "refresh-stale",
+      connectionId: created.connectionId,
+    });
+    await refreshStarted.promise;
+    await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/rotate-api-key",
+      commandId: "rotate-during-refresh",
+      connectionId: created.connectionId,
+      apiKey: "new-key",
+    });
+    refreshResponse.resolve(
+      Response.json({ models: [{ model: "stale-model:cloud" }] }),
+    );
+
+    expect((await refreshing).status).toBe("failed");
+    expect(
+      (await settings.getConnection("account-1", created.connectionId))
+        ?.modelCatalog?.models,
+    ).toContainEqual(
+      expect.objectContaining({ providerModelId: "new-model:cloud" }),
+    );
+  });
+
   test("terminally fails an admitted create whose credential was never sealed", async () => {
     const { storage, settings, ollama } = await fixture();
     storage.values.set("ollama-connection-account", "account-1");
@@ -436,7 +538,7 @@ describe("Ollama Cloud User Contribution", () => {
   test("rejects exact model authorization when Connection state changes", async () => {
     const resolutionStarted = Promise.withResolvers<void>();
     const resolutionResponse = Promise.withResolvers<Response>();
-    const { ollama } = await fixture(async (input, init) => {
+    const { settings, ollama } = await fixture(async (input, init) => {
       if (String(input).endsWith("/tags")) {
         return Response.json({
           models: [{ model: "glm-5.3-flash:cloud" }],
@@ -458,11 +560,17 @@ describe("Ollama Cloud User Contribution", () => {
       label: "Personal",
       apiKey: "valid-key",
     });
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!connection?.generation) throw new Error("generation is missing");
     const authorization = ollama.leaseModelCredential({
       accountId: "account-1",
       connectionId: created.connectionId,
       providerModelId: "new-model:cloud",
       effectId: "effect-race",
+      connectionGeneration: connection.generation,
     });
     await resolutionStarted.promise;
     await ollama.executeConnection("account-1", {
@@ -495,11 +603,13 @@ describe("Ollama Cloud User Contribution", () => {
       created.connectionId,
     );
 
+    if (!before?.generation) throw new Error("generation is missing");
     await ollama.leaseModelCredential({
       accountId: "account-1",
       connectionId: created.connectionId,
       providerModelId: "new-model:cloud",
       effectId: "effect-resolution",
+      connectionGeneration: before.generation,
     });
     const after = await settings.getConnection(
       "account-1",
@@ -514,8 +624,43 @@ describe("Ollama Cloud User Contribution", () => {
     );
   });
 
+  test("rejects a journaled credential generation after rotation", async () => {
+    const { settings, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "old-key",
+    });
+    const before = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!before?.generation) throw new Error("generation is missing");
+    await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/rotate-api-key",
+      commandId: "rotate-before-lease",
+      connectionId: created.connectionId,
+      apiKey: "new-key",
+    });
+
+    await expect(
+      ollama.leaseModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        providerModelId: "glm-5.3-flash:cloud",
+        effectId: "journaled-effect",
+        connectionGeneration: before.generation,
+      }),
+    ).rejects.toThrow("Connection changed before model authorization");
+  });
+
   test("pins one credential lease to the exact model effect", async () => {
-    const { ollama } = await fixture();
+    const { settings, ollama } = await fixture();
     const created = await ollama.executeConnection("account-1", {
       schemaVersion: 1,
       type: "connection/create-api-key",
@@ -526,17 +671,24 @@ describe("Ollama Cloud User Contribution", () => {
       apiKey: "valid-key",
     });
 
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!connection?.generation) throw new Error("generation is missing");
     const first = await ollama.leaseModelCredential({
       accountId: "account-1",
       connectionId: created.connectionId,
       providerModelId: "glm-5.3-flash:cloud",
       effectId: "effect-1",
+      connectionGeneration: connection.generation,
     });
     const replay = await ollama.leaseModelCredential({
       accountId: "account-1",
       connectionId: created.connectionId,
       providerModelId: "glm-5.3-flash:cloud",
       effectId: "effect-1",
+      connectionGeneration: connection.generation,
     });
 
     expect(replay).toEqual(first);

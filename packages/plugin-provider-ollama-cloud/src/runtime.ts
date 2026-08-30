@@ -1,4 +1,5 @@
 import {
+  type Agent,
   LlmEffectNotStartedError,
   type LlmProvider,
   type NormalizedModelRequest,
@@ -8,9 +9,22 @@ import {
   openCredentialV1,
   parseCredentialKeyringV1,
 } from "@frockbot/connection-core";
-import { OpenAICompatibleProvider } from "@frockbot/provider-openai-compatible";
+import {
+  OpenAICompatibleHttpError,
+  OpenAICompatibleProvider,
+} from "@frockbot/provider-openai-compatible";
 import type { Plugin } from "cordis";
 import type { OllamaFetch } from "./client.js";
+
+declare module "cordis" {
+  interface Events {
+    "agent/model-outcome-committed": (
+      agent: Agent,
+      requestId: string,
+      outcome: "completed" | "not-started",
+    ) => Promise<void>;
+  }
+}
 
 export const OLLAMA_CLOUD_PROVIDER = "ollama-cloud";
 
@@ -19,30 +33,60 @@ export interface OllamaCloudRuntimeConfig {
   connectionId: string;
   packageId: "provider-ollama-cloud";
   credentialKeyring: string;
-  leaseCredential(effectId: string): Promise<CredentialLeaseV1>;
+  leaseCredential(
+    effectId: string,
+    expectedGeneration?: string,
+  ): Promise<CredentialLeaseV1>;
   settleCredential(effectId: string): Promise<void>;
   chatBaseUrl?: string;
   fetch?: OllamaFetch;
   now?: () => number;
 }
 
+interface AuthorizedRequest {
+  lease: CredentialLeaseV1;
+  apiKey: string;
+}
+
 class OllamaCloudProvider implements LlmProvider {
   readonly id = OLLAMA_CLOUD_PROVIDER;
   private readonly keyring;
+  private readonly authorized = new Map<string, AuthorizedRequest>();
 
   constructor(private readonly config: OllamaCloudRuntimeConfig) {
     this.keyring = parseCredentialKeyringV1(config.credentialKeyring);
   }
 
-  async *stream(request: NormalizedModelRequest, signal: AbortSignal) {
-    let lease: CredentialLeaseV1 | undefined;
-    let apiKey: string;
-    try {
-      lease = await this.config.leaseCredential(request.requestId);
-      if (Date.parse(lease.expiresAt) <= (this.config.now ?? Date.now)()) {
-        throw new Error("Ollama Cloud credential lease expired");
+  async authorize(request: NormalizedModelRequest): Promise<void> {
+    const expectedGeneration = request.modelBinding?.connectionGeneration;
+    if (!expectedGeneration) {
+      throw new LlmEffectNotStartedError(
+        "Ollama Cloud request is missing its Connection generation",
+      );
+    }
+    const existing = this.authorized.get(request.requestId);
+    if (existing) {
+      if (existing.lease.credentialGeneration !== expectedGeneration) {
+        throw new LlmEffectNotStartedError(
+          "Ollama Cloud request generation changed",
+        );
       }
-      apiKey = await openCredentialV1({
+      return;
+    }
+
+    let lease: CredentialLeaseV1 | undefined;
+    try {
+      lease = await this.config.leaseCredential(
+        request.requestId,
+        expectedGeneration,
+      );
+      if (
+        lease.credentialGeneration !== expectedGeneration ||
+        Date.parse(lease.expiresAt) <= (this.config.now ?? Date.now)()
+      ) {
+        throw new Error("Ollama Cloud credential lease is invalid");
+      }
+      const apiKey = await openCredentialV1({
         keyring: this.keyring,
         context: {
           accountId: this.config.accountId,
@@ -52,6 +96,7 @@ class OllamaCloudProvider implements LlmProvider {
         },
         envelope: lease.envelope,
       });
+      this.authorized.set(request.requestId, { lease, apiKey });
     } catch (error) {
       if (lease) {
         await this.config
@@ -64,25 +109,70 @@ class OllamaCloudProvider implements LlmProvider {
           : "Ollama Cloud credential is unavailable",
       );
     }
+  }
 
+  async settle(requestId: string): Promise<void> {
+    if (!this.authorized.has(requestId)) return;
+    try {
+      await this.config.settleCredential(requestId);
+      this.authorized.delete(requestId);
+    } catch {
+      return;
+    }
+  }
+
+  async *stream(request: NormalizedModelRequest, signal: AbortSignal) {
+    await this.authorize(request);
+    const authorization = this.authorized.get(request.requestId);
+    if (!authorization) {
+      throw new LlmEffectNotStartedError(
+        "Ollama Cloud request authorization is unavailable",
+      );
+    }
     const provider = new OpenAICompatibleProvider({
       baseUrl: this.config.chatBaseUrl ?? "https://ollama.com/v1",
-      apiKey,
+      apiKey: authorization.apiKey,
       providerId: this.id,
       fetch: this.config.fetch,
     });
-    yield* provider.stream(request, signal);
-    await this.config
-      .settleCredential(request.requestId)
-      .catch(() => undefined);
+    try {
+      yield* provider.stream(request, signal);
+    } catch (error) {
+      if (
+        error instanceof OpenAICompatibleHttpError &&
+        (error.status === 401 || error.status === 403)
+      ) {
+        throw new LlmEffectNotStartedError(error.message);
+      }
+      throw error;
+    }
   }
 }
 
 export function createOllamaCloudRuntimePlugin(
   config: OllamaCloudRuntimeConfig,
 ): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) =>
-    ctx.llm.register(new OllamaCloudProvider(config));
+  const plugin: Plugin.Function = (ctx) => {
+    const provider = new OllamaCloudProvider(config);
+    const disposeProvider = ctx.llm.register(provider);
+    const disposeAuthorization = ctx.on(
+      "agent/request",
+      async (_agent, _request, _signal, next) => {
+        const request = await next();
+        if (request.provider === provider.id) await provider.authorize(request);
+        return request;
+      },
+    );
+    const disposeSettlement = ctx.on(
+      "agent/model-outcome-committed",
+      async (_agent, requestId) => provider.settle(requestId),
+    );
+    return () => {
+      disposeSettlement();
+      disposeAuthorization();
+      disposeProvider();
+    };
+  };
   plugin.inject = ["llm"];
   return plugin;
 }

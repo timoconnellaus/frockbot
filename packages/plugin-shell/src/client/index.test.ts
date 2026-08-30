@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
+import {
+  initializeBotSettingsV1,
+  type UserSettingsViewV1,
+} from "@frockbot/configuration-core";
 import {
   decodePluginCatalog,
   projectCompletedRuns,
@@ -172,6 +175,55 @@ describe("Bot selection", () => {
     expect(requested).toEqual(["old", "new"]);
     expect(provided.value.activeBotId).toBe("new");
     expect(provided.value.botSettings?.botId).toBe("new");
+  });
+  test("labels an explicitly bound Ollama Bot by its provider", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const bot = {
+      ...initializeBotSettingsV1("ollama-bot"),
+      model: {
+        connectionId: "ollama-work",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+    };
+    const user: UserSettingsViewV1 = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [],
+      connections: [
+        {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          providerType: "ollama-cloud",
+          safeMetadata: {},
+        },
+      ],
+    };
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) =>
+          Promise.resolve(query.type === "user/get" ? user : bot),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = bot.botId;
+
+    await provided.value.loadBotSettings();
+    await provided.value.loadUserSettings();
+
+    expect(provided.value.modelLabel).toBe("Ollama Cloud · Dynamic Worker");
   });
 });
 

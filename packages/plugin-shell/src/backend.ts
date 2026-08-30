@@ -1071,13 +1071,23 @@ export class ShellBotBackendContribution {
         accountId: identity.userId,
         connectionId: binding.connection.connectionId,
         credentialKeyring,
-        leaseCredential: (effectId): Promise<CredentialLeaseV1> =>
-          userConfiguration.leaseModelCredential(
+        leaseCredential: (
+          effectId,
+          expectedGeneration,
+        ): Promise<CredentialLeaseV1> => {
+          if (!expectedGeneration) {
+            throw new Error(
+              "Model request Connection generation is unavailable",
+            );
+          }
+          return userConfiguration.leaseModelCredential(
             identity.userId,
             binding.connection!.connectionId,
             settings.model!.providerModelId,
             effectId,
-          ),
+            expectedGeneration,
+          );
+        },
         settleCredential: (effectId) =>
           userConfiguration.settleModelCredential(identity.userId, effectId),
       }),
@@ -1447,6 +1457,7 @@ export class ShellBotBackendContribution {
       connectionId: string,
       providerModelId: string,
       effectId: string,
+      connectionGeneration: string,
     ): Promise<CredentialLeaseV1>;
     settleModelCredential(userId: string, effectId: string): Promise<void>;
   } {
@@ -1511,6 +1522,7 @@ export class ShellBotBackendContribution {
         connectionId,
         providerModelId,
         effectId,
+        connectionGeneration,
       ) =>
         decodeCredentialLeaseV1(
           await rpc.leaseModelCredential({
@@ -1519,6 +1531,7 @@ export class ShellBotBackendContribution {
             connectionId,
             providerModelId,
             effectId,
+            connectionGeneration,
           }),
         ),
       settleModelCredential: (userId, effectId) =>

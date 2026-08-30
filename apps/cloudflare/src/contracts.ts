@@ -275,6 +275,7 @@ export interface UserConfigurationBinding {
     connectionId: string;
     providerModelId: string;
     effectId: string;
+    connectionGeneration: string;
   }): Promise<CredentialLeaseV1>;
   settleModelCredential(request: {
     schemaVersion: 1;

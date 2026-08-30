@@ -552,9 +552,24 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     }
   }
 
+  function updateModelLabel(): void {
+    const model = web.value.botSettings?.model;
+    const connection = web.value.userSettings?.connections.find(
+      (candidate) => candidate.connectionId === model?.connectionId,
+    );
+    web.value.modelLabel =
+      connection?.providerType === "ollama-cloud"
+        ? "Ollama Cloud · Dynamic Worker"
+        : connection
+          ? `${connection.displayName} · Dynamic Worker`
+          : model
+            ? "Connected model · Dynamic Worker"
+            : "Model not configured · Dynamic Worker";
+  }
+
   const web = ref<FrockBotWebData>({
     connection: "ready",
-    modelLabel: "Foundation · Dynamic Worker",
+    modelLabel: "Model not configured · Dynamic Worker",
     settingsAvailable: true,
     connectionsAvailable: ctx.transport.connectionsAvailable !== false,
     activeBotId: undefined,
@@ -598,6 +613,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )
           return;
         web.value.botSettings = settings;
+        updateModelLabel();
         web.value.settingsError = undefined;
         await deliverNotifications(botId, generation);
       } catch (error) {
@@ -682,6 +698,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         })) as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, settings);
         web.value.userSettings = settings;
+        updateModelLabel();
         web.value.settingsError = undefined;
       } catch (error) {
         web.value.settingsError =
@@ -725,6 +742,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         const userSettings = settings as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, userSettings);
         web.value.userSettings = userSettings;
+        updateModelLabel();
         web.value.settingsError = undefined;
       } catch (error) {
         web.value.settingsError =

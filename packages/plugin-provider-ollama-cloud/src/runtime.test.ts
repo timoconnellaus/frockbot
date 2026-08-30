@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type Agent,
   LlmEffectNotStartedError,
   LlmRegistry,
   type NormalizedModelRequest,
@@ -34,6 +35,10 @@ const request: NormalizedModelRequest = {
   system: "",
   messages: [{ role: "user", content: "hello" }],
   tools: [],
+  modelBinding: {
+    connectionId: "connection-1",
+    connectionGeneration: "generation-1",
+  },
 };
 
 describe("Ollama Cloud runtime Contribution", () => {
@@ -50,6 +55,7 @@ describe("Ollama Cloud runtime Contribution", () => {
       plaintext: "account-secret",
     });
     const authorizations: string[] = [];
+    const leasedGenerations: Array<string | undefined> = [];
     const settled: string[] = [];
     const root = new Context();
     await root.plugin(LlmRegistry);
@@ -60,8 +66,9 @@ describe("Ollama Cloud runtime Contribution", () => {
         packageId: "provider-ollama-cloud",
         credentialKeyring: keyringText,
         now: () => Date.parse("2026-08-30T00:00:00.000Z"),
-        leaseCredential: (effectId) =>
-          Promise.resolve({
+        leaseCredential: (effectId, expectedGeneration) => {
+          leasedGenerations.push(expectedGeneration);
+          return Promise.resolve({
             schemaVersion: 1,
             leaseId: "lease-1",
             effectId,
@@ -69,7 +76,8 @@ describe("Ollama Cloud runtime Contribution", () => {
             credentialGeneration: "generation-1",
             expiresAt: "2026-08-30T01:00:00.000Z",
             envelope,
-          }),
+          });
+        },
         settleCredential: (effectId) => {
           settled.push(effectId);
           return Promise.reject(new Error("settlement unavailable"));
@@ -92,11 +100,16 @@ describe("Ollama Cloud runtime Contribution", () => {
       }),
     );
 
-    const events = [];
-    for await (const event of root.llm.stream(
+    const signal = new AbortController().signal;
+    const authorizedRequest = await root.waterfall(
+      "agent/request",
+      {} as Agent,
       request,
-      new AbortController().signal,
-    )) {
+      signal,
+      () => Promise.resolve(request),
+    );
+    const events = [];
+    for await (const event of root.llm.stream(authorizedRequest, signal)) {
       events.push(event);
     }
 
@@ -105,6 +118,78 @@ describe("Ollama Cloud runtime Contribution", () => {
       { type: "finish", reason: "completed" },
     ]);
     expect(authorizations).toEqual(["Bearer account-secret"]);
+    expect(leasedGenerations).toEqual(["generation-1"]);
+    expect(settled).toEqual([]);
+    await root.serial(
+      "agent/model-outcome-committed",
+      {} as Agent,
+      request.requestId,
+      "completed",
+    );
+    expect(settled).toEqual(["effect-1"]);
+    await root.fiber.dispose();
+  });
+
+  test("settles definitive HTTP rejections after durable no-effect outcome", async () => {
+    const keyringText = serializedKeyring();
+    const envelope = await sealCredentialV1({
+      keyring: parseCredentialKeyringV1(keyringText),
+      context: {
+        accountId: "account-1",
+        connectionId: "connection-1",
+        packageId: "provider-ollama-cloud",
+        credentialGeneration: "generation-1",
+      },
+      plaintext: "account-secret",
+    });
+    const settled: string[] = [];
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createOllamaCloudRuntimePlugin({
+        accountId: "account-1",
+        connectionId: "connection-1",
+        packageId: "provider-ollama-cloud",
+        credentialKeyring: keyringText,
+        now: () => Date.parse("2026-08-30T00:00:00.000Z"),
+        leaseCredential: (effectId) =>
+          Promise.resolve({
+            schemaVersion: 1,
+            leaseId: "lease-1",
+            effectId,
+            connectionId: "connection-1",
+            credentialGeneration: "generation-1",
+            expiresAt: "2026-08-30T01:00:00.000Z",
+            envelope,
+          }),
+        settleCredential: (effectId) => {
+          settled.push(effectId);
+          return Promise.resolve();
+        },
+        fetch: () =>
+          Promise.resolve(new Response("unauthorized", { status: 401 })),
+      }),
+    );
+
+    let failure: unknown;
+    try {
+      for await (const event of root.llm.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        void event;
+      }
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect(settled).toEqual([]);
+    await root.serial(
+      "agent/model-outcome-committed",
+      {} as Agent,
+      request.requestId,
+      "not-started",
+    );
     expect(settled).toEqual(["effect-1"]);
     await root.fiber.dispose();
   });
