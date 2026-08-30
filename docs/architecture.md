@@ -38,8 +38,9 @@ Browser or sandboxed Electron renderer
                            ▼
 Cloudflare application gateway
 ┌─────────────────────────────────────────────────────────┐
-│ Authentication, application artifact, and DTO routing   │
+│ Authentication, immutable User application, DTO routing │
 │   ├── User Durable Object authority/storage/scheduling  │
+│   │   └── application revision ledger + rollback        │
 │   └── Bot Durable Object authority/storage/scheduling   │
 │       └── declared backend runtime Contributions        │
 │           ├── session + custom Agent-loop plugins       │
@@ -242,6 +243,10 @@ A Package manifest has a versioned FrockBot section that declares identity, comp
 
 One Package may contribute to several runtimes, but Cordis does not make that activation atomic. The Package catalog coordinates prepare, mount, commit, and rollback across roots. Disabling a Package first blocks new work, then drains and disposes Contributions in reverse dependency order.
 
+`@frockbot/plugin-package-publisher` is the first User-owned publication vertical slice. Every Bot mounts its runtime Contribution and may list, publish, or roll back the User's shared immutable application revisions. The Bot edits by whatever Computer mechanism is available in the fixed `/home/box/setup` Git repository; publication archives committed `HEAD`, reads `dist/application.mjs`, and carries that source snapshot, exact built application artifact, and required-check results in the durable command. The User Durable Object records a pending publication and durable recovery alarm before writing content-addressed source and artifact objects to R2, then loads those exact bytes through Worker Loader and requires a matching `/app-manifest` health response before changing the active hash. Failed checks or verification preserve the current active revision; command IDs replay durable receipts, and rollback changes the User-wide active revision through the same authenticated backend protocol used by the hosted and desktop clients. File-editing tools and editor choice are deliberately outside this Package.
+
+The current slice changes the User's hosted Dynamic Worker application, including its UI and gateway Contributions. It does not dynamically import user-authored Agent Contributions into the Bot Durable Object; Bot admission, session state, Agent execution, and runtime composition remain on the compiled foundation revision. Extending publication to Bot-runtime code must retain those authorities and add an enforceable trust boundary rather than moving the Agent loop into the Dynamic Worker.
+
 Computer behavior is split across three modules. `@frockbot/computer-core` defines the provider registry, durable workspace, process, browser, viewer, and control interfaces. `@frockbot/plugin-computer` owns provider-neutral tools, prompt policy, reactive state, and the trusted viewer UI. Provider Packages register adapters; consumers resolve the selected provider using persistent User and Bot identity and never import provider SDKs.
 
 `@frockbot/plugin-fly-sprite` is the first Computer provider Package. It maps persistent Bot identity to a deterministic private workspace, Package-data directories, Chromium profile, X display, CDP port, VNC port, and `flock`-serialized takeover lease. Generic process and browser calls cross the Computer interface; memory uses the durable workspace interface and remains writable during human takeover. Each Bot receives a distinct Sprite; a separate non-viewer Sprite stores User-scoped Package files such as global memory. A Bot-local websockify `TokenFile` gateway routes opaque viewer tokens to loopback VNC ports. The Sprites token remains provider-local. Strong isolation depends on the provider's VM and network enforcement rather than Cordis or directory naming. Heartbeat loss re-shields the viewer, and expired leases can be atomically reclaimed after a crash.
@@ -268,7 +273,7 @@ Bot admission, Agent execution, session-event persistence, recovery alarms, and 
 | Reviewed third-party    | Separate host process where possible | Dedicated runtime/container according to permissions | Direct only when explicitly trusted; otherwise sandbox view |
 | Generated or unreviewed | Never                                | Quarantine process/container only                    | Sandbox view only                                           |
 
-A permission manifest improves review and routing but is not enforcement. Enforcement requires the selected process, container, operating-system, credential-broker, and frame policies to deny undeclared actions.
+A permission manifest improves review and routing but is not enforcement. Enforcement requires the selected process, container, operating-system, credential-broker, and frame policies to deny undeclared actions. Published User application artifacts run in per-hash Worker Loader isolates with only the injected deployment identity and User-scoped Bot-state binding; publication health verification does not promote their code into the Bot Durable Object. Public network egress is intentionally available to these application artifacts, while platform secrets are not injected into their module map.
 
 Cordis `ctx.isolate()` is not used as a security boundary. Until upstream issue #72 is resolved or excluded by a regression test, FrockBot also avoids relying on bare isolated-context disposal for critical ownership.
 
@@ -298,8 +303,8 @@ Package boundaries may be consolidated when two modules do not vary independentl
 
 1. The browser loads the hosted application directly, or Electron validates the configured application origin before creating its sandboxed hosted window.
 2. The hosted client authenticates against the configured auth origin and exchanges only versioned DTOs with the Cloudflare gateway.
-3. The gateway routes User configuration work to the User Durable Object and Bot work to the selected Bot Durable Object.
-4. Each Durable Object mounts declared backend Contributions in its host-owned runtime context.
+3. The gateway resolves the User's active immutable application hash, loads that application through Worker Loader, routes User configuration and publication work to the User Durable Object, and routes Bot work to the selected Bot Durable Object.
+4. Each Durable Object mounts declared built-in backend Contributions in its host-owned runtime context; published User application code remains outside those authoritative contexts.
 5. The Bot host durably admits a Turn before its Agent-loop Plugin crosses a model or tool effect boundary.
 6. Browser and native observers project the same durable run and session state; disconnecting an observer does not cancel the Turn.
 7. Native authentication handoff, deep links, notifications, clipboard, and file selection remain optional enhancements at decoded platform seams.
@@ -319,5 +324,6 @@ The production composition is accepted only when automated tests demonstrate:
 - side-effecting tools being journaled before execution and never implicitly retried after interruption;
 - recovery resuming completed model journals while retaining genuinely uncertain effects for reconciliation;
 - explicit authenticated cancellation leaving no unmatched tool call or open turn;
+- publication intent preceding artifact writes, exact-artifact health verification, active-revision preservation after failure, idempotent command replay, and authenticated User-wide rollback;
 - package activation rollback after failure in any contribution;
 - packaged Electron startup without Bun installed and clear failure when required hosted configuration is absent.

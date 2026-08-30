@@ -378,6 +378,24 @@ class MemoryConfiguration
       registered: true,
     });
   }
+  readPackageRevisions() {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      revision: 0,
+      revisions: [],
+    });
+  }
+  publishPackage(): Promise<never> {
+    return Promise.reject(
+      new Error("publication is not configured in this test"),
+    );
+  }
+  rollbackPackage(): Promise<never> {
+    return Promise.reject(new Error("rollback is not configured in this test"));
+  }
+  activeApplicationHash(): Promise<undefined> {
+    return Promise.resolve(undefined);
+  }
   readSheep(request: Parameters<BotConfigurationBinding["readSheep"]>[0]) {
     return Promise.resolve({
       schemaVersion: 1 as const,
@@ -838,9 +856,9 @@ describe("Cloudflare user application gateway", () => {
     expect(wire).not.toContain("input/queued");
     expect(wire).not.toContain('"input"');
     expect(new Set(loader.ids)).toEqual(new Set(["alice:foundation-v1"]));
-    expect(loader.codes.every((code) => code.globalOutbound === null)).toBe(
-      true,
-    );
+    expect(
+      loader.codes.every((code) => code.globalOutbound === undefined),
+    ).toBe(true);
     expect(Object.keys(loader.codes[0]?.env ?? {}).sort()).toEqual([
       "BOT_STATE",
       "DEPLOYMENT",

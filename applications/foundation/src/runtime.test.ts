@@ -41,11 +41,12 @@ describe("foundation application", () => {
       "memory",
       "mobile-clipboard",
       "mobile-notifications",
+      "package-publisher",
       "provider-foundation",
       "settings",
     ]);
     expect(first.contributions).toEqual({
-      backend: ["shell", "flock", "settings"],
+      backend: ["shell", "flock", "package-publisher", "settings"],
       runtime: [
         "clock",
         "computer",
@@ -53,6 +54,7 @@ describe("foundation application", () => {
         "fly-sprite",
         "identity",
         "memory",
+        "package-publisher",
         "provider-foundation",
       ],
       client: [
@@ -62,6 +64,7 @@ describe("foundation application", () => {
         "clock",
         "computer",
         "flock",
+        "package-publisher",
         "settings",
       ],
       desktop: [
@@ -136,10 +139,14 @@ describe("foundation application", () => {
         }),
       readSheep: () => Promise.reject(new Error("not used while composing")),
       updateSheep: () => Promise.reject(new Error("not used while composing")),
+      read: () =>
+        Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
+      publish: () => Promise.reject(new Error("not used while composing")),
+      rollback: () => Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions.map((contribution) => contribution.packageId),
-    ).toEqual(["flock"]);
+    ).toEqual(["flock", "package-publisher"]);
     interface TestContribution {
       specifier: string;
       executeConfiguration?(): void;
@@ -158,7 +165,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(2);
+    expect(userBackend.contributions).toHaveLength(3);
     expect(typeof botBackend.contributions[0]?.executeConfiguration).toBe(
       "function",
     );
@@ -181,8 +188,18 @@ describe("foundation application", () => {
           requestedSecrets.push(name);
           return undefined;
         },
+        packagePublisher: {
+          read: () =>
+            Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
+          publish: () => Promise.reject(new Error("not used while composing")),
+          rollback: () => Promise.reject(new Error("not used while composing")),
+        },
       }).map((pkg) => pkg.specifier),
-    ).toEqual(["@frockbot/plugin-fly-sprite", "@frockbot/plugin-computer"]);
+    ).toEqual([
+      "@frockbot/plugin-package-publisher",
+      "@frockbot/plugin-fly-sprite",
+      "@frockbot/plugin-computer",
+    ]);
     expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
 
     const assignment = {

@@ -25,6 +25,12 @@ import type {
   UpdateSheepCommandV1,
 } from "@frockbot/plugin-flock/shared";
 import type {
+  PackagePublicationReceiptV1,
+  PackageRevisionHistoryV1,
+  PublishPackageCommandV1,
+  RollbackPackageCommandV1,
+} from "@frockbot/plugin-package-publisher/shared";
+import type {
   ClientRunLookupQueryV1,
   ClientRunLookupV1,
   ClientRunListQueryV1,
@@ -176,7 +182,7 @@ export interface WorkerCode {
   compatibilityDate: string;
   mainModule: string;
   modules: Record<string, string | { js: string }>;
-  globalOutbound: null;
+  globalOutbound?: null;
   env: UserApplicationEnv;
   limits?: {
     cpuMs?: number;
@@ -255,6 +261,24 @@ export interface UserConfigurationBinding {
   executeConfiguration(
     request: UserConfigurationExecuteRpcV1,
   ): Promise<OperationReceiptV1>;
+  readPackageRevisions(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<PackageRevisionHistoryV1>;
+  publishPackage(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: PublishPackageCommandV1;
+  }): Promise<PackagePublicationReceiptV1>;
+  rollbackPackage(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: RollbackPackageCommandV1;
+  }): Promise<PackagePublicationReceiptV1>;
+  activeApplicationHash(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<string | undefined>;
 }
 
 export interface BotConfigurationBinding {

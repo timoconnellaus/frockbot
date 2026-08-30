@@ -26,6 +26,7 @@
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
+    "@frockbot/plugin-package-publisher": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "better-auth": "1.7.2",
     "cordis": "4.0.0-rc.8",

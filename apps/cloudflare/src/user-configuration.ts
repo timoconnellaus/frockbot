@@ -13,9 +13,19 @@ import {
 } from "@frockbot/plugin-flock/user";
 import { decodeCreateBotCommandV1 } from "@frockbot/plugin-flock/shared";
 import {
+  createPackagePublisherUserPlugin,
+  type PackagePublisherUserContribution,
+} from "@frockbot/plugin-package-publisher/user";
+import {
+  decodePublishPackageCommandV1,
+  decodeRollbackPackageCommandV1,
+} from "@frockbot/plugin-package-publisher/shared";
+import {
   createUserSettingsBackendPlugin,
   type UserSettingsBackendContribution,
 } from "@frockbot/plugin-settings/user";
+import type { WorkerLoader } from "./contracts.js";
+import { createPackagePublicationHost } from "./package-publication.js";
 import {
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -23,26 +33,31 @@ import {
   rpcIdentifier,
 } from "./durable-rpc.js";
 
-export class UserConfiguration extends DurableObject {
-  private mounted:
-    | Promise<{
-        settings: UserSettingsBackendContribution;
-        flock: FlockUserBackendContribution;
-        dispose(): Promise<void>;
-      }>
-    | undefined;
+interface UserConfigurationEnv {
+  APPLICATION_ARTIFACTS: R2Bucket;
+  USER_APPLICATIONS: WorkerLoader;
+}
 
-  private contributions(): Promise<{
-    settings: UserSettingsBackendContribution;
-    flock: FlockUserBackendContribution;
-    dispose(): Promise<void>;
-  }> {
+interface UserContributions {
+  settings: UserSettingsBackendContribution;
+  flock: FlockUserBackendContribution;
+  publisher: PackagePublisherUserContribution;
+  dispose(): Promise<void>;
+}
+
+export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
+  private mounted: Promise<UserContributions> | undefined;
+
+  private contributions(): Promise<UserContributions> {
     if (!this.mounted) {
       this.mounted = compileFoundationApplication().then(async (plan) => {
         let settings: UserSettingsBackendContribution | undefined;
         let flock: FlockUserBackendContribution | undefined;
+        let publisher: PackagePublisherUserContribution | undefined;
         const mounted = await createFoundationBackendContributions<
-          UserSettingsBackendContribution | FlockUserBackendContribution
+          | UserSettingsBackendContribution
+          | FlockUserBackendContribution
+          | PackagePublisherUserContribution
         >(plan, {
           backendHost: "user",
           resolve: (specifier, lifecycle) => {
@@ -58,6 +73,17 @@ export class UserConfiguration extends DurableObject {
                 {
                   mount(value: UserSettingsBackendContribution) {
                     settings = value;
+                    return lifecycle.mount(value);
+                  },
+                },
+              );
+            }
+            if (specifier === "@frockbot/plugin-package-publisher/user") {
+              return createPackagePublisherUserPlugin(
+                createPackagePublicationHost(this.env, this.ctx.storage),
+                {
+                  mount(value: PackagePublisherUserContribution) {
+                    publisher = value;
                     return lifecycle.mount(value);
                   },
                 },
@@ -87,13 +113,18 @@ export class UserConfiguration extends DurableObject {
             throw new Error(`Unsupported User Contribution: ${specifier}`);
           },
         });
-        if (!settings || !flock || mounted.contributions.length !== 2) {
+        if (
+          !settings ||
+          !flock ||
+          !publisher ||
+          mounted.contributions.length !== 3
+        ) {
           await mounted.dispose();
           throw new Error(
-            "Foundation requires Settings and Flock User backend Contributions",
+            "Foundation requires Settings, Flock, and Package Publisher User backend Contributions",
           );
         }
-        return { settings, flock, dispose: mounted.dispose };
+        return { settings, flock, publisher, dispose: mounted.dispose };
       });
     }
     return this.mounted;
@@ -105,6 +136,10 @@ export class UserConfiguration extends DurableObject {
 
   private async flockContribution(): Promise<FlockUserBackendContribution> {
     return (await this.contributions()).flock;
+  }
+
+  private async publisherContribution(): Promise<PackagePublisherUserContribution> {
+    return (await this.contributions()).publisher;
   }
 
   async readConfiguration(input: unknown) {
@@ -169,6 +204,46 @@ export class UserConfiguration extends DurableObject {
       request.userId as string,
       request.packageId as string,
     );
+  }
+
+  async readPackageRevisions(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.publisherContribution()).read();
+  }
+
+  async publishPackage(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodePublishPackageCommandV1),
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    return (await this.publisherContribution()).publish(
+      userId,
+      request.command as ReturnType<typeof decodePublishPackageCommandV1>,
+    );
+  }
+
+  async rollbackPackage(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeRollbackPackageCommandV1),
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.publisherContribution()).rollback(
+      request.command as ReturnType<typeof decodeRollbackPackageCommandV1>,
+    );
+  }
+
+  async activeApplicationHash(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.publisherContribution()).activeApplicationHash();
+  }
+
+  async alarm(): Promise<void> {
+    await (await this.publisherContribution()).recover();
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {

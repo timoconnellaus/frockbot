@@ -18,8 +18,11 @@ import {
   resolveBotExecutionPlanV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import { createFoundationAssignedRuntimePackages } from "@frockbot/application-foundation/runtime";
-import { createFoundationHostedRuntimePackages } from "@frockbot/application-foundation/runtime";
+import {
+  createFoundationAssignedRuntimePackages,
+  createFoundationHostedRuntimePackages,
+  type PackagePublisherAgentHost,
+} from "@frockbot/application-foundation/runtime";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 import {
   settleAssignmentSaga,
@@ -1017,6 +1020,22 @@ export class ShellBotBackendContribution {
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
         readSecret,
+        packagePublisher: {
+          read: () =>
+            this.userConfiguration(identity).readPackageRevisions(
+              identity.userId,
+            ),
+          publish: (command) =>
+            this.userConfiguration(identity).publishPackage(
+              identity.userId,
+              command,
+            ),
+          rollback: (command) =>
+            this.userConfiguration(identity).rollbackPackage(
+              identity.userId,
+              command,
+            ),
+        },
       }),
       ...(await createFoundationAssignedRuntimePackages(
         application,
@@ -1353,6 +1372,17 @@ export class ShellBotBackendContribution {
       schemaVersion: 1;
       userId: string;
     }): Promise<UserSettingsViewV1>;
+    readPackageRevisions(
+      userId: string,
+    ): ReturnType<PackagePublisherAgentHost["read"]>;
+    publishPackage(
+      userId: string,
+      command: Parameters<PackagePublisherAgentHost["publish"]>[0],
+    ): ReturnType<PackagePublisherAgentHost["publish"]>;
+    rollbackPackage(
+      userId: string,
+      command: Parameters<PackagePublisherAgentHost["rollback"]>[0],
+    ): ReturnType<PackagePublisherAgentHost["rollback"]>;
     getConnection(
       userId: string,
       connectionId: string,
@@ -1381,6 +1411,15 @@ export class ShellBotBackendContribution {
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+      readPackageRevisions(
+        input: unknown,
+      ): ReturnType<PackagePublisherAgentHost["read"]>;
+      publishPackage(
+        input: unknown,
+      ): ReturnType<PackagePublisherAgentHost["publish"]>;
+      rollbackPackage(
+        input: unknown,
+      ): ReturnType<PackagePublisherAgentHost["rollback"]>;
       getConnection(input: unknown): Promise<ConnectionView | undefined>;
       claimConnectionDependency(input: unknown): Promise<boolean>;
       acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
@@ -1388,6 +1427,12 @@ export class ShellBotBackendContribution {
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
+      readPackageRevisions: (userId) =>
+        rpc.readPackageRevisions({ schemaVersion: 1, userId }),
+      publishPackage: (userId, command) =>
+        rpc.publishPackage({ schemaVersion: 1, userId, command }),
+      rollbackPackage: (userId, command) =>
+        rpc.rollbackPackage({ schemaVersion: 1, userId, command }),
       getConnection: (userId, connectionId) =>
         rpc.getConnection({ schemaVersion: 1, userId, connectionId }),
       claimConnectionDependency: (

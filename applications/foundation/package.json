@@ -34,6 +34,7 @@
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-mobile-clipboard": "workspace:*",
     "@frockbot/plugin-mobile-notifications": "workspace:*",
+    "@frockbot/plugin-package-publisher": "workspace:*",
     "@frockbot/plugin-provider-foundation": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",

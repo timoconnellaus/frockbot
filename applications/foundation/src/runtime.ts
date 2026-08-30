@@ -62,6 +62,18 @@ import identityManifest from "@frockbot/plugin-identity/manifest";
 import memoryManifest from "@frockbot/plugin-memory/manifest";
 import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
 import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
+import packagePublisherManifest from "@frockbot/plugin-package-publisher/manifest";
+import {
+  createPackagePublisherAgentPlugin,
+  type PackagePublisherAgentHost,
+} from "@frockbot/plugin-package-publisher/agent";
+export type { PackagePublisherAgentHost } from "@frockbot/plugin-package-publisher/agent";
+import {
+  createPackagePublisherBackendContribution,
+  type PackagePublisherGatewayHost,
+} from "@frockbot/plugin-package-publisher/backend"; // built-in publication Contribution
+const createPackagePublisherGatewayPlugin =
+  createPackagePublisherBackendContribution.plugin;
 import foundationProviderManifest from "@frockbot/plugin-provider-foundation/manifest";
 import foundationProviderPlugin, {
   FOUNDATION_MODEL,
@@ -85,6 +97,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
+  ["@frockbot/plugin-package-publisher", packagePublisherManifest],
   ["@frockbot/plugin-clock", clockManifest],
   ["@frockbot/plugin-computer", computerManifest],
   ["@frockbot/plugin-desktop-clipboard", clipboardManifest],
@@ -173,7 +186,8 @@ export interface MountedFoundationBackend<T> {
 /** Mount every declared backend Contribution into one owned Cordis root. */
 export async function createFoundationBackendContributions(
   plan: ApplicationPlan,
-  host: { backendHost: "gateway" } & FlockGatewayHost,
+  host: { backendHost: "gateway" } & FlockGatewayHost &
+    PackagePublisherGatewayHost,
 ): Promise<MountedFoundationBackend<BackendRouteContribution>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
@@ -182,7 +196,8 @@ export async function createFoundationBackendContributions<T>(
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host:
-    | ({ backendHost: "gateway" } & FlockGatewayHost)
+    | ({ backendHost: "gateway" } & FlockGatewayHost &
+        PackagePublisherGatewayHost)
     | FoundationBackendPluginHost<T>,
 ): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
   const root = new Context();
@@ -212,6 +227,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-flock/backend"
         ) {
           plugin = createFlockGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-package-publisher/backend"
+        ) {
+          plugin = createPackagePublisherGatewayPlugin(host, lifecycle);
         } else if (host.backendHost === "gateway") {
           throw new Error(
             `unknown foundation backend contribution: ${specifier}`,
@@ -267,9 +287,18 @@ export function createFoundationHostedRuntimePackages(
   host: {
     userId: string;
     readSecret(name: string): string | undefined;
+    packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
+    runtimePackage(
+      plan,
+      "package-publisher",
+      createPackagePublisherAgentPlugin(host.packagePublisher, {
+        userId: host.userId,
+        defaultProviderId: "fly-sprite",
+      }),
+    ),
     runtimePackage(
       plan,
       "fly-sprite",
@@ -339,6 +368,8 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Computer providers require host authority and are added only by a capable runtime.
   runtimeIds.delete("computer");
   runtimeIds.delete("fly-sprite");
+  // Package publication is mounted with the current User's durable host.
+  runtimeIds.delete("package-publisher");
   // Composio mounts only after durable Connections resolve its backend config.
   runtimeIds.delete("composio");
   return {

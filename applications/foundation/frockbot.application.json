@@ -37,6 +37,11 @@
       "grants": []
     },
     {
+      "specifier": "@frockbot/plugin-package-publisher",
+      "version": "0.0.1",
+      "grants": ["package:publish"]
+    },
+    {
       "specifier": "@frockbot/plugin-flock",
       "version": "0.0.1",
       "grants": []
