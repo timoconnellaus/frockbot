@@ -201,6 +201,7 @@ describe("foundation application", () => {
         profile: { name: "Primary" },
         notifications: { enabled: false },
         assignments: [assignment],
+        assignmentOperations: [],
       },
       {
         schemaVersion: 1,

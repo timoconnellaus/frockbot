@@ -362,15 +362,37 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   return value.packages.flatMap((candidate) => {
     if (!isRecord(candidate) || !isRecord(candidate.configuration)) return [];
     const connectionTypes = candidate.configuration.connectionTypes;
-    if (!Array.isArray(connectionTypes) || connectionTypes.length === 0) {
-      return [];
+    const capabilities = candidate.configuration.capabilities;
+    if (!Array.isArray(connectionTypes) || !Array.isArray(capabilities)) {
+      throw new Error("Application configuration metadata is invalid");
     }
+    if (connectionTypes.length === 0 && capabilities.length === 0) return [];
     if (
       typeof candidate.id !== "string" ||
       typeof candidate.version !== "string"
     ) {
       throw new Error("Application Package metadata is invalid");
     }
+    const decodedCapabilities = capabilities.map((capability) => {
+      if (
+        !isRecord(capability) ||
+        typeof capability.id !== "string" ||
+        (capability.kind !== "model" &&
+          capability.kind !== "tool" &&
+          capability.kind !== "memory" &&
+          capability.kind !== "notification" &&
+          capability.kind !== "computer") ||
+        !Array.isArray(capability.connectionTypes) ||
+        !capability.connectionTypes.every((item) => typeof item === "string")
+      ) {
+        throw new Error("Application Capability metadata is invalid");
+      }
+      return {
+        id: capability.id,
+        kind: capability.kind as PluginCatalogItem["capabilities"][number]["kind"],
+        connectionTypes: capability.connectionTypes as string[],
+      };
+    });
     const decodedConnections = connectionTypes.map((connection) => {
       if (
         !isRecord(connection) ||
@@ -404,6 +426,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
             ? candidate.displayName
             : candidate.id,
         version: candidate.version,
+        capabilities: decodedCapabilities,
         connectionTypes: decodedConnections,
       },
     ];
@@ -705,6 +728,54 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         botId,
         expectedRevision: current.revision,
         notifications,
+      });
+      await web.value.loadBotSettings();
+    },
+    async assignCapability(assignment): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/assign-capability",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        assignment,
+      });
+      await web.value.loadBotSettings();
+    },
+    async replaceCapability(assignment): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/replace-capability",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        assignment,
+      });
+      await web.value.loadBotSettings();
+    },
+    async unassignCapability(assignmentId): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/unassign-capability",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        assignmentId,
       });
       await web.value.loadBotSettings();
     },

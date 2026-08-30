@@ -1,66 +1,113 @@
 import { describe, expect, test } from "bun:test";
 import {
-  settleAssignmentSaga,
-  type AssignmentSagaEffects,
+  nextAssignmentPhase,
+  requireStoredAssignmentSaga,
   type StoredAssignmentSaga,
 } from "./backend-assignment.js";
 
-function saga(phase: StoredAssignmentSaga["phase"]): StoredAssignmentSaga {
+function saga(
+  phase: StoredAssignmentSaga["phase"],
+  input: Partial<StoredAssignmentSaga> = {},
+): StoredAssignmentSaga {
   return {
     schemaVersion: 1,
     commandId: "command-1",
     commandFingerprint: "configuration-command-v1:test",
     userId: "user-1",
     botId: "bot-1",
-    connectionId: "connection-1",
+    operation: "replacing",
+    assignmentId: "mail",
     generation: "generation-1",
     phase,
+    target: {
+      assignmentId: "mail",
+      packageId: "mail",
+      capabilityId: "send",
+      connectionId: "new-connection",
+    },
+    previous: {
+      assignmentId: "mail",
+      packageId: "mail",
+      capabilityId: "send",
+      connectionId: "old-connection",
+      state: "enabled",
+    },
+    previousGeneration: "old-generation",
     deadlineAt: Date.now() + 60_000,
-  };
-}
-
-function effects(log: string[], acknowledge = true): AssignmentSagaEffects {
-  return {
-    acknowledge: () => {
-      log.push("acknowledge");
-      return Promise.resolve(acknowledge);
-    },
-    compensate: () => {
-      log.push("compensate");
-      return Promise.resolve();
-    },
-    rejectCommitted: () => {
-      log.push("reject-committed");
-      return Promise.resolve();
+    ...input,
+    acceptedReceipt: input.acceptedReceipt ?? {
+      schemaVersion: 1,
+      commandId: "command-1",
+      revision: 0,
+      status: "pending",
     },
   };
 }
 
-describe("assignment saga settlement", () => {
-  test("compensates a dependency claim interrupted before Bot commit", async () => {
-    const log: string[] = [];
-
-    await expect(
-      settleAssignmentSaga(saga("claiming"), effects(log)),
-    ).resolves.toBe("compensated");
-    expect(log).toEqual(["compensate"]);
+describe("Assignment saga transitions", () => {
+  test("orders Replace as claim, commit, acknowledge, release", () => {
+    const committed = nextAssignmentPhase(saga("claiming"), "claimed")!;
+    const acknowledged = nextAssignmentPhase(committed, "committed")!;
+    const releasing = nextAssignmentPhase(acknowledged, "acknowledged")!;
+    expect([committed.phase, acknowledged.phase, releasing.phase]).toEqual([
+      "committing",
+      "acknowledging",
+      "releasing",
+    ]);
+    expect(nextAssignmentPhase(releasing, "released")).toBeUndefined();
   });
 
-  test("acknowledges a dependency after its Bot commit", async () => {
-    const log: string[] = [];
-
-    await expect(
-      settleAssignmentSaga(saga("committed"), effects(log)),
-    ).resolves.toBe("acknowledged");
-    expect(log).toEqual(["acknowledge"]);
+  test("finishes a connection-free Assign after commit", () => {
+    expect(
+      nextAssignmentPhase(
+        saga("committing", {
+          operation: "assigning",
+          target: {
+            assignmentId: "clock",
+            packageId: "clock",
+            capabilityId: "time",
+          },
+          previous: undefined,
+          previousGeneration: undefined,
+        }),
+        "committed",
+      ),
+    ).toBeUndefined();
   });
 
-  test("rejects a committed Bot assignment when acknowledgement loses a race", async () => {
-    const log: string[] = [];
+  test("strictly decodes durable saga state", () => {
+    expect(requireStoredAssignmentSaga(saga("claiming"))).toMatchObject({
+      operation: "replacing",
+      phase: "claiming",
+    });
+    expect(() =>
+      requireStoredAssignmentSaga({ ...saga("claiming"), extra: true }),
+    ).toThrow("invalid fields");
+    const hidden = saga("claiming") as StoredAssignmentSaga & { hidden?: true };
+    Object.defineProperty(hidden, "hidden", { value: true });
+    expect(() => requireStoredAssignmentSaga(hidden)).toThrow("invalid fields");
+    expect(() =>
+      requireStoredAssignmentSaga({
+        ...saga("claiming"),
+        [Symbol("extra")]: true,
+      }),
+    ).toThrow("invalid fields");
+    expect(() =>
+      requireStoredAssignmentSaga({
+        ...saga("claiming"),
+        acceptedReceipt: {
+          schemaVersion: 1,
+          commandId: "command-1",
+          revision: 0,
+          status: "applied",
+        },
+      }),
+    ).toThrow("accepted receipt is invalid");
+  });
 
-    await expect(
-      settleAssignmentSaga(saga("committed"), effects(log, false)),
-    ).resolves.toBe("rejected");
-    expect(log).toEqual(["acknowledge", "reject-committed"]);
+  test("rejects out-of-order advancement", () => {
+    expect(() => nextAssignmentPhase(saga("claiming"), "released")).toThrow(
+      "cannot apply released while claiming",
+    );
   });
 });

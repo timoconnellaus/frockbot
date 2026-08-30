@@ -58,6 +58,37 @@ afterEach(() => {
 describe("application manifest protocol", () => {
   test("requires the owned manifest response version", () => {
     expect(decodePluginCatalog({ schemaVersion: 1, packages: [] })).toEqual([]);
+    expect(
+      decodePluginCatalog({
+        schemaVersion: 1,
+        packages: [
+          {
+            id: "mail",
+            version: "1.0.0",
+            displayName: "Mail",
+            configuration: {
+              capabilities: [
+                { id: "send", kind: "tool", connectionTypes: ["oauth"] },
+              ],
+              connectionTypes: [
+                {
+                  id: "oauth",
+                  displayName: "Mail OAuth",
+                  allowMultiple: true,
+                  authorization: { kind: "oauth2" },
+                  capabilities: ["send"],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toMatchObject([
+      {
+        packageId: "mail",
+        capabilities: [{ id: "send", kind: "tool" }],
+      },
+    ]);
     for (const manifest of [
       { packages: [] },
       { schemaVersion: 2, packages: [] },
@@ -114,6 +145,66 @@ describe("composer hydration context", () => {
     expect(provided.value.composerContext).toBeUndefined();
     expect(provided.value.activeBotId).toBeUndefined();
     expect(provided.value.botSettings).toBeUndefined();
+  });
+});
+
+describe("hosted Assignment commands", () => {
+  test("uses distinct atomic Assign, Replace, and Unassign commands", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const commands: unknown[] = [];
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: () =>
+          Promise.resolve(initializeBotSettingsV1("primary")),
+        executeConfiguration: (command) => {
+          commands.push(command);
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            revision: command.expectedRevision + 1,
+            status: "applied",
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    provided.value.botSettings = initializeBotSettingsV1("primary");
+    const assignment = {
+      assignmentId: "mail",
+      packageId: "mail",
+      capabilityId: "send",
+      connectionId: "mail-1",
+    };
+    await provided.value.assignCapability(assignment);
+    provided.value.botSettings = {
+      ...initializeBotSettingsV1("primary"),
+      revision: 1,
+    };
+    await provided.value.replaceCapability(assignment);
+    provided.value.botSettings = {
+      ...initializeBotSettingsV1("primary"),
+      revision: 2,
+    };
+    await provided.value.unassignCapability("mail");
+    expect(commands).toMatchObject([
+      { type: "bot/assign-capability", expectedRevision: 0, assignment },
+      { type: "bot/replace-capability", expectedRevision: 1, assignment },
+      {
+        type: "bot/unassign-capability",
+        expectedRevision: 2,
+        assignmentId: "mail",
+      },
+    ]);
   });
 });
 

@@ -117,6 +117,7 @@ class MemoryBotState implements BotStateBinding {
         profile: { name: "Internal Bot configuration" },
         notifications: { enabled: false },
         assignments: [],
+        assignmentOperations: [],
       },
       previousEventCount: previousEvents.length,
     };
@@ -278,6 +279,7 @@ class MemoryConfiguration
       profile: { name: query.botId },
       notifications: { enabled: false },
       assignments: [],
+      assignmentOperations: [],
     };
     this.bots.set(query.botId, current);
     return Promise.resolve(current);
@@ -308,16 +310,23 @@ class MemoryConfiguration
             ? { notifications: command.notifications }
             : command.type === "bot/select-model"
               ? { model: command.model }
-              : {
-                  assignments: [
-                    ...bot.assignments.filter(
+              : command.type === "bot/unassign-capability"
+                ? {
+                    assignments: bot.assignments.filter(
                       (assignment) =>
-                        assignment.assignmentId !==
-                        command.assignment.assignmentId,
+                        assignment.assignmentId !== command.assignmentId,
                     ),
-                    { ...command.assignment, state: "enabled" as const },
-                  ],
-                }),
+                  }
+                : {
+                    assignments: [
+                      ...bot.assignments.filter(
+                        (assignment) =>
+                          assignment.assignmentId !==
+                          command.assignment.assignmentId,
+                      ),
+                      { ...command.assignment, state: "enabled" as const },
+                    ],
+                  }),
       });
     } else {
       const user = current as UserSettingsViewV1;
@@ -787,6 +796,44 @@ describe("Cloudflare user application gateway", () => {
         },
       ],
     });
+
+    for (const command of [
+      {
+        schemaVersion: 1,
+        type: "bot/replace-capability",
+        commandId: "replace-gmail-1",
+        botId: "primary",
+        expectedRevision: 1,
+        assignment: {
+          assignmentId: "gmail-primary",
+          packageId: "composio",
+          capabilityId: "gmail-tools",
+          connectionId: "connection-gmail-2",
+        },
+      },
+      {
+        schemaVersion: 1,
+        type: "bot/unassign-capability",
+        commandId: "unassign-gmail-1",
+        botId: "primary",
+        expectedRevision: 2,
+        assignmentId: "gmail-primary",
+      },
+    ]) {
+      const response = await gateway(
+        request("/api/bots/primary/settings", "alice", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(command),
+        }),
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(
+      await (
+        await gateway(request("/api/bots/primary/settings", "alice"))
+      ).json(),
+    ).toMatchObject({ revision: 3, assignments: [] });
   });
 
   test("replays and acknowledges durable Bot notification intents", async () => {

@@ -4,6 +4,7 @@ import type {
   BotNotificationPolicy,
   BotProfile,
   BotSettingsViewV1,
+  CapabilityAssignmentView,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { InjectionKey, Ref } from "vue";
@@ -49,6 +50,11 @@ export interface PluginCatalogItem {
   packageId: string;
   displayName: string;
   version: string;
+  capabilities: Array<{
+    id: string;
+    kind: "model" | "tool" | "memory" | "notification" | "computer";
+    connectionTypes: string[];
+  }>;
   connectionTypes: Array<{
     id: string;
     displayName: string;
@@ -77,6 +83,13 @@ export interface FrockBotWebData {
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;
+  assignCapability(
+    assignment: Omit<CapabilityAssignmentView, "state">,
+  ): Promise<void>;
+  replaceCapability(
+    assignment: Omit<CapabilityAssignmentView, "state">,
+  ): Promise<void>;
+  unassignCapability(assignmentId: string): Promise<void>;
   loadUserSettings(): Promise<void>;
   saveUserProfile(profile: { name: string; email?: string }): Promise<void>;
   loadPluginCatalog(): Promise<void>;

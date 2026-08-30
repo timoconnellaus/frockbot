@@ -8,6 +8,10 @@ import {
   decodeUserConfigurationReadRpcV1,
 } from "@frockbot/configuration-core";
 import {
+  ConnectionDependencyRouter,
+  decodeConnectionDependencyCommandV1,
+} from "@frockbot/connection-core";
+import {
   createFlockUserBackendPlugin,
   type FlockUserBackendContribution,
 } from "@frockbot/plugin-flock/user";
@@ -22,8 +26,10 @@ import {
   rpcDecoded,
   rpcIdentifier,
 } from "./durable-rpc.js";
+import { executeUserConnectionDependency } from "./connection-dependency-router.js";
 
 export class UserConfiguration extends DurableObject {
+  private readonly connectionDependencies = new ConnectionDependencyRouter();
   private mounted:
     | Promise<{
         settings: UserSettingsBackendContribution;
@@ -115,6 +121,34 @@ export class UserConfiguration extends DurableObject {
   async executeConfiguration(input: unknown) {
     const request = decodeUserConfigurationExecuteRpcV1(input);
     return (await this.settingsContribution()).executeConfiguration(request);
+  }
+
+  async getConnection(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+    });
+    const settings = await (
+      await this.settingsContribution()
+    ).readConfiguration({
+      schemaVersion: 1,
+      userId: request.userId as string,
+    });
+    return settings.connections.find(
+      (connection) => connection.connectionId === request.connectionId,
+    );
+  }
+
+  async executeConnectionDependency(input: unknown) {
+    const command = decodeConnectionDependencyCommandV1(input);
+    const settings = await (
+      await this.settingsContribution()
+    ).readConfiguration({ schemaVersion: 1, userId: command.userId });
+    return executeUserConnectionDependency(
+      settings,
+      this.connectionDependencies,
+      command,
+    );
   }
 
   async listBots(input: unknown) {

@@ -97,6 +97,14 @@ export interface ConnectionDependencyRequirementV1 {
   connectionTypeIds: string[];
 }
 
+export interface CapabilityAssignmentOperationViewV1 {
+  commandId: string;
+  kind: "assigning" | "replacing" | "unassigning";
+  assignmentId: string;
+  state: "pending" | "retrying";
+  target?: Omit<CapabilityAssignmentView, "state">;
+}
+
 export interface BotSettingsViewV1 {
   schemaVersion: 1;
   botId: string;
@@ -104,6 +112,7 @@ export interface BotSettingsViewV1 {
   profile: BotProfile;
   notifications: BotNotificationPolicy;
   assignments: CapabilityAssignmentView[];
+  assignmentOperations: CapabilityAssignmentOperationViewV1[];
   model?: ModelAssignment;
 }
 
@@ -118,6 +127,7 @@ export function initializeBotSettingsV1(
     profile: { name: botId === "default" ? "Barebones" : botId },
     notifications: { enabled: false },
     assignments: [],
+    assignmentOperations: [],
     model: model ? structuredClone(model) : undefined,
   };
 }
@@ -172,6 +182,16 @@ export type ConfigurationCommandV1 =
       type: "bot/assign-capability";
       botId: string;
       assignment: Omit<CapabilityAssignmentView, "state">;
+    })
+  | (CommandMetaV1 & {
+      type: "bot/replace-capability";
+      botId: string;
+      assignment: Omit<CapabilityAssignmentView, "state">;
+    })
+  | (CommandMetaV1 & {
+      type: "bot/unassign-capability";
+      botId: string;
+      assignmentId: string;
     });
 
 export type UserConfigurationCommandV1 = Exclude<
@@ -247,7 +267,7 @@ export type OperationReceiptV1 =
       schemaVersion: 1;
       commandId: string;
       revision: number;
-      status: "applied";
+      status: "pending" | "applied";
     }
   | {
       schemaVersion: 1;
@@ -415,14 +435,14 @@ function connectionIdentifier(value: unknown, label: string): string {
 function exactRecord(
   value: unknown,
   label: string,
-  required: readonly string[],
-  optional: readonly string[] = [],
+  required: readonly PropertyKey[],
+  optional: readonly PropertyKey[] = [],
 ): Record<string, unknown> {
   const decoded = record(value, label);
-  const allowed = new Set([...required, ...optional]);
+  const allowed = new Set<PropertyKey>([...required, ...optional]);
   if (
     !required.every((key) => Object.hasOwn(decoded, key)) ||
-    Object.keys(decoded).some((key) => !allowed.has(key))
+    Reflect.ownKeys(decoded).some((key) => !allowed.has(key))
   ) {
     throw new ConfigurationDecodeError(`${label} has invalid fields`);
   }
@@ -712,30 +732,23 @@ export function decodeConfigurationCommandV1(
         model: model(command.model),
       };
     }
-    case "bot/assign-capability": {
+    case "bot/assign-capability":
+    case "bot/replace-capability": {
       const command = exactCommand(input, ["botId", "assignment"]);
-      const assignment = exactRecord(
-        command.assignment,
-        "assignment",
-        ["assignmentId", "packageId", "capabilityId"],
-        ["connectionId"],
-      );
       return {
         ...commandMeta(command),
         type: value.type,
         botId: identifier(command.botId, "botId"),
-        assignment: {
-          assignmentId: identifier(assignment.assignmentId, "assignmentId"),
-          packageId: identifier(assignment.packageId, "assignment.packageId"),
-          capabilityId: identifier(
-            assignment.capabilityId,
-            "assignment.capabilityId",
-          ),
-          connectionId:
-            assignment.connectionId === undefined
-              ? undefined
-              : identifier(assignment.connectionId, "assignment.connectionId"),
-        },
+        assignment: assignmentTarget(command.assignment, "assignment"),
+      };
+    }
+    case "bot/unassign-capability": {
+      const command = exactCommand(input, ["botId", "assignmentId"]);
+      return {
+        ...commandMeta(command),
+        type: value.type,
+        botId: identifier(command.botId, "botId"),
+        assignmentId: identifier(command.assignmentId, "assignmentId"),
       };
     }
     default:
@@ -953,6 +966,68 @@ function capabilityAssignment(value: unknown): CapabilityAssignmentView {
   };
 }
 
+function assignmentTarget(
+  value: unknown,
+  label = "assignment target",
+): Omit<CapabilityAssignmentView, "state"> {
+  const assignment = exactRecord(
+    value,
+    label,
+    ["assignmentId", "packageId", "capabilityId"],
+    ["connectionId"],
+  );
+  return {
+    assignmentId: identifier(assignment.assignmentId, `${label}.assignmentId`),
+    packageId: identifier(assignment.packageId, `${label}.packageId`),
+    capabilityId: identifier(assignment.capabilityId, `${label}.capabilityId`),
+    connectionId:
+      assignment.connectionId === undefined
+        ? undefined
+        : identifier(assignment.connectionId, `${label}.connectionId`),
+  };
+}
+
+function assignmentOperation(
+  value: unknown,
+): CapabilityAssignmentOperationViewV1 {
+  const operation = exactRecord(
+    value,
+    "Assignment operation",
+    ["commandId", "kind", "assignmentId", "state"],
+    ["target"],
+  );
+  if (
+    operation.kind !== "assigning" &&
+    operation.kind !== "replacing" &&
+    operation.kind !== "unassigning"
+  ) {
+    throw new ConfigurationDecodeError("Assignment operation kind is invalid");
+  }
+  if (operation.state !== "pending" && operation.state !== "retrying") {
+    throw new ConfigurationDecodeError("Assignment operation state is invalid");
+  }
+  if (operation.kind !== "unassigning" && operation.target === undefined) {
+    throw new ConfigurationDecodeError(
+      "Assignment operation target is required",
+    );
+  }
+  if (operation.kind === "unassigning" && operation.target !== undefined) {
+    throw new ConfigurationDecodeError(
+      "Unassign operation cannot have a target",
+    );
+  }
+  return {
+    commandId: identifier(operation.commandId, "operation.commandId"),
+    kind: operation.kind,
+    assignmentId: identifier(operation.assignmentId, "operation.assignmentId"),
+    state: operation.state,
+    target:
+      operation.target === undefined
+        ? undefined
+        : assignmentTarget(operation.target),
+  };
+}
+
 function schemaVersion(value: Record<string, unknown>): void {
   if (value.schemaVersion !== 1) {
     throw new ConfigurationDecodeError("unsupported configuration schema");
@@ -1000,13 +1075,17 @@ export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
       "profile",
       "notifications",
       "assignments",
+      "assignmentOperations",
     ],
     ["model"],
   );
   schemaVersion(value);
-  if (!Array.isArray(value.assignments)) {
+  if (
+    !Array.isArray(value.assignments) ||
+    !Array.isArray(value.assignmentOperations)
+  ) {
     throw new ConfigurationDecodeError(
-      "Bot settings Assignments must be an array",
+      "Bot settings Assignments and operations must be arrays",
     );
   }
   return {
@@ -1016,6 +1095,7 @@ export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
     profile: botProfile(value.profile),
     notifications: notifications(value.notifications),
     assignments: value.assignments.map(capabilityAssignment),
+    assignmentOperations: value.assignmentOperations.map(assignmentOperation),
     model: value.model === undefined ? undefined : model(value.model),
   };
 }
@@ -1029,7 +1109,11 @@ export function decodeConfigurationViewV1(input: unknown): ConfigurationViewV1 {
 
 export function decodeOperationReceiptV1(input: unknown): OperationReceiptV1 {
   const candidate = record(input, "operation receipt");
-  if (candidate.status !== "applied" && candidate.status !== "rejected") {
+  if (
+    candidate.status !== "pending" &&
+    candidate.status !== "applied" &&
+    candidate.status !== "rejected"
+  ) {
     throw new ConfigurationDecodeError("operation receipt status is invalid");
   }
   const value = exactRecord(
@@ -1052,5 +1136,8 @@ export function decodeOperationReceiptV1(input: unknown): OperationReceiptV1 {
       failure: text(value.failure, "operation receipt failure", 1_000),
     };
   }
-  return { ...receipt, status: "applied" };
+  return {
+    ...receipt,
+    status: value.status as "pending" | "applied",
+  };
 }
