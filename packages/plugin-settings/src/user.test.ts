@@ -225,6 +225,25 @@ describe("User settings backend Contribution", () => {
         },
       ],
     });
+    await expect(
+      settings.releaseConnectionDependency(
+        "user-1",
+        "ollama-2",
+        "bot-1",
+        "assignment-2",
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      settings.releaseConnectionDependency(
+        "user-1",
+        "ollama-2",
+        "bot-1",
+        "assignment-2",
+      ),
+    ).resolves.toBe(true);
+    expect(
+      (await settings.getConnection("user-1", "ollama-2"))?.safeMetadata,
+    ).toMatchObject({ dependentAssignments: [] });
   });
 
   test("compacts revoked Connections and bounds active Connections", async () => {

@@ -489,6 +489,7 @@ describe("Bot capability assignment admission", () => {
   test("atomically binds and durably unbinds a Connection model", async () => {
     const storage = new MemoryStorage();
     let dependencyGeneration: string | undefined;
+    let releaseAttempts = 0;
     const userConfiguration = {
       readConfiguration: () => Promise.resolve(installedUser()),
       claimConnectionDependency: (request: { generation: string }) => {
@@ -496,12 +497,15 @@ describe("Bot capability assignment admission", () => {
         return Promise.resolve(true);
       },
       acknowledgeConnectionDependency: () => Promise.resolve(true),
-      compensateConnectionDependency: (request: { generation: string }) => {
+      releaseConnectionDependency: (request: { generation: string }) => {
+        releaseAttempts += 1;
+        if (releaseAttempts === 1) return Promise.resolve(false);
         if (request.generation === dependencyGeneration) {
           dependencyGeneration = undefined;
         }
         return Promise.resolve(true);
       },
+      compensateConnectionDependency: () => Promise.resolve(true),
     };
     const contribution = createShellBotBackendContribution({
       state: { storage } as unknown as DurableObjectState,
@@ -551,16 +555,23 @@ describe("Bot capability assignment admission", () => {
       assignments: [{ assignmentId: "fixture-model", state: "enabled" }],
     });
 
-    const unbound = await execute({
+    const unbind: BotConfigurationCommandV1 = {
       schemaVersion: 1,
       type: "bot/unbind-model",
       commandId: "unbind-model",
       botId: "primary",
       expectedRevision: 1,
       assignmentId: "fixture-model",
-    });
+    };
+    await expect(execute(unbind)).rejects.toThrow(
+      "Acknowledged Connection dependency was not released",
+    );
+    expect(dependencyGeneration).toBe("bind-model");
+
+    const unbound = await execute(unbind);
 
     expect(unbound).toMatchObject({ status: "applied", revision: 2 });
+    expect(releaseAttempts).toBe(2);
     expect(dependencyGeneration).toBeUndefined();
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 2,

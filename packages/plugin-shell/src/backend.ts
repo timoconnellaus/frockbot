@@ -820,12 +820,18 @@ export class ShellBotBackendContribution {
     const userConfiguration = this.userConfiguration(identity);
     try {
       if (saga.mode === "unassign") {
-        await userConfiguration.compensateConnectionDependency(
-          saga.userId,
-          saga.connectionId,
-          saga.botId,
-          saga.generation,
-        );
+        if (
+          !(await userConfiguration.releaseConnectionDependency(
+            saga.userId,
+            saga.connectionId,
+            saga.botId,
+            saga.generation,
+          ))
+        ) {
+          throw new Error(
+            "Acknowledged Connection dependency was not released",
+          );
+        }
       } else {
         await settleAssignmentSaga(saga, {
           acknowledge: (stored) =>
@@ -1638,6 +1644,12 @@ export class ShellBotBackendContribution {
       botId: string,
       generation: string,
     ): Promise<boolean>;
+    releaseConnectionDependency(
+      userId: string,
+      connectionId: string,
+      botId: string,
+      generation: string,
+    ): Promise<boolean>;
     compensateConnectionDependency(
       userId: string,
       connectionId: string,
@@ -1660,6 +1672,7 @@ export class ShellBotBackendContribution {
       getConnection(input: unknown): Promise<ConnectionView | undefined>;
       claimConnectionDependency(input: unknown): Promise<boolean>;
       acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
+      releaseConnectionDependency(input: unknown): Promise<boolean>;
       compensateConnectionDependency(input: unknown): Promise<boolean>;
       leaseModelCredential(input: unknown): Promise<unknown>;
       settleModelCredential(input: unknown): Promise<void>;
@@ -1690,6 +1703,14 @@ export class ShellBotBackendContribution {
         generation,
       ) =>
         rpc.acknowledgeConnectionDependency({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          botId,
+          generation,
+        }),
+      releaseConnectionDependency: (userId, connectionId, botId, generation) =>
+        rpc.releaseConnectionDependency({
           schemaVersion: 1,
           userId,
           connectionId,

@@ -14,8 +14,9 @@ const ACTIVE_PREFIX = "credential-active:";
 const LEASE_PREFIX = "credential-lease:";
 const LEASE_TOMBSTONE_PREFIX = "credential-lease-expired:";
 const LEASE_INDEX_KEY = "credential-lease-index";
-const LEASE_TOMBSTONE_INDEX_KEY = "credential-lease-expired-index";
-const MAX_LEASE_TOMBSTONES = 64;
+const LEASE_GENERATION_INDEX_PREFIX = "credential-lease-generation-index:";
+const LEASE_TOMBSTONE_INDEX_PREFIX = "credential-lease-expired-index:";
+const MAX_GENERATION_LEASE_RECORDS = 64;
 
 export interface CredentialTransaction {
   get<T>(key: string): Promise<T | undefined>;
@@ -80,6 +81,20 @@ function leaseKey(effectId: string): string {
 
 function leaseTombstoneKey(effectId: string): string {
   return `${LEASE_TOMBSTONE_PREFIX}${effectId}`;
+}
+
+function leaseGenerationIndexKey(
+  connectionId: string,
+  generation: string,
+): string {
+  return `${LEASE_GENERATION_INDEX_PREFIX}${connectionId}:${generation}`;
+}
+
+function leaseTombstoneIndexKey(
+  connectionId: string,
+  generation: string,
+): string {
+  return `${LEASE_TOMBSTONE_INDEX_PREFIX}${connectionId}:${generation}`;
 }
 
 function storedRecord(
@@ -400,9 +415,11 @@ export class CredentialUserBackendContribution {
         }
       }
       if (currentGeneration && currentGeneration !== input.generation) {
-        const tombstoneIndexValue = await transaction.get<unknown>(
-          LEASE_TOMBSTONE_INDEX_KEY,
+        const indexKey = leaseTombstoneIndexKey(
+          input.connectionId,
+          currentGeneration,
         );
+        const tombstoneIndexValue = await transaction.get<unknown>(indexKey);
         const tombstoneIndex =
           tombstoneIndexValue === undefined
             ? []
@@ -410,24 +427,32 @@ export class CredentialUserBackendContribution {
                 tombstoneIndexValue,
                 "credential lease tombstone index",
               );
-        const retainedTombstones: string[] = [];
         for (const effectId of tombstoneIndex) {
           const tombstoneValue = await transaction.get<unknown>(
             leaseTombstoneKey(effectId),
           );
           if (tombstoneValue === undefined) continue;
           const tombstone = decodeLeaseTombstone(tombstoneValue);
-          if (tombstone.credentialGeneration === currentGeneration) {
-            await transaction.delete(leaseTombstoneKey(effectId));
-          } else {
-            retainedTombstones.push(effectId);
+          if (
+            tombstone.connectionId !== input.connectionId ||
+            tombstone.credentialGeneration !== currentGeneration
+          ) {
+            throw new Error("Credential lease tombstone index is invalid");
           }
+          await transaction.delete(leaseTombstoneKey(effectId));
         }
-        entries[LEASE_TOMBSTONE_INDEX_KEY] = retainedTombstones;
+        entries[indexKey] = [];
       }
       await transaction.put(entries);
-      if (obsoleteGenerationKey)
+      if (obsoleteGenerationKey && currentGeneration) {
         await transaction.delete(obsoleteGenerationKey);
+        await transaction.delete(
+          leaseGenerationIndexKey(input.connectionId, currentGeneration),
+        );
+        await transaction.delete(
+          leaseTombstoneIndexKey(input.connectionId, currentGeneration),
+        );
+      }
     };
     await (storage
       ? activate(storage)
@@ -550,9 +575,26 @@ export class CredentialUserBackendContribution {
       ) {
         throw new Error("Connection credential is unavailable");
       }
-      const tombstoneIndexValue = await transaction.get<unknown>(
-        LEASE_TOMBSTONE_INDEX_KEY,
+      const generationLeaseIndexKey = leaseGenerationIndexKey(
+        input.connectionId,
+        generation,
       );
+      const generationLeaseIndexValue = await transaction.get<unknown>(
+        generationLeaseIndexKey,
+      );
+      const generationLeaseIndex =
+        generationLeaseIndexValue === undefined
+          ? []
+          : decodeStoredStringList(
+              generationLeaseIndexValue,
+              "credential generation lease index",
+            );
+      const tombstoneIndexKey = leaseTombstoneIndexKey(
+        input.connectionId,
+        generation,
+      );
+      const tombstoneIndexValue =
+        await transaction.get<unknown>(tombstoneIndexKey);
       const tombstoneIndex =
         tombstoneIndexValue === undefined
           ? []
@@ -560,14 +602,17 @@ export class CredentialUserBackendContribution {
               tombstoneIndexValue,
               "credential lease tombstone index",
             );
+      if (
+        tombstoneIndex.length + generationLeaseIndex.length >=
+        MAX_GENERATION_LEASE_RECORDS
+      ) {
+        throw new Error("Credential lease capacity requires rotation");
+      }
       const leaseIndexValue = await transaction.get<unknown>(LEASE_INDEX_KEY);
       const leaseIndex =
         leaseIndexValue === undefined
           ? []
           : decodeStoredStringList(leaseIndexValue, "credential lease index");
-      if (tombstoneIndex.length + leaseIndex.length >= MAX_LEASE_TOMBSTONES) {
-        throw new Error("Credential lease capacity requires rotation");
-      }
       const leaseId = crypto.randomUUID();
       const lease: StoredCredentialLease = {
         schemaVersion: 1,
@@ -584,6 +629,9 @@ export class CredentialUserBackendContribution {
       await transaction.put({
         [leaseKey(input.effectId)]: lease,
         [LEASE_INDEX_KEY]: [...new Set([...leaseIndex, input.effectId])],
+        [generationLeaseIndexKey]: [
+          ...new Set([...generationLeaseIndex, input.effectId]),
+        ],
         [credentialKey(input.connectionId, generation)]: {
           ...stored,
           leaseIds: [...new Set([...stored.leaseIds, leaseId])],
@@ -712,12 +760,32 @@ export class CredentialUserBackendContribution {
         ? []
         : decodeStoredStringList(leaseIndexValue, "credential lease index")
     ).filter((effectId) => effectId !== lease.effectId);
+    const generationLeaseIndexKey = leaseGenerationIndexKey(
+      lease.connectionId,
+      lease.credentialGeneration,
+    );
+    const generationLeaseIndexValue = await storage.get<unknown>(
+      generationLeaseIndexKey,
+    );
+    const generationLeaseIndex = (
+      generationLeaseIndexValue === undefined
+        ? []
+        : decodeStoredStringList(
+            generationLeaseIndexValue,
+            "credential generation lease index",
+          )
+    ).filter((effectId) => effectId !== lease.effectId);
     await storage.delete(leaseKey(lease.effectId));
-    await storage.put(LEASE_INDEX_KEY, leaseIndex);
+    await storage.put({
+      [LEASE_INDEX_KEY]: leaseIndex,
+      [generationLeaseIndexKey]: generationLeaseIndex,
+    });
     if (expired && stored.state === "active") {
-      const tombstoneIndexValue = await storage.get<unknown>(
-        LEASE_TOMBSTONE_INDEX_KEY,
+      const tombstoneIndexKey = leaseTombstoneIndexKey(
+        lease.connectionId,
+        lease.credentialGeneration,
       );
+      const tombstoneIndexValue = await storage.get<unknown>(tombstoneIndexKey);
       const tombstoneIndex =
         tombstoneIndexValue === undefined
           ? []
@@ -732,7 +800,7 @@ export class CredentialUserBackendContribution {
           packageId: lease.packageId,
           credentialGeneration: lease.credentialGeneration,
         },
-        [LEASE_TOMBSTONE_INDEX_KEY]: [
+        [tombstoneIndexKey]: [
           ...tombstoneIndex.filter((effectId) => effectId !== lease.effectId),
           lease.effectId,
         ],
@@ -740,6 +808,10 @@ export class CredentialUserBackendContribution {
     }
     if (next.state === "retired" && next.leaseIds.length === 0) {
       await storage.delete(key);
+      await storage.delete(generationLeaseIndexKey);
+      await storage.delete(
+        leaseTombstoneIndexKey(lease.connectionId, lease.credentialGeneration),
+      );
     } else {
       await storage.put(key, next);
     }

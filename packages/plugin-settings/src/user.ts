@@ -477,6 +477,46 @@ export class UserSettingsBackendContribution {
     });
   }
 
+  async releaseConnectionDependency(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    generation: string,
+  ): Promise<boolean> {
+    return this.host.storage.transaction(async (storage) => {
+      await this.assertIdentity(userId, storage);
+      const current = await this.readSnapshot(storage);
+      const target = current.connections.find(
+        (connection) => connection.connectionId === connectionId,
+      );
+      if (!target) return true;
+      const existing = connectionDependencies(target);
+      const matching = existing.filter(
+        (dependency) =>
+          dependency.botId === botId && dependency.generation === generation,
+      );
+      if (matching.length === 0) return true;
+      if (matching.some((dependency) => dependency.status !== "acknowledged")) {
+        return false;
+      }
+      const remaining = existing.filter(
+        (dependency) =>
+          dependency.botId !== botId || dependency.generation !== generation,
+      );
+      const connections = current.connections.map((connection) =>
+        connection.connectionId === connectionId
+          ? withConnectionDependencies(connection, remaining)
+          : connection,
+      );
+      await storage.put(STATE_KEY, {
+        ...current,
+        revision: current.revision + 1,
+        connections,
+      } satisfies UserSettingsViewV1);
+      return true;
+    });
+  }
+
   async compensateConnectionDependency(
     userId: string,
     connectionId: string,

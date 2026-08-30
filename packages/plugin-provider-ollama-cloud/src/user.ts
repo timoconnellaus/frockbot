@@ -27,8 +27,8 @@ const COMMAND_PREFIX = "ollama-connection-command:";
 const PENDING_KEY = "ollama-pending-connection-commands";
 const RECEIPT_INDEX_KEY = "ollama-connection-receipt-index";
 const MAX_MANUAL_RECEIPTS = 256;
-const MANUAL_COMMAND_VALIDITY_MS = 30 * 24 * 60 * 60 * 1_000;
 const MAX_PENDING_COMMANDS = 64;
+const MAX_PENDING_RECOVERIES_PER_ALARM = 1;
 const MAX_CATALOG_REFRESHES_PER_ALARM = 1;
 const ACCOUNT_KEY = "ollama-connection-account";
 const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
@@ -649,45 +649,12 @@ export class OllamaCloudUserBackendContribution {
         }
         return { record: existing, created: false };
       }
-      let manualHistoryCount = 0;
-      let receiptIndexEntry: Record<string, unknown> = {};
-      if (!record.automaticRefresh) {
-        const receiptIndexValue =
-          await transaction.get<unknown>(RECEIPT_INDEX_KEY);
-        const receiptIndex =
-          receiptIndexValue === undefined
-            ? []
-            : decodeReceiptIndex(receiptIndexValue);
-        const retained: string[] = [];
-        const validAfter = this.now() - MANUAL_COMMAND_VALIDITY_MS;
-        for (const commandId of receiptIndex) {
-          const value = await transaction.get<unknown>(commandKey(commandId));
-          if (value === undefined) continue;
-          const completed = decodeStoredCommand(value);
-          if (!completed.receipt || completed.completedAt === undefined) {
-            throw new Error("Stored Ollama completed command is invalid");
-          }
-          if (completed.completedAt < validAfter) {
-            await transaction.delete(commandKey(commandId));
-          } else {
-            retained.push(commandId);
-          }
-        }
-        manualHistoryCount = retained.length;
-        receiptIndexEntry = { [RECEIPT_INDEX_KEY]: retained };
-      }
       const pendingValue = await transaction.get<unknown>(PENDING_KEY);
       const pending = (
         pendingValue === undefined ? [] : decodePendingCommands(pendingValue)
       ).filter((id) => id !== record.commandId);
       if (pending.length >= MAX_PENDING_COMMANDS) {
         throw new Error("Ollama Connection command capacity reached");
-      }
-      if (
-        !record.automaticRefresh &&
-        manualHistoryCount + pending.length >= MAX_MANUAL_RECEIPTS
-      ) {
-        throw new Error("Ollama Connection command history capacity reached");
       }
       let admitted = record;
       let sequenceEntry: Record<string, unknown> = {};
@@ -712,7 +679,6 @@ export class OllamaCloudUserBackendContribution {
       await transaction.put({
         [commandKey(record.commandId)]: admitted,
         [PENDING_KEY]: [...pending, record.commandId],
-        ...receiptIndexEntry,
         ...sequenceEntry,
       });
       await transaction.setAlarm?.(this.now() + RECOVERY_DELAY_MS);
@@ -1211,17 +1177,21 @@ export class OllamaCloudUserBackendContribution {
       receiptIndexValue === undefined
         ? []
         : decodeReceiptIndex(receiptIndexValue);
-    const nextReceiptIndex = [
+    const ordered = [
       ...receiptIndex.filter((commandId) => !completedIds.includes(commandId)),
       ...completedIds,
     ];
-    if (nextReceiptIndex.length > MAX_MANUAL_RECEIPTS) {
-      throw new Error("Ollama Connection command history capacity reached");
+    for (const commandId of ordered.slice(0, -MAX_MANUAL_RECEIPTS)) {
+      const value = await storage.get<unknown>(commandKey(commandId));
+      if (value === undefined) continue;
+      completed[commandKey(commandId)] = compactCompletedCommand(
+        decodeStoredCommand(value),
+      );
     }
     await storage.put({
       ...completed,
       [PENDING_KEY]: retained,
-      [RECEIPT_INDEX_KEY]: nextReceiptIndex,
+      [RECEIPT_INDEX_KEY]: ordered.slice(-MAX_MANUAL_RECEIPTS),
     });
   }
 
@@ -1356,19 +1326,24 @@ export class OllamaCloudUserBackendContribution {
             ),
             record.commandId,
           ];
-          if (ordered.length > MAX_MANUAL_RECEIPTS) {
-            throw new Error(
-              "Ollama Connection command history capacity reached",
-            );
-          }
+          const retained = ordered.slice(-MAX_MANUAL_RECEIPTS);
           const completed = {
             ...(stored ?? record),
             receipt: proposed,
             completedAt: this.now(),
           };
+          const compacted: Record<string, unknown> = {};
+          for (const commandId of ordered.slice(0, -MAX_MANUAL_RECEIPTS)) {
+            const value = await storage.get<unknown>(commandKey(commandId));
+            if (value === undefined) continue;
+            compacted[commandKey(commandId)] = compactCompletedCommand(
+              decodeStoredCommand(value),
+            );
+          }
           await storage.put({
+            ...compacted,
             [commandKey(record.commandId)]: completed,
-            [RECEIPT_INDEX_KEY]: ordered,
+            [RECEIPT_INDEX_KEY]: retained,
             [PENDING_KEY]: pending,
           });
         }
@@ -1551,7 +1526,10 @@ export class OllamaCloudUserBackendContribution {
     const pendingValue = await this.host.storage.get<unknown>(PENDING_KEY);
     const pending =
       pendingValue === undefined ? [] : decodePendingCommands(pendingValue);
-    for (const commandId of pending) {
+    for (const commandId of pending.slice(
+      0,
+      MAX_PENDING_RECOVERIES_PER_ALARM,
+    )) {
       const recordValue = await this.host.storage.get<unknown>(
         commandKey(commandId),
       );

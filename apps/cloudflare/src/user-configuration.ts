@@ -336,6 +336,21 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     );
   }
 
+  async releaseConnectionDependency(input: unknown): Promise<boolean> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      botId: rpcBotId,
+      generation: rpcIdentifier,
+    });
+    return (await this.settingsContribution()).releaseConnectionDependency(
+      request.userId as string,
+      request.connectionId as string,
+      request.botId as string,
+      request.generation as string,
+    );
+  }
+
   async compensateConnectionDependency(input: unknown): Promise<boolean> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

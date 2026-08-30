@@ -652,6 +652,17 @@ describe("Bot execution-plan authority", () => {
       resolveBotModelBindingV1({
         model: {
           connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        assignments,
+        user,
+        packages: modelPackages.map((pkg) => ({ ...pkg, version: "0.0.2" })),
+      }).state,
+    ).toBe("unavailable");
+    expect(
+      resolveBotModelBindingV1({
+        model: {
+          connectionId: "ollama-work",
           providerModelId: "new-model:cloud",
         },
         assignments,

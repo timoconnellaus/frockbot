@@ -296,9 +296,8 @@ describe("Ollama Cloud User Contribution", () => {
     ).resolves.toBeUndefined();
   });
 
-  test("bounds command history with an explicit validity window", async () => {
-    let now = Date.parse("2026-08-30T00:00:00.000Z");
-    const { settings, storage, ollama } = await fixture(undefined, () => now);
+  test("compacts command history without expiring idempotency", async () => {
+    const { settings, storage, ollama } = await fixture();
     const created = await ollama.executeConnection("account-1", {
       schemaVersion: 1,
       type: "connection/create-api-key",
@@ -308,7 +307,7 @@ describe("Ollama Cloud User Contribution", () => {
       label: "Original",
       apiKey: "valid-key",
     });
-    for (let index = 0; index < 255; index += 1) {
+    for (let index = 0; index < 257; index += 1) {
       await ollama.executeConnection("account-1", {
         schemaVersion: 1,
         type: "connection/update-label",
@@ -318,15 +317,6 @@ describe("Ollama Cloud User Contribution", () => {
       });
     }
 
-    await expect(
-      ollama.executeConnection("account-1", {
-        schemaVersion: 1,
-        type: "connection/update-label",
-        commandId: "label-over-history-capacity",
-        connectionId: created.connectionId,
-        label: "Over capacity",
-      }),
-    ).rejects.toThrow("Ollama Connection command history capacity reached");
     await expect(
       ollama.lookupConnectionCommand("account-1", "connect-receipt-retention"),
     ).resolves.toEqual(created);
@@ -344,25 +334,21 @@ describe("Ollama Cloud User Contribution", () => {
     expect((await settings.read("account-1")).connections).toHaveLength(1);
     expect(
       storage.values.get("ollama-connection-command:connect-receipt-retention"),
-    ).toMatchObject({ receipt: created, completedAt: now });
-
-    now += 31 * 24 * 60 * 60 * 1_000;
-    await ollama.executeConnection("account-1", {
+    ).toEqual({
       schemaVersion: 1,
-      type: "connection/update-label",
-      commandId: "label-after-history-expiry",
+      commandId: "connect-receipt-retention",
+      fingerprint: expect.any(String),
+      accountId: "account-1",
       connectionId: created.connectionId,
-      label: "After expiry",
+      operation: "connection/create-api-key",
+      receipt: created,
+      completedAt: expect.any(Number),
     });
-
-    await expect(
-      ollama.lookupConnectionCommand("account-1", "connect-receipt-retention"),
-    ).resolves.toBeUndefined();
     expect(
       [...storage.values.keys()].filter((key) =>
         key.startsWith("ollama-connection-command:"),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(258);
   });
 
   test("bounds pending command admission before durable recovery grows", async () => {
@@ -396,6 +382,62 @@ describe("Ollama Cloud User Contribution", () => {
     expect(
       storage.values.has("ollama-connection-command:label-over-capacity"),
     ).toBe(false);
+  });
+
+  test("recovers one pending command per alarm", async () => {
+    const { storage, settings, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-pending-recovery",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Original",
+      apiKey: "valid-key",
+    });
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!connection?.generation) throw new Error("generation is missing");
+    storage.values.set("ollama-pending-connection-commands", [
+      "pending-label-1",
+      "pending-label-2",
+    ]);
+    for (const [index, commandId] of [
+      "pending-label-1",
+      "pending-label-2",
+    ].entries()) {
+      storage.values.set(`ollama-connection-command:${commandId}`, {
+        schemaVersion: 1,
+        commandId,
+        fingerprint: `fingerprint-${index}`,
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        expectedGeneration: connection.generation,
+        operation: "connection/update-label",
+        label: `Recovered ${index + 1}`,
+      });
+    }
+
+    await ollama.alarm();
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "pending-label-1"),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "pending-label-2"),
+    ).resolves.toBeUndefined();
+    expect(
+      await settings.getConnection("account-1", created.connectionId),
+    ).toMatchObject({ displayName: "Recovered 1" });
+
+    await ollama.alarm();
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "pending-label-2"),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(
+      await settings.getConnection("account-1", created.connectionId),
+    ).toMatchObject({ displayName: "Recovered 2" });
   });
 
   test("keeps the active generation when rotation validation fails", async () => {

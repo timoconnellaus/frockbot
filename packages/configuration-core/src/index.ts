@@ -389,7 +389,9 @@ export function resolveBotModelBindingV1(input: {
     return unavailable("Connection Package is not installed and enabled");
   }
   const pkg = input.packages.find(
-    (candidate) => candidate.packageId === connection.packageId,
+    (candidate) =>
+      candidate.packageId === connection.packageId &&
+      candidate.version === installation.version,
   );
   const connectionType = pkg?.connectionTypes.find(
     (candidate) => candidate.id === connection.connectionTypeId,

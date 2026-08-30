@@ -288,6 +288,28 @@ describe("Credential User Contribution", () => {
       }),
     ).rejects.toThrow("Credential lease capacity requires rotation");
 
+    const otherAuthority = {
+      ...authority,
+      connectionId: "connection-2",
+      expectedGeneration: "other-generation",
+    };
+    await credentials.stageApiKey({
+      ...otherAuthority,
+      generation: "other-generation",
+      apiKey: "other-secret",
+    });
+    await credentials.activate({
+      ...otherAuthority,
+      generation: "other-generation",
+    });
+    await expect(
+      credentials.lease({
+        ...otherAuthority,
+        effectId: "other-connection-effect",
+        expiresAt: "2026-08-30T01:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({ connectionId: "connection-2" });
+
     now = Date.parse("2026-08-30T01:00:00.000Z");
     await credentials.expireLeases();
 
@@ -315,6 +337,9 @@ describe("Credential User Contribution", () => {
         key.startsWith("credential-lease-expired:effect-"),
       ),
     ).toHaveLength(0);
+    expect(
+      storage.values.has("credential-lease-expired:other-connection-effect"),
+    ).toBe(true);
     await expect(
       credentials.lease({
         ...authority,
