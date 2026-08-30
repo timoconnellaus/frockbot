@@ -22,6 +22,10 @@ class MemoryStorage implements UserSettingsStorage, CredentialStorage {
   failNextEntriesContaining?: string;
   failNextGetKey?: string;
   armGetFailureAfterEntriesContaining?: string;
+  armEntriesFailureAfterKey?: {
+    key: string;
+    entry: string;
+  };
 
   get<T>(key: string): Promise<T | undefined> {
     if (this.failNextGetKey === key) {
@@ -43,6 +47,10 @@ class MemoryStorage implements UserSettingsStorage, CredentialStorage {
         return Promise.reject(new Error("injected storage failure"));
       }
       this.values.set(keyOrEntries, value);
+      if (this.armEntriesFailureAfterKey?.key === keyOrEntries) {
+        this.failNextEntriesContaining = this.armEntriesFailureAfterKey.entry;
+        this.armEntriesFailureAfterKey = undefined;
+      }
     } else {
       if (
         this.failNextEntriesContaining &&
@@ -632,6 +640,42 @@ describe("Ollama Cloud User Contribution", () => {
     ).toMatchObject({ receipt: { status: "failed" } });
   });
 
+  test("recovers a committed sequenced mutation as applied", async () => {
+    const { storage, settings, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-committed-label",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Original",
+      apiKey: "key",
+    });
+    storage.armEntriesFailureAfterKey = {
+      key: "user-configuration",
+      entry: "ollama-connection-command:label-committed",
+    };
+
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: "label-committed",
+        connectionId: created.connectionId,
+        label: "Committed",
+      }),
+    ).rejects.toThrow("injected storage failure");
+    expect(
+      await settings.getConnection("account-1", created.connectionId),
+    ).toMatchObject({ displayName: "Committed" });
+
+    await ollama.alarm();
+
+    expect(
+      storage.values.get("ollama-connection-command:label-committed"),
+    ).toMatchObject({ receipt: { status: "applied" } });
+  });
+
   test("recovers independent mutations with per-field ordering", async () => {
     const { storage, settings, ollama } = await fixture();
     const created = await ollama.executeConnection("account-1", {
@@ -1123,6 +1167,61 @@ describe("Ollama Cloud User Contribution", () => {
     ).resolves.toMatchObject({ status: "applied" });
   });
 
+  test("commits catalog outcomes atomically with settlement recovery", async () => {
+    let storageRef: MemoryStorage | undefined;
+    let failOutcomeCommit = false;
+    let catalogRequests = 0;
+    const fixtureValue = await fixture(async (input) => {
+      if (String(input).endsWith("/tags")) {
+        catalogRequests += 1;
+        if (failOutcomeCommit) {
+          storageRef!.failNextKey =
+            "ollama-connection-command:refresh-atomic-outcome";
+          failOutcomeCommit = false;
+        }
+        return Response.json({
+          models: [{ model: `model-${catalogRequests}:cloud` }],
+        });
+      }
+      return Response.json({ capabilities: ["tools"] });
+    });
+    const { storage, settings, ollama } = fixtureValue;
+    storageRef = storage;
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-atomic-outcome",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "key",
+    });
+    const before = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    failOutcomeCommit = true;
+
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId: "refresh-atomic-outcome",
+        connectionId: created.connectionId,
+      }),
+    ).rejects.toThrow("injected storage failure");
+
+    expect(
+      (await settings.getConnection("account-1", created.connectionId))
+        ?.modelCatalog?.generation,
+    ).toBe(before?.modelCatalog?.generation);
+    await ollama.alarm();
+    expect(catalogRequests).toBe(3);
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "refresh-atomic-outcome"),
+    ).resolves.toMatchObject({ status: "applied" });
+  });
+
   test("compacts automatic refresh commands into one durable receipt", async () => {
     let currentTime = Date.parse("2026-08-30T00:00:00.000Z");
     const { storage, settings, ollama } = await fixture(
@@ -1324,6 +1423,69 @@ describe("Ollama Cloud User Contribution", () => {
     expect(after?.modelCatalog?.models).toContainEqual(
       expect.objectContaining({ providerModelId: "new-model:cloud" }),
     );
+  });
+
+  test("settles a failed exact-resolution lease from model outcome recovery", async () => {
+    const { settings, credentials, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-resolution-settlement",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "valid-key",
+    });
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!connection?.generation) throw new Error("generation is missing");
+    const settle = credentials.settle.bind(credentials);
+    let failResolutionSettlement = true;
+    credentials.settle = (input) => {
+      if (
+        failResolutionSettlement &&
+        input.effectId === "resolve:resolution-outcome"
+      ) {
+        failResolutionSettlement = false;
+        return Promise.reject(new Error("settlement unavailable"));
+      }
+      return settle(input);
+    };
+
+    await expect(
+      ollama.leaseModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        providerModelId: "uncatalogued:cloud",
+        effectId: "resolution-outcome",
+        connectionGeneration: connection.generation,
+      }),
+    ).rejects.toThrow("settlement unavailable");
+    await expect(
+      credentials.replayLease({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        packageId: "provider-ollama-cloud",
+        effectId: "resolve:resolution-outcome",
+      }),
+    ).resolves.toBeDefined();
+
+    await ollama.settleModelCredential({
+      accountId: "account-1",
+      connectionId: created.connectionId,
+      effectId: "resolution-outcome",
+    });
+
+    await expect(
+      credentials.replayLease({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        packageId: "provider-ollama-cloud",
+        effectId: "resolve:resolution-outcome",
+      }),
+    ).resolves.toBeUndefined();
   });
 
   test("bounds retained exact models while preserving discovered models", async () => {

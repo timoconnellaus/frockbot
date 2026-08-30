@@ -382,6 +382,7 @@ export class UserSettingsBackendContribution {
     botId: string,
     generation: string,
     requirement: ConnectionDependencyRequirementV1,
+    storage?: UserSettingsTransaction,
   ): Promise<boolean> {
     const decoded = decodeConnectionDependencyRequirementV1(requirement);
     return this.transitionConnectionDependency(
@@ -418,6 +419,7 @@ export class UserSettingsBackendContribution {
           },
         ]);
       },
+      storage,
     );
   }
 
@@ -445,6 +447,21 @@ export class UserSettingsBackendContribution {
           dependency.botId === botId && dependency.generation === generation,
       );
       if (!matched) return false;
+      if (
+        matched.status === "acknowledged" &&
+        !current.connections.some((connection) =>
+          connectionDependencies(connection).some(
+            (dependency) =>
+              dependency.botId === botId &&
+              dependency.packageId === matched.packageId &&
+              dependency.capabilityId === matched.capabilityId &&
+              (connection.connectionId !== connectionId ||
+                dependency.generation !== generation),
+          ),
+        )
+      ) {
+        return true;
+      }
       const connections = current.connections.map((connection) => {
         const dependencies = connectionDependencies(connection);
         const nextDependencies = dependencies.flatMap((dependency) => {
@@ -548,8 +565,9 @@ export class UserSettingsBackendContribution {
       connection: ConnectionView,
       settings: UserSettingsViewV1,
     ) => ConnectionView | undefined,
+    transaction?: UserSettingsTransaction,
   ): Promise<boolean> {
-    return this.host.storage.transaction(async (storage) => {
+    const apply = async (storage: UserSettingsTransaction) => {
       await this.assertIdentity(userId, storage);
       const current = await this.readSnapshot(storage);
       const connection = current.connections.find(
@@ -566,7 +584,10 @@ export class UserSettingsBackendContribution {
         ),
       } satisfies UserSettingsViewV1);
       return true;
-    });
+    };
+    return transaction
+      ? apply(transaction)
+      : this.host.storage.transaction(apply);
   }
 
   private async assertIdentity(

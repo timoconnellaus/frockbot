@@ -166,6 +166,16 @@ describe("BotState Ollama execution", () => {
             connectionId: "ollama-1",
             providerModelId: "glm-5.3-flash:cloud",
           },
+          initialModelBinding: {
+            assignment: {
+              assignmentId: "create-primary",
+              packageId: "provider-ollama-cloud",
+              capabilityId: "ollama-cloud-models",
+              connectionId: "ollama-1",
+              state: "enabled" as const,
+            },
+            generation: "create-primary",
+          },
           sheep: randomSheepRecipeV1(() => 0),
         }),
       readConfiguration: () => Promise.resolve(structuredClone(user)),
@@ -238,26 +248,6 @@ describe("BotState Ollama execution", () => {
       });
 
     const firstState = state();
-    await expect(
-      firstState.executeConfiguration({
-        schemaVersion: 1,
-        userId: "user-1",
-        botId: "primary",
-        command: {
-          schemaVersion: 1,
-          type: "bot/assign-capability",
-          commandId: "assign-ollama",
-          botId: "primary",
-          expectedRevision: 0,
-          assignment: {
-            assignmentId: "ollama-model",
-            packageId: "provider-ollama-cloud",
-            capabilityId: "ollama-cloud-models",
-            connectionId: "ollama-1",
-          },
-        },
-      }),
-    ).resolves.toMatchObject({ status: "applied" });
     const first = await firstState.run({
       schemaVersion: 1,
       userId: "user-1",
@@ -283,7 +273,7 @@ describe("BotState Ollama execution", () => {
 
     expect(first.text).toBe("Ollama reply");
     expect(second.text).toBe("Ollama reply");
-    expect(dependencyEffects).toEqual(["claim", "acknowledge"]);
+    expect(dependencyEffects).toEqual(["acknowledge", "acknowledge"]);
     expect(requests).toHaveLength(2);
     expect(leases).toHaveLength(2);
     expect(settlements).toHaveLength(2);

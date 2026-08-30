@@ -1006,7 +1006,8 @@ export class OllamaCloudUserBackendContribution {
     }
     const effectId = `catalog:${record.commandId}`;
     let lease: CredentialLeaseV1 | undefined;
-    let failed = false;
+    let models: ConnectionModelCatalogV1["models"] | undefined;
+    let failure: unknown;
     try {
       lease = await this.host.storage.transaction(
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
@@ -1036,99 +1037,113 @@ export class OllamaCloudUserBackendContribution {
         packageId: PACKAGE_ID,
         lease,
       });
-      const models = await this.client.listModels(apiKey);
-      await this.host.storage.transaction(
-        async (storage: UserSettingsTransaction & CredentialTransaction) => {
-          const current = await this.requireModelAuthority(
-            {
-              accountId: record.accountId,
-              connectionId: record.connectionId,
-              connectionGeneration: expectedGeneration,
-            },
-            storage,
-          );
+      models = await this.client.listModels(apiKey);
+    } catch (error) {
+      failure = error;
+    }
+    const outcome = await this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        let outcomeModels = models;
+        let outcomeFailure = failure;
+        let authorized: ConnectionView | undefined;
+        if (outcomeModels) {
+          try {
+            authorized = await this.requireModelAuthority(
+              {
+                accountId: record.accountId,
+                connectionId: record.connectionId,
+                connectionGeneration: expectedGeneration,
+              },
+              storage,
+            );
+          } catch (error) {
+            outcomeModels = undefined;
+            outcomeFailure = error;
+          }
+        }
+        const status: ConnectionCommandReceiptV1["status"] =
+          outcomeFailure === undefined ? "applied" : "failed";
+        const pendingSettlement: StoredCommand | undefined = lease
+          ? {
+              ...record,
+              settlementEffectId: effectId,
+              settlementStatus: status,
+            }
+          : undefined;
+        if (outcomeModels && authorized) {
           await this.host.settings.replaceConnection(
             record.accountId,
             record.connectionId,
             expectedGeneration,
             {
-              ...current,
-              modelCatalog: this.catalog(models),
+              ...authorized,
+              modelCatalog: this.catalog(outcomeModels),
               failure: undefined,
             },
             storage,
           );
-        },
-      );
-    } catch (error) {
-      failed = true;
-      await this.host.storage.transaction(
-        async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        } else {
           const settings = await this.host.settings.readSnapshot(storage);
           const current = settings.connections.find(
             (connection) => connection.connectionId === record.connectionId,
           );
           if (
-            !settings.packages.some(
+            settings.packages.some(
               (pkg) =>
                 pkg.packageId === PACKAGE_ID && pkg.state === "installed",
-            ) ||
-            !current ||
-            current.packageId !== PACKAGE_ID ||
-            current.generation !== expectedGeneration ||
-            current.state !== "ready" ||
-            !current.modelCatalog
+            ) &&
+            current?.packageId === PACKAGE_ID &&
+            current.generation === expectedGeneration &&
+            current.state === "ready" &&
+            current.modelCatalog
           ) {
-            return;
-          }
-          await this.host.settings.replaceConnection(
-            record.accountId,
-            record.connectionId,
-            expectedGeneration,
-            {
-              ...current,
-              modelCatalog: {
-                ...current.modelCatalog,
-                state: "stale",
-                refreshAfter: new Date(
-                  this.now() + REFRESH_INTERVAL_MS,
-                ).toISOString(),
-                failure:
-                  error instanceof Error
-                    ? error.message
-                    : "Ollama Cloud catalog refresh failed",
+            await this.host.settings.replaceConnection(
+              record.accountId,
+              record.connectionId,
+              expectedGeneration,
+              {
+                ...current,
+                modelCatalog: {
+                  ...current.modelCatalog,
+                  state: "stale",
+                  refreshAfter: new Date(
+                    this.now() + REFRESH_INTERVAL_MS,
+                  ).toISOString(),
+                  failure:
+                    outcomeFailure instanceof Error
+                      ? outcomeFailure.message
+                      : "Ollama Cloud catalog refresh failed",
+                },
               },
-            },
-            storage,
+              storage,
+            );
+          }
+        }
+        if (pendingSettlement) {
+          const storedValue = await storage.get<unknown>(
+            commandKey(record.commandId),
           );
-        },
-      );
+          if (storedValue === undefined) {
+            throw new Error("Ollama Connection command is unavailable");
+          }
+          const stored = decodeStoredCommand(storedValue);
+          if (!stored.receipt) {
+            await storage.put(commandKey(record.commandId), pendingSettlement);
+          }
+        }
+        return { status, pendingSettlement };
+      },
+    );
+    if (!outcome.pendingSettlement) {
+      return this.finishRecord(record, outcome.status);
     }
-    const status = failed ? "failed" : "applied";
-    if (!lease) return this.finishRecord(record, status);
-    const pendingSettlement: StoredCommand = {
-      ...record,
-      settlementEffectId: effectId,
-      settlementStatus: status,
-    };
-    await this.host.storage.transaction(async (storage) => {
-      const storedValue = await storage.get<unknown>(
-        commandKey(record.commandId),
-      );
-      if (storedValue === undefined) {
-        throw new Error("Ollama Connection command is unavailable");
-      }
-      const stored = decodeStoredCommand(storedValue);
-      if (stored.receipt) return;
-      await storage.put(commandKey(record.commandId), pendingSettlement);
-    });
     await this.host.credentials.settle({
       accountId: record.accountId,
       connectionId: record.connectionId,
       packageId: PACKAGE_ID,
       effectId,
     });
-    return this.finishRecord(pendingSettlement, status);
+    return this.finishRecord(outcome.pendingSettlement, outcome.status);
   }
 
   private async setEnabled(
@@ -1158,7 +1173,8 @@ export class OllamaCloudUserBackendContribution {
           sequenceValue === undefined
             ? { next: mutationSequence, applied: 0 }
             : decodeMutationSequence(sequenceValue);
-        if (mutationSequence <= sequence.applied) return false;
+        if (mutationSequence < sequence.applied) return false;
+        if (mutationSequence === sequence.applied) return true;
         const current = await this.host.settings.getConnection(
           record.accountId,
           record.connectionId,
@@ -1586,10 +1602,13 @@ export class OllamaCloudUserBackendContribution {
     connectionId: string;
     effectId: string;
   }): Promise<void> {
-    await this.host.credentials.settle({
-      ...input,
-      packageId: PACKAGE_ID,
-    });
+    for (const effectId of [input.effectId, `resolve:${input.effectId}`]) {
+      await this.host.credentials.settle({
+        ...input,
+        packageId: PACKAGE_ID,
+        effectId,
+      });
+    }
   }
 
   async alarm(): Promise<void> {

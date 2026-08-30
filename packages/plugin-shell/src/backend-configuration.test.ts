@@ -585,7 +585,7 @@ describe("Bot capability assignment admission", () => {
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 2,
       model: undefined,
-      assignments: [{ assignmentId: "fixture-model", state: "unavailable" }],
+      assignments: [],
     });
   });
 
@@ -716,53 +716,53 @@ describe("Bot capability assignment admission", () => {
       revision: 2,
       model: { connectionId: "gmail-2" },
       assignments: [
-        { assignmentId: "gmail-model-1", state: "unavailable" },
         { assignmentId: "gmail-tool", state: "enabled" },
         { assignmentId: "gmail-model-2", state: "enabled" },
       ],
     });
 
-    const beforeSelect = await contribution.getSettings(identity);
-    await storage.put({
-      "bot-configuration": {
-        ...beforeSelect,
-        assignments: beforeSelect.assignments.map((assignment) =>
-          assignment.assignmentId === "gmail-model-1"
-            ? { ...assignment, state: "enabled" as const }
-            : assignment,
-        ),
-      },
-      "assignment-generation:gmail-model-1": "rebound-gmail-1",
-    });
-    generations.add("rebound-gmail-1");
+    for (const [commandId, assignmentId, connectionId, expectedRevision] of [
+      ["bind-gmail-1-again", "gmail-model-1-again", "gmail-1", 2],
+      ["bind-gmail-2-again", "gmail-model-2-again", "gmail-2", 3],
+    ] as const) {
+      await expect(
+        execute({
+          schemaVersion: 1,
+          type: "bot/assign-capability",
+          commandId,
+          botId: "primary",
+          expectedRevision,
+          assignment: {
+            assignmentId,
+            packageId: "composio",
+            capabilityId: "gmail-tools",
+            connectionId,
+          },
+          model: {
+            connectionId,
+            providerModelId: "fixture-model:latest",
+          },
+        }),
+      ).resolves.toMatchObject({
+        status: "applied",
+        revision: expectedRevision + 1,
+      });
+    }
 
-    await expect(
-      execute({
-        schemaVersion: 1,
-        type: "bot/select-model",
-        commandId: "select-gmail-1",
-        botId: "primary",
-        expectedRevision: 2,
-        model: {
-          connectionId: "gmail-1",
-          providerModelId: "fixture-model:latest",
-        },
-      }),
-    ).resolves.toMatchObject({ status: "applied", revision: 3 });
-
-    expect(released.at(-1)).toEqual({
-      connectionId: "gmail-2",
-      generation: "bind-gmail-2",
-    });
+    expect(released.slice(-2)).toEqual([
+      { connectionId: "gmail-2", generation: "bind-gmail-2" },
+      { connectionId: "gmail-1", generation: "bind-gmail-1-again" },
+    ]);
+    expect(generations.has("bind-gmail-1")).toBe(false);
     expect(generations.has("bind-gmail-2")).toBe(false);
+    expect(generations.has("bind-gmail-1-again")).toBe(false);
     expect(generations.has("tool-generation")).toBe(true);
     expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 3,
-      model: { connectionId: "gmail-1" },
+      revision: 4,
+      model: { connectionId: "gmail-2" },
       assignments: [
-        { assignmentId: "gmail-model-1", state: "enabled" },
         { assignmentId: "gmail-tool", state: "enabled" },
-        { assignmentId: "gmail-model-2", state: "unavailable" },
+        { assignmentId: "gmail-model-2-again", state: "enabled" },
       ],
     });
   });

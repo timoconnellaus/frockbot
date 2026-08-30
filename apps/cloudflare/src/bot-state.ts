@@ -122,9 +122,20 @@ export class BotState extends DurableObject<BotStateEnv> {
                         {
                           name: registration.initialName,
                           model: registration.initialModel,
+                          modelBinding: registration.initialModelBinding,
                         },
                       )
-                      .then(() => undefined);
+                      .then(async () => {
+                        if (
+                          registration.initialModel &&
+                          registration.initialModelBinding
+                        ) {
+                          await this.acknowledgeInitialModelBinding(
+                            userId,
+                            registration,
+                          );
+                        }
+                      });
                   },
                 },
                 {
@@ -148,6 +159,31 @@ export class BotState extends DurableObject<BotStateEnv> {
       });
     }
     return this.mounted;
+  }
+
+  private async acknowledgeInitialModelBinding(
+    userId: string,
+    registration: BotRegistrationV1,
+  ): Promise<void> {
+    const binding = registration.initialModelBinding;
+    const model = registration.initialModel;
+    if (!binding || !model) return;
+    const id = this.env.USER_CONFIGURATIONS.idFromName(userId);
+    // SAFETY: USER_CONFIGURATIONS binds UserConfiguration; workers-types cannot infer its generated dependency RPC surface.
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
+    };
+    if (
+      !(await rpc.acknowledgeConnectionDependency({
+        schemaVersion: 1,
+        userId,
+        connectionId: model.connectionId,
+        botId: registration.botId,
+        generation: binding.generation,
+      }))
+    ) {
+      throw new Error("Initial model dependency was not acknowledged");
+    }
   }
 
   private async registration(identity: {

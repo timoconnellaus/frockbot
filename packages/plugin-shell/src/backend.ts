@@ -235,7 +235,14 @@ export class ShellBotBackendContribution {
 
   async materializeSettings(
     identity: BotIdentity,
-    initial: { name: string; model?: BotSettingsViewV1["model"] },
+    initial: {
+      name: string;
+      model?: BotSettingsViewV1["model"];
+      modelBinding?: {
+        assignment: BotSettingsViewV1["assignments"][number];
+        generation: string;
+      };
+    },
   ): Promise<BotSettingsViewV1> {
     return this.ctx.storage.transaction(async (transaction) => {
       const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
@@ -253,10 +260,20 @@ export class ShellBotBackendContribution {
       const settings = {
         ...this.initialBotSettings(identity.botId, initial.model),
         profile: { name: initial.name },
+        assignments: initial.modelBinding
+          ? [structuredClone(initial.modelBinding.assignment)]
+          : [],
       } satisfies BotSettingsViewV1;
       await transaction.put({
         [IDENTITY_KEY]: durableIdentity ?? identity,
         [BOT_CONFIGURATION_KEY]: settings,
+        ...(initial.modelBinding
+          ? {
+              [assignmentGenerationKey(
+                initial.modelBinding.assignment.assignmentId,
+              )]: initial.modelBinding.generation,
+            }
+          : {}),
       });
       return settings;
     });
@@ -495,6 +512,7 @@ export class ShellBotBackendContribution {
     ) {
       const superseded = settings.assignments.find(
         (assignment) =>
+          assignment.state === "enabled" &&
           assignment.connectionId === settings.model?.connectionId &&
           modelCapabilities.has(
             capabilityKey(assignment.packageId, assignment.capabilityId),
@@ -660,6 +678,7 @@ export class ShellBotBackendContribution {
         const previousConnectionId = current.model?.connectionId;
         const superseded = current.assignments.find(
           (assignment) =>
+            assignment.state === "enabled" &&
             command.model &&
             previousConnectionId &&
             previousConnectionId !== connectionAssignment.connectionId &&
@@ -871,10 +890,9 @@ export class ShellBotBackendContribution {
                   model: command.model,
                   ...(saga?.mode === "release"
                     ? {
-                        assignments: current.assignments.map((assignment) =>
-                          assignment.assignmentId === saga.assignmentId
-                            ? { ...assignment, state: "unavailable" as const }
-                            : assignment,
+                        assignments: current.assignments.filter(
+                          (assignment) =>
+                            assignment.assignmentId !== saga.assignmentId,
                         ),
                       }
                     : {}),
@@ -884,10 +902,9 @@ export class ShellBotBackendContribution {
                     ...current,
                     revision,
                     model: undefined,
-                    assignments: current.assignments.map((assignment) =>
-                      assignment.assignmentId === command.assignmentId
-                        ? { ...assignment, state: "unavailable" as const }
-                        : assignment,
+                    assignments: current.assignments.filter(
+                      (assignment) =>
+                        assignment.assignmentId !== command.assignmentId,
                     ),
                   }
                 : {
@@ -895,22 +912,17 @@ export class ShellBotBackendContribution {
                     revision,
                     ...(command.model ? { model: command.model } : {}),
                     assignments: [
-                      ...current.assignments
-                        .filter(
-                          (assignment) =>
-                            assignment.assignmentId !==
-                            command.assignment.assignmentId,
-                        )
-                        .map((assignment) =>
-                          (assignment.packageId ===
-                            command.assignment.packageId &&
-                            assignment.capabilityId ===
-                              command.assignment.capabilityId) ||
-                          assignment.assignmentId ===
-                            saga?.supersededAssignmentId
-                            ? { ...assignment, state: "unavailable" as const }
-                            : assignment,
-                        ),
+                      ...current.assignments.filter(
+                        (assignment) =>
+                          assignment.assignmentId !==
+                            command.assignment.assignmentId &&
+                          assignment.assignmentId !==
+                            saga?.supersededAssignmentId &&
+                          (assignment.packageId !==
+                            command.assignment.packageId ||
+                            assignment.capabilityId !==
+                              command.assignment.capabilityId),
+                      ),
                       { ...command.assignment, state: "enabled" },
                     ],
                   };
@@ -924,6 +936,16 @@ export class ShellBotBackendContribution {
         [BOT_CONFIGURATION_KEY]: next,
         [receiptKey]: { commandFingerprint, receipt },
       });
+      const retainedAssignmentIds = new Set(
+        next.assignments.map((assignment) => assignment.assignmentId),
+      );
+      for (const assignment of current.assignments) {
+        if (!retainedAssignmentIds.has(assignment.assignmentId)) {
+          await transaction.delete(
+            assignmentGenerationKey(assignment.assignmentId),
+          );
+        }
+      }
       if (
         command.type === "bot/assign-capability" &&
         command.assignment.connectionId

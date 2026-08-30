@@ -2,6 +2,7 @@
 import {
   decodeBotIdV1,
   isPublicIdentifier,
+  type CapabilityAssignmentView,
   type ModelAssignment,
 } from "@frockbot/configuration-core";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
@@ -20,12 +21,17 @@ export interface SheepRecipeV1 {
   middle: string;
   lower: string;
 }
+export interface InitialModelBindingV1 {
+  assignment: CapabilityAssignmentView;
+  generation: string;
+}
 export interface BotRegistrationV1 {
   schemaVersion: 1;
   botId: string;
   registeredAt: string;
   initialName: string;
   initialModel?: ModelAssignment;
+  initialModelBinding?: InitialModelBindingV1;
   sheep: SheepRecipeV1;
 }
 export interface BotMembershipViewV1 {
@@ -170,7 +176,51 @@ function modelAssignment(value: unknown): ModelAssignment {
     providerModelId: boundedText(
       model.providerModelId,
       "initialModel.providerModelId",
-      200,
+      256,
+    ),
+  };
+}
+
+function initialModelBinding(value: unknown): InitialModelBindingV1 {
+  const binding = record(value, "initialModelBinding");
+  exact(binding, ["assignment", "generation"]);
+  const assignment = record(
+    binding.assignment,
+    "initialModelBinding.assignment",
+  );
+  exact(assignment, [
+    "assignmentId",
+    "packageId",
+    "capabilityId",
+    "connectionId",
+    "state",
+  ]);
+  if (assignment.state !== "enabled") {
+    throw new FlockDecodeError("initial model assignment is invalid");
+  }
+  return {
+    assignment: {
+      assignmentId: identifier(
+        assignment.assignmentId,
+        "initialModelBinding.assignment.assignmentId",
+      ),
+      packageId: identifier(
+        assignment.packageId,
+        "initialModelBinding.assignment.packageId",
+      ),
+      capabilityId: identifier(
+        assignment.capabilityId,
+        "initialModelBinding.assignment.capabilityId",
+      ),
+      connectionId: identifier(
+        assignment.connectionId,
+        "initialModelBinding.assignment.connectionId",
+      ),
+      state: "enabled",
+    },
+    generation: identifier(
+      binding.generation,
+      "initialModelBinding.generation",
     ),
   };
 }
@@ -249,19 +299,32 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "sheep"],
-    ["initialModel"],
+    ["initialModel", "initialModelBinding"],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
+  const initialModel =
+    bot.initialModel === undefined
+      ? undefined
+      : modelAssignment(bot.initialModel);
+  const binding =
+    bot.initialModelBinding === undefined
+      ? undefined
+      : initialModelBinding(bot.initialModelBinding);
+  if (
+    binding &&
+    (!initialModel ||
+      binding.assignment.connectionId !== initialModel.connectionId)
+  ) {
+    throw new FlockDecodeError("initial model binding is invalid");
+  }
   return {
     schemaVersion: 1,
     botId: botIdentifier(bot.botId),
     registeredAt: boundedText(bot.registeredAt, "registeredAt", 64),
     initialName: boundedText(bot.initialName, "initialName", 100),
-    initialModel:
-      bot.initialModel === undefined
-        ? undefined
-        : modelAssignment(bot.initialModel),
+    initialModel,
+    initialModelBinding: binding,
     sheep: decodeSheepRecipeV1(bot.sheep),
   };
 }

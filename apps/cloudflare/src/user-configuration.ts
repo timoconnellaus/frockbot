@@ -163,6 +163,72 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                     }
                     return settings.readSnapshot(storage);
                   },
+                  claimInitialModelBinding: async (storage, input) => {
+                    if (!settings) {
+                      throw new Error(
+                        "User settings Contribution is unavailable",
+                      );
+                    }
+                    const user = await settings.readSnapshot(storage);
+                    const connection = user.connections.find(
+                      (candidate) =>
+                        candidate.connectionId === input.model.connectionId,
+                    );
+                    const installation = user.packages.find(
+                      (candidate) =>
+                        candidate.packageId === connection?.packageId &&
+                        candidate.state === "installed",
+                    );
+                    const pkg = plan.packages.find(
+                      (candidate) =>
+                        candidate.id === connection?.packageId &&
+                        candidate.version === installation?.version,
+                    );
+                    const connectionType =
+                      pkg?.manifest.configuration?.connectionTypes.find(
+                        (candidate) =>
+                          candidate.id === connection?.connectionTypeId,
+                      );
+                    const capability =
+                      pkg?.manifest.configuration?.capabilities.find(
+                        (candidate) =>
+                          candidate.kind === "model" &&
+                          connectionType?.capabilities.includes(candidate.id) &&
+                          candidate.connectionTypes.includes(connectionType.id),
+                      );
+                    if (
+                      connection?.state !== "ready" ||
+                      !installation ||
+                      !pkg ||
+                      !connectionType ||
+                      !capability
+                    ) {
+                      return undefined;
+                    }
+                    const claimed = await settings.claimConnectionDependency(
+                      input.userId,
+                      connection.connectionId,
+                      input.botId,
+                      input.generation,
+                      {
+                        schemaVersion: 1,
+                        packageId: pkg.id,
+                        packageVersion: pkg.version,
+                        capabilityId: capability.id,
+                        connectionTypeIds: [...capability.connectionTypes],
+                      },
+                      storage,
+                    );
+                    return claimed
+                      ? {
+                          assignmentId: input.generation,
+                          packageId: pkg.id,
+                          capabilityId: capability.id,
+                          connectionId: connection.connectionId,
+                          state: "enabled" as const,
+                        }
+                      : undefined;
+                  },
                 },
                 {
                   mount(value: FlockUserBackendContribution) {
