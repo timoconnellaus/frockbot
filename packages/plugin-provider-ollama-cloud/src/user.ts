@@ -1306,7 +1306,9 @@ export class OllamaCloudUserBackendContribution {
           }
         }
         const status: ConnectionCommandReceiptV1["status"] =
-          outcomeFailure === undefined ? "applied" : "failed";
+          appliesProjection && outcomeFailure === undefined
+            ? "applied"
+            : "failed";
         const pendingSettlement: StoredCommand | undefined = lease
           ? {
               ...record,

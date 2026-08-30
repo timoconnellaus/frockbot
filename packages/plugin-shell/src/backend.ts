@@ -1514,7 +1514,13 @@ export class ShellBotBackendContribution {
       connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
     }));
     const plan = admittedRequest
-      ? undefined
+      ? {
+          schemaVersion: 1 as const,
+          botId: settings.botId,
+          revision: settings.revision,
+          model: settings.model ? structuredClone(settings.model) : undefined,
+          assignments: structuredClone(settings.assignments),
+        }
       : resolveBotExecutionPlanV1({
           bot: settings,
           user,
@@ -1525,24 +1531,26 @@ export class ShellBotBackendContribution {
       const value = (this.env as unknown as Record<string, unknown>)[name];
       return typeof value === "string" ? value : undefined;
     };
+    const authorizeAssignedConnection = admittedRequest
+      ? (assignment: BotSettingsViewV1["assignments"][number]) =>
+          this.authorizeAdmittedAssignedEffect(identity, assignment)
+      : (assignment: BotSettingsViewV1["assignments"][number]) =>
+          this.authorizeAssignedEffect(identity, assignment);
     const agentPackages: FoundationAgentPackage[] = [
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
         readSecret,
       }),
-      ...(plan
-        ? await createFoundationAssignedRuntimePackages(
-            application,
-            settings,
-            plan,
-            {
-              userId: identity.userId,
-              readSecret,
-              authorizeConnection: (assignment) =>
-                this.authorizeAssignedEffect(identity, assignment),
-            },
-          )
-        : []),
+      ...(await createFoundationAssignedRuntimePackages(
+        application,
+        settings,
+        plan,
+        {
+          userId: identity.userId,
+          readSecret,
+          authorizeConnection: authorizeAssignedConnection,
+        },
+      )),
     ];
     if (!settings.model) {
       throw new Error("Bot model Connection is not configured");
@@ -1661,6 +1669,36 @@ export class ShellBotBackendContribution {
           : {}),
       },
     };
+  }
+
+  private async authorizeAdmittedAssignedEffect(
+    identity: BotIdentity,
+    assignment: BotSettingsViewV1["assignments"][number],
+  ): Promise<ConnectionView> {
+    const user = await this.userConfiguration(identity).readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
+    const application = await this.compileApplication();
+    const connection = user.connections.find(
+      (candidate) =>
+        candidate.connectionId === assignment.connectionId &&
+        candidate.packageId === assignment.packageId &&
+        candidate.state === "ready",
+    );
+    const pkg = application.packages.find(
+      (candidate) => candidate.id === assignment.packageId,
+    );
+    const capability = pkg?.manifest.configuration?.capabilities.find(
+      (candidate) =>
+        candidate.id === assignment.capabilityId &&
+        connection !== undefined &&
+        candidate.connectionTypes.includes(connection.connectionTypeId),
+    );
+    if (assignment.state !== "enabled" || !connection || !capability) {
+      throw new Error("Admitted assigned effect is unavailable");
+    }
+    return structuredClone(connection);
   }
 
   private async authorizeAssignedEffect(

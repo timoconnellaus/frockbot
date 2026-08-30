@@ -1231,10 +1231,12 @@ describe("Ollama Cloud User Contribution", () => {
     });
     await newerStarted.promise;
     newer.resolve(Response.json({ models: [{ model: "newer:cloud" }] }));
-    await newerRefresh;
+    const newerReceipt = await newerRefresh;
     older.resolve(Response.json({ models: [{ model: "older:cloud" }] }));
-    await olderRefresh;
+    const olderReceipt = await olderRefresh;
 
+    expect(newerReceipt.status).toBe("applied");
+    expect(olderReceipt.status).toBe("failed");
     const catalog = (
       await settings.getConnection("account-1", created.connectionId)
     )?.modelCatalog;
