@@ -79,10 +79,16 @@ function developmentIdentity(request: Request): DevelopmentIdentity {
 
 function allowedClientOrigin(
   request: Request,
+  requestOrigin: string,
   allowedOrigins: string[] | undefined,
 ): string | null {
   const origin = request.headers.get("origin");
-  if (!origin || !allowedOrigins?.includes(origin)) return null;
+  if (
+    !origin ||
+    (origin !== requestOrigin && !allowedOrigins?.includes(origin))
+  ) {
+    return null;
+  }
   return origin;
 }
 
@@ -395,9 +401,20 @@ export function createGateway(dependencies: GatewayDependencies) {
 
     const origin = allowedClientOrigin(
       request,
+      url.origin,
       dependencies.allowedClientOrigins,
     );
     const isApiPath = url.pathname.startsWith("/api/");
+    const presentedOrigin = request.headers.get("origin");
+    if (
+      isApiPath &&
+      presentedOrigin &&
+      !origin &&
+      request.method !== "GET" &&
+      request.method !== "HEAD"
+    ) {
+      return jsonError(403, "request origin is not allowed");
+    }
     if (!origin || !isApiPath) return route(request, url);
     if (request.method === "OPTIONS") return preflightResponse(origin);
     return withClientOrigin(await route(request, url), origin);

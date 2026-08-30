@@ -143,6 +143,7 @@ describe("Bot recovery", () => {
     };
     const leasedRequests: Array<Record<string, unknown>> = [];
     const settledEffects: string[] = [];
+    let settlementFailures = 0;
     const rpc = {
       readConfiguration: () => Promise.resolve(structuredClone(userSettings)),
       getConnection: () =>
@@ -165,6 +166,10 @@ describe("Bot recovery", () => {
       },
       settleModelCredential: (input: unknown) => {
         settledEffects.push((input as { effectId: string }).effectId);
+        if (settlementFailures > 0) {
+          settlementFailures -= 1;
+          return Promise.reject(new Error("settlement unavailable"));
+        }
         return Promise.resolve();
       },
     };
@@ -296,6 +301,34 @@ describe("Bot recovery", () => {
         },
       });
     }
+
+    settlementFailures = 1;
+    await expect(
+      host().run({
+        userId: "user-1",
+        botId: "primary",
+        runId: "ollama-run-settlement",
+        sessionId: "user-1:primary",
+        acceptedAt: "2026-08-30T00:01:30.000Z",
+        text: "settle durably",
+      }),
+    ).rejects.toThrow("durable outcome settlement pending");
+    expect(
+      await storage.get<StoredRun>("run:ollama-run-settlement"),
+    ).toMatchObject({ status: "running", phase: "executing" });
+    expect(await storage.get<string>("active-run")).toBe(
+      "ollama-run-settlement",
+    );
+    expect(requests).toHaveLength(3);
+
+    await host().alarm();
+
+    expect(
+      await storage.get<StoredRun>("run:ollama-run-settlement"),
+    ).toMatchObject({ status: "completed" });
+    expect(await storage.get("active-run")).toBeUndefined();
+    expect(requests).toHaveLength(3);
+    expect(settledEffects).toHaveLength(4);
 
     failRequests = true;
     await expect(

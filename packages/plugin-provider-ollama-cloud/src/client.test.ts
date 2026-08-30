@@ -55,25 +55,28 @@ describe("Ollama Cloud client", () => {
     expect(requests).toBe(1);
   });
 
-  test("bounds catalog size before model detail fanout", async () => {
+  test("truncates oversized advisory catalogs before detail fanout", async () => {
     let requests = 0;
     const client = new OllamaCloudClient({
-      fetch: () => {
+      fetch: (input) => {
         requests += 1;
         return Promise.resolve(
-          Response.json({
-            models: Array.from({ length: 101 }, (_, index) => ({
-              model: `model-${index}:cloud`,
-            })),
-          }),
+          String(input).endsWith("/tags")
+            ? Response.json({
+                models: Array.from({ length: 101 }, (_, index) => ({
+                  model: `model-${index}:cloud`,
+                })),
+              })
+            : Response.json({ capabilities: [] }),
         );
       },
     });
 
-    await expect(client.listModels("account-key")).rejects.toThrow(
-      "Ollama Cloud model catalog is invalid",
-    );
-    expect(requests).toBe(1);
+    const models = await client.listModels("account-key");
+
+    expect(models).toHaveLength(100);
+    expect(models.at(-1)?.providerModelId).toBe("model-99:cloud");
+    expect(requests).toBe(101);
   });
 
   test("limits concurrent model detail lookups", async () => {

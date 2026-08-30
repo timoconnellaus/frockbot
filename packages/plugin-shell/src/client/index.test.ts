@@ -417,6 +417,15 @@ describe("Bot selection", () => {
       ],
     });
 
+    bot = {
+      ...bot,
+      assignments: bot.assignments.map((assignment) => ({
+        ...assignment,
+        state: "unavailable",
+      })),
+    };
+    provided.value.botSettings = bot;
+
     await provided.value.clearBotModel();
 
     expect(commands.at(-1)).toEqual({

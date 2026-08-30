@@ -9,6 +9,8 @@ export interface StoredAssignmentSaga {
   connectionId: string;
   generation: string;
   mode?: "assign" | "unassign";
+  supersededConnectionId?: string;
+  supersededGeneration?: string;
   phase: "claiming" | "committed";
   deadlineAt: number;
   receipt?: OperationReceiptV1;

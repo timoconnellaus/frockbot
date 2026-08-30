@@ -141,20 +141,17 @@ export class OllamaCloudClient {
       await this.request("/tags", apiKey, { method: "GET", signal }),
       "Ollama Cloud model catalog",
     );
-    if (
-      !Array.isArray(payload.models) ||
-      payload.models.length > MAX_CONNECTION_MODELS
-    ) {
+    if (!Array.isArray(payload.models)) {
       throw new Error("Ollama Cloud model catalog is invalid");
     }
-    const modelIds = payload.models.map((candidate) => {
+    const modelIds = new Set<string>();
+    for (const candidate of payload.models) {
       const model = object(candidate, "Ollama Cloud model");
-      return modelId(model.model ?? model.name);
-    });
-    return mapConcurrent(
-      [...new Set(modelIds)],
-      MODEL_LOOKUP_CONCURRENCY,
-      (id) => this.resolveModel(apiKey, id, signal, "discovered"),
+      modelIds.add(modelId(model.model ?? model.name));
+      if (modelIds.size >= MAX_CONNECTION_MODELS) break;
+    }
+    return mapConcurrent([...modelIds], MODEL_LOOKUP_CONCURRENCY, (id) =>
+      this.resolveModel(apiKey, id, signal, "discovered"),
     );
   }
 

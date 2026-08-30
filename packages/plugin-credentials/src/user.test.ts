@@ -242,7 +242,7 @@ describe("Credential User Contribution", () => {
     ).rejects.toThrow("Credential lease effect id was reused");
   });
 
-  test("expires durable leases and blocks replay or decryption", async () => {
+  test("expires leases until a delayed durable outcome settles", async () => {
     let now = Date.parse("2026-08-30T00:00:00.000Z");
     const { credentials } = contribution(undefined, () => now);
     await credentials.stageApiKey({
@@ -272,6 +272,16 @@ describe("Credential User Contribution", () => {
         expiresAt: "2026-08-30T02:00:00.000Z",
       }),
     ).rejects.toThrow("Credential lease expired");
+
+    await credentials.settle({ ...authority, effectId: "effect-expired" });
+
+    await expect(
+      credentials.lease({
+        ...authority,
+        effectId: "effect-expired",
+        expiresAt: "2026-08-30T02:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({ effectId: "effect-expired" });
   });
 
   test("bounds expired lease tombstones", async () => {

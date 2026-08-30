@@ -126,6 +126,45 @@ describe("AgentLoop", () => {
     expect(committed[0]?.durable).toBe(true);
   });
 
+  test("keeps a durable settlement failure resumable", async () => {
+    let attempts = 0;
+    const provider: LlmProvider = {
+      id: "settlement-retry",
+      async *stream() {
+        yield { type: "text-delta", text: "done" };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider);
+    root.on("agent/model-outcome-committed", async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("settlement unavailable");
+    });
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "settlement-retry",
+      provider: provider.id,
+      model: "model-1",
+    });
+
+    handle.agent.send("Run once");
+    await handle.agent.whenIdle();
+
+    expect(attempts).toBe(1);
+    expect(
+      handle.agent.session.events.some((event) => event.type === "turn/end"),
+    ).toBe(false);
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(attempts).toBe(2);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+
   test("reannounces a durable assistant outcome during recovery", async () => {
     const timestamp = "2026-08-28T00:00:00.000Z";
     const initial = [

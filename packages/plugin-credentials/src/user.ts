@@ -793,7 +793,36 @@ export class CredentialUserBackendContribution {
   }): Promise<void> {
     await this.host.storage.transaction(async (storage) => {
       const leaseValue = await storage.get<unknown>(leaseKey(input.effectId));
-      if (leaseValue === undefined) return;
+      if (leaseValue === undefined) {
+        const tombstoneValue = await storage.get<unknown>(
+          leaseTombstoneKey(input.effectId),
+        );
+        if (tombstoneValue === undefined) return;
+        const tombstone = decodeLeaseTombstone(tombstoneValue);
+        if (
+          tombstone.accountId !== input.accountId ||
+          tombstone.connectionId !== input.connectionId ||
+          tombstone.packageId !== input.packageId
+        ) {
+          throw new Error("Credential lease authority does not match");
+        }
+        const indexKey = leaseTombstoneIndexKey(
+          tombstone.connectionId,
+          tombstone.credentialGeneration,
+        );
+        const indexValue = await storage.get<unknown>(indexKey);
+        const index = (
+          indexValue === undefined
+            ? []
+            : decodeStoredStringList(
+                indexValue,
+                "credential lease tombstone index",
+              )
+        ).filter((effectId) => effectId !== input.effectId);
+        await storage.delete(leaseTombstoneKey(input.effectId));
+        await storage.put(indexKey, index);
+        return;
+      }
       const lease = decodeStoredCredentialLease(leaseValue);
       if (
         lease.accountId !== input.accountId ||

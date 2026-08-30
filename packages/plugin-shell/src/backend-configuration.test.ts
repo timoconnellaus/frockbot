@@ -555,6 +555,15 @@ describe("Bot capability assignment admission", () => {
       assignments: [{ assignmentId: "fixture-model", state: "enabled" }],
     });
 
+    const unavailable = await contribution.getSettings(identity);
+    await storage.put("bot-configuration", {
+      ...unavailable,
+      assignments: unavailable.assignments.map((assignment) => ({
+        ...assignment,
+        state: "unavailable" as const,
+      })),
+    });
+
     const unbind: BotConfigurationCommandV1 = {
       schemaVersion: 1,
       type: "bot/unbind-model",
@@ -577,6 +586,119 @@ describe("Bot capability assignment admission", () => {
       revision: 2,
       model: undefined,
       assignments: [{ assignmentId: "fixture-model", state: "unavailable" }],
+    });
+  });
+
+  test("releases the superseded model dependency after switching Connections", async () => {
+    const storage = new MemoryStorage();
+    const user = installedUser();
+    user.connections.push({
+      ...user.connections[0]!,
+      connectionId: "gmail-2",
+      displayName: "Gmail 2",
+    });
+    const generations = new Map<string, string>();
+    const released: Array<{ connectionId: string; generation: string }> = [];
+    let releaseAttempts = 0;
+    const userConfiguration = {
+      readConfiguration: () => Promise.resolve(user),
+      claimConnectionDependency: (request: {
+        connectionId: string;
+        generation: string;
+      }) => {
+        generations.set(request.connectionId, request.generation);
+        return Promise.resolve(true);
+      },
+      acknowledgeConnectionDependency: () => Promise.resolve(true),
+      releaseConnectionDependency: (request: {
+        connectionId: string;
+        generation: string;
+      }) => {
+        releaseAttempts += 1;
+        if (releaseAttempts === 1) return Promise.resolve(false);
+        released.push({
+          connectionId: request.connectionId,
+          generation: request.generation,
+        });
+        generations.delete(request.connectionId);
+        return Promise.resolve(true);
+      },
+      compensateConnectionDependency: () => Promise.resolve(true),
+    };
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {
+        USER_CONFIGURATIONS: {
+          idFromName: () => "user-1",
+          get: () => userConfiguration,
+        },
+      } as never,
+      compileApplication: compileAssignmentTestApplication,
+    });
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    const execute = (command: BotConfigurationCommandV1) =>
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        ...identity,
+        command,
+      });
+
+    await execute({
+      schemaVersion: 1,
+      type: "bot/assign-capability",
+      commandId: "bind-gmail-1",
+      botId: "primary",
+      expectedRevision: 0,
+      assignment: {
+        assignmentId: "gmail-model-1",
+        packageId: "composio",
+        capabilityId: "gmail-tools",
+        connectionId: "gmail-1",
+      },
+      model: {
+        connectionId: "gmail-1",
+        providerModelId: "fixture-model:latest",
+      },
+    });
+    const switchModel: BotConfigurationCommandV1 = {
+      schemaVersion: 1,
+      type: "bot/assign-capability",
+      commandId: "bind-gmail-2",
+      botId: "primary",
+      expectedRevision: 1,
+      assignment: {
+        assignmentId: "gmail-model-2",
+        packageId: "composio",
+        capabilityId: "gmail-tools",
+        connectionId: "gmail-2",
+      },
+      model: {
+        connectionId: "gmail-2",
+        providerModelId: "fixture-model:latest",
+      },
+    };
+    await expect(execute(switchModel)).rejects.toThrow(
+      "Superseded Connection dependency was not released",
+    );
+    await expect(execute(switchModel)).resolves.toMatchObject({
+      status: "applied",
+      revision: 2,
+    });
+
+    expect(releaseAttempts).toBe(2);
+    expect(released).toEqual([
+      { connectionId: "gmail-1", generation: "bind-gmail-1" },
+    ]);
+    expect(generations.has("gmail-1")).toBe(false);
+    expect(generations.get("gmail-2")).toBe("bind-gmail-2");
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      revision: 2,
+      model: { connectionId: "gmail-2" },
+      assignments: [
+        { assignmentId: "gmail-model-1", state: "unavailable" },
+        { assignmentId: "gmail-model-2", state: "enabled" },
+      ],
     });
   });
 

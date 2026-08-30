@@ -257,16 +257,25 @@ class MemoryConfiguration
             ? { notifications: command.notifications }
             : command.type === "bot/select-model"
               ? { model: command.model }
-              : {
-                  assignments: [
-                    ...bot.assignments.filter(
-                      (assignment) =>
-                        assignment.assignmentId !==
-                        command.assignment.assignmentId,
+              : command.type === "bot/unbind-model"
+                ? {
+                    model: undefined,
+                    assignments: bot.assignments.map((assignment) =>
+                      assignment.assignmentId === command.assignmentId
+                        ? { ...assignment, state: "unavailable" as const }
+                        : assignment,
                     ),
-                    { ...command.assignment, state: "enabled" as const },
-                  ],
-                }),
+                  }
+                : {
+                    assignments: [
+                      ...bot.assignments.filter(
+                        (assignment) =>
+                          assignment.assignmentId !==
+                          command.assignment.assignmentId,
+                      ),
+                      { ...command.assignment, state: "enabled" as const },
+                    ],
+                  }),
       });
     } else {
       const user = current as UserSettingsViewV1;
@@ -1356,9 +1365,63 @@ describe("Cross-origin access for mobile clients", () => {
         headers: { origin: "https://attacker.test" },
       }),
     );
-    expect(preflight.status).toBe(401);
+    expect(preflight.status).toBe(403);
     expect(preflight.headers.get("access-control-allow-origin")).toBeNull();
     expect(preflight.headers.get("vary")).toBeNull();
+  });
+
+  test("rejects credential mutations from an untrusted origin", async () => {
+    const { gateway } = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      true,
+      [MOBILE_ORIGIN],
+    );
+    const response = await gateway(
+      new Request("https://frockbot.test/api/connections", {
+        method: "POST",
+        headers: {
+          origin: "https://attacker.test",
+          cookie: "frockbot_dev_user=alice",
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/create-api-key",
+          commandId: "csrf-connection",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          label: "Injected",
+          apiKey: "stolen-context",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect((await response.json()) as unknown).toEqual({
+      error: "request origin is not allowed",
+    });
+
+    const sameOrigin = await gateway(
+      new Request("https://frockbot.test/api/connections", {
+        method: "POST",
+        headers: {
+          origin: "https://frockbot.test",
+          cookie: "frockbot_dev_user=alice",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/create-api-key",
+          commandId: "same-origin-connection",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          label: "Allowed",
+          apiKey: "write-only-secret",
+        }),
+      }),
+    );
+    expect(sameOrigin.status).toBe(200);
   });
 
   test("shares authenticated bearer turns with the mobile origin", async () => {
@@ -1441,7 +1504,7 @@ describe("Cross-origin access for mobile clients", () => {
     const response = await gateway(
       mobileRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
     );
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(403);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 

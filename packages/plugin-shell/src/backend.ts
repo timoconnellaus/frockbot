@@ -43,6 +43,7 @@ import {
 } from "./backend-completion.js";
 import {
   BotTurnReconciliationRequiredError,
+  BotTurnRecoveryRequiredError,
   executeBotTurn,
 } from "./backend-runner.js";
 import {
@@ -462,7 +463,8 @@ export class ShellBotBackendContribution {
       const assignment = settings.assignments.find(
         (candidate) =>
           candidate.assignmentId === command.assignmentId &&
-          candidate.state === "enabled" &&
+          (candidate.state === "enabled" ||
+            candidate.state === "unavailable") &&
           candidate.connectionId === settings.model?.connectionId,
       );
       const application = await this.compileApplication();
@@ -565,6 +567,27 @@ export class ShellBotBackendContribution {
         ) {
           throw new Error("Connection assignment was revoked before admission");
         }
+        let supersededConnectionId: string | undefined;
+        let supersededGeneration: string | undefined;
+        const previousConnectionId = current.model?.connectionId;
+        if (
+          command.model &&
+          previousConnectionId &&
+          previousConnectionId !== connectionAssignment.connectionId &&
+          current.assignments.some(
+            (assignment) => assignment.connectionId === previousConnectionId,
+          )
+        ) {
+          supersededGeneration = await transaction.get<string>(
+            `${ASSIGNMENT_GENERATION_PREFIX}${previousConnectionId}`,
+          );
+          if (!supersededGeneration) {
+            throw new Error(
+              "Superseded model assignment generation is unavailable",
+            );
+          }
+          supersededConnectionId = previousConnectionId;
+        }
         const saga: StoredAssignmentSaga = {
           schemaVersion: 1,
           commandId: command.commandId,
@@ -573,6 +596,9 @@ export class ShellBotBackendContribution {
           botId: identity.botId,
           connectionId: connectionAssignment.connectionId,
           generation: connectionAssignment.generation,
+          ...(supersededConnectionId && supersededGeneration
+            ? { supersededConnectionId, supersededGeneration }
+            : {}),
           phase: "claiming",
           deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
         };
@@ -756,10 +782,13 @@ export class ShellBotBackendContribution {
                             command.assignment.assignmentId,
                         )
                         .map((assignment) =>
-                          assignment.packageId ===
+                          (assignment.packageId ===
                             command.assignment.packageId &&
-                          assignment.capabilityId ===
-                            command.assignment.capabilityId
+                            assignment.capabilityId ===
+                              command.assignment.capabilityId) ||
+                          (command.model &&
+                            assignment.connectionId ===
+                              current.model?.connectionId)
                             ? { ...assignment, state: "unavailable" as const }
                             : assignment,
                         ),
@@ -810,6 +839,12 @@ export class ShellBotBackendContribution {
       throw new Error("Assignment saga does not match its durable identity");
     }
     if (
+      Boolean(saga.supersededConnectionId) !==
+      Boolean(saga.supersededGeneration)
+    ) {
+      throw new Error("Assignment saga superseded dependency is invalid");
+    }
+    if (
       commandFingerprint !== undefined &&
       saga.commandFingerprint !== commandFingerprint
     ) {
@@ -818,6 +853,7 @@ export class ShellBotBackendContribution {
       );
     }
     const userConfiguration = this.userConfiguration(identity);
+    let releasedSuperseded = false;
     try {
       if (saga.mode === "unassign") {
         if (
@@ -833,7 +869,7 @@ export class ShellBotBackendContribution {
           );
         }
       } else {
-        await settleAssignmentSaga(saga, {
+        const settlement = await settleAssignmentSaga(saga, {
           acknowledge: (stored) =>
             userConfiguration.acknowledgeConnectionDependency(
               stored.userId,
@@ -860,6 +896,25 @@ export class ShellBotBackendContribution {
             );
           },
         });
+        if (
+          settlement === "acknowledged" &&
+          saga.supersededConnectionId &&
+          saga.supersededGeneration
+        ) {
+          if (
+            !(await userConfiguration.releaseConnectionDependency(
+              saga.userId,
+              saga.supersededConnectionId,
+              saga.botId,
+              saga.supersededGeneration,
+            ))
+          ) {
+            throw new Error(
+              "Superseded Connection dependency was not released",
+            );
+          }
+          releasedSuperseded = true;
+        }
       }
       await this.ctx.storage.transaction(async (transaction) => {
         const current = await transaction.get<StoredAssignmentSaga>(key);
@@ -876,6 +931,18 @@ export class ShellBotBackendContribution {
           ) {
             await transaction.delete(
               `${ASSIGNMENT_GENERATION_PREFIX}${saga.connectionId}`,
+            );
+          }
+          if (
+            releasedSuperseded &&
+            saga.supersededConnectionId &&
+            saga.supersededGeneration &&
+            (await transaction.get(
+              `${ASSIGNMENT_GENERATION_PREFIX}${saga.supersededConnectionId}`,
+            )) === saga.supersededGeneration
+          ) {
+            await transaction.delete(
+              `${ASSIGNMENT_GENERATION_PREFIX}${saga.supersededConnectionId}`,
             );
           }
         }
@@ -1097,6 +1164,10 @@ export class ShellBotBackendContribution {
       const events = eventsForFailedRun(durableRun, error);
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
+      if (error instanceof BotTurnRecoveryRequiredError) {
+        await this.deferRunRecovery(command.runId);
+        throw new Error(message);
+      }
       const modelState = latestModelRequestJournalState(events);
       if (
         error instanceof BotTurnReconciliationRequiredError ||
@@ -1177,6 +1248,10 @@ export class ShellBotBackendContribution {
       const events = durableRun?.events ?? run.events;
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
+      if (error instanceof BotTurnRecoveryRequiredError) {
+        await this.deferRunRecovery(run.runId);
+        throw new Error(message);
+      }
       const modelState = latestModelRequestJournalState(events);
       if (
         error instanceof BotTurnReconciliationRequiredError ||
@@ -1197,6 +1272,22 @@ export class ShellBotBackendContribution {
     } finally {
       if (this.executingRunId === run.runId) this.executingRunId = undefined;
     }
+  }
+
+  private async deferRunRecovery(runId: string): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const run = optionalStoredRun(
+        await transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
+      );
+      if (!run || run.status !== "running") {
+        throw new Error(`run "${runId}" is not resumable`);
+      }
+      await transaction.put(`${RUN_PREFIX}${runId}`, {
+        ...run,
+        phase: "executing",
+      } satisfies StoredRun);
+      await this.refreshRecoveryAlarm(transaction);
+    });
   }
 
   private async agentRuntime(

@@ -61,6 +61,13 @@ class ModelEffectReconciliationRequiredError extends Error {
   }
 }
 
+class ModelOutcomeSettlementRequiredError extends Error {
+  constructor(readonly cause: unknown) {
+    super("Durable model outcome settlement is pending");
+    this.name = "ModelOutcomeSettlementRequiredError";
+  }
+}
+
 function modelFailureMessage(error: unknown): string {
   return error instanceof Error && error.message
     ? error.message
@@ -258,22 +265,21 @@ class LoopAgent implements Agent {
         latestAssistant = event;
       }
     }
-    if (latestAssistant) {
-      await this.#ctx.serial(
-        "agent/model-outcome-committed",
-        this,
-        latestAssistant.requestId,
-        "completed",
-      );
-    }
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
     let reconciliationRequired = false;
     try {
+      if (latestAssistant) {
+        await this.#notifyModelOutcome(latestAssistant.requestId, "completed");
+      }
       let nextStep = latestStep === 0 ? 1 : latestStep + 1;
       if (unresolvedRequest) {
         openStep = latestStep;
         if (definitiveNoEffect) {
+          await this.#notifyModelOutcome(
+            definitiveNoEffect.requestId,
+            "not-started",
+          );
           turnOutcome = "model-error";
           this.#ctx.emit(
             "agent/error",
@@ -448,7 +454,10 @@ class LoopAgent implements Agent {
     } catch (error) {
       if (signal.aborted) {
         turnOutcome = "cancelled";
-      } else if (error instanceof ModelEffectReconciliationRequiredError) {
+      } else if (
+        error instanceof ModelEffectReconciliationRequiredError ||
+        error instanceof ModelOutcomeSettlementRequiredError
+      ) {
         reconciliationRequired = true;
         this.#ctx.emit("agent/error", this, error);
       } else {
@@ -564,7 +573,10 @@ class LoopAgent implements Agent {
     } catch (error) {
       if (signal.aborted) {
         turnOutcome = "cancelled";
-      } else if (error instanceof ModelEffectReconciliationRequiredError) {
+      } else if (
+        error instanceof ModelEffectReconciliationRequiredError ||
+        error instanceof ModelOutcomeSettlementRequiredError
+      ) {
         reconciliationRequired = true;
         this.#ctx.emit("agent/error", this, error);
       } else {
@@ -595,9 +607,16 @@ class LoopAgent implements Agent {
     requestId: string,
     outcome: "completed" | "not-started",
   ): Promise<void> {
-    await this.#ctx
-      .serial("agent/model-outcome-committed", this, requestId, outcome)
-      .catch(() => undefined);
+    try {
+      await this.#ctx.serial(
+        "agent/model-outcome-committed",
+        this,
+        requestId,
+        outcome,
+      );
+    } catch (error) {
+      throw new ModelOutcomeSettlementRequiredError(error);
+    }
   }
 
   async #requestModel(

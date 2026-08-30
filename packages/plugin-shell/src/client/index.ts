@@ -946,7 +946,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             (declared) => declared.id === candidate.capabilityId,
           );
         return (
-          candidate.state === "enabled" &&
+          (candidate.state === "enabled" ||
+            candidate.state === "unavailable") &&
           candidate.connectionId === current.model?.connectionId &&
           capability?.kind === "model"
         );

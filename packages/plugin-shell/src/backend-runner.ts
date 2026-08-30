@@ -44,6 +44,13 @@ export class BotTurnReconciliationRequiredError extends Error {
   }
 }
 
+export class BotTurnRecoveryRequiredError extends Error {
+  constructor(readonly events: SessionEvent[]) {
+    super("Bot turn has a durable outcome settlement pending");
+    this.name = "BotTurnRecoveryRequiredError";
+  }
+}
+
 export interface ExecuteBotTurnOptions {
   botId: string;
   command: BotTurnCommand;
@@ -105,6 +112,22 @@ export async function executeBotTurn(
           appendedSessionEvents(previousEvents, events),
         );
       }
+      const latestRequest = events.findLast(
+        (event) => event.type === "model/request" && event.turn === currentTurn,
+      );
+      const hasDurableOutcome =
+        latestRequest?.type === "model/request" &&
+        events.some(
+          (event) =>
+            (event.type === "assistant/message" ||
+              event.type === "model/effect-not-started") &&
+            event.requestId === latestRequest.request.requestId,
+        );
+      if (hasDurableOutcome) {
+        throw new BotTurnRecoveryRequiredError(
+          appendedSessionEvents(previousEvents, events),
+        );
+      }
       throw new BotTurnExecutionError(
         "Bot turn did not reach a durable terminal state",
         appendedSessionEvents(previousEvents, events),
@@ -125,7 +148,8 @@ export async function executeBotTurn(
   } catch (error) {
     if (
       error instanceof BotTurnExecutionError ||
-      error instanceof BotTurnReconciliationRequiredError
+      error instanceof BotTurnReconciliationRequiredError ||
+      error instanceof BotTurnRecoveryRequiredError
     ) {
       throw error;
     }
