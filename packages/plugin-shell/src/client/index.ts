@@ -313,7 +313,9 @@ function retireSettledConnectionOperations(
   let changed = false;
   for (const [key, operation] of Object.entries(operations)) {
     const connection = settings.connections.find(
-      (candidate) => candidate.connectionId === operation.commandId,
+      (candidate) =>
+        candidate.connectionId === operation.commandId ||
+        candidate.safeMetadata.creationCommandId === operation.commandId,
     );
     if (
       connection &&
@@ -609,6 +611,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     const connection = web.value.userSettings?.connections.find(
       (candidate) => candidate.connectionId === model?.connectionId,
     );
+    const packageInstalled = web.value.userSettings?.packages.some(
+      (pkg) =>
+        pkg.packageId === connection?.packageId && pkg.state === "installed",
+    );
+    web.value.modelReady = Boolean(
+      model && connection?.state === "ready" && packageInstalled,
+    );
     web.value.modelLabel =
       connection?.providerType === "ollama-cloud"
         ? "Ollama Cloud · Dynamic Worker"
@@ -622,6 +631,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   const web = ref<FrockBotWebData>({
     connection: "ready",
     modelLabel: "Model not configured · Dynamic Worker",
+    modelReady: false,
     settingsAvailable: true,
     connectionsAvailable: ctx.transport.connectionsAvailable !== false,
     activeBotId: undefined,
@@ -635,6 +645,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.activeBotId = botId;
       web.value.composerContext = botId;
       web.value.botSettings = undefined;
+      web.value.modelReady = false;
       web.value.messages = [];
       web.value.activeRun = undefined;
       web.value.activeRunId = undefined;

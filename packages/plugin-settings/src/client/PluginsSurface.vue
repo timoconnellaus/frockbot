@@ -269,9 +269,22 @@ async function disconnect(connectionId: string): Promise<void> {
         :key="connection.connectionId"
         class="connected-account"
       >
-        <div>
+        <div class="connection-status">
           <strong>{{ connection.displayName }}</strong>
-          <small>{{ connection.state }}</small>
+          <small>Connection: {{ connection.state }}</small>
+          <small v-if="connection.modelCatalog">
+            Models: {{ connection.modelCatalog.state }}
+          </small>
+          <p v-if="connection.failure" class="connection-failure" role="alert">
+            {{ connection.failure }}
+          </p>
+          <p
+            v-if="connection.modelCatalog?.failure"
+            class="connection-failure"
+            role="alert"
+          >
+            {{ connection.modelCatalog.failure }}
+          </p>
         </div>
         <div class="connection-actions">
           <UiButton
@@ -532,6 +545,12 @@ async function disconnect(connectionId: string): Promise<void> {
   color: var(--frock-text-muted);
   font-size: 11px;
   text-transform: capitalize;
+}
+
+.connection-failure {
+  margin: 6px 0 0;
+  color: var(--frock-danger-text);
+  font-size: 12px;
 }
 
 .settings-error {

@@ -62,6 +62,7 @@ export interface PluginCatalogItem {
 export interface FrockBotWebData {
   connection: WebConnection;
   modelLabel: string;
+  modelReady: boolean;
   settingsAvailable: boolean;
   connectionsAvailable: boolean;
   activeBotId?: string;

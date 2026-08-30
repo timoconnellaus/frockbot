@@ -1,10 +1,29 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeConnectionModelCatalogV1,
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
 } from "./index.js";
 
 describe("Connection result contracts", () => {
+  test("bounds advisory model catalogs", () => {
+    const model = {
+      providerModelId: "model:cloud",
+      displayName: "Model",
+      capabilities: { tools: false, vision: false, reasoning: false },
+      source: "discovered",
+    };
+
+    expect(() =>
+      decodeConnectionModelCatalogV1({
+        schemaVersion: 1,
+        generation: "catalog-1",
+        state: "fresh",
+        models: Array.from({ length: 101 }, () => model),
+      }),
+    ).toThrow("Connection model catalog is invalid");
+  });
+
   test("requires exact versioned Connection start variants", () => {
     expect(
       decodeStartConnectionResultV1({

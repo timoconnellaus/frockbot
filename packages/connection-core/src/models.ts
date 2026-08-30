@@ -9,6 +9,8 @@ export interface ModelCapabilityV1 {
   reasoning: boolean;
 }
 
+export const MAX_CONNECTION_MODELS_V1 = 100;
+
 export interface ConnectionModelV1 {
   providerModelId: string;
   displayName: string;
@@ -228,6 +230,7 @@ export function decodeConnectionModelCatalogV1(
     value.schemaVersion !== 1 ||
     !states.includes(value.state as never) ||
     !Array.isArray(value.models) ||
+    value.models.length > MAX_CONNECTION_MODELS_V1 ||
     Object.keys(value).some((key) => !allowed.has(key))
   ) {
     throw new Error("Connection model catalog is invalid");

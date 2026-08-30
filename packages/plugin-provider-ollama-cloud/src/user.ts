@@ -27,9 +27,11 @@ const COMMAND_PREFIX = "ollama-connection-command:";
 const PENDING_KEY = "ollama-pending-connection-commands";
 const ACCOUNT_KEY = "ollama-connection-account";
 const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
+const MUTATION_SEQUENCE_PREFIX = "ollama-mutation-sequence:";
 const REFRESH_INTERVAL_MS = 60 * 60 * 1_000;
 const RECOVERY_DELAY_MS = 60_000;
 const MODEL_LEASE_MS = 30 * 60 * 1_000;
+const MAX_CONNECTION_MODELS = 100;
 
 interface StoredCommand {
   schemaVersion: 1;
@@ -45,6 +47,7 @@ interface StoredCommand {
   revokeUpstream?: boolean;
   receipt?: ConnectionCommandReceiptV1;
   automaticRefresh?: boolean;
+  mutationSequence?: number;
 }
 
 type OllamaCredentialContribution = Omit<
@@ -85,6 +88,10 @@ export interface OllamaUserBackendHost {
 
 function commandKey(commandId: string): string {
   return `${COMMAND_PREFIX}${commandId}`;
+}
+
+function mutationSequenceKey(connectionId: string): string {
+  return `${MUTATION_SEQUENCE_PREFIX}${connectionId}`;
 }
 
 async function fingerprint(value: unknown): Promise<string> {
@@ -173,6 +180,7 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       "revokeUpstream",
       "receipt",
       "automaticRefresh",
+      "mutationSequence",
     ],
   );
   const operations: StoredCommand["operation"][] = [
@@ -190,7 +198,11 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     (value.revokeUpstream !== undefined &&
       typeof value.revokeUpstream !== "boolean") ||
     (value.automaticRefresh !== undefined &&
-      typeof value.automaticRefresh !== "boolean")
+      typeof value.automaticRefresh !== "boolean") ||
+    (value.mutationSequence !== undefined &&
+      (typeof value.mutationSequence !== "number" ||
+        !Number.isSafeInteger(value.mutationSequence) ||
+        value.mutationSequence <= 0))
   ) {
     throw new Error("Stored Ollama command is invalid");
   }
@@ -245,7 +257,61 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     ...(value.automaticRefresh === undefined
       ? {}
       : { automaticRefresh: value.automaticRefresh as boolean }),
+    ...(value.mutationSequence === undefined
+      ? {}
+      : { mutationSequence: value.mutationSequence as number }),
   };
+}
+
+function decodeMutationSequence(input: unknown): {
+  next: number;
+  applied: number;
+} {
+  const value = storedRecord(input, "Stored Ollama mutation sequence", [
+    "schemaVersion",
+    "next",
+    "applied",
+  ]);
+  if (
+    value.schemaVersion !== 1 ||
+    typeof value.next !== "number" ||
+    !Number.isSafeInteger(value.next) ||
+    value.next < 0 ||
+    typeof value.applied !== "number" ||
+    !Number.isSafeInteger(value.applied) ||
+    value.applied < 0 ||
+    value.applied > value.next
+  ) {
+    throw new Error("Stored Ollama mutation sequence is invalid");
+  }
+  return { next: value.next, applied: value.applied };
+}
+
+function isSequencedMutation(operation: StoredCommand["operation"]): boolean {
+  return (
+    operation === "connection/update-label" ||
+    operation === "connection/set-enabled"
+  );
+}
+
+function retainResolvedModel(
+  catalog: ConnectionModelCatalogV1,
+  resolved: ConnectionModelCatalogV1["models"][number],
+): ConnectionModelCatalogV1["models"] {
+  const discovered = catalog.models
+    .filter((model) => model.source === "discovered")
+    .slice(0, MAX_CONNECTION_MODELS);
+  const available = MAX_CONNECTION_MODELS - discovered.length;
+  if (available === 0) return discovered;
+  const exact = [
+    ...catalog.models.filter(
+      (model) =>
+        model.source === "exact-resolution" &&
+        model.providerModelId !== resolved.providerModelId,
+    ),
+    resolved,
+  ];
+  return [...discovered, ...exact.slice(-available)];
 }
 
 export class OllamaCloudUserBackendContribution {
@@ -419,12 +485,15 @@ export class OllamaCloudUserBackendContribution {
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
           const admission = await this.admitRecord(record, storage);
           if (!admission.created) return admission.record;
-          const current = await this.host.settings.getConnection(
-            accountId,
-            connection.connectionId,
-            storage,
+          const settings = await this.host.settings.readSnapshot(storage);
+          const current = settings.connections.find(
+            (candidate) => candidate.connectionId === connection.connectionId,
           );
           if (
+            !settings.packages.some(
+              (pkg) =>
+                pkg.packageId === PACKAGE_ID && pkg.state === "installed",
+            ) ||
             !current ||
             current.generation !== connection.generation ||
             (current.state !== "ready" && current.state !== "disabled")
@@ -515,12 +584,33 @@ export class OllamaCloudUserBackendContribution {
       const pending = (
         pendingValue === undefined ? [] : decodePendingCommands(pendingValue)
       ).filter((id) => id !== record.commandId);
+      let admitted = record;
+      let sequenceEntry: Record<string, unknown> = {};
+      if (isSequencedMutation(record.operation)) {
+        const sequenceValue = await transaction.get<unknown>(
+          mutationSequenceKey(record.connectionId),
+        );
+        const sequence =
+          sequenceValue === undefined
+            ? { next: 0, applied: 0 }
+            : decodeMutationSequence(sequenceValue);
+        const next = sequence.next + 1;
+        admitted = { ...record, mutationSequence: next };
+        sequenceEntry = {
+          [mutationSequenceKey(record.connectionId)]: {
+            schemaVersion: 1,
+            next,
+            applied: sequence.applied,
+          },
+        };
+      }
       await transaction.put({
-        [commandKey(record.commandId)]: record,
+        [commandKey(record.commandId)]: admitted,
         [PENDING_KEY]: [...pending, record.commandId],
+        ...sequenceEntry,
       });
       await transaction.setAlarm?.(this.now() + RECOVERY_DELAY_MS);
-      return { record, created: true };
+      return { record: admitted, created: true };
     };
     return storage ? admit(storage) : this.host.storage.transaction(admit);
   }
@@ -551,7 +641,7 @@ export class OllamaCloudUserBackendContribution {
         },
       },
       settings: {},
-      safeMetadata: {},
+      safeMetadata: { creationCommandId: record.commandId },
     };
   }
 
@@ -559,28 +649,65 @@ export class OllamaCloudUserBackendContribution {
     record: StoredCommand,
     apiKey?: string,
   ): Promise<ConnectionCommandReceiptV1> {
-    const active = this.resumptions.get(record.commandId);
+    const sequenced = await this.ensureMutationSequence(record);
+    const active = this.resumptions.get(sequenced.commandId);
     if (active) {
-      if (active.fingerprint !== record.fingerprint) {
+      if (active.fingerprint !== sequenced.fingerprint) {
         throw new Error("Connection command idempotency key was reused");
       }
       return active.promise;
     }
     const promise = (async () => {
-      await this.ensureAdmittedState(record, apiKey);
-      return this.resume(record);
+      await this.ensureAdmittedState(sequenced, apiKey);
+      return this.resume(sequenced);
     })();
-    this.resumptions.set(record.commandId, {
-      fingerprint: record.fingerprint,
+    this.resumptions.set(sequenced.commandId, {
+      fingerprint: sequenced.fingerprint,
       promise,
     });
     const release = () => {
-      if (this.resumptions.get(record.commandId)?.promise === promise) {
-        this.resumptions.delete(record.commandId);
+      if (this.resumptions.get(sequenced.commandId)?.promise === promise) {
+        this.resumptions.delete(sequenced.commandId);
       }
     };
     void promise.then(release, release);
     return promise;
+  }
+
+  private async ensureMutationSequence(
+    record: StoredCommand,
+  ): Promise<StoredCommand> {
+    if (!isSequencedMutation(record.operation) || record.mutationSequence) {
+      return record;
+    }
+    return this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        const storedValue = await storage.get<unknown>(
+          commandKey(record.commandId),
+        );
+        if (storedValue === undefined) return record;
+        const stored = decodeStoredCommand(storedValue);
+        if (stored.mutationSequence) return stored;
+        const sequenceValue = await storage.get<unknown>(
+          mutationSequenceKey(record.connectionId),
+        );
+        const sequence =
+          sequenceValue === undefined
+            ? { next: 0, applied: 0 }
+            : decodeMutationSequence(sequenceValue);
+        const next = sequence.next + 1;
+        const sequenced = { ...stored, mutationSequence: next };
+        await storage.put({
+          [commandKey(record.commandId)]: sequenced,
+          [mutationSequenceKey(record.connectionId)]: {
+            schemaVersion: 1,
+            next,
+            applied: sequence.applied,
+          },
+        });
+        return sequenced;
+      },
+    );
   }
 
   private async resume(
@@ -745,18 +872,13 @@ export class OllamaCloudUserBackendContribution {
   private async updateLabel(
     record: StoredCommand,
   ): Promise<ConnectionCommandReceiptV1> {
-    const current = await this.requireConnection(
-      record.accountId,
-      record.connectionId,
-    );
-    if (!record.label) return this.finishRecord(record, "failed");
-    await this.host.settings.replaceConnection(
-      record.accountId,
-      record.connectionId,
-      current.generation,
-      { ...current, displayName: record.label },
-    );
-    return this.finishRecord(record, "applied");
+    const label = record.label;
+    if (!label) return this.finishRecord(record, "failed");
+    const applied = await this.applySequencedMutation(record, (current) => ({
+      ...current,
+      displayName: label,
+    }));
+    return this.finishRecord(record, applied ? "applied" : "failed");
   }
 
   private async refreshCatalog(
@@ -874,20 +996,60 @@ export class OllamaCloudUserBackendContribution {
   private async setEnabled(
     record: StoredCommand,
   ): Promise<ConnectionCommandReceiptV1> {
-    const current = await this.requireConnection(
-      record.accountId,
-      record.connectionId,
+    const applied = await this.applySequencedMutation(record, (current) => {
+      if (current.state !== "ready" && current.state !== "disabled") {
+        return undefined;
+      }
+      return { ...current, state: record.enabled ? "ready" : "disabled" };
+    });
+    return this.finishRecord(record, applied ? "applied" : "failed");
+  }
+
+  private async applySequencedMutation(
+    record: StoredCommand,
+    update: (current: ConnectionView) => ConnectionView | undefined,
+  ): Promise<boolean> {
+    const mutationSequence = record.mutationSequence;
+    if (!mutationSequence) return false;
+    return this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        const sequenceValue = await storage.get<unknown>(
+          mutationSequenceKey(record.connectionId),
+        );
+        const sequence =
+          sequenceValue === undefined
+            ? { next: mutationSequence, applied: 0 }
+            : decodeMutationSequence(sequenceValue);
+        if (mutationSequence <= sequence.applied) return false;
+        const current = await this.host.settings.getConnection(
+          record.accountId,
+          record.connectionId,
+          storage,
+        );
+        if (
+          !current ||
+          current.packageId !== PACKAGE_ID ||
+          current.generation !== record.expectedGeneration
+        ) {
+          return false;
+        }
+        const updated = update(current);
+        if (!updated) return false;
+        await this.host.settings.replaceConnection(
+          record.accountId,
+          record.connectionId,
+          current.generation,
+          updated,
+          storage,
+        );
+        await storage.put(mutationSequenceKey(record.connectionId), {
+          schemaVersion: 1,
+          next: Math.max(sequence.next, mutationSequence),
+          applied: mutationSequence,
+        });
+        return true;
+      },
     );
-    if (current.state !== "ready" && current.state !== "disabled") {
-      return this.finishRecord(record, "failed");
-    }
-    await this.host.settings.replaceConnection(
-      record.accountId,
-      record.connectionId,
-      current.generation,
-      { ...current, state: record.enabled ? "ready" : "disabled" },
-    );
-    return this.finishRecord(record, "applied");
   }
 
   private async disconnect(
@@ -1116,7 +1278,7 @@ export class OllamaCloudUserBackendContribution {
               modelCatalog: {
                 ...catalog,
                 generation: this.randomId(),
-                models: [...catalog.models, resolvedModel],
+                models: retainResolvedModel(catalog, resolvedModel),
               },
             },
             storage,

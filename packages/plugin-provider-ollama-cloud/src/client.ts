@@ -16,7 +16,7 @@ export interface OllamaCloudClientConfig {
 
 const MAX_CATALOG_RESPONSE_BYTES = 512 * 1024;
 const MAX_MODEL_RESPONSE_BYTES = 256 * 1024;
-const MAX_CATALOG_MODELS = 100;
+const MAX_CONNECTION_MODELS = 100;
 const MODEL_LOOKUP_CONCURRENCY = 4;
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -143,7 +143,7 @@ export class OllamaCloudClient {
     );
     if (
       !Array.isArray(payload.models) ||
-      payload.models.length > MAX_CATALOG_MODELS
+      payload.models.length > MAX_CONNECTION_MODELS
     ) {
       throw new Error("Ollama Cloud model catalog is invalid");
     }

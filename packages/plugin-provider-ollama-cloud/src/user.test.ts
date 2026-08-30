@@ -238,6 +238,7 @@ describe("Ollama Cloud User Contribution", () => {
       displayName: "Work",
       state: "ready",
       providerType: "ollama-cloud",
+      safeMetadata: { creationCommandId: "connect-1" },
       authorization: { credential: { configured: true, writable: true } },
       modelCatalog: {
         state: "fresh",
@@ -423,6 +424,47 @@ describe("Ollama Cloud User Contribution", () => {
     expect(catalogRequests).toBe(1);
     expect(firstReceipt.status).toBe("applied");
     expect(secondReceipt).toEqual(firstReceipt);
+  });
+
+  test("does not let recovered mutations reverse newer commands", async () => {
+    const { storage, settings, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-sequenced",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Original",
+      apiKey: "key",
+    });
+    storage.failNextKey = "user-configuration";
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: "label-older",
+        connectionId: created.connectionId,
+        label: "Older",
+      }),
+    ).rejects.toThrow("injected storage failure");
+
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: "label-newer",
+        connectionId: created.connectionId,
+        label: "Newer",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await ollama.alarm();
+
+    expect(
+      await settings.getConnection("account-1", created.connectionId),
+    ).toMatchObject({ displayName: "Newer" });
+    expect(
+      storage.values.get("ollama-connection-command:label-older"),
+    ).toMatchObject({ receipt: { status: "failed" } });
   });
 
   test("preserves disabled state across credential rotation", async () => {
@@ -848,6 +890,50 @@ describe("Ollama Cloud User Contribution", () => {
     );
   });
 
+  test("bounds retained exact models while preserving discovered models", async () => {
+    const { settings, ollama } = await fixture();
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-model-retention",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "valid-key",
+    });
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    if (!connection?.generation) throw new Error("generation is missing");
+
+    for (let index = 0; index < 105; index += 1) {
+      const effectId = `exact-retention-${index}`;
+      await ollama.leaseModelCredential({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        providerModelId: `exact-${index}:cloud`,
+        effectId,
+        connectionGeneration: connection.generation,
+      });
+      await ollama.settleModelCredential(effectId);
+    }
+    const models = (
+      await settings.getConnection("account-1", created.connectionId)
+    )?.modelCatalog?.models;
+
+    expect(models).toHaveLength(100);
+    expect(models).toContainEqual(
+      expect.objectContaining({ providerModelId: "glm-5.3-flash:cloud" }),
+    );
+    expect(models).toContainEqual(
+      expect.objectContaining({ providerModelId: "exact-104:cloud" }),
+    );
+    expect(models).not.toContainEqual(
+      expect.objectContaining({ providerModelId: "exact-0:cloud" }),
+    );
+  });
+
   test("rejects a journaled credential generation after rotation", async () => {
     const { settings, ollama } = await fixture();
     const created = await ollama.executeConnection("account-1", {
@@ -929,6 +1015,19 @@ describe("Ollama Cloud User Contribution", () => {
     });
     const requestsBeforeAuthorization = providerRequests;
 
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/rotate-api-key",
+        commandId: "rotate-disabled-package",
+        connectionId: created.connectionId,
+        apiKey: "replacement-key",
+      }),
+    ).rejects.toThrow("Connection changed before credential rotation");
+    expect(
+      (await settings.getConnection("account-1", created.connectionId))
+        ?.generation,
+    ).toBe(connection.generation);
     await expect(
       ollama.leaseModelCredential({
         accountId: "account-1",
