@@ -1,4 +1,5 @@
 import type { SessionEvent } from "@frockbot/agent-core";
+import { isPublicIdentifier } from "@frockbot/configuration-core";
 import type {
   ClientNotificationIntent,
   ClientRun,
@@ -28,7 +29,6 @@ const MAX_NOTIFICATION_BODY_BYTES = 2_000;
 const MAX_CLIENT_TURN_BYTES = 256_000;
 const MAX_CURSOR_LENGTH = 320;
 const RUN_CURSOR_PATTERN = /^run-index:(.{24}):(.+)$/;
-const IDENTIFIER_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 export const CLIENT_RUN_PAGE_LIMIT = 32;
 
 function decodeRunCursor(value: string): string {
@@ -824,7 +824,7 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     MAX_RUN_ID_LENGTH,
     "turn command",
   );
-  if (!IDENTIFIER_PATTERN.test(commandId)) {
+  if (!isPublicIdentifier(commandId)) {
     throw new Error("turn command.commandId is invalid");
   }
   const text = wireString(
@@ -855,7 +855,7 @@ export function decodeClientNotificationAcknowledgementCommandV1(
     MAX_RUN_ID_LENGTH,
     "notification acknowledgement command",
   );
-  if (!IDENTIFIER_PATTERN.test(notificationId)) {
+  if (!isPublicIdentifier(notificationId)) {
     throw new Error(
       "notification acknowledgement command.notificationId is invalid",
     );

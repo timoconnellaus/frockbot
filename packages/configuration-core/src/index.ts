@@ -1,5 +1,7 @@
 import { BOT_ID_PATTERN_V1 } from "./bot-id.js";
+import { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
 export { BOT_ID_PATTERN_V1, isBotIdV1 } from "./bot-id.js";
+export { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
 
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -385,42 +387,24 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-const ID_PATTERN = BOT_ID_PATTERN_V1;
-
 export function decodeBotIdV1(value: unknown, label = "botId"): string {
   if (typeof value !== "string" || !BOT_ID_PATTERN_V1.test(value))
     throw new ConfigurationDecodeError(`${label} is invalid`);
   return value;
 }
-const RESERVED_CONNECTION_IDENTIFIERS = new Set([
-  "__defineGetter__",
-  "__defineSetter__",
-  "__lookupGetter__",
-  "__lookupSetter__",
-  "__proto__",
-  "constructor",
-  "hasOwnProperty",
-  "isPrototypeOf",
-  "propertyIsEnumerable",
-  "prototype",
-  "toLocaleString",
-  "toString",
-  "valueOf",
-]);
 
 function identifier(value: unknown, label: string): string {
-  if (typeof value !== "string" || !ID_PATTERN.test(value)) {
+  if (!isPublicIdentifier(value)) {
     throw new ConfigurationDecodeError(`${label} is invalid`);
   }
   return value;
 }
 
 function connectionIdentifier(value: unknown, label: string): string {
-  const decoded = identifier(value, label);
-  if (RESERVED_CONNECTION_IDENTIFIERS.has(decoded)) {
+  if (!isConnectionIdentifier(value)) {
     throw new ConfigurationDecodeError(`${label} is invalid`);
   }
-  return decoded;
+  return value;
 }
 
 function exactRecord(
