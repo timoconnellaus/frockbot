@@ -502,6 +502,12 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
             ? candidate.displayName
             : candidate.id,
         version: candidate.version,
+        capabilities: (decoded.configuration?.capabilities ?? []).map(
+          (capability) => ({
+            id: capability.id,
+            kind: capability.kind,
+          }),
+        ),
         connectionTypes: decodedConnections,
       },
     ];
@@ -858,16 +864,70 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
     async saveBotModel(model: ModelAssignment): Promise<void> {
       const current = web.value.botSettings;
+      const user = web.value.userSettings;
       const botId = web.value.activeBotId;
-      if (!current || !botId || !ctx.transport.executeConfiguration) {
+      if (!current || !user || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
+      }
+      const connection = user.connections.find(
+        (candidate) => candidate.connectionId === model.connectionId,
+      );
+      const pkg = web.value.pluginCatalog.find(
+        (candidate) => candidate.packageId === connection?.packageId,
+      );
+      const connectionType = pkg?.connectionTypes.find(
+        (candidate) => candidate.id === connection?.connectionTypeId,
+      );
+      const capability = pkg?.capabilities.find(
+        (candidate) =>
+          candidate.kind === "model" &&
+          connectionType?.capabilities.includes(candidate.id),
+      );
+      if (!connection || connection.state !== "ready" || !pkg || !capability) {
+        throw new Error("The selected Connection has no model capability");
+      }
+      let expectedRevision = current.revision;
+      const assigned = current.assignments.some(
+        (assignment) =>
+          assignment.state === "enabled" &&
+          assignment.packageId === pkg.packageId &&
+          assignment.capabilityId === capability.id &&
+          assignment.connectionId === connection.connectionId,
+      );
+      const modelChanged =
+        current.model?.connectionId !== model.connectionId ||
+        current.model?.providerModelId !== model.providerModelId;
+      if (assigned && !modelChanged) return;
+      if (!assigned) {
+        const assignmentReceipt = await ctx.transport.executeConfiguration({
+          schemaVersion: 1,
+          type: "bot/assign-capability",
+          commandId: crypto.randomUUID(),
+          botId,
+          expectedRevision,
+          assignment: {
+            assignmentId: crypto.randomUUID(),
+            packageId: pkg.packageId,
+            capabilityId: capability.id,
+            connectionId: connection.connectionId,
+          },
+        });
+        if (assignmentReceipt.status === "rejected") {
+          await web.value.loadBotSettings();
+          throw new Error(assignmentReceipt.failure);
+        }
+        expectedRevision = assignmentReceipt.revision;
+      }
+      if (!modelChanged) {
+        await web.value.loadBotSettings();
+        return;
       }
       const receipt = await ctx.transport.executeConfiguration({
         schemaVersion: 1,
         type: "bot/select-model",
         commandId: crypto.randomUUID(),
         botId,
-        expectedRevision: current.revision,
+        expectedRevision,
         model,
       });
       await web.value.loadBotSettings();

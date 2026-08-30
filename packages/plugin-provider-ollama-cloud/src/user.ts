@@ -27,6 +27,7 @@ const COMMAND_PREFIX = "ollama-connection-command:";
 const PENDING_KEY = "ollama-pending-connection-commands";
 const RECEIPT_INDEX_KEY = "ollama-connection-receipt-index";
 const MAX_MANUAL_RECEIPTS = 256;
+const MAX_PENDING_COMMANDS = 64;
 const ACCOUNT_KEY = "ollama-connection-account";
 const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
 const MUTATION_SEQUENCE_PREFIX = "ollama-mutation-sequence:";
@@ -167,7 +168,11 @@ function decodeCommandIdList(input: unknown, label: string): string[] {
 }
 
 function decodePendingCommands(input: unknown): string[] {
-  return decodeCommandIdList(input, "pending commands");
+  const pending = decodeCommandIdList(input, "pending commands");
+  if (pending.length > MAX_PENDING_COMMANDS) {
+    throw new Error("Stored Ollama pending commands are invalid");
+  }
+  return pending;
 }
 
 function decodeReceiptIndex(input: unknown): string[] {
@@ -303,6 +308,21 @@ function decodeMutationSequence(input: unknown): {
     throw new Error("Stored Ollama mutation sequence is invalid");
   }
   return { next: value.next, applied: value.applied };
+}
+
+function compactCompletedCommand(record: StoredCommand): StoredCommand {
+  if (!record.receipt) {
+    throw new Error("Completed Ollama command receipt is unavailable");
+  }
+  return {
+    schemaVersion: 1,
+    commandId: record.commandId,
+    fingerprint: record.fingerprint,
+    accountId: record.accountId,
+    connectionId: record.connectionId,
+    operation: record.operation,
+    receipt: record.receipt,
+  };
 }
 
 function isSequencedMutation(operation: StoredCommand["operation"]): boolean {
@@ -616,6 +636,9 @@ export class OllamaCloudUserBackendContribution {
       const pending = (
         pendingValue === undefined ? [] : decodePendingCommands(pendingValue)
       ).filter((id) => id !== record.commandId);
+      if (pending.length >= MAX_PENDING_COMMANDS) {
+        throw new Error("Ollama Connection command capacity reached");
+      }
       let admitted = record;
       let sequenceEntry: Record<string, unknown> = {};
       if (isSequencedMutation(record.operation)) {
@@ -862,6 +885,14 @@ export class OllamaCloudUserBackendContribution {
         record.connectionId,
         generation,
       );
+      const settledValue = await this.host.storage.get<unknown>(
+        commandKey(record.commandId),
+      );
+      const settled =
+        settledValue === undefined
+          ? undefined
+          : decodeStoredCommand(settledValue).receipt;
+      if (settled) return settled;
       if (record.operation === "connection/create-api-key") {
         const current = await this.requireConnection(
           record.accountId,
@@ -1087,6 +1118,35 @@ export class OllamaCloudUserBackendContribution {
     );
   }
 
+  private async cancelPendingCreate(
+    record: StoredCommand,
+    storage: UserSettingsTransaction & CredentialTransaction,
+  ): Promise<void> {
+    const pendingValue = await storage.get<unknown>(PENDING_KEY);
+    const pending =
+      pendingValue === undefined ? [] : decodePendingCommands(pendingValue);
+    const retained: string[] = [];
+    const completed: Record<string, unknown> = {};
+    for (const commandId of pending) {
+      const value = await storage.get<unknown>(commandKey(commandId));
+      if (value === undefined) continue;
+      const candidate = decodeStoredCommand(value);
+      if (
+        candidate.operation === "connection/create-api-key" &&
+        candidate.connectionId === record.connectionId &&
+        !candidate.receipt
+      ) {
+        completed[commandKey(commandId)] = compactCompletedCommand({
+          ...candidate,
+          receipt: receipt(candidate, "failed"),
+        });
+      } else {
+        retained.push(commandId);
+      }
+    }
+    await storage.put({ ...completed, [PENDING_KEY]: retained });
+  }
+
   private async disconnect(
     record: StoredCommand,
   ): Promise<ConnectionCommandReceiptV1> {
@@ -1111,6 +1171,7 @@ export class OllamaCloudUserBackendContribution {
         ) {
           return "dependent";
         }
+        await this.cancelPendingCreate(record, storage);
         if (current.state !== "revoking") {
           await this.host.settings.replaceConnection(
             record.accountId,
@@ -1208,14 +1269,18 @@ export class OllamaCloudUserBackendContribution {
             record.commandId,
           ];
           const retained = ordered.slice(-MAX_MANUAL_RECEIPTS);
+          const completed = { ...(stored ?? record), receipt: proposed };
+          const compacted: Record<string, unknown> = {};
           for (const commandId of ordered.slice(0, -MAX_MANUAL_RECEIPTS)) {
-            await storage.delete(commandKey(commandId));
+            const value = await storage.get<unknown>(commandKey(commandId));
+            if (value === undefined) continue;
+            compacted[commandKey(commandId)] = compactCompletedCommand(
+              decodeStoredCommand(value),
+            );
           }
           await storage.put({
-            [commandKey(record.commandId)]: {
-              ...(stored ?? record),
-              receipt: proposed,
-            },
+            ...compacted,
+            [commandKey(record.commandId)]: completed,
             [RECEIPT_INDEX_KEY]: retained,
             [PENDING_KEY]: pending,
           });

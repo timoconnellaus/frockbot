@@ -50,6 +50,10 @@ export interface PluginCatalogItem {
   packageId: string;
   displayName: string;
   version: string;
+  capabilities: Array<{
+    id: string;
+    kind: "tool" | "model" | "memory" | "notification";
+  }>;
   connectionTypes: Array<{
     id: string;
     displayName: string;

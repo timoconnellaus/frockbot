@@ -78,7 +78,13 @@ describe("application manifest protocol", () => {
             contributions: ["backend", "runtime", "client"],
             configuration: {
               settings: [],
-              capabilities: [],
+              capabilities: [
+                {
+                  id: "ollama-cloud-models",
+                  kind: "model",
+                  connectionTypes: ["ollama-cloud-account"],
+                },
+              ],
               connectionTypes: [
                 {
                   id: "ollama-cloud-account",
@@ -98,6 +104,7 @@ describe("application manifest protocol", () => {
     ).toEqual([
       expect.objectContaining({
         packageId: "provider-ollama-cloud",
+        capabilities: [{ id: "ollama-cloud-models", kind: "model" }],
         connectionTypes: [
           expect.objectContaining({ id: "ollama-cloud-account" }),
         ],
@@ -284,6 +291,120 @@ describe("Bot selection", () => {
 
     expect(provided.value.modelLabel).toBe("Ollama Cloud · Dynamic Worker");
     expect(provided.value.modelReady).toBe(true);
+  });
+
+  test("assigns a newly connected model capability before model selection", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    let bot = initializeBotSettingsV1("ollama-bot");
+    const commands: Array<{ type: string; expectedRevision: number }> = [];
+    const user: UserSettingsViewV1 = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          providerType: "ollama-cloud",
+          safeMetadata: {},
+        },
+      ],
+    };
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) =>
+          Promise.resolve(query.type === "user/get" ? user : bot),
+        executeConfiguration: (command) => {
+          if (!("botId" in command)) throw new Error("unexpected User command");
+          commands.push({
+            type: command.type,
+            expectedRevision: command.expectedRevision,
+          });
+          if (command.type === "bot/assign-capability") {
+            bot = {
+              ...bot,
+              revision: 1,
+              assignments: [{ ...command.assignment, state: "enabled" }],
+            };
+          } else if (command.type === "bot/select-model") {
+            bot = { ...bot, revision: 2, model: command.model };
+          } else {
+            throw new Error("unexpected Bot command");
+          }
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            revision: bot.revision,
+            status: "applied" as const,
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = bot.botId;
+    provided.value.botSettings = bot;
+    provided.value.userSettings = user;
+    provided.value.pluginCatalog = [
+      {
+        packageId: "provider-ollama-cloud",
+        displayName: "Ollama Cloud",
+        version: "0.0.1",
+        capabilities: [{ id: "ollama-cloud-models", kind: "model" }],
+        connectionTypes: [
+          {
+            id: "ollama-cloud-account",
+            displayName: "Ollama Cloud account",
+            allowMultiple: true,
+            authorizationKind: "api-key",
+            capabilities: ["ollama-cloud-models"],
+          },
+        ],
+      },
+    ];
+
+    await provided.value.saveBotModel({
+      connectionId: "ollama-work",
+      providerModelId: "glm-5.3-flash:cloud",
+    });
+
+    expect(commands).toEqual([
+      { type: "bot/assign-capability", expectedRevision: 0 },
+      { type: "bot/select-model", expectedRevision: 1 },
+    ]);
+    expect(bot).toMatchObject({
+      revision: 2,
+      model: {
+        connectionId: "ollama-work",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+      assignments: [
+        {
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "ollama-work",
+          state: "enabled",
+        },
+      ],
+    });
   });
 });
 

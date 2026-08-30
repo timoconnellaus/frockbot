@@ -21,20 +21,24 @@ const selectedModel = ref("");
 const useExactModel = ref(false);
 const exactConnectionId = ref("");
 const exactProviderModelId = ref("");
-const readyConnections = computed(() => {
-  const assignedConnectionIds = new Set(
-    (web.value.botSettings?.assignments ?? []).flatMap((assignment) =>
-      assignment.state === "enabled" && assignment.connectionId
-        ? [assignment.connectionId]
-        : [],
-    ),
-  );
-  return (web.value.userSettings?.connections ?? []).filter(
-    (connection) =>
+const readyConnections = computed(() =>
+  (web.value.userSettings?.connections ?? []).filter((connection) => {
+    const pkg = web.value.pluginCatalog.find(
+      (candidate) => candidate.packageId === connection.packageId,
+    );
+    const connectionType = pkg?.connectionTypes.find(
+      (candidate) => candidate.id === connection.connectionTypeId,
+    );
+    return (
       connection.state === "ready" &&
-      assignedConnectionIds.has(connection.connectionId),
-  );
-});
+      pkg?.capabilities.some(
+        (capability) =>
+          capability.kind === "model" &&
+          connectionType?.capabilities.includes(capability.id),
+      )
+    );
+  }),
+);
 const modelOptions = computed(() =>
   readyConnections.value.flatMap((connection) =>
     (connection.modelCatalog?.models ?? []).map((model) => ({
@@ -48,6 +52,7 @@ onMounted(async () => {
   await Promise.all([
     web.value.loadBotSettings(),
     web.value.loadUserSettings(),
+    web.value.loadPluginCatalog(),
   ]);
   const settings = web.value.botSettings;
   if (!settings) return;
@@ -88,13 +93,7 @@ async function save(): Promise<void> {
       label: label.value || undefined,
       description: description.value || undefined,
     });
-    if (
-      selected &&
-      (current?.connectionId !== selected.connectionId ||
-        current.providerModelId !== selected.providerModelId)
-    ) {
-      await web.value.saveBotModel(selected);
-    }
+    if (selected) await web.value.saveBotModel(selected);
     await web.value.saveBotNotifications({ enabled: notifications.value });
     surfaces?.close();
   } catch (error) {
