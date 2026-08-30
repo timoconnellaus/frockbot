@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 3,
+  "id": "package-publisher",
+  "displayName": "Package Publisher",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "computer": ">=0.0.1",
+    "shell": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
+  },
+  "contributions": {
+    "backend": [
+      { "entry": "./backend", "host": "gateway" },
+      { "entry": "./user", "host": "user" }
+    ],
+    "runtime": { "entry": "./agent" },
+    "client": {
+      "entry": "./client",
+      "mounts": [{ "slot": "frockbot.sidebar-actions", "order": 20 }],
+      "outlets": []
+    }
+  },
+  "permissions": ["package:publish"]
+}

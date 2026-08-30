@@ -283,7 +283,6 @@ export function createGateway(dependencies: GatewayDependencies) {
         compatibilityDate,
         mainModule: "index.js",
         modules: { "index.js": { js: source } },
-        globalOutbound: null,
         env: {
           BOT_STATE: dependencies.botStateFor(userId),
           DEPLOYMENT: identity,
