@@ -437,14 +437,17 @@ export class CredentialUserBackendContribution {
   async discardPending(
     connectionId: string,
     generation: string,
+    storage?: CredentialTransaction,
   ): Promise<void> {
-    await this.host.storage.transaction(async (storage) => {
+    const discard = async (transaction: CredentialTransaction) => {
       const key = credentialKey(connectionId, generation);
-      const storedValue = await storage.get<unknown>(key);
+      const storedValue = await transaction.get<unknown>(key);
       if (storedValue === undefined) return;
       const stored = decodeStoredCredentialGeneration(storedValue);
-      if (stored.state === "pending") await storage.delete(key);
-    });
+      if (stored.state === "pending") await transaction.delete(key);
+    };
+    if (storage) return discard(storage);
+    return this.host.storage.transaction(discard);
   }
 
   async replayLease(input: {

@@ -77,6 +77,21 @@ onMounted(async () => {
   );
 });
 
+async function clearModel(): Promise<void> {
+  saving.value = true;
+  try {
+    await web.value.clearBotModel();
+    selectedModel.value = "";
+    exactProviderModelId.value = "";
+    useExactModel.value = false;
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not unbind model";
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function save(): Promise<void> {
   saving.value = true;
   try {
@@ -178,6 +193,14 @@ async function save(): Promise<void> {
       {{ web.settingsError }}
     </p>
     <div class="settings-actions">
+      <UiButton
+        v-if="web.botSettings?.model"
+        type="button"
+        :disabled="saving"
+        @click="clearModel"
+      >
+        Unbind model
+      </UiButton>
       <UiButton type="submit" variant="primary" :disabled="saving">
         {{ saving ? "Saving…" : "Save settings" }}
       </UiButton>

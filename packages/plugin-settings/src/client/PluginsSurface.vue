@@ -297,7 +297,7 @@ async function disconnect(connectionId: string): Promise<void> {
           </UiButton>
           <template v-if="connection.authorization?.kind === 'api-key'">
             <UiButton
-              v-if="connection.modelCatalog"
+              v-if="connection.modelCatalog && connection.state === 'ready'"
               @click="refreshModels(connection.connectionId)"
             >
               Refresh models

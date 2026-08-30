@@ -170,7 +170,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             type="button"
             @click="web.resumeRun(state.activeRun.runId)"
           >
-            Resume Turn
+            Resolve Turn
           </button>
         </div>
 

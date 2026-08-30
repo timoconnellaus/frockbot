@@ -68,6 +68,7 @@ export async function failStoredRun(
     ...run,
     events: decodedEvents,
     status: "failed",
+    phase: run.phase === "reconciliation-required" ? "executing" : run.phase,
     failure,
   } satisfies StoredRun);
   await storage.put({

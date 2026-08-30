@@ -188,6 +188,12 @@ export type ConfigurationCommandV1 =
       type: "bot/assign-capability";
       botId: string;
       assignment: Omit<CapabilityAssignmentView, "state">;
+      model?: ModelAssignment;
+    })
+  | (CommandMetaV1 & {
+      type: "bot/unbind-model";
+      botId: string;
+      assignmentId: string;
     });
 
 export type UserConfigurationCommandV1 = Exclude<
@@ -804,7 +810,7 @@ export function decodeConfigurationCommandV1(
       };
     }
     case "bot/assign-capability": {
-      const command = exactCommand(input, ["botId", "assignment"]);
+      const command = exactCommand(input, ["botId", "assignment"], ["model"]);
       const assignment = exactRecord(
         command.assignment,
         "assignment",
@@ -827,6 +833,16 @@ export function decodeConfigurationCommandV1(
               ? undefined
               : identifier(assignment.connectionId, "assignment.connectionId"),
         },
+        model: command.model === undefined ? undefined : model(command.model),
+      };
+    }
+    case "bot/unbind-model": {
+      const command = exactCommand(input, ["botId", "assignmentId"]);
+      return {
+        ...commandMeta(command),
+        type: value.type,
+        botId: identifier(command.botId, "botId"),
+        assignmentId: identifier(command.assignmentId, "assignmentId"),
       };
     }
     default:

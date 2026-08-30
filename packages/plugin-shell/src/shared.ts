@@ -84,6 +84,7 @@ export interface FrockBotWebData {
   saveBotProfile(profile: BotProfile): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;
   saveBotModel(model: ModelAssignment): Promise<void>;
+  clearBotModel(): Promise<void>;
   loadUserSettings(): Promise<void>;
   saveUserProfile(profile: { name: string; email?: string }): Promise<void>;
   loadPluginCatalog(): Promise<void>;

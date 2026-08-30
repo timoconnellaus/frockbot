@@ -8,6 +8,7 @@ export interface StoredAssignmentSaga {
   botId: string;
   connectionId: string;
   generation: string;
+  mode?: "assign" | "unassign";
   phase: "claiming" | "committed";
   deadlineAt: number;
   receipt?: OperationReceiptV1;

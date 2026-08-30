@@ -169,12 +169,14 @@ describe("Bot recovery", () => {
       },
     };
     const requests: Request[] = [];
+    let failRequests = false;
     const outboundFetch = ((input, init) => {
       const request = new Request(input, init);
       requests.push(request);
       if (!request.url.startsWith("https://ollama.com/")) {
         return Promise.reject(new Error("Foundation fallback invoked"));
       }
+      if (failRequests) return Promise.reject(new Error("response lost"));
       return Promise.resolve(
         new Response(
           'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
@@ -294,6 +296,39 @@ describe("Bot recovery", () => {
         },
       });
     }
+
+    failRequests = true;
+    await expect(
+      host().run({
+        userId: "user-1",
+        botId: "primary",
+        runId: "ollama-run-uncertain",
+        sessionId: "user-1:primary",
+        acceptedAt: "2026-08-30T00:02:00.000Z",
+        text: "uncertain",
+      }),
+    ).rejects.toThrow("response lost");
+    expect(
+      await storage.get<StoredRun>("run:ollama-run-uncertain"),
+    ).toMatchObject({ status: "reconciliation-required" });
+
+    await host().alarm();
+    expect(
+      await storage.get<StoredRun>("run:ollama-run-uncertain"),
+    ).toMatchObject({ status: "reconciliation-required" });
+    await expect(
+      host().reconcileRun(
+        { userId: "user-1", botId: "primary" },
+        "ollama-run-uncertain",
+      ),
+    ).rejects.toThrow();
+    expect(
+      await storage.get<StoredRun>("run:ollama-run-uncertain"),
+    ).toMatchObject({
+      status: "failed",
+      failure: expect.stringContaining("explicitly abandoned"),
+    });
+    expect(await storage.get("active-run")).toBeUndefined();
   });
 
   test("does not clear active work whose durable run is malformed", async () => {
@@ -538,7 +573,7 @@ describe("Bot recovery", () => {
     expect(await recoveredAgain.listNotifications()).toEqual(notifications);
   });
 
-  test("keeps an unresolved durable request scheduled when its marker was lost", async () => {
+  test("preserves an unresolved request for an explicit decision", async () => {
     const storage = new MemoryStorage();
     const settings = initializeBotSettingsV1("primary");
     const events = [
@@ -613,7 +648,7 @@ describe("Bot recovery", () => {
       page: { truncated: false },
     });
     expect(storage.values.get("active-run")).toBe("run-lost-marker");
-    expect(typeof storage.alarmAt).toBe("number");
+    expect(storage.alarmAt).toBeUndefined();
   });
 
   test("resumes a request whose durable journal proves no effect started", () => {

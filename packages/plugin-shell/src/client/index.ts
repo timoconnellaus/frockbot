@@ -869,9 +869,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!current || !user || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
       }
+      const modelChanged =
+        current.model?.connectionId !== model.connectionId ||
+        current.model?.providerModelId !== model.providerModelId;
       const connection = user.connections.find(
         (candidate) => candidate.connectionId === model.connectionId,
       );
+      if (!modelChanged && connection?.state !== "ready") return;
       const pkg = web.value.pluginCatalog.find(
         (candidate) => candidate.packageId === connection?.packageId,
       );
@@ -886,7 +890,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!connection || connection.state !== "ready" || !pkg || !capability) {
         throw new Error("The selected Connection has no model capability");
       }
-      let expectedRevision = current.revision;
       const assigned = current.assignments.some(
         (assignment) =>
           assignment.state === "enabled" &&
@@ -894,9 +897,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           assignment.capabilityId === capability.id &&
           assignment.connectionId === connection.connectionId,
       );
-      const modelChanged =
-        current.model?.connectionId !== model.connectionId ||
-        current.model?.providerModelId !== model.providerModelId;
       if (assigned && !modelChanged) return;
       if (!assigned) {
         const assignmentReceipt = await ctx.transport.executeConfiguration({
@@ -904,21 +904,19 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           type: "bot/assign-capability",
           commandId: crypto.randomUUID(),
           botId,
-          expectedRevision,
+          expectedRevision: current.revision,
           assignment: {
             assignmentId: crypto.randomUUID(),
             packageId: pkg.packageId,
             capabilityId: capability.id,
             connectionId: connection.connectionId,
           },
+          model,
         });
         if (assignmentReceipt.status === "rejected") {
           await web.value.loadBotSettings();
           throw new Error(assignmentReceipt.failure);
         }
-        expectedRevision = assignmentReceipt.revision;
-      }
-      if (!modelChanged) {
         await web.value.loadBotSettings();
         return;
       }
@@ -927,13 +925,43 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         type: "bot/select-model",
         commandId: crypto.randomUUID(),
         botId,
-        expectedRevision,
+        expectedRevision: current.revision,
         model,
       });
       await web.value.loadBotSettings();
       if (receipt.status === "rejected") {
         throw new Error(receipt.failure);
       }
+    },
+    async clearBotModel(): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current?.model || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      const assignment = current.assignments.find((candidate) => {
+        const capability = web.value.pluginCatalog
+          .find((pkg) => pkg.packageId === candidate.packageId)
+          ?.capabilities.find(
+            (declared) => declared.id === candidate.capabilityId,
+          );
+        return (
+          candidate.state === "enabled" &&
+          candidate.connectionId === current.model?.connectionId &&
+          capability?.kind === "model"
+        );
+      });
+      if (!assignment) throw new Error("Bot model assignment is unavailable");
+      const receipt = await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/unbind-model",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        assignmentId: assignment.assignmentId,
+      });
+      await web.value.loadBotSettings();
+      if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
     async loadUserSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {

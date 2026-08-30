@@ -312,7 +312,8 @@ export class ShellBotBackendContribution {
           | "bot/update-profile"
           | "bot/update-notifications"
           | "bot/select-model"
-          | "bot/assign-capability";
+          | "bot/assign-capability"
+          | "bot/unbind-model";
       }
     >,
     commandFingerprint: string,
@@ -424,6 +425,95 @@ export class ShellBotBackendContribution {
           connectionTypeIds: [...capability.connectionTypes],
         };
       }
+      if (command.model) {
+        if (command.model.connectionId !== command.assignment.connectionId) {
+          return this.rejectConfigurationCommand(
+            identity,
+            command,
+            commandFingerprint,
+            "Model binding must use the assigned Connection",
+          );
+        }
+        const binding = resolveBotModelBindingV1({
+          model: command.model,
+          assignments: [
+            ...settings.assignments,
+            { ...command.assignment, state: "enabled" },
+          ],
+          user,
+          packages: application.packages.map((pkg) => ({
+            packageId: pkg.id,
+            version: pkg.version,
+            capabilities: pkg.manifest.configuration?.capabilities ?? [],
+            connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+          })),
+        });
+        if (binding.state === "unavailable") {
+          return this.rejectConfigurationCommand(
+            identity,
+            command,
+            commandFingerprint,
+            binding.failure ?? "Bot model binding is unavailable",
+          );
+        }
+      }
+    }
+    if (command.type === "bot/unbind-model") {
+      const assignment = settings.assignments.find(
+        (candidate) =>
+          candidate.assignmentId === command.assignmentId &&
+          candidate.state === "enabled" &&
+          candidate.connectionId === settings.model?.connectionId,
+      );
+      const application = await this.compileApplication();
+      const capability = application.packages
+        .find((pkg) => pkg.id === assignment?.packageId)
+        ?.manifest.configuration?.capabilities.find(
+          (candidate) => candidate.id === assignment?.capabilityId,
+        );
+      if (!assignment?.connectionId || capability?.kind !== "model") {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          "Bot model assignment is unavailable",
+        );
+      }
+      const generation = await this.ctx.storage.get<string>(
+        `${ASSIGNMENT_GENERATION_PREFIX}${assignment.connectionId}`,
+      );
+      if (!generation) {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          "Bot model assignment generation is unavailable",
+        );
+      }
+      const saga: StoredAssignmentSaga = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        commandFingerprint,
+        userId: identity.userId,
+        botId: identity.botId,
+        connectionId: assignment.connectionId,
+        generation,
+        mode: "unassign",
+        phase: "committed",
+        deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
+      };
+      const receipt = await this.applyConfigurationCommand(
+        identity,
+        command,
+        commandFingerprint,
+        saga,
+      );
+      await this.reconcileStoredAssignmentSaga(
+        identity,
+        command.commandId,
+        commandFingerprint,
+      );
+      return receipt;
     }
     if (
       command.type !== "bot/assign-capability" ||
@@ -552,7 +642,8 @@ export class ShellBotBackendContribution {
           | "bot/update-profile"
           | "bot/update-notifications"
           | "bot/select-model"
-          | "bot/assign-capability";
+          | "bot/assign-capability"
+          | "bot/unbind-model";
       }
     >,
     commandFingerprint: string,
@@ -601,7 +692,8 @@ export class ShellBotBackendContribution {
           | "bot/update-profile"
           | "bot/update-notifications"
           | "bot/select-model"
-          | "bot/assign-capability";
+          | "bot/assign-capability"
+          | "bot/unbind-model";
       }
     >,
     commandFingerprint: string,
@@ -626,6 +718,7 @@ export class ShellBotBackendContribution {
       }
       if (
         saga &&
+        saga.mode !== "unassign" &&
         (await transaction.get(
           `${ASSIGNMENT_TOMBSTONE_PREFIX}${saga.connectionId}:${saga.generation}`,
         ))
@@ -640,26 +733,39 @@ export class ShellBotBackendContribution {
             ? { ...current, revision, notifications: command.notifications }
             : command.type === "bot/select-model"
               ? { ...current, revision, model: command.model }
-              : {
-                  ...current,
-                  revision,
-                  assignments: [
-                    ...current.assignments
-                      .filter(
-                        (assignment) =>
-                          assignment.assignmentId !==
-                          command.assignment.assignmentId,
-                      )
-                      .map((assignment) =>
-                        assignment.packageId === command.assignment.packageId &&
-                        assignment.capabilityId ===
-                          command.assignment.capabilityId
-                          ? { ...assignment, state: "unavailable" as const }
-                          : assignment,
-                      ),
-                    { ...command.assignment, state: "enabled" },
-                  ],
-                };
+              : command.type === "bot/unbind-model"
+                ? {
+                    ...current,
+                    revision,
+                    model: undefined,
+                    assignments: current.assignments.map((assignment) =>
+                      assignment.assignmentId === command.assignmentId
+                        ? { ...assignment, state: "unavailable" as const }
+                        : assignment,
+                    ),
+                  }
+                : {
+                    ...current,
+                    revision,
+                    ...(command.model ? { model: command.model } : {}),
+                    assignments: [
+                      ...current.assignments
+                        .filter(
+                          (assignment) =>
+                            assignment.assignmentId !==
+                            command.assignment.assignmentId,
+                        )
+                        .map((assignment) =>
+                          assignment.packageId ===
+                            command.assignment.packageId &&
+                          assignment.capabilityId ===
+                            command.assignment.capabilityId
+                            ? { ...assignment, state: "unavailable" as const }
+                            : assignment,
+                        ),
+                      { ...command.assignment, state: "enabled" },
+                    ],
+                  };
       const receipt: OperationReceiptV1 = {
         schemaVersion: 1,
         commandId: command.commandId,
@@ -713,33 +819,42 @@ export class ShellBotBackendContribution {
     }
     const userConfiguration = this.userConfiguration(identity);
     try {
-      await settleAssignmentSaga(saga, {
-        acknowledge: (stored) =>
-          userConfiguration.acknowledgeConnectionDependency(
-            stored.userId,
-            stored.connectionId,
-            stored.botId,
-            stored.generation,
-          ),
-        compensate: async (stored) => {
-          await userConfiguration.compensateConnectionDependency(
-            stored.userId,
-            stored.connectionId,
-            stored.botId,
-            stored.generation,
-          );
-        },
-        rejectCommitted: async (stored) => {
-          await this.markConnectionUnavailable(
-            { userId: stored.userId, botId: stored.botId },
-            stored.connectionId,
-            {
-              id: `assignment-rejected:${stored.generation}`,
-              expectedGeneration: stored.generation,
-            },
-          );
-        },
-      });
+      if (saga.mode === "unassign") {
+        await userConfiguration.compensateConnectionDependency(
+          saga.userId,
+          saga.connectionId,
+          saga.botId,
+          saga.generation,
+        );
+      } else {
+        await settleAssignmentSaga(saga, {
+          acknowledge: (stored) =>
+            userConfiguration.acknowledgeConnectionDependency(
+              stored.userId,
+              stored.connectionId,
+              stored.botId,
+              stored.generation,
+            ),
+          compensate: async (stored) => {
+            await userConfiguration.compensateConnectionDependency(
+              stored.userId,
+              stored.connectionId,
+              stored.botId,
+              stored.generation,
+            );
+          },
+          rejectCommitted: async (stored) => {
+            await this.markConnectionUnavailable(
+              { userId: stored.userId, botId: stored.botId },
+              stored.connectionId,
+              {
+                id: `assignment-rejected:${stored.generation}`,
+                expectedGeneration: stored.generation,
+              },
+            );
+          },
+        });
+      }
       await this.ctx.storage.transaction(async (transaction) => {
         const current = await transaction.get<StoredAssignmentSaga>(key);
         if (
@@ -747,6 +862,16 @@ export class ShellBotBackendContribution {
           current.phase === saga.phase
         ) {
           await transaction.delete(key);
+          if (
+            saga.mode === "unassign" &&
+            (await transaction.get(
+              `${ASSIGNMENT_GENERATION_PREFIX}${saga.connectionId}`,
+            )) === saga.generation
+          ) {
+            await transaction.delete(
+              `${ASSIGNMENT_GENERATION_PREFIX}${saga.connectionId}`,
+            );
+          }
         }
         await this.refreshRecoveryAlarm(transaction);
       });
@@ -774,8 +899,18 @@ export class ShellBotBackendContribution {
         prefix: ASSIGNMENT_SAGA_PREFIX,
       }),
     ]);
+    const activeRun = activeRunId
+      ? optionalStoredRun(
+          await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
+        )
+      : undefined;
     const deadlines = [...sagas.values()].map((saga) => saga.deadlineAt);
-    if (activeRunId) deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
+    if (
+      activeRunId &&
+      (!activeRun || activeRun.status !== "reconciliation-required")
+    ) {
+      deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
+    }
     if (deadlines.length === 0) await transaction.deleteAlarm();
     else await transaction.setAlarm(Math.min(...deadlines));
   }
@@ -877,14 +1012,32 @@ export class ShellBotBackendContribution {
       await this.refreshRecoveryAlarm(transaction);
       return { run, latest, settings };
     });
-    return projectClientTurnV1(
-      await this.executeResumedRun(
-        identity,
-        recovery.run,
-        recovery.latest,
-        recovery.settings,
-      ),
-    );
+    try {
+      return projectClientTurnV1(
+        await this.executeResumedRun(
+          identity,
+          recovery.run,
+          recovery.latest,
+          recovery.settings,
+        ),
+      );
+    } catch (error) {
+      const current = optionalStoredRun(
+        await this.ctx.storage.get<unknown>(key),
+      );
+      if (current?.status === "reconciliation-required") {
+        const previous = recovery.latest.slice(0, current.previousEventCount);
+        const failure =
+          error instanceof Error ? error.message : "Reconciliation failed";
+        await this.failRun(
+          runId,
+          previous,
+          current.events,
+          `Reconciliation was explicitly abandoned: ${failure}`,
+        );
+      }
+      throw error;
+    }
   }
 
   private async executeAcceptedRun(
@@ -1318,10 +1471,7 @@ export class ShellBotBackendContribution {
         this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
       ]);
       const run = optionalStoredRun(storedRun);
-      if (run?.status === "reconciliation-required" && identity) {
-        await this.reconcileRun(identity, activeRunId);
-        return;
-      }
+      if (run?.status === "reconciliation-required" && identity) return;
     }
     await this.recoverActiveRun();
   }

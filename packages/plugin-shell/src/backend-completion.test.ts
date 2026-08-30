@@ -164,6 +164,32 @@ describe("Bot run terminal persistence", () => {
     expect(storage.values.has("notification:run-1")).toBe(false);
   });
 
+  test("terminalizes an explicitly abandoned reconciliation", async () => {
+    const storage = new MemoryRunStorage();
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      status: "reconciliation-required",
+      phase: "reconciliation-required",
+      failure: "provider outcome is uncertain",
+    } satisfies StoredRun);
+
+    await failStoredRun(
+      storage,
+      keys,
+      "run-1",
+      [],
+      [ended],
+      "reconciliation abandoned",
+    );
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "failed",
+      phase: "executing",
+      failure: "reconciliation abandoned",
+    });
+    expect(storage.values.has(keys.activeRun)).toBe(false);
+  });
+
   test("preserves committed success after an uncertain response", async () => {
     const storage = new MemoryRunStorage();
     await completeStoredRun(storage, keys, "run-1", [], result());

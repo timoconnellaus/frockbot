@@ -335,10 +335,22 @@ describe("Bot selection", () => {
             bot = {
               ...bot,
               revision: 1,
+              model: command.model,
               assignments: [{ ...command.assignment, state: "enabled" }],
             };
           } else if (command.type === "bot/select-model") {
-            bot = { ...bot, revision: 2, model: command.model };
+            bot = { ...bot, revision: bot.revision + 1, model: command.model };
+          } else if (command.type === "bot/unbind-model") {
+            bot = {
+              ...bot,
+              revision: bot.revision + 1,
+              model: undefined,
+              assignments: bot.assignments.map((assignment) =>
+                assignment.assignmentId === command.assignmentId
+                  ? { ...assignment, state: "unavailable" }
+                  : assignment,
+              ),
+            };
           } else {
             throw new Error("unexpected Bot command");
           }
@@ -388,10 +400,9 @@ describe("Bot selection", () => {
 
     expect(commands).toEqual([
       { type: "bot/assign-capability", expectedRevision: 0 },
-      { type: "bot/select-model", expectedRevision: 1 },
     ]);
     expect(bot).toMatchObject({
-      revision: 2,
+      revision: 1,
       model: {
         connectionId: "ollama-work",
         providerModelId: "glm-5.3-flash:cloud",
@@ -405,6 +416,62 @@ describe("Bot selection", () => {
         },
       ],
     });
+
+    await provided.value.clearBotModel();
+
+    expect(commands.at(-1)).toEqual({
+      type: "bot/unbind-model",
+      expectedRevision: 1,
+    });
+    expect(bot).toMatchObject({
+      revision: 2,
+      model: undefined,
+      assignments: [{ state: "unavailable" }],
+    });
+  });
+
+  test("does not resubmit an unchanged unavailable model", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const bot = {
+      ...initializeBotSettingsV1("ollama-bot"),
+      model: {
+        connectionId: "revoked-connection",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+      assignments: [],
+    };
+    let executed = false;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        executeConfiguration: () => {
+          executed = true;
+          throw new Error("model was resubmitted");
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = bot.botId;
+    provided.value.botSettings = bot;
+    provided.value.userSettings = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [],
+      connections: [],
+    };
+
+    await provided.value.saveBotModel(bot.model);
+
+    expect(executed).toBe(false);
   });
 });
 

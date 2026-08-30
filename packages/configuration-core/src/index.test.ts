@@ -108,6 +108,42 @@ describe("configuration DTO seam", () => {
     ).toMatchObject({ model: { providerModelId } });
   });
 
+  test("decodes atomic model binding and explicit unbinding commands", () => {
+    expect(
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        type: "bot/assign-capability",
+        commandId: "bind-model",
+        botId: "primary",
+        expectedRevision: 2,
+        assignment: {
+          assignmentId: "ollama-model",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "ollama-work",
+        },
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+      }),
+    ).toMatchObject({
+      type: "bot/assign-capability",
+      assignment: { connectionId: "ollama-work" },
+      model: { providerModelId: "glm-5.3-flash:cloud" },
+    });
+    expect(
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        type: "bot/unbind-model",
+        commandId: "unbind-model",
+        botId: "primary",
+        expectedRevision: 3,
+        assignmentId: "ollama-model",
+      }),
+    ).toMatchObject({ type: "bot/unbind-model", assignmentId: "ollama-model" });
+  });
+
   test("rejects unversioned, malformed, and unknown commands", () => {
     for (const value of [
       { type: "bot/update-profile" },

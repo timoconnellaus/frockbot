@@ -296,8 +296,9 @@ describe("Ollama Cloud User Contribution", () => {
     ).resolves.toBeUndefined();
   });
 
-  test("compacts completed commands without losing idempotency", async () => {
-    const { settings, storage, ollama } = await fixture();
+  test("bounds command history with an explicit validity window", async () => {
+    let now = Date.parse("2026-08-30T00:00:00.000Z");
+    const { settings, storage, ollama } = await fixture(undefined, () => now);
     const created = await ollama.executeConnection("account-1", {
       schemaVersion: 1,
       type: "connection/create-api-key",
@@ -307,7 +308,7 @@ describe("Ollama Cloud User Contribution", () => {
       label: "Original",
       apiKey: "valid-key",
     });
-    for (let index = 0; index < 257; index += 1) {
+    for (let index = 0; index < 255; index += 1) {
       await ollama.executeConnection("account-1", {
         schemaVersion: 1,
         type: "connection/update-label",
@@ -317,6 +318,15 @@ describe("Ollama Cloud User Contribution", () => {
       });
     }
 
+    await expect(
+      ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: "label-over-history-capacity",
+        connectionId: created.connectionId,
+        label: "Over capacity",
+      }),
+    ).rejects.toThrow("Ollama Connection command history capacity reached");
     await expect(
       ollama.lookupConnectionCommand("account-1", "connect-receipt-retention"),
     ).resolves.toEqual(created);
@@ -334,15 +344,25 @@ describe("Ollama Cloud User Contribution", () => {
     expect((await settings.read("account-1")).connections).toHaveLength(1);
     expect(
       storage.values.get("ollama-connection-command:connect-receipt-retention"),
-    ).toEqual({
+    ).toMatchObject({ receipt: created, completedAt: now });
+
+    now += 31 * 24 * 60 * 60 * 1_000;
+    await ollama.executeConnection("account-1", {
       schemaVersion: 1,
-      commandId: "connect-receipt-retention",
-      fingerprint: expect.any(String),
-      accountId: "account-1",
+      type: "connection/update-label",
+      commandId: "label-after-history-expiry",
       connectionId: created.connectionId,
-      operation: "connection/create-api-key",
-      receipt: created,
+      label: "After expiry",
     });
+
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "connect-receipt-retention"),
+    ).resolves.toBeUndefined();
+    expect(
+      [...storage.values.keys()].filter((key) =>
+        key.startsWith("ollama-connection-command:"),
+      ),
+    ).toHaveLength(1);
   });
 
   test("bounds pending command admission before durable recovery grows", async () => {
@@ -682,7 +702,7 @@ describe("Ollama Cloud User Contribution", () => {
     const catalogStarted = Promise.withResolvers<void>();
     const catalogResponse = Promise.withResolvers<Response>();
     let catalogRequests = 0;
-    const { settings, ollama } = await fixture(async (input) => {
+    const { settings, credentials, ollama } = await fixture(async (input) => {
       if (String(input).endsWith("/tags")) {
         catalogRequests += 1;
         if (catalogRequests === 1) {
@@ -743,6 +763,85 @@ describe("Ollama Cloud User Contribution", () => {
     expect((await settings.read("account-1")).connections).toMatchObject([
       { connectionId: replacement.connectionId, state: "ready" },
     ]);
+    await expect(
+      credentials.readStagedApiKey({
+        accountId: "account-1",
+        connectionId: "connection-id-1",
+        packageId: "provider-ollama-cloud",
+        generation: "id-2",
+      }),
+    ).rejects.toThrow("Credential generation is unavailable");
+  });
+
+  test("cancels pending credential rotation before revocation", async () => {
+    const rotationStarted = Promise.withResolvers<void>();
+    const rotationResponse = Promise.withResolvers<Response>();
+    let catalogRequests = 0;
+    const { settings, credentials, ollama } = await fixture(async (input) => {
+      if (String(input).endsWith("/tags")) {
+        catalogRequests += 1;
+        if (catalogRequests === 2) {
+          rotationStarted.resolve();
+          return rotationResponse.promise;
+        }
+        return Response.json({
+          models: [{ model: "glm-5.3-flash:cloud" }],
+        });
+      }
+      return Response.json({ capabilities: ["tools"] });
+    });
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-before-pending-rotation",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Original",
+      apiKey: "original-key",
+    });
+    const rotating = ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/rotate-api-key",
+      commandId: "pending-rotation",
+      connectionId: created.connectionId,
+      apiKey: "pending-key",
+    });
+    await rotationStarted.promise;
+
+    const disconnected = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/disconnect",
+      commandId: "disconnect-pending-rotation",
+      connectionId: created.connectionId,
+      revokeUpstream: false,
+    });
+    rotationResponse.resolve(
+      Response.json({ models: [{ model: "glm-5.3-flash:cloud" }] }),
+    );
+
+    expect(disconnected.status).toBe("applied");
+    expect((await rotating).status).toBe("failed");
+    const revoked = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    expect(revoked).toMatchObject({
+      state: "revoked",
+      authorization: {
+        credential: { configured: false },
+      },
+    });
+    expect(
+      Object.hasOwn(revoked?.authorization?.credential ?? {}, "generation"),
+    ).toBe(false);
+    await expect(
+      credentials.readStagedApiKey({
+        accountId: "account-1",
+        connectionId: created.connectionId,
+        packageId: "provider-ollama-cloud",
+        generation: "id-3",
+      }),
+    ).rejects.toThrow("Credential generation is unavailable");
   });
 
   test("fails an interrupted disconnect after credential rotation", async () => {
@@ -978,6 +1077,43 @@ describe("Ollama Cloud User Contribution", () => {
         key.startsWith("ollama-refresh-receipt:"),
       ),
     ).toEqual([receiptKey]);
+  });
+
+  test("refreshes one due Connection per recovery alarm", async () => {
+    let currentTime = Date.parse("2026-08-30T00:00:00.000Z");
+    let catalogRequests = 0;
+    const { settings, ollama } = await fixture(
+      async (input) => {
+        if (String(input).endsWith("/tags")) {
+          catalogRequests += 1;
+          return Response.json({
+            models: [{ model: "glm-5.3-flash:cloud" }],
+          });
+        }
+        return Response.json({ capabilities: ["tools"] });
+      },
+      () => currentTime,
+    );
+    for (const suffix of ["one", "two"]) {
+      await ollama.executeConnection("account-1", {
+        schemaVersion: 1,
+        type: "connection/create-api-key",
+        commandId: `connect-alarm-${suffix}`,
+        packageId: "provider-ollama-cloud",
+        connectionTypeId: "ollama-cloud-account",
+        label: suffix,
+        apiKey: `${suffix}-key`,
+      });
+    }
+    const refreshAfter = (await settings.read("account-1")).connections[0]
+      ?.modelCatalog?.refreshAfter;
+    if (!refreshAfter) throw new Error("refresh deadline is missing");
+    currentTime = Date.parse(refreshAfter);
+
+    await ollama.alarm();
+    expect(catalogRequests).toBe(3);
+    await ollama.alarm();
+    expect(catalogRequests).toBe(4);
   });
 
   test("terminally fails an admitted create whose credential was never sealed", async () => {

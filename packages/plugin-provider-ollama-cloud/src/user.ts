@@ -27,7 +27,9 @@ const COMMAND_PREFIX = "ollama-connection-command:";
 const PENDING_KEY = "ollama-pending-connection-commands";
 const RECEIPT_INDEX_KEY = "ollama-connection-receipt-index";
 const MAX_MANUAL_RECEIPTS = 256;
+const MANUAL_COMMAND_VALIDITY_MS = 30 * 24 * 60 * 60 * 1_000;
 const MAX_PENDING_COMMANDS = 64;
+const MAX_CATALOG_REFRESHES_PER_ALARM = 1;
 const ACCOUNT_KEY = "ollama-connection-account";
 const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
 const MUTATION_SEQUENCE_PREFIX = "ollama-mutation-sequence:";
@@ -50,14 +52,20 @@ interface StoredCommand {
   enabled?: boolean;
   revokeUpstream?: boolean;
   receipt?: ConnectionCommandReceiptV1;
+  completedAt?: number;
   automaticRefresh?: boolean;
   mutationSequence?: number;
 }
 
 type OllamaCredentialContribution = Omit<
   CredentialUserBackendContribution,
-  "lease" | "replayLease"
+  "discardPending" | "lease" | "replayLease"
 > & {
+  discardPending(
+    connectionId: string,
+    generation: string,
+    storage?: CredentialTransaction,
+  ): Promise<void>;
   replayLease(input: {
     accountId: string;
     connectionId: string;
@@ -202,6 +210,7 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       "enabled",
       "revokeUpstream",
       "receipt",
+      "completedAt",
       "automaticRefresh",
       "mutationSequence",
     ],
@@ -220,6 +229,10 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     (value.enabled !== undefined && typeof value.enabled !== "boolean") ||
     (value.revokeUpstream !== undefined &&
       typeof value.revokeUpstream !== "boolean") ||
+    (value.completedAt !== undefined &&
+      (typeof value.completedAt !== "number" ||
+        !Number.isSafeInteger(value.completedAt) ||
+        value.completedAt < 0)) ||
     (value.automaticRefresh !== undefined &&
       typeof value.automaticRefresh !== "boolean") ||
     (value.mutationSequence !== undefined &&
@@ -277,6 +290,9 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       ? {}
       : { revokeUpstream: value.revokeUpstream as boolean }),
     ...(decodedReceipt === undefined ? {} : { receipt: decodedReceipt }),
+    ...(value.completedAt === undefined
+      ? {}
+      : { completedAt: value.completedAt as number }),
     ...(value.automaticRefresh === undefined
       ? {}
       : { automaticRefresh: value.automaticRefresh as boolean }),
@@ -311,7 +327,7 @@ function decodeMutationSequence(input: unknown): {
 }
 
 function compactCompletedCommand(record: StoredCommand): StoredCommand {
-  if (!record.receipt) {
+  if (!record.receipt || record.completedAt === undefined) {
     throw new Error("Completed Ollama command receipt is unavailable");
   }
   return {
@@ -322,6 +338,7 @@ function compactCompletedCommand(record: StoredCommand): StoredCommand {
     connectionId: record.connectionId,
     operation: record.operation,
     receipt: record.receipt,
+    completedAt: record.completedAt,
   };
 }
 
@@ -632,12 +649,45 @@ export class OllamaCloudUserBackendContribution {
         }
         return { record: existing, created: false };
       }
+      let manualHistoryCount = 0;
+      let receiptIndexEntry: Record<string, unknown> = {};
+      if (!record.automaticRefresh) {
+        const receiptIndexValue =
+          await transaction.get<unknown>(RECEIPT_INDEX_KEY);
+        const receiptIndex =
+          receiptIndexValue === undefined
+            ? []
+            : decodeReceiptIndex(receiptIndexValue);
+        const retained: string[] = [];
+        const validAfter = this.now() - MANUAL_COMMAND_VALIDITY_MS;
+        for (const commandId of receiptIndex) {
+          const value = await transaction.get<unknown>(commandKey(commandId));
+          if (value === undefined) continue;
+          const completed = decodeStoredCommand(value);
+          if (!completed.receipt || completed.completedAt === undefined) {
+            throw new Error("Stored Ollama completed command is invalid");
+          }
+          if (completed.completedAt < validAfter) {
+            await transaction.delete(commandKey(commandId));
+          } else {
+            retained.push(commandId);
+          }
+        }
+        manualHistoryCount = retained.length;
+        receiptIndexEntry = { [RECEIPT_INDEX_KEY]: retained };
+      }
       const pendingValue = await transaction.get<unknown>(PENDING_KEY);
       const pending = (
         pendingValue === undefined ? [] : decodePendingCommands(pendingValue)
       ).filter((id) => id !== record.commandId);
       if (pending.length >= MAX_PENDING_COMMANDS) {
         throw new Error("Ollama Connection command capacity reached");
+      }
+      if (
+        !record.automaticRefresh &&
+        manualHistoryCount + pending.length >= MAX_MANUAL_RECEIPTS
+      ) {
+        throw new Error("Ollama Connection command history capacity reached");
       }
       let admitted = record;
       let sequenceEntry: Record<string, unknown> = {};
@@ -662,6 +712,7 @@ export class OllamaCloudUserBackendContribution {
       await transaction.put({
         [commandKey(record.commandId)]: admitted,
         [PENDING_KEY]: [...pending, record.commandId],
+        ...receiptIndexEntry,
         ...sequenceEntry,
       });
       await transaction.setAlarm?.(this.now() + RECOVERY_DELAY_MS);
@@ -1118,7 +1169,7 @@ export class OllamaCloudUserBackendContribution {
     );
   }
 
-  private async cancelPendingCreate(
+  private async cancelPendingCredentialMutations(
     record: StoredCommand,
     storage: UserSettingsTransaction & CredentialTransaction,
   ): Promise<void> {
@@ -1126,25 +1177,52 @@ export class OllamaCloudUserBackendContribution {
     const pending =
       pendingValue === undefined ? [] : decodePendingCommands(pendingValue);
     const retained: string[] = [];
+    const completedIds: string[] = [];
     const completed: Record<string, unknown> = {};
     for (const commandId of pending) {
       const value = await storage.get<unknown>(commandKey(commandId));
       if (value === undefined) continue;
       const candidate = decodeStoredCommand(value);
       if (
-        candidate.operation === "connection/create-api-key" &&
+        (candidate.operation === "connection/create-api-key" ||
+          candidate.operation === "connection/rotate-api-key") &&
         candidate.connectionId === record.connectionId &&
         !candidate.receipt
       ) {
         completed[commandKey(commandId)] = compactCompletedCommand({
           ...candidate,
           receipt: receipt(candidate, "failed"),
+          completedAt: this.now(),
         });
+        completedIds.push(commandId);
+        if (candidate.credentialGeneration) {
+          await this.host.credentials.discardPending(
+            candidate.connectionId,
+            candidate.credentialGeneration,
+            storage,
+          );
+        }
       } else {
         retained.push(commandId);
       }
     }
-    await storage.put({ ...completed, [PENDING_KEY]: retained });
+    const receiptIndexValue = await storage.get<unknown>(RECEIPT_INDEX_KEY);
+    const receiptIndex =
+      receiptIndexValue === undefined
+        ? []
+        : decodeReceiptIndex(receiptIndexValue);
+    const nextReceiptIndex = [
+      ...receiptIndex.filter((commandId) => !completedIds.includes(commandId)),
+      ...completedIds,
+    ];
+    if (nextReceiptIndex.length > MAX_MANUAL_RECEIPTS) {
+      throw new Error("Ollama Connection command history capacity reached");
+    }
+    await storage.put({
+      ...completed,
+      [PENDING_KEY]: retained,
+      [RECEIPT_INDEX_KEY]: nextReceiptIndex,
+    });
   }
 
   private async disconnect(
@@ -1171,7 +1249,7 @@ export class OllamaCloudUserBackendContribution {
         ) {
           return "dependent";
         }
-        await this.cancelPendingCreate(record, storage);
+        await this.cancelPendingCredentialMutations(record, storage);
         if (current.state !== "revoking") {
           await this.host.settings.replaceConnection(
             record.accountId,
@@ -1210,6 +1288,16 @@ export class OllamaCloudUserBackendContribution {
         state: unsupportedUpstreamRevoke
           ? "reconciliation-required"
           : "revoked",
+        authorization: {
+          schemaVersion: 1,
+          kind: "api-key",
+          credential: {
+            schemaVersion: 1,
+            configured: false,
+            source: "api-key",
+            writable: true,
+          },
+        },
         ...(unsupportedUpstreamRevoke
           ? {
               failure:
@@ -1268,20 +1356,19 @@ export class OllamaCloudUserBackendContribution {
             ),
             record.commandId,
           ];
-          const retained = ordered.slice(-MAX_MANUAL_RECEIPTS);
-          const completed = { ...(stored ?? record), receipt: proposed };
-          const compacted: Record<string, unknown> = {};
-          for (const commandId of ordered.slice(0, -MAX_MANUAL_RECEIPTS)) {
-            const value = await storage.get<unknown>(commandKey(commandId));
-            if (value === undefined) continue;
-            compacted[commandKey(commandId)] = compactCompletedCommand(
-              decodeStoredCommand(value),
+          if (ordered.length > MAX_MANUAL_RECEIPTS) {
+            throw new Error(
+              "Ollama Connection command history capacity reached",
             );
           }
+          const completed = {
+            ...(stored ?? record),
+            receipt: proposed,
+            completedAt: this.now(),
+          };
           await storage.put({
-            ...compacted,
             [commandKey(record.commandId)]: completed,
-            [RECEIPT_INDEX_KEY]: retained,
+            [RECEIPT_INDEX_KEY]: ordered,
             [PENDING_KEY]: pending,
           });
         }
@@ -1311,7 +1398,9 @@ export class OllamaCloudUserBackendContribution {
             return [];
           }
           const deadline = Date.parse(refreshAfter);
-          return Number.isFinite(deadline) ? [deadline] : [];
+          return Number.isFinite(deadline)
+            ? [Math.max(deadline, this.now() + RECOVERY_DELAY_MS)]
+            : [];
         })
       : [];
     const credentialExpiry = await this.host.credentials.nextLeaseExpiry();
@@ -1481,25 +1570,30 @@ export class OllamaCloudUserBackendContribution {
       await this.scheduleNextAlarm(accountId);
       return;
     }
-    for (const connection of settings.connections) {
-      const refreshAfter = connection.modelCatalog?.refreshAfter;
-      if (
-        connection.packageId === PACKAGE_ID &&
-        connection.state === "ready" &&
-        refreshAfter &&
-        Date.parse(refreshAfter) <= this.now()
-      ) {
-        await this.executeCommand(
-          accountId,
-          decodeConnectionCommandV1({
-            schemaVersion: 1,
-            type: "connection/refresh-models",
-            commandId: `refresh-${connection.connectionId}-${Date.parse(refreshAfter)}`,
-            connectionId: connection.connectionId,
-          }),
-          true,
+    const dueConnections = settings.connections
+      .filter((connection) => {
+        const refreshAfter = connection.modelCatalog?.refreshAfter;
+        return (
+          connection.packageId === PACKAGE_ID &&
+          connection.state === "ready" &&
+          refreshAfter !== undefined &&
+          Date.parse(refreshAfter) <= this.now()
         );
-      }
+      })
+      .slice(0, MAX_CATALOG_REFRESHES_PER_ALARM);
+    for (const connection of dueConnections) {
+      const refreshAfter = connection.modelCatalog?.refreshAfter;
+      if (!refreshAfter) continue;
+      await this.executeCommand(
+        accountId,
+        decodeConnectionCommandV1({
+          schemaVersion: 1,
+          type: "connection/refresh-models",
+          commandId: `refresh-${connection.connectionId}-${Date.parse(refreshAfter)}`,
+          connectionId: connection.connectionId,
+        }),
+        true,
+      );
     }
     await this.scheduleNextAlarm(accountId);
   }
