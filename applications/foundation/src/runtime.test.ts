@@ -134,6 +134,10 @@ describe("foundation application", () => {
           status: "applied",
           revision: 1,
         }),
+      listBotLifecycles: () =>
+        Promise.resolve({ schemaVersion: 1, lifecycles: [] }),
+      executeBotLifecycle: () =>
+        Promise.reject(new Error("not used while composing")),
       readSheep: () => Promise.reject(new Error("not used while composing")),
       updateSheep: () => Promise.reject(new Error("not used while composing")),
     });

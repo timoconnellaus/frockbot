@@ -167,6 +167,10 @@ export interface ShellBotBackendHost {
   env: BotStateEnv;
   execution: BotResidentExecution;
   compileApplication?: typeof compileFoundationApplication;
+  assertLifecycleActive?(
+    storage: DurableObjectTransaction,
+    botId: string,
+  ): Promise<void>;
 }
 
 function optionalStoredRun(input: unknown): StoredRun | undefined {
@@ -242,6 +246,7 @@ export class ShellBotBackendContribution {
   readonly env: BotStateEnv;
   private readonly compileApplication: typeof compileFoundationApplication;
   private readonly execution: BotResidentExecution;
+  private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
   private executingRunId: string | undefined;
   private readonly assignmentActivities = new Map<string, AssignmentActivity>();
 
@@ -251,6 +256,7 @@ export class ShellBotBackendContribution {
     this.compileApplication =
       host.compileApplication ?? compileFoundationApplication;
     this.execution = host.execution;
+    this.lifecycleAdmission = host.assertLifecycleActive;
   }
 
   async materializeSettings(
@@ -318,6 +324,7 @@ export class ShellBotBackendContribution {
 
   async executeConfiguration(input: unknown): Promise<OperationReceiptV1> {
     const request = decodeBotConfigurationExecuteRpcV1(input);
+    await this.assertLifecycleActive(request.botId);
     return this.executeConfigurationCommand(
       { userId: request.userId, botId: request.botId },
       request.command,
@@ -2065,6 +2072,19 @@ export class ShellBotBackendContribution {
     return { settings, user, plan };
   }
 
+  async archiveEligible(storage: {
+    get<T>(key: string): Promise<T | undefined>;
+  }): Promise<boolean> {
+    return (await storage.get<string>(ACTIVE_RUN_KEY)) === undefined;
+  }
+
+  async assertLifecycleActive(botId: string): Promise<void> {
+    if (!this.lifecycleAdmission) return;
+    await this.ctx.storage.transaction((transaction) =>
+      this.lifecycleAdmission!(transaction, botId),
+    );
+  }
+
   private async assertIdentity(identity: BotIdentity): Promise<void> {
     const existing = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
     if (
@@ -2118,6 +2138,7 @@ export class ShellBotBackendContribution {
       if (await transaction.get(ACTIVE_RUN_KEY)) {
         throw new Error("bot already has an active run");
       }
+      await this.lifecycleAdmission?.(transaction, command.botId);
       const currentSettings = await transaction.get<BotSettingsViewV1>(
         BOT_CONFIGURATION_KEY,
       );

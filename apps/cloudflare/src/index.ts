@@ -4,6 +4,9 @@ import {
   createFoundationBackendContributions,
 } from "@frockbot/application-foundation/runtime";
 import {
+  decodeBotLifecycleDirectoryViewV1,
+  decodeBotLifecycleReceiptV1,
+  type BotLifecycleCommandV1,
   decodeBotMembershipViewV1,
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
@@ -161,6 +164,8 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
   ) as unknown as RpcBoundary<UserConfigurationRpc>;
   return {
     listBots: (request) => rpc.listBots(request),
+    listBotLifecycles: (request) => rpc.listBotLifecycles(request),
+    executeBotLifecycle: (request) => rpc.executeBotLifecycle(request),
     createBot: (request) => rpc.createBot(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
@@ -197,6 +202,23 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     if (!membership.registered) {
       const error = new Error(`Bot "${botId}" is not registered`);
       error.name = "BotNotFoundError";
+      throw error;
+    }
+    const lifecycles = decodeBotLifecycleDirectoryViewV1(
+      await userConfigurationStub(
+        this.env,
+        this.ctx.props.userId,
+      ).listBotLifecycles({
+        schemaVersion: 1,
+        userId: this.ctx.props.userId,
+      }),
+    );
+    if (
+      lifecycles.lifecycles.find((item) => item.botId === botId)?.status ===
+      "archived"
+    ) {
+      const error = new Error(`Bot "${botId}" is archived`);
+      error.name = "BotArchivedError";
       throw error;
     }
   }
@@ -330,6 +352,24 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           await userConfigurationStub(env, userId).listBots({
             schemaVersion: 1,
             userId,
+          }),
+        ),
+      listBotLifecycles: async (userId: string) =>
+        decodeBotLifecycleDirectoryViewV1(
+          await userConfigurationStub(env, userId).listBotLifecycles({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      executeBotLifecycle: async (
+        userId: string,
+        command: BotLifecycleCommandV1,
+      ) =>
+        decodeBotLifecycleReceiptV1(
+          await userConfigurationStub(env, userId).executeBotLifecycle({
+            schemaVersion: 1,
+            userId,
+            command,
           }),
         ),
       createBot: async (userId, command) =>

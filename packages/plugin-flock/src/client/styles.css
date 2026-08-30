@@ -25,19 +25,24 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+.flock-heading-actions {
+  display: flex;
+  gap: 4px;
+}
 .flock-sidebar-heading button {
-  width: 24px;
+  min-width: 24px;
   height: 24px;
   border: 0;
   border-radius: 50%;
   background: var(--frock-action-primary);
   color: var(--frock-on-accent);
-  font-size: 16px;
+  padding: 0 7px;
+  font-size: 10px;
 }
 .flock-bot-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 8px;
   margin: 0 0 4px;
@@ -47,6 +52,21 @@
   background: transparent;
   color: inherit;
   text-align: left;
+}
+.flock-bot-select {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.flock-bot-row.archived {
+  opacity: 0.72;
 }
 .flock-bot-row:hover,
 .flock-bot-row.active {

@@ -3,6 +3,7 @@ import type { InjectionKey, Ref } from "vue";
 import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
 import type {
   BotDirectoryViewV1,
+  BotLifecycleStatusV1,
   SheepIdentityViewV1,
   SheepRecipeV1,
 } from "../shared.js";
@@ -12,7 +13,10 @@ export interface FlockWebData {
   identities: Record<string, SheepIdentityViewV1>;
   loading: boolean;
   error?: string;
-  overlay?: "create" | "edit";
+  overlay?: "create" | "edit" | "archive";
+  lifecycles: Record<string, BotLifecycleStatusV1>;
+  showArchived: boolean;
+  lifecyclePending?: string;
   draftName: string;
   draftSheep: SheepRecipeV1;
   bindShell(shell: Ref<FrockBotWebData>): void;
@@ -20,6 +24,10 @@ export interface FlockWebData {
   select(botId: string): Promise<void>;
   openCreate(): void;
   openEdit(): Promise<void>;
+  toggleArchived(): void;
+  openArchive(botId: string): void;
+  archive(): Promise<void>;
+  restore(botId: string): Promise<void>;
   closeOverlay(): void;
   reroll(): void;
   create(): Promise<void>;

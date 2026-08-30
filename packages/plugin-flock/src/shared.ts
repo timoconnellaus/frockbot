@@ -38,6 +38,35 @@ export interface BotDirectoryViewV1 {
   revision: number;
   bots: BotRegistrationV1[];
 }
+export type BotLifecycleStatusV1 = "active" | "archived";
+export interface BotLifecycleViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  status: BotLifecycleStatusV1;
+  revision: number;
+}
+export interface BotLifecycleDirectoryViewV1 {
+  schemaVersion: 1;
+  lifecycles: BotLifecycleViewV1[];
+}
+export interface BotLifecycleCommandV1 {
+  schemaVersion: 1;
+  type: "bot/archive" | "bot/restore";
+  commandId: string;
+  botId: string;
+}
+export interface BotLifecycleReceiptV1 {
+  schemaVersion: 1;
+  commandId: string;
+  botId: string;
+  status: "pending" | "applied" | "rejected";
+  lifecycle: BotLifecycleViewV1;
+  failure?: string;
+}
+export interface StoredBotLifecycleReceiptV1 {
+  fingerprint: string;
+  receipt: BotLifecycleReceiptV1;
+}
 export interface CreateBotCommandV1 {
   schemaVersion: 1;
   type: "bot/create";
@@ -128,9 +157,10 @@ function exact(
   optional: string[] = [],
 ): void {
   const allowed = new Set([...required, ...optional]);
+  const keys = Reflect.ownKeys(value);
   if (
     !required.every((key) => Object.hasOwn(value, key)) ||
-    Object.keys(value).some((key) => !allowed.has(key))
+    keys.some((key) => typeof key !== "string" || !allowed.has(key))
   )
     throw new FlockDecodeError("unknown or missing field");
 }
@@ -297,6 +327,103 @@ export function decodeDirectoryViewV1(input: unknown): BotDirectoryViewV1 {
   };
 }
 
+export function decodeBotLifecycleCommandV1(
+  input: unknown,
+): BotLifecycleCommandV1 {
+  const value = record(input, "Bot lifecycle command");
+  exact(value, ["schemaVersion", "type", "commandId", "botId"]);
+  if (
+    value.schemaVersion !== 1 ||
+    (value.type !== "bot/archive" && value.type !== "bot/restore")
+  )
+    throw new FlockDecodeError("unsupported Bot lifecycle command");
+  return {
+    schemaVersion: 1,
+    type: value.type,
+    commandId: identifier(value.commandId, "commandId"),
+    botId: botIdentifier(value.botId),
+  };
+}
+
+export function decodeBotLifecycleViewV1(input: unknown): BotLifecycleViewV1 {
+  const value = record(input, "Bot lifecycle");
+  exact(value, ["schemaVersion", "botId", "status", "revision"]);
+  if (
+    value.schemaVersion !== 1 ||
+    (value.status !== "active" && value.status !== "archived")
+  )
+    throw new FlockDecodeError("Bot lifecycle is invalid");
+  return {
+    schemaVersion: 1,
+    botId: botIdentifier(value.botId),
+    status: value.status,
+    revision: revision(value.revision),
+  };
+}
+
+export function decodeBotLifecycleDirectoryViewV1(
+  input: unknown,
+): BotLifecycleDirectoryViewV1 {
+  const value = record(input, "Bot lifecycle directory");
+  exact(value, ["schemaVersion", "lifecycles"]);
+  if (
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.lifecycles) ||
+    value.lifecycles.length > FLOCK_DIRECTORY_LIMIT
+  )
+    throw new FlockDecodeError("Bot lifecycle directory is invalid");
+  const lifecycles = value.lifecycles.map(decodeBotLifecycleViewV1);
+  if (new Set(lifecycles.map((item) => item.botId)).size !== lifecycles.length)
+    throw new FlockDecodeError(
+      "Bot lifecycle directory contains duplicate IDs",
+    );
+  return { schemaVersion: 1, lifecycles };
+}
+
+export function decodeBotLifecycleReceiptV1(
+  input: unknown,
+): BotLifecycleReceiptV1 {
+  const value = record(input, "Bot lifecycle receipt");
+  exact(
+    value,
+    ["schemaVersion", "commandId", "botId", "status", "lifecycle"],
+    ["failure"],
+  );
+  if (
+    value.schemaVersion !== 1 ||
+    (value.status !== "pending" &&
+      value.status !== "applied" &&
+      value.status !== "rejected")
+  )
+    throw new FlockDecodeError("Bot lifecycle receipt is invalid");
+  const lifecycle = decodeBotLifecycleViewV1(value.lifecycle);
+  const botId = botIdentifier(value.botId);
+  if (lifecycle.botId !== botId)
+    throw new FlockDecodeError("Bot lifecycle receipt identity is invalid");
+  return {
+    schemaVersion: 1,
+    commandId: identifier(value.commandId, "commandId"),
+    botId,
+    status: value.status,
+    lifecycle,
+    failure:
+      value.failure === undefined
+        ? undefined
+        : boundedText(value.failure, "Bot lifecycle receipt failure", 1_000),
+  };
+}
+
+export function decodeStoredBotLifecycleReceiptV1(
+  input: unknown,
+): StoredBotLifecycleReceiptV1 {
+  const value = record(input, "stored Bot lifecycle receipt");
+  exact(value, ["fingerprint", "receipt"]);
+  return {
+    fingerprint: boundedText(value.fingerprint, "fingerprint", 10_000),
+    receipt: decodeBotLifecycleReceiptV1(value.receipt),
+  };
+}
+
 export function decodeFlockReceiptV1(input: unknown): FlockReceiptV1 {
   const value = record(input, "Flock receipt");
   exact(
@@ -375,7 +502,7 @@ export function sheepLayerIds(recipe: SheepRecipeV1): string[] {
 }
 
 export function flockCommandFingerprint(
-  value: CreateBotCommandV1 | UpdateSheepCommandV1,
+  value: CreateBotCommandV1 | UpdateSheepCommandV1 | BotLifecycleCommandV1,
 ): string {
   return JSON.stringify(value);
 }

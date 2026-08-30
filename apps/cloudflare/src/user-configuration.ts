@@ -15,7 +15,12 @@ import {
   createFlockUserBackendPlugin,
   type FlockUserBackendContribution,
 } from "@frockbot/plugin-flock/user";
-import { decodeCreateBotCommandV1 } from "@frockbot/plugin-flock/shared";
+import {
+  decodeBotLifecycleCommandV1,
+  decodeBotLifecycleReceiptV1,
+  decodeBotLifecycleViewV1,
+  decodeCreateBotCommandV1,
+} from "@frockbot/plugin-flock/shared";
 import {
   createUserSettingsBackendPlugin,
   type UserSettingsBackendContribution,
@@ -28,7 +33,11 @@ import {
 } from "./durable-rpc.js";
 import { executeUserConnectionDependency } from "./connection-dependency-router.js";
 
-export class UserConfiguration extends DurableObject {
+interface UserConfigurationEnv {
+  BOT_STATES: DurableObjectNamespace;
+}
+
+export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   private readonly connectionDependencies = new ConnectionDependencyRouter();
   private mounted:
     | Promise<{
@@ -80,6 +89,39 @@ export class UserConfiguration extends DurableObject {
                       );
                     }
                     return settings.readSnapshot(storage);
+                  },
+                  commandBotLifecycle: async (userId, command) => {
+                    const id = this.env.BOT_STATES.idFromName(
+                      `${userId}:${command.botId}`,
+                    );
+                    // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+                    const rpc = this.env.BOT_STATES.get(id) as unknown as {
+                      executeLifecycle(input: unknown): Promise<unknown>;
+                    };
+                    return decodeBotLifecycleReceiptV1(
+                      await rpc.executeLifecycle({
+                        schemaVersion: 1,
+                        userId,
+                        botId: command.botId,
+                        command,
+                      }),
+                    );
+                  },
+                  readBotLifecycle: async (userId, botId) => {
+                    const id = this.env.BOT_STATES.idFromName(
+                      `${userId}:${botId}`,
+                    );
+                    // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+                    const rpc = this.env.BOT_STATES.get(id) as unknown as {
+                      readLifecycle(input: unknown): Promise<unknown>;
+                    };
+                    return decodeBotLifecycleViewV1(
+                      await rpc.readLifecycle({
+                        schemaVersion: 1,
+                        userId,
+                        botId,
+                      }),
+                    );
                   },
                 },
                 {
@@ -169,6 +211,24 @@ export class UserConfiguration extends DurableObject {
     );
   }
 
+  async listBotLifecycles(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).listBotLifecycles();
+  }
+
+  async executeBotLifecycle(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeBotLifecycleCommandV1),
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).executeLifecycle(
+      request.userId as string,
+      request.command,
+    );
+  }
+
   async getBotRegistration(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
@@ -203,6 +263,10 @@ export class UserConfiguration extends DurableObject {
       request.userId as string,
       request.packageId as string,
     );
+  }
+
+  async alarm(): Promise<void> {
+    await (await this.flockContribution()).alarm();
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {

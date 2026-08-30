@@ -31,8 +31,10 @@ import {
   type FlockBotBackendContribution,
 } from "@frockbot/plugin-flock/bot";
 import {
+  decodeBotLifecycleCommandV1,
   decodeBotRegistrationV1,
   decodeUpdateSheepCommandV1,
+  type BotLifecycleCommandV1,
   type BotRegistrationV1,
 } from "@frockbot/plugin-flock/shared";
 import {
@@ -171,7 +173,18 @@ export class BotState extends DurableObject<BotStateEnv> {
             resolve: (specifier, lifecycle) => {
               if (specifier === "@frockbot/plugin-shell/backend") {
                 return createShellBotBackendPlugin(
-                  { state: this.ctx, env: this.env, execution },
+                  {
+                    state: this.ctx,
+                    env: this.env,
+                    execution,
+                    assertLifecycleActive: (storage, botId) => {
+                      if (!flock)
+                        throw new Error(
+                          "Flock Bot Contribution is unavailable",
+                        );
+                      return flock.assertActive(storage, botId);
+                    },
+                  },
                   {
                     mount(value) {
                       shell = value;
@@ -198,6 +211,13 @@ export class BotState extends DurableObject<BotStateEnv> {
                           },
                         )
                         .then(() => undefined);
+                    },
+                    archiveEligible: (storage) => {
+                      if (!shell)
+                        throw new Error(
+                          "Shell Bot Contribution is unavailable",
+                        );
+                      return shell.archiveEligible(storage);
                     },
                   },
                   {
@@ -245,7 +265,9 @@ export class BotState extends DurableObject<BotStateEnv> {
       getBotRegistration(input: unknown): Promise<BotRegistrationV1>;
     };
     return decodeBotRegistrationV1(
-      await rpc.getBotRegistration({ schemaVersion: 1, ...identity }),
+      structuredClone(
+        await rpc.getBotRegistration({ schemaVersion: 1, ...identity }),
+      ),
     );
   }
 
@@ -300,6 +322,29 @@ export class BotState extends DurableObject<BotStateEnv> {
       identity.userId,
       request.command as ReturnType<typeof decodeUpdateSheepCommandV1>,
     );
+  }
+
+  async readLifecycle(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { flock, registration } = await this.materialized(identity);
+    return flock.readLifecycle(registration, identity.userId);
+  }
+
+  async executeLifecycle(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeBotLifecycleCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const command = request.command as BotLifecycleCommandV1;
+    if (command.botId !== identity.botId)
+      throw new Error("lifecycle command does not match Bot authority");
+    const { flock, registration } = await this.materialized(identity);
+    return flock.executeLifecycle(registration, identity.userId, command);
   }
 
   async markConnectionUnavailable(input: unknown) {

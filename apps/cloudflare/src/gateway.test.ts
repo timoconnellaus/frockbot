@@ -16,6 +16,7 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
+import { createFlockBackendContribution } from "@frockbot/plugin-flock/backend";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import {
   createClientRunStopReceiptV1,
@@ -269,6 +270,7 @@ class MemoryConfiguration
   };
   private readonly bots = new Map<string, BotSettingsViewV1>();
   private readonly receipts = new Map<string, OperationReceiptV1>();
+  private readonly lifecycles = new Map<string, "active" | "archived">();
 
   private read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
     if (query.type === "user/get") return Promise.resolve(this.user);
@@ -417,6 +419,36 @@ class MemoryConfiguration
       })),
     });
   }
+  listBotLifecycles() {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      lifecycles: [...this.bots.keys()].map((botId) => ({
+        schemaVersion: 1 as const,
+        botId,
+        status: this.lifecycles.get(botId) ?? ("active" as const),
+        revision: 0,
+      })),
+    });
+  }
+  executeBotLifecycle(
+    request: Parameters<UserConfigurationBinding["executeBotLifecycle"]>[0],
+  ) {
+    const status: "active" | "archived" =
+      request.command.type === "bot/archive" ? "archived" : "active";
+    this.lifecycles.set(request.command.botId, status);
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      botId: request.command.botId,
+      status: "applied" as const,
+      lifecycle: {
+        schemaVersion: 1 as const,
+        botId: request.command.botId,
+        status,
+        revision: 1,
+      },
+    });
+  }
   createBot(request: Parameters<UserConfigurationBinding["createBot"]>[0]) {
     void this.read({
       schemaVersion: 1,
@@ -549,6 +581,12 @@ function createTestGateway(
   const configurations = new Map<string, MemoryConfiguration>();
   const configurationRoutes: string[] = [];
   const connections = new Map<string, MemoryConnections>();
+  const configurationFor = (userId: string) => {
+    const configuration =
+      configurations.get(userId) ?? new MemoryConfiguration();
+    configurations.set(userId, configuration);
+    return configuration;
+  };
   const gateway = createGateway({
     loader,
     artifacts: { load: () => Promise.resolve("export default {}") },
@@ -561,19 +599,43 @@ function createTestGateway(
     },
     userConfigurationFor: (userId) => {
       configurationRoutes.push(`user:${userId}`);
-      const configuration =
-        configurations.get(userId) ?? new MemoryConfiguration();
-      configurations.set(userId, configuration);
-      return configuration;
+      return configurationFor(userId);
     },
     botConfigurationFor: (userId, botId) => {
       configurationRoutes.push(`bot:${userId}:${botId}`);
-      const configuration =
-        configurations.get(userId) ?? new MemoryConfiguration();
-      configurations.set(userId, configuration);
-      return configuration;
+      return configurationFor(userId);
     },
     backendContributions: [
+      createFlockBackendContribution({
+        listBots: (userId) => configurationFor(userId).listBots(),
+        createBot: (userId, command) =>
+          configurationFor(userId).createBot({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        listBotLifecycles: (userId) =>
+          configurationFor(userId).listBotLifecycles(),
+        executeBotLifecycle: (userId, command) =>
+          configurationFor(userId).executeBotLifecycle({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        readSheep: (userId, botId) =>
+          configurationFor(userId).readSheep({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        updateSheep: (userId, botId, command) =>
+          configurationFor(userId).updateSheep({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+      }),
       {
         packageId: "composio",
         async route(request, url, context) {
@@ -746,6 +808,32 @@ describe("Cloudflare user application gateway", () => {
       }
     }
     expect(configurationRoutes).toEqual([]);
+  });
+
+  test("routes authenticated Bot archive and lifecycle projection", async () => {
+    const { gateway } = createTestGateway();
+    await gateway(request("/api/bots/primary/settings", "alice"));
+    const archived = await gateway(
+      request("/api/bots/primary/lifecycle", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "bot/archive",
+          commandId: "archive-primary",
+          botId: "primary",
+        }),
+      }),
+    );
+    expect(archived.status).toBe(200);
+    expect(await archived.json()).toMatchObject({
+      status: "applied",
+      lifecycle: { status: "archived" },
+    });
+    const lifecycles = await gateway(request("/api/bots/lifecycles", "alice"));
+    expect(await lifecycles.json()).toMatchObject({
+      lifecycles: [{ botId: "primary", status: "archived" }],
+    });
   });
 
   test("assigns a Connection only through an authenticated Bot command receipt", async () => {

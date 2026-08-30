@@ -170,6 +170,42 @@ describe("Bot capability assignment admission", () => {
     expect(storage.values.size).toBe(0);
   });
 
+  test("rejects archived settings mutations while preserving configuration reads", async () => {
+    const storage = new MemoryStorage();
+    let archived = false;
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+      assertLifecycleActive: (_transaction, botId) => {
+        if (archived)
+          return Promise.reject(new Error(`Bot "${botId}" is archived`));
+        return Promise.resolve();
+      },
+    });
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    archived = true;
+    await expect(
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        userId: identity.userId,
+        botId: identity.botId,
+        command: {
+          schemaVersion: 1,
+          type: "bot/update-profile",
+          commandId: "archived-profile",
+          botId: identity.botId,
+          expectedRevision: 0,
+          profile: { name: "Changed" },
+        },
+      }),
+    ).rejects.toThrow("archived");
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      revision: 0,
+      profile: { name: "Primary" },
+    });
+  });
+
   test("validates notification authority without changing settings", async () => {
     const storage = new MemoryStorage();
     const settings = {

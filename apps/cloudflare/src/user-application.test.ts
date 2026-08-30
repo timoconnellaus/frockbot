@@ -192,6 +192,31 @@ describe("user application Bot seam", () => {
     expect(dispatches).toBe(0);
   });
 
+  test("rejects archived Bot routes before dispatch", async () => {
+    let dispatches = 0;
+    const archived = new Error('Bot "primary" is archived');
+    archived.name = "BotArchivedError";
+    const env = {
+      BOT_STATE: {
+        assertRegistered: () => Promise.reject(archived),
+        run: () => {
+          dispatches += 1;
+          return Promise.reject(new Error("must not dispatch"));
+        },
+      } as unknown as UserBotStateBinding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    } satisfies UserApplicationEnv;
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/turns"),
+      env,
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()) as { error: string }).toEqual({
+      error: 'Bot "primary" is archived',
+    });
+    expect(dispatches).toBe(0);
+  });
+
   test("keeps registration infrastructure failures retryable", async () => {
     const env = {
       BOT_STATE: {

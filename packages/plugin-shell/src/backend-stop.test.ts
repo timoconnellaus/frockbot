@@ -456,6 +456,44 @@ async function materializedFixture(
 }
 
 describe("durable Stop", () => {
+  test("serializes archive against Turn admission before Agent execution", async () => {
+    const fixture = await materializedFixture();
+    let checked: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    const checking = new Promise<void>((resolve) => {
+      checked = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let archived = false;
+    let executions = 0;
+    const execution: BotResidentExecution = {
+      project: () => Promise.resolve(),
+      execute: () => {
+        executions += 1;
+        return Promise.reject(new Error("archived Bot must not execute"));
+      },
+      cancel: () => Promise.resolve(false),
+      generation: () => 0,
+    };
+    const contribution = createShellBotBackendContribution({
+      ...host(fixture.storage, execution),
+      assertLifecycleActive: async () => {
+        checked?.();
+        await released;
+        if (archived) throw new Error("Bot is archived");
+      },
+    });
+    const running = contribution.run(turn);
+    await checking;
+    archived = true;
+    release?.();
+    await expect(running).rejects.toThrow("archived");
+    expect(executions).toBe(0);
+    expect(fixture.storage.values.get("active-run")).toBeUndefined();
+  });
+
   test("fences Agent activation when Stop wins during runtime startup", async () => {
     let effects = 0;
     const fixture = await materializedFixture((input, current) =>
