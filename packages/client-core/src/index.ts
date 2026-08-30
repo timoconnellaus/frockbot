@@ -20,7 +20,9 @@ import {
   h,
   type App,
   type Component,
+  type ComputedRef,
   type InjectionKey,
+  type Ref,
 } from "vue";
 
 export interface ClientTurnEvent {
@@ -277,10 +279,29 @@ export interface ClientSlotRegistration {
   component: Component;
 }
 
+export interface ClientSurfaceRegistration {
+  id: string;
+  title: string;
+  component: Component;
+}
+
+export interface ClientSurfaceRegistry {
+  readonly active: ComputedRef<ClientSurfaceRegistration | undefined>;
+  readonly activeId: Readonly<Ref<string | undefined>>;
+  register(registration: ClientSurfaceRegistration): () => void;
+  has(id: string): boolean;
+  open(id: string): void;
+  close(): void;
+}
+
+export const clientSurfaceRegistryKey: InjectionKey<ClientSurfaceRegistry> =
+  Symbol("frockbot.client-surfaces");
+
 export interface ClientPluginContext {
   transport: AgentTransport;
   slot(registration: ClientSlotRegistration): () => void;
   provide<T>(key: InjectionKey<T>, value: T): () => void;
+  inject<T>(key: InjectionKey<T>): T;
 }
 
 export type ClientPluginResult = void | (() => void) | readonly (() => void)[];
@@ -314,6 +335,7 @@ export class ClientApplication {
       transport: this.transport,
       slot: (registration) => this.registerSlot(registration),
       provide: (key, value) => this.registerProvider(key, value),
+      inject: (key) => this.injectProvider(key),
     });
     this.pluginDisposers.push(() => disposeResult(result));
   }
@@ -379,11 +401,24 @@ export class ClientApplication {
   }
 
   private registerProvider<T>(key: InjectionKey<T>, value: T): () => void {
+    if (this.providers.some((registration) => registration.key === key)) {
+      throw new Error("client provider is already registered");
+    }
     const registration: ProviderRegistration = { key, value };
     this.providers.push(registration);
     return () => {
       const index = this.providers.indexOf(registration);
       if (index >= 0) this.providers.splice(index, 1);
     };
+  }
+
+  private injectProvider<T>(key: InjectionKey<T>): T {
+    const registration = this.providers.find(
+      (candidate) => candidate.key === key,
+    );
+    if (!registration) {
+      throw new Error("required client provider is unavailable");
+    }
+    return registration.value as T;
   }
 }

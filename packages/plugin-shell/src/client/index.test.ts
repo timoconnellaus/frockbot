@@ -78,6 +78,9 @@ describe("composer hydration context", () => {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};
@@ -97,6 +100,9 @@ describe("composer hydration context", () => {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};
@@ -148,6 +154,9 @@ describe("Bot selection", () => {
         },
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};
@@ -460,6 +469,9 @@ describe("active durable Turn projection", () => {
         },
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};
@@ -531,6 +543,9 @@ describe("uncertain Turn admission", () => {
           Promise.reject(new Error("fence must not be called")),
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};
@@ -593,6 +608,9 @@ describe("uncertain Turn admission", () => {
         fenceRunAdmission: () => Promise.resolve(undefined),
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};
@@ -643,6 +661,9 @@ describe("uncertain Turn admission", () => {
         fenceRunAdmission: () => Promise.resolve(undefined),
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};
@@ -703,6 +724,9 @@ describe("Connection operation reconciliation", () => {
           },
         },
         slot: () => () => {},
+        inject: () => {
+          throw new Error("unexpected client provider injection");
+        },
         provide: (_key, value) => {
           provided = value as Ref<FrockBotWebData>;
           return () => {};
@@ -746,6 +770,9 @@ describe("Connection operation reconciliation", () => {
           },
         },
         slot: () => () => {},
+        inject: () => {
+          throw new Error("unexpected client provider injection");
+        },
         provide: (_key, value) => {
           provided = value as Ref<FrockBotWebData>;
           return () => {};
@@ -797,6 +824,9 @@ describe("Connection operation reconciliation", () => {
           },
         },
         slot: () => () => {},
+        inject: () => {
+          throw new Error("unexpected client provider injection");
+        },
         provide: (_key, value) => {
           provided = value as Ref<FrockBotWebData>;
           return () => {};
@@ -835,6 +865,9 @@ describe("Connection operation reconciliation", () => {
         },
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};
@@ -897,6 +930,9 @@ describe("Connection operation reconciliation", () => {
           }),
       },
       slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
       provide: (_key, value) => {
         provided = value as Ref<FrockBotWebData>;
         return () => {};

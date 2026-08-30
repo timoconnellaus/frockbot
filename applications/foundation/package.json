@@ -36,7 +36,9 @@
     "@frockbot/plugin-mobile-clipboard": "workspace:*",
     "@frockbot/plugin-mobile-notifications": "workspace:*",
     "@frockbot/plugin-provider-foundation": "workspace:*",
+    "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
+    "@frockbot/plugin-ui-theme": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
