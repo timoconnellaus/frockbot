@@ -76,6 +76,21 @@ describe("Durable Object RPC boundaries", () => {
     ]);
   });
 
+  test("accepts the canonical RPC identifier grammar", () => {
+    expect(
+      decodeStartConnectionRpcV1({
+        schemaVersion: 1,
+        userId: "person@example.com",
+        connection: {
+          connectionId: "gmail-1",
+          packageId: "composio",
+          connectionTypeId: "gmail",
+          displayName: "Gmail",
+        },
+      }).userId,
+    ).toBe("person@example.com");
+  });
+
   test("accepts the maximum composed User and Bot session identifier", () => {
     const userId = "u".repeat(128);
     const botId = "b".repeat(128);

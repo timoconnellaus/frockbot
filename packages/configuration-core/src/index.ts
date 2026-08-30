@@ -1,7 +1,12 @@
-import { BOT_ID_PATTERN_V1 } from "./bot-id.js";
+import { isBotIdV1 } from "./bot-id.js";
 import { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
-export { BOT_ID_PATTERN_V1, isBotIdV1 } from "./bot-id.js";
-export { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
+export { isBotIdV1 } from "./bot-id.js";
+export {
+  isApplicationDeploymentHash,
+  isConnectionIdentifier,
+  isPublicIdentifier,
+  isRpcIdentifier,
+} from "./identifiers.js";
 
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -388,7 +393,7 @@ function record(value: unknown, label: string): Record<string, unknown> {
 }
 
 export function decodeBotIdV1(value: unknown, label = "botId"): string {
-  if (typeof value !== "string" || !BOT_ID_PATTERN_V1.test(value))
+  if (!isBotIdV1(value))
     throw new ConfigurationDecodeError(`${label} is invalid`);
   return value;
 }
