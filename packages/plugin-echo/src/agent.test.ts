@@ -62,6 +62,7 @@ describe("echo plugin", () => {
       botId: "echo-bot",
       agentId: "echo-agent",
       compositionGenerationId: "bootstrap",
+      turnType: "chat" as const,
       sessionId: "session",
       effectId: "tool:1:1:0",
       signal: controller.signal,
@@ -72,6 +73,7 @@ describe("echo plugin", () => {
         botId: "echo-bot",
         agentId: "echo-agent",
         compositionGenerationId: "bootstrap",
+        turnType: "chat" as const,
         sessionId: "session",
         effectId: "tool:1:1:0",
         signal: controller.signal,
@@ -79,7 +81,7 @@ describe("echo plugin", () => {
     ).toEqual({ content: "hello plugins", isError: false });
 
     await fiber.dispose();
-    expect(harness.root.tools.schemas()).toEqual([]);
+    expect(harness.root.tools.schemas({ turnType: "chat" })).toEqual([]);
     await harness.dispose();
   });
 

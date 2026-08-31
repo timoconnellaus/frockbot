@@ -132,6 +132,35 @@ export function turnFailureMessage(
     : `Bot turn ended with outcome ${outcome}`;
 }
 
+/**
+ * The kind of Turn an Agent run was admitted as. GrokBot trims the tool
+ * catalog per turn type — the parity register's row 57 — so the kernel has to
+ * carry the value; which tools a turn type admits stays Package policy.
+ *
+ * All four names are declared at once because the value crosses the manifest,
+ * the isolate contract, and the durable run record: adding one later is a wire
+ * change in three places. Only `chat` and `automation` have a producer today.
+ */
+export type TurnTypeV1 = "chat" | "automation" | "subagent" | "channel";
+
+/** The declared turn types, in their canonical order. */
+export const TURN_TYPES_V1: readonly TurnTypeV1[] = [
+  "chat",
+  "automation",
+  "subagent",
+  "channel",
+];
+
+/** The strict decoder for a turn type crossing any seam. */
+export function decodeTurnTypeV1(
+  value: unknown,
+  label = "turn type",
+): TurnTypeV1 {
+  const turnType = TURN_TYPES_V1.find((candidate) => candidate === value);
+  if (!turnType) throw new Error(`${label} is invalid`);
+  return turnType;
+}
+
 /** The Composition generation an admitted Turn is pinned to. */
 export interface CompositionPinV1 {
   generationId: string;
@@ -156,6 +185,13 @@ export interface SessionEventMap {
     generationId: string;
     artifactSetHash: string;
   };
+  /**
+   * The turn type this Turn was admitted as, recorded beside the Composition
+   * it pinned so the trimmed tool catalog the Turn ran on is auditable in
+   * durable state. Absent on Turns recorded before turn admission existed;
+   * they replay as `chat`.
+   */
+  "turn/admission": { turn: number; turnType: TurnTypeV1 };
   "step/start": { turn: number; step: number };
   "user/message": {
     turn: number;
@@ -644,6 +680,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       turn();
       eventString(event.generationId, "session event.generationId");
       eventString(event.artifactSetHash, "session event.artifactSetHash");
+      break;
+    case "turn/admission":
+      requireEventKeys(event, keys("turn", "turnType"), "session event");
+      turn();
+      decodeTurnTypeV1(event.turnType, "session event.turnType");
       break;
     case "step/start":
       requireEventKeys(event, keys("turn", "step"), "session event");

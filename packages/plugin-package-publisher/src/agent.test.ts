@@ -40,6 +40,7 @@ async function execute(
     botId: "bot-1",
     agentId: "bot-1",
     compositionGenerationId: "bootstrap",
+    turnType: "chat" as const,
     effectId: "tool:1:1:0",
     sessionId: "session-1",
     signal: new AbortController().signal,
@@ -115,11 +116,9 @@ describe("Package Publisher Agent contribution", () => {
       ),
     );
 
-    expect(harness.root.tools.schemas().map((tool) => tool.name)).toEqual([
-      "list_setup_revisions",
-      "publish_setup",
-      "rollback_setup",
-    ]);
+    expect(
+      harness.root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+    ).toEqual(["list_setup_revisions", "publish_setup", "rollback_setup"]);
     expect(
       JSON.parse(
         (await execute(harness.root.tools, "list_setup_revisions", {})).content,
@@ -147,7 +146,7 @@ describe("Package Publisher Agent contribution", () => {
     });
 
     await fiber.dispose();
-    expect(harness.root.tools.schemas()).toEqual([]);
+    expect(harness.root.tools.schemas({ turnType: "chat" })).toEqual([]);
     await harness.dispose();
   });
 

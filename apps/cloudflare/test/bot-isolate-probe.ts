@@ -376,6 +376,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           agentId: input.botId,
           sessionId: `${input.userId}:${input.botId}`,
           compositionGenerationId: generation.generationId,
+          turnType: "chat" as const,
           effectId: "tool:1:1:0",
           signal: new AbortController().signal,
         },
@@ -386,6 +387,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
         agentId: input.botId,
         sessionId: `${input.userId}:${input.botId}`,
         compositionGenerationId: generation.generationId,
+        turnType: "chat" as const,
         effectId: "tool:1:1:0",
         signal: new AbortController().signal,
       });

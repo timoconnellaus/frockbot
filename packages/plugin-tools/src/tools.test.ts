@@ -28,6 +28,7 @@ async function registryFixture(tool: ToolDefinition): Promise<{
       compositionGenerationId: "test-composition-generation",
       effectId: "tool:1:1:0",
       toolCall: { id: "provider-call", name: tool.name, input: {} },
+      turnType: "chat" as const,
       signal: new AbortController().signal,
     },
   };
@@ -199,6 +200,172 @@ describe("ToolRegistry effect reconciliation", () => {
     ).toEqual({
       status: "unavailable",
       reason: "Tool opaque does not support effect reconciliation",
+    });
+  });
+});
+
+describe("ToolRegistry turn admission", () => {
+  async function admissionRoot(): Promise<Context> {
+    const root = new Context();
+    roots.push(root);
+    await root.plugin(ToolRegistry);
+    return root;
+  }
+
+  const work: ToolDefinition = {
+    name: "work",
+    description: "A work tool.",
+    inputSchema: { type: "object" },
+    execute: () => Promise.resolve({ content: "worked", isError: false }),
+  };
+  const chatOnly: ToolDefinition = {
+    name: "send_to_user",
+    description: "The voice to the User.",
+    inputSchema: { type: "object" },
+    admission: { turnTypes: ["chat"] },
+    execute: () => Promise.resolve({ content: "sent", isError: false }),
+  };
+  const automationOnly: ToolDefinition = {
+    name: "wake_parent",
+    description: "Hands off to the parent conversation.",
+    inputSchema: { type: "object" },
+    admission: { turnTypes: ["automation", "subagent"] },
+    execute: () => Promise.resolve({ content: "woke", isError: false }),
+  };
+
+  function contextFor(
+    name: string,
+    turnType: ToolExecutionContext["turnType"],
+  ): ToolExecutionContext {
+    return {
+      botId: "primary",
+      agentId: "primary",
+      sessionId: "alice:primary",
+      compositionGenerationId: "test-composition-generation",
+      effectId: "tool:1:1:0",
+      toolCall: { id: "provider-call", name, input: {} },
+      turnType,
+      signal: new AbortController().signal,
+    };
+  }
+
+  test("offers a tool with no declaration on every turn type", async () => {
+    const root = await admissionRoot();
+    root.tools.register(work);
+    for (const turnType of [
+      "chat",
+      "automation",
+      "subagent",
+      "channel",
+    ] as const) {
+      expect(root.tools.schemas({ turnType }).map((s) => s.name)).toEqual([
+        "work",
+      ]);
+    }
+  });
+
+  test("trims the catalog to what the turn type admits", async () => {
+    const root = await admissionRoot();
+    root.tools.register(work);
+    root.tools.register(chatOnly);
+    root.tools.register(automationOnly);
+
+    expect(root.tools.schemas({ turnType: "chat" }).map((s) => s.name)).toEqual(
+      ["work", "send_to_user"],
+    );
+    expect(
+      root.tools.schemas({ turnType: "automation" }).map((s) => s.name),
+    ).toEqual(["work", "wake_parent"]);
+    expect(
+      root.tools.schemas({ turnType: "channel" }).map((s) => s.name),
+    ).toEqual(["work"]);
+  });
+
+  test("bounds a tool declaration by the manifest ceiling", async () => {
+    const root = await admissionRoot();
+    root.tools.register(work, { admissionCeiling: ["automation"] });
+    root.tools.register(chatOnly, {
+      admissionCeiling: ["automation", "subagent"],
+    });
+
+    expect(root.tools.schemas({ turnType: "chat" })).toEqual([]);
+    expect(
+      root.tools.schemas({ turnType: "automation" }).map((s) => s.name),
+    ).toEqual(["work"]);
+  });
+
+  test("denies an out-of-admission call without executing it", async () => {
+    let executions = 0;
+    const root = await admissionRoot();
+    root.tools.register({
+      ...chatOnly,
+      execute: () => {
+        executions += 1;
+        return Promise.resolve({ content: "sent", isError: false });
+      },
+    });
+
+    const denied = await root.tools.prepare(
+      { id: "provider-call", name: "send_to_user", input: {} },
+      contextFor("send_to_user", "automation"),
+    );
+    expect(denied).toMatchObject({
+      kind: "denied",
+      result: { isError: true },
+    });
+    if (denied.kind !== "denied") throw new Error("expected a denial");
+    expect(denied.result.content).toContain("send_to_user");
+    expect(executions).toBe(0);
+
+    const ready = await root.tools.prepare(
+      { id: "provider-call", name: "send_to_user", input: {} },
+      contextFor("send_to_user", "chat"),
+    );
+    expect(ready.kind).toBe("ready");
+  });
+
+  test("denies a call the manifest ceiling excludes even when the tool allows it", async () => {
+    const root = await admissionRoot();
+    root.tools.register(chatOnly, { admissionCeiling: ["automation"] });
+    const denied = await root.tools.prepare(
+      { id: "provider-call", name: "send_to_user", input: {} },
+      contextFor("send_to_user", "chat"),
+    );
+    expect(denied.kind).toBe("denied");
+  });
+
+  test("carries endsTurn through execution and reconciliation", async () => {
+    const root = await admissionRoot();
+    root.tools.register({
+      name: "hand_off",
+      description: "Ends the Turn.",
+      inputSchema: { type: "object" },
+      execute: () =>
+        Promise.resolve({
+          content: "handed off",
+          isError: false,
+          endsTurn: true,
+        }),
+      reconcile: () =>
+        Promise.resolve({
+          status: "recovered" as const,
+          result: { content: "handed off", isError: false, endsTurn: true },
+        }),
+    });
+    const context = contextFor("hand_off", "automation");
+    const preparation = await root.tools.prepare(
+      { id: "provider-call", name: "hand_off", input: {} },
+      context,
+    );
+    if (preparation.kind !== "ready") throw new Error("tool was denied");
+    expect(await root.tools.executePrepared(preparation, context)).toEqual({
+      content: "handed off",
+      isError: false,
+      endsTurn: true,
+    });
+    expect(await root.tools.reconcilePrepared(preparation, context)).toEqual({
+      status: "recovered",
+      result: { content: "handed off", isError: false, endsTurn: true },
     });
   });
 });

@@ -3,6 +3,7 @@ import type {
   ModelBindingSnapshot,
   NormalizedModelRequest,
   Session,
+  TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 
 export type AgentStatus = "idle" | "running" | "disposed";
@@ -17,6 +18,13 @@ export interface AgentOptions {
   sessionId: string;
   provider: string;
   model: string;
+  /**
+   * The kind of Turn this Agent's runs are admitted as. It selects the tool
+   * catalog and nothing else; the kernel carries the value and holds no
+   * opinion about what any turn type admits. Defaults to `chat`, which is what
+   * every Turn recorded before turn admission existed replays as.
+   */
+  turnType?: TurnTypeV1;
   /** Durably linearizes each new effect against Stop immediately before use. */
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   modelBinding?: ModelBindingSnapshot;

@@ -48,7 +48,7 @@ const TEST_COMPOSITION = {
 
 async function mountRuntime(
   provider: LlmProvider,
-  tool?: ToolDefinition,
+  tool?: ToolDefinition | ToolDefinition[],
   persistEvents?: PersistSessionEvents,
   initialSessions?: Record<string, SessionEvent[]>,
 ): Promise<Context> {
@@ -72,7 +72,10 @@ async function mountRuntime(
   await root.plugin(providerPlugin);
 
   if (tool) {
-    const toolPlugin: Plugin.Function = (ctx) => ctx.tools.register(tool);
+    const tools = Array.isArray(tool) ? tool : [tool];
+    const toolPlugin: Plugin.Function = (ctx) => {
+      for (const definition of tools) ctx.tools.register(definition);
+    };
     toolPlugin.inject = ["tools"];
     await root.plugin(toolPlugin);
   }
@@ -377,6 +380,290 @@ describe("AgentLoop", () => {
     );
     expect(durableTypes).toContain("composition/pinned");
     expect(() => decodeSessionEvent(structuredClone(pins[0]))).not.toThrow();
+  });
+
+  test("records the admitted turn type and trims the catalog it requests", async () => {
+    const provider: LlmProvider = {
+      id: "admission-catalog",
+      async *stream() {
+        yield { type: "text-delta", text: "done" };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const work: ToolDefinition = {
+      name: "work",
+      description: "A work tool.",
+      inputSchema: { type: "object" },
+      execute: () => Promise.resolve({ content: "worked", isError: false }),
+    };
+    const chatOnly: ToolDefinition = {
+      name: "send_to_user",
+      description: "The voice to the User.",
+      inputSchema: { type: "object" },
+      admission: { turnTypes: ["chat"] },
+      execute: () => Promise.resolve({ content: "sent", isError: false }),
+    };
+    const root = await mountRuntime(provider, [work, chatOnly]);
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "admission-catalog",
+      provider: provider.id,
+      model: "model-1",
+      turnType: "automation",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Run the automation");
+    await handle.agent.whenIdle();
+
+    const types = handle.agent.session.events.map((event) => event.type);
+    expect(types.indexOf("turn/admission")).toBe(
+      types.indexOf("composition/pinned") + 1,
+    );
+    const admission = handle.agent.session.events.find(
+      (event) => event.type === "turn/admission",
+    );
+    expect(admission).toMatchObject({
+      type: "turn/admission",
+      turn: 1,
+      turnType: "automation",
+    });
+    expect(() => decodeSessionEvent(structuredClone(admission))).not.toThrow();
+
+    // The recorded request *is* the trimmed catalog, so the Turn stays
+    // reconstructable from the log alone.
+    const request = handle.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    if (request?.type !== "model/request") throw new Error("request missing");
+    expect(request.request.tools.map((schema) => schema.name)).toEqual([
+      "work",
+    ]);
+  });
+
+  test("replays a Turn with no admission event as a chat turn", async () => {
+    const provider: LlmProvider = {
+      id: "admission-default",
+      async *stream() {
+        yield { type: "text-delta", text: "done" };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const chatOnly: ToolDefinition = {
+      name: "send_to_user",
+      description: "The voice to the User.",
+      inputSchema: { type: "object" },
+      admission: { turnTypes: ["chat"] },
+      execute: () => Promise.resolve({ content: "sent", isError: false }),
+    };
+    const timestamp = "2026-08-30T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const root = await mountRuntime(provider, chatOnly, undefined, {
+      "admission-default": initial,
+    });
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "admission-default",
+      provider: provider.id,
+      model: "model-1",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    const request = handle.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    if (request?.type !== "model/request") throw new Error("request missing");
+    expect(request.request.tools.map((schema) => schema.name)).toEqual([
+      "send_to_user",
+    ]);
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "turn/admission",
+      ),
+    ).toBe(false);
+  });
+
+  test("denies an out-of-admission call instead of executing it", async () => {
+    let executions = 0;
+    const provider: LlmProvider = {
+      id: "admission-denial",
+      async *stream() {
+        yield {
+          type: "tool-call",
+          call: { id: "provider-call", name: "send_to_user", input: {} },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    };
+    const chatOnly: ToolDefinition = {
+      name: "send_to_user",
+      description: "The voice to the User.",
+      inputSchema: { type: "object" },
+      admission: { turnTypes: ["chat"] },
+      execute: () => {
+        executions += 1;
+        return Promise.resolve({ content: "sent", isError: false });
+      },
+    };
+    const root = await mountRuntime(provider, chatOnly);
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "admission-denial",
+      provider: provider.id,
+      model: "model-1",
+      turnType: "automation",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Try the chat tool");
+    await handle.agent.whenIdle();
+
+    expect(executions).toBe(0);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool/result",
+        name: "send_to_user",
+        isError: true,
+      }),
+    );
+  });
+
+  test("ends the Turn on a result that declares it, with no further request", async () => {
+    let streams = 0;
+    const provider: LlmProvider = {
+      id: "ends-turn",
+      async *stream() {
+        streams += 1;
+        yield {
+          type: "tool-call",
+          call: { id: "provider-call", name: "hand_off", input: {} },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    };
+    const handOff: ToolDefinition = {
+      name: "hand_off",
+      description: "Hands the Turn back.",
+      inputSchema: { type: "object" },
+      execute: () =>
+        Promise.resolve({
+          content: "handed off",
+          isError: false,
+          endsTurn: true,
+        }),
+    };
+    const root = await mountRuntime(provider, handOff);
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "ends-turn",
+      provider: provider.id,
+      model: "model-1",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Hand off");
+    await handle.agent.whenIdle();
+
+    expect(streams).toBe(1);
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/request",
+      ),
+    ).toHaveLength(1);
+    const types = handle.agent.session.events.map((event) => event.type);
+    expect(types.at(-1)).toBe("turn/end");
+    expect(types.at(-2)).toBe("step/end");
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+    expect(handle.agent.session.events.at(-2)).toMatchObject({
+      type: "step/end",
+      step: 1,
+      outcome: "completed",
+    });
+  });
+
+  test("honours a turn-ending result on the resume path", async () => {
+    let streams = 0;
+    const provider: LlmProvider = {
+      id: "ends-turn-resume",
+      async *stream() {
+        streams += 1;
+        yield { type: "text-delta", text: "unreachable" };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const handOff: ToolDefinition = {
+      name: "hand_off",
+      description: "Hands the Turn back.",
+      inputSchema: { type: "object" },
+      execute: () =>
+        Promise.resolve({
+          content: "handed off",
+          isError: false,
+          endsTurn: true,
+        }),
+    };
+    const timestamp = "2026-08-30T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "turn/admission", turn: 1, turnType: "automation" },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "hand-off-request",
+          provider: provider.id,
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "hand-off-request",
+        text: "",
+        toolCalls: [{ id: "provider-call", name: "hand_off", input: {} }],
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const root = await mountRuntime(provider, handOff, undefined, {
+      "ends-turn-resume": initial,
+    });
+    const handle = await root.agents.create({
+      botId: "bot-1",
+      sessionId: "ends-turn-resume",
+      provider: provider.id,
+      model: "model-1",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(streams).toBe(0);
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/request",
+      ),
+    ).toHaveLength(1);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
   });
 
   test("keeps a durable settlement failure resumable", async () => {

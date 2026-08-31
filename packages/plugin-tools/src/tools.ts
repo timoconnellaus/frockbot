@@ -1,13 +1,16 @@
 import { type Context, Service } from "cordis";
-import type {
-  ToolCall,
-  ToolDefinition,
-  ToolEffectReconciliation,
-  ToolExecution,
-  ToolExecutionContext,
-  ToolExecutionResult,
-  ToolPreparation,
-  ToolSchema,
+import {
+  admittedTurnTypesV1,
+  type ToolCall,
+  type ToolDefinition,
+  type ToolEffectReconciliation,
+  type ToolExecution,
+  type ToolExecutionContext,
+  type ToolExecutionResult,
+  type ToolPreparation,
+  type ToolRegistrationOptions,
+  type ToolSchema,
+  type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 
 function sameToolCall(left: ToolCall, right: ToolCall): boolean {
@@ -18,33 +21,54 @@ function sameToolCall(left: ToolCall, right: ToolCall): boolean {
   );
 }
 
+/** One registration: the tool, and the turn types it may ever be offered on. */
+interface RegisteredTool {
+  definition: ToolDefinition;
+  /**
+   * The tool's own declaration intersected with its Capability's durable
+   * manifest ceiling, resolved once at registration so admission cannot drift
+   * between the catalog the model saw and the call the loop admits.
+   */
+  admitted: readonly TurnTypeV1[];
+}
+
 export class ToolRegistry extends Service implements ToolExecution {
-  private definitions = new Map<string, ToolDefinition>();
+  private definitions = new Map<string, RegisteredTool>();
 
   constructor(ctx: Context) {
     super(ctx, "tools");
   }
 
-  register(definition: ToolDefinition): () => void {
+  register(
+    definition: ToolDefinition,
+    options?: ToolRegistrationOptions,
+  ): () => void {
     if (this.definitions.has(definition.name)) {
       throw new Error(`tool "${definition.name}" is already registered`);
     }
-    this.definitions.set(definition.name, definition);
+    const registered: RegisteredTool = {
+      definition,
+      admitted: admittedTurnTypesV1(
+        definition.admission?.turnTypes,
+        options?.admissionCeiling,
+      ),
+    };
+    this.definitions.set(definition.name, registered);
     return () => {
-      if (this.definitions.get(definition.name) === definition) {
+      if (this.definitions.get(definition.name) === registered) {
         this.definitions.delete(definition.name);
       }
     };
   }
 
-  schemas(): ToolSchema[] {
-    return [...this.definitions.values()].map(
-      ({ name, description, inputSchema }) => ({
+  schemas(admission: { turnType: TurnTypeV1 }): ToolSchema[] {
+    return [...this.definitions.values()]
+      .filter((registered) => registered.admitted.includes(admission.turnType))
+      .map(({ definition: { name, description, inputSchema } }) => ({
         name,
         description,
         inputSchema,
-      }),
-    );
+      }));
   }
 
   prepare(
@@ -52,14 +76,27 @@ export class ToolRegistry extends Service implements ToolExecution {
     context: ToolExecutionContext,
   ): Promise<ToolPreparation> {
     return this.ctx.waterfall("tools/pre-execute", call, context, async () => {
-      const definition = this.definitions.get(call.name);
-      if (!definition) {
+      const registered = this.definitions.get(call.name);
+      if (!registered) {
         return {
           kind: "denied",
           call,
           result: { content: `Unknown tool: ${call.name}`, isError: true },
         };
       }
+      // Defence in depth: the catalog was already trimmed, so a call that
+      // arrives here names a tool the model was never offered.
+      if (!registered.admitted.includes(context.turnType)) {
+        return {
+          kind: "denied",
+          call,
+          result: {
+            content: `Tool is not available on a ${context.turnType} turn: ${call.name}`,
+            isError: true,
+          },
+        };
+      }
+      const definition = registered.definition;
       if (definition.validate && !definition.validate(call.input)) {
         return {
           kind: "denied",
@@ -82,7 +119,7 @@ export class ToolRegistry extends Service implements ToolExecution {
     preparation: Extract<ToolPreparation, { kind: "ready" }>,
     context: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const definition = this.definitions.get(preparation.call.name);
+    const definition = this.definitions.get(preparation.call.name)?.definition;
     const initial = await this.ctx.waterfall(
       "tools/execute",
       preparation.call,
@@ -136,7 +173,7 @@ export class ToolRegistry extends Service implements ToolExecution {
         ),
       };
     }
-    const definition = this.definitions.get(expectedCall.name);
+    const definition = this.definitions.get(expectedCall.name)?.definition;
     if (!definition) {
       return {
         status: "unavailable",
@@ -233,21 +270,32 @@ function normalizedReconciliation(
     if (
       typeof result === "object" &&
       result !== null &&
-      hasExactKeys(result as Record<PropertyKey, unknown>, [
+      (hasExactKeys(result as Record<PropertyKey, unknown>, [
         "content",
         "isError",
-      ])
+      ]) ||
+        hasExactKeys(result as Record<PropertyKey, unknown>, [
+          "content",
+          "isError",
+          "endsTurn",
+        ]))
     ) {
       const resultRecord = result as Record<PropertyKey, unknown>;
       if (
         typeof resultRecord.content === "string" &&
-        typeof resultRecord.isError === "boolean"
+        typeof resultRecord.isError === "boolean" &&
+        (resultRecord.endsTurn === undefined ||
+          typeof resultRecord.endsTurn === "boolean")
       ) {
         return {
           status: "recovered",
           result: {
             content: resultRecord.content,
             isError: resultRecord.isError,
+            // A recovered hand-off still ends the Turn it was recorded on.
+            ...(resultRecord.endsTurn === undefined
+              ? {}
+              : { endsTurn: resultRecord.endsTurn }),
           },
         };
       }

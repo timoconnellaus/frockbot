@@ -682,9 +682,9 @@ describe("foundation Cordis runtime", () => {
   test("loads generic Computer tools and the Fly provider without a token at startup", async () => {
     const runtime = await createRuntime();
 
-    expect(runtime.root.tools.schemas().map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(["computer_exec", "computer_browser"]),
-    );
+    expect(
+      runtime.root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+    ).toEqual(expect.arrayContaining(["computer_exec", "computer_browser"]));
   });
 
   test("injects Memory into the model request, through the Memory Package", async () => {

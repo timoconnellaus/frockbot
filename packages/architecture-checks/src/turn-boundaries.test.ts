@@ -133,9 +133,9 @@ describe("Turn boundaries", () => {
     await root.plugin(AgentLoop, { maxSteps: 4, composition: COMPOSITION });
 
     // The Computer tools really are mounted: this Turn declines them.
-    expect(root.tools.schemas().map((schema) => schema.name)).toContain(
-      "computer_exec",
-    );
+    expect(
+      root.tools.schemas({ turnType: "chat" }).map((schema) => schema.name),
+    ).toContain("computer_exec");
 
     const handle = await root.agents.create({
       botId: "bot-1",
@@ -310,6 +310,7 @@ describe("Turn boundaries", () => {
           agentId: handle.agent.id,
           sessionId: "user-1:bot-1",
           compositionGenerationId: COMPOSITION.generationId,
+          turnType: "chat" as const,
           effectId: "tool:1:1:0",
           signal: new AbortController().signal,
         },

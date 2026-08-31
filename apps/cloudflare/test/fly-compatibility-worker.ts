@@ -446,6 +446,7 @@ export class WorkerdBotState extends BotState {
         agentId: input.botId,
         sessionId,
         compositionGenerationId: "probe",
+        turnType: "chat" as const,
         effectId: "tool:1:1:0",
         signal: new AbortController().signal,
       },
