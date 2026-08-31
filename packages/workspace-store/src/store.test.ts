@@ -666,3 +666,204 @@ describe("listing bounds", () => {
     ).toMatchObject({ status: "refused" });
   });
 });
+
+describe("an unrecorded file is still overwritable by the writer that read it", () => {
+  test("a write whose ledger record never landed is overwritten by the generation read returned", async () => {
+    const { files, generations } = harness();
+    // The `record` that follows a `put` fails once: the bytes land, and the
+    // only place their generation exists is beside them in the object store.
+    const record = generations.record;
+    let failed = false;
+    generations.record = (entry) => {
+      if (failed) return record(entry);
+      failed = true;
+      return Promise.reject(new Error("the ledger is unreachable"));
+    };
+
+    const first = await files.write({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      bytes: bytes("first"),
+      writer: user,
+      expectedGenerationId: null,
+    });
+    expect(first.status).toBe("unavailable");
+    expect(await generations.current(INSTRUCTIONS, "notes.md")).toBeUndefined();
+
+    // The file reads back with the generation its writer minted…
+    const read = await files.read({ root: INSTRUCTIONS, path: "notes.md" });
+    expect(read.status).toBe("ok");
+    if (read.status !== "ok") return;
+    expect(read.file.generation.writer).toEqual(user);
+    // …and reading it repairs the ledger rather than leaving it wedged.
+    expect(
+      (await generations.current(INSTRUCTIONS, "notes.md"))?.generation
+        .generationId,
+    ).toBe(read.file.generation.generationId);
+
+    // A writer that passes exactly the generation it read wins.
+    const second = await files.write({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      bytes: bytes("second"),
+      writer: user,
+      expectedGenerationId: read.file.generation.generationId,
+    });
+    expect(second.status).toBe("ok");
+    expect(
+      await files.read({ root: INSTRUCTIONS, path: "notes.md" }),
+    ).toMatchObject({ status: "ok" });
+    const after = await files.read({ root: INSTRUCTIONS, path: "notes.md" });
+    if (after.status !== "ok") return;
+    expect(text(after.file.bytes)).toBe("second");
+  });
+
+  test("an object mirrored with its generation in metadata and no record is overwritable too", async () => {
+    const { files, sync, generations } = harness();
+    // The Computer-side sync mirrored a file straight into object storage.
+    const mirrored = await sync.write({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      bytes: bytes("mirrored"),
+      writer: { kind: "unattributed" },
+      expectedGenerationId: null,
+    });
+    expect(mirrored.status).toBe("ok");
+    if (mirrored.status !== "ok") return;
+    // …and the ledger lost the record, as an evicted-then-restored object
+    // would if its `record` never landed.
+    await generations.record({
+      schemaVersion: 1,
+      root: INSTRUCTIONS,
+      path: "notes.md",
+      generation: mirrored.generation,
+      etag: "gone",
+    });
+
+    const stat = await files.stat({ root: INSTRUCTIONS, path: "notes.md" });
+    expect(stat.status).toBe("ok");
+    if (stat.status !== "ok") return;
+    const written = await files.write({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      bytes: bytes("authored"),
+      writer: user,
+      expectedGenerationId: stat.entry.generation.generationId,
+    });
+    expect(written.status).toBe("ok");
+  });
+});
+
+describe("a delete is fenced, never a read-then-unconditional-delete", () => {
+  test("a write landing between the head and the fence wins, and the deletion is preserved", async () => {
+    const { files, bucket, generations } = harness();
+    const first = await files.write({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      bytes: bytes("first"),
+      writer: user,
+      expectedGenerationId: null,
+    });
+    expect(first.status).toBe("ok");
+    if (first.status !== "ok") return;
+
+    // The race: a write lands the instant the delete has read the head it
+    // will condition on. An unconditional delete would destroy it.
+    const key = workspaceObjectKeyV1(INSTRUCTIONS, "notes.md");
+    const head = bucket.head;
+    let raced = false;
+    let racing: Awaited<ReturnType<WorkspaceFilesV1["write"]>> | undefined;
+    bucket.head = async (probed: string) => {
+      const answer = await head(probed);
+      if (!raced && probed === key) {
+        raced = true;
+        racing = await files.write({
+          path: { root: INSTRUCTIONS, path: "notes.md" },
+          bytes: bytes("racing"),
+          writer: bot("bot-1"),
+          expectedGenerationId: first.generation.generationId,
+        });
+      }
+      return answer;
+    };
+
+    const removed = await files.delete({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      writer: user,
+      expectedGenerationId: first.generation.generationId,
+    });
+    bucket.head = head;
+
+    expect(racing?.status).toBe("ok");
+    if (racing?.status !== "ok") return;
+    expect(removed.status).toBe("conflict");
+    if (!isWorkspaceConflictV1(removed)) return;
+
+    // The racing write survives, untouched by the delete.
+    const survivor = await files.read({ root: INSTRUCTIONS, path: "notes.md" });
+    expect(survivor.status).toBe("ok");
+    if (survivor.status !== "ok") return;
+    expect(text(survivor.file.bytes)).toBe("racing");
+
+    // Both generations are surfaced, and the losing deletion is preserved.
+    expect(removed.current?.generationId).toBe(racing.generation.generationId);
+    const preserved = removed.preserved;
+    expect(preserved).toBeDefined();
+    if (!preserved) return;
+    expect(preserved.conflictsWith).toBe(racing.generation.generationId);
+    const conflicts = await generations.conflicts(INSTRUCTIONS, "notes.md");
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.generation.generationId).toBe(preserved.generationId);
+    expect(conflicts[0]?.generation.writer).toEqual(user);
+    // No tombstone was recorded: nothing was deleted.
+    expect(generations.tombstones()).toEqual([]);
+  });
+
+  test("a tombstone marker left unswept reads as absence and does not block a create", async () => {
+    const { files, bucket } = harness();
+    const written = await files.write({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      bytes: bytes("first"),
+      writer: user,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") return;
+
+    // The sweep never runs — the connection dropped after the fence.
+    const remove = bucket.delete;
+    bucket.delete = () => Promise.resolve();
+    const removed = await files.delete({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      writer: user,
+      expectedGenerationId: written.generation.generationId,
+    });
+    bucket.delete = remove;
+    expect(removed.status).toBe("ok");
+
+    // The marker is still in the bucket, and it is an absence everywhere.
+    expect(bucket.keys()).toEqual([
+      workspaceObjectKeyV1(INSTRUCTIONS, "notes.md"),
+    ]);
+    expect(
+      await files.read({ root: INSTRUCTIONS, path: "notes.md" }),
+    ).toMatchObject({ status: "not-found" });
+    expect(
+      await files.stat({ root: INSTRUCTIONS, path: "notes.md" }),
+    ).toMatchObject({ status: "not-found" });
+    const listed = await files.list({ root: INSTRUCTIONS });
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(listed.entries).toEqual([]);
+    expect(
+      await files.delete({
+        path: { root: INSTRUCTIONS, path: "notes.md" },
+        writer: user,
+        expectedGenerationId: written.generation.generationId,
+      }),
+    ).toMatchObject({ status: "not-found" });
+
+    // And a writer asserting absence still creates the file.
+    const again = await files.write({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      bytes: bytes("again"),
+      writer: user,
+      expectedGenerationId: null,
+    });
+    expect(again.status).toBe("ok");
+  });
+});

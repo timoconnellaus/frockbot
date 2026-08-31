@@ -78,6 +78,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     const stub = bot(`skills-${suffix}`);
 
     const written = await stub.writeWorkspaceFile({
+      userId: identity.userId,
       root: instructionRoot(identity),
       path: SKILL_PATH,
       text: SKILL_BODY,
@@ -120,6 +121,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     const stub = bot(`conflict-${suffix}`);
 
     const first = await stub.writeWorkspaceFile({
+      userId: identity.userId,
       root,
       path: "notes.md",
       text: "first",
@@ -128,6 +130,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     });
     expect(first.status).toBe("ok");
     const second = await stub.writeWorkspaceFile({
+      userId: identity.userId,
       root,
       path: "notes.md",
       text: "second",
@@ -137,6 +140,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     expect(second.status).toBe("ok");
 
     const stale = await stub.writeWorkspaceFile({
+      userId: identity.userId,
       root,
       path: "notes.md",
       text: "stale",
@@ -150,7 +154,11 @@ describe("the object-storage Workspace store in Workerd", () => {
 
     // The winner is untouched.
     expect(
-      await stub.readWorkspaceFile({ root, path: "notes.md" }),
+      await stub.readWorkspaceFile({
+        userId: identity.userId,
+        root,
+        path: "notes.md",
+      }),
     ).toMatchObject({ status: "ok", text: "second" });
 
     // The loser survives in object storage and in the Durable Object ledger,
@@ -175,6 +183,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     expect(
       (
         await stub.writeWorkspaceFile({
+          userId: identity.userId,
           root,
           path: "notes.md",
           text: "first",
@@ -185,6 +194,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     ).toBe("ok");
 
     const clash = await stub.writeWorkspaceFile({
+      userId: identity.userId,
       root,
       path: "notes.md",
       text: "clash",
@@ -194,7 +204,11 @@ describe("the object-storage Workspace store in Workerd", () => {
 
     expect(clash.status).toBe("conflict");
     expect(
-      await stub.readWorkspaceFile({ root, path: "notes.md" }),
+      await stub.readWorkspaceFile({
+        userId: identity.userId,
+        root,
+        path: "notes.md",
+      }),
     ).toMatchObject({ status: "ok", text: "first" });
   });
 
@@ -205,6 +219,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     const stub = bot(`tombstone-${suffix}`);
 
     const written = await stub.writeWorkspaceFile({
+      userId: identity.userId,
       root,
       path: "notes.md",
       text: "first",
@@ -214,6 +229,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     expect(written.status).toBe("ok");
 
     const removed = await stub.deleteWorkspaceFile({
+      userId: identity.userId,
       root,
       path: "notes.md",
       writer: botWriter(identity),
@@ -221,7 +237,11 @@ describe("the object-storage Workspace store in Workerd", () => {
     });
     expect(removed.status).toBe("ok");
     expect(
-      await stub.readWorkspaceFile({ root, path: "notes.md" }),
+      await stub.readWorkspaceFile({
+        userId: identity.userId,
+        root,
+        path: "notes.md",
+      }),
     ).toMatchObject({ status: "not-found" });
 
     await evictDurableObject(stub);
@@ -238,12 +258,45 @@ describe("the object-storage Workspace store in Workerd", () => {
     expect(tombstone?.generation.size).toBe(0);
   });
 
+  test("a store built for one User refuses another User's root", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = identityFor(suffix);
+    const stub = bot(`owner-${suffix}`);
+    // The production surface is built with the `owner` the Durable Object
+    // knows, so a root belonging to another User is refused here rather than
+    // reaching R2 — whatever root the caller names.
+    const other = {
+      userId: `workspace-other-${suffix}`,
+      botId: identity.botId,
+    };
+
+    const refused = await stub.writeWorkspaceFile({
+      userId: identity.userId,
+      root: instructionRoot(other),
+      path: "notes.md",
+      text: "elsewhere",
+      writer: botWriter(other),
+      expectedGenerationId: null,
+    });
+
+    expect(refused.status).toBe("refused");
+    expect(refused.reason).toContain("different User");
+    expect(
+      await stub.readWorkspaceFile({
+        userId: identity.userId,
+        root: instructionRoot(other),
+        path: "notes.md",
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
   test("a Skill another Bot wrote is refused at the store, not merely unloaded", async () => {
     const suffix = crypto.randomUUID();
     const identity = identityFor(suffix);
     const stub = bot(`authority-${suffix}`);
 
     const refused = await stub.writeWorkspaceFile({
+      userId: identity.userId,
       root: instructionRoot(identity),
       path: SKILL_PATH,
       text: SKILL_BODY,

@@ -35,6 +35,10 @@
 // entirely, so without one, "this file is gone, deliberately, and here is who
 // removed it" would exist nowhere in durable state after the Durable Object is
 // evicted — which is the same hole `unattributed` closes for arriving files.
+// The delete is itself conditional, because object storage offers no
+// conditional delete: it overwrites the file with an empty tombstone marker
+// under `If-Match` and sweeps that marker afterwards, so a write racing a
+// delete is preserved rather than destroyed. `delete` below has the detail.
 import {
   WORKSPACE_MAX_FILE_BYTES,
   WORKSPACE_MAX_LIST_ENTRIES,
@@ -60,7 +64,11 @@ import {
   type WorkspaceWriteRequestV1,
   type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
-import type { ObjectBucketV1, ObjectHeadV1 } from "./bucket.js";
+import type {
+  ObjectBucketV1,
+  ObjectConditionsV1,
+  ObjectHeadV1,
+} from "./bucket.js";
 import {
   isWorkspaceConflictKeyV1,
   workspaceConflictKeyV1,
@@ -74,6 +82,15 @@ export const WORKSPACE_EMPTY_SHA256 =
   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 /** Where a generation rides beside its bytes in the object store. */
 export const WORKSPACE_GENERATION_METADATA_KEY = "frockbot-generation";
+/**
+ * Marks the empty object a delete writes over the file before sweeping it.
+ *
+ * R2 has no conditional delete, so a delete fences with a conditional
+ * *overwrite* — see `delete` below. `read`, `stat`, and `list` treat a marker
+ * as absence, so a sweep that never ran leaves the file deleted rather than
+ * resurrected as an empty one.
+ */
+export const WORKSPACE_TOMBSTONE_METADATA_KEY = "frockbot-tombstone";
 /** Beyond this the generation is recorded durably but not mirrored on the object. */
 const MAX_METADATA_BYTES = 1800;
 const DEFAULT_LIST_LIMIT = 100;
@@ -91,6 +108,11 @@ async function digestV1(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(buffer)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** True for the empty marker a delete leaves while it sweeps the key. */
+function isTombstoneMarkerV1(head: ObjectHeadV1): boolean {
+  return head.customMetadata?.[WORKSPACE_TOMBSTONE_METADATA_KEY] !== undefined;
 }
 
 /**
@@ -247,6 +269,43 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
   }
 
   /**
+   * Records what the bytes already say, when the ledger does not say it.
+   *
+   * A tombstone marker is never reconciled: it is an absence being swept, not
+   * a file, and the deletion has its own recorded generation. Nor is a ledger
+   * record ever moved backwards — the head may be one this caller read before
+   * a concurrent write landed, and generation ids sort, so a record naming a
+   * later generation stands.
+   */
+  private async reconcile(
+    root: WorkspaceRootV1,
+    path: string,
+    head: ObjectHeadV1,
+    generation: WorkspaceGenerationV1,
+    recorded: WorkspaceGenerationRecordV1 | undefined,
+  ): Promise<void> {
+    if (isTombstoneMarkerV1(head)) return;
+    if (
+      recorded &&
+      recorded.generation.generationId >= generation.generationId
+    ) {
+      return;
+    }
+    try {
+      await this.generations.record({
+        schemaVersion: 1,
+        root,
+        path,
+        generation,
+        etag: head.etag,
+      });
+    } catch {
+      // The ledger is briefly unreachable. The generation still rides beside
+      // the bytes, so the next read repairs it rather than wedging the file.
+    }
+  }
+
+  /**
    * Recovers the generation of one object.
    *
    * The Durable Object is the authority, so its record wins whenever it still
@@ -255,6 +314,15 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
    * written straight into object storage by the Computer-side sync keeps its
    * writer. A file with neither is `unattributed`: nobody recorded who wrote
    * it, so it is data the Bot can read and never an instruction it loads.
+   *
+   * Falling back to the metadata also *repairs* the ledger. `record` runs
+   * after the `put` that produced its etag, so a `record` that fails leaves
+   * bytes whose generation exists only beside them. Without the repair the
+   * ledger would answer "no current generation" forever, and every later
+   * conditional write on that file would be treated as unseen — a file no
+   * authorized writer could ever overwrite. The repair is best-effort: if the
+   * ledger is still unreachable the generation is still returned, and the next
+   * read tries again.
    */
   private async generationOf(
     root: WorkspaceRootV1,
@@ -267,7 +335,10 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
       return recorded.generation;
     }
     const beside = this.decodeMetadata(head);
-    if (beside) return beside;
+    if (beside) {
+      await this.reconcile(root, path, head, beside, recorded);
+      return beside;
+    }
     const body = bytes ?? (await (await this.bucket.get(head.key))?.bytes());
     return {
       schemaVersion: 1,
@@ -294,7 +365,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         error instanceof Error ? error.message : String(error),
       );
     }
-    if (!object) {
+    if (!object || isTombstoneMarkerV1(object)) {
       return failure("not-found", `No such Workspace file: ${relative}`);
     }
     if (object.size > WORKSPACE_MAX_FILE_BYTES) {
@@ -328,7 +399,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         error instanceof Error ? error.message : String(error),
       );
     }
-    if (!head) {
+    if (!head || isTombstoneMarkerV1(head)) {
       return failure("not-found", `No such Workspace file: ${relative}`);
     }
     return {
@@ -381,6 +452,8 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     const entries: WorkspaceEntryV1[] = [];
     for (const object of page.objects) {
       if (isWorkspaceConflictKeyV1(object.key)) continue;
+      // A tombstone marker is a delete mid-sweep, not a file.
+      if (isTombstoneMarkerV1(object)) continue;
       const relative = workspaceRelativeFromKeyV1(request.root, object.key);
       if (relative === undefined) continue;
       // A raw key prefix would also match a sibling whose name merely starts
@@ -407,6 +480,38 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
       entries,
       ...(page.truncated && page.cursor ? { cursor: page.cursor } : {}),
     };
+  }
+
+  /**
+   * The conditional one write is sent under, or `undefined` when the writer
+   * has not seen what the store holds and must therefore lose.
+   *
+   * A tombstone marker is an absence being swept: a writer asserting absence
+   * conditions on the marker's own ETag rather than on `If-None-Match`, so a
+   * delete that could not sweep its marker never blocks the next create.
+   */
+  private async precondition(
+    root: WorkspaceRootV1,
+    relative: string,
+    head: ObjectHeadV1 | null,
+    expectedGenerationId: string | null,
+  ): Promise<ObjectConditionsV1 | undefined> {
+    if (!head) {
+      return expectedGenerationId === null
+        ? { etagDoesNotMatch: "*" }
+        : undefined;
+    }
+    if (isTombstoneMarkerV1(head)) {
+      const removed = this.decodeMetadata(head);
+      return expectedGenerationId === null ||
+        expectedGenerationId === removed?.generationId
+        ? { etagMatches: head.etag }
+        : undefined;
+    }
+    const holder = await this.generationOf(root, relative, head);
+    return holder.generationId === expectedGenerationId
+      ? { etagMatches: head.etag }
+      : undefined;
   }
 
   async write(
@@ -444,15 +549,31 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     }
     // The caller's `expectedGenerationId` is mapped to the ETag that
     // generation produced. `null` asserts absence, which is `If-None-Match: *`.
-    const seen =
-      request.expectedGenerationId === null
-        ? { etagDoesNotMatch: "*" }
-        : current &&
-            !current.deleted &&
-            current.etag &&
-            current.generation.generationId === request.expectedGenerationId
-          ? { etagMatches: current.etag }
-          : undefined;
+    //
+    // The mapping is derived from what object storage actually holds, not from
+    // the ledger alone. `generationOf` prefers the Durable Object's record
+    // whenever that record still describes these bytes, and falls back to the
+    // generation stored beside them — so a writer that passes exactly the
+    // generation `read` or `stat` handed it wins, even when the ledger has no
+    // record at all because a `record` failed after its `put` or the object
+    // was mirrored with metadata only. Without that, an unrecorded file could
+    // never be overwritten by anyone: the writer would be judged unseen, and
+    // `null` would fail `If-None-Match`.
+    let head: ObjectHeadV1 | null;
+    try {
+      head = await this.bucket.head(key);
+    } catch (error) {
+      return failure(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const seen = await this.precondition(
+      root,
+      relative,
+      head,
+      request.expectedGenerationId,
+    );
     if (seen) {
       const metadata = this.encodeMetadata(generation);
       let written: ObjectHeadV1 | null;
@@ -549,6 +670,27 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     };
   }
 
+  /**
+   * Deletes a file, fenced by a conditional overwrite.
+   *
+   * Object storage has no conditional delete, so `head` then `delete` would
+   * destroy a write that landed in between — last-writer-wins, which ADR 0013
+   * names as the one outcome that is prohibited. The delete therefore *writes*
+   * first: an empty object carrying `frockbot-tombstone` and the tombstone
+   * generation replaces the file under `If-Match` on the ETag the deleter saw.
+   * That put is the fence. A racing write either won before it — in which case
+   * the `If-Match` fails and the deletion is preserved as a conflicting
+   * generation, so both generations survive and the caller is handed both — or
+   * it arrives after, and then its own `If-Match` on the file's old ETag fails
+   * and it is preserved instead.
+   *
+   * The marker is then swept with an unconditional delete, because object
+   * storage should not accumulate empty objects and the durable evidence of
+   * the removal is the ledger tombstone, not the marker. A sweep that never
+   * runs is harmless: `read`, `stat`, and `list` treat a marker as absence,
+   * and the next write conditions on the marker's ETag rather than on
+   * `If-None-Match`.
+   */
   async delete(
     request: WorkspaceDeleteRequestV1,
   ): Promise<WorkspaceWriteOutcomeV1> {
@@ -567,7 +709,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         error instanceof Error ? error.message : String(error),
       );
     }
-    if (!head) {
+    if (!head || isTombstoneMarkerV1(head)) {
       return failure("not-found", `No such Workspace file: ${relative}`);
     }
     const holder = await this.generationOf(root, relative, head);
@@ -579,8 +721,9 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
       };
     }
     const at = this.clock();
+    let tombstone: WorkspaceGenerationV1;
     try {
-      const tombstone: WorkspaceGenerationV1 = {
+      tombstone = {
         schemaVersion: 1,
         generationId: await this.generations.mint(at, root),
         contentHash: WORKSPACE_EMPTY_SHA256,
@@ -588,10 +731,45 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         writer: request.writer,
         writtenAt: at.toISOString(),
       };
-      await this.bucket.delete(key);
-      // Recorded after the effect and never before it is reachable: object
-      // storage forgets the key, so the tombstone is the only durable evidence
-      // that the file was removed, by whom, and when.
+    } catch (error) {
+      return failure(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const empty = new Uint8Array(0);
+    let fenced: ObjectHeadV1 | null;
+    try {
+      fenced = await this.bucket.put(key, empty, {
+        onlyIf: { etagMatches: head.etag },
+        contentType: DEFAULT_MEDIA_TYPE,
+        customMetadata: {
+          ...(this.encodeMetadata(tombstone) ?? {}),
+          [WORKSPACE_TOMBSTONE_METADATA_KEY]: "1",
+        },
+      });
+    } catch (error) {
+      return failure(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    if (!fenced) {
+      // A write landed between the head and the fence. It holds the file; the
+      // deletion is the loser, preserved as a conflicting generation like any
+      // other losing write, with both generations returned to the caller.
+      return this.preserve(
+        root,
+        relative,
+        empty,
+        tombstone,
+        await this.recordOf(root, relative),
+      );
+    }
+    try {
+      // Recorded before the marker is swept: object storage forgets the key,
+      // so the tombstone is the only durable evidence that the file was
+      // removed, by whom, and when.
       await this.generations.tombstone({
         schemaVersion: 1,
         root,
@@ -599,6 +777,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         generation: tombstone,
         deleted: true,
       });
+      await this.bucket.delete(key);
       return { status: "ok", generation: tombstone };
     } catch (error) {
       return failure(

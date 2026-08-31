@@ -589,12 +589,32 @@ function ownerId(value: unknown, label: string): string {
   return boundedString(value, label, WORKSPACE_MAX_OWNER_ID_LENGTH);
 }
 
+/** The suffix the object-storage conflict key scheme reserves. */
+export const WORKSPACE_CONFLICT_SEGMENT_SUFFIX = ".conflict";
+
+/**
+ * Segments no durable-root path may use, because the object-storage key scheme
+ * and the Computer-side sync already own them.
+ *
+ * A segment ending in `.conflict` would collide with the conflict key scheme —
+ * `workspace/<root>/<relative>.conflict/<generationId>` — so `notes.conflict`
+ * and `notes.conflict/a.md` are refused rather than silently shadowing, or
+ * being shadowed by, a preserved losing write. `.frockbot-generations` and
+ * `.frockbot-sync` are the sync agent's own directories on the Computer; a
+ * durable-root file may not occupy them either.
+ */
+const WORKSPACE_RESERVED_SEGMENTS = new Set([
+  ".frockbot-generations",
+  ".frockbot-sync",
+]);
+
 /**
  * Validates one relative path inside a durable root. Rejects absolute paths,
  * `.` and `..` segments, empty segments, backslashes, NUL and other control
- * characters, untrimmed text, and anything past the length or depth bound.
- * Returns the path unchanged: a path that needs normalizing is refused rather
- * than rewritten, so what a caller asked for is what a generation records.
+ * characters, untrimmed text, the reserved segments above, and anything past
+ * the length or depth bound. Returns the path unchanged: a path that needs
+ * normalizing is refused rather than rewritten, so what a caller asked for is
+ * what a generation records.
  */
 export function normalizeWorkspaceRelativePathV1(
   input: unknown,
@@ -622,6 +642,12 @@ export function normalizeWorkspaceRelativePathV1(
       segment !== segment.trim()
     ) {
       throw new Error(`${label} has an invalid segment`);
+    }
+    if (
+      segment.endsWith(WORKSPACE_CONFLICT_SEGMENT_SUFFIX) ||
+      WORKSPACE_RESERVED_SEGMENTS.has(segment)
+    ) {
+      throw new Error(`${label} uses a reserved segment: ${segment}`);
     }
   }
   return path;
