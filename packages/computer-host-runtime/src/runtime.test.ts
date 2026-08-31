@@ -134,6 +134,11 @@ describe("provisioning script", () => {
 
   test("installs the desktop, sync, and gateway runtime", () => {
     expect(provisionScript).toContain("apt-get install -y chromium xvfb");
+    // `computer_screenshot` runs `scrot` under the tenant's own display, so
+    // provisioning installs it and the capability probe asks for it. Without
+    // the probe, an already-provisioned Computer would never gain it.
+    expect(provisionScript).toContain("util-linux scrot");
+    expect(provisionScript).toContain("! command -v scrot >/dev/null");
     expect(provisionScript).toContain("playwright-core@1.55.0");
     expect(provisionScript).toContain(`chmod 600 ${RUNTIME_ROOT}/tokens`);
   });

@@ -2,6 +2,7 @@
 import type {} from "cordis";
 import {
   TURN_TYPES_V1,
+  type ToolAttachmentV1,
   type ToolCall,
   type ToolSchema,
   type TurnTypeV1,
@@ -32,6 +33,14 @@ export interface ToolExecutionResult {
    * policy.
    */
   endsTurn?: boolean;
+  /**
+   * Binaries this result produced, named by their durable Workspace path.
+   *
+   * They reach the model only where the model-invocation adapter can show
+   * them; an adapter that cannot drops them and says so in the text, so a tool
+   * that returns an image is never silently answered with nothing.
+   */
+  attachments?: ToolAttachmentV1[];
 }
 
 /** The turn types an admission declaration names. */

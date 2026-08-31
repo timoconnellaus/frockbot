@@ -18,6 +18,7 @@
  */
 import type {
   ComputerHostControlResultV1,
+  ComputerHostFileReadResultV1,
   ComputerHostOpenResultV1,
   ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
@@ -82,6 +83,10 @@ export class FakeComputerHost {
   generation = 1;
   /** Set to refuse the next `open`, the way an exhausted slot pool does. */
   openFailure?: Error;
+  /** The bytes `file/read` answers with, by absolute path on the Computer. */
+  readonly files = new Map<string, Uint8Array>();
+  /** Every `file/read` the host was asked for, in order. */
+  readonly reads: Array<{ botId: string; path: string }> = [];
 
   constructor(private runner: FakeComputerRunnerV1 = () => ({})) {}
 
@@ -142,6 +147,29 @@ export class FakeComputerHost {
           stderr: encoder.encode(run.stderr ?? ""),
           outputTruncated: run.outputTruncated ?? false,
         };
+      },
+
+      fileRead(
+        path: string,
+        options?: ComputerHostCallOptions,
+      ): Promise<ComputerHostFileReadResultV1> {
+        options?.signal?.throwIfAborted();
+        host.reads.push({ botId, path });
+        const bytes = host.files.get(path);
+        if (!bytes) {
+          return Promise.reject(new Error(`no such file: ${path}`));
+        }
+        return Promise.resolve({
+          version: 1,
+          effectId: options?.effectId ?? "effect-file-read",
+          entry: {
+            path,
+            kind: "file",
+            size: bytes.byteLength,
+            mode: 0o600,
+          },
+          bytesBase64: Buffer.from(bytes).toString("base64"),
+        });
       },
 
       control(

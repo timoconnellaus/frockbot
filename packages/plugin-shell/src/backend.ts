@@ -2671,6 +2671,12 @@ export class ShellBotBackendContribution {
         ...(turn
           ? {
               computerSync: createBotComputerSyncHost(this.env),
+              // The same Turn, as the writer a durable Computer write records.
+              computerWriter: {
+                sessionId: turn.sessionId,
+                turnId: turn.turnId,
+                runId: turn.runId,
+              },
             }
           : {}),
         // The Computer host, when this deployment has one. Both halves or

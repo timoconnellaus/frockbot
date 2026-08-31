@@ -274,3 +274,88 @@ describe("OpenAICompatibleProvider", () => {
     );
   });
 });
+
+// An image a tool produced, on the wire.
+//
+// Two behaviours, and the difference between them has to be visible in the
+// request: a model that takes images is shown the picture, and a model that
+// does not is *told* where it is. Silently dropping it would make a Bot that
+// asked for a screenshot indistinguishable from one that got nothing.
+describe("tool result attachments", () => {
+  const attachment = {
+    kind: "image" as const,
+    mediaType: "image/png" as const,
+    workspacePath: {
+      root: {
+        kind: "package-declared" as const,
+        userId: "user-1",
+        packageId: "computer",
+        rootId: "screenshots",
+      },
+      path: "bot-1/run-9-1.png",
+    },
+    contentHash: "b".repeat(64),
+    bytes: 3,
+  };
+
+  function requestWith(model: string, dataBase64?: string) {
+    return {
+      requestId: "request-1",
+      provider: "openai-compatible",
+      model,
+      system: "",
+      tools: [],
+      messages: [
+        {
+          role: "tool" as const,
+          callId: "call-1",
+          name: "computer_screenshot",
+          content: '{"path":"bot-1/run-9-1.png"}',
+          isError: false,
+          attachments: [
+            { ...attachment, ...(dataBase64 ? { dataBase64 } : {}) },
+          ],
+        },
+      ],
+    };
+  }
+
+  test("shows a vision model the image as a following user message", () => {
+    const wire = requestToWire(requestWith("gpt-4o", "AAAA"));
+    const messages = wire.messages as Record<string, unknown>[];
+
+    expect(messages[0]).toMatchObject({ role: "tool", tool_call_id: "call-1" });
+    expect(messages[1]).toMatchObject({ role: "user" });
+    expect(JSON.stringify(messages[1])).toContain("data:image/png;base64,AAAA");
+  });
+
+  test("tells a model that takes no image where the image is", () => {
+    const wire = requestToWire(requestWith("llama3-8b", "AAAA"));
+    const messages = wire.messages as Record<string, unknown>[];
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.content).toContain("not shown to this model");
+    expect(messages[0]!.content).toContain("bot-1/run-9-1.png");
+    expect(JSON.stringify(wire)).not.toContain("AAAA");
+  });
+
+  test("says so when a vision model's image could not be resolved", () => {
+    const wire = requestToWire(requestWith("gpt-4o"));
+    const messages = wire.messages as Record<string, unknown>[];
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.content).toContain("not shown to this model");
+  });
+
+  test("lets an explicit acceptsImages override the model-name guess", () => {
+    const shown = requestToWire(requestWith("some-local-model", "AAAA"), {
+      acceptsImages: true,
+    });
+    expect((shown.messages as unknown[]).length).toBe(2);
+
+    const withheld = requestToWire(requestWith("gpt-4o", "AAAA"), {
+      acceptsImages: false,
+    });
+    expect((withheld.messages as unknown[]).length).toBe(1);
+  });
+});

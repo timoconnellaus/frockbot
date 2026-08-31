@@ -256,6 +256,9 @@ export function createUserApplication() {
     }
 
     const skillsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/skills$/);
+    const workspaceFileMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/workspace\/file$/,
+    );
     const turnMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/turns$/);
     const lookupMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)$/,
@@ -271,6 +274,7 @@ export function createUserApplication() {
     );
     if (
       !skillsMatch &&
+      !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
       !reconcileMatch &&
@@ -283,6 +287,7 @@ export function createUserApplication() {
     try {
       const matched =
         skillsMatch ??
+        workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
         reconcileMatch ??
@@ -312,6 +317,52 @@ export function createUserApplication() {
         return jsonError(
           500,
           error instanceof Error ? error.message : "skill catalog failed",
+        );
+      }
+    }
+
+    if (workspaceFileMatch) {
+      // Read-only, and the durable root and path arrive as one encoded
+      // `WorkspacePathV1` so the route cannot assemble a root the decoder
+      // would not accept. The bytes come from object storage; no Computer
+      // wakes to serve this.
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      const encoded = url.searchParams.get("path");
+      if (!encoded) return jsonError(400, "a workspace path is required");
+      let path: unknown;
+      try {
+        path = JSON.parse(encoded);
+      } catch {
+        return jsonError(400, "invalid workspace path");
+      }
+      try {
+        const answer = await env.BOT_STATE.readWorkspaceFileV1({
+          schemaVersion: 1,
+          botId,
+          path,
+        });
+        if (answer.status !== "ok") {
+          return jsonError(
+            answer.status === "not-found" ? 404 : 409,
+            "reason" in answer ? answer.reason : "workspace read failed",
+          );
+        }
+        const binary = atob(answer.bytesBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        return new Response(bytes, {
+          headers: {
+            "content-type": "application/octet-stream",
+            "cache-control": "private, max-age=60",
+            etag: `"${answer.contentHash}"`,
+          },
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "workspace read failed",
         );
       }
     }

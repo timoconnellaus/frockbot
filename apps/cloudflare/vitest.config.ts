@@ -66,5 +66,9 @@ export default defineConfig({
   test: {
     include: ["test/**/*.workerd.ts"],
     testTimeout: 15 * 60_000,
+    // One fake Computer host serves every file in this project, and it is one
+    // Node-side object: a file that resets it, or asserts on the calls it
+    // recorded, cannot be running beside another file driving the same host.
+    fileParallelism: false,
   },
 });

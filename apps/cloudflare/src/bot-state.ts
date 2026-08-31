@@ -66,8 +66,17 @@ import type {
   NormalizedModelRequest,
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
+  WorkspacePathV1,
   WorkspaceSyncEffectsV1,
 } from "@frockbot/kernel-contracts";
+import { decodeWorkspacePathV1 } from "@frockbot/kernel-contracts";
+
+/** Base64 without a Node Buffer: this object runs in workerd. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
 import {
   decodeRoutineCommandV1,
   decodeRoutineInboxCommandV1,
@@ -81,6 +90,7 @@ import {
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import type { BotSkillCatalogReaderV1 } from "@frockbot/plugin-shell/backend-skills";
+import type { ClientWorkspaceFileV1 } from "./contracts.js";
 import {
   DurableWorkspaceGenerations,
   DurableWorkspaceSyncEffects,
@@ -655,6 +665,52 @@ export class BotState extends DurableObject<BotStateEnv> {
    * read: it binds the Workspace surfaces the Turn path binds, and writes
    * nothing.
    */
+  /**
+   * One durable-root file, read from object storage.
+   *
+   * The Workspace read path the hosted client needs: a screenshot the Bot
+   * filed under a Package-declared root is durable content, and a card that
+   * renders it has to be able to fetch it without reaching a Computer. It
+   * wakes none — this is R2 and this object's own generation ledger — which is
+   * exactly why the durable-root sync exists.
+   */
+  async readWorkspaceFileV1(input: unknown): Promise<ClientWorkspaceFileV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      path: rpcDecoded(decodeWorkspacePathV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const files = this.backendEnv.WORKSPACE_FILES;
+    if (!files) {
+      return {
+        schemaVersion: 1 as const,
+        status: "unavailable" as const,
+        reason: "This deployment binds no Workspace object store",
+      };
+    }
+    const outcome = await files.read(request.path as WorkspacePathV1);
+    if (outcome.status !== "ok") {
+      return {
+        schemaVersion: 1 as const,
+        status: outcome.status,
+        reason: outcome.reason,
+      };
+    }
+    return {
+      schemaVersion: 1 as const,
+      status: "ok" as const,
+      contentHash: outcome.file.generation.contentHash,
+      size: outcome.file.generation.size,
+      bytesBase64: bytesToBase64(outcome.file.bytes),
+    };
+  }
+
   async listSkills(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);

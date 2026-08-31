@@ -21,6 +21,7 @@ import {
   frockBotWebDataKey,
   type FrockBotWebData,
   type WebChatMessage,
+  type WebToolAttachment,
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
 import SendPayloadView from "./SendPayloadView.vue";
@@ -110,6 +111,20 @@ const canSend = computed(
  * shows the Bot avatar while it runs and nothing once it finishes with no
  * text, so an empty bubble never appears in the thread.
  */
+/**
+ * The binaries this Turn's tools filed, in call order. Read off the tool
+ * activity rather than the text so a result that is JSON stays JSON.
+ */
+function attachmentsOf(message: WebChatMessage): WebToolAttachment[] {
+  return message.tools.flatMap((tool) => tool.attachments ?? []);
+}
+
+/** The Workspace read route for one encoded `WorkspacePathV1`. */
+function workspaceFileUrl(path: string): string {
+  const botId = state.value.activeBotId ?? "";
+  return `/api/bots/${encodeURIComponent(botId)}/workspace/file?path=${encodeURIComponent(path)}`;
+}
+
 function isVisible(message: WebChatMessage): boolean {
   if (message.role === "user") return message.text.length > 0;
   if (message.role === "system") return message.text.length > 0;
@@ -460,6 +475,30 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               </div>
               <div v-if="message.text" class="message-bubble">
                 <UiMarkdown :text="message.text" />
+              </div>
+              <!--
+                A binary a tool filed in a durable root, drawn from the
+                Workspace read route. The thread carries the path, never the
+                bytes, so a long conversation costs paths and the image is
+                fetched only when it is on screen.
+              -->
+              <div
+                v-if="attachmentsOf(message).length > 0"
+                class="message-attachments"
+              >
+                <a
+                  v-for="attachment in attachmentsOf(message)"
+                  :key="attachment.contentHash"
+                  :href="workspaceFileUrl(attachment.path)"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <img
+                    :src="workspaceFileUrl(attachment.path)"
+                    :alt="`Attachment from ${message.runId}`"
+                    loading="lazy"
+                  />
+                </a>
               </div>
               <!--
                 Sends sit beside the derived text rather than inside it: each

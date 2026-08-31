@@ -338,6 +338,19 @@ function handle(
         };
       },
     },
+    screenshot: {
+      capture: async (options) => {
+        const captured = await computer.screenshot(
+          options?.signal ?? new AbortController().signal,
+        );
+        return {
+          bytes: captured.bytes,
+          mediaType: "image/png",
+          display: captured.display,
+          capturedAt: captured.capturedAt,
+        };
+      },
+    },
     browser: {
       perform: async (action, options) =>
         browserState(

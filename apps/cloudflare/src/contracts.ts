@@ -173,6 +173,24 @@ export interface MemoryBinding {
   embed(model: string, texts: string[]): Promise<{ data: number[][] }>;
 }
 
+/**
+ * One durable-root file as the hosted client reads it. A declared variant,
+ * never an exception: a root the store cannot serve is an ordinary answer.
+ */
+export type ClientWorkspaceFileV1 =
+  | {
+      schemaVersion: 1;
+      status: "ok";
+      contentHash: string;
+      size: number;
+      bytesBase64: string;
+    }
+  | {
+      schemaVersion: 1;
+      status: "not-found" | "refused" | "conflict" | "unavailable";
+      reason: string;
+    };
+
 export interface UserBotStateBinding {
   assertRegistered(input: { schemaVersion: 1; botId: string }): Promise<void>;
   run(input: {
@@ -199,6 +217,11 @@ export interface UserBotStateBinding {
     schemaVersion: 1;
     botId: string;
   }): Promise<ClientSkillCatalogV1>;
+  readWorkspaceFileV1(input: {
+    schemaVersion: 1;
+    botId: string;
+    path: unknown;
+  }): Promise<ClientWorkspaceFileV1>;
   listNotifications(input: {
     schemaVersion: 1;
     botId: string;

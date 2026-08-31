@@ -712,3 +712,17 @@
     scroll-behavior: auto !important;
   }
 }
+
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--frockbot-space-2, 0.5rem);
+  margin-top: var(--frockbot-space-2, 0.5rem);
+}
+
+.message-attachments img {
+  border: 1px solid var(--frockbot-border, rgba(0, 0, 0, 0.12));
+  border-radius: var(--frockbot-radius-small, 4px);
+  display: block;
+  max-width: 20rem;
+}

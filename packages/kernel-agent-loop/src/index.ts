@@ -1092,6 +1092,9 @@ class LoopAgent implements Agent {
         content: result.content,
         isError: result.isError,
         status: "completed",
+        ...(result.attachments && result.attachments.length > 0
+          ? { attachments: result.attachments }
+          : {}),
       });
       await this.session.flush();
     }

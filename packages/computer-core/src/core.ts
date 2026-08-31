@@ -6,7 +6,31 @@ import {
   type WorkspaceRootV1,
   type WorkspaceSyncEffectsV1,
 } from "@frockbot/kernel-contracts";
+import { createHash } from "node:crypto";
 import { type Context, Service } from "cordis";
+
+/**
+ * A stable, provider-neutral directory name for one Bot inside a User-scoped
+ * durable root.
+ *
+ * A Package that files something per Bot under a root the whole User shares
+ * needs a name that is the same on every Computer and on every provider, so it
+ * is derived here rather than borrowed from whichever provider happens to be
+ * mounted. It is a path segment, never an identity: the writer of a file is
+ * what the generation records.
+ */
+export function computerBotPathKeyV1(botId: string): string {
+  const id = botId.trim();
+  if (!id) throw new Error("Computer Bot id must be non-empty");
+  const slug = id
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 28);
+  const digest = createHash("sha256").update(id).digest("hex").slice(0, 12);
+  return `${slug || "bot"}-${digest}`;
+}
 
 export type ComputerErrorCode =
   | "not-assigned"
@@ -291,6 +315,25 @@ export interface ComputerBrowser {
   ): Promise<ComputerBrowserState>;
 }
 
+/** One capture of the Bot's own desktop on its Computer. */
+export interface ComputerScreenshotV1 {
+  bytes: Uint8Array;
+  mediaType: "image/png";
+  /** The X display the capture came from. */
+  display: string;
+  capturedAt: string;
+}
+
+/**
+ * Captures the Bot's own desktop. Read-only by declaration: it observes the
+ * Computer and changes nothing on it, so it records no durable intent — but it
+ * is refused while a human holds the takeover lease, because during a takeover
+ * the screen is the human's.
+ */
+export interface ComputerScreenshotCapabilityV1 {
+  capture(options?: ComputerOperationOptions): Promise<ComputerScreenshotV1>;
+}
+
 export interface ComputerViewerSession {
   id: string;
   url: string;
@@ -429,6 +472,7 @@ export interface ComputerHandle {
   sync?: ComputerSyncV1;
   exec?: ComputerExec;
   browser?: ComputerBrowser;
+  screenshot?: ComputerScreenshotCapabilityV1;
   viewer?: ComputerViewer;
   control?: ComputerControl;
   close(): Promise<void>;
@@ -497,7 +541,8 @@ function guardedHandle(
   handle: ComputerHandle,
   assertCurrent: () => void,
 ): ComputerHandle {
-  const { workspace, sync, exec, browser, viewer, control } = handle;
+  const { workspace, sync, exec, browser, screenshot, viewer, control } =
+    handle;
   return {
     assignment: handle.assignment,
     identity: handle.identity,
@@ -529,6 +574,12 @@ function guardedHandle(
             guardedOperation(assertCurrent, () =>
               browser.perform(action, options),
             ),
+        }
+      : undefined,
+    screenshot: screenshot
+      ? {
+          capture: (options) =>
+            guardedOperation(assertCurrent, () => screenshot.capture(options)),
         }
       : undefined,
     viewer: viewer
