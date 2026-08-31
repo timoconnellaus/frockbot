@@ -41,6 +41,16 @@ export const MAX_CATALOG_ENTRIES_V1 = 512;
 export const MAX_CATALOG_SERVERS_V1 = 16;
 export const MAX_CATALOG_SETUP_FIELDS_V1 = 32;
 export const MAX_CATALOG_SKILLS_V1 = 64;
+/**
+ * Longest Skill body one Catalog entry may carry.
+ *
+ * A plugin-borne Skill is *indexed*, never copied into an instruction root
+ * (`docs/research/grokbot-computer.md` line 285: `plugin-skills/cache.json` is
+ * only an index). The entry document at the pinned generation is therefore the
+ * one place the body lives, and it is bounded here so a hostile entry cannot
+ * fill a system prompt or exhaust the document bound above.
+ */
+export const MAX_CATALOG_SKILL_BODY_BYTES_V1 = 16_384;
 export const MAX_CATALOG_DOCUMENT_BYTES_V1 = 1_048_576;
 
 export type CatalogEntryKindV1 = "package" | "mcp-connector";
@@ -75,6 +85,12 @@ export interface CatalogServerV1 {
 export interface CatalogSkillV1 {
   name: string;
   description?: string;
+  /**
+   * The Markdown recipe, as a `SKILL.md` body. Optional: an entry may announce
+   * a Skill it does not ship, and the Skills Package then records a refusal
+   * rather than injecting a Skill with nothing to say.
+   */
+  body?: string;
 }
 
 export interface CatalogEntryV1 {
@@ -331,7 +347,12 @@ function decodeCatalogServerV1(value: unknown): CatalogServerV1 {
 }
 
 function decodeCatalogSkillV1(value: unknown): CatalogSkillV1 {
-  const skill = exactRecord(value, "catalog skill", ["name"], ["description"]);
+  const skill = exactRecord(
+    value,
+    "catalog skill",
+    ["name"],
+    ["description", "body"],
+  );
   return withOptional(
     { name: text(skill.name, "catalog skill name", 100) },
     {
@@ -339,6 +360,11 @@ function decodeCatalogSkillV1(value: unknown): CatalogSkillV1 {
         skill.description,
         "catalog skill description",
         2_000,
+      ),
+      body: optionalText(
+        skill.body,
+        "catalog skill body",
+        MAX_CATALOG_SKILL_BODY_BYTES_V1,
       ),
     },
   );

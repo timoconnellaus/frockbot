@@ -107,7 +107,16 @@ describe("the object-storage Workspace store in Workerd", () => {
       skills: Array<{ path: string; name: string; generationId: string }>;
       refusals: unknown[];
     };
-    expect(payload.skills.map((skill) => skill.path)).toEqual([SKILL_PATH]);
+    // The Bot's own root first, then the managed set the Skills Package
+    // compiles into its artifact — those are not Workspace files at all, and
+    // this test is about the store.
+    expect(payload.skills.map((skill) => skill.path)).toEqual([
+      SKILL_PATH,
+      "managed/add-connector/SKILL.md",
+      "managed/export-bot-template/SKILL.md",
+      "managed/import-bot-template/SKILL.md",
+      "managed/learn-from-demonstration/SKILL.md",
+    ]);
     expect(payload.skills[0]?.name).toBe("deploy");
     expect(payload.refusals).toEqual([]);
     // The exact generation the Turn used is reconstructable from durable state.

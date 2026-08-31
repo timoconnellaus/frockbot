@@ -324,9 +324,17 @@ describe("Turn boundaries", () => {
       );
       expect(injected).toMatchObject({ type: "skill/injected", turn: 1 });
       if (injected?.type !== "skill/injected") throw new Error("unreachable");
+      // The Bot's own root first, then the managed set the Skills Package
+      // compiles into its artifact. A managed Skill is not a Workspace file
+      // and never meets the predicate this test is about; it is Package-
+      // contributed prompt content, pinned by the Turn's Composition.
       expect(injected.skills.map((skill) => skill.path)).toEqual([
         "skills/own-bot/SKILL.md",
         "skills/own-user/SKILL.md",
+        "managed/add-connector/SKILL.md",
+        "managed/export-bot-template/SKILL.md",
+        "managed/import-bot-template/SKILL.md",
+        "managed/learn-from-demonstration/SKILL.md",
       ]);
       expect(injected.refusals.map((refusal) => refusal.path)).toEqual([
         "skills/first-party/SKILL.md",
