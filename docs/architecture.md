@@ -541,6 +541,10 @@ No entry carries a secret. The arguments never reach the table — only a sha-25
 
 Retention is two durable bounds, both visible: at most 20 000 rows per User and nothing older than 180 days, enforced by evicting the oldest and setting an `audit-truncated` marker a rebuild clears. An outcome the durable log cannot explain is recorded as `unknown` rather than guessed.
 
+`GET /api/audit?botId&kind&target&before&limit` and `POST /api/audit/rebuild` are the Audit Package's gateway Contribution, on the same host as `/api/search` and for the same reason: the gateway is where an authenticated `userId` exists. The route owns no state — it decodes the query string into the same exact `AuditQueryV1` every other caller uses and asks the User Durable Object, which applies the filters inside the table so the total a page reports is the filtered total. An unexpected or repeated parameter is a 400 rather than something quietly ignored, so a client that means something the route does not implement is not handed a page it will misread as filtered.
+
+The WebUI surface is an "Activity" section in Bot settings, mounted on the existing `frockbot.bot-settings-sections` slot. Rows are time, kind badge, target, redacted preview and outcome, newest first, with filter chips per kind and a cursor-paged "Load more". Two states are rendered rather than hidden: a truncation banner when the table has been trimmed to a retention bound, and an `unknown` outcome shown in the same place a success or a failure would be. The Rebuild button answers with the receipt itself — how many entries the Bots' own runs account for, how many outcomes the turn log cannot explain, and how many effects the Computer host reported that no turn does — so a repair reports what it found rather than only that it ran.
+
 ## Trust model
 
 | Trust tier              | Desktop contribution                 | Backend contribution                                 | WebUI contribution                                          |

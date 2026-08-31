@@ -22,6 +22,7 @@ import {
 } from "../harness/miniflare.ts";
 import {
   asUser,
+  expectJson,
   expectOkJson,
   freshUserId,
   postAsUser,
@@ -180,5 +181,86 @@ describe("auditing one Turn's effects", () => {
     // The preview keeps enough of the command to be worth reading, and none of
     // the secret.
     expect(shell.preview).toContain(marker);
+  });
+
+  it("filters by kind through the route, and rebuilds to the same count", async () => {
+    const userId = freshUserId("audit-route");
+    const botId = "route-auditor";
+    const marker = `frockbot-route-${crypto.randomUUID()}`;
+    await script({
+      match: marker,
+      stdout: `audited\n${EXEC_EXIT_MARKER}0\n`,
+    });
+    await provisionThroughGateway({ userId, botId });
+    await connectMcpServer(userId, botId);
+
+    await expectOkJson(
+      await postAsUser(userId, `/api/bots/${botId}/turns`, {
+        schemaVersion: 1,
+        commandId: "audit-route-1",
+        text: toolCallTriggerPrompt(
+          ["computer_exec", { command: `echo ${marker}` }],
+          ["mcp__example__echo", { message: "routed" }],
+        ),
+      }),
+    );
+
+    const all = (await expectOkJson(
+      await asUser(userId, "/api/audit"),
+    )) as AuditPage;
+    expect(all.total).toBe(2);
+    expect(all.indexState).toBe("ready");
+
+    // THE FILTER IS APPLIED IN THE TABLE, not by the client. `?kind=shell`
+    // returns the shell entry and nothing else, and the total it reports is
+    // the filtered total.
+    const shellOnly = (await expectOkJson(
+      await asUser(userId, "/api/audit?kind=shell"),
+    )) as AuditPage;
+    expect(shellOnly.entries.map((entry) => entry.toolName)).toEqual([
+      "computer_exec",
+    ]);
+    expect(shellOnly.total).toBe(1);
+
+    const remote = (await expectOkJson(
+      await asUser(userId, "/api/audit?target=remote:mcp.example.test"),
+    )) as AuditPage;
+    expect(remote.entries.map((entry) => entry.kind)).toEqual(["mcp"]);
+
+    // A REBUILD ACCOUNTS FOR EXACTLY WHAT WAS THERE. The receipt is the claim,
+    // and the table after it is the evidence.
+    const receipt = (await expectOkJson(
+      await postAsUser(userId, "/api/audit/rebuild", {}),
+    )) as {
+      status: string;
+      entries: number;
+      indexState: string;
+      unknownOutcomes: number;
+      hostJournalDiscrepancies: number;
+    };
+    expect(receipt).toMatchObject({
+      status: "rebuilt",
+      indexState: "ready",
+      unknownOutcomes: 0,
+      hostJournalDiscrepancies: 0,
+    });
+    expect(receipt.entries).toBe(all.total);
+    const after = (await expectOkJson(
+      await asUser(userId, "/api/audit"),
+    )) as AuditPage;
+    expect(after.entries).toEqual(all.entries);
+  });
+
+  it("refuses a query parameter the route does not implement", async () => {
+    const userId = freshUserId("audit-refuse");
+    await provisionThroughGateway({ userId, botId: "refuser" });
+    const refused = await asUser(userId, "/api/audit?userId=someone");
+    expect(refused.status).toBe(400);
+    expect(await expectJson(refused)).toMatchObject({
+      code: "invalid-request",
+      definitive: true,
+    });
+    const repeated = await asUser(userId, "/api/audit?kind=shell&kind=mcp");
+    expect(repeated.status).toBe(400);
   });
 });

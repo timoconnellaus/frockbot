@@ -179,6 +179,9 @@ export class AuditUserBackendContribution {
       entries: outcome.entries,
       bots: outcome.bots,
       indexState: outcome.indexState,
+      unknownOutcomes: this.store
+        .all()
+        .filter((entry) => entry.outcome === "unknown").length,
       hostJournalDiscrepancies: await this.countHostJournalDiscrepancies(),
     };
   }

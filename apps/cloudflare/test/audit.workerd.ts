@@ -172,6 +172,32 @@ describe("the audit table in Workerd", () => {
     );
   });
 
+  test("pages a filtered answer over two thousand rows on real SQL", async () => {
+    // @ts-expect-error the probe is bound by this suite alone.
+    const probe = env.AUDIT_PROBE.getByName(`paging-${crypto.randomUUID()}`);
+    const outcome = await probe.paging(2_000);
+    expect(outcome.total).toBe(2_000);
+    // Half the rows are `shell`; the filter is applied in the table, so the
+    // total the page reports is the filtered total and not the table's.
+    expect(outcome.shellTotal).toBe(1_000);
+    expect(outcome.walked).toBe(1_000);
+    expect(outcome.duplicates).toBe(0);
+    expect(outcome.pages).toBe(10);
+    // Newest first, all the way down.
+    expect(outcome.firstOccurrenceId).not.toBe(outcome.lastOccurrenceId);
+  });
+
+  test("evicts past the age bound and says so, whatever the row count", async () => {
+    // @ts-expect-error the probe is bound by this suite alone.
+    const probe = env.AUDIT_PROBE.getByName(`age-${crypto.randomUUID()}`);
+    const outcome = await probe.ageEviction();
+    // Four rows in, two of them older than 180 days. Retention is a promise
+    // about time as well as about volume.
+    expect(outcome.remaining).toBe(2);
+    expect(outcome.oldestKept).toBe("aged 179");
+    expect(outcome.state).toBe("truncated");
+  });
+
   test("a User Durable Object refuses an audit read naming another User", async () => {
     const suffix = crypto.randomUUID();
     const mine = `audit-user-${suffix}`;

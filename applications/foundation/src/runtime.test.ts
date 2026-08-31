@@ -99,6 +99,7 @@ describe("foundation application", () => {
         "ui-theme",
         "shell",
         "flock",
+        "audit",
         "auth",
         "settings",
         "bot-template",
@@ -329,6 +330,9 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       rebuildSearchIndex: () =>
         Promise.reject(new Error("not used while composing")),
+      readAudit: () => Promise.reject(new Error("not used while composing")),
+      rebuildAuditIndex: () =>
+        Promise.reject(new Error("not used while composing")),
       listBotUnread: () =>
         Promise.resolve({ schemaVersion: 1 as const, unread: [] }),
       listBotNotifications: () =>
@@ -370,6 +374,7 @@ describe("foundation application", () => {
         .map((contribution) => contribution.packageId)
         .sort(),
     ).toEqual([
+      "audit",
       "bot-template",
       "flock",
       "mcp",

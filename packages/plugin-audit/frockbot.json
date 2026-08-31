@@ -1,15 +1,37 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "id": "audit",
   "displayName": "Audit",
   "version": "0.0.1",
-  "compatibility": { "frockbot": ">=0.0.1" },
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
   "dependencies": {
     "flock": ">=0.0.1",
-    "shell": ">=0.0.1"
+    "shell": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
   },
   "contributions": {
-    "backend": [{ "entry": "./user", "host": "user" }]
+    "backend": [
+      {
+        "entry": "./user",
+        "host": "user"
+      },
+      {
+        "entry": "./backend",
+        "host": "gateway"
+      }
+    ],
+    "client": {
+      "entry": "./client",
+      "mounts": [
+        {
+          "slot": "frockbot.bot-settings-sections",
+          "order": 20
+        }
+      ],
+      "outlets": []
+    }
   },
   "permissions": []
 }

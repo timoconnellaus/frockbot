@@ -18,6 +18,19 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
 import auditManifest from "@frockbot/plugin-audit/manifest";
+// Gateway Audit behavior is resolved as a lifecycle-owned Plugin.
+import {
+  createAuditBackendContribution,
+  type AuditGatewayHost,
+} from "@frockbot/plugin-audit/backend";
+const createAuditGatewayPlugin = (
+  createAuditBackendContribution as typeof createAuditBackendContribution & {
+    plugin(
+      host: AuditGatewayHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
 import authManifest from "@frockbot/plugin-auth/manifest";
 import botTemplateManifest from "@frockbot/plugin-bot-template/manifest";
 import {
@@ -504,6 +517,7 @@ export type FoundationGatewayHost = {
   SettingsGatewayHost &
   RoutinesGatewayHost &
   SearchGatewayHost &
+  AuditGatewayHost &
   PackagePublisherGatewayHost;
 
 export async function createFoundationBackendContributions(
@@ -574,6 +588,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-search/backend"
         ) {
           plugin = createSearchGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-audit/backend"
+        ) {
+          plugin = createAuditGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-package-publisher/backend"

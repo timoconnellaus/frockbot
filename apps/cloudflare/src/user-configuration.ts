@@ -67,9 +67,8 @@ import {
   AUDIT_KINDS_V1,
   AUDIT_MAX_ENTRY_PAGE_V1,
   AUDIT_MAX_RESULTS_V1,
-  type AuditEntryV1,
-  type AuditIndexStateV1,
   type AuditRebuildReceiptV1,
+  type ClientAuditPageV1,
 } from "@frockbot/plugin-audit";
 import type { BotAuditRpc } from "./audit.js";
 import {
@@ -1493,13 +1492,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    * User-scoped by construction: there is no cross-User store to reach into,
    * and the object refuses any RPC naming a User it is not.
    */
-  async readAuditEntries(input: unknown): Promise<{
-    schemaVersion: 1;
-    entries: AuditEntryV1[];
-    nextCursor?: string;
-    total: number;
-    indexState: AuditIndexStateV1;
-  }> {
+  async readAuditEntries(input: unknown): Promise<ClientAuditPageV1> {
     const request = decodeRpcEnvelopeV1(
       input,
       { userId: rpcIdentifier },
@@ -1531,7 +1524,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return {
       schemaVersion: 1,
       entries: page.entries,
-      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+      page: {
+        truncated: page.nextCursor !== undefined,
+        ...(page.nextCursor === undefined
+          ? {}
+          : { nextCursor: page.nextCursor }),
+      },
       total: page.total,
       indexState: contribution.state(),
     };
