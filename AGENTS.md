@@ -23,7 +23,7 @@ These rules govern production features and architecture. Treat them as invariant
 - The Bot's Durable Object is the authority for everything Bot-scoped: command admission, the append-only event log, the resumable execution cursor, idempotency records, cancellation, serialization, durable scheduling, Routines, Assignments, and the pinned Composition of every admitted Turn.
 - The User's Durable Object is the authority for everything User-scoped: Package availability, Connections, credentials, the Computer assignment, User settings, quotas, and the generation records of User and Project Memory roots.
 - The Workspace and its object-storage twin are the only durable state outside a Durable Object. They hold files, never authority: a Durable Object records every intent, effect, and generation that concerns them, and the rules under Computer and Workspace and Memory govern their reconciliation. Immutable content-addressed Package artifacts are durable content, not state: addressed by hash, never mutated, and holding no authority.
-- Each Bot's Agent loop runs in that Bot's Durable Object. When resident, the Durable Object constructs one application root from the Bot's durable Composition. The root and its Plugins are ephemeral projections of durable state, not authorities that must remain resident.
+- A Bot's conversational Turns run in its Bot Durable Object; each concurrent child Turn runs in a Subagent Durable Object of the same Bot that holds no authority — the Bot Durable Object admits it, pins its Composition, and records its lifecycle and terminal result. When resident, the Durable Object constructs one application root from the Bot's durable Composition. The root and its Plugins are ephemeral projections of durable state, not authorities that must remain resident.
 - Gateways, application Workers, and Dynamic Workers route commands, serve immutable artifacts, or execute Package code loaded for a Bot. They own no Agent loop and no durable state.
 - Admit input durably before acknowledging it.
 - Client disconnect, refresh, or shutdown detaches an observer; only an explicit authenticated command cancels work.
@@ -42,7 +42,7 @@ These rules govern production features and architecture. Treat them as invariant
 - The kernel is the only production code that is not a Package. It has exactly three parts: Durable Object authority (admission, event log, cursor, idempotency, cancellation, scheduling, and storage), the Agent loop (claim input, call the model, run the tools, record events, repeat), and Package composition (resolve durable desired state into a pinned generation set, mount it, verify it, commit or roll back, and bootstrap and dispose the host that does so).
 - The kernel declares the narrow interfaces it consumes, including model invocation, tool execution, and Memory access, and owns no implementation of them. Model providers, the tool registry, Memory, Computers, Skills, Routines, Channels, notifications, credentials, settings, and every UI surface are Packages.
 - The kernel imports no Package and contains no product policy.
-- The kernel treats every Workspace file as data. Only Skills under the Bot's own instruction root, written under the Bot's own authority or its User's, are loaded as instructions.
+- The kernel treats every Workspace file as data. Only Skills under a Bot's instruction roots — its own and its User's — written under the Bot's own authority or its User's, are loaded as instructions.
 
 ## Package composition
 

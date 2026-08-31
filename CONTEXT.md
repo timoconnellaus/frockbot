@@ -81,7 +81,7 @@ A User attaching a Skill ref to a message, which expands that Skill's body into 
 _Avoid_: Run a skill, trigger, call
 
 **Channel**:
-A Package-provided delivery surface, such as Telegram or the hosted WebUI, through which a User and a Bot exchange messages.
+A Package-provided delivery surface, such as Telegram or the hosted WebUI, through which messages are exchanged between a User and a Bot, among a group of one to six member Bots, or between a Bot and an external peer reached through a connector.
 _Avoid_: Integration, transport
 
 **Catalog**:
