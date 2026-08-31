@@ -6,10 +6,13 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 
+// Bun has no single-file-component loader, so every Vue module the client
+// graph reaches stands in as an empty component; these tests exercise the
+// projection and command functions, not the rendered shell.
 plugin({
   name: "shell-client-vue-test-loader",
   setup(build) {
-    build.onLoad({ filter: /FrockBotApp\.vue$/ }, () => ({
+    build.onLoad({ filter: /\.vue$/ }, () => ({
       contents: "export default {};",
       loader: "js",
     }));
@@ -607,14 +610,36 @@ describe("Bot selection", () => {
     await provided.value.loadBotSettings();
     await provided.value.loadUserSettings();
 
-    expect(provided.value.modelLabel).toBe("Ollama Cloud · Dynamic Worker");
+    expect(provided.value.modelLabel).toBe(
+      "glm-5.3-flash:cloud · Ollama Cloud",
+    );
     expect(provided.value.modelReady).toBe(true);
+    expect(provided.value.modelSource).toBe("bot");
 
     bot.assignments[0] = {
       ...bot.assignments[0]!,
       capabilityId: "ollama-cloud-tools",
     };
     await provided.value.loadBotSettings();
+    expect(provided.value.modelReady).toBe(false);
+
+    // A Bot without a model of its own follows the User's default, and the
+    // label never says so: the Bot simply runs on that model.
+    bot.model = undefined as unknown as typeof bot.model;
+    user.newBotModelTemplate = {
+      connectionId: "ollama-work",
+      providerModelId: "llama-3:cloud",
+    };
+    await provided.value.loadUserSettings();
+    await provided.value.loadBotSettings();
+    expect(provided.value.modelSource).toBe("default");
+    expect(provided.value.modelLabel).toBe("llama-3:cloud · Ollama Cloud");
+    expect(provided.value.modelReady).toBe(true);
+
+    user.newBotModelTemplate = undefined;
+    await provided.value.loadUserSettings();
+    expect(provided.value.modelSource).toBe("none");
+    expect(provided.value.modelLabel).toBe("No default model");
     expect(provided.value.modelReady).toBe(false);
   });
 
@@ -983,15 +1008,64 @@ describe("active durable Turn projection", () => {
 
     expect(state.activeRunId).toBe("run-1");
     expect(state.error).toBeUndefined();
-    expect(state.activeRun).toMatchObject({
-      runId: "run-1",
-      status: "running",
-      canResume: false,
-    });
+    // A running Turn is shown by the animated avatar, never by a banner.
+    expect(state.activeRun).toBeUndefined();
     expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]).toMatchObject({ text: "", status: "streaming" });
+  });
+
+  test("streams running text without a banner and clears busy state", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [{ runId: "run-2", input: "Explain", events: [], status: "running" }],
+    );
+    expect(state.activeRunId).toBe("run-2");
+    expect(state.activeRun).toBeUndefined();
+    expect(state.messages[1]).toMatchObject({ text: "", status: "streaming" });
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-2",
+          input: "Explain",
+          events: [],
+          status: "running",
+          responseText: "Because",
+        },
+      ],
+    );
+    expect(state.activeRunId).toBe("run-2");
     expect(state.messages[1]).toMatchObject({
-      text: "Working…",
+      text: "Because",
       status: "streaming",
+    });
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-2",
+          input: "Explain",
+          events: [],
+          status: "completed",
+          responseText: "Because it is.",
+        },
+      ],
+    );
+    expect(state.activeRunId).toBeUndefined();
+    expect(state.activeRun).toBeUndefined();
+    expect(state.messages[1]).toMatchObject({
+      text: "Because it is.",
+      status: "completed",
     });
   });
 

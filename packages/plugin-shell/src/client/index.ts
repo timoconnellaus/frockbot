@@ -67,14 +67,20 @@ type DurableRunProjectionState = Pick<
   "messages" | "activeRunId" | "activeRun" | "error"
 >;
 
+/**
+ * The banner exists for Turns the User has to act on. A running Turn is shown
+ * by the animated Bot avatar in the thread, so it produces no banner.
+ */
 function activeRunView(run: ClientRun): WebActiveRun | undefined {
   if (run.status === "running") {
+    // A plain running Turn is shown by the animated Bot avatar, so it has no
+    // banner. Once a durable Stop has been accepted the User is waiting on a
+    // settlement they asked for, and the banner reports it.
+    if (!run.stopRequestedAt) return undefined;
     return {
       runId: run.runId,
       status: run.status,
-      message: run.stopRequestedAt
-        ? "Stop accepted; waiting for durable settlement."
-        : "This Turn is still running in the backend.",
+      message: "Stop accepted; waiting for durable settlement.",
       canResume: false,
     };
   }
@@ -106,11 +112,13 @@ function assistantMessage(
   notification: ClientNotificationIntent | undefined,
 ): WebChatMessage {
   if (run.status === "running") {
+    // A streaming Turn carries only the text the model has produced. Until
+    // there is any, the thread shows the animated avatar and no bubble.
     return {
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.responseText ?? "Working…",
+      text: run.responseText ?? "",
       status: "streaming",
       tools: toolsFrom(run.events),
     };
@@ -159,6 +167,9 @@ export function projectDurableRuns(
   const projected = new Set<string>();
   const observedRunId = state.activeRunId;
   let activeRun: WebActiveRun | undefined;
+  // Busy state and the banner are separate: a running Turn keeps the composer
+  // busy without producing a banner of its own.
+  let busyRunId: string | undefined;
   for (const run of runs) {
     const notification = notifications.find(
       (candidate) => candidate.runId === run.runId,
@@ -185,6 +196,9 @@ export function projectDurableRuns(
     else state.messages.push(assistant);
 
     activeRun = activeRunView(run) ?? activeRun;
+    if (run.status === "running" || run.status === "reconciliation-required") {
+      busyRunId = run.runId;
+    }
     if (notification && isTerminalRun(run)) {
       projected.add(notification.notificationId);
     }
@@ -194,19 +208,20 @@ export function projectDurableRuns(
     state.error = undefined;
   }
 
-  if (activeRun) {
-    state.activeRunId = activeRun.runId;
-    state.activeRun = activeRun;
-  } else {
-    const terminalRunIds = new Set(
-      runs.filter(isTerminalRun).map((run) => run.runId),
-    );
-    if (state.activeRunId && terminalRunIds.has(state.activeRunId)) {
-      state.activeRunId = undefined;
-    }
-    if (state.activeRun && terminalRunIds.has(state.activeRun.runId)) {
-      state.activeRun = undefined;
-    }
+  const terminalRunIds = new Set(
+    runs.filter(isTerminalRun).map((run) => run.runId),
+  );
+  if (busyRunId) state.activeRunId = busyRunId;
+  else if (state.activeRunId && terminalRunIds.has(state.activeRunId)) {
+    state.activeRunId = undefined;
+  }
+  if (activeRun) state.activeRun = activeRun;
+  else if (
+    state.activeRun &&
+    runs.some((run) => run.runId === state.activeRun?.runId)
+  ) {
+    // The Turn this banner described has moved on to a state that needs none.
+    state.activeRun = undefined;
   }
   return projected;
 }
@@ -818,12 +833,22 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     web.value.settingsError = [...settingsLoadErrors.values()].at(-1);
   }
 
+  /**
+   * The Bot runs on its own model when it has one and on the User's default
+   * otherwise, so readiness and the composer label follow the effective model.
+   * A Bot following the default is ready as soon as the User's Connection is:
+   * the Bot's own Assignment for that Connection is claimed durably when the
+   * Turn is admitted.
+   */
   function updateModelLabel(): void {
-    const model = web.value.botSettings?.model;
-    const connection = web.value.userSettings?.connections.find(
+    const bot = web.value.botSettings;
+    const user = web.value.userSettings;
+    const model = bot?.model ?? user?.newBotModelTemplate;
+    web.value.modelSource = bot?.model ? "bot" : model ? "default" : "none";
+    const connection = (user?.connections ?? []).find(
       (candidate) => candidate.connectionId === model?.connectionId,
     );
-    const packageInstalled = web.value.userSettings?.packages.some(
+    const packageInstalled = (user?.packages ?? []).some(
       (pkg) =>
         pkg.packageId === connection?.packageId && pkg.state === "installed",
     );
@@ -841,20 +866,27 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           : [],
       ) ?? [],
     );
-    const capabilityAssigned = web.value.botSettings?.assignments.some(
-      (assignment) =>
-        assignment.connectionId === model?.connectionId &&
-        assignment.packageId === connection?.packageId &&
-        assignment.state === "enabled" &&
-        modelCapabilities.has(assignment.capabilityId),
-    );
+    const authorized =
+      web.value.modelSource === "bot"
+        ? Boolean(
+            bot?.assignments.some(
+              (assignment) =>
+                assignment.connectionId === model?.connectionId &&
+                assignment.packageId === connection?.packageId &&
+                assignment.state === "enabled" &&
+                modelCapabilities.has(assignment.capabilityId),
+            ),
+          )
+        : modelCapabilities.size > 0;
     web.value.modelReady = Boolean(
-      model &&
-      connection?.state === "ready" &&
-      packageInstalled &&
-      capabilityAssigned,
+      model && connection?.state === "ready" && packageInstalled && authorized,
+    );
+    const catalogModel = connection?.modelCatalog?.models.find(
+      (candidate) => candidate.providerModelId === model?.providerModelId,
     );
     web.value.modelLabel = modelRuntimeLabel({
+      modelDisplayName: catalogModel?.displayName,
+      providerModelId: model?.providerModelId,
       packageDisplayName: catalogPackage?.displayName,
       connectionDisplayName: connection?.displayName,
       hasModel: Boolean(model),
@@ -863,8 +895,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
 
   const web = ref<FrockBotWebData>({
     connection: "ready",
-    modelLabel: "Model not configured · Dynamic Worker",
+    modelLabel: "No default model",
     modelReady: false,
+    modelSource: "none",
     settingsAvailable: true,
     connectionsAvailable: ctx.transport.connectionsAvailable !== false,
     activeBotId: undefined,
@@ -910,6 +943,15 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )
           return;
         web.value.botSettings = settings;
+        // The effective model may be the User's default, so Bot readiness
+        // needs the User settings too. Loading them never fails this read:
+        // `loadUserSettings` reports its own failure.
+        if (!web.value.userSettings) await web.value.loadUserSettings();
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
         updateModelLabel();
         updateSettingsLoadError("bot");
         await deliverNotifications(botId, generation);
@@ -1164,6 +1206,28 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         profile,
       });
       await web.value.loadUserSettings();
+    },
+    async saveDefaultModel(model: ModelAssignment | undefined): Promise<void> {
+      const settings = web.value.userSettings;
+      if (!settings || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      const current = settings.newBotModelTemplate;
+      if (
+        current?.connectionId === model?.connectionId &&
+        current?.providerModelId === model?.providerModelId
+      ) {
+        return;
+      }
+      const receipt = await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "user/set-new-bot-model",
+        commandId: crypto.randomUUID(),
+        expectedRevision: settings.revision,
+        ...(model ? { model } : {}),
+      });
+      await web.value.loadUserSettings();
+      if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
     async loadPluginCatalog(): Promise<void> {
       if (

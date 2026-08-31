@@ -382,8 +382,13 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         if (state === "acknowledged") {
           return { schemaVersion: 1, status: "acknowledged" };
         }
+        // A durable dependency that is recorded but not yet acknowledged is
+        // *claimed*, which is what the Bot's Assignment saga acknowledges
+        // next. Reporting it as `pending` would tell the saga the User
+        // authority cannot answer yet, and it would compensate a claim it is
+        // entitled to keep.
         return state === "pending"
-          ? { schemaVersion: 1, status: "pending" }
+          ? { schemaVersion: 1, status: "claimed" }
           : { schemaVersion: 1, status: "absent" };
       }
     }

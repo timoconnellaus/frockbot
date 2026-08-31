@@ -69,6 +69,11 @@ export interface FrockBotWebData {
   connection: WebConnection;
   modelLabel: string;
   modelReady: boolean;
+  /**
+   * Where the effective model comes from: the Bot's own override, the User's
+   * default, or nothing at all.
+   */
+  modelSource: "bot" | "default" | "none";
   settingsAvailable: boolean;
   connectionsAvailable: boolean;
   activeBotId?: string;
@@ -96,6 +101,8 @@ export interface FrockBotWebData {
   clearBotModel(): Promise<void>;
   loadUserSettings(): Promise<void>;
   saveUserProfile(profile: { name: string; email?: string }): Promise<void>;
+  /** The model every Bot uses unless it overrides it. */
+  saveDefaultModel(model: ModelAssignment | undefined): Promise<void>;
   loadPluginCatalog(): Promise<void>;
   installPackage(packageId: string, version: string): Promise<void>;
   startConnection(

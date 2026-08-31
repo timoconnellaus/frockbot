@@ -52,6 +52,7 @@ describe("settings client contribution", () => {
   it("registers feature surfaces and shell-owned trigger seats", () => {
     const surfaces = createClientSurfaceRegistry();
     const slots: ClientSlotRegistration[] = [];
+    const provided: unknown[] = [];
     const context: ClientPluginContext = {
       transport: {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
@@ -62,7 +63,10 @@ describe("settings client contribution", () => {
         }
         return surfaces as never;
       },
-      provide: () => () => {},
+      provide: (key) => {
+        provided.push(key);
+        return () => {};
+      },
       slot: (registration) => {
         slots.push(registration);
         return () => slots.splice(slots.indexOf(registration), 1);
@@ -77,6 +81,9 @@ describe("settings client contribution", () => {
       "frockbot.user-profile",
       "frockbot.bot-actions",
     ]);
+    // Composition is an internal detail the Settings Package no longer shows,
+    // so it provides no client state of its own.
+    expect(provided).toEqual([]);
     for (const id of ["bot-settings", "plugins", "user-settings"]) {
       expect(surfaces.has(id)).toBe(true);
     }

@@ -1618,3 +1618,137 @@ describe("Bot capability assignment admission", () => {
     expect(acknowledged).toBe(true);
   });
 });
+
+describe("User default model", () => {
+  test("claims one durable Assignment for a Bot that follows the default", async () => {
+    const storage = new MemoryStorage();
+    let dependencyClaims = 0;
+    let dependencyAcknowledgements = 0;
+    let dependencyStatus: "absent" | "claimed" | "acknowledged" = "absent";
+    const user: UserSettingsViewV1 = {
+      ...installedUser(),
+      newBotModelTemplate: {
+        connectionId: "gmail-1",
+        providerModelId: "fixture-model",
+      },
+    };
+    const userConfiguration = {
+      readConfiguration: () => Promise.resolve(structuredClone(user)),
+      executeConnectionDependency: (request: { action: string }) => {
+        if (request.action === "read") {
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: dependencyStatus,
+          });
+        }
+        if (request.action === "claim") {
+          dependencyClaims += 1;
+          dependencyStatus = "claimed";
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "claimed" as const,
+          });
+        }
+        if (request.action === "acknowledge") {
+          dependencyAcknowledgements += 1;
+          dependencyStatus = "acknowledged";
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "acknowledged" as const,
+          });
+        }
+        dependencyStatus = "absent";
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "released" as const,
+        });
+      },
+    };
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {
+        USER_CONFIGURATIONS: {
+          idFromName: () => "user-1",
+          get: () => userConfiguration,
+        },
+      } as never,
+      compileApplication: compileAssignmentTestApplication,
+    });
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+
+    const plan = await contribution.resolveConfiguration(identity);
+    expect(plan.model).toBeUndefined();
+    expect(plan.assignments).toMatchObject([
+      {
+        packageId: "composio",
+        capabilityId: "gmail-tools",
+        connectionId: "gmail-1",
+        state: "enabled",
+      },
+    ]);
+    expect(dependencyClaims).toBe(1);
+    expect(dependencyAcknowledgements).toBe(1);
+
+    // The claim is made once: a Bot that already holds the Assignment keeps it
+    // and follows the default without further durable writes.
+    const settings = await contribution.readConfiguration({
+      schemaVersion: 1,
+      ...identity,
+    });
+    await contribution.resolveConfiguration(identity);
+    expect(dependencyClaims).toBe(1);
+    expect(
+      await contribution.readConfiguration({ schemaVersion: 1, ...identity }),
+    ).toEqual(settings);
+    expect(settings.model).toBeUndefined();
+  });
+
+  test("leaves a Bot unclaimed when the default Connection is unavailable", async () => {
+    const storage = new MemoryStorage();
+    let dependencyClaims = 0;
+    const userConfiguration = {
+      readConfiguration: () =>
+        Promise.resolve({
+          ...installedUser(),
+          connections: [
+            { ...installedUser().connections[0]!, state: "revoked" as const },
+          ],
+          newBotModelTemplate: {
+            connectionId: "gmail-1",
+            providerModelId: "fixture-model",
+          },
+        }),
+      executeConnectionDependency: (request: { action: string }) => {
+        if (request.action === "read") {
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "absent" as const,
+          });
+        }
+        if (request.action === "claim") dependencyClaims += 1;
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "unauthorized" as const,
+        });
+      },
+    };
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {
+        USER_CONFIGURATIONS: {
+          idFromName: () => "user-1",
+          get: () => userConfiguration,
+        },
+      } as never,
+      compileApplication: compileAssignmentTestApplication,
+    });
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+
+    expect(
+      (await contribution.resolveConfiguration(identity)).assignments,
+    ).toEqual([]);
+    expect(dependencyClaims).toBe(0);
+  });
+});

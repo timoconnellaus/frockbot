@@ -5,7 +5,7 @@ const props = withDefaults(
   defineProps<{
     sheep: SheepRecipeV1;
     label?: string;
-    size?: "small" | "large";
+    size?: "mini" | "small" | "large";
   }>(),
   { label: "Bot sheep", size: "small" },
 );

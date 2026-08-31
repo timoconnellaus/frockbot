@@ -73,13 +73,24 @@ describe("production Bot durability in Workerd", () => {
       firstEvents.map((_, index) => index),
     );
 
+    // This Bot follows the User's default model, so its first admitted Turn
+    // claimed its own model Assignment: a client renames it against the
+    // revision it reads, exactly as the hosted client does.
+    // SAFETY: the generated stub type for `readConfiguration` is too deep for
+    // the compiler to instantiate here; this names the one field it reads.
+    const settingsRpc = stub as unknown as {
+      readConfiguration(input: unknown): Promise<{ revision: number }>;
+    };
+    const renamedFrom = (await settingsRpc.readConfiguration(identity))
+      .revision;
+    expect(renamedFrom).toBeGreaterThan(0);
     await stub.executeConfiguration({
       ...identity,
       command: {
         schemaVersion: 1,
         type: "bot/update-profile",
         commandId: "rename-1",
-        expectedRevision: 0,
+        expectedRevision: renamedFrom,
         botId: identity.botId,
         profile: { name: "Remounted Workerd Bot" },
       },

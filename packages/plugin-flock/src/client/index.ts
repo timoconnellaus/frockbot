@@ -16,6 +16,7 @@ import {
 import FlockSidebar from "./FlockSidebar.vue";
 import FlockOverlay from "./FlockOverlay.vue";
 import FlockIdentity from "./FlockIdentity.vue";
+import FlockAvatar from "./FlockAvatar.vue";
 import {
   clearPendingCreate,
   clearPendingSheep,
@@ -438,6 +439,11 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       slot: "frockbot.bot-identity",
       order: 10,
       component: FlockIdentity,
+    }),
+    ctx.slot({
+      slot: "frockbot.bot-avatar",
+      order: 10,
+      component: FlockAvatar,
     }),
   ];
 };

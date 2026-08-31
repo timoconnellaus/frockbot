@@ -8,10 +8,12 @@ import {
   projectAssignmentOperations,
 } from "./assignment-operations.js";
 import {
-  isModelConnectionEligible,
+  describeModelAssignment,
+  eligibleModelConnections,
+  encodeModelSelection,
+  modelSelectOptions,
   resolveBotSettingsModel,
 } from "./bot-settings.js";
-import CompositionSection from "./CompositionSection.vue";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
 const providedWeb = inject(frockBotWebDataKey);
@@ -25,6 +27,7 @@ const label = ref("");
 const description = ref("");
 const notifications = ref(false);
 const saving = ref(false);
+const modelMode = ref<"default" | "custom">("default");
 const assignmentBusy = ref<string>();
 const selectedConnections = reactive<Record<string, string>>({});
 
@@ -93,22 +96,21 @@ const useExactModel = ref(false);
 const exactConnectionId = ref("");
 const exactProviderModelId = ref("");
 const readyConnections = computed(() =>
-  (web.value.userSettings?.connections ?? []).filter((connection) =>
-    isModelConnectionEligible({
-      connection,
-      packages: web.value.userSettings?.packages ?? [],
-      catalog: web.value.pluginCatalog,
-    }),
-  ),
+  eligibleModelConnections({
+    connections: web.value.userSettings?.connections ?? [],
+    packages: web.value.userSettings?.packages ?? [],
+    catalog: web.value.pluginCatalog,
+  }),
 );
-const modelOptions = computed(() =>
-  readyConnections.value.flatMap((connection) =>
-    (connection.modelCatalog?.models ?? []).map((model) => ({
-      value: JSON.stringify([connection.connectionId, model.providerModelId]),
-      label: `${model.displayName} — ${connection.displayName}`,
-    })),
-  ),
+const modelOptions = computed(() => modelSelectOptions(readyConnections.value));
+const defaultModelName = computed(
+  () =>
+    describeModelAssignment(
+      web.value.userSettings?.newBotModelTemplate,
+      web.value.userSettings?.connections ?? [],
+    ) ?? "none set",
 );
+const overriding = computed(() => Boolean(web.value.botSettings?.model));
 
 onMounted(async () => {
   await Promise.all([
@@ -122,12 +124,8 @@ onMounted(async () => {
   label.value = settings.profile.label ?? "";
   description.value = settings.profile.description ?? "";
   notifications.value = settings.notifications.enabled;
-  selectedModel.value = settings.model
-    ? JSON.stringify([
-        settings.model.connectionId,
-        settings.model.providerModelId,
-      ])
-    : "";
+  modelMode.value = settings.model ? "custom" : "default";
+  selectedModel.value = encodeModelSelection(settings.model);
   exactConnectionId.value =
     settings.model?.connectionId ??
     readyConnections.value[0]?.connectionId ??
@@ -139,38 +137,31 @@ onMounted(async () => {
   );
 });
 
-async function clearModel(): Promise<void> {
-  saving.value = true;
-  try {
-    await web.value.clearBotModel();
-    selectedModel.value = "";
-    exactProviderModelId.value = "";
-    useExactModel.value = false;
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not unbind model";
-  } finally {
-    saving.value = false;
+async function saveModel(): Promise<void> {
+  if (modelMode.value === "default") {
+    // Following the default means holding no Bot binding at all.
+    if (web.value.botSettings?.model) await web.value.clearBotModel();
+    return;
   }
+  const selected = resolveBotSettingsModel({
+    current: web.value.botSettings?.model,
+    useExactModel: useExactModel.value,
+    selectedModel: selectedModel.value,
+    exactConnectionId: exactConnectionId.value,
+    exactProviderModelId: exactProviderModelId.value,
+  });
+  if (selected) await web.value.saveBotModel(selected);
 }
 
 async function save(): Promise<void> {
   saving.value = true;
   try {
-    const current = web.value.botSettings?.model;
-    const selected = resolveBotSettingsModel({
-      current,
-      useExactModel: useExactModel.value,
-      selectedModel: selectedModel.value,
-      exactConnectionId: exactConnectionId.value,
-      exactProviderModelId: exactProviderModelId.value,
-    });
     await web.value.saveBotProfile({
       name: name.value,
       label: label.value || undefined,
       description: description.value || undefined,
     });
-    if (selected) await web.value.saveBotModel(selected);
+    await saveModel();
     await web.value.saveBotNotifications({ enabled: notifications.value });
     surfaces.close();
   } catch (error) {
@@ -272,169 +263,6 @@ async function unassign(
     <UiField label="Description">
       <textarea v-model="description" maxlength="10000" rows="7" />
     </UiField>
-
-    <section class="assignment-settings">
-      <div>
-        <strong>Capability Assignments</strong>
-        <p>Grant this Bot an installed Capability and required Connection.</p>
-      </div>
-      <article
-        v-for="item in capabilityItems"
-        :key="item.key"
-        class="assignment-card"
-      >
-        <div>
-          <strong>{{ item.pkg.displayName }} · {{ item.capability.id }}</strong>
-          <small v-if="item.pending">
-            {{ item.pending.kind }} · {{ item.pending.state }}
-          </small>
-          <small v-else-if="item.existing">
-            {{ item.existing.state }}
-          </small>
-          <small v-else>Not assigned</small>
-        </div>
-        <select
-          v-if="item.capability.connectionTypes.length > 0"
-          v-model="selectedConnections[item.key]"
-          :disabled="Boolean(item.pending)"
-          :aria-label="`Connection for ${item.capability.id}`"
-        >
-          <option value="">Choose a ready Connection</option>
-          <option
-            v-for="connection in item.connections"
-            :key="connection.connectionId"
-            :value="connection.connectionId"
-          >
-            {{ connection.displayName }}
-          </option>
-        </select>
-        <div class="assignment-actions">
-          <UiButton
-            v-if="!item.existing"
-            type="button"
-            :disabled="
-              Boolean(item.pending) ||
-              assignmentBusy === item.key ||
-              (item.capability.connectionTypes.length > 0 &&
-                !selectedConnections[item.key])
-            "
-            @click="assign(item)"
-          >
-            Assign
-          </UiButton>
-          <template v-else>
-            <UiButton
-              type="button"
-              :disabled="Boolean(item.pending) || assignmentBusy === item.key"
-              @click="replace(item)"
-            >
-              Replace
-            </UiButton>
-            <UiButton
-              type="button"
-              variant="danger"
-              :disabled="Boolean(item.pending) || assignmentBusy === item.key"
-              @click="unassign(item)"
-            >
-              Unassign
-            </UiButton>
-          </template>
-        </div>
-      </article>
-      <article
-        v-for="operation in assignmentOperations"
-        :key="`operation:${operation.commandId}`"
-        class="assignment-card"
-        data-assignment-operation
-      >
-        <div>
-          <strong>
-            {{ operation.target?.packageId ?? "Unavailable Package" }} ·
-            {{ operation.target?.capabilityId ?? operation.assignmentId }}
-          </strong>
-          <small>{{ operation.kind }} · {{ operation.state }}</small>
-        </div>
-      </article>
-      <article
-        v-for="assignment in orphanAssignments"
-        :key="assignment.assignmentId"
-        class="assignment-card"
-      >
-        <div>
-          <strong
-            >{{ assignment.packageId }} · {{ assignment.capabilityId }}</strong
-          >
-          <small
-            >{{ assignment.state }} · no longer available in the catalog</small
-          >
-        </div>
-        <div class="assignment-actions">
-          <UiButton
-            type="button"
-            variant="danger"
-            :disabled="
-              assignmentBusy === assignment.assignmentId ||
-              assignmentOperationPending(assignment.assignmentId)
-            "
-            @click="
-              unassignAssignment(
-                assignment.assignmentId,
-                assignment.assignmentId,
-              )
-            "
-          >
-            Unassign
-          </UiButton>
-        </div>
-      </article>
-      <p
-        v-if="capabilityItems.length === 0 && orphanAssignments.length === 0"
-        class="assignment-empty"
-      >
-        No assignable Capabilities are available in the production catalog.
-      </p>
-    </section>
-
-    <label class="exact-model-setting">
-      <span>
-        <strong>Use exact model ID</strong>
-        <small>Choose a model not listed in the advisory catalog.</small>
-      </span>
-      <input v-model="useExactModel" type="checkbox" />
-    </label>
-    <template v-if="useExactModel">
-      <UiField label="Connection">
-        <select v-model="exactConnectionId">
-          <option disabled value="">Select a Connection</option>
-          <option
-            v-for="connection in readyConnections"
-            :key="connection.connectionId"
-            :value="connection.connectionId"
-          >
-            {{ connection.displayName }}
-          </option>
-        </select>
-      </UiField>
-      <UiField label="Exact provider model ID">
-        <input
-          v-model="exactProviderModelId"
-          maxlength="256"
-          placeholder="model-name:cloud"
-        />
-      </UiField>
-    </template>
-    <UiField v-else label="Model">
-      <select v-model="selectedModel">
-        <option disabled value="">Select a connected model</option>
-        <option
-          v-for="model in modelOptions"
-          :key="model.value"
-          :value="model.value"
-        >
-          {{ model.label }}
-        </option>
-      </select>
-    </UiField>
     <label class="notification-setting">
       <span>
         <strong>Notifications</strong>
@@ -442,23 +270,211 @@ async function unassign(
       </span>
       <input v-model="notifications" type="checkbox" />
     </label>
+    <p v-if="overriding" class="model-note">Overrides default model</p>
+    <details class="advanced">
+      <summary>
+        <span>Advanced</span>
+        <span class="advanced__marker" aria-hidden="true"
+          ><UiIcon name="arrow-down" size="sm"
+        /></span>
+      </summary>
+      <div class="advanced__body">
+        <fieldset class="model-mode">
+          <legend>Model</legend>
+          <label>
+            <input v-model="modelMode" type="radio" value="default" />
+            <span>Use default model ({{ defaultModelName }})</span>
+          </label>
+          <label>
+            <input v-model="modelMode" type="radio" value="custom" />
+            <span>Custom model</span>
+          </label>
+        </fieldset>
+        <template v-if="modelMode === 'custom'">
+          <label class="exact-model-setting">
+            <span>
+              <strong>Use exact model ID</strong>
+              <small>Choose a model not listed in the advisory catalog.</small>
+            </span>
+            <input v-model="useExactModel" type="checkbox" />
+          </label>
+          <template v-if="useExactModel">
+            <UiField label="Connection">
+              <select v-model="exactConnectionId">
+                <option disabled value="">Select a Connection</option>
+                <option
+                  v-for="connection in readyConnections"
+                  :key="connection.connectionId"
+                  :value="connection.connectionId"
+                >
+                  {{ connection.displayName }}
+                </option>
+              </select>
+            </UiField>
+            <UiField label="Exact provider model ID">
+              <input
+                v-model="exactProviderModelId"
+                maxlength="256"
+                placeholder="model-name:cloud"
+              />
+            </UiField>
+          </template>
+          <UiField v-else label="Model">
+            <select v-model="selectedModel">
+              <option disabled value="">Select a connected model</option>
+              <option
+                v-for="model in modelOptions"
+                :key="model.value"
+                :value="model.value"
+              >
+                {{ model.label }}
+              </option>
+            </select>
+          </UiField>
+        </template>
+        <section class="assignment-settings">
+          <div>
+            <strong>Capability Assignments</strong>
+            <p>
+              Grant this Bot an installed Capability and required Connection.
+            </p>
+          </div>
+          <article
+            v-for="item in capabilityItems"
+            :key="item.key"
+            class="assignment-card"
+          >
+            <div>
+              <strong
+                >{{ item.pkg.displayName }} · {{ item.capability.id }}</strong
+              >
+              <small v-if="item.pending">
+                {{ item.pending.kind }} · {{ item.pending.state }}
+              </small>
+              <small v-else-if="item.existing">
+                {{ item.existing.state }}
+              </small>
+              <small v-else>Not assigned</small>
+            </div>
+            <select
+              v-if="item.capability.connectionTypes.length > 0"
+              v-model="selectedConnections[item.key]"
+              :disabled="Boolean(item.pending)"
+              :aria-label="`Connection for ${item.capability.id}`"
+            >
+              <option value="">Choose a ready Connection</option>
+              <option
+                v-for="connection in item.connections"
+                :key="connection.connectionId"
+                :value="connection.connectionId"
+              >
+                {{ connection.displayName }}
+              </option>
+            </select>
+            <div class="assignment-actions">
+              <UiButton
+                v-if="!item.existing"
+                type="button"
+                :disabled="
+                  Boolean(item.pending) ||
+                  assignmentBusy === item.key ||
+                  (item.capability.connectionTypes.length > 0 &&
+                    !selectedConnections[item.key])
+                "
+                @click="assign(item)"
+              >
+                Assign
+              </UiButton>
+              <template v-else>
+                <UiButton
+                  type="button"
+                  :disabled="
+                    Boolean(item.pending) || assignmentBusy === item.key
+                  "
+                  @click="replace(item)"
+                >
+                  Replace
+                </UiButton>
+                <UiButton
+                  type="button"
+                  variant="danger"
+                  :disabled="
+                    Boolean(item.pending) || assignmentBusy === item.key
+                  "
+                  @click="unassign(item)"
+                >
+                  Unassign
+                </UiButton>
+              </template>
+            </div>
+          </article>
+          <article
+            v-for="operation in assignmentOperations"
+            :key="`operation:${operation.commandId}`"
+            class="assignment-card"
+            data-assignment-operation
+          >
+            <div>
+              <strong>
+                {{ operation.target?.packageId ?? "Unavailable Package" }} ·
+                {{ operation.target?.capabilityId ?? operation.assignmentId }}
+              </strong>
+              <small>{{ operation.kind }} · {{ operation.state }}</small>
+            </div>
+          </article>
+          <article
+            v-for="assignment in orphanAssignments"
+            :key="assignment.assignmentId"
+            class="assignment-card"
+          >
+            <div>
+              <strong
+                >{{ assignment.packageId }} ·
+                {{ assignment.capabilityId }}</strong
+              >
+              <small
+                >{{ assignment.state }} · no longer available in the
+                catalog</small
+              >
+            </div>
+            <div class="assignment-actions">
+              <UiButton
+                type="button"
+                variant="danger"
+                :disabled="
+                  assignmentBusy === assignment.assignmentId ||
+                  assignmentOperationPending(assignment.assignmentId)
+                "
+                @click="
+                  unassignAssignment(
+                    assignment.assignmentId,
+                    assignment.assignmentId,
+                  )
+                "
+              >
+                Unassign
+              </UiButton>
+            </div>
+          </article>
+          <p
+            v-if="
+              capabilityItems.length === 0 && orphanAssignments.length === 0
+            "
+            class="assignment-empty"
+          >
+            No assignable Capabilities are available in the production catalog.
+          </p>
+        </section>
+      </div>
+    </details>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
     </p>
     <div class="settings-actions">
-      <UiButton
-        v-if="web.botSettings?.model"
-        type="button"
-        :disabled="saving"
-        @click="clearModel"
-      >
-        Unbind model
-      </UiButton>
       <UiButton type="submit" variant="primary" :disabled="saving">
         {{ saving ? "Saving…" : "Save settings" }}
       </UiButton>
     </div>
-    <CompositionSection />
   </form>
 </template>
 
@@ -466,8 +482,8 @@ async function unassign(
 .settings-form {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 24px;
+  gap: 16px;
+  padding: 16px;
 }
 
 .settings-intro,
@@ -481,14 +497,17 @@ async function unassign(
 .settings-intro {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 15px;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-card);
+  background: var(--frock-surface-subtle);
 }
 
 .settings-avatar {
   display: grid;
-  width: 52px;
-  height: 52px;
+  width: var(--frock-avatar-md);
+  height: var(--frock-avatar-md);
   flex: 0 0 auto;
   place-items: center;
   border-radius: 16px;
@@ -513,7 +532,7 @@ async function unassign(
 .assignment-card small {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: var(--frock-text-base);
+  font-size: var(--frock-text-sm);
   line-height: var(--frock-leading-normal);
 }
 
@@ -522,10 +541,21 @@ async function unassign(
   gap: 10px;
 }
 
+.assignment-settings strong {
+  font-size: var(--frock-text-md);
+  font-weight: 600;
+}
+
 .assignment-card {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  padding: 12px;
+}
+
+.assignment-card strong {
+  font-size: var(--frock-text-md);
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .assignment-card small {
@@ -538,12 +568,22 @@ async function unassign(
 
 .assignment-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
 
+/* The right panel is ~360px wide, so Assignment controls stay compact. */
+.assignment-actions :deep(.ui-button) {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: var(--frock-text-sm);
+}
+
 .assignment-empty {
   padding: 12px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
   border: 1px dashed var(--frock-border);
   border-radius: var(--frock-radius-card);
 }
@@ -553,8 +593,11 @@ async function unassign(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 14px;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-card);
+  background: var(--frock-surface-subtle);
 }
 
 .exact-model-setting strong,
@@ -564,7 +607,8 @@ async function unassign(
   display: block;
 }
 
-.notification-setting strong {
+.notification-setting strong,
+.exact-model-setting strong {
   font-size: var(--frock-text-md);
   font-weight: 600;
 }
@@ -576,10 +620,90 @@ async function unassign(
   font-size: var(--frock-text-sm);
 }
 
-.exact-model-setting input,
-.notification-setting input {
+.exact-model-setting input[type="checkbox"],
+.notification-setting input[type="checkbox"] {
   width: 19px;
   height: 19px;
+  flex: 0 0 auto;
+  accent-color: var(--frock-action-primary);
+}
+
+.model-note {
+  margin: 0;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+
+.advanced {
+  border-top: 1px solid var(--frock-border);
+  padding-top: 12px;
+}
+
+.advanced summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+
+.advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced__marker {
+  display: grid;
+  place-items: center;
+  transition: transform var(--frock-motion-fast);
+}
+
+.advanced[open] .advanced__marker {
+  transform: rotate(180deg);
+}
+
+.advanced__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.model-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.model-mode legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--frock-text);
+  font-size: var(--frock-text-md);
+  font-weight: 600;
+}
+
+.model-mode label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--frock-text);
+  font-size: var(--frock-text-md);
+  cursor: pointer;
+}
+
+.model-mode input {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
   accent-color: var(--frock-action-primary);
 }
 

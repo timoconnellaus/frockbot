@@ -456,6 +456,43 @@ export function resolveBotModelBindingV1(input: {
   };
 }
 
+export interface EffectiveBotModelV1 {
+  /**
+   * "bot" when the Bot overrides the User default, "default" when the Bot
+   * follows `UserSettingsViewV1.newBotModelTemplate`, "none" when neither is
+   * set.
+   */
+  source: "bot" | "default" | "none";
+  model?: ModelAssignment;
+  binding?: ResolvedModelBindingV1;
+}
+
+/**
+ * The model a Bot actually runs on. A Bot without its own `model` follows the
+ * User's default dynamically, so changing the default changes every Bot that
+ * has not overridden it. Authority is unchanged: the returned binding is still
+ * resolved against the Bot's own Assignments, so a Bot that has never claimed
+ * the Connection's model Capability resolves "unavailable" until it does.
+ */
+export function resolveEffectiveBotModelV1(input: {
+  bot: Pick<BotSettingsViewV1, "model" | "assignments">;
+  user: UserSettingsViewV1;
+  packages: readonly ExecutionPackageDefinition[];
+}): EffectiveBotModelV1 {
+  const model = input.bot.model ?? input.user.newBotModelTemplate;
+  if (!model) return { source: "none" };
+  return {
+    source: input.bot.model ? "bot" : "default",
+    model: structuredClone(model),
+    binding: resolveBotModelBindingV1({
+      model,
+      assignments: input.bot.assignments,
+      user: input.user,
+      packages: input.packages,
+    }),
+  };
+}
+
 export function resolveBotExecutionPlanV1(input: {
   bot: BotSettingsViewV1;
   user: UserSettingsViewV1;
@@ -536,6 +573,11 @@ function connectionIdentifier(value: unknown, label: string): string {
   return value;
 }
 
+const rpcDisposalKeys: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
+  Symbol.dispose,
+  Symbol.asyncDispose,
+]);
+
 function exactRecord(
   value: unknown,
   label: string,
@@ -544,9 +586,13 @@ function exactRecord(
 ): Record<string, unknown> {
   const decoded = record(value, label);
   const allowed = new Set<PropertyKey>([...required, ...optional]);
+  // Values returned over Durable Object RPC carry a disposal symbol as an own
+  // key; it is transport, not a field. Every other own key must be declared.
   if (
     !required.every((key) => Object.hasOwn(decoded, key)) ||
-    Reflect.ownKeys(decoded).some((key) => !allowed.has(key))
+    Reflect.ownKeys(decoded).some(
+      (key) => !allowed.has(key) && !rpcDisposalKeys.has(key),
+    )
   ) {
     throw new ConfigurationDecodeError(`${label} has invalid fields`);
   }

@@ -4,5 +4,7 @@ export { default as UiField } from "./UiField.vue";
 export { default as UiIcon } from "./UiIcon.vue";
 export { uiIconPaths, type UiIconName } from "./icons.js";
 export { default as UiIconButton } from "./UiIconButton.vue";
+export { default as UiMarkdown } from "./UiMarkdown.vue";
+export { renderMarkdown } from "./markdown.js";
 export { default as UiSkeleton } from "./UiSkeleton.vue";
 export { createClientSurfaceRegistry } from "./surfaces.js";

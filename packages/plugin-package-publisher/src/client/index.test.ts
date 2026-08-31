@@ -72,7 +72,7 @@ describe("Package Publisher client contribution", () => {
     if (!Array.isArray(disposers)) throw new Error("expected registrations");
     expect(surfaces.has("package-publisher")).toBe(true);
     expect(slots.map((slot) => slot.slot)).toEqual([
-      "frockbot.sidebar-actions",
+      "frockbot.user-settings-sections",
     ]);
 
     const publisher = state as {

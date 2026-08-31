@@ -16,6 +16,9 @@
  */
 .app-shell {
   --panel-current: 0px;
+
+  /* A hosted surface needs more room than a panel plugin's summary column. */
+  --panel-surface-width: 360px;
   position: relative;
   display: grid;
   grid-template-columns:
@@ -30,6 +33,10 @@
 
 .app-shell.panel-open {
   --panel-current: var(--frock-panel-width);
+}
+
+.app-shell.panel-open.panel-surface {
+  --panel-current: var(--panel-surface-width);
 }
 
 /* Sidebar */
@@ -216,6 +223,90 @@
   margin-top: 18px;
 }
 
+/* An assistant Turn is its avatar and, once there is text, its bubble. */
+.message-assistant {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bot-avatar {
+  position: relative;
+  display: grid;
+  width: var(--frock-avatar-sm);
+  height: var(--frock-avatar-sm);
+  flex: 0 0 auto;
+  place-items: center;
+  margin-top: 2px;
+}
+
+.bot-avatar-fallback {
+  display: grid;
+  width: var(--frock-avatar-sm);
+  height: var(--frock-avatar-sm);
+  place-items: center;
+  border-radius: 9px;
+  color: var(--frock-action-primary-hover);
+  background: var(--frock-surface-accent);
+}
+
+/*
+ * A Package that fills `frockbot.bot-avatar` renders beside this tile, which
+ * then stops being the only child and steps aside.
+ */
+.bot-avatar-fallback:not(:only-child) {
+  display: none;
+}
+
+/*
+ * The avatar carries the running state: a fast breath with a halo while the
+ * Turn has produced nothing yet, a slower one once text is arriving. The
+ * reduced-motion block at the end of this file stops both.
+ */
+.bot-avatar-live {
+  animation: frock-breathe 2600ms ease-in-out infinite;
+}
+
+.bot-avatar-live::after {
+  position: absolute;
+  border-radius: 12px;
+  animation: frock-halo 2600ms ease-in-out infinite;
+  box-shadow: 0 0 0 2px var(--frock-surface-accent);
+  content: "";
+  inset: -4px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bot-avatar-waiting,
+.bot-avatar-waiting::after {
+  animation-duration: 1600ms;
+}
+
+@keyframes frock-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+@keyframes frock-halo {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
 .message-bubble {
   width: max-content;
   max-width: min(640px, 84%);
@@ -228,6 +319,7 @@
   line-height: var(--frock-leading-normal);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  animation: frock-rise-in var(--frock-motion-enter) both;
 }
 
 .message-user .message-bubble {
@@ -238,96 +330,16 @@
   background: var(--frock-action-primary);
 }
 
-.typing {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 1px;
-}
+/* Jump to latest */
 
-.typing i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--frock-action-primary);
-  animation: pulse 1s infinite alternate;
-}
-
-.typing i:nth-child(2) {
-  animation-delay: 150ms;
-}
-
-.typing i:nth-child(3) {
-  animation-delay: 300ms;
-}
-
-@keyframes pulse {
-  from {
-    opacity: 0.25;
-    transform: translateY(1px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(-1px);
-  }
-}
-
-.tool-list {
-  display: flex;
-  width: min(500px, 76%);
-  flex-direction: column;
-  gap: 5px;
-  margin-top: 6px;
-}
-
-.tool-row {
-  overflow: hidden;
-  border: 1px solid var(--frock-border);
-  border-radius: 10px;
-  background: var(--frock-surface-accent-soft);
-  font-size: var(--frock-text-sm);
-}
-
-.tool-row summary {
-  display: flex;
-  height: 30px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px;
-  color: var(--frock-text-muted);
-  cursor: pointer;
-  transition: background-color var(--frock-motion-fast);
-}
-
-.tool-row summary:hover {
-  background: var(--frock-fill-hover);
-}
-
-.tool-symbol {
-  color: var(--frock-success);
-}
-
-.tool-failed .tool-symbol {
-  color: var(--frock-danger-strong);
-}
-
-.tool-running .tool-symbol {
-  color: var(--frock-action-primary);
-}
-
-.tool-row pre {
-  overflow: auto;
-  max-height: 150px;
-  margin: 0;
-  padding: 9px 10px;
-  border-top: 1px solid var(--frock-border);
+.jump-latest {
+  position: absolute;
+  z-index: 6;
+  right: 24px;
+  bottom: 92px;
   color: var(--frock-text);
   background: var(--frock-surface);
-  font-family: var(--frock-font-mono);
-  font-size: var(--frock-text-sm);
-  line-height: var(--frock-leading-snug);
-  white-space: pre-wrap;
+  box-shadow: var(--frock-shadow-card);
 }
 
 /* Status banner */
@@ -439,13 +451,77 @@
   background: var(--frock-surface-subtle);
 }
 
-.right-panel-content {
-  width: var(--frock-panel-width);
+.right-panel-stack {
+  position: relative;
+  width: 100%;
   height: 100%;
+}
+
+.right-panel-content {
+  position: absolute;
+  inset: 0;
+  width: var(--frock-panel-width);
   overflow-y: auto;
   padding: var(--frock-titlebar-height) 16px 16px;
   scrollbar-color: var(--frock-scrollbar) transparent;
   scrollbar-width: thin;
+}
+
+.panel-surface-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  width: var(--panel-surface-width);
+  min-height: 0;
+  flex-direction: column;
+  background: var(--frock-surface);
+}
+
+/*
+ * The window actions are pinned over this column's top-right corner, so the
+ * close control sits at the header's leading edge and the title stops short
+ * of the gear and the panel toggle.
+ */
+.panel-surface-header {
+  display: flex;
+  height: var(--frock-titlebar-height);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 96px 0 10px;
+  border-bottom: 1px solid var(--frock-border);
+}
+
+.panel-surface-header h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--frock-text);
+  font-size: var(--frock-text-md);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.panel-surface-content {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  scrollbar-color: var(--frock-scrollbar) transparent;
+  scrollbar-width: thin;
+}
+
+.panel-swap-enter-active,
+.panel-swap-leave-active {
+  transition:
+    opacity var(--frock-motion-panel),
+    transform var(--frock-motion-panel);
+}
+
+.panel-swap-enter-from,
+.panel-swap-leave-to {
+  opacity: 0;
+  transform: translateX(12px);
 }
 
 /* Responsive */
@@ -453,6 +529,10 @@
 @media (max-width: 980px) {
   .app-shell.panel-open {
     --panel-current: 0px;
+  }
+
+  .app-shell.panel-surface .right-panel {
+    width: var(--panel-surface-width);
   }
 
   .right-panel {

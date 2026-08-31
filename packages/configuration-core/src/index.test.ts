@@ -22,6 +22,8 @@ import {
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
   resolveBotModelBindingV1,
+  resolveEffectiveBotModelV1,
+  type ModelAssignment,
 } from "./index.js";
 import {
   isApplicationDeploymentHash,
@@ -592,6 +594,23 @@ describe("configuration DTO seam", () => {
         })),
       }),
     ).toThrow(ConfigurationDecodeError);
+    // Values read over Durable Object RPC carry a `Symbol.dispose` own key;
+    // symbol keys are not fields and must not fail the exact-field check.
+    const disposableView = {
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "User" },
+      packages: [],
+      connections: [],
+      [Symbol.dispose]: () => undefined,
+    };
+    expect(decodeUserSettingsViewV1(disposableView)).toEqual({
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "User" },
+      packages: [],
+      connections: [],
+    });
     for (const value of [
       {
         schemaVersion: 1,
@@ -1038,5 +1057,143 @@ describe("Composition generation views", () => {
         currentGenerationId: AUTHORED_GENERATION,
       }),
     ).toThrow(ConfigurationDecodeError);
+  });
+});
+
+describe("effective Bot model resolution", () => {
+  const modelPackages = [
+    {
+      packageId: "provider-ollama-cloud",
+      version: "0.0.1",
+      capabilities: [
+        {
+          id: "ollama-cloud-models",
+          kind: "model" as const,
+          connectionTypes: ["ollama-cloud-account"],
+        },
+      ],
+      connectionTypes: [
+        { id: "ollama-cloud-account", capabilities: ["ollama-cloud-models"] },
+      ],
+    },
+  ];
+  function user(
+    newBotModelTemplate?: ModelAssignment,
+  ): Parameters<typeof resolveEffectiveBotModelV1>[0]["user"] {
+    return {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          providerType: "ollama-cloud",
+          modelCatalog: {
+            schemaVersion: 1,
+            generation: "catalog-1",
+            state: "fresh",
+            models: [
+              {
+                providerModelId: "glm-5.3-flash:cloud",
+                displayName: "GLM 5.3 Flash",
+                capabilities: { tools: true, vision: false, reasoning: true },
+                source: "discovered",
+              },
+              {
+                providerModelId: "llama-3:cloud",
+                displayName: "Llama 3",
+                capabilities: { tools: true, vision: false, reasoning: false },
+                source: "discovered",
+              },
+            ],
+          },
+          safeMetadata: {},
+        },
+      ],
+      ...(newBotModelTemplate ? { newBotModelTemplate } : {}),
+    };
+  }
+  const assignments = [
+    {
+      assignmentId: "ollama-model",
+      packageId: "provider-ollama-cloud",
+      capabilityId: "ollama-cloud-models",
+      connectionId: "ollama-work",
+      state: "enabled" as const,
+    },
+  ];
+
+  test("follows the User default when the Bot has no model of its own", () => {
+    const effective = resolveEffectiveBotModelV1({
+      bot: { assignments },
+      user: user({
+        connectionId: "ollama-work",
+        providerModelId: "llama-3:cloud",
+      }),
+      packages: modelPackages,
+    });
+    expect(effective.source).toBe("default");
+    expect(effective.model).toEqual({
+      connectionId: "ollama-work",
+      providerModelId: "llama-3:cloud",
+    });
+    expect(effective.binding?.state).toBe("ready");
+  });
+
+  test("prefers the Bot override over the User default", () => {
+    const effective = resolveEffectiveBotModelV1({
+      bot: {
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        assignments,
+      },
+      user: user({
+        connectionId: "ollama-work",
+        providerModelId: "llama-3:cloud",
+      }),
+      packages: modelPackages,
+    });
+    expect(effective.source).toBe("bot");
+    expect(effective.model?.providerModelId).toBe("glm-5.3-flash:cloud");
+    expect(effective.binding?.state).toBe("ready");
+  });
+
+  test("reports no model when neither the Bot nor the User names one", () => {
+    expect(
+      resolveEffectiveBotModelV1({
+        bot: { assignments },
+        user: user(),
+        packages: modelPackages,
+      }),
+    ).toEqual({ source: "none" });
+  });
+
+  test("keeps the default fail-closed until the Bot claims the Assignment", () => {
+    const effective = resolveEffectiveBotModelV1({
+      bot: { assignments: [] },
+      user: user({
+        connectionId: "ollama-work",
+        providerModelId: "llama-3:cloud",
+      }),
+      packages: modelPackages,
+    });
+    expect(effective.source).toBe("default");
+    expect(effective.binding).toMatchObject({
+      state: "unavailable",
+      failure: "Bot is not assigned the Connection model capability",
+    });
   });
 });

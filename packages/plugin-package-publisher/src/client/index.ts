@@ -10,8 +10,8 @@ import {
   decodePackagePublicationReceiptV1,
   decodePackageRevisionHistoryV1,
 } from "../shared.js";
+import PackagePublisherSection from "./PackagePublisherSection.vue";
 import PackagePublisherSurface from "./PackagePublisherSurface.vue";
-import PackagePublisherTrigger from "./PackagePublisherTrigger.vue";
 import {
   packagePublisherStateKey,
   type PackagePublisherClientState,
@@ -71,10 +71,12 @@ export const packagePublisherClientPlugin: ClientPlugin = (ctx) => {
       title: "Published setup",
       component: PackagePublisherSurface,
     }),
+    // Revisions are an internal detail: they live inside the User profile's
+    // advanced section rather than the sidebar.
     ctx.slot({
-      slot: "frockbot.sidebar-actions",
+      slot: "frockbot.user-settings-sections",
       order: 20,
-      component: PackagePublisherTrigger,
+      component: PackagePublisherSection,
     }),
   ];
 };

@@ -25,6 +25,26 @@ describe("client surface registry", () => {
     expect(registry.activeId.value).toBeUndefined();
   });
 
+  test("carries the declared placement and defaults to an overlay", () => {
+    const registry = createClientSurfaceRegistry();
+    registry.register({
+      id: "bot-settings",
+      title: "Bot settings",
+      component: Surface,
+      placement: "panel",
+    });
+    registry.register({
+      id: "plugins",
+      title: "Plugins",
+      component: Surface,
+    });
+
+    registry.open("bot-settings");
+    expect(registry.active.value?.placement).toBe("panel");
+    registry.open("plugins");
+    expect(registry.active.value?.placement).toBeUndefined();
+  });
+
   test("rejects missing and duplicate surfaces", () => {
     const registry = createClientSurfaceRegistry();
     expect(() => registry.open("missing")).toThrow(

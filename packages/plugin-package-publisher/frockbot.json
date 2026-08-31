@@ -17,7 +17,7 @@
     "runtime": { "entry": "./agent" },
     "client": {
       "entry": "./client",
-      "mounts": [{ "slot": "frockbot.sidebar-actions", "order": 20 }],
+      "mounts": [{ "slot": "frockbot.user-settings-sections", "order": 20 }],
       "outlets": []
     }
   },
