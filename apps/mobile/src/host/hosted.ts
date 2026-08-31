@@ -344,11 +344,18 @@ export async function startHostedMobileCapabilities(
   const meta = document.querySelector<HTMLMetaElement>(
     'meta[name="frockbot-application"]',
   )?.content;
+  // `getServerUrl` exists only in the native Capacitor runtime. Reading it
+  // unconditionally threw on every hosted page load in a browser, and the
+  // rejection surfaced as a console error even though the absence of a native
+  // shell is the expected case for the WebUI.
+  const native = Capacitor.isNativePlatform();
   const capabilities = await mountHostedMobileCapabilities({
-    native: Capacitor.isNativePlatform(),
-    configuredServerUrl: (
-      Capacitor as typeof Capacitor & { getServerUrl(): string }
-    ).getServerUrl(),
+    native,
+    configuredServerUrl: native
+      ? (
+          Capacitor as typeof Capacitor & { getServerUrl(): string }
+        ).getServerUrl()
+      : "",
     currentUrl: window.location.href,
     applicationHash: meta,
     bodyApplicationHash: document.body.dataset.frockbotUserApplication,
