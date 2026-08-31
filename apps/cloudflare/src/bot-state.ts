@@ -7,6 +7,7 @@ import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
 } from "@frockbot/configuration-core";
+import { BotDurableAuthority } from "@frockbot/kernel-do";
 import type {
   BotStateEnv,
   OwnedBotTurnCommand,
@@ -100,6 +101,11 @@ export class BotState extends DurableObject<BotStateEnv> {
                   state: this.ctx,
                   env: this.env,
                   outboundFetch: this.outboundFetch,
+                  // The Durable Object owns the kernel authority; the Shell
+                  // Package supplies only its configuration and Composition
+                  // hooks.
+                  createAuthority: (options) =>
+                    new BotDurableAuthority(options),
                 },
                 {
                   mount(value) {

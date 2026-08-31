@@ -1,9 +1,13 @@
-import {
-  decodeSessionEvent,
-  type NormalizedModelRequest,
-  type SessionEvent,
-} from "@frockbot/agent-core";
+import type { NormalizedModelRequest } from "@frockbot/agent-core";
 import type { Plugin } from "cordis";
+import {
+  BotDurableAuthority,
+  IDENTITY_KEY,
+  type BotIdentity,
+  type BotDurableAuthorityOptions,
+  type BotTurnExecutionInput,
+  type OwnedBotTurnCommand,
+} from "@frockbot/kernel-do";
 import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
@@ -41,21 +45,7 @@ import {
   settleAssignmentSaga,
   type StoredAssignmentSaga,
 } from "./backend-assignment.js";
-import {
-  completeStoredRun,
-  failStoredRun,
-  requireStoredRunReconciliation,
-} from "./backend-completion.js";
-import {
-  BotTurnReconciliationRequiredError,
-  BotTurnRecoveryRequiredError,
-  executeBotTurn,
-} from "./backend-runner.js";
-import {
-  eventsForFailedRun,
-  latestModelRequestJournalState,
-  planBotRunRecovery,
-} from "./backend-recovery.js";
+import { executeBotTurn } from "./backend-runner.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
@@ -72,50 +62,18 @@ import {
   type ClientTurnV1,
 } from "./run-protocol.js";
 import {
-  botTurnCommandFingerprintV1,
-  requireStoredRunV1,
+  storedRunCodecV1,
   type BotNotificationIntent,
-  type BotTurnCommand,
   type BotTurnCompletion,
-  type StoredRun,
 } from "./backend-contracts.js";
 
-const RUN_PREFIX = "run:";
-const RUN_INDEX_PREFIX = "run-index:";
-const RUN_ADMISSION_FENCE_PREFIX = "run-admission-fence:";
-const RUN_ADMISSION_FENCE_INDEX_KEY = "run-admission-fences";
-const MAX_RUN_ADMISSION_FENCES = 256;
-const ACTIVE_RUN_KEY = "active-run";
-const LATEST_EVENTS_KEY = "latest-events";
-const IDENTITY_KEY = "identity";
 const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const ASSIGNMENT_GENERATION_PREFIX = "assignment-generation:";
 const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
 const ASSIGNMENT_TOMBSTONE_PREFIX = "assignment-tombstone:";
 const ASSIGNMENT_SAGA_PREFIX = "assignment-saga:";
-const NOTIFICATION_PREFIX = "notification:";
-const RECOVERY_ALARM_DELAY_MS = 60_000;
 const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
-
-function runIndexKey(acceptedAt: string, runId: string): string {
-  return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;
-}
-
-function storedRunAdmissionFences(input: unknown): string[] {
-  if (input === undefined) return [];
-  if (
-    !Array.isArray(input) ||
-    input.length > MAX_RUN_ADMISSION_FENCES ||
-    input.some(
-      (runId) =>
-        typeof runId !== "string" || runId.length < 1 || runId.length > 128,
-    )
-  ) {
-    throw new Error("Stored run admission fences are invalid");
-  }
-  return [...new Set(input)];
-}
 
 function assignmentGenerationKey(assignmentId: string): string {
   return `${ASSIGNMENT_GENERATION_PREFIX}${assignmentId}`;
@@ -123,11 +81,6 @@ function assignmentGenerationKey(assignmentId: string): string {
 
 function capabilityKey(packageId: string, capabilityId: string): string {
   return `${packageId}:${capabilityId}`;
-}
-
-interface BotIdentity {
-  userId: string;
-  botId: string;
 }
 
 interface StoredConfigurationReceipt {
@@ -153,7 +106,7 @@ function requireMatchingConfigurationReceipt(
   return stored.receipt;
 }
 
-export interface OwnedBotTurnCommand extends BotTurnCommand, BotIdentity {}
+export type { BotIdentity, OwnedBotTurnCommand };
 
 export interface BotStateEnv {
   MEMORY_FILES: R2Bucket;
@@ -164,15 +117,18 @@ export interface BotStateEnv {
   CREDENTIAL_KEYRING?: string;
 }
 
+/** Constructs the kernel Bot Durable Object authority this Package runs under. */
+export type CreateBotDurableAuthority = <Snapshot>(
+  options: BotDurableAuthorityOptions<Snapshot>,
+) => BotDurableAuthority<Snapshot>;
+
 export interface ShellBotBackendHost {
   state: DurableObjectState;
   env: BotStateEnv;
   compileApplication?: typeof compileFoundationApplication;
   outboundFetch?: typeof fetch;
-}
-
-function optionalStoredRun(input: unknown): StoredRun | undefined {
-  return input === undefined ? undefined : requireStoredRunV1(input);
+  /** Supplied by the Durable Object; defaults to the kernel implementation. */
+  createAuthority?: CreateBotDurableAuthority;
 }
 
 function parseStoredJson<T>(body: string): Promise<T> {
@@ -244,8 +200,13 @@ export class ShellBotBackendContribution {
   readonly env: BotStateEnv;
   private readonly compileApplication: typeof compileFoundationApplication;
   private readonly outboundFetch?: typeof fetch;
-  private executingRunId: string | undefined;
   private readonly assignmentActivities = new Map<string, AssignmentActivity>();
+  /**
+   * Admission, the event log, the cursor, idempotency, cancellation, and
+   * durable scheduling are kernel authority; this Package supplies only the
+   * configuration, Composition, and notification policy it needs.
+   */
+  private readonly authority: BotDurableAuthority<BotSettingsViewV1>;
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -253,6 +214,27 @@ export class ShellBotBackendContribution {
     this.compileApplication =
       host.compileApplication ?? compileFoundationApplication;
     this.outboundFetch = host.outboundFetch;
+    const createAuthority: CreateBotDurableAuthority =
+      host.createAuthority ?? ((options) => new BotDurableAuthority(options));
+    this.authority = createAuthority<BotSettingsViewV1>({
+      state: host.state,
+      codec: storedRunCodecV1,
+      hooks: {
+        resolveAdmissionSnapshot: (command) =>
+          this.resolveAdmissionSnapshot(command),
+        admittedSnapshot: (transaction, resolved) =>
+          this.admittedSnapshot(transaction, resolved),
+        executeTurn: (input) => this.executeTurn(input),
+        notification: (snapshot, result) =>
+          this.createNotification(snapshot, result),
+        scheduledDeadlines: (transaction) =>
+          this.scheduledDeadlines(transaction),
+        scheduledWorkInFlight: () => this.assignmentActivities.size > 0,
+        deferScheduledWork: (transaction) =>
+          this.deferScheduledWork(transaction),
+        settleScheduledWork: () => this.settleScheduledWork(),
+      },
+    });
   }
 
   async materializeSettings(
@@ -1156,28 +1138,8 @@ export class ShellBotBackendContribution {
   private async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
-    const [activeRunId, sagas] = await Promise.all([
-      transaction.get<string>(ACTIVE_RUN_KEY),
-      transaction.list<StoredAssignmentSaga>({
-        prefix: ASSIGNMENT_SAGA_PREFIX,
-      }),
-    ]);
-    const activeRun = activeRunId
-      ? optionalStoredRun(
-          await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
-        )
-      : undefined;
-    const deadlines = [...sagas.values()].map((saga) => saga.deadlineAt);
-    if (
-      activeRunId &&
-      (!activeRun || activeRun.status !== "reconciliation-required")
-    ) {
-      deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
-    }
-    if (deadlines.length === 0) await transaction.deleteAlarm();
-    else await transaction.setAlarm(Math.min(...deadlines));
+    await this.authority.refreshRecoveryAlarm(transaction);
   }
-
   async markConnectionUnavailable(
     identity: BotIdentity,
     connectionId: string,
@@ -1238,261 +1200,105 @@ export class ShellBotBackendContribution {
   }
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
-    await this.assertMatchingRunCommand(command);
-    await this.recoverActiveRun();
-    const replay = await this.completedRunResult(command);
-    if (replay) return projectClientTurnV1(replay);
-    const admission = await this.acceptRun(command);
-    return projectClientTurnV1(
-      await this.executeAcceptedRun(
-        command,
-        admission.previous,
-        admission.settings,
-      ),
-    );
+    return projectClientTurnV1(await this.authority.run(command));
   }
 
   async reconcileRun(
     identity: BotIdentity,
     runId: string,
   ): Promise<ClientTurnV1> {
-    await this.assertIdentity(identity);
-    const key = `${RUN_PREFIX}${runId}`;
-    const recovery = await this.ctx.storage.transaction(async (transaction) => {
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
-      if (
-        !run ||
-        run.status !== "reconciliation-required" ||
-        activeRunId !== runId
-      ) {
-        throw new Error(`run "${runId}" does not require reconciliation`);
-      }
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      const settings = run.configurationSnapshot;
-      await transaction.put(key, {
-        ...run,
-        status: "running",
-        phase: "executing",
-        failure: undefined,
-      } satisfies StoredRun);
-      await this.refreshRecoveryAlarm(transaction);
-      return { run, latest, settings };
+    return projectClientTurnV1(
+      await this.authority.reconcileRun(identity, runId),
+    );
+  }
+  private async executeTurn(
+    input: BotTurnExecutionInput<BotSettingsViewV1>,
+  ): Promise<BotTurnCompletion> {
+    const settings = input.configurationSnapshot;
+    const runtime = await this.agentRuntime(
+      input.identity,
+      settings,
+      input.admittedRequest,
+    );
+    const promptParts = [
+      `You are ${settings.profile.name}.`,
+      settings.profile.label,
+      settings.profile.description,
+    ].filter((part): part is string => Boolean(part?.trim()));
+    return executeBotTurn({
+      botId: input.identity.botId,
+      command: input.command,
+      previousEvents: input.previousEvents,
+      memory: memoryPluginConfig(this.env, input.identity),
+      persistSessionEvents: input.persistSessionEvents,
+      agentPackages: runtime.agentPackages,
+      modelSelection: runtime.modelSelection,
+      systemPromptSection: promptParts.join("\n\n"),
+      resume: input.resume,
     });
-    try {
-      return projectClientTurnV1(
-        await this.executeResumedRun(
-          identity,
-          recovery.run,
-          recovery.latest,
-          recovery.settings,
-        ),
-      );
-    } catch (error) {
-      const current = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(key),
-      );
-      if (current?.status === "reconciliation-required") {
-        const previous = recovery.latest.slice(0, current.previousEventCount);
-        const failure =
-          error instanceof Error ? error.message : "Reconciliation failed";
-        await this.failRun(
-          runId,
-          previous,
-          current.events,
-          `Reconciliation was explicitly abandoned: ${failure}`,
-        );
-      }
-      throw error;
-    }
   }
 
-  private async executeAcceptedRun(
+  private async resolveAdmissionSnapshot(
     command: OwnedBotTurnCommand,
-    previous: SessionEvent[],
-    settings: BotSettingsViewV1,
-  ): Promise<BotTurnCompletion> {
-    this.executingRunId = command.runId;
-    try {
-      await this.ctx.storage.transaction(async (transaction) => {
-        const key = `${RUN_PREFIX}${command.runId}`;
-        const run = optionalStoredRun(await transaction.get<unknown>(key));
-        if (!run || run.status !== "running") {
-          throw new Error(`run "${command.runId}" is not resumable`);
-        }
-        await transaction.put(key, {
-          ...run,
-          phase: "executing",
-        } satisfies StoredRun);
-        await this.refreshRecoveryAlarm(transaction);
-      });
-      const runtime = await this.agentRuntime(command, settings);
-      const promptParts = [
-        `You are ${settings.profile.name}.`,
-        settings.profile.label,
-        settings.profile.description,
-      ].filter((part): part is string => Boolean(part?.trim()));
-      const result = await executeBotTurn({
-        botId: command.botId,
-        command,
-        previousEvents: previous,
-        memory: memoryPluginConfig(this.env, command),
-        persistSessionEvents: (_sessionId, events) =>
-          this.persistRunEvents(command.runId, events),
-        agentPackages: runtime.agentPackages,
-        modelSelection: runtime.modelSelection,
-        systemPromptSection: promptParts.join("\n\n"),
-      });
-      const completed = settings.notifications.enabled
-        ? {
-            ...result,
-            notification: this.createNotification(settings, result),
-          }
-        : result;
-      await this.completeRun(command.runId, previous, completed);
-      return completed;
-    } catch (error) {
-      const durableRun = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
-      );
-      const events = eventsForFailedRun(durableRun, error);
-      const message =
-        error instanceof Error ? error.message : "Bot turn failed";
-      if (error instanceof BotTurnRecoveryRequiredError) {
-        await this.deferRunRecovery(command.runId);
-        throw new Error(message);
-      }
-      const modelState = latestModelRequestJournalState(events);
-      if (
-        error instanceof BotTurnReconciliationRequiredError ||
-        modelState.status === "unresolved"
-      ) {
-        await this.requireRunReconciliation(
-          command.runId,
-          previous,
-          events,
-          modelState.status === "unresolved"
-            ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
-            : message,
-        );
-        throw new Error(message);
-      }
-      await this.failRun(command.runId, previous, events, message);
-      throw new Error(message);
-    } finally {
-      if (this.executingRunId === command.runId) {
-        this.executingRunId = undefined;
-      }
-    }
+  ): Promise<BotSettingsViewV1> {
+    const context = await this.resolveExecutionContext(command);
+    return {
+      ...context.settings,
+      assignments: context.plan.assignments,
+    } satisfies BotSettingsViewV1;
   }
 
-  private async executeResumedRun(
-    identity: BotIdentity,
-    run: StoredRun,
-    latest: SessionEvent[],
-    settings: BotSettingsViewV1,
-  ): Promise<BotTurnCompletion> {
-    this.executingRunId = run.runId;
-    requireStoredRunV1(run);
-    const previous = latest.slice(0, run.previousEventCount);
-    try {
-      const modelState = latestModelRequestJournalState(latest);
-      const runtime = await this.agentRuntime(
-        identity,
-        settings,
-        modelState.status === "completed"
-          ? modelState.request.request
-          : undefined,
-      );
-      const promptParts = [
-        `You are ${settings.profile.name}.`,
-        settings.profile.label,
-        settings.profile.description,
-      ].filter((part): part is string => Boolean(part?.trim()));
-      const result = await executeBotTurn({
-        botId: identity.botId,
-        command: {
-          runId: run.runId,
-          sessionId: run.sessionId,
-          acceptedAt: run.acceptedAt,
-          text: run.input,
-        },
-        previousEvents: latest,
-        memory: memoryPluginConfig(this.env, identity),
-        persistSessionEvents: (_sessionId, events) =>
-          this.persistRunEvents(run.runId, events),
-        agentPackages: runtime.agentPackages,
-        modelSelection: runtime.modelSelection,
-        systemPromptSection: promptParts.join("\n\n"),
-        resume: true,
-      });
-      const durableRun = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
-      );
-      if (!durableRun) throw new Error(`run "${run.runId}" was not accepted`);
-      const fullResult = {
-        ...result,
-        events: durableRun.events,
-      } satisfies BotTurnCompletion;
-      const completed = settings.notifications.enabled
-        ? {
-            ...fullResult,
-            notification: this.createNotification(settings, fullResult),
-          }
-        : fullResult;
-      await this.completeRun(run.runId, previous, completed);
-      return completed;
-    } catch (error) {
-      const durableRun = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
-      );
-      const events = durableRun?.events ?? run.events;
-      const message =
-        error instanceof Error ? error.message : "Bot turn failed";
-      if (error instanceof BotTurnRecoveryRequiredError) {
-        await this.deferRunRecovery(run.runId);
-        throw new Error(message);
-      }
-      const modelState = latestModelRequestJournalState(events);
-      if (
-        error instanceof BotTurnReconciliationRequiredError ||
-        modelState.status === "unresolved"
-      ) {
-        await this.requireRunReconciliation(
-          run.runId,
-          previous,
-          events,
-          modelState.status === "unresolved"
-            ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
-            : message,
-        );
-        throw new Error(message);
-      }
-      await this.failRun(run.runId, previous, events, message);
-      throw new Error(message);
-    } finally {
-      if (this.executingRunId === run.runId) this.executingRunId = undefined;
-    }
+  private async admittedSnapshot(
+    transaction: DurableObjectTransaction,
+    resolved: BotSettingsViewV1,
+  ): Promise<BotSettingsViewV1> {
+    return (
+      (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
+      resolved
+    );
   }
 
-  private async deferRunRecovery(runId: string): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      const run = optionalStoredRun(
-        await transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
-      );
-      if (!run || run.status !== "running") {
-        throw new Error(`run "${runId}" is not resumable`);
-      }
-      await transaction.put(`${RUN_PREFIX}${runId}`, {
-        ...run,
-        phase: "executing",
-      } satisfies StoredRun);
-      await this.refreshRecoveryAlarm(transaction);
+  private async scheduledDeadlines(
+    transaction: DurableObjectTransaction,
+  ): Promise<number[]> {
+    const sagas = await transaction.list<StoredAssignmentSaga>({
+      prefix: ASSIGNMENT_SAGA_PREFIX,
     });
+    return [...sagas.values()].map((saga) => saga.deadlineAt);
   }
 
+  private async deferScheduledWork(
+    transaction: DurableObjectTransaction,
+  ): Promise<void> {
+    const sagas = await transaction.list<StoredAssignmentSaga>({
+      prefix: ASSIGNMENT_SAGA_PREFIX,
+    });
+    for (const [key, saga] of sagas) {
+      await transaction.put(key, {
+        ...saga,
+        deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
+      } satisfies StoredAssignmentSaga);
+    }
+  }
+
+  private async settleScheduledWork(): Promise<void> {
+    const sagas = await this.ctx.storage.list<StoredAssignmentSaga>({
+      prefix: ASSIGNMENT_SAGA_PREFIX,
+    });
+    for (const saga of sagas.values()) {
+      try {
+        await this.reconcileStoredAssignmentSaga(
+          { userId: saga.userId, botId: saga.botId },
+          saga.commandId,
+        );
+      } catch (error) {
+        console.error(
+          "Assignment saga remains durably scheduled after reconciliation failure",
+          error instanceof Error ? error.message : "unknown failure",
+        );
+      }
+    }
+  }
   private async agentRuntime(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
@@ -1737,85 +1543,26 @@ export class ShellBotBackendContribution {
     return connection;
   }
 
-  private async completedRunResult(
-    command: OwnedBotTurnCommand,
-  ): Promise<BotTurnCompletion | undefined> {
-    const { runId } = command;
-    const run = optionalStoredRun(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
-    );
-    if (!run) return undefined;
-    if (run.commandFingerprint !== botTurnCommandFingerprintV1(command)) {
-      throw new Error(
-        `Turn idempotency key "${runId}" was reused for a different command`,
-      );
-    }
-    if (run.status !== "completed") {
-      throw new Error(
-        `run "${runId}" already exists with status ${run.status}`,
-      );
-    }
-    if (run.responseText === undefined) {
-      throw new Error(`run "${runId}" has no response text`);
-    }
-    const notification = await this.ctx.storage.get<BotNotificationIntent>(
-      `${NOTIFICATION_PREFIX}${runId}`,
-    );
-    return {
-      runId,
-      text: run.responseText,
-      events: structuredClone(run.events),
-      notification,
-    };
-  }
-
-  private async assertMatchingRunCommand(
-    command: OwnedBotTurnCommand,
-  ): Promise<void> {
-    const run = optionalStoredRun(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
-    );
-    if (
-      run &&
-      run.commandFingerprint !== botTurnCommandFingerprintV1(command)
-    ) {
-      throw new Error(
-        `Turn idempotency key "${command.runId}" was reused for a different command`,
-      );
-    }
-  }
-
   async readDurableIdentity(): Promise<BotIdentity | undefined> {
-    return this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    return this.authority.readDurableIdentity();
   }
 
   async validateIdentity(identity: BotIdentity): Promise<void> {
-    const existing = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    if (
-      existing &&
-      (existing.userId !== identity.userId || existing.botId !== identity.botId)
-    ) {
-      throw new Error("Bot authority does not match its durable identity");
-    }
+    return this.authority.validateIdentity(identity);
   }
 
   async listNotifications(): Promise<BotNotificationIntent[]> {
-    const entries = await this.ctx.storage.list<BotNotificationIntent>({
-      prefix: NOTIFICATION_PREFIX,
-    });
-    return [...entries.values()].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
-    );
+    return this.authority.listNotifications();
   }
 
   async acknowledgeNotification(notificationId: string): Promise<void> {
-    await this.ctx.storage.delete(`${NOTIFICATION_PREFIX}${notificationId}`);
+    return this.authority.acknowledgeNotification(notificationId);
   }
-
   private createNotification(
     settings: BotSettingsViewV1,
     result: BotTurnCompletion,
-  ): BotNotificationIntent {
+  ): BotNotificationIntent | undefined {
+    if (!settings.notifications.enabled) return undefined;
     return {
       notificationId: result.runId,
       runId: result.runId,
@@ -1826,75 +1573,24 @@ export class ShellBotBackendContribution {
   }
 
   async alarm(): Promise<void> {
-    if (this.executingRunId || this.assignmentActivities.size > 0) {
-      await this.ctx.storage.transaction(async (transaction) => {
-        const sagas = await transaction.list<StoredAssignmentSaga>({
-          prefix: ASSIGNMENT_SAGA_PREFIX,
-        });
-        for (const [key, saga] of sagas) {
-          await transaction.put(key, {
-            ...saga,
-            deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
-          } satisfies StoredAssignmentSaga);
-        }
-        await this.refreshRecoveryAlarm(transaction);
-      });
-      return;
-    }
-    const sagas = await this.ctx.storage.list<StoredAssignmentSaga>({
-      prefix: ASSIGNMENT_SAGA_PREFIX,
-    });
-    for (const saga of sagas.values()) {
-      try {
-        await this.reconcileStoredAssignmentSaga(
-          { userId: saga.userId, botId: saga.botId },
-          saga.commandId,
-        );
-      } catch (error) {
-        console.error(
-          "Assignment saga remains durably scheduled after reconciliation failure",
-          error instanceof Error ? error.message : "unknown failure",
-        );
-      }
-    }
-    const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
-    if (activeRunId) {
-      const [storedRun, identity] = await Promise.all([
-        this.ctx.storage.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
-        this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
-      ]);
-      const run = optionalStoredRun(storedRun);
-      if (run?.status === "reconciliation-required" && identity) return;
-    }
-    await this.recoverActiveRun();
+    await this.authority.alarm();
   }
-
   async listRuns(
     input: unknown = { schemaVersion: 1 },
   ): Promise<ClientRunListV1> {
     const query = decodeClientRunListQueryV1(input);
-    await this.recoverActiveRun();
+    await this.authority.recoverActiveRun();
     const activeRunId = query.before
       ? undefined
-      : await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
-    const indexEntries = await this.ctx.storage.list<string>({
-      prefix: RUN_INDEX_PREFIX,
-      reverse: true,
+      : await this.authority.readActiveRunId();
+    const candidates = await this.authority.listRunIndex({
       limit: CLIENT_RUN_PAGE_LIMIT + 1,
-      ...(query.before?.startsWith(RUN_INDEX_PREFIX)
-        ? { end: query.before }
-        : {}),
+      ...(query.before ? { before: query.before } : {}),
     });
-    const candidates = [...indexEntries].map(([cursor, runId]) => ({
-      cursor,
-      runId,
-    }));
 
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
-      const active = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
-      );
+      const active = await this.authority.readStoredRun(activeRunId);
       if (active)
         selected.set(active.runId, { run: projectClientRunV1(active) });
     }
@@ -1906,9 +1602,7 @@ export class ShellBotBackendContribution {
         selected.set(candidate.runId, { ...current, cursor: candidate.cursor });
         continue;
       }
-      const stored = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${candidate.runId}`),
-      );
+      const stored = await this.authority.readStoredRun(candidate.runId);
       if (!stored) continue;
       const projected = projectClientRunV1(stored);
       const tentative = [
@@ -1960,16 +1654,9 @@ export class ShellBotBackendContribution {
     }
     return page;
   }
-
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
-    const run = optionalStoredRun(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${query.runId}`),
-    );
-    if (run && run.runId !== query.runId) {
-      throw new Error("stored run does not match its lookup key");
-    }
-    return projectClientRunLookupV1(run);
+    return projectClientRunLookupV1(await this.authority.readRun(query.runId));
   }
 
   async fenceRunAdmission(
@@ -1977,44 +1664,10 @@ export class ShellBotBackendContribution {
     input: unknown,
   ): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
-      if (
-        durableIdentity &&
-        (durableIdentity.userId !== identity.userId ||
-          durableIdentity.botId !== identity.botId)
-      ) {
-        throw new Error("Bot authority does not match its durable identity");
-      }
-      const run = optionalStoredRun(
-        await transaction.get<unknown>(`${RUN_PREFIX}${query.runId}`),
-      );
-      if (run && run.runId !== query.runId) {
-        throw new Error("stored run does not match its lookup key");
-      }
-      if (!run) {
-        const storedFences = storedRunAdmissionFences(
-          await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
-        );
-        if (
-          !storedFences.includes(query.runId) &&
-          storedFences.length >= MAX_RUN_ADMISSION_FENCES
-        ) {
-          throw new Error("Run admission fence capacity reached");
-        }
-        await transaction.put({
-          [RUN_ADMISSION_FENCE_INDEX_KEY]: [
-            ...storedFences.filter((runId) => runId !== query.runId),
-            query.runId,
-          ],
-          [IDENTITY_KEY]: durableIdentity ?? identity,
-        });
-        await transaction.delete(`${RUN_ADMISSION_FENCE_PREFIX}${query.runId}`);
-      }
-      return projectClientRunLookupV1(run);
-    });
+    return projectClientRunLookupV1(
+      await this.authority.fenceRunAdmission(identity, query.runId),
+    );
   }
-
   private initialBotSettings(
     botId: string,
     model?: BotSettingsViewV1["model"],
@@ -2221,339 +1874,6 @@ export class ShellBotBackendContribution {
       };
     }
     return { settings, user, plan };
-  }
-
-  private async assertIdentity(identity: BotIdentity): Promise<void> {
-    const existing = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    if (
-      existing &&
-      (existing.userId !== identity.userId || existing.botId !== identity.botId)
-    ) {
-      throw new Error("Bot authority does not match its durable identity");
-    }
-    if (!existing) await this.ctx.storage.put(IDENTITY_KEY, identity);
-  }
-
-  private async acceptRun(
-    command: OwnedBotTurnCommand,
-  ): Promise<{ previous: SessionEvent[]; settings: BotSettingsViewV1 }> {
-    const fenceKey = `${RUN_ADMISSION_FENCE_PREFIX}${command.runId}`;
-    const fences = storedRunAdmissionFences(
-      await this.ctx.storage.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
-    );
-    if (
-      fences.includes(command.runId) ||
-      (await this.ctx.storage.get(fenceKey))
-    ) {
-      throw new Error(`run "${command.runId}" admission was fenced`);
-    }
-    const context = await this.resolveExecutionContext(command);
-    const settings = {
-      ...context.settings,
-      assignments: context.plan.assignments,
-    } satisfies BotSettingsViewV1;
-    const key = `${RUN_PREFIX}${command.runId}`;
-    return this.ctx.storage.transaction(async (transaction) => {
-      const existing = optionalStoredRun(await transaction.get<unknown>(key));
-      if (existing) {
-        if (
-          existing.commandFingerprint !== botTurnCommandFingerprintV1(command)
-        ) {
-          throw new Error(
-            `Turn idempotency key "${command.runId}" was reused for a different command`,
-          );
-        }
-        if (existing.status === "completed") {
-          throw new Error(`run "${command.runId}" already completed`);
-        }
-        throw new Error(`run "${command.runId}" already exists`);
-      }
-      const fences = storedRunAdmissionFences(
-        await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
-      );
-      if (fences.includes(command.runId) || (await transaction.get(fenceKey))) {
-        throw new Error(`run "${command.runId}" admission was fenced`);
-      }
-      const identity = await transaction.get<BotIdentity>(IDENTITY_KEY);
-      if (
-        identity &&
-        (identity.userId !== command.userId || identity.botId !== command.botId)
-      ) {
-        throw new Error("Bot authority does not match its durable identity");
-      }
-      if (await transaction.get(ACTIVE_RUN_KEY)) {
-        throw new Error("bot already has an active run");
-      }
-      const latestEvents = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      const admittedSettings =
-        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-        settings;
-      const admittedRun = requireStoredRunV1({
-        runId: command.runId,
-        commandFingerprint: botTurnCommandFingerprintV1(command),
-        sessionId: command.sessionId,
-        acceptedAt: command.acceptedAt,
-        input: command.text,
-        events: [],
-        status: "running",
-        phase: "admitted",
-        configurationSnapshot: structuredClone(admittedSettings),
-        previousEventCount: latestEvents.length,
-      } satisfies StoredRun);
-      await transaction.put({
-        [key]: admittedRun,
-        [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
-        [ACTIVE_RUN_KEY]: command.runId,
-        [IDENTITY_KEY]: identity ?? {
-          userId: command.userId,
-          botId: command.botId,
-        },
-      });
-      await this.refreshRecoveryAlarm(transaction);
-      return { previous: latestEvents, settings: admittedSettings };
-    });
-  }
-
-  private async persistRunEvents(
-    runId: string,
-    events: readonly SessionEvent[],
-  ): Promise<void> {
-    const durableEvents = events
-      .filter((event) => event.type !== "session/disposed")
-      .map(decodeSessionEvent);
-    if (durableEvents.length === 0) return;
-    const key = `${RUN_PREFIX}${runId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      if (!run) throw new Error(`run "${runId}" was not accepted`);
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      for (const [index, event] of durableEvents.entries()) {
-        if (event.seq !== latest.length + index) {
-          throw new Error(
-            "Bot session persistence received non-contiguous events",
-          );
-        }
-      }
-      const next = requireStoredRunV1({
-        ...run,
-        events: [...run.events, ...durableEvents],
-      } satisfies StoredRun);
-      await transaction.put({
-        [key]: structuredClone(next),
-        [LATEST_EVENTS_KEY]: structuredClone([...latest, ...durableEvents]),
-      });
-    });
-  }
-
-  private async completeRun(
-    runId: string,
-    previous: SessionEvent[],
-    result: BotTurnCompletion,
-  ): Promise<void> {
-    const key = `${RUN_PREFIX}${runId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
-      await completeStoredRun(
-        transaction,
-        {
-          run: key,
-          activeRun: ACTIVE_RUN_KEY,
-          latestEvents: LATEST_EVENTS_KEY,
-          notificationPrefix: NOTIFICATION_PREFIX,
-        },
-        runId,
-        previous,
-        result,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  private async failRun(
-    runId: string,
-    previous: SessionEvent[],
-    events: SessionEvent[],
-    failure: string,
-  ): Promise<void> {
-    const key = `${RUN_PREFIX}${runId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
-      await failStoredRun(
-        transaction,
-        {
-          run: key,
-          activeRun: ACTIVE_RUN_KEY,
-          latestEvents: LATEST_EVENTS_KEY,
-          notificationPrefix: NOTIFICATION_PREFIX,
-        },
-        runId,
-        previous,
-        events,
-        failure,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  private async requireRunReconciliation(
-    runId: string,
-    previous: SessionEvent[],
-    events: SessionEvent[],
-    failure: string,
-  ): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      await requireStoredRunReconciliation(
-        transaction,
-        {
-          run: `${RUN_PREFIX}${runId}`,
-          activeRun: ACTIVE_RUN_KEY,
-          latestEvents: LATEST_EVENTS_KEY,
-          notificationPrefix: NOTIFICATION_PREFIX,
-        },
-        runId,
-        previous,
-        events,
-        failure,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  private async recoverActiveRun(): Promise<void> {
-    const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
-    if (!activeRunId || activeRunId === this.executingRunId) return;
-    const durableIdentity =
-      await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    const key = `${RUN_PREFIX}${activeRunId}`;
-    const recovery = await this.ctx.storage.transaction(async (transaction) => {
-      const current = await transaction.get<string>(ACTIVE_RUN_KEY);
-      if (!current || current === this.executingRunId) return undefined;
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      if (run?.status === "reconciliation-required") {
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
-      if (!run || run.status !== "running") {
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      const plan = planBotRunRecovery(run, latest);
-      if (plan.kind === "complete") {
-        const result = {
-          runId: run.runId,
-          text: plan.responseText,
-          events: run.events,
-        } satisfies BotTurnCompletion;
-        const completed = run.configurationSnapshot.notifications.enabled
-          ? {
-              ...result,
-              notification: this.createNotification(
-                run.configurationSnapshot,
-                result,
-              ),
-            }
-          : result;
-        await completeStoredRun(
-          transaction,
-          {
-            run: key,
-            activeRun: ACTIVE_RUN_KEY,
-            latestEvents: LATEST_EVENTS_KEY,
-            notificationPrefix: NOTIFICATION_PREFIX,
-          },
-          run.runId,
-          latest.slice(0, run.previousEventCount),
-          completed,
-        );
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
-      if (plan.kind === "fail") {
-        await failStoredRun(
-          transaction,
-          {
-            run: key,
-            activeRun: ACTIVE_RUN_KEY,
-            latestEvents: LATEST_EVENTS_KEY,
-            notificationPrefix: NOTIFICATION_PREFIX,
-          },
-          run.runId,
-          latest.slice(0, run.previousEventCount),
-          run.events,
-          plan.failure,
-        );
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
-      if (plan.kind === "restart") {
-        const settings = run.configurationSnapshot;
-        await transaction.put({
-          [key]: {
-            ...run,
-            events: [],
-            phase: "admitted",
-          } satisfies StoredRun,
-          [LATEST_EVENTS_KEY]: plan.previous,
-        });
-        await this.refreshRecoveryAlarm(transaction);
-        return {
-          kind: "restart" as const,
-          run,
-          previous: plan.previous,
-          settings,
-        };
-      }
-      if (plan.kind === "resume") {
-        const settings = run.configurationSnapshot;
-        await transaction.put(key, {
-          ...run,
-          phase: "executing",
-        } satisfies StoredRun);
-        await this.refreshRecoveryAlarm(transaction);
-        return { kind: "resume" as const, run, latest, settings };
-      }
-      await transaction.put({
-        [key]: {
-          ...run,
-          events: [...run.events, ...plan.repairs],
-          status: "reconciliation-required",
-          phase: "reconciliation-required",
-          failure:
-            "Execution outcome requires reconciliation before it can resume",
-        } satisfies StoredRun,
-        [LATEST_EVENTS_KEY]: [...latest, ...plan.repairs],
-      });
-      await this.refreshRecoveryAlarm(transaction);
-      return undefined;
-    });
-    if (!recovery) return;
-    if (!durableIdentity) throw new Error("Bot identity is unavailable");
-    if (recovery.kind === "resume") {
-      await this.executeResumedRun(
-        durableIdentity,
-        recovery.run,
-        recovery.latest,
-        recovery.settings,
-      );
-      return;
-    }
-    await this.executeAcceptedRun(
-      {
-        userId: durableIdentity.userId,
-        botId: durableIdentity.botId,
-        runId: recovery.run.runId,
-        sessionId: recovery.run.sessionId,
-        acceptedAt: recovery.run.acceptedAt,
-        text: recovery.run.input,
-      },
-      recovery.previous,
-      recovery.settings,
-    );
   }
 }
 

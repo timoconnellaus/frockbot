@@ -35,6 +35,7 @@
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
+    "@frockbot/kernel-do": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/protocol": "workspace:*",

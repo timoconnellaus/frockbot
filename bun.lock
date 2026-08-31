@@ -81,6 +81,7 @@
         "@frockbot/client-core": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
+        "@frockbot/kernel-do": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
@@ -356,6 +357,20 @@
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
+        "@types/bun": "1.4.0",
+        "@types/node": "26.2.0",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/kernel-do": {
+      "name": "@frockbot/kernel-do",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-contracts": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "latest",
         "@types/bun": "1.4.0",
         "@types/node": "26.2.0",
         "typescript": "^7.0.2",
@@ -699,6 +714,7 @@
         "@frockbot/client-ui": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
+        "@frockbot/kernel-do": "workspace:*",
         "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/protocol": "workspace:*",
@@ -1025,6 +1041,8 @@
     "@frockbot/kernel-composition": ["@frockbot/kernel-composition@workspace:packages/kernel-composition"],
 
     "@frockbot/kernel-contracts": ["@frockbot/kernel-contracts@workspace:packages/kernel-contracts"],
+
+    "@frockbot/kernel-do": ["@frockbot/kernel-do@workspace:packages/kernel-do"],
 
     "@frockbot/marketing": ["@frockbot/marketing@workspace:apps/marketing"],
 

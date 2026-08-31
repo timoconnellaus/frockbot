@@ -6,7 +6,18 @@ import {
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
 import type { PersistSessionEvents, SessionEvent } from "@frockbot/agent-core";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
+import {
+  BotTurnExecutionError,
+  BotTurnReconciliationRequiredError,
+  BotTurnRecoveryRequiredError,
+} from "@frockbot/kernel-do";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
+
+export {
+  BotTurnExecutionError,
+  BotTurnReconciliationRequiredError,
+  BotTurnRecoveryRequiredError,
+};
 
 function appendedSessionEvents(
   previous: readonly SessionEvent[],
@@ -22,33 +33,6 @@ function appendedSessionEvents(
     throw new Error("candidate changed durable session history");
   }
   return structuredClone(candidate.slice(previous.length));
-}
-
-export class BotTurnExecutionError extends Error {
-  constructor(
-    message: string,
-    readonly events: SessionEvent[],
-  ) {
-    super(message);
-    this.name = "BotTurnExecutionError";
-  }
-}
-
-export class BotTurnReconciliationRequiredError extends Error {
-  constructor(
-    message: string,
-    readonly events: SessionEvent[],
-  ) {
-    super(message);
-    this.name = "BotTurnReconciliationRequiredError";
-  }
-}
-
-export class BotTurnRecoveryRequiredError extends Error {
-  constructor(readonly events: SessionEvent[]) {
-    super("Bot turn has a durable outcome settlement pending");
-    this.name = "BotTurnRecoveryRequiredError";
-  }
 }
 
 export interface ExecuteBotTurnOptions {
