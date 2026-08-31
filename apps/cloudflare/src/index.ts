@@ -21,6 +21,8 @@ import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
+  BundlerBinding,
+  PackageArtifactStore,
   BotConfigurationBinding,
   BotNotificationIntent,
   BotTurnCommand,
@@ -45,6 +47,9 @@ export { BotState, UserConfiguration };
 interface Env {
   USER_APPLICATIONS: WorkerLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
+  // `apps/cloudflare-bundler`; the Bot Durable Object calls it after recording
+  // its authorship intent (plan Step 3, decision D4).
+  PACKAGE_BUNDLER: BundlerBinding;
   MEMORY_FILES: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
@@ -290,7 +295,26 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   }
 }
 
-class R2ApplicationArtifacts implements ApplicationArtifactStore {
+function packageArtifactKey(contentHash: string): string {
+  if (!/^[0-9a-f]{64}$/.test(contentHash)) {
+    throw new Error("package artifact contentHash is invalid");
+  }
+  return `packages/${contentHash}.mjs`;
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+class R2ApplicationArtifacts
+  implements ApplicationArtifactStore, PackageArtifactStore
+{
   constructor(private readonly bucket: R2Bucket) {}
 
   async load(applicationHash: string): Promise<string> {
@@ -301,6 +325,45 @@ class R2ApplicationArtifacts implements ApplicationArtifactStore {
       );
     }
     return object.text();
+  }
+
+  /**
+   * Content-addressed, so the write is idempotent: the same bytes always land
+   * at the same key. The hash is verified here too — the caller does not get to
+   * name bytes something they are not.
+   */
+  async putPackageArtifact(contentHash: string, module: string): Promise<void> {
+    const key = packageArtifactKey(contentHash);
+    if ((await sha256Hex(module)) !== contentHash) {
+      throw new Error(
+        `package artifact "${contentHash}" does not match its content hash`,
+      );
+    }
+    await this.bucket.put(key, module, {
+      httpMetadata: { contentType: "application/javascript" },
+    });
+  }
+
+  async headPackageArtifact(
+    contentHash: string,
+  ): Promise<{ contentHash: string; size: number } | undefined> {
+    const object = await this.bucket.head(packageArtifactKey(contentHash));
+    return object ? { contentHash, size: object.size } : undefined;
+  }
+
+  /** Hash-verified read: mismatched bytes are never handed to a loader. */
+  async loadPackageArtifact(contentHash: string): Promise<string> {
+    const object = await this.bucket.get(packageArtifactKey(contentHash));
+    if (!object) {
+      throw new Error(`package artifact "${contentHash}" was not found`);
+    }
+    const module = await object.text();
+    if ((await sha256Hex(module)) !== contentHash) {
+      throw new Error(
+        `package artifact "${contentHash}" failed hash verification`,
+      );
+    }
+    return module;
   }
 }
 

@@ -205,6 +205,63 @@ export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;
 }
 
+/**
+ * Bot-authored Package artifacts (`docs/plans/kernel-and-isolate.md` Step 3).
+ * Content-addressed and immutable, stored at `packages/<contentHash>.mjs` in the
+ * same `APPLICATION_ARTIFACTS` bucket. Unlike `ApplicationArtifactStore.load`,
+ * the reader verifies the hash before the bytes are used.
+ */
+export interface PackageArtifactStore {
+  putPackageArtifact(contentHash: string, module: string): Promise<void>;
+  headPackageArtifact(
+    contentHash: string,
+  ): Promise<{ contentHash: string; size: number } | undefined>;
+  loadPackageArtifact(contentHash: string): Promise<string>;
+}
+
+/**
+ * The `PACKAGE_BUNDLER` service binding (`apps/cloudflare-bundler`). Defined
+ * here until `@frockbot/kernel-composition` owns `ArtifactRefV1` (Step 2); the
+ * shapes are the plan's verbatim v1 DTOs and must stay in step with
+ * `apps/cloudflare-bundler/src/contracts.ts`.
+ */
+export interface ArtifactRefV1 {
+  contentHash: string;
+  size: number;
+  mediaType: "application/javascript";
+  bundlerVersion: string;
+}
+
+export interface BundleRequestV1 {
+  schemaVersion: 1;
+  effectId: string;
+  target: "bot-isolate";
+  compatibilityDate: string;
+  entry: "package.ts";
+  sources: { path: string; text: string }[];
+}
+
+export type BundleResultV1 =
+  | {
+      schemaVersion: 1;
+      effectId: string;
+      status: "bundled";
+      artifact: ArtifactRefV1;
+      module: string;
+      diagnostics: string[];
+    }
+  | {
+      schemaVersion: 1;
+      effectId: string;
+      status: "failed";
+      failure: string;
+      diagnostics: string[];
+    };
+
+export interface BundlerBinding {
+  bundle(request: BundleRequestV1): Promise<BundleResultV1>;
+}
+
 export interface AuthSession {
   user: {
     id: string;

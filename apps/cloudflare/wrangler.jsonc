@@ -16,6 +16,14 @@
       "binding": "USER_APPLICATIONS",
     },
   ],
+  // Package bundling runs outside the Durable Object, in a Worker with no
+  // outbound bindings of its own (plan Step 3 / decision D4).
+  "services": [
+    {
+      "binding": "PACKAGE_BUNDLER",
+      "service": "frockbot-cloudflare-bundler",
+    },
+  ],
   "r2_buckets": [
     {
       "binding": "APPLICATION_ARTIFACTS",
@@ -75,6 +83,12 @@
       "worker_loaders": [
         {
           "binding": "USER_APPLICATIONS",
+        },
+      ],
+      "services": [
+        {
+          "binding": "PACKAGE_BUNDLER",
+          "service": "frockbot-cloudflare-bundler",
         },
       ],
       "r2_buckets": [

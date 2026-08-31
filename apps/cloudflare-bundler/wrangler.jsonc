@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "frockbot-cloudflare-bundler",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": [],
+  // No bindings, by design. Bot-authored text drives this Worker and
+  // `@cloudflare/worker-bundler` fetches npm for real when a package.json
+  // reaches it, so the bundler gets no outbound bindings at all. It also gets
+  // no R2 binding: the Bot Durable Object owns the durable effect (plan
+  // decision D4) and writes the artifact itself from the bytes returned here.
+  "observability": {
+    "enabled": true,
+  },
+}
