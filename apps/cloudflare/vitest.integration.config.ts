@@ -25,6 +25,10 @@ import {
   createOutboundService,
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
+import {
+  createWorkersAiFakeWorker,
+  WORKERS_AI_FAKE_SERVICE,
+} from "./test/workers-ai-fake.ts";
 
 // The bytes `test:integration` just built, read here rather than imported with
 // Vite's `?raw` from a test file: `tsc` resolves a relative specifier on disk
@@ -74,7 +78,16 @@ export default defineConfig({
         },
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
+          // The `AI` binding, impersonated by an auxiliary Worker's RPC
+          // entrypoint. Production reaches Workers AI through
+          // `env.AI.run(model, input)`; so does the suite, and the only
+          // difference is which isolate answers. `WORKERS_AI` is the same
+          // entrypoint under a second name, so a test can read the call log
+          // the binding itself has no method for.
+          AI: WORKERS_AI_FAKE_SERVICE,
+          WORKERS_AI: WORKERS_AI_FAKE_SERVICE,
         },
+        workers: [createWorkersAiFakeWorker("2026-08-27")],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {
@@ -108,19 +121,22 @@ export default defineConfig({
         },
         // Deliberately absent, and why:
         //
-        // - `AI` and `MEMORY_INDEX`: miniflare has no local Workers AI or
-        //   Vectorize simulator, and `wrangler.jsonc` marks both `remote` even
-        //   in the development environment. `BotStateEnv` declares them, but no
-        //   production code path reads either today (`grep MEMORY_INDEX
-        //   packages apps` finds only the declarations), so leaving them
-        //   undefined stubs nothing the suite exercises. The day a Package
-        //   reads them, the failure is a clear `undefined` at that seam.
+        // - `MEMORY_INDEX`: miniflare has no local Vectorize simulator, and
+        //   `wrangler.jsonc` marks it `remote` even in the development
+        //   environment. `BotStateEnv` declares it, but no production code path
+        //   reads it today (`grep MEMORY_INDEX packages apps` finds only the
+        //   declarations), so leaving it undefined stubs nothing the suite
+        //   exercises. The day a Package reads it, the failure is a clear
+        //   `undefined` at that seam. `AI` used to sit here for the same
+        //   reason; `plugin-image` reads it now, so it is bound above to an
+        //   auxiliary RPC Worker rather than left undefined.
         // - `PACKAGE_BUNDLER`: `BotStateEnv` types it optional precisely so a
         //   host without Bot authoring still runs; the Bot Durable Object then
-        //   refuses `package_author` visibly instead of throwing. Wiring
-        //   `test/package-bundler-fake.ts` in would need an auxiliary Worker
-        //   with an RPC entrypoint, and no test in this layer authors a
-        //   Package. `test/authoring.workerd.ts` covers that seam with the fake.
+        //   refuses `package_author` visibly instead of throwing. No test in
+        //   this layer authors a Package, and `test/authoring.workerd.ts`
+        //   already covers that seam with `test/package-bundler-fake.ts`. The
+        //   auxiliary-RPC-Worker pattern above is what would wire it in the
+        //   day a test here needs it.
       },
     }),
   ],

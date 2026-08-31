@@ -1,0 +1,41 @@
+{
+  "name": "@frockbot/plugin-image",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
+    "./bytes": "./src/bytes.ts",
+    "./manifest": "./src/manifest.ts",
+    "./model": "./src/model.ts",
+    "./root": "./src/root.ts",
+    "./testing": "./src/testing.ts",
+    "./frockbot.json": "./frockbot.json",
+    "./package.json": "./package.json"
+  },
+  "frockbot": {
+    "manifest": "./frockbot.json"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/kernel-agent-loop": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "typescript": "^7.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/plugin-image"
+  }
+}

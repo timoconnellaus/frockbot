@@ -117,6 +117,7 @@ import {
 } from "@frockbot/plugin-flock/shared";
 import { createBotSelfManagementHost } from "./backend-flock.js";
 import { createBotMemoryHost } from "./backend-memory.js";
+import { createBotImageHost } from "./backend-image.js";
 import {
   createBotPluginSkillsSource,
   createBotSkillCatalogReader,
@@ -322,7 +323,14 @@ export interface BotStateEnv {
    */
   PACKAGE_BUNDLER?: PackageBundlerBinding;
   MEMORY_INDEX: VectorizeIndex;
-  AI: Ai;
+  /**
+   * The Workers AI binding, read only by the image-generation seam
+   * (`backend-image.ts`). Optional so a host without Workers AI — a test, the
+   * Electron shell, a self-hosted deployment — still compiles; `generate_image`
+   * then refuses visibly on the Turn that calls it rather than throwing inside
+   * the Agent loop. The `PACKAGE_BUNDLER` precedent.
+   */
+  AI?: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   COMPUTER_HOST?: Fetcher;
   /**
@@ -2559,6 +2567,11 @@ export class ShellBotBackendContribution {
           : {}),
         ...(turn
           ? { memory: createBotMemoryHost(identity, turn, this.env) }
+          : {}),
+        // A Bot generates an image only inside an admitted Turn, whose Session
+        // and Turn the Workspace write names as its writer.
+        ...(turn
+          ? { image: createBotImageHost(identity, turn, this.env) }
           : {}),
         // A Bot changes its own identity, or adds a Bot to its User's flock,
         // only inside an admitted Turn whose Session and Turn the write names.
