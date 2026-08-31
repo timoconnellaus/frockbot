@@ -9,6 +9,7 @@ import {
   createPluginHarness,
   verifyPluginPackage,
 } from "@frockbot/plugin-testkit";
+import { SessionStore } from "@frockbot/kernel-contracts";
 import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
 import { createComputerAgentPlugin } from "./agent.js";
@@ -71,6 +72,7 @@ describe("computer agent contribution", () => {
       ComputerRegistry,
       ToolRegistry,
       SystemPromptRegistry,
+      SessionStore,
     ]);
     harness.root.computers.register(provider);
     await harness.mount(

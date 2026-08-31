@@ -102,23 +102,34 @@ of [ADR 0013](adr/0013-bidirectional-memory-sync.md)
 (`packages/plugin-fly-sprite/src/sync.ts`) and the on-Sprite watcher service it
 drives (`WORKSPACE_SYNC_SERVICE` in `packages/plugin-fly-sprite/src/computer.ts`).
 
-| Constitutional check                                                                                                      | File                                               | Test name                                                                                 | Runner |
-| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ |
-| conflicting Workspace and object-storage writes to a non-Memory durable root both survive as generations and are surfaced | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a Computer write and a store write to one path both survive, one as a surfaced conflict` | Bun    |
-| the Workspace presents Memory roots read-only through the durable-root sync                                               | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a Memory file changed on the Computer is never pushed and is restored`                   | Bun    |
-| — its removal half: a Memory file removed on the Computer is restored, never deleted in the store                         | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a Memory file removed on the Computer is restored, never deleted in the store`           | Bun    |
-| — its store half: the sync surface reads every root and writes no Memory root                                             | `packages/workspace-store/src/store.test.ts`       | `the sync surface reads every root and writes no Memory root`                             | Bun    |
-| durable roots survive cold start: an empty disk is repopulated from object storage                                        | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a cold start with an empty disk repopulates every declared root`                         | Bun    |
-| a Skill written through the store reaches the Bot's instruction root with the writer the store recorded                   | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a Skill written through the store appears under the instruction root with its writer`    | Bun    |
-| every write to a durable root records its writer — including a file a shell wrote, attributed or `unattributed`           | `packages/plugin-fly-sprite/src/sync.test.ts`      | `pushes a shell-written file with the writer the session recorded`                        | Bun    |
-| — a shell-written file with no session is `unattributed`, and never loadable as an instruction                            | `packages/plugin-fly-sprite/src/sync.test.ts`      | `pushes a shell-written file with no session as unattributed, never loadable`             | Bun    |
-| — its store half: only the sync surface may mirror an `unattributed` file                                                 | `packages/workspace-store/src/store.test.ts`       | `the sync surface mirrors an unattributed file, and no other surface may`                 | Bun    |
-| a delete is recorded on both sides and never a silent overwrite                                                           | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a delete in the store becomes a recorded removal on the Computer`                        | Bun    |
-| — the other direction, with the tombstone writer recorded in the ledger                                                   | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a removal on the Computer becomes a delete in the store, recorded`                       | Bun    |
-| recovery never silently duplicates a Computer effect: a push interrupted mid-flight resumes                               | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a push interrupted by a pause resumes without writing a second generation`               | Bun    |
-| connections drop on every pause; a Computer client resumes rather than treating a drop as failure                         | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a paused Sprite answers unavailable and the next run completes the sync`                 | Bun    |
-| only Computer-provider-declared services may be reattached                                                                | `packages/plugin-fly-sprite/src/sync.test.ts`      | `is declared as a provider service so a cold pause brings it back`                        | Bun    |
-| — its retired counterpart: the Computer-side Memory write seam refuses every call                                         | `packages/plugin-fly-sprite/src/workspace.test.ts` | `the retired Memory seam refuses every write`                                             | Bun    |
+| Constitutional check                                                                                                      | File                                            | Test name                                                                                 | Runner  |
+| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------- | ------- |
+| conflicting Workspace and object-storage writes to a non-Memory durable root both survive as generations and are surfaced | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a Computer write and a store write to one path both survive, one as a surfaced conflict` | Bun     |
+| the Workspace presents Memory roots read-only through the durable-root sync                                               | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a Memory file changed on the Computer is never pushed and is restored`                   | Bun     |
+| — its removal half: a Memory file removed on the Computer is restored, never deleted in the store                         | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a Memory file removed on the Computer is restored, never deleted in the store`           | Bun     |
+| — its store half: the sync surface reads every root and writes no Memory root                                             | `packages/workspace-store/src/store.test.ts`    | `the sync surface reads every root and writes no Memory root`                             | Bun     |
+| durable roots survive cold start: an empty disk is repopulated from object storage                                        | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a cold start with an empty disk repopulates every declared root`                         | Bun     |
+| a Skill written through the store reaches the Bot's instruction root with the writer the store recorded                   | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a Skill written through the store appears under the instruction root with its writer`    | Bun     |
+| every write to a durable root records its writer — including a file a shell wrote, attributed or `unattributed`           | `packages/plugin-fly-sprite/src/sync.test.ts`   | `pushes a shell-written file with the writer the session recorded`                        | Bun     |
+| — a shell-written file with no session is `unattributed`, and never loadable as an instruction                            | `packages/plugin-fly-sprite/src/sync.test.ts`   | `pushes a shell-written file with no session as unattributed, never loadable`             | Bun     |
+| — its store half: only the sync surface may mirror an `unattributed` file                                                 | `packages/workspace-store/src/store.test.ts`    | `the sync surface mirrors an unattributed file, and no other surface may`                 | Bun     |
+| a delete is recorded on both sides and never a silent overwrite                                                           | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a delete in the store becomes a recorded removal on the Computer`                        | Bun     |
+| — the other direction, with the tombstone writer recorded in the ledger                                                   | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a removal on the Computer becomes a delete in the store, recorded`                       | Bun     |
+| recovery never silently duplicates a Computer effect: a push interrupted mid-flight resumes                               | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a push interrupted by a pause resumes without writing a second generation`               | Bun     |
+| connections drop on every pause; a Computer client resumes rather than treating a drop as failure                         | `packages/plugin-fly-sprite/src/sync.test.ts`   | `a paused Sprite answers unavailable and the next run completes the sync`                 | Bun     |
+| only Computer-provider-declared services may be reattached                                                                | `packages/plugin-fly-sprite/src/sync.test.ts`   | `is declared as a provider service so a cold pause brings it back`                        | Bun     |
+| the sync has a production caller: the pull lands before the Turn's first Computer tool call                               | `packages/plugin-computer/src/sync.test.ts`     | `pulls before the Turn's first Computer tool call and pushes after the Turn`              | Bun     |
+| — and the push lands after a Turn that used the Computer, on the Computer that Turn already had open                      | `packages/plugin-computer/src/sync.test.ts`     | `pulls before the Turn's first Computer tool call and pushes after the Turn`              | Bun     |
+| — a Turn that does not use the Computer syncs nothing, so no sync ever wakes a Computer                                   | `packages/plugin-computer/src/sync.test.ts`     | `a Turn that never uses the Computer never syncs, so nothing wakes`                       | Bun     |
+| — a mid-Turn sync happens only on the watcher's change signal                                                             | `packages/plugin-computer/src/sync.test.ts`     | `syncs again inside a Turn only when the watcher's change signal moved`                   | Bun     |
+| a failed or unavailable sync is a recorded outcome on the Turn, never a thrown error and never a failed Turn              | `packages/plugin-computer/src/sync.test.ts`     | `an unavailable sync is recorded on the Turn and never fails it`                          | Bun     |
+| the sync reaches the Bot only through the provider-neutral Computer interface, and pulls the store's roots onto the disk  | `packages/plugin-fly-sprite/src/sync.test.ts`   | `pulls the store's durable roots onto the Computer before the Bot's first use`            | Bun     |
+| — intent is recorded before the push, settled after, with the Turn's Bot as the writer of a shell-written file            | `packages/plugin-fly-sprite/src/sync.test.ts`   | `pushes a shell write after the Turn, recording its intent before the write`              | Bun     |
+| — a paused Computer answers `unavailable` through that interface too                                                      | `packages/plugin-fly-sprite/src/sync.test.ts`   | `answers unavailable rather than throwing when the Sprite is paused`                      | Bun     |
+| — a host with no object-storage side gets no sync at all, rather than one with nowhere to record                          | `packages/plugin-fly-sprite/src/sync.test.ts`   | `carries no sync at all when the host supplies no object-storage side`                    | Bun     |
+| a push records intent and an effect identifier in the Bot's Durable Object before it runs, and it survives eviction       | `apps/cloudflare/test/computer-sync.workerd.ts` | `a push records its intent in the Bot Durable Object, and it survives eviction`           | workerd |
+| — recovery reads that outcome instead of repeating the effect                                                             | `apps/cloudflare/test/computer-sync.workerd.ts` | `an interrupted push is adopted after eviction, never written twice`                      | workerd |
+| — the deployed push attributes a shell-written file to the Bot whose Turn had the Computer open                           | `apps/cloudflare/test/computer-sync.workerd.ts` | `a Turn's push writes the Bot's own instruction root with Bot provenance`                 | workerd |
 
 ## Memory
 
@@ -176,10 +187,8 @@ step start awaiting its model request`) but never across a real workerd
   to another durable root both survive as generations and are surfaced (under
   **Sync**, against the in-memory bucket and Sprite double, and on real R2 for
   the object-storage side in `apps/cloudflare/test/workspace.workerd.ts`). ADR
-  0013 can be accepted once the sync has a production caller.
-- **The Computer's `memoryWriter` seam is retired, not deleted.** It refuses
-  every call and nothing calls it; the property goes from `computer-core` and
-  `plugin-fly-sprite` in the next Computer change.
+  0013 is accepted: the sync's production caller is the Computer Package
+  (`packages/plugin-computer/src/agent.ts`), with rows under **Sync**.
 - **Computer tools operate without a desktop client.** No check. The Computer
   Package's tests exercise provider routing, not the absence of a desktop
   shell.
@@ -198,14 +207,6 @@ step start awaiting its model request`) but never across a real workerd
   Bot's object. `WorkspaceGenerationsV1.mint` gained a `root` parameter so the
   id that orders a shared root's generations is minted by the authority that
   holds them.
-- **The sync is proven but not yet wired.** The **Sync** rows above prove the
-  agent against the in-memory bucket, the Durable Object ledger double, and the
-  Sprite mocks, but no production caller constructs it yet: the Bot's Durable
-  Object still has to run it on wake and on the watcher's change signal, and to
-  supply the `WorkspaceSyncEffectsV1` implementation that records a push intent
-  in the Durable Object as well as in the Workspace. Until then, a durable-root
-  file written on the Computer becomes durable only when something calls the
-  sync.
 - **UI style contract** (`scripts/check-ui-styles.ts`) and the **kernel import
   contract** (`scripts/check-kernel-imports.ts`) remain standalone linters as
   well as tests, because `bun run typecheck` must fail on them before any test

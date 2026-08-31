@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Synchronize durable Workspace roots with object storage, with Memory single-writer
@@ -90,6 +90,16 @@ watches the durable roots and bumps a change signal, so the agent can tell
 "something changed while I was away" from "nothing to do". It is a declared
 service because "Only Computer-provider-declared services may be reattached;
 other processes are assumed dead after a cold pause."
+
+**The caller.** The sync has a production caller: the Computer Package
+(`packages/plugin-computer/src/agent.ts`) runs it through `ComputerSyncV1` on
+the provider-neutral Computer handle — pulling before a Turn's first Computer
+tool call, again mid-Turn only when the watcher's signal moved, and pushing
+after a Turn that used the Computer. It never runs to reach a Computer, so a
+hibernated Computer stays hibernated; the Bot Durable Object supplies the
+object-storage side and the `WorkspaceSyncEffectsV1` records
+(`packages/kernel-do/src/workspace-sync-effects.ts`); and a sync that cannot
+run is a `computer/sync` outcome in the session event log, never a failed Turn.
 
 ## Consequences
 

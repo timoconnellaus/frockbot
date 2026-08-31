@@ -27,7 +27,6 @@
 import { createHash } from "node:crypto";
 import {
   ComputerError,
-  refusedWorkspaceFilesV1,
   workspaceMountPathV1,
   type ComputerWorkspace,
   type WorkspaceLayoutV1,
@@ -577,16 +576,12 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
  * The Fly Computer's Workspace: the kernel-consumed surface, which refuses
  * every Memory root.
  *
- * There is no Computer-side Memory writer any more. The Memory Package writes
- * object storage, and the durable-root sync (`./sync.ts`) materializes Memory
- * roots here read-only, so `memoryWriter` is a retired seam that refuses every
- * call rather than a second write path.
+ * There is no Computer-side Memory writer, and no seam that could become one.
+ * The Memory Package writes object storage, and the durable-root sync
+ * (`./sync.ts`) materializes Memory roots here read-only.
  */
 export class FlyComputerWorkspace implements ComputerWorkspace {
   private readonly files: FlyWorkspaceFiles;
-  readonly memoryWriter: WorkspaceFilesV1 = refusedWorkspaceFilesV1(
-    "The Computer-side Memory writer is retired; the Memory Package writes object storage and the durable-root sync presents Memory roots read-only",
-  );
 
   constructor(
     readonly layout: WorkspaceLayoutV1,

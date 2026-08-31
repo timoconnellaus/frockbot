@@ -86,6 +86,8 @@ import {
   type WorkspaceGenerationV1,
   type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
+  type WorkspaceSyncEffectsV1,
+  type WorkspaceSyncEffectV1,
   type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
 import type { FlySpriteAgentComputer } from "./computer.js";
@@ -199,29 +201,18 @@ export interface ComputerSyncSurfaceV1 {
   signal(): Promise<ComputerSyncNoteOutcomeV1>;
 }
 
-/** One recorded push intent. */
-export interface WorkspaceSyncEffectV1 {
-  effectId: string;
-  root: WorkspaceRootV1;
-  path: string;
-  kind: "push" | "remove";
-  /** sha-256 of the bytes the push is carrying; the empty hash for a remove. */
-  contentHash: string;
-  expectedGenerationId: string | null;
-  at: string;
-}
-
 /**
- * Where a push records its intent. The Bot's Durable Object implements this
- * when it is reachable; `createWorkspaceSidecarEffectsV1` is the Workspace
- * half, which § Durable effects allows ("in the Bot's Durable Object and in
- * the Workspace").
+ * Where a push records its intent, and the record it writes. Both are declared
+ * by the kernel (`@frockbot/kernel-contracts`), because the Bot's Durable
+ * Object implements the interface and a Package may not declare what an
+ * authority must store. `createWorkspaceSidecarEffectsV1` below is the
+ * Workspace half, which § Durable effects also allows ("in the Bot's Durable
+ * Object **and** in the Workspace").
  */
-export interface WorkspaceSyncEffectsV1 {
-  intent(effect: WorkspaceSyncEffectV1): Promise<void>;
-  settle(effect: WorkspaceSyncEffectV1): Promise<void>;
-  pending(effectId: string): Promise<WorkspaceSyncEffectV1 | undefined>;
-}
+export type {
+  WorkspaceSyncEffectV1,
+  WorkspaceSyncEffectsV1,
+} from "@frockbot/kernel-contracts";
 
 /** A conflict the sync preserved and is surfacing. */
 export interface WorkspaceSyncConflictV1 {

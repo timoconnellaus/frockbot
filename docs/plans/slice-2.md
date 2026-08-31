@@ -2,11 +2,14 @@
 
 ## Status
 
-steps 0, 1, 2, 3a, 3b and 3 landed (the shared Workspace contract; one
-Computer per User; the Skills loader; the object-storage Workspace store; the
-Computer-side durable-root sync; the Memory Package). What remains of slice 2
-is wiring the sync to a production caller and deleting the retired
-`memoryWriter` seam.
+slice 2 is complete. Steps 0, 1, 2, 3a, 3b and 3 landed (the shared Workspace
+contract; one Computer per User; the Skills loader; the object-storage
+Workspace store; the Computer-side durable-root sync; the Memory Package), and
+so did the two leftovers Step 3b named: the sync has a production caller — the
+Computer Package runs it around a Turn's Computer use, over
+`WorkspaceSyncEffectsV1` in the Bot Durable Object — and the retired
+Computer-side Memory writer is deleted rather than deprecated. ADR 0013 is
+**accepted**.
 
 ## Resolved decisions
 
@@ -98,8 +101,9 @@ left them alone; Step 1 removed all four):
 **Deliberately left for Step 3.** The Workspace presents Memory roots read-only
 through the kernel-consumed surface, but the ADR 0013 durable-root R2 sync did
 not exist, so the Memory Package still wrote the Computer directly through one
-named seam, `ComputerWorkspace.memoryWriter`. Step 3b retired it: it refuses
-every call, and it is deleted once nothing names it.
+named seam on `ComputerWorkspace`. Step 3b retired it and the caller step
+deleted it: the Memory Package writes object storage, and no Computer-side
+Memory write path is declared anywhere.
 
 **Where constitution and code still disagree.** "Every write to a durable root
 records its writer" holds for every write that goes _through_ the Workspace
@@ -296,8 +300,8 @@ root, and never for first-party or `unattributed`; `WorkspaceConflictV1` with
 - **Memory Package.** Construct the store with `surface: "memory"` and the
   User's or Bot's ledger, write through `memoryShardPathV1`, and hand the
   kernel `workspaceMemoryProjectionV1` of it. It replaces
-  `packages/plugin-memory/src/workspace-storage.ts` and deletes
-  `ComputerWorkspace.memoryWriter`.
+  `packages/plugin-memory/src/workspace-storage.ts` and retires the
+  Computer-side Memory writer.
 - **Computer sync.** Landed as Step 3b below. The same object keys and the same
   conditional-write rules are what the sync agent obeys, through the store's
   `"sync"` surface; `WorkspaceGenerationsV1` is where its writes are recorded. A
@@ -326,7 +330,7 @@ the **Open** list of `docs/architecture-checks.md`.
 `packages/plugin-memory` is a first-party Package with one runtime
 Contribution, mounted like Skills: only for a Turn whose Memory roots the host
 can reach. The old Package — `agent`/`global` scopes, an R2 bucket of its own,
-a Vectorize index, `workspace-storage.ts` over the Computer's `memoryWriter`
+a Vectorize index, `workspace-storage.ts` over the Computer's Memory writer
 seam — is deleted, not kept alongside.
 
 - **Storage.** Every read and write goes through `WorkspaceFilesV1` from
@@ -389,21 +393,22 @@ seam — is deleted, not kept alongside.
   Memory", not "prove this string holds no entropy". The refusal is a value the
   tool reports, never a throw and never a silent redaction.
 - **Electron.** `apps/agent-runtime` no longer mounts Memory. It used to, over
-  the Computer's `memoryWriter` seam, which meant the Computer had to be awake
+  the Computer's Memory writer seam, which meant the Computer had to be awake
   for a Bot to read its own Memory. The hosted backend is the production path
   and supplies the Durable Object binding; the Electron utility runtime is a
   platform shell with no such binding, so it mounts no Memory Package rather
   than reaching a second store.
 
-**Left over.** `ComputerWorkspace.memoryWriter` is retired but still declared
-in `packages/computer-core` and `packages/plugin-fly-sprite`; nothing calls it.
-ADR 0013 stays **proposed** until the sync of Step 3b has a production caller.
+**Left over — closed.** The retired Computer-side Memory writer is deleted from
+`packages/computer-core` and `packages/plugin-fly-sprite`, with no deprecated
+stub in its place, and ADR 0013 is **accepted** now that the sync of Step 3b
+has a production caller (Step 3c below).
 
 ### Step 3b — Computer sync (landed)
 
-**Status.** Landed. The Computer-side half of ADR 0013: the Workspace on the
-Computer and the object-storage Workspace are one set of files. Not yet wired
-to a production caller — see the **Open** list of `docs/architecture-checks.md`.
+**Status.** Landed, and wired: the Computer-side half of ADR 0013 — the
+Workspace on the Computer and the object-storage Workspace are one set of
+files — with the caller in Step 3c below.
 
 **Mechanism, decided.** A backend sync agent, not a FUSE mount. A mount needs a
 bucket credential on the Workspace, cannot record a writer, and is
@@ -445,11 +450,9 @@ generations })`, the reconciliation itself, over two seams:
 
 **Step 1 disagreements this step closes.**
 
-- `ComputerWorkspace.memoryWriter` is retired: it refuses every call, because
-  the Memory Package writes object storage and the sync presents Memory roots
-  read-only. It is not deleted yet — `apps/agent-runtime` still names it while
-  the Memory Package's own step lands, so the property stays until nothing
-  does.
+- The Computer-side Memory writer is retired, because the Memory Package writes
+  object storage and the sync presents Memory roots read-only. Step 3c deleted
+  the property outright: there is no deprecated stub to call.
 - Shell-written files are no longer merely visible-but-unattributed on the
   Computer: they become durable generations in object storage, attributed to
   the tenant's Bot when the session recorded one and `unattributed` otherwise.
@@ -468,10 +471,51 @@ with the writer the store recorded; deletes cross in both directions, recorded;
 a paused Sprite answers `unavailable` and the next run completes the work; the
 watcher is a provider-declared service.
 
-**Left for the caller.** Running the sync — on wake, on the watcher's change
-signal, and around a Turn that uses the Computer — and the Durable Object
-implementation of `WorkspaceSyncEffectsV1`. Both belong to whoever owns the
-Bot's Computer lifecycle, not to the provider Package.
+**Left for the caller — landed as Step 3c.** Running the sync, and the Durable
+Object implementation of `WorkspaceSyncEffectsV1`. Both belonged to whoever
+owns the Bot's Computer lifecycle rather than to the provider Package.
+
+### Step 3c — the sync's production caller (landed)
+
+**Status.** Landed. ADR 0013 is accepted.
+
+**Where the sync runs.** In the Package that gives a Bot its Computer tools
+(`packages/plugin-computer/src/agent.ts`), through a new `sync` hook on the
+provider-neutral Computer handle (`ComputerSyncV1` in
+`packages/computer-core/src/core.ts`) — never through a provider type, because
+"Bots invoke Computers only through the provider-neutral Computer interface".
+Three points, and no others: before the Turn's first Computer tool call
+(`open`), before a later call in the same Turn when the on-Computer watcher's
+change signal moved (`signal`), and after a Turn that used the Computer
+(`turn-end`). Every one of them is inside a Turn that already has the Computer
+open for this Bot, so no sync is ever a reason to wake one; while a Computer
+hibernates the object-storage side is authoritative on its own.
+
+**The records.** `WorkspaceSyncEffectsV1` moved to `@frockbot/kernel-contracts`
+— the Bot's Durable Object implements it, and a Package may not declare what an
+authority must store — and
+`packages/kernel-do/src/workspace-sync-effects.ts` implements it over the
+object's own storage under `workspace:sync-effect:<effectId>`, the same
+intent-then-settle shape the Bot's authoring effects use rather than a parallel
+store. `apps/cloudflare/src/bot-state.ts` binds it beside a third Workspace
+surface, `WORKSPACE_SYNC_FILES` (`surface: "sync"`), and
+`packages/plugin-shell/src/backend-computer.ts` hands both to the provider for
+one admitted Turn, with that Turn's Bot as the writer of anything a shell wrote.
+
+**Outcomes, not errors.** A sync that could not run appends `computer/sync` to
+the session event log with `status: "unavailable"` and what it moved, and the
+Turn continues: "Connections to the Computer are expected to drop on every
+pause; every Computer client reconnects and resumes rather than treating a
+dropped connection as failure."
+
+**Tests that gate.** `packages/plugin-computer/src/sync.test.ts` (pull before
+first use, push after the Turn, no sync on a Turn that never used the Computer,
+a mid-Turn sync only on the watcher's signal, an unavailable sync recorded
+rather than thrown); `packages/plugin-fly-sprite/src/sync.test.ts` (the same
+through the provider handle against the Sprite double, with intent recorded
+before the push); `apps/cloudflare/test/computer-sync.workerd.ts` (the intent
+lands in the Bot Durable Object before the push, survives eviction, and is
+adopted rather than repeated).
 
 ### Parity facts
 

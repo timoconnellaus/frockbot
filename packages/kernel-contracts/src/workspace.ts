@@ -990,3 +990,93 @@ export function decodeWorkspaceGenerationRecordV1(
   }
   return entry;
 }
+
+/**
+ * One recorded push intent of the durable-root sync (ADR 0013).
+ *
+ * Constitution, Computer and Workspace: "A mutation ... records intent and an
+ * effect identifier in the Bot's Durable Object and in the Workspace before it
+ * runs, so recovery can read its outcome or classify it as unknown without
+ * repeating it." A sync push is such a mutation, and this is the record it
+ * writes first. `effectId` is deterministic in the root, path, kind, bytes and
+ * expected generation, so the same pending push resolves to the same key
+ * however many times a dropped connection makes the sync try again.
+ */
+export interface WorkspaceSyncEffectV1 {
+  effectId: string;
+  root: WorkspaceRootV1;
+  path: string;
+  kind: "push" | "remove";
+  /** sha-256 of the bytes the push carries; the empty digest for a remove. */
+  contentHash: string;
+  expectedGenerationId: string | null;
+  at: string;
+}
+
+/**
+ * Where a durable-root push records its intent.
+ *
+ * Declared by the kernel and implemented by the Bot's Durable Object
+ * (`packages/kernel-do/src/workspace-sync-effects.ts`), the same way
+ * `WorkspaceGenerationsV1` is: the sync agent lives in a Computer provider
+ * Package and holds no authority, so the record it depends on belongs to the
+ * object that owns the root. A provider with no Durable Object reachable falls
+ * back to the Workspace sidecar half, which § Durable effects also allows
+ * ("in the Bot's Durable Object **and** in the Workspace").
+ */
+export interface WorkspaceSyncEffectsV1 {
+  intent(effect: WorkspaceSyncEffectV1): Promise<void>;
+  settle(effect: WorkspaceSyncEffectV1): Promise<void>;
+  pending(effectId: string): Promise<WorkspaceSyncEffectV1 | undefined>;
+}
+
+export function decodeWorkspaceSyncEffectV1(
+  input: unknown,
+  label = "workspace sync effect",
+): WorkspaceSyncEffectV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    [
+      "effectId",
+      "root",
+      "path",
+      "kind",
+      "contentHash",
+      "expectedGenerationId",
+      "at",
+    ],
+    label,
+  );
+  if (value.kind !== "push" && value.kind !== "remove") {
+    throw new Error(`${label}.kind is invalid`);
+  }
+  if (
+    typeof value.contentHash !== "string" ||
+    !SHA256_HEX.test(value.contentHash)
+  ) {
+    throw new Error(`${label}.contentHash must be a sha-256 hex digest`);
+  }
+  if (
+    value.expectedGenerationId !== null &&
+    typeof value.expectedGenerationId !== "string"
+  ) {
+    throw new Error(`${label}.expectedGenerationId must be a string or null`);
+  }
+  return {
+    effectId: boundedString(value.effectId, `${label}.effectId`, 256),
+    root: decodeWorkspaceRootV1(value.root, `${label}.root`),
+    path: normalizeWorkspaceRelativePathV1(value.path, `${label}.path`),
+    kind: value.kind,
+    contentHash: value.contentHash,
+    expectedGenerationId:
+      value.expectedGenerationId === null
+        ? null
+        : boundedString(
+            value.expectedGenerationId,
+            `${label}.expectedGenerationId`,
+            256,
+          ),
+    at: boundedString(value.at, `${label}.at`, 64),
+  };
+}

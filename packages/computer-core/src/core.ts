@@ -5,7 +5,9 @@ import {
   type WorkspaceListRequestV1,
   type WorkspacePathV1,
   type WorkspaceRootKindV1,
+  type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
+  type WorkspaceSyncEffectsV1,
   type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
 import { type Context, Service } from "cordis";
@@ -287,33 +289,6 @@ export interface ComputerDirectory {
  */
 export interface ComputerWorkspace extends WorkspaceFilesV1 {
   readonly layout: WorkspaceLayoutV1;
-  /**
-   * RETIRED — ADR 0013 / `docs/plans/slice-2.md` Step 3b.
-   *
-   * @deprecated The Computer-side Memory write path is gone. Memory roots come
-   * from object storage through the durable-root sync and are presented
-   * read-only on the Computer, so this seam answers `refused` to every call. It
-   * remains only so the Memory Package's replacement can land in a separate
-   * change; delete the property once nothing names it.
-   */
-  readonly memoryWriter: WorkspaceFilesV1;
-}
-
-/**
- * A `WorkspaceFilesV1` that refuses everything, as a declared outcome rather
- * than a throw. It is how a retired seam stays type-compatible while writing
- * nothing: the Computer host is non-authoritative, so "this surface does not
- * serve you" is an ordinary answer its callers already handle.
- */
-export function refusedWorkspaceFilesV1(reason: string): WorkspaceFilesV1 {
-  const refused = () => Promise.resolve({ status: "refused" as const, reason });
-  return {
-    read: refused,
-    list: refused,
-    stat: refused,
-    write: refused,
-    delete: refused,
-  };
 }
 
 type WorkspaceOutcomeFailure = { status: string; reason: string };
@@ -520,6 +495,102 @@ export interface ComputerControl {
   ): Promise<void>;
 }
 
+/** Why one run of the durable-root sync happened. */
+export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end";
+
+/**
+ * What one sync run moved, flattened to counts.
+ *
+ * The provider-neutral answer is deliberately small: a caller outside the
+ * Computer Package decides nothing from a sync report except what to record,
+ * and the detailed report (which paths, which conflicting generations) belongs
+ * to the provider that produced it and to the durable generation records.
+ *
+ * There is no failure branch. "Connections to the Computer are expected to
+ * drop on every pause; every Computer client reconnects and resumes rather
+ * than treating a dropped connection as failure" — so an unreachable Computer
+ * answers `unavailable` and a Turn continues.
+ */
+export interface ComputerSyncSummaryV1 {
+  status: "ok" | "unavailable" | "refused" | "skipped";
+  /** Human-readable reason, empty when the run had nothing to say. */
+  detail: string;
+  pulled: number;
+  pushed: number;
+  restored: number;
+  removed: number;
+  adopted: number;
+  conflicts: number;
+  failures: number;
+}
+
+export function computerSyncSummaryV1(
+  status: ComputerSyncSummaryV1["status"],
+  detail = "",
+): ComputerSyncSummaryV1 {
+  return {
+    status,
+    detail: detail.slice(0, 512),
+    pulled: 0,
+    pushed: 0,
+    restored: 0,
+    removed: 0,
+    adopted: 0,
+    conflicts: 0,
+    failures: 0,
+  };
+}
+
+/**
+ * The durable-root sync of ADR 0013, as the provider-neutral Computer
+ * interface exposes it. "Bots invoke Computers only through the
+ * provider-neutral Computer interface", so the Package that gives a Bot its
+ * Computer tools reaches the sync here and never through a provider type.
+ *
+ * A `sync` is present only on a Computer that is already open for a Bot.
+ * Reconciling is therefore never a reason to wake a Computer: "The Agent loop,
+ * Memory, Skills, Package composition, and Routines function correctly while
+ * the Computer is hibernated and do not wake it", and the object-storage side
+ * stays authoritative while it sleeps.
+ */
+export interface ComputerSyncV1 {
+  /** Reconciles every declared durable root. Never throws. */
+  reconcile(
+    reason: ComputerSyncReasonV1,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerSyncSummaryV1>;
+  /**
+   * The Computer-side watcher's change signal, or `undefined` when it cannot
+   * be read. A caller reconciles again when this changes, rather than scanning
+   * every root on every tool call.
+   */
+  signal(options?: ComputerOperationOptions): Promise<string | undefined>;
+}
+
+/**
+ * What a host supplies so a Computer Package can build the sync: the
+ * object-storage side of the durable roots, and the Durable Object records the
+ * push depends on. A provider that receives none simply has no `sync` on its
+ * handle, and the Computer's durable roots then live on the Computer alone.
+ *
+ * Every member is authority the host owns. The Computer Package holds none of
+ * it: it drives the reconciliation and records nothing itself.
+ */
+export interface ComputerSyncHostV1 {
+  /** The durable roots in object storage, built with the `sync` surface. */
+  store: WorkspaceFilesV1;
+  /** Where a push records its intent, in the Bot's Durable Object. */
+  effects?: WorkspaceSyncEffectsV1;
+  /** The owning object's generation ledger, read to recover a removal writer. */
+  generations?: WorkspaceGenerationsV1;
+  /**
+   * The writer a file written around the Workspace surface — a shell command
+   * on the Computer — is attributed to. Absent means `unattributed`, which the
+   * Skills loader refuses: such a file is data, never an instruction.
+   */
+  writer?: WorkspaceWriterV1;
+}
+
 /**
  * One open Computer, addressed by the User whose Computer it is and by the Bot
  * tenant that opened it. The provider answers with the tenant's resolved
@@ -530,6 +601,8 @@ export interface ComputerHandle {
   identity: ComputerIdentityV1;
   tenant: ComputerTenantV1;
   workspace?: ComputerWorkspace;
+  /** The durable-root sync, when the host supplied its object-storage side. */
+  sync?: ComputerSyncV1;
   exec?: ComputerExec;
   browser?: ComputerBrowser;
   viewer?: ComputerViewer;
@@ -593,7 +666,6 @@ function guardedWorkspace(
   return {
     ...guardedFiles(workspace, assertCurrent),
     layout: workspace.layout,
-    memoryWriter: guardedFiles(workspace.memoryWriter, assertCurrent),
   };
 }
 
@@ -601,13 +673,23 @@ function guardedHandle(
   handle: ComputerHandle,
   assertCurrent: () => void,
 ): ComputerHandle {
-  const { workspace, exec, browser, viewer, control } = handle;
+  const { workspace, sync, exec, browser, viewer, control } = handle;
   return {
     assignment: handle.assignment,
     identity: handle.identity,
     tenant: handle.tenant,
     workspace: workspace
       ? guardedWorkspace(workspace, assertCurrent)
+      : undefined,
+    sync: sync
+      ? {
+          reconcile: (reason, options) =>
+            guardedOperation(assertCurrent, () =>
+              sync.reconcile(reason, options),
+            ),
+          signal: (options) =>
+            guardedOperation(assertCurrent, () => sync.signal(options)),
+        }
       : undefined,
     exec: exec
       ? {

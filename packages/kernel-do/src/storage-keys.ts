@@ -25,6 +25,8 @@ export const RECOVERY_ALARM_DELAY_MS = 60_000;
 export const WORKSPACE_GENERATION_PREFIX = "workspace:generation:";
 /** Preserved losing writes for one durable-root file. */
 export const WORKSPACE_CONFLICT_PREFIX = "workspace:conflict:";
+/** One unsettled durable-root sync push intent, by effect id (ADR 0013). */
+export const WORKSPACE_SYNC_EFFECT_PREFIX = "workspace:sync-effect:";
 /** The monotonic cursor every minted Workspace generation id advances. */
 export const WORKSPACE_GENERATION_CURSOR_KEY = "workspace:generation-cursor";
 /** Longest readable key tail before it is fingerprinted; Durable Object keys are bounded. */
@@ -116,4 +118,12 @@ export function storedRunAdmissionFences(input: unknown): string[] {
     throw new Error("Stored run admission fences are invalid");
   }
   return [...new Set(input)];
+}
+
+/**
+ * The key one sync push intent is recorded under. The effect id is already a
+ * bounded digest minted by the sync, so it is used verbatim.
+ */
+export function workspaceSyncEffectKey(effectId: string): string {
+  return `${WORKSPACE_SYNC_EFFECT_PREFIX}${effectId}`;
 }

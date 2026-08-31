@@ -12,11 +12,16 @@ import {
   createStoredRunCodecV1,
   DurableCompositionStore,
   DurableWorkspaceGenerations,
+  DurableWorkspaceSyncEffects,
   type BotTurnExecutionInput,
 } from "@frockbot/kernel-do";
-import { isWorkspaceConflictV1 } from "@frockbot/kernel-contracts";
+import {
+  isWorkspaceConflictV1,
+  workspaceRootKeyV1,
+} from "@frockbot/kernel-contracts";
 import type {
   WorkspaceFilesV1,
+  WorkspaceGenerationV1,
   WorkspaceGenerationRecordV1,
   WorkspaceRootV1,
   WorkspaceWriteOutcomeV1,
@@ -29,6 +34,17 @@ import {
   MemoryProjection,
 } from "@frockbot/plugin-memory/agent";
 import { createBotMemoryHost } from "@frockbot/plugin-shell/backend-memory";
+import { createBotComputerSyncHost } from "@frockbot/plugin-shell/backend-computer";
+import {
+  createWorkspaceRootSyncV1,
+  type ComputerSyncBytesOutcomeV1,
+  type ComputerSyncEntryV1,
+  type ComputerSyncNoteOutcomeV1,
+  type ComputerSyncOutcomeV1,
+  type ComputerSyncRemovalV1,
+  type ComputerSyncScanOutcomeV1,
+  type ComputerSyncSurfaceV1,
+} from "@frockbot/plugin-fly-sprite/sync";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
@@ -104,6 +120,150 @@ export interface WorkspaceProbeWrite {
   text: string;
   writer: WorkspaceWriterV1;
   expectedGenerationId: string | null;
+}
+
+/**
+ * The Computer half of the sync, as a probe: a durable map in one Durable
+ * Object's storage standing in for a Sprite's filesystem. It is deliberately
+ * durable rather than in-memory — the claim under test is that an intent and
+ * the Computer-side bytes both survive an eviction, and an in-memory disk
+ * would forget the second half.
+ */
+class ProbeComputerSurface implements ComputerSyncSurfaceV1 {
+  static readonly FILE_PREFIX = "probe-computer:file:";
+  static readonly REMOVED_PREFIX = "probe-computer:removed:";
+  static readonly NOTE_PREFIX = "probe-computer:note:";
+
+  constructor(private readonly ctx: DurableObjectState) {}
+
+  private key(root: WorkspaceRootV1, path: string): string {
+    return `${ProbeComputerSurface.FILE_PREFIX}${workspaceRootKeyV1(root)}:${path}`;
+  }
+
+  private async hash(bytes: Uint8Array): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+    return [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  /** A file written around the Workspace surface: bytes, and no sidecar. */
+  async shellWrite(
+    root: WorkspaceRootV1,
+    path: string,
+    text: string,
+  ): Promise<void> {
+    await this.ctx.storage.put(this.key(root, path), { text });
+  }
+
+  async scan(root: WorkspaceRootV1): Promise<ComputerSyncScanOutcomeV1> {
+    const prefix = `${ProbeComputerSurface.FILE_PREFIX}${workspaceRootKeyV1(root)}:`;
+    const files = await this.ctx.storage.list<{
+      text: string;
+      recorded?: WorkspaceGenerationV1;
+    }>({ prefix });
+    const entries: ComputerSyncEntryV1[] = [];
+    for (const [key, value] of files) {
+      const bytes = new TextEncoder().encode(value.text);
+      entries.push({
+        path: key.slice(prefix.length),
+        contentHash: await this.hash(bytes),
+        size: bytes.byteLength,
+        ...(value.recorded ? { recorded: value.recorded } : {}),
+      });
+    }
+    const removals = await this.ctx.storage.list<ComputerSyncRemovalV1>({
+      prefix: `${ProbeComputerSurface.REMOVED_PREFIX}${workspaceRootKeyV1(root)}:`,
+    });
+    return {
+      status: "ok",
+      scan: { entries, removed: [...removals.values()] },
+    };
+  }
+
+  async read(
+    root: WorkspaceRootV1,
+    path: string,
+  ): Promise<ComputerSyncBytesOutcomeV1> {
+    const stored = await this.ctx.storage.get<{ text: string }>(
+      this.key(root, path),
+    );
+    if (!stored) {
+      return { status: "not-found", reason: `no such file: ${path}` };
+    }
+    return { status: "ok", bytes: new TextEncoder().encode(stored.text) };
+  }
+
+  async materialize(
+    root: WorkspaceRootV1,
+    path: string,
+    bytes: Uint8Array,
+    generation: WorkspaceGenerationV1,
+  ): Promise<ComputerSyncOutcomeV1> {
+    await this.ctx.storage.put(this.key(root, path), {
+      text: new TextDecoder().decode(bytes),
+      recorded: generation,
+    });
+    return { status: "ok" };
+  }
+
+  async remove(
+    root: WorkspaceRootV1,
+    path: string,
+    supersedes: string | undefined,
+    tombstone: WorkspaceGenerationV1,
+  ): Promise<ComputerSyncOutcomeV1> {
+    await this.ctx.storage.delete(this.key(root, path));
+    await this.ctx.storage.put(
+      `${ProbeComputerSurface.REMOVED_PREFIX}${workspaceRootKeyV1(root)}:${path}`,
+      { path, ...(supersedes ? { supersedes } : {}), tombstone },
+    );
+    return { status: "ok" };
+  }
+
+  async forget(
+    root: WorkspaceRootV1,
+    path: string,
+  ): Promise<ComputerSyncOutcomeV1> {
+    await this.ctx.storage.delete(
+      `${ProbeComputerSurface.REMOVED_PREFIX}${workspaceRootKeyV1(root)}:${path}`,
+    );
+    return { status: "ok" };
+  }
+
+  preserve(): Promise<ComputerSyncOutcomeV1> {
+    return Promise.resolve({ status: "ok" });
+  }
+
+  async note(
+    kind: string,
+    id: string,
+    text: string,
+  ): Promise<ComputerSyncOutcomeV1> {
+    await this.ctx.storage.put(
+      `${ProbeComputerSurface.NOTE_PREFIX}${kind}:${id}`,
+      text,
+    );
+    return { status: "ok" };
+  }
+
+  async readNote(kind: string, id: string): Promise<ComputerSyncNoteOutcomeV1> {
+    const text = await this.ctx.storage.get<string>(
+      `${ProbeComputerSurface.NOTE_PREFIX}${kind}:${id}`,
+    );
+    return { status: "ok", ...(text ? { text } : {}) };
+  }
+
+  async clearNote(kind: string, id: string): Promise<ComputerSyncOutcomeV1> {
+    await this.ctx.storage.delete(
+      `${ProbeComputerSurface.NOTE_PREFIX}${kind}:${id}`,
+    );
+    return { status: "ok" };
+  }
+
+  signal(): Promise<ComputerSyncNoteOutcomeV1> {
+    return Promise.resolve({ status: "ok" });
+  }
 }
 
 export class WorkerdBotState extends BotState {
@@ -286,6 +446,116 @@ export class WorkerdBotState extends BotState {
     path: string;
   }): Promise<WorkspaceGenerationRecordV1 | undefined> {
     return this.generations().current(input.root, input.path);
+  }
+
+  /**
+   * The durable-root sync (ADR 0013) with its production halves in place: the
+   * object-storage store this object serves, the push intent records this
+   * object holds, and its generation ledger. Only the Computer side is a
+   * probe — a durable map in this object's own storage standing in for a
+   * Sprite's filesystem, so what the "Computer" holds survives eviction the
+   * way a Sprite's disk does.
+   *
+   * `interrupt` drops the connection the way a Sprite pause does: after the
+   * store has taken the write but before the sync could settle its intent.
+   */
+  async computerSyncRun(input: {
+    userId: string;
+    botId: string;
+    interrupt?: boolean;
+  }): Promise<{
+    status: string;
+    pushed: string[];
+    pulled: string[];
+    adopted: string[];
+    failures: string[];
+  }> {
+    const identity = { userId: input.userId, botId: input.botId };
+    this.bindSurfaces(identity);
+    const host = createBotComputerSyncHost(
+      identity,
+      {
+        runId: "sync-probe-run",
+        turnId: "sync-probe-turn",
+        sessionId: `${input.userId}:${input.botId}`,
+      },
+      this.backendEnv,
+    );
+    if (!host) throw new Error("no Workspace sync surface is bound");
+    const store: WorkspaceFilesV1 = {
+      read: (path) => host.store.read(path),
+      list: (request) => host.store.list(request),
+      stat: (path) => host.store.stat(path),
+      write: async (request) => {
+        const outcome = await host.store.write(request);
+        if (input.interrupt) {
+          // The bytes landed; the answer never came back. This is the ordinary
+          // shape of a Computer pause, not an exceptional one.
+          throw new Error("the connection to the Computer dropped");
+        }
+        return outcome;
+      },
+      delete: (request) => host.store.delete(request),
+    };
+    const sync = createWorkspaceRootSyncV1({
+      store,
+      computer: new ProbeComputerSurface(this.ctx),
+      roots: [
+        { kind: "bot-instructions", userId: input.userId, botId: input.botId },
+      ],
+      ...(host.effects ? { effects: host.effects } : {}),
+      ...(host.generations ? { generations: host.generations } : {}),
+      ...(host.writer ? { sessionWriter: () => host.writer } : {}),
+    });
+    const report = await sync.sync();
+    const root = report.roots[0];
+    return {
+      status: report.failures.length > 0 ? "failed" : "ok",
+      pushed: root?.pushed ?? [],
+      pulled: root?.pulled ?? [],
+      adopted: root?.adopted ?? [],
+      failures: report.failures.map((failure) => failure.reason),
+    };
+  }
+
+  /** Writes a file on the probe Computer the way a shell command would. */
+  async computerShellWrite(input: {
+    root: WorkspaceRootV1;
+    path: string;
+    text: string;
+  }): Promise<void> {
+    await new ProbeComputerSurface(this.ctx).shellWrite(
+      input.root,
+      input.path,
+      input.text,
+    );
+  }
+
+  async computerFile(input: {
+    root: WorkspaceRootV1;
+    path: string;
+  }): Promise<string | undefined> {
+    const outcome = await new ProbeComputerSurface(this.ctx).read(
+      input.root,
+      input.path,
+    );
+    return outcome.status === "ok"
+      ? new TextDecoder().decode(outcome.bytes)
+      : undefined;
+  }
+
+  /** Push intents this object still holds unsettled, read straight off storage. */
+  async pendingSyncEffects(): Promise<
+    Array<{ effectId: string; kind: string; path: string }>
+  > {
+    const effects = await new DurableWorkspaceSyncEffects({
+      state: this.ctx,
+    }).unsettled();
+    return effects.map((effect) => ({
+      effectId: effect.effectId,
+      kind: effect.kind,
+      path: effect.path,
+    }));
   }
 
   async durableSessionEvents(): Promise<SessionEvent[]> {

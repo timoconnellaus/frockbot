@@ -324,25 +324,6 @@ describe("Fly Workspace files", () => {
     }
   });
 
-  // ADR 0013 / `docs/plans/slice-2.md` Step 3b: the Computer-side Memory
-  // writer is retired. The Memory Package writes object storage and the
-  // durable-root sync presents Memory roots read-only here, so the seam
-  // refuses every call rather than offering a second write path.
-  test("the retired Memory seam refuses every write", async () => {
-    const { workspace } = await openWorkspace();
-
-    for (const root of [botMemoryRoot, userMemoryRoot, skillsRoot]) {
-      expect(
-        await workspace.memoryWriter.write({
-          path: { root, path: "profile.md" },
-          bytes: new TextEncoder().encode("fact"),
-          writer: BOT_WRITER,
-          expectedGenerationId: null,
-        }),
-      ).toMatchObject({ status: "refused" });
-    }
-  });
-
   // A Memory root the sync materialized is readable through the kernel
   // surface: read-only, not invisible.
   test("reads a Memory root the sync materialized, and refuses to write it", async () => {

@@ -7,3 +7,4 @@ export * from "./run-terminal.js";
 export * from "./storage-keys.js";
 export * from "./turn-errors.js";
 export * from "./workspace-generations.js";
+export * from "./workspace-sync-effects.js";

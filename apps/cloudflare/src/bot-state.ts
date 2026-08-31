@@ -40,9 +40,14 @@ import {
 import type {
   NormalizedModelRequest,
   WorkspaceFilesV1,
+  WorkspaceGenerationsV1,
+  WorkspaceSyncEffectsV1,
 } from "@frockbot/kernel-contracts";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
-import { DurableWorkspaceGenerations } from "@frockbot/kernel-do";
+import {
+  DurableWorkspaceGenerations,
+  DurableWorkspaceSyncEffects,
+} from "@frockbot/kernel-do";
 import type { MemoryProjectsV1 } from "@frockbot/plugin-memory/agent";
 import {
   createRoutedWorkspaceGenerationsV1,
@@ -96,6 +101,9 @@ export class BotState extends DurableObject<BotStateEnv> {
     WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_PROJECTS?: MemoryProjectsV1;
+    WORKSPACE_SYNC_FILES?: WorkspaceFilesV1;
+    WORKSPACE_SYNC_EFFECTS?: WorkspaceSyncEffectsV1;
+    WORKSPACE_SYNC_GENERATIONS?: WorkspaceGenerationsV1;
   };
   /** The identity the Workspace and Memory surfaces above were built for. */
   private surfacesFor: string | undefined;
@@ -264,12 +272,20 @@ export class BotState extends DurableObject<BotStateEnv> {
   /**
    * Builds the Workspace and Memory file surfaces for one identity.
    *
-   * Two surfaces, deliberately: `WORKSPACE_FILES` is the kernel surface and
-   * refuses every Memory root; `MEMORY_WORKSPACE_FILES` is the Memory
-   * Package's and serves Memory roots and nothing else. The second routes a
-   * shared root's generations to the User Durable Object, because "The User's
-   * Durable Object is the authority for ... the generation records of User
-   * Memory roots", while the Bot's own Memory root stays in this object.
+   * Three surfaces, deliberately, because the store refuses to be two things
+   * at once: `WORKSPACE_FILES` is the kernel surface and refuses every Memory
+   * root; `MEMORY_WORKSPACE_FILES` is the Memory Package's and serves Memory
+   * roots and nothing else; `WORKSPACE_SYNC_FILES` is the durable-root sync's,
+   * the only surface that reads every root and the only one that accepts an
+   * `unattributed` writer — a shell wrote the file and nothing recorded who.
+   * The Memory surface routes a shared root's generations to the User Durable
+   * Object, because "The User's Durable Object is the authority for ... the
+   * generation records of User Memory roots", while the Bot's own Memory root
+   * stays in this object.
+   *
+   * The sync's effect records stay here too: a push records its intent in the
+   * Bot's Durable Object before it runs (§ Computer and Workspace), so an
+   * interrupted push is read back rather than repeated.
    */
   protected bindSurfaces(identity: { userId: string; botId: string }): void {
     const key = `${identity.userId}\u0000${identity.botId}`;
@@ -287,7 +303,23 @@ export class BotState extends DurableObject<BotStateEnv> {
         user: createUserWorkspaceGenerationsV1(rpc, identity.userId),
       }),
     });
+    const sync = createDurableWorkspaceFilesV1(this.ctx, this.env, {
+      owner,
+      surface: "sync",
+      generations: createRoutedWorkspaceGenerationsV1({
+        bot: new DurableWorkspaceGenerations({ state: this.ctx }),
+        user: createUserWorkspaceGenerationsV1(rpc, identity.userId),
+      }),
+    });
     if (workspace) this.backendEnv.WORKSPACE_FILES = workspace;
+    if (sync) {
+      this.backendEnv.WORKSPACE_SYNC_FILES = sync;
+      this.backendEnv.WORKSPACE_SYNC_EFFECTS = new DurableWorkspaceSyncEffects({
+        state: this.ctx,
+      });
+      this.backendEnv.WORKSPACE_SYNC_GENERATIONS =
+        new DurableWorkspaceGenerations({ state: this.ctx });
+    }
     if (memory) {
       this.backendEnv.MEMORY_WORKSPACE_FILES = memory;
       this.backendEnv.MEMORY_PROJECTS = createUserMemoryProjectsV1(

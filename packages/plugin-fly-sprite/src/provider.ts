@@ -1,6 +1,7 @@
 import {
   ComputerError,
   computerIdentityKeyV1,
+  computerSyncSummaryV1,
   computerTenantBotIdV1,
   type ComputerAssignment,
   type ComputerBrowserAction,
@@ -9,6 +10,10 @@ import {
   type ComputerIdentityV1,
   type ComputerOperationOptions,
   type ComputerProvider,
+  type ComputerSyncHostV1,
+  type ComputerSyncReasonV1,
+  type ComputerSyncSummaryV1,
+  type ComputerSyncV1,
   type ComputerTenantV1,
   type WorkspaceLayoutV1,
 } from "@frockbot/computer-core";
@@ -21,6 +26,7 @@ import {
   flySpriteNameForBot,
 } from "./computer.js";
 import { FlyComputerWorkspace } from "./workspace.js";
+import { createFlySpriteSyncV1, type WorkspaceSyncReportV1 } from "./sync.js";
 
 const encoder = new TextEncoder();
 
@@ -141,16 +147,120 @@ function commandFor(
   return [executable, ...(args ?? [])].map(shellQuote).join(" ");
 }
 
+/**
+ * The durable-root sync of ADR 0013, behind the provider-neutral
+ * `ComputerSyncV1`.
+ *
+ * Everything Fly-specific stops here: the reconciliation itself is
+ * `./sync.ts`, the object-storage side and the Durable Object records come
+ * from the host, and what leaves this class is counts and a status. It exists
+ * only while a Computer is open for a Bot, so it can never be the reason a
+ * hibernated Computer wakes.
+ *
+ * `reconcile` never throws. A paused Sprite, a dropped connection, a store
+ * that refuses: each is a declared outcome its caller records on the Turn and
+ * carries on — "a dropped connection is an outcome, not a failure."
+ */
+class FlySpriteComputerSync implements ComputerSyncV1 {
+  private readonly sync: ReturnType<typeof createFlySpriteSyncV1>;
+
+  constructor(
+    computer: FlySpriteAgentComputer,
+    identity: ComputerIdentityV1,
+    tenant: ComputerTenantV1,
+    host: ComputerSyncHostV1,
+  ) {
+    this.sync = createFlySpriteSyncV1({
+      computer,
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: identity.userId,
+      botDirectoryKey: computerBotKey,
+      botIds: [tenant.botId],
+      store: host.store,
+      ...(host.effects ? { effects: host.effects } : {}),
+      ...(host.generations ? { generations: host.generations } : {}),
+      // A file a shell wrote records no writer of its own. It is attributed to
+      // the Bot whose Turn has the Computer open, and `unattributed` when
+      // there is none: data either way, never an instruction.
+      ...(host.writer ? { sessionWriter: () => host.writer } : {}),
+    });
+  }
+
+  async reconcile(
+    _reason: ComputerSyncReasonV1,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerSyncSummaryV1> {
+    if (options?.signal?.aborted) {
+      return computerSyncSummaryV1("skipped", "the Turn was cancelled");
+    }
+    let report: WorkspaceSyncReportV1;
+    try {
+      report = await this.sync.sync();
+    } catch (error) {
+      return computerSyncSummaryV1(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    return summarize(report);
+  }
+
+  async signal(
+    options?: ComputerOperationOptions,
+  ): Promise<string | undefined> {
+    if (options?.signal?.aborted) return undefined;
+    try {
+      const outcome = await this.sync.signal();
+      return outcome.status === "ok" ? (outcome.text ?? "") : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
+  const total = (
+    pick: (root: WorkspaceSyncReportV1["roots"][number]) => number,
+  ) => report.roots.reduce((sum, root) => sum + pick(root), 0);
+  const failed = report.failures[0];
+  const summary: ComputerSyncSummaryV1 = {
+    // Every root failing is `unavailable` — the usual shape of a paused
+    // Sprite. A partial failure is still an `ok` run that says what it missed.
+    status:
+      report.failures.length > 0 &&
+      report.roots.every((root) => root.failures.length > 0)
+        ? "unavailable"
+        : "ok",
+    detail: failed ? `${failed.status}: ${failed.reason}`.slice(0, 512) : "",
+    pulled: total((root) => root.pulled.length),
+    pushed: total((root) => root.pushed.length),
+    restored: total((root) => root.restored.length),
+    removed: total(
+      (root) => root.removedOnComputer.length + root.removedInStore.length,
+    ),
+    adopted: total((root) => root.adopted.length),
+    conflicts: report.conflicts.length,
+    failures: report.failures.length,
+  };
+  return summary;
+}
+
 function handle(
   identity: ComputerIdentityV1,
   tenant: ComputerTenantV1,
   computer: FlySpriteAgentComputer,
   assignment: ComputerAssignment,
+  syncHost?: ComputerSyncHostV1,
 ): ComputerHandle {
   return {
     assignment,
     identity,
     tenant,
+    ...(syncHost
+      ? {
+          sync: new FlySpriteComputerSync(computer, identity, tenant, syncHost),
+        }
+      : {}),
     workspace: new FlyComputerWorkspace(FLY_WORKSPACE_LAYOUT, {
       computer,
       userId: identity.userId,
@@ -216,6 +326,13 @@ export class FlySpriteComputerProvider implements ComputerProvider {
   constructor(
     private readonly fixedComputer?: FlySpriteComputer,
     private readonly token?: string,
+    /**
+     * The object-storage side of the durable roots, and the Durable Object
+     * records a push depends on. Supplied by the host for one admitted Turn;
+     * absent outside one, and the handle then carries no `sync` at all rather
+     * than a sync with nowhere to record its intent.
+     */
+    private readonly syncHost?: ComputerSyncHostV1,
   ) {}
 
   /**
@@ -256,6 +373,7 @@ export class FlySpriteComputerProvider implements ComputerProvider {
         },
         attached,
         assignment,
+        this.syncHost,
       ),
     );
   }
@@ -263,11 +381,11 @@ export class FlySpriteComputerProvider implements ComputerProvider {
 
 export function createFlySpriteProviderPlugin(
   computer?: FlySpriteComputer,
-  options?: { token?: string },
+  options?: { token?: string; sync?: ComputerSyncHostV1 },
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) =>
     ctx.computers.register(
-      new FlySpriteComputerProvider(computer, options?.token),
+      new FlySpriteComputerProvider(computer, options?.token, options?.sync),
     );
   plugin.inject = ["computers"];
   return plugin;

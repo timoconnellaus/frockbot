@@ -49,6 +49,7 @@ import notificationsManifest from "@frockbot/plugin-desktop-notifications/manife
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
 import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
+import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
 // Flock contributes lifecycle routes and durable User/Bot state.
 import flockManifest from "@frockbot/plugin-flock/manifest";
 // Gateway Flock behavior is resolved as a lifecycle-owned Plugin.
@@ -366,6 +367,15 @@ export function createFoundationHostedRuntimePackages(
      * readable Memory root injects no Memory rather than guessing.
      */
     memory?: MemoryRuntimeHostV1;
+    /**
+     * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
+     * for one admitted Turn. Absent outside a Turn, and outside one whose
+     * durable roots are reachable in object storage — the Computer provider
+     * then offers no sync at all, and a Computer's durable roots live on the
+     * Computer alone rather than reconciling against a store no authority
+     * backs.
+     */
+    computerSync?: ComputerSyncHostV1;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
@@ -394,6 +404,7 @@ export function createFoundationHostedRuntimePackages(
       "fly-sprite",
       createFlySpriteProviderPlugin(undefined, {
         token: host.readSecret("SPRITES_TOKEN"),
+        ...(host.computerSync ? { sync: host.computerSync } : {}),
       }),
     ),
     runtimePackage(

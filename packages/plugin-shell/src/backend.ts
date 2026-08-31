@@ -73,6 +73,7 @@ import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
 } from "./backend-authoring.js";
+import { createBotComputerSyncHost } from "./backend-computer.js";
 import { createBotMemoryHost } from "./backend-memory.js";
 import { createBotSkillsHost } from "./backend-skills.js";
 import {
@@ -1767,6 +1768,14 @@ export class ShellBotBackendContribution {
           : {}),
         ...(turn
           ? { memory: createBotMemoryHost(identity, turn, this.env) }
+          : {}),
+        // The durable-root sync runs only inside a Turn that uses the
+        // Computer, and records that Turn's Bot as the writer of anything a
+        // shell wrote there.
+        ...(turn
+          ? {
+              computerSync: createBotComputerSyncHost(identity, turn, this.env),
+            }
           : {}),
       }),
       ...(await createFoundationAssignedRuntimePackages(

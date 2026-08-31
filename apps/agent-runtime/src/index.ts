@@ -36,9 +36,9 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// MEMORY IS NOT MOUNTED IN THIS RUNTIME. It used to be, through the Computer's
-// named `memoryWriter` seam — the Computer had to be awake for the Bot to read
-// its own Memory, which is exactly what "The Agent loop, Memory, Skills,
+// MEMORY IS NOT MOUNTED IN THIS RUNTIME. It used to be, through a named
+// Memory writer on the Computer's Workspace — the Computer had to be awake for
+// the Bot to read its own Memory, which is exactly what "The Agent loop, Memory, Skills,
 // Package composition, and Routines function correctly while the Computer is
 // hibernated and do not wake it" forbids. Under ADR 0013 the Memory Package
 // writes object storage directly, and the surface that backs it is a Durable

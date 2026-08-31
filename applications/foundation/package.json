@@ -25,6 +25,7 @@
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
+    "@frockbot/computer-core": "workspace:*",
     "@frockbot/plugin-computer": "workspace:*",
     "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-desktop-clipboard": "workspace:*",

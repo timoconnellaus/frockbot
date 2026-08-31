@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 import {
   isLoadableSkillSourceV1,
   type WorkspaceFilesV1,
+  type WorkspaceSyncEffectV1,
+  type WorkspaceSyncEffectsV1,
   type WorkspaceGenerationV1,
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
@@ -22,7 +24,7 @@ import {
   type SpriteServiceStream,
   type SpritesClientHandle,
 } from "./computer.ts";
-import { FLY_WORKSPACE_LAYOUT } from "./provider.ts";
+import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";
 import {
   createFlySpriteSyncV1,
   declaredWorkspaceRootsV1,
@@ -778,5 +780,165 @@ describe("the on-Sprite sync service", () => {
     expect(await agent.signal()).toEqual({ status: "ok" });
     sprite.files.set("/home/box/.frockbot/sync/signal", encoder.encode("7\n"));
     expect(await agent.signal()).toEqual({ status: "ok", text: "7" });
+  });
+});
+
+// The sync as a Bot reaches it: `handle.sync` on the provider-neutral Computer
+// interface, built from the host seam the Bot Durable Object supplies. These
+// are the provider half of the caller wiring — the Computer Package decides
+// *when* (`packages/plugin-computer/src/sync.test.ts`), and here is what
+// actually happens against a Sprite when it does.
+describe("the durable-root sync on the Computer handle", () => {
+  interface EffectLog {
+    effects: WorkspaceSyncEffectsV1;
+    /** Every intent and settlement, in order, interleaved with store writes. */
+    log: string[];
+    pending: Map<string, WorkspaceSyncEffectV1>;
+  }
+
+  function recordingEffects(log: string[]): EffectLog {
+    const pending = new Map<string, WorkspaceSyncEffectV1>();
+    return {
+      log,
+      pending,
+      effects: {
+        intent: (effect) => {
+          pending.set(effect.effectId, effect);
+          log.push(`intent:${effect.kind}:${effect.path}`);
+          return Promise.resolve();
+        },
+        settle: (effect) => {
+          pending.delete(effect.effectId);
+          log.push(`settle:${effect.kind}:${effect.path}`);
+          return Promise.resolve();
+        },
+        pending: (effectId) => Promise.resolve(pending.get(effectId)),
+      },
+    };
+  }
+
+  function providerHarness() {
+    const bucket = createInMemoryObjectBucketV1();
+    const generations = createInMemoryWorkspaceGenerationsV1();
+    const owner = { userId: USER };
+    const store = createObjectWorkspaceFilesV1({
+      bucket,
+      generations,
+      owner,
+      surface: "sync",
+    });
+    const log: string[] = [];
+    const effects = recordingEffects(log);
+    const sprite = new FakeSyncSprite();
+    const computer = new FlySpriteComputer({
+      client: new FakeClient(sprite),
+      spriteName: "frockbot-test",
+    });
+    const provider = new FlySpriteComputerProvider(computer, undefined, {
+      // Every write the store takes is announced, so "intent before the push"
+      // is an ordering claim about this one list.
+      store: {
+        read: (path) => store.read(path),
+        list: (request) => store.list(request),
+        stat: (path) => store.stat(path),
+        write: (request) => {
+          log.push(`write:${request.path.path}`);
+          return store.write(request);
+        },
+        delete: (request) => {
+          log.push(`delete:${request.path.path}`);
+          return store.delete(request);
+        },
+      },
+      effects: effects.effects,
+      generations,
+      writer: BOT_WRITER,
+    });
+    const open = () =>
+      provider.open(
+        { userId: USER },
+        { botId: BOT },
+        { providerId: "fly-sprite", generation: 1 },
+      );
+    return { sprite, store, generations, effects, provider, open };
+  }
+
+  test("pulls the store's durable roots onto the Computer before the Bot's first use", async () => {
+    const { sprite, store, open } = providerHarness();
+    await writeToStore(
+      store,
+      skillsRoot,
+      "deploy/SKILL.md",
+      "# deploy",
+      BOT_WRITER,
+    );
+
+    const handle = await open();
+    expect(handle.sync).toBeDefined();
+    const summary = await handle.sync!.reconcile("open");
+
+    expect(summary.status).toBe("ok");
+    expect(summary.pulled).toBe(1);
+    expect(sprite.text(`${MOUNTS.skills}/deploy/SKILL.md`)).toBe("# deploy");
+  });
+
+  test("pushes a shell write after the Turn, recording its intent before the write", async () => {
+    const { sprite, store, effects, open } = providerHarness();
+    const handle = await open();
+    await handle.sync!.reconcile("open");
+    sprite.shellWrite(MOUNTS.skills, "notes.md", "written by a shell");
+
+    const summary = await handle.sync!.reconcile("turn-end");
+
+    expect(summary.status).toBe("ok");
+    expect(summary.pushed).toBe(1);
+    // Intent, then the write, then settlement: the order § Durable effects
+    // requires, so an interrupted push is read back rather than repeated.
+    expect(effects.log).toEqual([
+      "intent:push:notes.md",
+      "write:notes.md",
+      "settle:push:notes.md",
+    ]);
+    expect(effects.pending.size).toBe(0);
+    const stored = await store.read({ root: skillsRoot, path: "notes.md" });
+    expect(stored).toMatchObject({ status: "ok" });
+    if (stored.status === "ok") {
+      expect(decoder.decode(stored.file.bytes)).toBe("written by a shell");
+      // The Turn's Bot is the writer of a file nothing else attributed.
+      expect(stored.file.generation.writer).toMatchObject({
+        kind: "bot",
+        botId: BOT,
+      });
+    }
+  });
+
+  test("answers unavailable rather than throwing when the Sprite is paused", async () => {
+    const { sprite, open } = providerHarness();
+    const handle = await open();
+    sprite.paused = true;
+
+    const summary = await handle.sync!.reconcile("turn-end");
+
+    expect(summary.status).toBe("unavailable");
+    expect(summary.failures).toBeGreaterThan(0);
+    expect(await handle.sync!.signal()).toBeUndefined();
+  });
+
+  test("carries no sync at all when the host supplies no object-storage side", async () => {
+    const sprite = new FakeSyncSprite();
+    const provider = new FlySpriteComputerProvider(
+      new FlySpriteComputer({
+        client: new FakeClient(sprite),
+        spriteName: "frockbot-test",
+      }),
+    );
+
+    const handle = await provider.open(
+      { userId: USER },
+      { botId: BOT },
+      { providerId: "fly-sprite", generation: 1 },
+    );
+
+    expect(handle.sync).toBeUndefined();
   });
 });

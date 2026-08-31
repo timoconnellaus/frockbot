@@ -310,6 +310,34 @@ export interface SessionEventMap {
     projectId: string;
     projects: string[];
   };
+  /**
+   * One run of the durable-root sync between the Computer's Workspace and
+   * object storage (ADR 0013), on a Turn that had the Computer open.
+   *
+   * "Connections to the Computer are expected to drop on every pause; every
+   * Computer client reconnects and resumes rather than treating a dropped
+   * connection as failure." A sync that could not run is therefore an
+   * `unavailable` outcome recorded here, never a thrown error and never a
+   * failed Turn — and a sync that did run leaves what it moved in durable
+   * state, so a missing pull is visible rather than silent.
+   *
+   * `reason` is why the sync ran: `open` before the Turn's first Computer tool
+   * call, `signal` when the on-Computer watcher reported a change mid-Turn,
+   * `turn-end` after a Turn that used the Computer.
+   */
+  "computer/sync": {
+    turn: number;
+    reason: "open" | "signal" | "turn-end";
+    status: "ok" | "unavailable" | "refused" | "skipped";
+    detail: string;
+    pulled: number;
+    pushed: number;
+    restored: number;
+    removed: number;
+    adopted: number;
+    conflicts: number;
+    failures: number;
+  };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   "turn/end": { turn: number; outcome: TurnOutcome };
   "session/disposed": { disposedAt: string };
@@ -914,6 +942,49 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         eventString(project, `session event.projects[${index}]`),
       );
       break;
+    case "computer/sync": {
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "reason",
+          "status",
+          "detail",
+          "pulled",
+          "pushed",
+          "restored",
+          "removed",
+          "adopted",
+          "conflicts",
+          "failures",
+        ),
+        "session event",
+      );
+      turn();
+      if (!["open", "signal", "turn-end"].includes(event.reason as string)) {
+        throw new Error("session event.reason is invalid");
+      }
+      if (
+        !["ok", "unavailable", "refused", "skipped"].includes(
+          event.status as string,
+        )
+      ) {
+        throw new Error("session event.status is invalid");
+      }
+      eventString(event.detail, "session event.detail", true);
+      for (const field of [
+        "pulled",
+        "pushed",
+        "restored",
+        "removed",
+        "adopted",
+        "conflicts",
+        "failures",
+      ] as const) {
+        eventInteger(event[field], `session event.${field}`, 0);
+      }
+      break;
+    }
     case "step/end":
       requireEventKeys(event, keys("turn", "step", "outcome"), "session event");
       turn();
