@@ -3,9 +3,10 @@
 ## Status
 
 steps 0, 1, and 2 landed (the shared Workspace contract; one Computer per
-User; the Skills loader), and step 3a landed (the object-storage Workspace
-store, which also mounts the Skills loader in production); the rest of step 3
-not started
+User; the Skills loader); step 3a landed (the object-storage Workspace store,
+which also mounts the Skills loader in production); step 3b landed (the
+Computer-side durable-root sync). The Memory Package itself — the rest of
+step 3 — is in flight separately.
 
 ## Resolved decisions
 
@@ -95,11 +96,10 @@ left them alone; Step 1 removed all four):
   deleted with it.
 
 **Deliberately left for Step 3.** The Workspace presents Memory roots read-only
-through the kernel-consumed surface, but the ADR 0013 durable-root R2 sync does
-not exist, so the Memory Package still writes the Computer directly through one
-named seam, `ComputerWorkspace.memoryWriter`. It accepts Memory roots and
-nothing else; the kernel surface accepts everything else and no Memory root.
-Step 3 deletes it.
+through the kernel-consumed surface, but the ADR 0013 durable-root R2 sync did
+not exist, so the Memory Package still wrote the Computer directly through one
+named seam, `ComputerWorkspace.memoryWriter`. Step 3b retired it: it refuses
+every call, and it is deleted once nothing names it.
 
 **Where constitution and code still disagree.** "Every write to a durable root
 records its writer" holds for every write that goes _through_ the Workspace
@@ -298,10 +298,11 @@ root, and never for first-party or `unattributed`; `WorkspaceConflictV1` with
   kernel `workspaceMemoryProjectionV1` of it. It replaces
   `packages/plugin-memory/src/workspace-storage.ts` and deletes
   `ComputerWorkspace.memoryWriter`.
-- **Computer sync.** The same object keys and the same conditional-write rules
-  are what the FUSE-side agent must obey, and `WorkspaceGenerationsV1` is where
-  it records what it wrote. A file it writes with no generation metadata reads
-  back as `unattributed`, exactly as a shell-written file does on the Computer.
+- **Computer sync.** Landed as Step 3b below. The same object keys and the same
+  conditional-write rules are what the sync agent obeys, through the store's
+  `"sync"` surface; `WorkspaceGenerationsV1` is where its writes are recorded. A
+  file it mirrors with no recorded writer reads back as `unattributed`, exactly
+  as a shell-written file does on the Computer.
 
 **Wiring.** `apps/cloudflare/src/workspace.ts` exports
 `createR2ObjectBucketV1` and `createDurableWorkspaceFilesV1`. `BotState`
@@ -319,6 +320,80 @@ only the Bot object's ledger is wired today. Nothing writes a shared root in
 production yet, so nothing is wrong at runtime — the Memory step closes it by
 routing shared roots to the User object through the same interface. It is in
 the **Open** list of `docs/architecture-checks.md`.
+
+### Step 3b — Computer sync (landed)
+
+**Status.** Landed. The Computer-side half of ADR 0013: the Workspace on the
+Computer and the object-storage Workspace are one set of files. Not yet wired
+to a production caller — see the **Open** list of `docs/architecture-checks.md`.
+
+**Mechanism, decided.** A backend sync agent, not a FUSE mount. A mount needs a
+bucket credential on the Workspace, cannot record a writer, and is
+last-writer-wins; all three are things the constitution forbids, so FUSE
+latency was never the deciding argument. The full reasoning is in ADR 0013's
+**Mechanism** paragraph and at the top of
+`packages/plugin-fly-sprite/src/sync.ts`.
+
+**What landed.**
+
+- `packages/plugin-fly-sprite/src/sync.ts` —
+  `createWorkspaceRootSyncV1({ store, computer, roots, sessionWriter, effects,
+generations })`, the reconciliation itself, over two seams:
+  `WorkspaceFilesV1` for object storage and `ComputerSyncSurfaceV1` for the
+  Computer. `FlySpriteSyncSurface` implements the second over the Sprite's
+  storage exec path; `createFlySpriteSyncV1` wires both to one Sprite, and
+  `declaredWorkspaceRootsV1` derives the roots from the provider's
+  `WorkspaceLayoutV1`.
+- A `"sync"` surface on `packages/workspace-store`: it reads every root, writes
+  no Memory root, and is the only surface that accepts an `unattributed`
+  writer, and only on a non-Memory root. That is the one place this step widens
+  a rule — the alternative is losing a shell-written durable-root file at the
+  next image rebuild, and the mirrored file carries no authority because
+  `isLoadableSkillSourceV1` refuses it.
+- `WORKSPACE_SYNC_SERVICE` (`frockbot-workspace-sync`), declared beside the
+  viewer gateway in the provider's service list so a cold pause brings it back.
+  It holds no credential and makes no network call: it watches the durable
+  roots and bumps a change signal.
+- A durable Computer-side tombstone. `FlyWorkspaceFiles.delete` now records
+  `.frockbot-sync/tombstones/<rel>`, holding the generation the removal
+  superseded and the writer that performed it, instead of deleting the sidecar
+  and leaving the removal unaccountable. A shell `rm` is detected the same way,
+  by a sidecar with no file.
+- Effect identifiers on every push: intent recorded before the write, against a
+  deterministic effect id, in the Bot's Durable Object through
+  `WorkspaceSyncEffectsV1` where one is injected and in the Workspace otherwise.
+  An unsettled intent is reconciled by reading the store, never by repeating
+  the write.
+
+**Step 1 disagreements this step closes.**
+
+- `ComputerWorkspace.memoryWriter` is retired: it refuses every call, because
+  the Memory Package writes object storage and the sync presents Memory roots
+  read-only. It is not deleted yet — `apps/agent-runtime` still names it while
+  the Memory Package's own step lands, so the property stays until nothing
+  does.
+- Shell-written files are no longer merely visible-but-unattributed on the
+  Computer: they become durable generations in object storage, attributed to
+  the tenant's Bot when the session recorded one and `unattributed` otherwise.
+- The Computer side now has a durable tombstone, so a removal is recorded on
+  both sides rather than inferred from an absence.
+
+**Tests that gate** (`packages/plugin-fly-sprite/src/sync.test.ts`, with the
+in-memory bucket and ledger from `@frockbot/workspace-store/testing` and a
+Sprite double that interprets the emitted shell): concurrent Computer and store
+writes to one non-Memory path leave both generations alive, one preserved as a
+surfaced conflict; a Memory file changed or removed on the Computer is never
+pushed and is restored; a push interrupted mid-flight resumes without writing a
+second generation; a cold start with an empty disk repopulates every declared
+root; a Skill written through the store lands under the Bot's instruction root
+with the writer the store recorded; deletes cross in both directions, recorded;
+a paused Sprite answers `unavailable` and the next run completes the work; the
+watcher is a provider-declared service.
+
+**Left for the caller.** Running the sync — on wake, on the watcher's change
+signal, and around a Turn that uses the Computer — and the Durable Object
+implementation of `WorkspaceSyncEffectsV1`. Both belong to whoever owns the
+Bot's Computer lifecycle, not to the provider Package.
 
 ### Parity facts
 

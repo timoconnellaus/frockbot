@@ -99,8 +99,20 @@ async function digestV1(bytes: Uint8Array): Promise<string> {
  * roots". `"memory"` is the Memory Package's own surface: it serves Memory
  * roots and nothing else. Nothing accepts both — the same split the Fly
  * Workspace makes.
+ *
+ * `"sync"` is the Computer-side durable-root sync of ADR 0013, and it is a
+ * mirror rather than an author. It reads every root — a Memory root has to be
+ * readable for the sync to present it read-only on the Computer — and writes
+ * every root except a Memory one, because pushing a Memory root would give
+ * that root a second writer. It is also the one surface that accepts an
+ * `unattributed` writer, and only on a non-Memory root: the file it is
+ * mirroring was written by a shell on the Computer, so nothing recorded who
+ * wrote it, and the choice is between recording that truthfully and losing a
+ * durable-root file at the next image rebuild. `unattributed` carries no
+ * authority — `isLoadableSkillSourceV1` refuses it — so the mirrored file is
+ * data the Bot can read and never an instruction it loads.
  */
-export type WorkspaceStoreSurfaceV1 = "kernel" | "memory";
+export type WorkspaceStoreSurfaceV1 = "kernel" | "memory" | "sync";
 
 export interface ObjectWorkspaceFilesOptionsV1 {
   bucket: ObjectBucketV1;
@@ -151,14 +163,21 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     const root = path.root;
     const refused = this.admit(root);
     if (refused) return refused;
-    if (!workspaceWriterMayWriteV1(writer)) {
+    // The sync mirrors a file whose writer the Computer did not record. It is
+    // the only caller that may carry `unattributed`, and never into a Memory
+    // root, which it does not write at all.
+    const mirroring =
+      this.surface === "sync" &&
+      writer.kind === "unattributed" &&
+      !isWorkspaceMemoryRootV1(root);
+    if (!workspaceWriterMayWriteV1(writer) && !mirroring) {
       return failure(
         "refused",
         "Every write to a durable root records its writer; an unattributed writer records none",
       );
     }
     if (isWorkspaceMemoryRootV1(root)) {
-      if (this.surface === "kernel") {
+      if (this.surface !== "memory") {
         return failure(
           "refused",
           "The Workspace presents Memory roots read-only; the Memory Package is their only writer",
@@ -175,7 +194,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     if (root.kind === "bot-instructions") {
       const byBot = writer.kind === "bot" && writer.botId === root.botId;
       const byUser = writer.kind === "user" && writer.userId === root.userId;
-      if (!byBot && !byUser) {
+      if (!byBot && !byUser && !mirroring) {
         return failure(
           "refused",
           `Only Bot "${root.botId}" or its User may write this root`,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isLoadableSkillSourceV1,
   isWorkspaceConflictV1,
   memoryShardPathV1,
   workspaceMemoryProjectionV1,
@@ -53,6 +54,7 @@ const firstParty: WorkspaceWriterV1 = {
 interface Harness {
   files: WorkspaceFilesV1;
   memory: WorkspaceFilesV1;
+  sync: WorkspaceFilesV1;
   bucket: InMemoryObjectBucketV1;
   generations: InMemoryWorkspaceGenerationsV1;
 }
@@ -77,6 +79,13 @@ function harness(): Harness {
       clock,
       owner: { userId: USER },
       surface: "memory",
+    }),
+    sync: createObjectWorkspaceFilesV1({
+      bucket,
+      generations,
+      clock,
+      owner: { userId: USER },
+      surface: "sync",
     }),
   };
 }
@@ -412,6 +421,86 @@ describe("who may write", () => {
         expectedGenerationId: null,
       }),
     ).toMatchObject({ status: "refused" });
+  });
+
+  // ADR 0013: the Computer-side sync mirrors a durable root. It never writes a
+  // Memory root — that would give the root a second writer — and it reads
+  // every root, because a Memory root has to be readable to be presented
+  // read-only on the Computer.
+  test("the sync surface reads every root and writes no Memory root", async () => {
+    const { sync, memory } = harness();
+    const written = await memory.write({
+      path: memoryShardPathV1(USER_MEMORY, "bot-1", "profile.md"),
+      bytes: bytes("fact"),
+      writer: bot("bot-1"),
+      expectedGenerationId: null,
+    });
+    expect(written.status).toBe("ok");
+
+    expect(
+      await sync.read(memoryShardPathV1(USER_MEMORY, "bot-1", "profile.md")),
+    ).toMatchObject({ status: "ok" });
+    for (const root of [BOT_MEMORY, USER_MEMORY, PROJECT_MEMORY]) {
+      expect(
+        await sync.write({
+          path: memoryShardPathV1(root, "bot-1", "profile.md"),
+          bytes: bytes("x"),
+          writer: bot("bot-1"),
+          expectedGenerationId: null,
+        }),
+      ).toMatchObject({ status: "refused" });
+    }
+  });
+
+  // The one caller that may carry `unattributed`: a shell wrote the file on
+  // the Computer, so nothing recorded who wrote it, and the alternative to
+  // recording that truthfully is losing a durable-root file. It carries no
+  // authority — `isLoadableSkillSourceV1` refuses it.
+  test("the sync surface mirrors an unattributed file, and no other surface may", async () => {
+    const { sync, files, memory } = harness();
+    const unattributed: WorkspaceWriterV1 = { kind: "unattributed" };
+
+    expect(
+      await sync.write({
+        path: { root: INSTRUCTIONS, path: "skills/shell/SKILL.md" },
+        bytes: bytes("# from a shell"),
+        writer: unattributed,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "ok" });
+    expect(
+      await files.write({
+        path: { root: INSTRUCTIONS, path: "skills/other/SKILL.md" },
+        bytes: bytes("x"),
+        writer: unattributed,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await memory.write({
+        path: memoryShardPathV1(USER_MEMORY, "bot-1", "profile.md"),
+        bytes: bytes("x"),
+        writer: unattributed,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+
+    const read = await files.read({
+      root: INSTRUCTIONS,
+      path: "skills/shell/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.generation.writer).toEqual(unattributed);
+    expect(
+      isLoadableSkillSourceV1(
+        {
+          path: { root: INSTRUCTIONS, path: "skills/shell/SKILL.md" },
+          writer: read.file.generation.writer,
+          generation: read.file.generation,
+        },
+        { botId: "bot-1", userId: USER },
+      ),
+    ).toBe(false);
   });
 
   test("another User's root is refused outright", async () => {

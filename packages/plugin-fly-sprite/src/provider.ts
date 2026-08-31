@@ -33,9 +33,8 @@ const encoder = new TextEncoder();
  * Memory roots are `read-only` from the Computer's point of view. "The Memory
  * Package is the single writer of Memory roots ... the Workspace presents
  * Memory roots read-only through the durable-root sync" (ADR 0013). That sync
- * does not exist yet; until it does, the Memory Package writes these mounts
- * through `ComputerWorkspace.memoryWriter`, the seam Step 3 of
- * `docs/plans/slice-2.md` replaces.
+ * is `./sync.ts`: it materializes Memory roots at these mount paths from
+ * object storage and never pushes a change back out of them.
  *
  * `package-declared` roots are User-scoped, because Package availability is
  * User-level and `WorkspaceRootV1` names a Package root by User and Package.
