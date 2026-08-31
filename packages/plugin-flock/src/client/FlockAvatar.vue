@@ -2,7 +2,7 @@
 import { computed, inject } from "vue";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { flockWebDataKey } from "./state.js";
-import SheepAvatar from "./SheepAvatar.vue";
+import BotAvatar from "./BotAvatar.vue";
 
 /**
  * The active Bot's sheep, rendered beside each assistant message. The shell
@@ -23,8 +23,9 @@ const name = computed(
 </script>
 
 <template>
-  <SheepAvatar
-    v-if="identity"
+  <BotAvatar
+    v-if="identity && shell.activeBotId"
+    :bot-id="shell.activeBotId"
     :sheep="identity.sheep"
     size="mini"
     :label="name"

@@ -66,9 +66,25 @@ const canSend = computed(
  */
 function isVisible(message: WebChatMessage): boolean {
   if (message.role === "user") return message.text.length > 0;
+  if (message.role === "system") return message.text.length > 0;
   return message.text.length > 0 || message.status === "streaming";
 }
-const messages = computed(() => state.value.messages.filter(isVisible));
+/*
+ * System lines happen between Turns, so the thread orders by when each line
+ * happened. A line with no timestamp keeps the position the projection gave
+ * it, which is what makes the sort stable for a Turn still streaming.
+ */
+const messages = computed(() =>
+  state.value.messages
+    .filter(isVisible)
+    .map((message, index) => ({ message, index }))
+    .sort(
+      (left, right) =>
+        (left.message.at ?? "").localeCompare(right.message.at ?? "") ||
+        left.index - right.index,
+    )
+    .map((entry) => entry.message),
+);
 
 /*
  * The thread follows new content only while the reader is already at the
@@ -235,11 +251,12 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             v-else
             :key="message.id"
             class="message"
-            :class="
-              message.role === 'user' ? 'message-user' : 'message-assistant'
-            "
+            :class="`message-${message.role}`"
           >
-            <template v-if="message.role === 'assistant'">
+            <p v-if="message.role === 'system'" class="message-system-line">
+              {{ message.text }}
+            </p>
+            <template v-else-if="message.role === 'assistant'">
               <!--
                 The Bot's own avatar comes from whichever Package owns Bot
                 identity. When no Package fills the slot the sparkle tile is

@@ -3,6 +3,7 @@
 import {
   decodeExternalAuthorizationUrl,
   type AgentTransport,
+  type ClientAnnouncement,
   type ClientNotificationIntent,
   type ClientPlugin,
   type ClientRun,
@@ -17,9 +18,13 @@ import type {
 } from "@frockbot/connection-core";
 import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
+import { decodeBotAvatarUploadReceiptV1 } from "@frockbot/configuration-core";
 import type {
+  BotAvatarContentTypeV1,
+  BotNameProvenanceV1,
   BotNotificationPolicy,
   BotProfile,
+  BotProfilePatchV1,
   BotSettingsViewV1,
   ConfigurationCommandV1,
   ModelAssignment,
@@ -159,6 +164,33 @@ function assistantMessage(
   };
 }
 
+/**
+ * Projects the Session's announcements as system lines. They carry an `at`
+ * timestamp so the thread can place them among the Turns they happened
+ * between, and they replace rather than duplicate on every reload.
+ */
+export function projectAnnouncements(
+  messages: WebChatMessage[],
+  announcements: readonly ClientAnnouncement[],
+): void {
+  for (const announcement of announcements) {
+    const message: WebChatMessage = {
+      id: announcement.announcementId,
+      runId: announcement.announcementId,
+      role: "system",
+      text: `Renamed to ${announcement.to} by ${announcement.namedBy}`,
+      at: announcement.at,
+      status: "completed",
+      tools: [],
+    };
+    const index = messages.findIndex(
+      (candidate) => candidate.id === announcement.announcementId,
+    );
+    if (index >= 0) messages[index] = message;
+    else messages.push(message);
+  }
+}
+
 export function projectDurableRuns(
   state: DurableRunProjectionState,
   notifications: readonly ClientNotificationIntent[],
@@ -184,11 +216,13 @@ export function projectDurableRuns(
         runId: run.runId,
         role: "user",
         text: run.input,
+        ...(run.admittedAt ? { at: run.admittedAt } : {}),
         status: "completed",
         tools: [],
       });
     }
     const assistant = assistantMessage(run, notification);
+    if (run.admittedAt) assistant.at = run.admittedAt;
     const assistantIndex = state.messages.findIndex(
       (message) => message.runId === run.runId && message.role === "assistant",
     );
@@ -757,6 +791,15 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     if (generation !== selectionGeneration || web.value.activeBotId !== botId)
       return;
     projectDurableRuns(web.value, [], runs);
+    try {
+      const announcements = await (ctx.transport.listAnnouncements?.(botId) ??
+        Promise.resolve([]));
+      if (generation === selectionGeneration && web.value.activeBotId === botId)
+        projectAnnouncements(web.value.messages, announcements);
+    } catch {
+      // Announcements are conversational history, never admission: a Session
+      // that cannot read them still shows every Turn.
+    }
     let notifications: ClientNotificationIntent[];
     try {
       notifications = await (ctx.transport.listNotifications?.(botId) ??
@@ -982,6 +1025,55 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         profile,
       });
       await web.value.loadBotSettings();
+    },
+    async setBotProfile(
+      profile: BotProfilePatchV1,
+      namedBy?: BotNameProvenanceV1,
+    ): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/set-profile",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        ...(namedBy ? { namedBy } : {}),
+        profile,
+      });
+      await web.value.loadBotSettings();
+      // A rename produces a durable announcement; reload the Session so the
+      // system line appears without waiting for the next Turn.
+      await deliverNotifications(botId);
+    },
+    async uploadBotAvatar(input: {
+      contentType: BotAvatarContentTypeV1;
+      bytes: string;
+    }): Promise<void> {
+      const botId = web.value.activeBotId;
+      if (!botId || !ctx.transport.hostedRequest) {
+        throw new Error("Avatar upload is unavailable");
+      }
+      const receipt = decodeBotAvatarUploadReceiptV1(
+        await ctx.transport.hostedRequest(
+          `/api/bots/${encodeURIComponent(botId)}/avatar`,
+          "POST",
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "bot/upload-avatar",
+            botId,
+            contentType: input.contentType,
+            bytes: input.bytes,
+          }),
+        ),
+      );
+      await web.value.setBotProfile({ avatar: receipt.avatar });
+    },
+    async clearBotAvatar(): Promise<void> {
+      await web.value.setBotProfile({ avatar: { kind: "sheep" } });
     },
     async saveBotNotifications(
       notifications: BotNotificationPolicy,

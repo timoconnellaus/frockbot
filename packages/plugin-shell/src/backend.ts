@@ -39,6 +39,7 @@ import {
   createFoundationModelRuntimePackage,
 } from "@frockbot/application-foundation/runtime";
 import {
+  applyBotProfilePatchV1,
   capabilityAssignmentFailureV1,
   configurationCommandFingerprintV1,
   ConfigurationConflictError,
@@ -142,6 +143,7 @@ import {
   decodeClientRunStopCommandV1,
   projectClientRunLookupV1,
   projectClientRunV1,
+  projectClientAnnouncementsV1,
   projectClientTurnV1,
   type ClientRunLookupV1,
   type ClientRunListV1,
@@ -168,6 +170,18 @@ const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
 const ASSIGNMENT_TOMBSTONE_PREFIX = "assignment-tombstone:";
 const ASSIGNMENT_SAGA_PREFIX = "assignment-saga:";
 const STOP_RECEIPT_PREFIX = "stop-receipt:";
+/**
+ * The Bot's durable announcement log: Session events that happen outside any
+ * Turn, such as a rename.
+ */
+const BOT_ANNOUNCEMENT_PREFIX = "bot-announcement:";
+const BOT_ANNOUNCEMENT_SEQUENCE_KEY = "bot-announcement-sequence";
+/** How many announcements the Session keeps. */
+export const BOT_ANNOUNCEMENT_RETENTION = 32;
+
+function botAnnouncementKey(seq: number): string {
+  return `${BOT_ANNOUNCEMENT_PREFIX}${String(seq).padStart(12, "0")}`;
+}
 const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
 /** Idempotency records for Composition commands this Package admits. */
 const COMPOSITION_COMMAND_PREFIX = "composition-command:";
@@ -734,6 +748,7 @@ export class ShellBotBackendContribution {
       {
         type:
           | "bot/update-profile"
+          | "bot/set-profile"
           | "bot/update-notifications"
           | "bot/select-model";
       }
@@ -765,9 +780,19 @@ export class ShellBotBackendContribution {
       const next: BotSettingsViewV1 =
         command.type === "bot/update-profile"
           ? { ...current, revision, profile: command.profile }
-          : command.type === "bot/update-notifications"
-            ? { ...current, revision, notifications: command.notifications }
-            : { ...current, revision, model: command.model };
+          : command.type === "bot/set-profile"
+            ? {
+                ...current,
+                revision,
+                profile: applyBotProfilePatchV1(
+                  current.profile,
+                  command.profile,
+                  command.namedBy ?? "user",
+                ),
+              }
+            : command.type === "bot/update-notifications"
+              ? { ...current, revision, notifications: command.notifications }
+              : { ...current, revision, model: command.model };
       const receipt: OperationReceiptV1 = {
         schemaVersion: 1,
         commandId: command.commandId,
@@ -778,9 +803,67 @@ export class ShellBotBackendContribution {
         [BOT_CONFIGURATION_KEY]: next,
         [receiptKey]: { commandFingerprint, receipt },
       });
+      // A rename is durable history, not a settings side effect: the Session
+      // records it so the conversation shows who renamed the Bot and when.
+      if (next.profile.name !== current.profile.name) {
+        await this.appendRenameAnnouncement(transaction, {
+          from: current.profile.name,
+          to: next.profile.name,
+          namedBy: next.profile.namedBy ?? "user",
+        });
+      }
       await this.refreshRecoveryAlarm(transaction);
       return receipt;
     });
+  }
+
+  /**
+   * Appends a rename announcement to the Bot's durable announcement log, in
+   * the same transaction that wrote the name. The log is append-only and
+   * bounded: the oldest entries beyond {@link BOT_ANNOUNCEMENT_RETENTION} are
+   * dropped, because an announcement is conversational history, not authority.
+   */
+  private async appendRenameAnnouncement(
+    transaction: {
+      get<T>(key: string): Promise<T | undefined>;
+      put(entries: Record<string, unknown>): Promise<void>;
+      list<T>(options: { prefix: string }): Promise<Map<string, T>>;
+      delete(keys: string[]): Promise<number>;
+    },
+    rename: { from: string; to: string; namedBy: "user" | "bot" },
+  ): Promise<void> {
+    const seq =
+      ((await transaction.get<number>(BOT_ANNOUNCEMENT_SEQUENCE_KEY)) ?? -1) +
+      1;
+    const event: SessionEvent = {
+      type: "bot/renamed",
+      seq,
+      timestamp: new Date().toISOString(),
+      from: rename.from,
+      to: rename.to,
+      namedBy: rename.namedBy,
+    };
+    await transaction.put({
+      [botAnnouncementKey(seq)]: event,
+      [BOT_ANNOUNCEMENT_SEQUENCE_KEY]: seq,
+    });
+    const stored = await transaction.list<unknown>({
+      prefix: BOT_ANNOUNCEMENT_PREFIX,
+    });
+    const expired = [...stored.keys()]
+      .sort()
+      .slice(0, Math.max(0, stored.size - BOT_ANNOUNCEMENT_RETENTION));
+    if (expired.length > 0) await transaction.delete(expired);
+  }
+
+  /** The announcements the Session shows, oldest first. */
+  async listAnnouncements(): Promise<SessionEvent[]> {
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: BOT_ANNOUNCEMENT_PREFIX,
+    });
+    return [...stored.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, value]) => decodeSessionEvent(value));
   }
 
   private async assignmentRequirement(
@@ -2711,6 +2794,11 @@ export class ShellBotBackendContribution {
       truncated && oldestCursor
         ? { truncated: true, nextCursor: oldestCursor }
         : { truncated: false },
+      // Announcements belong to the Session, not to a page of Turns, so only
+      // the newest page carries them.
+      query.before
+        ? []
+        : projectClientAnnouncementsV1(await this.listAnnouncements()),
     );
     if (clientRunListWireBytes(page) > CLIENT_RUN_LIST_MAX_BYTES) {
       throw new Error("required run projections exceed the wire byte limit");

@@ -2,7 +2,7 @@
 import { computed, inject } from "vue";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { flockWebDataKey } from "./state.js";
-import SheepAvatar from "./SheepAvatar.vue";
+import BotAvatar from "./BotAvatar.vue";
 const flock = inject(flockWebDataKey);
 const shell = inject(frockBotWebDataKey);
 if (!flock || !shell) throw new Error("Flock client data was not provided");
@@ -22,6 +22,10 @@ const identity = computed(() =>
     aria-label="Tailor sheep"
     @click="flock.openEdit"
   >
-    <SheepAvatar :sheep="identity.sheep" /></button
+    <BotAvatar
+      :bot-id="shell.activeBotId!"
+      :sheep="identity.sheep"
+      :label="`${shell.botSettings?.profile.name ?? 'This Bot'} avatar`"
+    /></button
   ><span v-else>⌁</span>
 </template>

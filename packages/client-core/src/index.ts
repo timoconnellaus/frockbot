@@ -64,6 +64,19 @@ export interface ClientTurnResponse {
 
 export type ClientStartConnectionResult = StartConnectionResult;
 
+/**
+ * A durable Session event that belongs to no Turn — a rename, today. The chat
+ * shows it as a system line rather than as a message from either party.
+ */
+export interface ClientAnnouncement {
+  type: "bot/renamed";
+  announcementId: string;
+  at: string;
+  from: string;
+  to: string;
+  namedBy: "user" | "bot";
+}
+
 export interface ClientRun {
   runId: string;
   admittedAt?: string;
@@ -112,6 +125,7 @@ export interface AgentTransport {
     nativeReturnNonce?: string;
   }): Promise<ClientStartConnectionResult>;
   listRuns?(botId: string): Promise<ClientRun[]>;
+  listAnnouncements?(botId: string): Promise<ClientAnnouncement[]>;
   lookupRun?(botId: string, runId: string): Promise<ClientRun | undefined>;
   fenceRunAdmission?(
     botId: string,

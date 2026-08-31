@@ -9,6 +9,12 @@
   background: var(--frock-surface-accent);
 }
 
+/* An uploaded image fills the same tile the sheep layers do. */
+img.flock-avatar {
+  display: block;
+  object-fit: cover;
+}
+
 /* The message-thread size: one avatar token, matching a small control. */
 .flock-avatar--mini {
   width: var(--frock-avatar-sm);
@@ -24,6 +30,18 @@
 }
 
 /* Sidebar */
+
+/* Bots their own settings keep out of the list, reachable behind one click. */
+.flock-hidden-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.flock-hidden-toggle {
+  align-self: flex-start;
+}
 
 .flock-sidebar-heading {
   display: flex;

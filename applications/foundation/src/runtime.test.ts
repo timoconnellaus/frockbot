@@ -228,6 +228,11 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readSheep: () => Promise.reject(new Error("not used while composing")),
       updateSheep: () => Promise.reject(new Error("not used while composing")),
+      listBotIdentities: () =>
+        Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
+      readBotAvatar: () => Promise.resolve(undefined),
+      uploadBotAvatar: () =>
+        Promise.reject(new Error("not used while composing")),
       executeConnection: () =>
         Promise.reject(new Error("not used while composing")),
       lookupConnectionCommand: () =>

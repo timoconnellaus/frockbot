@@ -101,10 +101,28 @@ export interface ClientRunPageV1 {
   nextCursor?: string;
 }
 
+/**
+ * A durable Session event that belongs to no Turn. The WebUI renders it as a
+ * system line in the conversation.
+ */
+export interface ClientAnnouncementV1 {
+  type: "bot/renamed";
+  announcementId: string;
+  at: string;
+  from: string;
+  to: string;
+  namedBy: "user" | "bot";
+}
+
 export interface ClientRunListV1 {
   schemaVersion: 1;
   runs: ClientRunV1[];
   page: ClientRunPageV1;
+  /**
+   * Optional so a stored projection written before announcements existed still
+   * decodes. Absent means the same as an empty list.
+   */
+  announcements?: ClientAnnouncementV1[];
 }
 
 export interface ClientRunListQueryV1 {
@@ -471,8 +489,37 @@ export function projectClientRunListV1(
 export function createClientRunListV1(
   runs: ClientRunV1[],
   page: ClientRunPageV1,
+  announcements: readonly ClientAnnouncementV1[] = [],
 ): ClientRunListV1 {
-  return { schemaVersion: 1, runs, page };
+  return {
+    schemaVersion: 1,
+    runs,
+    page,
+    ...(announcements.length > 0 ? { announcements: [...announcements] } : {}),
+  };
+}
+
+const MAX_ANNOUNCEMENTS = 64;
+const MAX_ANNOUNCEMENT_NAME_BYTES = 400;
+
+/** Projects the Bot's durable announcement events onto the wire. */
+export function projectClientAnnouncementsV1(
+  events: readonly SessionEvent[],
+): ClientAnnouncementV1[] {
+  return events.flatMap((event) =>
+    event.type === "bot/renamed"
+      ? [
+          {
+            type: "bot/renamed" as const,
+            announcementId: `announcement-${event.seq}`,
+            at: truncate(event.timestamp, MAX_TIMESTAMP_LENGTH),
+            from: truncateWireString(event.from, MAX_ANNOUNCEMENT_NAME_BYTES),
+            to: truncateWireString(event.to, MAX_ANNOUNCEMENT_NAME_BYTES),
+            namedBy: event.namedBy,
+          },
+        ]
+      : [],
+  );
 }
 
 export function clientRunListWireBytes(value: ClientRunListV1): number {
@@ -1101,12 +1148,67 @@ export function decodeClientRunLookupV1(input: unknown): ClientRunLookup {
   return { state: lookup.state, run };
 }
 
+function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
+  const announcement = record(value, "run list.announcement");
+  exactKeys(
+    announcement,
+    ["type", "announcementId", "at", "from", "to", "namedBy"],
+    "run list.announcement",
+  );
+  if (announcement.type !== "bot/renamed") {
+    throw new Error("run list.announcement.type is invalid");
+  }
+  const at = string(
+    announcement,
+    "at",
+    MAX_TIMESTAMP_LENGTH,
+    "run list.announcement",
+  );
+  if (!Number.isFinite(Date.parse(at))) {
+    throw new Error("run list.announcement.at is invalid");
+  }
+  if (announcement.namedBy !== "user" && announcement.namedBy !== "bot") {
+    throw new Error("run list.announcement.namedBy is invalid");
+  }
+  return {
+    type: "bot/renamed",
+    announcementId: publicEventId(
+      string(
+        announcement,
+        "announcementId",
+        MAX_EVENT_ID_LENGTH,
+        "run list.announcement",
+      ),
+      "run list.announcement.announcementId",
+    ),
+    at,
+    from: wireString(
+      announcement,
+      "from",
+      MAX_ANNOUNCEMENT_NAME_BYTES,
+      "run list.announcement",
+    ),
+    to: wireString(
+      announcement,
+      "to",
+      MAX_ANNOUNCEMENT_NAME_BYTES,
+      "run list.announcement",
+    ),
+    namedBy: announcement.namedBy,
+  };
+}
+
 export function decodeClientRunPageV1(input: unknown): {
   runs: ClientRun[];
   page: ClientRunPageV1;
+  announcements: ClientAnnouncementV1[];
 } {
   const list = record(input, "run list");
-  exactKeys(list, ["schemaVersion", "runs", "page"], "run list");
+  exactKeys(
+    list,
+    ["schemaVersion", "runs", "page", "announcements"],
+    "run list",
+  );
   if (list.schemaVersion !== 1) {
     throw new Error("run list.schemaVersion is invalid");
   }
@@ -1119,9 +1221,17 @@ export function decodeClientRunPageV1(input: unknown): {
   if (wireBytes(input) > CLIENT_RUN_LIST_MAX_BYTES) {
     throw new Error("run list exceeds the wire byte limit");
   }
+  if (
+    list.announcements !== undefined &&
+    (!Array.isArray(list.announcements) ||
+      list.announcements.length > MAX_ANNOUNCEMENTS)
+  ) {
+    throw new Error("run list.announcements must be a bounded array");
+  }
   const decoded = {
     runs: list.runs.map(decodeRun),
     page: decodePage(list.page),
+    announcements: (list.announcements ?? []).map(decodeAnnouncement),
   };
   return decoded;
 }

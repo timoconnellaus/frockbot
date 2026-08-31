@@ -131,6 +131,8 @@ describe("Flock client reconciliation", () => {
     const sheep = randomSheepRecipeV1(() => 0);
     const methods: Array<string | undefined> = [];
     const state = mount((path, method) => {
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
       methods.push(method);
       if (path === "/api/bots/lifecycles")
         return Promise.resolve({
@@ -199,6 +201,8 @@ describe("Flock client reconciliation", () => {
     const posted: Array<Record<string, unknown>> = [];
     let revision = 1;
     const state = mount((path, method, body) => {
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
       if (method === "POST") {
         const command = JSON.parse(body ?? "") as Record<string, unknown>;
         posted.push(command);
@@ -264,6 +268,8 @@ describe("Flock client reconciliation", () => {
       definitive: true,
     });
     const state = mount((path, method) => {
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
       if (path === "/api/bots" && method === "POST")
         return Promise.reject(definitive);
       if (path === "/api/bots/lifecycles")
@@ -297,6 +303,8 @@ describe("Flock client reconciliation", () => {
     const sheep = randomSheepRecipeV1(() => 0);
     let created: Record<string, unknown> | undefined;
     const state = mount((path, method, body) => {
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
       if (path === "/api/bots" && method === "POST") {
         created = JSON.parse(body ?? "") as Record<string, unknown>;
         return Promise.resolve({
@@ -388,6 +396,8 @@ describe("Flock client reconciliation", () => {
     const sheep = randomSheepRecipeV1(() => 0);
     let alphaStatus: "active" | "archived" = "active";
     const state = mount((path, method, body) => {
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
       if (path === "/api/bots/alpha/lifecycle" && method === "POST") {
         const command = JSON.parse(body ?? "") as {
           commandId: string;
@@ -461,6 +471,8 @@ describe("Flock client reconciliation", () => {
     const original = randomSheepRecipeV1(() => 0);
     const updated = randomSheepRecipeV1(() => 0.999);
     const state = mount((path, method) => {
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
       if (method === "POST") return Promise.reject(new Error("response lost"));
       if (path === "/api/bots/alpha/sheep")
         return Promise.resolve({

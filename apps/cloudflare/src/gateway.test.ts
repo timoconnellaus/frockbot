@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { type SessionEvent } from "@frockbot/kernel-contracts";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/connection-core";
 import { createSettingsBackendContribution } from "@frockbot/plugin-settings/backend";
+import { applyBotProfilePatchV1 } from "@frockbot/configuration-core";
 import type {
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
@@ -313,36 +314,44 @@ class MemoryConfiguration
         revision,
         ...(command.type === "bot/update-profile"
           ? { profile: command.profile }
-          : command.type === "bot/update-notifications"
-            ? { notifications: command.notifications }
-            : command.type === "bot/select-model"
-              ? { model: command.model }
-              : command.type === "bot/unassign-capability"
-                ? {
-                    assignments: bot.assignments.filter(
-                      (assignment) =>
-                        assignment.assignmentId !== command.assignmentId,
-                    ),
-                  }
-                : command.type === "bot/unbind-model"
+          : command.type === "bot/set-profile"
+            ? {
+                profile: applyBotProfilePatchV1(
+                  bot.profile,
+                  command.profile,
+                  command.namedBy ?? "user",
+                ),
+              }
+            : command.type === "bot/update-notifications"
+              ? { notifications: command.notifications }
+              : command.type === "bot/select-model"
+                ? { model: command.model }
+                : command.type === "bot/unassign-capability"
                   ? {
-                      model: undefined,
-                      assignments: bot.assignments.map((assignment) =>
-                        assignment.assignmentId === command.assignmentId
-                          ? { ...assignment, state: "unavailable" as const }
-                          : assignment,
+                      assignments: bot.assignments.filter(
+                        (assignment) =>
+                          assignment.assignmentId !== command.assignmentId,
                       ),
                     }
-                  : {
-                      assignments: [
-                        ...bot.assignments.filter(
-                          (assignment) =>
-                            assignment.assignmentId !==
-                            command.assignment.assignmentId,
+                  : command.type === "bot/unbind-model"
+                    ? {
+                        model: undefined,
+                        assignments: bot.assignments.map((assignment) =>
+                          assignment.assignmentId === command.assignmentId
+                            ? { ...assignment, state: "unavailable" as const }
+                            : assignment,
                         ),
-                        { ...command.assignment, state: "enabled" as const },
-                      ],
-                    }),
+                      }
+                    : {
+                        assignments: [
+                          ...bot.assignments.filter(
+                            (assignment) =>
+                              assignment.assignmentId !==
+                              command.assignment.assignmentId,
+                          ),
+                          { ...command.assignment, state: "enabled" as const },
+                        ],
+                      }),
       });
     } else {
       const user = current as UserSettingsViewV1;
@@ -784,6 +793,11 @@ function createTestGateway(
             botId,
             command,
           }),
+        listBotIdentities: () =>
+          Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
+        readBotAvatar: () => Promise.resolve(undefined),
+        uploadBotAvatar: () =>
+          Promise.reject(new Error("avatar upload is not wired in this test")),
       }),
       createSettingsBackendContribution({
         executeConnection: (userId, command) => {
