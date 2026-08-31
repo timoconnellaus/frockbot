@@ -1,0 +1,136 @@
+/**
+ * Everything the Shell writes in the transaction that settles a Turn.
+ *
+ * Three policies share the kernel's one `terminalRecords` seam and none of them
+ * knows about the others: unread state advances for a conversational Turn, an
+ * automation Turn writes its completion-inbox entry and the pending input it
+ * hands off, and any Turn that asked for an approval writes the durable pending
+ * decision. The kernel writes the returned keys without reading them, so this
+ * is the only place their composition is decided.
+ *
+ * Two rules the composition itself has to keep, and they are why this is a
+ * function with a test rather than three spreads in a method body.
+ *
+ *  * **Each producer runs exactly once per settlement.** A settlement that ran
+ *    a producer twice would write two records where the Turn earned one — a
+ *    firing with two inbox entries, say — and the second would be invisible
+ *    until somebody counted.
+ *
+ *  * **No producer may silently overwrite another.** A spread lets a later key
+ *    clobber an earlier one with no sign; a collision here is a bug in the key
+ *    spaces two Packages chose, so it throws rather than picking a winner.
+ *
+ * One settlement also gets one `now`. Three producers each reading their own
+ * clock would stamp one transaction with three different instants.
+ */
+import {
+  advanceUnreadActivityV1,
+  optionalUnreadStateV1,
+  UNREAD_STATE_KEY,
+} from "./unread.js";
+import { approvalTerminalRecordsV1 } from "./approvals.js";
+import { routineTerminalRecordsForRunV1 } from "./backend-routines.js";
+
+/** The settled run a terminal record set is computed from. */
+export interface ShellTerminalRunV1 {
+  runId: string;
+  sessionId: string;
+  events: readonly { type: string }[];
+  responseText?: string;
+  admission?: {
+    turnType?: string;
+    origin?: { kind: string; routineId: string };
+  };
+}
+
+export interface ShellTerminalInputV1 {
+  run: ShellTerminalRunV1;
+  /** The admission-index cursor the Turn was admitted under. */
+  cursor: string;
+  /** The one instant this settlement is stamped with. */
+  now: string;
+  /** Reader bound to the transaction that is settling the Turn. */
+  read<T>(key: string): Promise<T | undefined>;
+}
+
+/**
+ * The unread record — FrockBot's `lastTurnSettlement`. Activity advances
+ * whatever the Bot's notification policy says: muting silences the intent,
+ * never the badge. Only a chat Turn advances it; an automation Turn reaches
+ * the User through its own inbox entry.
+ */
+async function unreadRecordsV1(
+  input: ShellTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  if ((input.run.admission?.turnType ?? "chat") !== "chat") return {};
+  const current = optionalUnreadStateV1(
+    await input.read<unknown>(UNREAD_STATE_KEY),
+  );
+  return {
+    [UNREAD_STATE_KEY]: advanceUnreadActivityV1(current, {
+      cursor: input.cursor,
+      at: input.now,
+    }),
+  };
+}
+
+/**
+ * The completion-inbox entry and pending wake an automation Turn contributes.
+ * Nothing for a conversational one, so a chat Turn's settlement is
+ * byte-for-byte what it was before Routines existed.
+ */
+async function routineRecordsV1(
+  input: ShellTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  const contributed = await routineTerminalRecordsForRunV1({
+    run: input.run,
+    read: input.read,
+    now: input.now,
+  });
+  return contributed?.records ?? {};
+}
+
+/**
+ * The pending decisions the Turn asked for. "A request for more becomes a
+ * durable pending decision for the User, never a grant": the card the User
+ * sees and the record their answer is written against become durable in one
+ * transaction, so there is no instant at which the question has been asked and
+ * the answer has nowhere to go.
+ */
+async function approvalRecordsV1(
+  input: ShellTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  return approvalTerminalRecordsV1({
+    run: {
+      runId: input.run.runId,
+      sessionId: input.run.sessionId,
+      events: input.run.events,
+    },
+    now: input.now,
+    read: input.read,
+  });
+}
+
+/** The producers, in the order they are composed. Each is called once. */
+const SHELL_TERMINAL_PRODUCERS_V1 = [
+  unreadRecordsV1,
+  routineRecordsV1,
+  approvalRecordsV1,
+] as const;
+
+export async function shellTerminalRecordsV1(
+  input: ShellTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  const records: Record<string, unknown> = {};
+  for (const produce of SHELL_TERMINAL_PRODUCERS_V1) {
+    for (const [key, value] of Object.entries(await produce(input))) {
+      if (Object.hasOwn(records, key)) {
+        throw new Error(
+          `two terminal-record producers both wrote "${key}"; one would have silently overwritten the other`,
+        );
+      }
+      records[key] = value;
+    }
+  }
+  return records;
+}

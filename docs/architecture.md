@@ -393,6 +393,8 @@ An automation Turn has no `send_to_user`; the tool registry refuses the call, an
 
 Both cursors (`routine-inbox-cursor`, `routine-wake-cursor`) exist because the terminal seam is handed a reader and not a lister: a record written inside the settling transaction must be addressable by key alone. The two bounds are retention rather than correctness, so they are enforced on the next read.
 
+The three producers that share the seam — unread, the completion inbox, and approval records — are composed in `plugin-shell/src/terminal-records.ts` rather than spread inline, because two properties have to hold and neither is visible in a spread: each producer runs **exactly once** per settlement, and no producer may silently overwrite another's key, which throws rather than picking a winner.
+
 `PendingBotInputV1` is deliberately wider than Routines: it is `{ kind: "wake", … } | { kind: "approval", approvalId, decision }`. Approval cards produce the second variant through `enqueuePendingBotInputV1`, which takes the caller's own transaction — a second producer, never a second queue, and no wire change.
 
 ### Draining a pending wake

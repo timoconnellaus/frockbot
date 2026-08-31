@@ -150,20 +150,15 @@ import {
   routineFireOutcomeV1,
   routineInboxEntryViewV1,
   routineRunDetailViewV1,
-  routineTerminalRecordsForRunV1,
   routineTurnCommandV1,
   settledRoutineOriginV1,
 } from "./backend-routines.js";
-import {
-  RoutineInboxStore,
-  type RoutineTerminalRecordsV1,
-} from "@frockbot/plugin-routines/inbox-store";
+import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import {
   approvalKeyV1,
   approvalNotificationBodyV1,
   approvalNotificationIdV1,
   approvalSendsV1,
-  approvalTerminalRecordsV1,
   decodeApprovalRecordV1,
   projectApprovalCardV1,
   trimmableApprovalKeysV1,
@@ -228,6 +223,7 @@ import {
 } from "@frockbot/plugin-mcp/records";
 import { projectCompositionGenerationV1 } from "./composition-views.js";
 import { executeBotTurn } from "./backend-runner.js";
+import { shellTerminalRecordsV1 } from "./terminal-records.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
@@ -261,7 +257,6 @@ import {
 
 /** The Bot Durable Object key holding this Bot's durable configuration. */
 import {
-  advanceUnreadActivityV1,
   botUnreadCommandFingerprintV1,
   markUnreadReadV1,
   markUnreadV1,
@@ -3553,34 +3548,6 @@ export class ShellBotBackendContribution {
   }
 
   /**
-   * The unread record, written in the same transaction that settles the Turn —
-   * FrockBot's `lastTurnSettlement`. Activity advances whatever the Bot's
-   * notification policy says: muting silences the intent, never the badge.
-   * Only a chat Turn advances it; an automation Turn reaches the User through
-   * its own inbox entry.
-   */
-  private async unreadTerminalRecords(input: {
-    run: {
-      acceptedAt: string;
-      runId: string;
-      admission?: { turnType: string };
-    };
-    cursor: string;
-    read<T>(key: string): Promise<T | undefined>;
-  }): Promise<Record<string, unknown>> {
-    if ((input.run.admission?.turnType ?? "chat") !== "chat") return {};
-    const current = optionalUnreadStateV1(
-      await input.read<unknown>(UNREAD_STATE_KEY),
-    );
-    return {
-      [UNREAD_STATE_KEY]: advanceUnreadActivityV1(current, {
-        cursor: input.cursor,
-        at: new Date().toISOString(),
-      }),
-    };
-  }
-
-  /**
    * The Bot's unread projection. The count is derived from the admission index
    * on every read, one page longer than the cap so "99+" is exact.
    */
@@ -3712,11 +3679,11 @@ export class ShellBotBackendContribution {
   }
 
   /**
-   * Everything the Shell writes in the transaction that settles a Turn. Two
-   * policies share the seam and neither knows about the other: unread state
-   * advances for a conversational Turn, and an automation Turn writes its
-   * completion inbox entry instead, which is why a firing reaches its User
-   * without ever touching the badge a visible run moves.
+   * Everything the Shell writes in the transaction that settles a Turn.
+   *
+   * The composition itself lives in `terminal-records.ts`, where "each
+   * producer exactly once, and no producer silently overwrites another" is a
+   * checked property rather than the shape of three spreads.
    */
   private async terminalPackageRecords(input: {
     snapshot: BotSettingsViewV1;
@@ -3724,50 +3691,12 @@ export class ShellBotBackendContribution {
     cursor: string;
     read<T>(key: string): Promise<T | undefined>;
   }): Promise<Record<string, unknown>> {
-    return {
-      ...(await this.unreadTerminalRecords(input)),
-      ...(await this.routineTerminalRecords(input)),
-      ...(await this.approvalTerminalRecords(input)),
-    };
-  }
-
-  /**
-   * The pending decisions a settled Turn asked for. "A request for more
-   * becomes a durable pending decision for the User, never a grant": the card
-   * the User sees and the record their answer is written against become
-   * durable in one transaction, so there is no instant at which the question
-   * has been asked and the answer has nowhere to go.
-   */
-  private async approvalTerminalRecords(input: {
-    run: StoredRun;
-    read<T>(key: string): Promise<T | undefined>;
-  }): Promise<Record<string, unknown>> {
-    return approvalTerminalRecordsV1({
-      run: {
-        runId: input.run.runId,
-        sessionId: input.run.sessionId,
-        events: input.run.events,
-      },
-      now: new Date().toISOString(),
-      read: input.read,
-    });
-  }
-
-  /**
-   * The Package records that settle with an automation Turn. Returns nothing
-   * for a conversational one, so a chat Turn's settlement is byte-for-byte what
-   * it was.
-   */
-  private async routineTerminalRecords(input: {
-    run: StoredRun;
-    read<T>(key: string): Promise<T | undefined>;
-  }): Promise<Record<string, unknown>> {
-    const contributed = await routineTerminalRecordsForRunV1({
+    return shellTerminalRecordsV1({
       run: input.run,
-      read: input.read,
+      cursor: input.cursor,
       now: new Date().toISOString(),
+      read: input.read,
     });
-    return contributed?.records ?? {};
   }
 
   async alarm(): Promise<void> {
