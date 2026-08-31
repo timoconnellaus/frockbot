@@ -18,6 +18,10 @@ export const ROUTINE_SCHEDULE_PREFIX = "routine-schedule:";
 export const ROUTINE_FIRE_PREFIX = "routine-fire:";
 /** Firings waiting behind the unsettled one, oldest first. */
 export const ROUTINE_QUEUE_PREFIX = "routine-queue:";
+/** One `RoutineHookKeyV1`: the authoritative digest of a Routine's webhook key. */
+export const ROUTINE_KEY_PREFIX = "routine-key:";
+/** One accepted delivery, so a replay answers with the firing it already made. */
+export const ROUTINE_DELIVERY_PREFIX = "routine-delivery:";
 
 /** Most run entries retained per Routine. Trimming loses index rows, never facts. */
 export const ROUTINE_RUN_LOG_LIMIT = 50;
@@ -114,4 +118,12 @@ export function nextQueueSequenceV1(keys: readonly string[]): number {
     if (Number.isSafeInteger(encoded)) highest = Math.max(highest, encoded);
   }
   return highest + 1;
+}
+
+export function routineHookKeyRecordV1(routineId: string): string {
+  return `${ROUTINE_KEY_PREFIX}${routineId}`;
+}
+
+export function routineDeliveryKeyV1(deliveryId: string): string {
+  return `${ROUTINE_DELIVERY_PREFIX}${deliveryId}`;
 }

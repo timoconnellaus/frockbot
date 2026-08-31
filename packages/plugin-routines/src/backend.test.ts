@@ -22,6 +22,8 @@ function contribution(options: { ownedBots?: string[] } = {}) {
     return created;
   };
   return createRoutinesBackendContribution({
+    deliverRoutineHook: () =>
+      Promise.reject(new Error("no webhook in this fixture")),
     listRoutines: (_userId, botId) => store(botId).list(botId),
     executeRoutineCommand: (_userId, botId, command) =>
       store(botId).execute(command, { kind: "user" }),

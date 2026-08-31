@@ -112,6 +112,8 @@ interface Env {
   GOOGLE_CLIENT_SECRET?: string;
   SPRITES_TOKEN?: string;
   CREDENTIAL_KEYRING?: string;
+  /** Signs every Routine webhook key. Absent closes the webhook door. */
+  ROUTINE_HOOK_SECRET?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
 }
@@ -168,6 +170,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     listRoutines: (request) => rpc.listRoutines(request),
     executeRoutineCommand: (request) => rpc.executeRoutineCommand(request),
     listRoutineRuns: (request) => rpc.listRoutineRuns(request),
+    deliverRoutineHook: (request) => rpc.deliverRoutineHook(request),
     listCompositionGenerations: (request) =>
       rpc.listCompositionGenerations(request),
     getCompositionGeneration: (request) =>
@@ -764,6 +767,18 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             command,
           }),
         ),
+      // The secret the gateway verifies a presented webhook key against. It
+      // never leaves the Worker; a Bot only ever sees a digest.
+      ...(typeof env.ROUTINE_HOOK_SECRET === "string"
+        ? { routineHookSecret: env.ROUTINE_HOOK_SECRET }
+        : {}),
+      deliverRoutineHook: async (userId, botId, delivery) =>
+        botStateStub(env, userId, botId).deliverRoutineHook({
+          schemaVersion: 1,
+          userId,
+          botId,
+          delivery,
+        }),
       listRoutineRuns: async (userId, botId, routineId) =>
         decodeRoutineRunListViewV1(
           await botStateStub(env, userId, botId).listRoutineRuns({

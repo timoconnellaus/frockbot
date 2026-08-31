@@ -342,6 +342,18 @@ else
   set_required_production_secret COMPUTER_HOST_TOKEN "$COMPUTER_HOST_TOKEN"
   unset COMPUTER_HOST_TOKEN
 fi
+if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx ROUTINE_HOOK_SECRET; then
+  note "Preserving the existing ROUTINE_HOOK_SECRET so already-issued Routine webhook keys keep verifying."
+else
+  say "Provision the secret every Routine webhook key is signed with."
+  ROUTINE_HOOK_SECRET="$(openssl rand -hex 32)"
+  [[ -n "$ROUTINE_HOOK_SECRET" ]] || {
+    warn "Routine hook secret generation failed"
+    exit 1
+  }
+  set_required_production_secret ROUTINE_HOOK_SECRET "$ROUTINE_HOOK_SECRET"
+  unset ROUTINE_HOOK_SECRET
+fi
 unset PRODUCTION_SECRETS
 
 stage "GitHub: verify production configuration"

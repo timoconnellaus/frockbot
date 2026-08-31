@@ -699,6 +699,12 @@ class MemoryConfiguration
       request.routineId,
     );
   }
+
+  deliverRoutineHook(
+    request: Parameters<BotConfigurationBinding["deliverRoutineHook"]>[0],
+  ): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
+    return this.routineStore(request.botId).deliverHook(request.delivery);
+  }
 }
 
 const COMPOSITION_GENERATION_ID = "2026-08-31T00:00:00.000Z:0123456789abcdef";

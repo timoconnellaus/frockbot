@@ -131,6 +131,7 @@ import {
   type ClientSkillCatalogV1,
 } from "./skill-protocol.js";
 import {
+  createBotRoutineHookMinter,
   createBotRoutines,
   createBotRoutinesHost,
   routineFireOutcomeV1,
@@ -309,6 +310,12 @@ export interface BotStateEnv {
   COMPUTER_HOST_TOKEN?: string;
   SPRITES_TOKEN?: string;
   CREDENTIAL_KEYRING?: string;
+  /**
+   * The HMAC secret every Routine webhook key is signed with. Absent in a
+   * deployment that has not set it, and a webhook Routine is then refused a key
+   * with that reason rather than given an unverifiable one.
+   */
+  ROUTINE_HOOK_SECRET?: string;
 }
 
 /** Constructs the kernel Bot Durable Object authority this Package runs under. */
@@ -372,7 +379,13 @@ export class ShellBotBackendContribution {
       host.compileApplication ?? compileFoundationApplication;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
-    const routines = createBotRoutines(host.state.storage);
+    const routines = createBotRoutines(
+      host.state.storage,
+      createBotRoutineHookMinter(
+        () => this.authority.readDurableIdentity(),
+        host.env.ROUTINE_HOOK_SECRET,
+      ),
+    );
     this.routines = routines.store;
     this.routineScheduler = routines.scheduler;
     const createAuthority: CreateBotDurableAuthority =
@@ -2854,6 +2867,29 @@ export class ShellBotBackendContribution {
       this.authority.refreshRecoveryAlarm(transaction),
     );
     return receipt;
+  }
+
+  /**
+   * One webhook delivery, after the edge proved the key was minted here.
+   *
+   * The Bot re-checks the key against its own durable record, because the edge
+   * knows only that the signature is this deployment's — not whether the key is
+   * still this Routine's. The delivery is enqueued, never run inline: an HTTP
+   * caller must not be able to hold a Turn open.
+   */
+  async deliverRoutineHook(input: {
+    routineId: string;
+    keyVersion: number;
+    digest: string;
+    deliveryId: string;
+    body: string;
+    contentType?: string | null;
+  }): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
+    const accepted = await this.routines.deliverHook(input);
+    await this.ctx.storage.transaction((transaction) =>
+      this.authority.refreshRecoveryAlarm(transaction),
+    );
+    return accepted;
   }
 
   /** One Routine's bounded run log, newest first. */

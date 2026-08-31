@@ -21,6 +21,7 @@ interface FlyTestEnv {
   FLY_COMPATIBILITY: DurableObjectNamespace<FlyCompatibilityProbe>;
   PACKAGE_CATALOG: R2Bucket;
   SPRITES_TOKEN: string;
+  ROUTINE_HOOK_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
 }
 

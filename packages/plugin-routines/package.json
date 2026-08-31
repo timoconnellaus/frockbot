@@ -10,6 +10,7 @@
     "./client": "./src/client/index.ts",
     "./cron": "./src/cron.ts",
     "./firing": "./src/firing.ts",
+    "./hook": "./src/hook.ts",
     "./frockbot.json": "./frockbot.json",
     "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",

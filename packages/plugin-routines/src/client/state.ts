@@ -1,5 +1,6 @@
 import type { InjectionKey, Ref } from "vue";
 import type {
+  RoutineHookMintV1,
   RoutineRunEntryViewV1,
   RoutineTriggerV1,
   RoutineViewV1,
@@ -31,6 +32,18 @@ export interface RoutinesClientState {
   remove(botId: string, routineId: string): Promise<void>;
   /** Ask for one firing now. It is queued; the alarm runs it. */
   runNow(botId: string, routineId: string): Promise<void>;
+  /**
+   * The webhook key most recently minted in this session, and the only place it
+   * is ever readable. It is not persisted anywhere on the client and cannot be
+   * fetched again: rotating is the only way to see a key twice.
+   */
+  mintedHook?: RoutineHookMintV1;
+  /** Mint a fresh key, retiring the one before it. */
+  rotateKey(botId: string, routineId: string): Promise<void>;
+  /** Retire the key without minting another. Deliveries then answer 401. */
+  revokeKey(botId: string, routineId: string): Promise<void>;
+  /** Forget the key on screen. */
+  dismissHook(): void;
 }
 
 export const routinesStateKey: InjectionKey<Ref<RoutinesClientState>> =
