@@ -872,6 +872,7 @@
         "@frockbot/kernel-do": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
+        "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",

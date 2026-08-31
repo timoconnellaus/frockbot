@@ -54,6 +54,7 @@ import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
+import { decodeMcpMountOutcomeV1 } from "@frockbot/plugin-mcp/records";
 import type { WorkerLoader } from "./contracts.js";
 import { createPackagePublicationHost } from "./package-publication.js";
 import { R2PackageCatalog } from "./package-catalog.js";
@@ -509,6 +510,56 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       request.botId as string,
       request.generation as string,
     );
+  }
+
+  /**
+   * The User's MCP servers, as the status projection GrokBot calls
+   * `GetMcpServerStatus`. A read of durable records this object owns; it
+   * reaches no server and wakes nothing.
+   */
+  async readMcpServers(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.contributions()).mcp.readServerStatus(
+      request.userId as string,
+    );
+  }
+
+  /**
+   * One MCP lifecycle command: add a server, set its instructions, restart
+   * it. Decoded inside the Contribution that owns the records, so the seam
+   * carries no shape of its own.
+   */
+  async executeMcpCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecodedValue,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.contributions()).mcp.executeLifecycle(
+      request.userId as string,
+      request.command,
+    );
+  }
+
+  /**
+   * What a Bot's mount of an MCP server found. The Bot Durable Object holds
+   * no MCP record — this object does — so a mount that could not reach the
+   * server reports it here and the failure becomes visible on the User's own
+   * surface rather than dying inside a Turn.
+   */
+  async recordMcpMountOutcome(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      outcome: rpcDecoded(decodeMcpMountOutcomeV1),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await (
+      await this.contributions()
+    ).mcp.recordMountOutcome({
+      accountId: request.userId as string,
+      ...(request.outcome as ReturnType<typeof decodeMcpMountOutcomeV1>),
+    });
   }
 
   /**

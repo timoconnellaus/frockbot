@@ -78,7 +78,20 @@ export interface McpClientConfig {
   maxTools?: number;
 }
 
-export class McpProtocolError extends Error {}
+export class McpProtocolError extends Error {
+  /**
+   * The HTTP status the server answered with, when there was one. The
+   * lifecycle needs it to tell `needs-auth` from `error`: a 401 is a
+   * credential a User can replace, and everything else is a server that is
+   * not there.
+   */
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    if (status !== undefined) this.status = status;
+  }
+}
 
 interface JsonRpcResponse {
   id: number;
@@ -307,6 +320,7 @@ export class McpClient {
       ).trim();
       throw new McpProtocolError(
         `MCP server answered ${response.status}${detail ? `: ${detail}` : ""}`,
+        response.status,
       );
     }
     return response;
@@ -386,6 +400,7 @@ export class McpClient {
     if (!response.ok || !response.body) {
       throw new McpProtocolError(
         `MCP server answered ${response.status} opening its event stream`,
+        response.status,
       );
     }
     const session = new SseSession(

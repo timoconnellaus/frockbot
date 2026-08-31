@@ -60,6 +60,10 @@ import {
   decodeSearchIndexResultsV1,
   type SearchQueryV1,
 } from "@frockbot/plugin-search";
+import {
+  decodeMcpLifecycleReceiptV1,
+  decodeMcpServerStatusViewV1,
+} from "@frockbot/plugin-mcp/records";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -265,6 +269,9 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
     lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
+    readMcpServers: (request) => rpc.readMcpServers(request),
+    executeMcpCommand: (request) => rpc.executeMcpCommand(request),
+    recordMcpMountOutcome: (request) => rpc.recordMcpMountOutcome(request),
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),
@@ -836,6 +843,25 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           userId,
           command,
         }),
+      readMcpServers: async (userId) =>
+        decodeMcpServerStatusViewV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).readMcpServers({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
+      executeMcpCommand: async (userId, command) =>
+        decodeMcpLifecycleReceiptV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).executeMcpCommand({
+              schemaVersion: 1,
+              userId,
+              command,
+            }),
+          ),
+        ),
       lookupConnectionCommand: (userId, packageId, commandId) =>
         userConfigurationStub(env, userId).lookupConnectionCommand({
           schemaVersion: 1,

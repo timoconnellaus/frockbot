@@ -25,6 +25,13 @@ import {
   type McpTransportV1,
 } from "./mcp-client.js";
 import { decodeOutboundMcpUrlV1 } from "./ssrf.js";
+import {
+  mcpAssignmentResolutionKeyV1,
+  mcpFailureCodeV1,
+  MAX_MCP_INSTRUCTIONS_BYTES_V1,
+  type McpFailureCodeV1,
+  type McpServerStatusViewV1,
+} from "./records.js";
 
 /**
  * The global `fetch`, bound. A bare reference to it throws "Illegal
@@ -52,6 +59,41 @@ export const MCP_TOOL_TURN_TYPES: readonly TurnTypeV1[] = [
  * by adding one more Assignment.
  */
 export const MAX_MCP_SERVERS_PER_USER_V1 = 16;
+
+/** What one mount of a server found, as the durable record records it. */
+export interface McpMountOutcomeV1 {
+  connectionId: string;
+  serverEpoch?: number;
+  state: "ready" | "needs-auth" | "error";
+  failure?: { code: McpFailureCodeV1; message: string };
+  protocolVersion?: string;
+  toolCount?: number;
+  toolsHash?: string;
+}
+
+/**
+ * The server's durable lifecycle fields as they reach the Bot: mirrored onto
+ * the Connection's `safeMetadata` by the User Durable Object, which owns the
+ * record. The Bot never invents them, and an absent mirror is a server that
+ * has not been through the lifecycle yet, not a failure.
+ */
+export function mcpConnectionLifecycleV1(connection: {
+  safeMetadata?: Record<string, unknown>;
+}): { serverEpoch?: number; instructions?: string } {
+  const metadata = connection.safeMetadata ?? {};
+  const epoch = metadata.serverEpoch;
+  const instructions = metadata.instructions;
+  return {
+    ...(typeof epoch === "number" && Number.isInteger(epoch) && epoch >= 0
+      ? { serverEpoch: epoch }
+      : {}),
+    ...(typeof instructions === "string" &&
+    instructions.length > 0 &&
+    instructions.length <= MAX_MCP_INSTRUCTIONS_BYTES_V1
+      ? { instructions }
+      : {}),
+  };
+}
 
 export interface McpConnectionSettingsV1 {
   url: URL;
@@ -136,11 +178,17 @@ export interface McpRuntimeContributionConfig {
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
   /**
-   * Where a mount failure goes. L2 records nothing durable — the durable
-   * server record and its `needs-auth`/`error` states are L3 — so a Bot whose
-   * server is unreachable is offered no tools rather than a broken one.
+   * Where a mount failure goes in-process: a Bot whose server is unreachable
+   * is offered no tools rather than a broken one.
    */
   onFailure?(reason: string): void;
+  /**
+   * Where a mount outcome goes durably. The User Durable Object owns the
+   * server record, so this is how an unreachable server or a refused
+   * credential becomes a visible `error`/`needs-auth` on the User's own
+   * surface instead of a Bot that quietly lost its tools.
+   */
+  onOutcome?(outcome: McpMountOutcomeV1): Promise<void> | void;
   now?: () => number;
   randomId?: () => string;
 }
@@ -169,8 +217,11 @@ export async function createConfiguredMcpRuntimeContribution(
   }
   const fetchImpl = config.fetch ?? boundFetch;
   let client: McpClient | undefined;
+  let lifecycle: { serverEpoch?: number; instructions?: string } = {};
+  const connectionId = config.assignment.connectionId;
   try {
     const connection = await config.authorizeConnection();
+    lifecycle = mcpConnectionLifecycleV1(connection);
     if (connection.state !== "ready") {
       throw new Error("MCP Connection is not ready");
     }
@@ -187,21 +238,76 @@ export async function createConfiguredMcpRuntimeContribution(
       maxResponseBytes: MAX_MCP_RESPONSE_BYTES,
       maxTools: MAX_MCP_TOOLS_PER_SERVER,
     });
-    await client.connect();
+    const handshake = await client.connect();
     const tools = await client.listTools();
+    try {
+      await config.onOutcome?.({
+        connectionId,
+        ...(lifecycle.serverEpoch === undefined
+          ? {}
+          : { serverEpoch: lifecycle.serverEpoch }),
+        state: "ready",
+        protocolVersion: handshake.protocolVersion,
+        toolCount: tools.length,
+      });
+    } catch {
+      // The record is a projection, not the authority for this mount: a User
+      // Durable Object that cannot be reached must not cost the Bot the tools
+      // its server just listed.
+    }
     return createMcpToolPlugin({
       client,
       serverSlug: mcpServerSlugV1(connection),
       serverLabel: connection.displayName,
       tools,
+      ...(lifecycle.instructions
+        ? { instructions: lifecycle.instructions }
+        : {}),
     });
   } catch (error) {
     await client?.close().catch(() => undefined);
-    config.onFailure?.(
-      error instanceof Error ? error.message : "MCP server is unavailable",
-    );
+    const message =
+      error instanceof Error ? error.message : "MCP server is unavailable";
+    config.onFailure?.(message);
+    const code = mcpFailureCodeV1(error);
+    try {
+      await config.onOutcome?.({
+        connectionId,
+        ...(lifecycle.serverEpoch === undefined
+          ? {}
+          : { serverEpoch: lifecycle.serverEpoch }),
+        state: code === "unauthorized" ? "needs-auth" : "error",
+        failure: { code, message },
+      });
+    } catch {
+      // The record is best-effort from inside a mount: a User Durable Object
+      // that cannot be reached must not turn a missing tool into a failed
+      // Turn.
+    }
     return undefined;
   }
+}
+
+/**
+ * What one Assignment of `mcp-tools` resolves to, including the server's
+ * `serverEpoch`. A restart bumps the epoch, so this key changes, so the next
+ * admitted Turn resolves a different mount and re-handshakes — while the
+ * in-flight Turn, holding the client it already mounted, is untouched.
+ */
+export function mcpAssignmentResolutionV1(config: {
+  assignment: { connectionId?: string };
+  connection: { generation?: string; safeMetadata?: Record<string, unknown> };
+}): string {
+  const lifecycle = mcpConnectionLifecycleV1(config.connection);
+  return mcpAssignmentResolutionKeyV1({
+    connectionId: config.assignment.connectionId ?? "",
+    ...(config.connection.generation === undefined
+      ? {}
+      : { connectionGeneration: config.connection.generation }),
+    ...(lifecycle.serverEpoch === undefined
+      ? {}
+      : { serverEpoch: lifecycle.serverEpoch }),
+  });
 }
 
 async function openAssignedCredential(
@@ -245,19 +351,43 @@ async function openAssignedCredential(
   }
 }
 
+/** One tool's description, with the server's instructions attached to it. */
+export function mcpToolDescriptionV1(input: {
+  declaration: { name: string; description?: string };
+  serverLabel: string;
+  instructions?: string;
+}): string {
+  const base =
+    input.declaration.description ??
+    `${input.declaration.name} on the MCP server "${input.serverLabel}".`;
+  return input.instructions
+    ? `${base}\n\nInstructions for "${input.serverLabel}": ${input.instructions}`
+    : base;
+}
+
 export function createMcpToolPlugin(config: {
   client: McpClient;
   serverSlug: string;
   serverLabel: string;
   tools: readonly McpToolDeclarationV1[];
+  /**
+   * GrokBot's `SetMcpInstructions`. There is no "tool set" in a model
+   * request — `model/request.tools` is a flat list — so the instructions
+   * become the description every one of this server's tools carries. That
+   * puts them in the exact normalized request the session log records, which
+   * is the only place a User can prove the model was told.
+   */
+  instructions?: string;
 }): Plugin.Function {
   const plugin: Plugin.Function = (ctx: Context) => {
     const disposers = config.tools.map((declaration) => {
       const definition: ToolDefinition = {
         name: mcpToolNameV1(config.serverSlug, declaration.name),
-        description:
-          declaration.description ??
-          `${declaration.name} on the MCP server "${config.serverLabel}".`,
+        description: mcpToolDescriptionV1({
+          declaration,
+          serverLabel: config.serverLabel,
+          ...(config.instructions ? { instructions: config.instructions } : {}),
+        }),
         inputSchema: declaration.inputSchema,
         validate: (input: unknown) => input === undefined || isObject(input),
         execute: async (input: unknown) => {

@@ -363,6 +363,12 @@ const API_ROUTES: Array<{
     matches: connectionCommandRoute,
     methods: new Set(["GET"]),
   },
+  // The MCP status projection and its lifecycle commands. One production
+  // path: the desktop shell reaches the same route the browser does.
+  {
+    matches: exactRoute(/^\/api\/mcp\/servers$/),
+    methods: new Set(["GET", "POST"]),
+  },
   {
     matches: (path) => pluginConnectionRoute(path, false),
     methods: new Set(["POST"]),

@@ -10,7 +10,15 @@ import type { ConnectionView } from "@frockbot/configuration-core";
 import { createConfiguredMcpRuntimeContribution } from "@frockbot/plugin-mcp/agent";
 import { ToolRegistry } from "@frockbot/plugin-tools";
 import { Context } from "cordis";
-import { MCP_ENDPOINT } from "./harness/miniflare.ts";
+import {
+  MCP_ENDPOINT,
+  MCP_HANDSHAKE_COUNT_ENDPOINT,
+  MCP_UNREACHABLE_ENDPOINT,
+} from "./harness/miniflare.ts";
+import {
+  mcpAssignmentResolutionV1,
+  type McpMountOutcomeV1,
+} from "@frockbot/plugin-mcp/agent";
 
 function connection(overrides: Partial<ConnectionView> = {}): ConnectionView {
   return {
@@ -26,7 +34,16 @@ function connection(overrides: Partial<ConnectionView> = {}): ConnectionView {
   };
 }
 
-async function mount(view: ConnectionView, failures: string[]) {
+async function handshakes(): Promise<number> {
+  const response = await fetch(MCP_HANDSHAKE_COUNT_ENDPOINT);
+  return ((await response.json()) as { handshakes: number }).handshakes;
+}
+
+async function mount(
+  view: ConnectionView,
+  failures: string[],
+  outcomes: McpMountOutcomeV1[] = [],
+) {
   const plugin = await createConfiguredMcpRuntimeContribution({
     assignment: {
       packageId: "mcp",
@@ -38,6 +55,9 @@ async function mount(view: ConnectionView, failures: string[]) {
     readSecret: () => undefined,
     authorizeConnection: () => Promise.resolve(view),
     onFailure: (reason) => failures.push(reason),
+    onOutcome: (outcome) => {
+      outcomes.push(outcome);
+    },
   });
   const root = new Context();
   await root.plugin(ToolRegistry);
@@ -115,6 +135,77 @@ describe("the MCP runtime Contribution in workerd", () => {
       expect(mounted).toBe(false);
       expect(root.tools.schemas({ turnType: "chat" })).toEqual([]);
       expect(failures).toHaveLength(1);
+    } finally {
+      await root.fiber.dispose();
+    }
+  });
+
+  test("a restart makes the next mount handshake again, and the one in flight does not", async () => {
+    // A restart is a `serverEpoch` bump on the durable record, mirrored onto
+    // the Connection. Nothing is killed: the Turn already holding a client
+    // keeps it, and the *next* resolution is a different one, so it
+    // handshakes and re-lists.
+    const before = connection({ safeMetadata: { serverEpoch: 1 } });
+    const after = connection({ safeMetadata: { serverEpoch: 2 } });
+    expect(
+      mcpAssignmentResolutionV1({
+        assignment: { connectionId: before.connectionId },
+        connection: after,
+      }),
+    ).not.toBe(
+      mcpAssignmentResolutionV1({
+        assignment: { connectionId: before.connectionId },
+        connection: before,
+      }),
+    );
+
+    const start = await handshakes();
+    const inFlight = await mount(before, []);
+    try {
+      expect(await handshakes()).toBe(start + 1);
+      // The restarted resolution mounts its own client against the real
+      // endpoint rather than reusing the resident one.
+      const next = await mount(after, []);
+      try {
+        expect(await handshakes()).toBe(start + 2);
+        expect(
+          next.root.tools
+            .schemas({ turnType: "chat" })
+            .map((tool) => tool.name),
+        ).toEqual(["mcp__example__echo"]);
+        // The Turn that was already running still has its tools.
+        expect(
+          inFlight.root.tools
+            .schemas({ turnType: "chat" })
+            .map((tool) => tool.name),
+        ).toEqual(["mcp__example__echo"]);
+      } finally {
+        await next.root.fiber.dispose();
+      }
+    } finally {
+      await inFlight.root.fiber.dispose();
+    }
+  });
+
+  test("reports the durable outcome of a mount that reaches a broken server", async () => {
+    const failures: string[] = [];
+    const outcomes: McpMountOutcomeV1[] = [];
+    const { root, mounted } = await mount(
+      connection({
+        settings: { url: MCP_UNREACHABLE_ENDPOINT },
+        safeMetadata: { serverEpoch: 3 },
+      }),
+      failures,
+      outcomes,
+    );
+    try {
+      expect(mounted).toBe(false);
+      expect(outcomes[0]).toMatchObject({
+        connectionId: "mcp-workerd-1",
+        serverEpoch: 3,
+        state: "error",
+        failure: { code: "unreachable" },
+      });
     } finally {
       await root.fiber.dispose();
     }

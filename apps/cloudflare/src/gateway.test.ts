@@ -474,6 +474,24 @@ class MemoryConfiguration
     return Promise.resolve(receipt);
   }
 
+  readMcpServers(): ReturnType<UserConfigurationBinding["readMcpServers"]> {
+    return Promise.reject(new Error("MCP status is not used in these tests"));
+  }
+
+  executeMcpCommand(): ReturnType<
+    UserConfigurationBinding["executeMcpCommand"]
+  > {
+    return Promise.reject(
+      new Error("MCP lifecycle is not used in these tests"),
+    );
+  }
+
+  recordMcpMountOutcome(): Promise<void> {
+    return Promise.reject(
+      new Error("MCP outcomes are not used in these tests"),
+    );
+  }
+
   lookupConnectionCommand(
     request: Parameters<UserConfigurationBinding["lookupConnectionCommand"]>[0],
   ): ReturnType<UserConfigurationBinding["lookupConnectionCommand"]> {

@@ -3,14 +3,27 @@
   "id": "mcp",
   "displayName": "MCP servers",
   "version": "0.0.1",
-  "compatibility": { "frockbot": ">=0.0.1" },
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
   "dependencies": {
     "credentials": ">=0.0.1",
     "settings": ">=0.0.1"
   },
   "contributions": {
-    "backend": [{ "entry": "./user", "host": "user" }],
-    "runtime": { "entry": "./agent" }
+    "backend": [
+      {
+        "entry": "./user",
+        "host": "user"
+      },
+      {
+        "entry": "./backend",
+        "host": "gateway"
+      }
+    ],
+    "runtime": {
+      "entry": "./agent"
+    }
   },
   "permissions": ["connections:manage", "tools:execute", "network:mcp"],
   "configuration": {
@@ -20,7 +33,10 @@
         "id": "mcp-remote",
         "displayName": "MCP server",
         "allowMultiple": true,
-        "authorization": { "kind": "none", "driverId": "mcp" },
+        "authorization": {
+          "kind": "none",
+          "driverId": "mcp"
+        },
         "capabilities": ["mcp-tools"],
         "settings": [
           {
@@ -50,7 +66,10 @@
         "id": "mcp-remote-key",
         "displayName": "MCP server (API key)",
         "allowMultiple": true,
-        "authorization": { "kind": "api-key", "driverId": "mcp" },
+        "authorization": {
+          "kind": "api-key",
+          "driverId": "mcp"
+        },
         "capabilities": ["mcp-tools"],
         "settings": [
           {
@@ -93,6 +112,14 @@
         "id": "mcp-tools",
         "kind": "tool",
         "connectionTypes": ["mcp-remote", "mcp-remote-key"],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent", "channel"]
+        }
+      },
+      {
+        "id": "mcp-lifecycle",
+        "kind": "tool",
+        "connectionTypes": [],
         "admission": {
           "turnTypes": ["chat", "automation", "subagent", "channel"]
         }

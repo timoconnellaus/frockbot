@@ -85,6 +85,13 @@ export interface MountedFoundationUserBackend {
   flock: FlockUserBackendContribution;
   publisher: PackagePublisherUserContribution;
   /**
+   * The MCP Contribution, exposed by name as well as by Connection ownership:
+   * the durable server records, the lifecycle commands and the status
+   * projection are MCP's own surface, not part of the Connection command
+   * protocol every provider answers.
+   */
+  mcp: McpUserBackendContribution;
+  /**
    * The User's transcript index. It is User-scoped state like every other
    * Contribution here, and it is the only one that is a *projection*: the rows
    * are rebuildable from the Bots' own stored runs.
@@ -416,6 +423,7 @@ export async function createFoundationUserBackendContributions(
     settings,
     credentials,
     connections,
+    mcp,
     flock,
     publisher,
     search,

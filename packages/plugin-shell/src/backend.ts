@@ -69,6 +69,7 @@ import {
 } from "@frockbot/configuration-core";
 import {
   createFoundationAssignedRuntimePackages,
+  mergeFoundationRuntimePackages,
   createFoundationHostedRuntimePackages,
   mergeFoundationRuntimePackagesV1,
   type PackagePublisherAgentHost,
@@ -172,6 +173,13 @@ import type {
   CompositionGenerationV1,
   CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
+import {
+  decodeMcpLifecycleReceiptV1,
+  decodeMcpServerStatusViewV1,
+  type McpLifecycleReceiptV1,
+  type McpMountOutcomeReportV1,
+  type McpServerStatusViewV1,
+} from "@frockbot/plugin-mcp/records";
 import { projectCompositionGenerationV1 } from "./composition-views.js";
 import { executeBotTurn } from "./backend-runner.js";
 import {
@@ -2525,7 +2533,7 @@ export class ShellBotBackendContribution {
           this.authorizeAdmittedAssignedEffect(identity, assignment)
       : (assignment: BotSettingsViewV1["assignments"][number]) =>
           this.authorizeAssignedEffect(identity, assignment);
-    const agentPackages: FoundationAgentPackage[] = [
+    const resolvedAgentPackages: FoundationAgentPackage[] = [
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
         readSecret,
@@ -2565,6 +2573,19 @@ export class ShellBotBackendContribution {
                 createBot: (userId, command) =>
                   this.userConfiguration(identity).createBot(userId, command),
               }),
+            }
+          : {}),
+        // The MCP lifecycle is offered only inside a Turn, and only with the
+        // User's own authority: the tools read and write the records this
+        // Bot's User owns, through the seam that already carries them.
+        ...(turn
+          ? {
+              mcp: {
+                readStatus: () =>
+                  userConfiguration.readMcpServers(identity.userId),
+                execute: (command: unknown) =>
+                  userConfiguration.executeMcpCommand(identity.userId, command),
+              },
             }
           : {}),
         // A Bot writes a Routine only inside a Turn, so the record's writer can
@@ -2644,9 +2665,16 @@ export class ShellBotBackendContribution {
               effectId,
             );
           },
+          // A mount that could not reach its server writes that down where
+          // the User can read it. The Bot holds no MCP record; the User
+          // Durable Object that owns the Connection does.
+          recordOutcome: (outcome) =>
+            userConfiguration.recordMcpMountOutcome(identity.userId, outcome),
         },
       )),
     ];
+    const agentPackages: FoundationAgentPackage[] =
+      mergeFoundationRuntimePackages(resolvedAgentPackages);
     // A Bot without its own `model` follows the User's default model. The
     // Bot's own Assignment still carries the authority (ADR 0003); the default
     // only names which model that Assignment's Connection should run.
@@ -3354,6 +3382,15 @@ export class ShellBotBackendContribution {
       effectId: string,
       connectionGeneration: string,
     ): Promise<CredentialLeaseV1>;
+    readMcpServers(userId: string): Promise<McpServerStatusViewV1>;
+    executeMcpCommand(
+      userId: string,
+      command: unknown,
+    ): Promise<McpLifecycleReceiptV1>;
+    recordMcpMountOutcome(
+      userId: string,
+      outcome: McpMountOutcomeReportV1,
+    ): Promise<void>;
     settleToolCredential(
       userId: string,
       connectionId: string,
@@ -3398,6 +3435,9 @@ export class ShellBotBackendContribution {
       settleModelCredential(input: unknown): Promise<void>;
       leaseToolCredential(input: unknown): Promise<unknown>;
       settleToolCredential(input: unknown): Promise<void>;
+      readMcpServers(input: unknown): Promise<unknown>;
+      executeMcpCommand(input: unknown): Promise<unknown>;
+      recordMcpMountOutcome(input: unknown): Promise<void>;
       listBots(input: unknown): Promise<unknown>;
       createBot(input: unknown): Promise<unknown>;
     };
@@ -3502,6 +3542,18 @@ export class ShellBotBackendContribution {
             connectionGeneration,
           }),
         ),
+      // The MCP lifecycle crosses this seam like every other value: decoded
+      // on arrival rather than trusted in the shape RPC happened to return.
+      readMcpServers: async (userId) =>
+        decodeMcpServerStatusViewV1(
+          await rpc.readMcpServers({ schemaVersion: 1, userId }),
+        ),
+      executeMcpCommand: async (userId, command) =>
+        decodeMcpLifecycleReceiptV1(
+          await rpc.executeMcpCommand({ schemaVersion: 1, userId, command }),
+        ),
+      recordMcpMountOutcome: (userId, outcome) =>
+        rpc.recordMcpMountOutcome({ schemaVersion: 1, userId, outcome }),
       settleToolCredential: (userId, connectionId, effectId) =>
         rpc.settleToolCredential({
           schemaVersion: 1,

@@ -3,12 +3,14 @@ import {
   compileFoundationApplication,
   compileFoundationApplicationDeclarations,
   createFoundationAssignedRuntimePackages,
+  mergeFoundationRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
   createFoundationRuntimeApplication,
   isUserInstallablePackageV1,
 } from "./runtime.js";
+import { Context, type Plugin } from "cordis";
 import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
 
 describe("foundation application", () => {
@@ -293,6 +295,19 @@ describe("foundation application", () => {
         Promise.resolve({ schemaVersion: 1, lifecycles: [] }),
       executeBotLifecycle: () =>
         Promise.reject(new Error("not used while composing")),
+      readMcpServers: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          servers: [],
+          refusals: [],
+          quotas: {
+            maxServers: 16,
+            maxToolsPerServer: 64,
+            maxResponseBytes: 262_144,
+          },
+        }),
+      executeMcpCommand: () =>
+        Promise.reject(new Error("not used while composing")),
       readSheep: () => Promise.reject(new Error("not used while composing")),
       updateSheep: () => Promise.reject(new Error("not used while composing")),
       listBotIdentities: () =>
@@ -335,7 +350,14 @@ describe("foundation application", () => {
       backend.contributions
         .map((contribution) => contribution.packageId)
         .sort(),
-    ).toEqual(["flock", "package-publisher", "routines", "search", "settings"]);
+    ).toEqual([
+      "flock",
+      "mcp",
+      "package-publisher",
+      "routines",
+      "search",
+      "settings",
+    ]);
     interface TestContribution {
       specifier: string;
       executeConfiguration?(): void;
@@ -469,5 +491,43 @@ describe("foundation application", () => {
       },
     );
     expect(runtime).toEqual([]);
+  });
+});
+
+describe("merging runtime Contributions that share a specifier", () => {
+  test("mounts every one of them, in order, under one Contribution", async () => {
+    const mounted: string[] = [];
+    const pkg = (name: string) => ({
+      specifier: "@frockbot/plugin-mcp",
+      contributionSpecifier: "@frockbot/plugin-mcp/agent",
+      manifest: {},
+      plugin: (() => {
+        mounted.push(name);
+      }) as Plugin,
+    });
+    const merged = mergeFoundationRuntimePackages([
+      pkg("lifecycle"),
+      pkg("server-1"),
+      pkg("server-2"),
+      {
+        specifier: "@frockbot/plugin-echo",
+        contributionSpecifier: "@frockbot/plugin-echo/agent",
+        manifest: {},
+        plugin: (() => {
+          mounted.push("echo");
+        }) as Plugin,
+      },
+    ]);
+
+    // One entry per Contribution: the runtime resolves a Package's runtime
+    // entry to exactly one Plugin, so a second entry would be lost silently.
+    expect(merged).toHaveLength(2);
+    const root = new Context();
+    try {
+      for (const entry of merged) await root.plugin(entry.plugin);
+      expect(mounted).toEqual(["lifecycle", "server-1", "server-2", "echo"]);
+    } finally {
+      await root.fiber.dispose();
+    }
   });
 });
