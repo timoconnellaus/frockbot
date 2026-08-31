@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { UiAnchor, UiButton, UiIcon } from "@frockbot/client-ui";
 import type { ConnectionView } from "@frockbot/configuration-core";
+import type {
+  PackageSettingDefinition,
+  PackageSettingSchema,
+} from "@frockbot/kernel-composition";
 import {
   frockBotWebDataKey,
   type CatalogEntryV1,
@@ -239,6 +243,106 @@ function primaryConnectionType(
   item: PluginCatalogItem,
 ): PluginCatalogItem["connectionTypes"][number] | undefined {
   return item.connectionTypes[0];
+}
+
+/**
+ * The Package-level settings form.
+ *
+ * The fields are generated from the schema each Package declares, so a
+ * Package that adds a setting gets a control here with no edit to this file:
+ * the manifest is the only description of the knob that exists.
+ */
+const settingsPackageId = ref<string>();
+const settingsDraft = ref<Record<string, string | number | boolean>>({});
+
+/** How one declared setting is rendered. */
+type SettingFieldKind = "enum" | "boolean" | "number" | "text";
+
+function settingFieldKind(schema: PackageSettingSchema): SettingFieldKind {
+  if (schema.enum && schema.enum.length > 0) return "enum";
+  if (schema.type === "boolean") return "boolean";
+  if (schema.type === "number" || schema.type === "integer") return "number";
+  return "text";
+}
+
+function settingLabel(definition: PackageSettingDefinition): string {
+  return definition.schema.title ?? definition.id;
+}
+
+/** The stored values of one installed Package, as the User settings hold them. */
+function storedPackageSettings(packageId: string): Record<string, unknown> {
+  const installation = web.value.userSettings?.packages.find(
+    (candidate) => candidate.packageId === packageId,
+  );
+  return (installation?.values ?? {}) as Record<string, unknown>;
+}
+
+/** A draft seeded from durable state, so an untouched field saves unchanged. */
+function beginPackageSettings(item: PluginCatalogItem): void {
+  if (settingsPackageId.value === item.packageId) {
+    settingsPackageId.value = undefined;
+    return;
+  }
+  const stored = storedPackageSettings(item.packageId);
+  const draft: Record<string, string | number | boolean> = {};
+  for (const definition of item.settings ?? []) {
+    const value = stored[definition.id];
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      draft[definition.id] = value;
+      continue;
+    }
+    draft[definition.id] =
+      settingFieldKind(definition.schema) === "boolean" ? false : "";
+  }
+  settingsDraft.value = draft;
+  settingsPackageId.value = item.packageId;
+}
+
+function cancelPackageSettings(): void {
+  settingsPackageId.value = undefined;
+  settingsDraft.value = {};
+}
+
+/**
+ * Only the fields the User filled in are sent: the command is a partial
+ * update, and an empty text or number box means "leave this one alone" rather
+ * than "store an empty string".
+ */
+async function savePackageSettings(item: PluginCatalogItem): Promise<void> {
+  const values: Record<string, string | number | boolean> = {};
+  for (const definition of item.settings ?? []) {
+    const kind = settingFieldKind(definition.schema);
+    const raw = settingsDraft.value[definition.id];
+    if (kind === "boolean") {
+      values[definition.id] = raw === true;
+      continue;
+    }
+    if (raw === "" || raw === undefined) continue;
+    if (kind === "number") {
+      const parsed = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isFinite(parsed)) continue;
+      values[definition.id] = parsed;
+      continue;
+    }
+    values[definition.id] = String(raw);
+  }
+  if (Object.keys(values).length === 0) {
+    cancelPackageSettings();
+    return;
+  }
+  try {
+    await web.value.savePackageSettings(item.packageId, values);
+    cancelPackageSettings();
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error
+        ? error.message
+        : "Could not save the Package settings";
+  }
 }
 
 function isExpanded(packageId: string): boolean {
@@ -532,6 +636,15 @@ async function disconnect(connectionId: string): Promise<void> {
             </small>
           </span>
           <UiButton
+            v-if="
+              isPackageInstalled(item.packageId) &&
+              (item.settings ?? []).length > 0
+            "
+            @click="beginPackageSettings(item)"
+          >
+            Settings
+          </UiButton>
+          <UiButton
             v-if="isPackageInstalled(item.packageId)"
             @click="beginConnect(item)"
           >
@@ -823,6 +936,56 @@ async function disconnect(connectionId: string): Promise<void> {
           <div class="api-key-actions">
             <UiButton @click="cancelApiKeyConnection">Cancel</UiButton>
             <UiButton type="submit" variant="primary">Connect account</UiButton>
+          </div>
+        </form>
+
+        <form
+          v-if="settingsPackageId === item.packageId"
+          class="api-key-form"
+          @submit.prevent="savePackageSettings(item)"
+        >
+          <label v-for="definition in item.settings ?? []" :key="definition.id">
+            <span>{{ settingLabel(definition) }}</span>
+            <select
+              v-if="settingFieldKind(definition.schema) === 'enum'"
+              v-model="settingsDraft[definition.id]"
+            >
+              <option value="">Package default</option>
+              <option
+                v-for="choice in definition.schema.enum ?? []"
+                :key="String(choice)"
+                :value="choice ?? ''"
+              >
+                {{ String(choice) }}
+              </option>
+            </select>
+            <input
+              v-else-if="settingFieldKind(definition.schema) === 'boolean'"
+              v-model="settingsDraft[definition.id]"
+              type="checkbox"
+            />
+            <input
+              v-else-if="settingFieldKind(definition.schema) === 'number'"
+              v-model="settingsDraft[definition.id]"
+              type="number"
+              inputmode="numeric"
+              :min="definition.schema.minimum"
+              :max="definition.schema.maximum"
+              :step="definition.schema.type === 'integer' ? 1 : 'any'"
+            />
+            <input
+              v-else
+              v-model="settingsDraft[definition.id]"
+              type="text"
+              :maxlength="definition.schema.maxLength"
+            />
+            <small v-if="definition.schema.description" class="api-key-hint">
+              {{ definition.schema.description }}
+            </small>
+          </label>
+          <div class="api-key-actions">
+            <UiButton @click="cancelPackageSettings">Cancel</UiButton>
+            <UiButton type="submit" variant="primary">Save settings</UiButton>
           </div>
         </form>
       </article>

@@ -1,6 +1,9 @@
 import {
   configurationCommandFingerprintV1,
   ConfigurationConflictError,
+  ConfigurationDecodeError,
+  decodePackageSettingsPatchV1,
+  MAX_PACKAGE_SETTINGS_V1,
   decodeConnectionDependencyRequirementV1,
   decodeOperationReceiptV1,
   decodeUserConfigurationExecuteRpcV1,
@@ -9,6 +12,7 @@ import {
   MAX_USER_CONNECTIONS_V1,
   type ConnectionDependencyRequirementV1,
   type ConnectionView,
+  type JsonValue,
   type OperationReceiptV1,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
@@ -21,6 +25,7 @@ import {
   type CatalogPinV1,
 } from "@frockbot/catalog-core";
 import type { ConnectionCommandV1 } from "@frockbot/connection-core";
+import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { Plugin } from "cordis";
 
 const STATE_KEY = "user-configuration";
@@ -102,9 +107,28 @@ export interface UserPackageCatalogHost {
   ): Promise<CatalogEntryV1 | undefined>;
 }
 
+/**
+ * One Package this application can execute, as the User Durable Object needs
+ * to see it: its identity, and the settings its manifest declares.
+ *
+ * The definitions travel with the version, not with the Package id: a Package
+ * that narrows a setting in a later version must validate a write against the
+ * version this User actually has installed.
+ */
+export interface AvailableUserPackage {
+  packageId: string;
+  version: string;
+  /**
+   * `configuration.settings` from this version's manifest. Absent is the same
+   * as empty and means the Package offers no User-level setting, so every
+   * `user/set-package-settings` naming it is refused.
+   */
+  settings?: readonly PackageSettingDefinition[];
+}
+
 export interface UserSettingsBackendHost {
   storage: UserSettingsStorage;
-  availablePackages: readonly { packageId: string; version: string }[];
+  availablePackages: readonly AvailableUserPackage[];
   catalog?: UserPackageCatalogHost;
 }
 
@@ -240,9 +264,35 @@ function withCatalogPin(
     : settings;
 }
 
+/**
+ * The setting values one installation carries after a partial update.
+ *
+ * `values` on the installation row *is* the store: the Catalog install path of
+ * ADR 0014 writes setup values there, and this writes the same field, so a
+ * Package has exactly one durable bag of configuration and the projection the
+ * client already reads needs no second source.
+ */
+function mergePackageSettingValues(
+  current: Record<string, JsonValue> | undefined,
+  patch: Record<string, string | number | boolean>,
+): Record<string, JsonValue> {
+  const merged: Record<string, JsonValue> = { ...(current ?? {}) };
+  for (const [settingId, value] of Object.entries(patch)) {
+    merged[settingId] = value;
+  }
+  if (Object.keys(merged).length > MAX_PACKAGE_SETTINGS_V1) {
+    throw new ConfigurationDecodeError("Package settings are too many");
+  }
+  return merged;
+}
+
 function applyUserCommand(
   current: UserSettingsViewV1,
   command: UserConfigurationCommandV1,
+  settingDefinitions: (
+    packageId: string,
+    version: string,
+  ) => readonly PackageSettingDefinition[],
 ): UserSettingsViewV1 {
   const revision = current.revision + 1;
   switch (command.type) {
@@ -254,6 +304,14 @@ function applyUserCommand(
       const existing = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
       );
+      // One store, two writers: a Catalog install's setup values and
+      // `user/set-package-settings` write the same bag, and a reinstall — a
+      // version bump, say — carries the configuration forward rather than
+      // silently returning the Package to its defaults.
+      const values = {
+        ...(existing?.values ?? {}),
+        ...structuredClone(command.values ?? {}),
+      };
       return {
         ...current,
         revision,
@@ -274,10 +332,8 @@ function applyUserCommand(
                   catalogId: command.catalogId,
                   catalogGeneration: command.catalogGeneration,
                   provenance: "catalog" as const,
-                  ...(command.values === undefined
-                    ? {}
-                    : { values: structuredClone(command.values) }),
                 }),
+            ...(Object.keys(values).length === 0 ? {} : { values }),
           },
         ],
       };
@@ -297,6 +353,34 @@ function applyUserCommand(
         revision,
         packages: current.packages.filter(
           (pkg) => pkg.packageId !== command.packageId,
+        ),
+      };
+    }
+    case "user/set-package-settings": {
+      const installed = current.packages.find(
+        (pkg) => pkg.packageId === command.packageId,
+      );
+      if (!installed) {
+        throw new ConfigurationDecodeError(
+          `Package "${command.packageId}" is not installed`,
+        );
+      }
+      // Validated against the manifest of the version this User has, not the
+      // one the client happened to be looking at.
+      const patch = decodePackageSettingsPatchV1(
+        settingDefinitions(installed.packageId, installed.version),
+        command.values,
+      );
+      return {
+        ...current,
+        revision,
+        packages: current.packages.map((pkg) =>
+          pkg.packageId === command.packageId
+            ? {
+                ...pkg,
+                values: mergePackageSettingValues(pkg.values, patch),
+              }
+            : pkg,
         ),
       };
     }
@@ -327,6 +411,12 @@ function applyUserCommand(
 export class UserSettingsBackendContribution {
   private readonly availablePackages: ReadonlySet<string>;
 
+  /** Declared User-level settings, by Package id and version. */
+  private readonly packageSettingDefinitions: ReadonlyMap<
+    string,
+    readonly PackageSettingDefinition[]
+  >;
+
   private readonly connectionOwners = new Map<string, ConnectionCommandOwner>();
 
   constructor(private readonly host: UserSettingsBackendHost) {
@@ -334,6 +424,26 @@ export class UserSettingsBackendContribution {
       host.availablePackages.map(
         ({ packageId, version }) => `${packageId}\u0000${version}`,
       ),
+    );
+    this.packageSettingDefinitions = new Map(
+      host.availablePackages.map((pkg) => [
+        `${pkg.packageId}\u0000${pkg.version}`,
+        pkg.settings ?? [],
+      ]),
+    );
+  }
+
+  /**
+   * The settings one installed version declares. A version this application
+   * cannot execute declares none, so a write against it is refused rather than
+   * stored against a manifest nobody here has.
+   */
+  private settingDefinitions(
+    packageId: string,
+    version: string,
+  ): readonly PackageSettingDefinition[] {
+    return (
+      this.packageSettingDefinitions.get(`${packageId}\u0000${version}`) ?? []
     );
   }
 
@@ -497,7 +607,9 @@ export class UserSettingsBackendContribution {
       if (command.expectedRevision !== current.revision) {
         throw new ConfigurationConflictError(current.revision);
       }
-      const next = applyUserCommand(current, command);
+      const next = applyUserCommand(current, command, (packageId, version) =>
+        this.settingDefinitions(packageId, version),
+      );
       const receipt: OperationReceiptV1 = {
         schemaVersion: 1,
         commandId: command.commandId,

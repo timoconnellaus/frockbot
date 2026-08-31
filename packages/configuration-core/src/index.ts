@@ -6,6 +6,13 @@ import {
   decodeConnectionAuthorizationViewV1,
   decodeConnectionModelCatalogV1,
 } from "@frockbot/connection-core";
+import { ConfigurationDecodeError } from "./errors.js";
+import {
+  MAX_PACKAGE_SETTINGS_V1,
+  MAX_PACKAGE_SETTING_TEXT_V1,
+  type PackageSettingValueV1,
+} from "./package-settings.js";
+export { ConfigurationDecodeError } from "./errors.js";
 import { isBotIdV1 } from "./bot-id.js";
 import {
   isConnectionIdentifier,
@@ -13,6 +20,17 @@ import {
   isRpcIdentifier,
 } from "./identifiers.js";
 export { isBotIdV1 } from "./bot-id.js";
+export {
+  decodePackageSettingsPatchV1,
+  decodePackageSettingValueV1,
+  decodePackageSettingValuesV1,
+  emptyPackageSettingValuesV1,
+  MAX_PACKAGE_SETTINGS_V1,
+  MAX_PACKAGE_SETTING_TEXT_V1,
+  resolvePackageSettingValuesV1,
+  type PackageSettingValueV1,
+  type PackageSettingValuesV1,
+} from "./package-settings.js";
 export {
   isApplicationDeploymentHash,
   isConnectionIdentifier,
@@ -306,6 +324,19 @@ export type ConfigurationCommandV1 =
       type: "user/set-package-enabled";
       packageId: string;
       enabled: boolean;
+    })
+  | (CommandMetaV1 & {
+      /**
+       * A partial update of one installed Package's setting values: only the
+       * ids it names change, and an id it omits keeps the value it had.
+       *
+       * The values are shape-checked here and schema-checked by the User
+       * Durable Object, which is the only place that knows which settings the
+       * installed version of that Package declares.
+       */
+      type: "user/set-package-settings";
+      packageId: string;
+      values: Record<string, PackageSettingValueV1>;
     })
   | (CommandMetaV1 & {
       type: "bot/update-profile";
@@ -687,13 +718,6 @@ export interface ConfigurationApplication {
     command: ConfigurationCommandV1,
   ): Promise<OperationReceiptV1>;
   resolveBot(authority: BotAuthority): Promise<BotExecutionPlanV1>;
-}
-
-export class ConfigurationDecodeError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ConfigurationDecodeError";
-  }
 }
 
 export class ConfigurationConflictError extends Error {
@@ -1265,6 +1289,15 @@ export function decodeConfigurationCommandV1(
         enabled: command.enabled,
       };
     }
+    case "user/set-package-settings": {
+      const command = exactCommand(input, ["packageId", "values"]);
+      return {
+        ...commandMeta(command),
+        type: value.type,
+        packageId: identifier(command.packageId, "packageId"),
+        values: packageSettingsPatch(command.values),
+      };
+    }
     case "bot/update-profile": {
       const command = exactCommand(input, ["botId", "profile"]);
       return {
@@ -1480,6 +1513,49 @@ function installValues(value: unknown): Record<string, JsonValue> {
     throw new ConfigurationDecodeError("values is too large");
   }
   return decoded;
+}
+
+/**
+ * The shape of a `user/set-package-settings` payload, before anything knows
+ * which Package it is for.
+ *
+ * Only the shape: ids are identifiers, values are scalars, and the bag is
+ * bounded. Whether a named setting exists, and whether its value satisfies the
+ * schema the Package declared, is the User Durable Object's answer — it is the
+ * authority that holds the installed version.
+ */
+function packageSettingsPatch(
+  value: unknown,
+): Record<string, PackageSettingValueV1> {
+  const values = record(value, "values");
+  const entries = Object.entries(values);
+  if (entries.length === 0) {
+    throw new ConfigurationDecodeError("values names no setting");
+  }
+  if (entries.length > MAX_PACKAGE_SETTINGS_V1) {
+    throw new ConfigurationDecodeError("values is too large");
+  }
+  return Object.fromEntries(
+    entries.map(([key, item]) => {
+      if (
+        typeof item !== "string" &&
+        typeof item !== "number" &&
+        typeof item !== "boolean"
+      ) {
+        throw new ConfigurationDecodeError(`values.${key} is invalid`);
+      }
+      if (typeof item === "number" && !Number.isFinite(item)) {
+        throw new ConfigurationDecodeError(`values.${key} is invalid`);
+      }
+      if (
+        typeof item === "string" &&
+        item.length > MAX_PACKAGE_SETTING_TEXT_V1
+      ) {
+        throw new ConfigurationDecodeError(`values.${key} is too long`);
+      }
+      return [identifier(key, "values key"), item];
+    }),
+  );
 }
 
 function viewRevision(value: unknown): number {

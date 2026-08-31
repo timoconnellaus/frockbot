@@ -172,9 +172,13 @@ export async function createFoundationUserBackendContributions(
         createUserSettingsBackendPlugin(
           {
             storage: host.storage,
+            // The declared settings travel with the version: the User
+            // Durable Object validates a `user/set-package-settings` write
+            // against the manifest of the version that User has installed.
             availablePackages: plan.packages.map((pkg) => ({
               packageId: pkg.id,
               version: pkg.version,
+              settings: pkg.manifest.configuration?.settings ?? [],
             })),
             ...(host.catalog ? { catalog: host.catalog } : {}),
           },

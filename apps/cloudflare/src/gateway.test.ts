@@ -398,7 +398,7 @@ class MemoryConfiguration
             (pkg) => pkg.packageId !== command.packageId,
           ),
         };
-      } else {
+      } else if (command.type === "user/set-package-enabled") {
         this.user = {
           ...user,
           revision,
@@ -408,6 +408,16 @@ class MemoryConfiguration
                   ...pkg,
                   state: command.enabled ? "installed" : "disabled",
                 }
+              : pkg,
+          ),
+        };
+      } else {
+        this.user = {
+          ...user,
+          revision,
+          packages: user.packages.map((pkg) =>
+            pkg.packageId === command.packageId
+              ? { ...pkg, values: { ...pkg.values, ...command.values } }
               : pkg,
           ),
         };

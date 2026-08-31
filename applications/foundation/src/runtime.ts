@@ -14,6 +14,7 @@ import type {
   BotExecutionPlanV1,
   BotSettingsViewV1,
   ConnectionView,
+  PackageSettingValueV1,
   ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
 import authManifest from "@frockbot/plugin-auth/manifest";
@@ -250,6 +251,17 @@ type AssignedRuntimeContributionFactory = (config: {
   /** This Assignment's ordinal among the enabled Assignments of its Package. */
   assignmentIndex: number;
   userId: string;
+  /**
+   * The Package-level setting values this User holds for the Package the
+   * Assignment names, already resolved against the manifest the pinned
+   * Composition carries. Empty when the User has set none, so a Contribution
+   * reads its own default exactly as before.
+   *
+   * They are read from durable User state when the Turn's Composition is
+   * resolved, which is what makes a changed value take effect at the next
+   * admitted Turn and never inside one already running.
+   */
+  packageSettings: Readonly<Record<string, PackageSettingValueV1>>;
   readSecret(name: string): string | undefined;
   authorizeConnection(): Promise<ConnectionView>;
   /** The Package's own outbound seam, when the host owns one. */
@@ -308,6 +320,7 @@ const assignedRuntimeContributionFactories = new Map<
       leaseCredential,
       settleCredential,
       fetch: outbound,
+      packageSettings,
     }) => {
       // `web_search` is authorized by its own Assignment and its own
       // Connection generation; a Bot whose model runs elsewhere still holds it.
@@ -328,6 +341,12 @@ const assignedRuntimeContributionFactories = new Map<
         // validates the endpoint root before it composes a request URL.
         ...(typeof connection.settings?.apiBaseUrl === "string"
           ? { apiBaseUrl: connection.settings.apiBaseUrl }
+          : {}),
+        // The Package-level ceiling this User set on `web_search`. Already
+        // schema-checked against the manifest, so it is a number in range or
+        // it is absent.
+        ...(typeof packageSettings["web-search-max-results"] === "number"
+          ? { maxResults: packageSettings["web-search-max-results"] }
           : {}),
         leaseCredential,
         settleCredential,
@@ -866,6 +885,14 @@ export async function createFoundationAssignedRuntimePackages(
     authorizeConnection(
       assignment: BotSettingsViewV1["assignments"][number],
     ): Promise<ConnectionView>;
+    /**
+     * One Package's durable User-level setting values. Supplied by the host
+     * that read the User's settings for this Turn; a host that supplies none
+     * leaves every Contribution on its Package defaults.
+     */
+    packageSettings?(
+      packageId: string,
+    ): Readonly<Record<string, PackageSettingValueV1>> | undefined;
     /** The Package's own outbound seam, passed through to each Contribution. */
     fetch?: typeof fetch;
     /** The User's credential authority, for Contributions that hold a key. */
@@ -910,6 +937,7 @@ export async function createFoundationAssignedRuntimePackages(
       assignment,
       assignmentIndex,
       userId: host.userId,
+      packageSettings: host.packageSettings?.(pkg.id) ?? {},
       readSecret: host.readSecret,
       authorizeConnection: () => host.authorizeConnection(admittedAssignment),
       ...(connection ? { connection } : {}),
