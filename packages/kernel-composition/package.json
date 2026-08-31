@@ -1,0 +1,39 @@
+{
+  "name": "@frockbot/kernel-composition",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./activation": "./src/activation.ts",
+    "./runtime": "./src/runtime.ts",
+    "./compiler": "./src/compiler.ts",
+    "./generation": "./src/generation.ts",
+    "./package.json": "./package.json",
+    "./isolate": "./src/isolate-host.ts",
+    "./isolate-wrapper": "./src/isolate-wrapper.ts"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.8",
+    "semver": "7.8.5",
+    "@frockbot/kernel-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "26.2.0",
+    "@types/semver": "7.8.0",
+    "typescript": "^7.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/kernel-composition"
+  }
+}

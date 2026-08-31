@@ -1,5 +1,17 @@
+import type {
+  ConnectionAuthorizationViewV1,
+  ConnectionModelCatalogV1,
+} from "@frockbot/connection-core";
+import {
+  decodeConnectionAuthorizationViewV1,
+  decodeConnectionModelCatalogV1,
+} from "@frockbot/connection-core";
 import { isBotIdV1 } from "./bot-id.js";
-import { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
+import {
+  isConnectionIdentifier,
+  isPublicIdentifier,
+  isRpcIdentifier,
+} from "./identifiers.js";
 export { isBotIdV1 } from "./bot-id.js";
 export {
   isApplicationDeploymentHash,
@@ -50,10 +62,16 @@ export interface ConnectionView {
   state:
     | "authorizing"
     | "ready"
+    | "disabled"
     | "revoking"
     | "revoked"
     | "reconciliation-required"
     | "failed";
+  generation?: string;
+  providerType?: string;
+  authorization?: ConnectionAuthorizationViewV1;
+  modelCatalog?: ConnectionModelCatalogV1;
+  settings?: Record<string, JsonValue>;
   safeMetadata: Record<string, JsonValue>;
   failure?: string;
 }
@@ -71,6 +89,8 @@ export interface RevokeConnectionCommandV1 {
   schemaVersion: 1;
   type: "connection/revoke";
 }
+
+export const MAX_USER_CONNECTIONS_V1 = 100;
 
 export interface UserSettingsViewV1 {
   schemaVersion: 1;
@@ -172,6 +192,12 @@ export type ConfigurationCommandV1 =
       type: "bot/assign-capability";
       botId: string;
       assignment: Omit<CapabilityAssignmentView, "state">;
+      model?: ModelAssignment;
+    })
+  | (CommandMetaV1 & {
+      type: "bot/unbind-model";
+      botId: string;
+      assignmentId: string;
     });
 
 export type UserConfigurationCommandV1 = Exclude<
@@ -270,6 +296,7 @@ export interface ExecutionPackageDefinition {
   version: string;
   capabilities: Array<{
     id: string;
+    kind?: "tool" | "model" | "memory" | "notification";
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{
@@ -330,6 +357,82 @@ export function capabilityAssignmentFailureV1(input: {
     return `Connection "${input.assignment.connectionId}" has an incompatible Connection Type`;
   }
   return undefined;
+}
+
+export interface ResolvedModelBindingV1 {
+  assignment: ModelAssignment;
+  state: "ready" | "requires-resolution" | "unavailable";
+  connection?: ConnectionView;
+  packageId?: string;
+  providerType?: string;
+  failure?: string;
+}
+
+export function resolveBotModelBindingV1(input: {
+  model: ModelAssignment;
+  assignments: readonly CapabilityAssignmentView[];
+  user: UserSettingsViewV1;
+  packages: readonly ExecutionPackageDefinition[];
+}): ResolvedModelBindingV1 {
+  const unavailable = (failure: string): ResolvedModelBindingV1 => ({
+    assignment: structuredClone(input.model),
+    state: "unavailable",
+    failure,
+  });
+  const connection = input.user.connections.find(
+    (candidate) => candidate.connectionId === input.model.connectionId,
+  );
+  if (!connection) return unavailable("Connection is unavailable");
+  if (connection.state !== "ready") {
+    return unavailable(`Connection is ${connection.state}`);
+  }
+  const installation = input.user.packages.find(
+    (candidate) => candidate.packageId === connection.packageId,
+  );
+  if (!installation || installation.state !== "installed") {
+    return unavailable("Connection Package is not installed and enabled");
+  }
+  const pkg = input.packages.find(
+    (candidate) =>
+      candidate.packageId === connection.packageId &&
+      candidate.version === installation.version,
+  );
+  const connectionType = pkg?.connectionTypes.find(
+    (candidate) => candidate.id === connection.connectionTypeId,
+  );
+  const modelCapability = pkg?.capabilities.find(
+    (candidate) =>
+      candidate.kind === "model" &&
+      connectionType?.capabilities.includes(candidate.id) &&
+      candidate.connectionTypes.includes(connection.connectionTypeId),
+  );
+  if (!pkg || !connectionType || !modelCapability) {
+    return unavailable("Connection does not provide models");
+  }
+  const assignment = input.assignments.find(
+    (candidate) =>
+      candidate.packageId === pkg.packageId &&
+      candidate.capabilityId === modelCapability.id &&
+      candidate.connectionId === connection.connectionId &&
+      candidate.state === "enabled",
+  );
+  if (!assignment) {
+    return unavailable("Bot is not assigned the Connection model capability");
+  }
+  if (!connection.providerType) {
+    return unavailable("Connection provider type is unavailable");
+  }
+  const knownModel = connection.modelCatalog?.models.some(
+    (candidate: { providerModelId: string }) =>
+      candidate.providerModelId === input.model.providerModelId,
+  );
+  return {
+    assignment: structuredClone(input.model),
+    state: knownModel ? "ready" : "requires-resolution",
+    connection: structuredClone(connection),
+    packageId: pkg.packageId,
+    providerType: connection.providerType,
+  };
 }
 
 export function resolveBotExecutionPlanV1(input: {
@@ -603,7 +706,7 @@ function model(value: unknown): ModelAssignment {
     providerModelId: text(
       assignment.providerModelId,
       "model.providerModelId",
-      200,
+      256,
     ),
   };
 }
@@ -713,7 +816,7 @@ export function decodeConfigurationCommandV1(
       };
     }
     case "bot/assign-capability": {
-      const command = exactCommand(input, ["botId", "assignment"]);
+      const command = exactCommand(input, ["botId", "assignment"], ["model"]);
       const assignment = exactRecord(
         command.assignment,
         "assignment",
@@ -736,6 +839,16 @@ export function decodeConfigurationCommandV1(
               ? undefined
               : identifier(assignment.connectionId, "assignment.connectionId"),
         },
+        model: command.model === undefined ? undefined : model(command.model),
+      };
+    }
+    case "bot/unbind-model": {
+      const command = exactCommand(input, ["botId", "assignmentId"]);
+      return {
+        ...commandMeta(command),
+        type: value.type,
+        botId: identifier(command.botId, "botId"),
+        assignmentId: identifier(command.assignmentId, "assignmentId"),
       };
     }
     default:
@@ -889,11 +1002,19 @@ function connectionView(value: unknown): ConnectionView {
       "state",
       "safeMetadata",
     ],
-    ["failure"],
+    [
+      "failure",
+      "generation",
+      "providerType",
+      "authorization",
+      "modelCatalog",
+      "settings",
+    ],
   );
   const states: ConnectionView["state"][] = [
     "authorizing",
     "ready",
+    "disabled",
     "revoking",
     "revoked",
     "reconciliation-required",
@@ -903,6 +1024,10 @@ function connectionView(value: unknown): ConnectionView {
     throw new ConfigurationDecodeError("Connection state is invalid");
   }
   const safeMetadata = record(connection.safeMetadata, "safeMetadata");
+  const settings =
+    connection.settings === undefined
+      ? undefined
+      : record(connection.settings, "settings");
   return {
     connectionId: identifier(connection.connectionId, "connectionId"),
     packageId: identifier(connection.packageId, "packageId"),
@@ -912,6 +1037,30 @@ function connectionView(value: unknown): ConnectionView {
     ),
     displayName: text(connection.displayName, "displayName", 200),
     state: connection.state as ConnectionView["state"],
+    generation: optionalText(connection.generation, "generation", 128),
+    providerType: optionalText(connection.providerType, "providerType", 128),
+    ...(connection.authorization === undefined
+      ? {}
+      : {
+          authorization: decodeConnectionAuthorizationViewV1(
+            connection.authorization,
+          ),
+        }),
+    ...(connection.modelCatalog === undefined
+      ? {}
+      : {
+          modelCatalog: decodeConnectionModelCatalogV1(connection.modelCatalog),
+        }),
+    ...(settings === undefined
+      ? {}
+      : {
+          settings: Object.fromEntries(
+            Object.entries(settings).map(([key, item]) => [
+              key,
+              safeJsonValue(item, `settings.${key}`),
+            ]),
+          ),
+        }),
     safeMetadata: Object.fromEntries(
       Object.entries(safeMetadata).map(([key, item]) => [
         key,
@@ -968,9 +1117,13 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
   );
   schemaVersion(value);
   const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
-  if (!Array.isArray(value.packages) || !Array.isArray(value.connections)) {
+  if (
+    !Array.isArray(value.packages) ||
+    !Array.isArray(value.connections) ||
+    value.connections.length > MAX_USER_CONNECTIONS_V1
+  ) {
     throw new ConfigurationDecodeError(
-      "User settings Packages and Connections must be arrays",
+      "User settings Packages and Connections must be bounded arrays",
     );
   }
   return {
@@ -1053,4 +1206,562 @@ export function decodeOperationReceiptV1(input: unknown): OperationReceiptV1 {
     };
   }
   return { ...receipt, status: "applied" };
+}
+
+// ---------------------------------------------------------------------------
+// Composition generations: the redacted Bot-scoped projection of the durable
+// `CompositionGenerationV1` records the Bot Durable Object owns. Artifact bytes
+// never cross this seam; a member carries its content hash, and its recorded
+// source text only when the Bot object holds an authorship record for it.
+// ---------------------------------------------------------------------------
+
+export const MAX_COMPOSITION_GENERATION_PAGE_V1 = 50;
+export const MAX_COMPOSITION_MEMBERS_V1 = 512;
+export const MAX_COMPOSITION_MEMBER_SOURCE_V1 = 262_144;
+
+export type CompositionGenerationStatusViewV1 =
+  "pending" | "active" | "superseded" | "failed" | "quarantined";
+
+const COMPOSITION_GENERATION_STATUSES_V1: readonly CompositionGenerationStatusViewV1[] =
+  ["pending", "active", "superseded", "failed", "quarantined"];
+
+export type CompositionProvenanceViewV1 =
+  | { kind: "first-party" }
+  | { kind: "user"; userId: string; authoredAt: string }
+  | {
+      kind: "bot";
+      botId: string;
+      sessionId: string;
+      turnId: string;
+      runId: string;
+      authoredAt: string;
+    };
+
+export type CompositionOriginViewV1 =
+  | { kind: "bootstrap" }
+  | { kind: "bot-authored"; runId: string; sessionId: string; turnId: string }
+  | { kind: "user-install"; userId: string }
+  | { kind: "revert"; revertsTo: string; userId: string };
+
+export interface CompositionMemberViewV1 {
+  packageId: string;
+  version: string;
+  provenance: CompositionProvenanceViewV1;
+  /** Artifact identity only; the bundled bytes never reach a client. */
+  contentHash?: string;
+  /** Recorded source text for an isolate member, when authorship holds it. */
+  source?: string;
+}
+
+export type CompositionFailurePhaseViewV1 =
+  "resolve" | "bundle" | "mount" | "health";
+
+const COMPOSITION_FAILURE_PHASES_V1: readonly CompositionFailurePhaseViewV1[] =
+  ["resolve", "bundle", "mount", "health"];
+
+export const MAX_COMPOSITION_FAILURE_PAGE_V1 = 32;
+
+/**
+ * One recorded activation failure. Diagnostics stay durable-side: they name
+ * artifact content hashes and loader identities, which never cross this seam.
+ */
+export interface CompositionFailureViewV1 {
+  attempt: number;
+  at: string;
+  phase: CompositionFailurePhaseViewV1;
+  message: string;
+}
+
+export interface CompositionQuarantineViewV1 {
+  quarantinedAt: string;
+  reason: string;
+  failures: number;
+}
+
+export interface CompositionGenerationViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  generationId: string;
+  createdAt: string;
+  status: CompositionGenerationStatusViewV1;
+  origin: CompositionOriginViewV1;
+  parentGenerationId?: string;
+  isCurrent: boolean;
+  members: CompositionMemberViewV1[];
+  /** Oldest attempt first; empty for a generation that never failed. */
+  failures: CompositionFailureViewV1[];
+  /** Present once three consecutive failures quarantined this generation. */
+  quarantine?: CompositionQuarantineViewV1;
+}
+
+export interface CompositionGenerationListViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  currentGenerationId: string;
+  generations: CompositionGenerationViewV1[];
+  cursor?: string;
+}
+
+export interface CompositionMemberVersionV1 {
+  version: string;
+  contentHash?: string;
+}
+
+export interface CompositionMemberDiffV1 {
+  packageId: string;
+  change: "added" | "removed" | "changed" | "unchanged";
+  from?: CompositionMemberVersionV1;
+  to?: CompositionMemberVersionV1;
+}
+
+export interface CompositionDiffV1 {
+  fromGenerationId: string;
+  toGenerationId: string;
+  members: CompositionMemberDiffV1[];
+}
+
+export interface RevertCompositionCommandV1 {
+  schemaVersion: 1;
+  type: "composition/revert";
+  commandId: string;
+  botId: string;
+  toGenerationId: string;
+  /** Optimistic check, mirroring `expectedRevision` on configuration commands. */
+  expectedGenerationId: string;
+}
+
+export type CompositionCommandReceiptV1 =
+  | {
+      schemaVersion: 1;
+      commandId: string;
+      status: "applied";
+      generationId: string;
+      currentGenerationId: string;
+    }
+  | {
+      schemaVersion: 1;
+      commandId: string;
+      status: "rejected";
+      failure: string;
+      currentGenerationId: string;
+    };
+
+export function decodeCompositionGenerationIdV1(
+  value: unknown,
+  label = "generationId",
+): string {
+  if (!isRpcIdentifier(value)) {
+    throw new ConfigurationDecodeError(`${label} is invalid`);
+  }
+  return value;
+}
+
+function compositionTimestamp(value: unknown, label: string): string {
+  const candidate = text(value, label, 64);
+  if (!Number.isFinite(Date.parse(candidate))) {
+    throw new ConfigurationDecodeError(`${label} is invalid`);
+  }
+  return candidate;
+}
+
+function compositionHash(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new ConfigurationDecodeError(`${label} is invalid`);
+  }
+  return value;
+}
+
+function compositionProvenanceView(
+  input: unknown,
+): CompositionProvenanceViewV1 {
+  const kind = record(input, "Composition provenance").kind;
+  if (kind === "first-party") {
+    exactRecord(input, "Composition provenance", ["kind"]);
+    return { kind: "first-party" };
+  }
+  if (kind === "user") {
+    const value = exactRecord(input, "Composition provenance", [
+      "kind",
+      "userId",
+      "authoredAt",
+    ]);
+    return {
+      kind: "user",
+      userId: text(value.userId, "Composition provenance userId", 256),
+      authoredAt: compositionTimestamp(
+        value.authoredAt,
+        "Composition provenance authoredAt",
+      ),
+    };
+  }
+  if (kind === "bot") {
+    const value = exactRecord(input, "Composition provenance", [
+      "kind",
+      "botId",
+      "sessionId",
+      "turnId",
+      "runId",
+      "authoredAt",
+    ]);
+    return {
+      kind: "bot",
+      botId: decodeBotIdV1(value.botId),
+      sessionId: text(value.sessionId, "Composition provenance sessionId", 257),
+      turnId: text(value.turnId, "Composition provenance turnId", 128),
+      runId: text(value.runId, "Composition provenance runId", 128),
+      authoredAt: compositionTimestamp(
+        value.authoredAt,
+        "Composition provenance authoredAt",
+      ),
+    };
+  }
+  throw new ConfigurationDecodeError("Composition provenance kind is invalid");
+}
+
+function compositionOriginView(input: unknown): CompositionOriginViewV1 {
+  const kind = record(input, "Composition origin").kind;
+  if (kind === "bootstrap") {
+    exactRecord(input, "Composition origin", ["kind"]);
+    return { kind: "bootstrap" };
+  }
+  if (kind === "bot-authored") {
+    const value = exactRecord(input, "Composition origin", [
+      "kind",
+      "runId",
+      "sessionId",
+      "turnId",
+    ]);
+    return {
+      kind: "bot-authored",
+      runId: text(value.runId, "Composition origin runId", 128),
+      sessionId: text(value.sessionId, "Composition origin sessionId", 257),
+      turnId: text(value.turnId, "Composition origin turnId", 128),
+    };
+  }
+  if (kind === "user-install") {
+    const value = exactRecord(input, "Composition origin", ["kind", "userId"]);
+    return {
+      kind: "user-install",
+      userId: text(value.userId, "Composition origin userId", 256),
+    };
+  }
+  if (kind === "revert") {
+    const value = exactRecord(input, "Composition origin", [
+      "kind",
+      "revertsTo",
+      "userId",
+    ]);
+    return {
+      kind: "revert",
+      revertsTo: decodeCompositionGenerationIdV1(
+        value.revertsTo,
+        "Composition origin revertsTo",
+      ),
+      userId: text(value.userId, "Composition origin userId", 256),
+    };
+  }
+  throw new ConfigurationDecodeError("Composition origin kind is invalid");
+}
+
+function compositionMemberView(input: unknown): CompositionMemberViewV1 {
+  const value = exactRecord(
+    input,
+    "Composition member",
+    ["packageId", "version", "provenance"],
+    ["contentHash", "source"],
+  );
+  if (
+    value.source !== undefined &&
+    (typeof value.source !== "string" ||
+      value.source.length === 0 ||
+      value.source.length > MAX_COMPOSITION_MEMBER_SOURCE_V1)
+  ) {
+    throw new ConfigurationDecodeError("Composition member source is invalid");
+  }
+  return {
+    packageId: identifier(value.packageId, "Composition member packageId"),
+    version: text(value.version, "Composition member version", 64),
+    provenance: compositionProvenanceView(value.provenance),
+    ...(value.contentHash === undefined
+      ? {}
+      : {
+          contentHash: compositionHash(
+            value.contentHash,
+            "Composition member contentHash",
+          ),
+        }),
+    ...(value.source === undefined ? {} : { source: value.source as string }),
+  };
+}
+
+function compositionFailureView(input: unknown): CompositionFailureViewV1 {
+  const value = exactRecord(input, "Composition failure", [
+    "attempt",
+    "at",
+    "phase",
+    "message",
+  ]);
+  if (
+    !Number.isSafeInteger(value.attempt) ||
+    (value.attempt as number) < 1 ||
+    (value.attempt as number) > 1_000
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition failure attempt is invalid",
+    );
+  }
+  if (
+    !COMPOSITION_FAILURE_PHASES_V1.includes(
+      value.phase as CompositionFailurePhaseViewV1,
+    )
+  ) {
+    throw new ConfigurationDecodeError("Composition failure phase is invalid");
+  }
+  return {
+    attempt: value.attempt as number,
+    at: compositionTimestamp(value.at, "Composition failure at"),
+    phase: value.phase as CompositionFailurePhaseViewV1,
+    message: text(value.message, "Composition failure message", 2_000),
+  };
+}
+
+function compositionQuarantineView(
+  input: unknown,
+): CompositionQuarantineViewV1 {
+  const value = exactRecord(input, "Composition quarantine", [
+    "quarantinedAt",
+    "reason",
+    "failures",
+  ]);
+  if (
+    !Number.isSafeInteger(value.failures) ||
+    (value.failures as number) < 1 ||
+    (value.failures as number) > 1_000
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition quarantine failures is invalid",
+    );
+  }
+  return {
+    quarantinedAt: compositionTimestamp(
+      value.quarantinedAt,
+      "Composition quarantine quarantinedAt",
+    ),
+    reason: text(value.reason, "Composition quarantine reason", 2_000),
+    failures: value.failures as number,
+  };
+}
+
+export function decodeCompositionGenerationViewV1(
+  input: unknown,
+): CompositionGenerationViewV1 {
+  const value = exactRecord(
+    input,
+    "Composition generation",
+    [
+      "schemaVersion",
+      "botId",
+      "generationId",
+      "createdAt",
+      "status",
+      "origin",
+      "isCurrent",
+      "members",
+      "failures",
+    ],
+    ["parentGenerationId", "quarantine"],
+  );
+  if (
+    !Array.isArray(value.failures) ||
+    value.failures.length > MAX_COMPOSITION_FAILURE_PAGE_V1
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition generation failures are invalid",
+    );
+  }
+  schemaVersion(value);
+  if (
+    !COMPOSITION_GENERATION_STATUSES_V1.includes(
+      value.status as CompositionGenerationStatusViewV1,
+    )
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition generation status is invalid",
+    );
+  }
+  if (typeof value.isCurrent !== "boolean") {
+    throw new ConfigurationDecodeError(
+      "Composition generation isCurrent is invalid",
+    );
+  }
+  if (
+    !Array.isArray(value.members) ||
+    value.members.length > MAX_COMPOSITION_MEMBERS_V1
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition generation members are invalid",
+    );
+  }
+  const members = value.members.map(compositionMemberView);
+  if (
+    new Set(members.map((member) => member.packageId)).size !== members.length
+  )
+    throw new ConfigurationDecodeError(
+      "Composition generation members are invalid",
+    );
+  return {
+    schemaVersion: 1,
+    botId: decodeBotIdV1(value.botId),
+    generationId: decodeCompositionGenerationIdV1(value.generationId),
+    createdAt: compositionTimestamp(
+      value.createdAt,
+      "Composition generation createdAt",
+    ),
+    status: value.status as CompositionGenerationStatusViewV1,
+    origin: compositionOriginView(value.origin),
+    isCurrent: value.isCurrent,
+    members,
+    failures: value.failures.map(compositionFailureView),
+    ...(value.quarantine === undefined
+      ? {}
+      : { quarantine: compositionQuarantineView(value.quarantine) }),
+    ...(value.parentGenerationId === undefined
+      ? {}
+      : {
+          parentGenerationId: decodeCompositionGenerationIdV1(
+            value.parentGenerationId,
+            "parentGenerationId",
+          ),
+        }),
+  };
+}
+
+export function decodeCompositionGenerationListViewV1(
+  input: unknown,
+): CompositionGenerationListViewV1 {
+  const value = exactRecord(
+    input,
+    "Composition generation list",
+    ["schemaVersion", "botId", "currentGenerationId", "generations"],
+    ["cursor"],
+  );
+  schemaVersion(value);
+  if (
+    !Array.isArray(value.generations) ||
+    value.generations.length > MAX_COMPOSITION_GENERATION_PAGE_V1
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition generation list is invalid",
+    );
+  }
+  const botId = decodeBotIdV1(value.botId);
+  const generations = value.generations.map(decodeCompositionGenerationViewV1);
+  if (generations.some((generation) => generation.botId !== botId)) {
+    throw new ConfigurationDecodeError(
+      "Composition generation list is invalid",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    botId,
+    currentGenerationId: decodeCompositionGenerationIdV1(
+      value.currentGenerationId,
+      "currentGenerationId",
+    ),
+    generations,
+    ...(value.cursor === undefined
+      ? {}
+      : { cursor: text(value.cursor, "cursor", 512) }),
+  };
+}
+
+export function decodeRevertCompositionCommandV1(
+  input: unknown,
+): RevertCompositionCommandV1 {
+  const value = exactRecord(input, "Composition revert command", [
+    "schemaVersion",
+    "type",
+    "commandId",
+    "botId",
+    "toGenerationId",
+    "expectedGenerationId",
+  ]);
+  schemaVersion(value);
+  if (value.type !== "composition/revert") {
+    throw new ConfigurationDecodeError(
+      "unsupported Composition revert command",
+    );
+  }
+  const toGenerationId = decodeCompositionGenerationIdV1(
+    value.toGenerationId,
+    "toGenerationId",
+  );
+  const expectedGenerationId = decodeCompositionGenerationIdV1(
+    value.expectedGenerationId,
+    "expectedGenerationId",
+  );
+  if (toGenerationId === expectedGenerationId) {
+    throw new ConfigurationDecodeError(
+      "Composition revert command targets the current generation",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    type: "composition/revert",
+    commandId: connectionIdentifier(value.commandId, "commandId"),
+    botId: decodeBotIdV1(value.botId),
+    toGenerationId,
+    expectedGenerationId,
+  };
+}
+
+export function decodeCompositionCommandReceiptV1(
+  input: unknown,
+): CompositionCommandReceiptV1 {
+  const candidate = record(input, "Composition command receipt");
+  if (candidate.status !== "applied" && candidate.status !== "rejected") {
+    throw new ConfigurationDecodeError(
+      "Composition command receipt status is invalid",
+    );
+  }
+  const value = exactRecord(
+    input,
+    "Composition command receipt",
+    candidate.status === "applied"
+      ? [
+          "schemaVersion",
+          "commandId",
+          "status",
+          "generationId",
+          "currentGenerationId",
+        ]
+      : [
+          "schemaVersion",
+          "commandId",
+          "status",
+          "failure",
+          "currentGenerationId",
+        ],
+  );
+  schemaVersion(value);
+  const shared = {
+    schemaVersion: 1,
+    commandId: connectionIdentifier(value.commandId, "commandId"),
+    currentGenerationId: decodeCompositionGenerationIdV1(
+      value.currentGenerationId,
+      "currentGenerationId",
+    ),
+  } as const;
+  if (value.status === "rejected") {
+    return {
+      ...shared,
+      status: "rejected",
+      failure: text(value.failure, "Composition command failure", 1_000),
+    };
+  }
+  return {
+    ...shared,
+    status: "applied",
+    generationId: decodeCompositionGenerationIdV1(value.generationId),
+  };
 }

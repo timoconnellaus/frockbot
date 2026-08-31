@@ -7,6 +7,10 @@
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
     "./manifest": "./src/manifest.ts",
+    "./projects": "./src/projects.ts",
+    "./roots": "./src/roots.ts",
+    "./store": "./src/store.ts",
+    "./testing": "./src/testing.ts",
     "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"
   },
@@ -18,12 +22,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/agent-core": "workspace:*",
-    "@frockbot/computer-core": "workspace:*",
+    "@frockbot/kernel-agent-loop": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/workspace-store": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
-    "@frockbot/plugin-testkit": "workspace:*",
     "@types/bun": "1.4.0",
     "typescript": "^7.0.2"
   },

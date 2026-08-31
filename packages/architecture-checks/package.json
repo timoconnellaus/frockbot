@@ -1,0 +1,40 @@
+{
+  "name": "@frockbot/architecture-checks",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Automated checks for the constitutional rules that can be enforced mechanically.",
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/computer-core": "workspace:*",
+    "@frockbot/connection-core": "workspace:*",
+    "@frockbot/kernel-agent-loop": "workspace:*",
+    "@frockbot/kernel-composition": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/kernel-do": "workspace:*",
+    "@frockbot/plugin-computer": "workspace:*",
+    "@frockbot/plugin-memory": "workspace:*",
+    "@frockbot/plugin-models": "workspace:*",
+    "@frockbot/plugin-prompt": "workspace:*",
+    "@frockbot/plugin-provider-foundation": "workspace:*",
+    "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
+    "@frockbot/plugin-skills": "workspace:*",
+    "@frockbot/plugin-tools": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "typescript": "^7.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/architecture-checks"
+  }
+}

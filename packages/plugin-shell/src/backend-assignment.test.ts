@@ -12,6 +12,7 @@ function saga(phase: StoredAssignmentSaga["phase"]): StoredAssignmentSaga {
     commandFingerprint: "configuration-command-v1:test",
     userId: "user-1",
     botId: "bot-1",
+    assignmentId: "assignment-1",
     connectionId: "connection-1",
     generation: "generation-1",
     phase,
@@ -28,6 +29,10 @@ function effects(log: string[], acknowledge = true): AssignmentSagaEffects {
     compensate: () => {
       log.push("compensate");
       return Promise.resolve();
+    },
+    release: () => {
+      log.push("release");
+      return Promise.resolve(true);
     },
     rejectCommitted: () => {
       log.push("reject-committed");
@@ -61,6 +66,11 @@ describe("assignment saga settlement", () => {
     await expect(
       settleAssignmentSaga(saga("committed"), effects(log, false)),
     ).resolves.toBe("rejected");
-    expect(log).toEqual(["acknowledge", "reject-committed"]);
+    expect(log).toEqual([
+      "acknowledge",
+      "compensate",
+      "release",
+      "reject-committed",
+    ]);
   });
 });

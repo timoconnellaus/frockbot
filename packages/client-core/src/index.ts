@@ -1,8 +1,11 @@
 import {
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
+  type ConnectionCommandReceiptV1,
+  type ConnectionCommandV1,
   type StartConnectionResult,
-} from "@frockbot/plugin-composio/backend-contracts";
+  // pi-lens-ignore: ts:2307
+} from "@frockbot/connection-core";
 import { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 export { decodeExternalAuthorizationUrl };
@@ -85,6 +88,13 @@ export interface AgentTransport {
   executeConfiguration?(
     command: ConfigurationCommandV1,
   ): Promise<OperationReceiptV1>;
+  executeConnection?(
+    command: ConnectionCommandV1,
+  ): Promise<ConnectionCommandReceiptV1>;
+  lookupConnectionCommand?(
+    packageId: string,
+    commandId: string,
+  ): Promise<ConnectionCommandReceiptV1 | undefined>;
   readApplicationManifest?(): Promise<unknown>;
   readAuthenticatedUserId?(): Promise<string>;
   startConnection?(input: {

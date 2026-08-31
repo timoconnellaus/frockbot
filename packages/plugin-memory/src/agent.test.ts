@@ -1,612 +1,520 @@
+// The Memory runtime Contribution: what it injects, what it records, and what
+// its tools refuse.
 import { describe, expect, test } from "bun:test";
+import { SessionStore, type Session } from "@frockbot/kernel-contracts";
+import { Context } from "cordis";
+import type { WorkspaceFilesV1 } from "@frockbot/kernel-contracts";
 import {
-  type Agent,
-  type NormalizedModelRequest,
-  SystemPromptRegistry,
-  ToolRegistry,
-} from "@frockbot/agent-core";
+  createMemoryForgetTool,
+  createMemorySearchTool,
+  createMemoryWriteTool,
+  createProjectTools,
+  MemoryProjection,
+  type MemoryRuntimeHostV1,
+} from "./agent.ts";
+import { userMemoryRootV1 } from "./roots.ts";
+import { MemoryStore, MEMORY_MAX_FILES_PER_TIER } from "./store.ts";
 import {
-  createPluginHarness,
-  verifyPluginPackage,
-} from "@frockbot/plugin-testkit";
-import manifest from "../frockbot.json" with { type: "json" };
-import packageJson from "../package.json" with { type: "json" };
-import { createMemoryPlugin } from "./agent.js";
-import type {
-  MemoryBucket,
-  MemoryBucketObject,
-  MemoryVector,
-  MemoryVectorIndex,
-} from "./types.js";
+  createInMemoryMemoryProjectsV1,
+  createTestMemoryFilesV1,
+} from "./testing.ts";
 
-class FakeBucket implements MemoryBucket {
-  readonly objects = new Map<string, string>();
+const OWNER = { userId: "user-1", botId: "bot-1" };
+const WRITER = { sessionId: "user-1:bot-1", turnId: "turn-4", runId: "run-9" };
+const AT = new Date("2026-08-31T10:00:00.000Z");
 
-  get(key: string): Promise<MemoryBucketObject | null> {
-    const body = this.objects.get(key);
-    return Promise.resolve(
-      body === undefined
-        ? null
-        : {
-            text: () => Promise.resolve(body),
-            json: <T>() => Promise.resolve(JSON.parse(body) as T),
-          },
-    );
-  }
+const CONTEXT = {
+  botId: "bot-1",
+  agentId: "bot-1",
+  sessionId: "user-1:bot-1",
+  compositionGenerationId: "2026-08-31T00:00:00.000Z:0123456789abcdef",
+  signal: new AbortController().signal,
+};
 
-  put(key: string, value: string): Promise<unknown> {
-    this.objects.set(key, value);
-    return Promise.resolve();
-  }
-
-  delete(key: string): Promise<unknown> {
-    this.objects.delete(key);
-    return Promise.resolve();
-  }
-
-  list({ prefix }: { prefix: string }): Promise<{
-    objects: Array<{ key: string }>;
-    truncated: boolean;
-  }> {
-    return Promise.resolve({
-      objects: [...this.objects.keys()]
-        .filter((key) => key.startsWith(prefix))
-        .map((key) => ({ key })),
-      truncated: false,
-    });
-  }
+async function openSession(): Promise<{
+  session: Session;
+  sessions: { get(id: string): Session | undefined };
+  dispose(): Promise<void>;
+}> {
+  const root = new Context();
+  await root.plugin(SessionStore);
+  const session = root.sessions.create("user-1:bot-1");
+  session.appendBatch([
+    { type: "turn/start", turn: 4 },
+    { type: "step/start", turn: 4, step: 2 },
+  ]);
+  return {
+    session,
+    sessions: root.sessions,
+    dispose: () => root.fiber.dispose(),
+  };
 }
 
-class FakeVectorize implements MemoryVectorIndex {
-  readonly vectors = new Map<string, MemoryVector>();
-
-  upsert(vectors: MemoryVector[]): Promise<unknown> {
-    for (const vector of vectors) this.vectors.set(vector.id, vector);
-    return Promise.resolve();
-  }
-
-  query(
-    query: number[],
-    options: { topK: number; namespace: string; returnMetadata: "all" },
-  ): Promise<{
-    matches: Array<{
-      id: string;
-      score: number;
-      metadata: Record<string, unknown>;
-    }>;
-  }> {
-    return Promise.resolve({
-      matches: [...this.vectors.values()]
-        .filter((vector) => vector.namespace === options.namespace)
-        .map((vector) => ({
-          id: vector.id,
-          score: cosine(query, vector.values),
-          metadata: vector.metadata,
-        }))
-        .sort((left, right) => right.score - left.score)
-        .slice(0, options.topK),
-    });
-  }
-
-  deleteByIds(ids: string[]): Promise<unknown> {
-    for (const id of ids) this.vectors.delete(id);
-    return Promise.resolve();
-  }
-}
-
-class MutatingVectorize extends FakeVectorize {
-  private mutated = false;
-
-  constructor(private readonly mutate: () => void) {
-    super();
-  }
-
-  override async upsert(vectors: MemoryVector[]): Promise<unknown> {
-    const result = await super.upsert(vectors);
-    if (!this.mutated) {
-      this.mutated = true;
-      this.mutate();
-    }
-    return result;
-  }
-}
-
-class NoAgentVectorMatches extends FakeVectorize {
-  override query(
-    query: number[],
-    options: { topK: number; namespace: string; returnMetadata: "all" },
-  ) {
-    if (options.namespace.startsWith("agent:")) {
-      return Promise.resolve({ matches: [] });
-    }
-    return super.query(query, options);
-  }
-}
-
-function cosine(left: number[], right: number[]): number {
-  let product = 0;
-  let leftMagnitude = 0;
-  let rightMagnitude = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    const leftValue = left[index] ?? 0;
-    const rightValue = right[index] ?? 0;
-    product += leftValue * rightValue;
-    leftMagnitude += leftValue * leftValue;
-    rightMagnitude += rightValue * rightValue;
-  }
-  if (!leftMagnitude || !rightMagnitude) return 0;
-  return product / Math.sqrt(leftMagnitude * rightMagnitude);
-}
-
-function embed(texts: string[]): Promise<number[][]> {
-  return Promise.resolve(
-    texts.map((text) => {
-      const vector = Array.from({ length: 32 }, () => 0);
-      for (const word of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
-        let hash = 0;
-        for (const character of word) {
-          hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-        }
-        vector[hash % vector.length] = (vector[hash % vector.length] ?? 0) + 1;
-      }
-      return vector;
+function hostFor(
+  botId = "bot-1",
+  files = createTestMemoryFilesV1({ userId: "user-1" }),
+): MemoryRuntimeHostV1 & {
+  writer: NonNullable<MemoryRuntimeHostV1["writer"]>;
+} {
+  return {
+    owner: { userId: "user-1", botId },
+    store: new MemoryStore({
+      files,
+      owner: { userId: "user-1", botId },
+      botNames: { "bot-1": "General", "bot-2": "School" },
+      clock: () => AT,
     }),
-  );
-}
-
-async function executeTool(
-  harness: Awaited<ReturnType<typeof createPluginHarness>>,
-  name: string,
-  input: unknown,
-): Promise<Record<string, unknown>> {
-  const call = { id: crypto.randomUUID(), name, input };
-  const context = {
-    botId: "alpha",
-    agentId: "alpha",
-    sessionId: "owner:alpha",
-    signal: new AbortController().signal,
+    writer: WRITER,
   };
-  const preparation = await harness.root.tools.prepare(call, context);
-  if (preparation.kind !== "ready") {
-    throw new Error(preparation.result.content);
-  }
-  const result = await harness.root.tools.executePrepared(preparation, context);
-  if (result.isError) throw new Error(result.content);
-  return JSON.parse(result.content) as Record<string, unknown>;
 }
 
-function modelRequest(text: string): NormalizedModelRequest {
+/** The Bot provenance one shard's writes carry. */
+function botWriter(botId: string) {
   return {
-    requestId: "request",
-    provider: "fixture",
-    model: "fixture",
-    system: "Base prompt",
-    messages: [{ role: "user", content: text }],
-    tools: [],
+    kind: "bot" as const,
+    botId,
+    sessionId: `user-1:${botId}`,
+    turnId: "turn-4",
+    runId: "run-9",
   };
 }
 
-function fakeAgent(): Agent {
+/**
+ * A Workspace surface that serves reads normally and stops accepting writes
+ * after `allowed` of them, so a change that spans two files can be interrupted
+ * between them.
+ */
+function writesFailAfter(
+  files: WorkspaceFilesV1,
+  allowed: number,
+): WorkspaceFilesV1 {
+  let seen = 0;
   return {
-    id: "owner:alpha",
-    botId: "alpha",
-    session: undefined as never,
-    status: "idle",
-    send: () => "message",
-    resume: () => undefined,
-    cancel: () => undefined,
-    whenIdle: () => Promise.resolve(),
+    read: (path) => files.read(path),
+    list: (request) => files.list(request),
+    stat: (path) => files.stat(path),
+    write: (request) => {
+      seen += 1;
+      if (seen > allowed) {
+        return Promise.resolve({
+          status: "unavailable" as const,
+          reason: "the bucket went away",
+        });
+      }
+      return files.write(request);
+    },
+    delete: (request) => files.delete(request),
   };
 }
 
-describe("memory plugin", () => {
-  test("prefers agent memory over global memory at the same path", async () => {
-    const bucket = new FakeBucket();
-    const vectorize = new FakeVectorize();
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize,
-        embed,
-      }),
+describe("memory_write", () => {
+  test("records intent before the effect, then the generation it produced", async () => {
+    const host = hostFor();
+    const { session, sessions, dispose } = await openSession();
+    const projection = new MemoryProjection(host);
+    const tool = createMemoryWriteTool(host, sessions, projection);
+
+    const result = await tool.execute(
+      { scope: "user", tier: "profile", fact: "Tim lives in Wollongong." },
+      CONTEXT,
     );
 
-    await executeTool(harness, "memory_write", {
-      tier: "global",
-      path: "preferences.md",
-      content: "Use the global preference.",
+    expect(result.isError).toBe(false);
+    const intent = session.events.find(
+      (event) => event.type === "memory/write-intent",
+    );
+    const written = session.events.find(
+      (event) => event.type === "memory/written",
+    );
+    expect(intent).toMatchObject({
+      turn: 4,
+      step: 2,
+      action: "write",
+      scope: "user",
+      tier: "profile",
     });
-    await executeTool(harness, "memory_write", {
-      tier: "agent",
-      path: "preferences.md",
-      content: "Use the alpha preference.",
-    });
-
-    expect(
-      await executeTool(harness, "memory_get", { path: "preferences.md" }),
-    ).toMatchObject({
-      found: true,
-      tier: "agent",
-      content: "Use the alpha preference.",
-    });
-    expect(
-      await executeTool(harness, "memory_get", {
-        tier: "global",
-        path: "preferences.md",
-      }),
-    ).toMatchObject({ tier: "global", content: "Use the global preference." });
-    const search = await executeTool(harness, "memory_search", {
-      query: "preference",
-      maxResults: 10,
-    });
-    expect(search.results).toEqual([
-      expect.objectContaining({ path: "preferences.md", tier: "agent" }),
-    ]);
-    await harness.dispose();
+    expect(written).toMatchObject({ action: "write", scope: "user" });
+    expect(intent!.seq).toBeLessThan(written!.seq);
+    if (written?.type !== "memory/written") throw new Error("unreachable");
+    expect(written.path).toBe("by-agent/bot-1/profile.md");
+    expect(written.effectId).toBe(
+      intent?.type === "memory/write-intent" ? intent.effectId : "",
+    );
+    await dispose();
   });
 
-  test("replaces a retrieved global clash with the authoritative agent copy", async () => {
-    const bucket = new FakeBucket();
-    const vectorize = new NoAgentVectorMatches();
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize,
-        embed,
-      }),
+  test("refuses a credential-shaped fact, visibly, and writes nothing", async () => {
+    const host = hostFor();
+    const { session, sessions, dispose } = await openSession();
+    const tool = createMemoryWriteTool(
+      host,
+      sessions,
+      new MemoryProjection(host),
     );
-    await executeTool(harness, "memory_write", {
-      tier: "global",
-      path: "policy.md",
-      content: "The launch color is blue.",
-    });
-    await executeTool(harness, "memory_write", {
-      path: "policy.md",
-      content: "Alpha has an authoritative private launch policy.",
-    });
 
-    const search = await executeTool(harness, "memory_search", {
-      query: "launch color blue",
-      maxResults: 5,
-    });
-    expect(search.results).toEqual([
-      expect.objectContaining({
-        path: "policy.md",
-        tier: "agent",
-        snippet: "Alpha has an authoritative private launch policy.",
-      }),
-    ]);
-    await harness.dispose();
-  });
-
-  test("shares global memory while isolating agent memory", async () => {
-    const bucket = new FakeBucket();
-    const vectorize = new FakeVectorize();
-    const alpha = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    const beta = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await alpha.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize,
-        embed,
-      }),
+    const result = await tool.execute(
+      { fact: "The key is sk-abcdefghijklmnopqrstuvwxyz." },
+      CONTEXT,
     );
-    await beta.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "beta",
-        bucket,
-        vectorize,
-        embed,
-      }),
-    );
-    await executeTool(alpha, "memory_write", {
-      path: "private.md",
-      content: "alpha only",
-    });
-    await executeTool(alpha, "memory_write", {
-      tier: "global",
-      path: "shared.md",
-      content: "all agents",
-    });
 
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("no secrets");
+    // The intent is still recorded: the refusal is an observable outcome of an
+    // attempt, not an event that never happened.
     expect(
-      await executeTool(beta, "memory_get", { path: "private.md" }),
-    ).toMatchObject({ found: false });
+      session.events.some((event) => event.type === "memory/write-intent"),
+    ).toBe(true);
     expect(
-      await executeTool(beta, "memory_get", { path: "shared.md" }),
-    ).toMatchObject({ found: true, tier: "global", content: "all agents" });
-    await Promise.all([alpha.dispose(), beta.dispose()]);
+      session.events.some((event) => event.type === "memory/written"),
+    ).toBe(false);
+    await dispose();
   });
+});
 
-  test("injects automatic recall into the normalized model request", async () => {
-    const bucket = new FakeBucket();
-    const vectorize = new FakeVectorize();
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize,
-        embed,
-      }),
-    );
-    await executeTool(harness, "memory_write", {
-      path: "pets.md",
-      content: "The user's dog is named Rex.",
+describe("memory_forget", () => {
+  test("retracts another Bot's shared fact in this Bot's own shard", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const other = hostFor("bot-2", files);
+    await other.store.write({
+      root: userMemoryRootV1(OWNER),
+      tier: "profile",
+      fact: "Tim teaches on Tuesdays.",
+      writer: {
+        kind: "bot",
+        botId: "bot-2",
+        sessionId: "user-1:bot-2",
+        turnId: "t",
+        runId: "r",
+      },
     });
-
-    const request = modelRequest("What is my dog's name?");
-    const recalled = await harness.root.waterfall(
-      "agent/request",
-      fakeAgent(),
-      request,
-      new AbortController().signal,
-      () => Promise.resolve(request),
+    const host = hostFor("bot-1", files);
+    const { session, sessions, dispose } = await openSession();
+    const tool = createMemoryForgetTool(
+      host,
+      sessions,
+      new MemoryProjection(host),
     );
-    expect(recalled.system).toContain("Possibly relevant durable memory");
-    expect(recalled.system).toContain("dog is named Rex");
-    await harness.dispose();
+
+    const result = await tool.execute(
+      { scope: "user", fact: "Tim teaches on Tuesdays." },
+      CONTEXT,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("retraction");
+    const written = session.events.find(
+      (event) => event.type === "memory/written",
+    );
+    if (written?.type !== "memory/written") throw new Error("unreachable");
+    expect(written.action).toBe("forget");
+    expect(written.path).toBe("by-agent/bot-1/log/2026-08.md");
+    await dispose();
   });
+});
 
-  test("indexes oversized paragraphs as distinct bounded chunks", async () => {
-    const bucket = new FakeBucket();
-    const vectorize = new FakeVectorize();
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize,
-        embed,
-      }),
-    );
-    const content = "memory ".repeat(600);
-    const result = await executeTool(harness, "memory_write", {
-      path: "long.md",
-      content,
+describe("the Turn projection", () => {
+  test("records exactly what it injected, generations included", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const other = hostFor("bot-2", files);
+    const shared = await other.store.write({
+      root: userMemoryRootV1(OWNER),
+      tier: "profile",
+      fact: "Tim teaches on Tuesdays.",
+      writer: {
+        kind: "bot",
+        botId: "bot-2",
+        sessionId: "user-1:bot-2",
+        turnId: "t",
+        runId: "r",
+      },
     });
-    if (typeof result.chunksTotal !== "number") {
-      throw new Error("memory write did not return a chunk count");
+    const host = hostFor("bot-1", files);
+    const { session, dispose } = await openSession();
+    const projection = new MemoryProjection(host);
+
+    const injection = await projection.refresh(4, session);
+
+    expect(injection.text).toContain(
+      "- (learned 2026-08-31) [via School] Tim teaches on Tuesdays.",
+    );
+    const injected = session.events.find(
+      (event) => event.type === "memory/injected",
+    );
+    if (injected?.type !== "memory/injected") throw new Error("unreachable");
+    expect(injected.turn).toBe(4);
+    expect(injected.facts).toEqual([
+      {
+        scope: "user",
+        projectId: "",
+        tier: "profile",
+        via: "School",
+        learnedAt: "2026-08-31",
+        text: "Tim teaches on Tuesdays.",
+      },
+    ]);
+    expect(injected.sources).toEqual([
+      {
+        scope: "user",
+        projectId: "",
+        path: "by-agent/bot-2/profile.md",
+        generationId:
+          shared.status === "ok" ? shared.generationId : "unreachable",
+        contentHash:
+          shared.status === "ok" ? shared.contentHash : "unreachable",
+      },
+    ]);
+    expect(projection.loadedTurn()).toBe(4);
+    await dispose();
+  });
+});
+
+describe("the Project tools", () => {
+  test("create is join, and membership reaches durable state through the authority", async () => {
+    const host = { ...hostFor(), projects: createInMemoryMemoryProjectsV1() };
+    const { session, sessions, dispose } = await openSession();
+    const projection = new MemoryProjection(host);
+    const [create, join, leave] = createProjectTools(
+      host,
+      sessions,
+      projection,
+    );
+
+    const created = await create!.execute(
+      {
+        project: "ghetto-movement",
+        name: "Ghetto Movement",
+        description: "The gym build.",
+      },
+      CONTEXT,
+    );
+    expect(created.isError).toBe(false);
+    expect(await host.projects.joined()).toEqual([
+      {
+        projectId: "ghetto-movement",
+        name: "Ghetto Movement",
+        description: "The gym build.",
+      },
+    ]);
+
+    // The descriptor is a Memory file, written with the User's authority.
+    const descriptor = await host.store.reads.read({
+      root: {
+        kind: "project-memory",
+        userId: "user-1",
+        projectId: "ghetto-movement",
+      },
+      path: "projects/ghetto-movement/project.md",
+    });
+    expect(descriptor.status).toBe("ok");
+    expect(
+      descriptor.status === "ok"
+        ? descriptor.file.generation.writer
+        : undefined,
+    ).toEqual({ kind: "user", userId: "user-1" });
+
+    const intent = session.events.find(
+      (event) => event.type === "memory/project-intent",
+    );
+    const changed = session.events.find(
+      (event) => event.type === "memory/project-changed",
+    );
+    expect(intent).toMatchObject({
+      action: "create",
+      projectId: "ghetto-movement",
+    });
+    expect(changed).toMatchObject({ projects: ["ghetto-movement"] });
+    expect(intent!.seq).toBeLessThan(changed!.seq);
+
+    await leave!.execute({ project: "ghetto-movement" }, CONTEXT);
+    expect(await host.projects.joined()).toEqual([]);
+    const rejoined = await join!.execute(
+      { project: "ghetto-movement" },
+      CONTEXT,
+    );
+    expect(rejoined.isError).toBe(false);
+    expect((await host.projects.joined()).map((p) => p.projectId)).toEqual([
+      "ghetto-movement",
+    ]);
+    await dispose();
+  });
+});
+
+describe("a Memory read that a bound cut short", () => {
+  test("records an omission naming the tier rather than a complete-looking injection", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    // One profile shard per Bot, one more than the tier read bound.
+    const shards = MEMORY_MAX_FILES_PER_TIER + 1;
+    for (let index = 0; index < shards; index += 1) {
+      const botId = `bot-${String(index).padStart(3, "0")}`;
+      const store = new MemoryStore({
+        files,
+        owner: { userId: "user-1", botId },
+        clock: () => AT,
+      });
+      const written = await store.write({
+        root: userMemoryRootV1(OWNER),
+        tier: "profile",
+        fact: `Shard ${index} learned something.`,
+        writer: botWriter(botId),
+      });
+      expect(written.status).toBe("ok");
     }
-    expect(result.chunksTotal).toBeGreaterThan(1);
-    expect(vectorize.vectors.size).toBe(result.chunksTotal);
+    const host = hostFor("bot-000", files);
+    const { session, dispose } = await openSession();
 
+    await new MemoryProjection(host).refresh(4, session);
+
+    const injected = session.events.find(
+      (event) => event.type === "memory/injected",
+    );
+    if (injected?.type !== "memory/injected") throw new Error("unreachable");
+    const omission = injected.omissions.find(
+      (entry) =>
+        entry.scope === "user" && entry.reason.includes("read bound were not"),
+    );
+    expect(omission).toBeDefined();
+    expect(omission?.reason).toContain(`1 Memory file(s)`);
+    await dispose();
+  });
+});
+
+describe("a project-scope change to a Project the Bot never joined", () => {
+  test("is refused, and nothing is recorded or written", async () => {
+    const host = { ...hostFor(), projects: createInMemoryMemoryProjectsV1() };
+    const { session, sessions, dispose } = await openSession();
+    const projection = new MemoryProjection(host);
+    const write = createMemoryWriteTool(host, sessions, projection);
+    const forget = createMemoryForgetTool(host, sessions, projection);
+
+    const written = await write.execute(
+      { scope: "project", project: "never-joined", fact: "A shared fact." },
+      CONTEXT,
+    );
+    const forgotten = await forget.execute(
+      { scope: "project", project: "never-joined", fact: "A shared fact." },
+      CONTEXT,
+    );
+
+    expect(written.isError).toBe(true);
+    expect(written.content).toContain("you have not joined");
+    expect(forgotten.isError).toBe(true);
+    expect(forgotten.content).toContain("you have not joined");
     expect(
-      await executeTool(harness, "memory_write", {
-        path: "long.md",
-        content,
-      }),
-    ).toMatchObject({ chunksEmbedded: 0 });
-    const partialEdit = await executeTool(harness, "memory_write", {
-      path: "long.md",
-      content: `${content}changed ending`,
-    });
-    expect(partialEdit.chunksEmbedded).toBe(partialEdit.chunksTotal);
-    await executeTool(harness, "memory_write", {
-      path: "long.md",
-      content: "short memory",
-    });
-    expect(vectorize.vectors.size).toBe(1);
-    await harness.dispose();
-  });
-
-  test("finds canonical R2 content in a partially indexed tier", async () => {
-    const bucket = new FakeBucket();
-    const vectorize = new FakeVectorize();
-    const selectiveEmbed = (texts: string[]) =>
-      texts.some((text) => text.includes("marker-fail"))
-        ? Promise.reject(new Error("selective embedding failure"))
-        : embed(texts);
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize,
-        embed: selectiveEmbed,
-      }),
-    );
-    await executeTool(harness, "memory_write", {
-      path: "indexed.md",
-      content: "An unrelated indexed document.",
-    });
-    await executeTool(harness, "memory_write", {
-      path: "canonical.md",
-      content: "The canonical phrase survives marker-fail.",
-    });
-
-    const search = await executeTool(harness, "memory_search", {
-      query: "canonical phrase",
-      maxResults: 10,
-    });
-    expect(search.results).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ path: "canonical.md", tier: "agent" }),
-      ]),
-    );
-    await harness.dispose();
-  });
-
-  test("reconciles indexing when canonical R2 changes during a write", async () => {
-    const bucket = new FakeBucket();
-    let contentKey: string | undefined;
-    const vectorize = new MutatingVectorize(() => {
-      contentKey = [...bucket.objects.keys()].find((key) =>
-        key.endsWith("/files/race.md"),
-      );
-      if (!contentKey) throw new Error("memory content was not persisted");
-      bucket.objects.set(
-        contentKey,
-        "The concurrent canonical value is violet.",
-      );
-    });
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize,
-        embed,
-      }),
-    );
-
+      session.events.some((event) => event.type === "memory/written"),
+    ).toBe(false);
     expect(
-      await executeTool(harness, "memory_write", {
-        tier: "global",
-        path: "race.md",
-        content: "The initial value is amber.",
-      }),
-    ).toMatchObject({ ok: true, indexed: true });
-    const search = await executeTool(harness, "memory_search", {
-      tier: "global",
-      query: "concurrent canonical value",
-    });
-    expect(search.results).toEqual([
-      expect.objectContaining({
-        path: "race.md",
-        snippet: "The concurrent canonical value is violet.",
-      }),
-    ]);
-    expect(vectorize.vectors.size).toBe(1);
-    await harness.dispose();
+      session.events.some((event) => event.type === "memory/write-intent"),
+    ).toBe(false);
+    await dispose();
   });
+});
 
-  test("rejects stale vectors when canonical R2 wins a concurrent write", async () => {
-    const bucket = new FakeBucket();
-    const vectorize = new FakeVectorize();
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize,
-        embed,
-      }),
+describe("a memory_forget that changes one file and then fails", () => {
+  test("records the generation it did write, so the log matches the files", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const seed = new MemoryStore({ files, owner: OWNER, clock: () => AT });
+    const fact = "Tim teaches on Tuesdays.";
+    for (const tier of ["profile", "log"] as const) {
+      const written = await seed.write({
+        root: userMemoryRootV1(OWNER),
+        tier,
+        fact,
+        writer: botWriter("bot-1"),
+      });
+      expect(written.status).toBe("ok");
+    }
+    // The forget rewrites log/2026-08.md then profile.md; only the first lands.
+    const host = hostFor("bot-1", writesFailAfter(files, 1));
+    const { session, sessions, dispose } = await openSession();
+    const tool = createMemoryForgetTool(
+      host,
+      sessions,
+      new MemoryProjection(host),
     );
-    await executeTool(harness, "memory_write", {
-      tier: "global",
-      path: "race.md",
-      content: "The stale semantic value is amber.",
-    });
-    const contentKey = [...bucket.objects.keys()].find((key) =>
-      key.endsWith("/files/race.md"),
-    );
-    if (!contentKey) throw new Error("memory content was not persisted");
-    bucket.objects.set(contentKey, "The canonical concurrent value is violet.");
 
-    const stale = await executeTool(harness, "memory_search", {
-      tier: "global",
-      query: "stale semantic value amber",
+    const result = await tool.execute({ scope: "user", fact }, CONTEXT);
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("after changing 1 file(s)");
+    const written = session.events.filter(
+      (event) => event.type === "memory/written",
+    );
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({
+      action: "forget",
+      path: "by-agent/bot-1/log/2026-08.md",
     });
-    expect(stale.results).toEqual([]);
-    const current = await executeTool(harness, "memory_search", {
-      tier: "global",
-      query: "canonical concurrent value",
-    });
-    expect(current.results).toEqual([
-      expect.objectContaining({ path: "race.md", tier: "global" }),
-    ]);
-    await harness.dispose();
+    // The event log names the file that really changed on disk.
+    const remaining = await host.store.read(userMemoryRootV1(OWNER));
+    expect(remaining.recent.map((entry) => entry.text)).toEqual([]);
+    expect(remaining.profile.map((entry) => entry.text)).toEqual([fact]);
+    await dispose();
   });
+});
 
-  test("keeps R2 content available when indexing fails", async () => {
-    const bucket = new FakeBucket();
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket,
-        vectorize: new FakeVectorize(),
-        embed: () => Promise.reject(new Error("embedding unavailable")),
-      }),
+describe("project_create when the descriptor write conflicts", () => {
+  test("is a visible refusal, and no membership change is recorded", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const conflicting: WorkspaceFilesV1 = {
+      read: (path) => files.read(path),
+      list: (request) => files.list(request),
+      stat: (path) => files.stat(path),
+      write: () =>
+        Promise.resolve({
+          status: "conflict" as const,
+          reason: "another writer holds a newer generation",
+        }),
+      delete: (request) => files.delete(request),
+    };
+    const host = {
+      ...hostFor("bot-1", conflicting),
+      projects: createInMemoryMemoryProjectsV1(),
+    };
+    const { session, sessions, dispose } = await openSession();
+    const [create] = createProjectTools(
+      host,
+      sessions,
+      new MemoryProjection(host),
     );
 
+    const created = await create!.execute(
+      { project: "ghetto-movement", name: "Ghetto Movement" },
+      CONTEXT,
+    );
+
+    expect(created.isError).toBe(true);
+    expect(created.content).toContain("conflict");
     expect(
-      await executeTool(harness, "memory_write", {
-        path: "resilient.md",
-        content: "Persist this despite indexing failure.",
-      }),
-    ).toMatchObject({ ok: true, indexed: false, tier: "agent" });
-    expect(
-      await executeTool(harness, "memory_get", { path: "resilient.md" }),
-    ).toMatchObject({
-      found: true,
-      content: "Persist this despite indexing failure.",
-    });
-    await harness.dispose();
+      session.events.some((event) => event.type === "memory/project-changed"),
+    ).toBe(false);
+    expect(await host.projects.joined()).toEqual([]);
+    await dispose();
   });
+});
 
-  test("disposes tools and satisfies package conventions", async () => {
-    expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
-      name: "@frockbot/plugin-memory",
-      contributionKinds: ["runtime"],
-    });
-    const harness = await createPluginHarness([
-      SystemPromptRegistry,
-      ToolRegistry,
-    ]);
-    const fiber = await harness.mount(
-      createMemoryPlugin({
-        ownerId: "owner",
-        botId: "alpha",
-        bucket: new FakeBucket(),
-        vectorize: new FakeVectorize(),
-        embed,
-      }),
+describe("memory_search", () => {
+  test("decodes its input at the seam, refusing an unknown field", async () => {
+    const host = hostFor();
+    const projection = new MemoryProjection(host);
+    const tool = createMemorySearchTool(host, projection);
+
+    expect(tool.validate?.({ query: "tuesdays", limit: 3 })).toBe(false);
+    const unknown = await tool.execute(
+      { query: "tuesdays", limit: 3 },
+      CONTEXT,
     );
-    expect(harness.root.tools.schemas().map((tool) => tool.name)).toEqual([
-      "memory_search",
-      "memory_get",
-      "memory_write",
-      "memory_delete",
-    ]);
-    await fiber.dispose();
-    expect(harness.root.tools.schemas()).toEqual([]);
-    await harness.dispose();
+    expect(unknown.isError).toBe(true);
+    expect(unknown.content).toContain("unknown fields");
+
+    expect(tool.validate?.({ query: "tuesdays", maxResults: 99 })).toBe(false);
+    const range = await tool.execute(
+      { query: "tuesdays", maxResults: 99 },
+      CONTEXT,
+    );
+    expect(range.isError).toBe(true);
+    expect(range.content).toContain("maxResults");
+
+    const ok = await tool.execute({ query: "tuesdays" }, CONTEXT);
+    expect(ok.isError).toBe(false);
   });
 });

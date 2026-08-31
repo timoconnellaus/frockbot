@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
+import { provisionBot } from "./provision-bot.ts";
 
 function flyProbe(name: string) {
   return env.FLY_COMPATIBILITY.getByName(name);
@@ -53,18 +54,7 @@ describe("production Bot durability in Workerd", () => {
       userId: `workerd-user-${suffix}`,
       botId: `workerd-bot-${suffix}`,
     };
-    await user(identity.userId).createBot({
-      schemaVersion: 1,
-      userId: identity.userId,
-      command: {
-        schemaVersion: 1,
-        type: "bot/create",
-        commandId: `create-${suffix}`,
-        expectedRevision: 0,
-        botId: identity.botId,
-        name: "Workerd Bot",
-      },
-    });
+    await provisionBot(identity);
     const stub = bot(`events-${suffix}`);
     const result = await stub.run({
       ...identity,
@@ -76,7 +66,7 @@ describe("production Bot durability in Workerd", () => {
       },
     });
 
-    expect(result.text).toBe("Cordis runtime: hello from Workerd");
+    expect(result.text).toBe("Ollama reply");
     const durableEvents = await stub.durableSessionEvents();
     expect(durableEvents.length).toBeGreaterThan(0);
     expect(durableEvents.map((event) => event.seq)).toEqual(

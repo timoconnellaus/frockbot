@@ -200,25 +200,10 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=6
+TOTAL_STAGES=5
 
 GITHUB_REPOSITORY="timoconnellaus/frockbot"
 GITHUB_ENVIRONMENT="production"
-
-set_production_variable() {
-  local name="$1" value="$2"
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    if gh variable set "$name" \
-      --repo "$GITHUB_REPOSITORY" \
-      --env "$GITHUB_ENVIRONMENT" \
-      --body "$value" >/dev/null 2>&1; then
-      printf '  %s✓ set%s GitHub production variable %s\n' "$GREEN" "$RESET" "$name"
-      return
-    fi
-  fi
-  SKIPPED+=("GitHub production variable $name")
-  warn "could not set $name; authenticate gh and rerun this wizard"
-}
 
 set_production_secret() {
   local name="$1" value="$2"
@@ -235,26 +220,16 @@ set_production_secret() {
   warn "could not set $name; authenticate gh and rerun this wizard"
 }
 
-is_repeated_authorization_state_secret() {
-  local secret="$1" pattern_length pattern repetitions candidate i
-  for ((pattern_length = 1; pattern_length <= 16 && pattern_length <= ${#secret} / 2; pattern_length++)); do
-    ((${#secret} % pattern_length == 0)) || continue
-    pattern="${secret:0:pattern_length}"
-    repetitions=$((${#secret} / pattern_length))
-    candidate=""
-    for ((i = 0; i < repetitions; i++)); do candidate+="$pattern"; done
-    [[ "$candidate" != "$secret" ]] || return 0
-  done
-  return 1
-}
-
-is_strong_authorization_state_secret() {
-  local secret="$1" unique_characters
-  ((${#secret} >= 32)) || return 1
-  [[ "$secret" != "replace-with-an-independent-random-secret" ]] || return 1
-  unique_characters=$(printf '%s' "$secret" | LC_ALL=C grep -o . | sort -u | wc -l | tr -d ' ')
-  ((unique_characters >= 8)) || return 1
-  ! is_repeated_authorization_state_secret "$secret"
+set_required_production_secret() {
+  local name="$1" value="$2"
+  if ! printf '%s' "$value" | gh secret set "$name" \
+    --repo "$GITHUB_REPOSITORY" \
+    --env "$GITHUB_ENVIRONMENT" >/dev/null 2>&1; then
+    warn "could not set required production secret $name"
+    return 1
+  fi
+  WRITTEN_SECRET+=("$name")
+  printf '  %s✓ set%s required GitHub production secret %s\n' "$GREEN" "$RESET" "$name"
 }
 
 banner "FrockBot production setup"
@@ -294,34 +269,6 @@ ask_secret GOOGLE_CLIENT_SECRET "Paste the Google client secret:"
 set_production_secret GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID"
 set_production_secret GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
 
-stage "Composio: project and Gmail Connection"
-say "Configure the backend project key and hosted Gmail Connect Link."
-open_url "https://dashboard.composio.dev/~/project/auth-configs"
-step "Create or select a Gmail auth config using Composio managed OAuth."
-step "Copy the Gmail auth config ID, then open project settings and copy the project API key."
-ask COMPOSIO_GMAIL_AUTH_CONFIG_ID "Paste the Gmail auth config ID:"
-ask_secret COMPOSIO_API_KEY "Paste the Composio project API key:"
-[[ -n "$COMPOSIO_GMAIL_AUTH_CONFIG_ID" && -n "$COMPOSIO_API_KEY" ]] || {
-  warn "Both Composio values are required"
-  exit 1
-}
-set_production_variable COMPOSIO_GMAIL_AUTH_CONFIG_ID "$COMPOSIO_GMAIL_AUTH_CONFIG_ID"
-set_production_secret COMPOSIO_API_KEY "$COMPOSIO_API_KEY"
-
-stage "FrockBot: Connection authorization state"
-say "Generate an independent secret used only to sign hosted Connection authorization state."
-command -v openssl >/dev/null 2>&1 || {
-  warn "OpenSSL is required to generate the authorization-state secret"
-  exit 1
-}
-FROCKBOT_AUTHORIZATION_STATE_SECRET=$(openssl rand -hex 32)
-if [[ ! "$FROCKBOT_AUTHORIZATION_STATE_SECRET" =~ ^[0-9a-f]{64}$ ]] \
-  || ! is_strong_authorization_state_secret "$FROCKBOT_AUTHORIZATION_STATE_SECRET"; then
-  warn "Failed to generate a strong Connection authorization-state secret"
-  exit 1
-fi
-set_production_secret FROCKBOT_AUTHORIZATION_STATE_SECRET "$FROCKBOT_AUTHORIZATION_STATE_SECRET"
-
 stage "Fly: Sprites Computer token"
 say "Provision the server-side credential used by the built-in Fly Computer provider."
 open_url "https://fly.io/dashboard"
@@ -333,6 +280,41 @@ ask_secret SPRITES_TOKEN "Paste the Fly Sprites token:"
   exit 1
 }
 set_production_secret SPRITES_TOKEN "$SPRITES_TOKEN"
+
+stage "FrockBot: per-account credential encryption"
+say "Provision the versioned backend keyring that encrypts Connection credentials at rest."
+if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+  warn "GitHub CLI authentication is required to inspect the production keyring"
+  exit 1
+fi
+if ! PRODUCTION_SECRETS="$(
+  gh secret list --repo "$GITHUB_REPOSITORY" --env "$GITHUB_ENVIRONMENT"
+)"; then
+  warn "Could not inspect production secrets; preserving the existing keyring requires a successful inspection"
+  exit 1
+fi
+if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx CREDENTIAL_KEYRING; then
+  note "Preserving the existing CREDENTIAL_KEYRING so stored credentials remain decryptable."
+else
+  CREDENTIAL_KEYRING="$({
+    node <<'NODE'
+const { randomBytes } = require('node:crypto');
+const keyId = new Date().toISOString().slice(0, 7);
+process.stdout.write(JSON.stringify({
+  schemaVersion: 1,
+  currentKeyId: keyId,
+  keys: { [keyId]: randomBytes(32).toString('base64url') },
+}));
+NODE
+  } 2>/dev/null)"
+  [[ -n "$CREDENTIAL_KEYRING" ]] || {
+    warn "Credential keyring generation failed"
+    exit 1
+  }
+  set_required_production_secret CREDENTIAL_KEYRING "$CREDENTIAL_KEYRING"
+  unset CREDENTIAL_KEYRING
+fi
+unset PRODUCTION_SECRETS
 
 stage "GitHub: verify production configuration"
 say "The repository already has the account ID, auth secret, app URL, and D1 ID."

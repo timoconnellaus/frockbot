@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/plugin-composio": "workspace:*",
+    "@frockbot/connection-core": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "vue": "3.5.41"
   },

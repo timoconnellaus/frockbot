@@ -1,7 +1,16 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { verifyPluginPackage } from "@frockbot/plugin-testkit";
@@ -11,6 +20,7 @@ import {
   computerBotKey,
   FlySpriteComputer,
   flySpriteNameForBot,
+  SLOT_IDLE_SECONDS,
   type SpriteHandle,
   type SpriteServiceStream,
   type SpritesClientHandle,
@@ -18,8 +28,7 @@ import {
 import { configuredFlyBotId } from "./host.ts";
 import {
   FlySpriteComputerProvider,
-  flySpriteNameForTarget,
-  flySpriteNameForUserStorage,
+  flySpriteNameForComputer,
 } from "./provider.ts";
 
 class FakeStream implements SpriteServiceStream {
@@ -104,14 +113,19 @@ class FakeSprite implements SpriteHandle {
       });
     }
     if (shell.includes('mv "$TMP" "$TARGET"')) {
-      return Promise.resolve({
-        stdout: "version-1\n7\n1700000000\n",
-        stderr: "",
-      });
+      return Promise.resolve({ stdout: "__WRITTEN__\n", stderr: "" });
     }
     if (shell.includes('base64 -w0 "$TARGET"')) {
+      // meta, content hash, size, mtime, bytes — the Workspace file shape.
       return Promise.resolve({
-        stdout: `version-1\n7\n1700000000\n${Buffer.from("remember").toString("base64")}\n`,
+        stdout: [
+          "",
+          "0".repeat(64),
+          "8",
+          "1700000000",
+          Buffer.from("remember").toString("base64"),
+          "",
+        ].join("\n"),
         stderr: "",
       });
     }
@@ -250,11 +264,13 @@ describe("Fly Sprite computer", () => {
     expect(
       flySpriteNameForBot("general", `f${"x".repeat(62)}`).length,
     ).toBeLessThanOrEqual(63);
-    expect(
-      flySpriteNameForTarget({ userId: "owner:a", botId: "health" }),
-    ).not.toBe(flySpriteNameForTarget({ userId: "owner", botId: "a:health" }));
-    expect(flySpriteNameForTarget({ userId: "user", botId: "owner" })).not.toBe(
-      flySpriteNameForUserStorage("owner"),
+    // ADR 0012: the Sprite name is derived from the User and nothing else, so
+    // every Bot the User owns lands on the same Computer.
+    expect(flySpriteNameForComputer({ userId: "owner" })).toBe(
+      flySpriteNameForComputer({ userId: " owner " }),
+    );
+    expect(flySpriteNameForComputer({ userId: "owner" })).not.toBe(
+      flySpriteNameForComputer({ userId: "owner-2" }),
     );
     expect(configuredFlyBotId({ FROCKBOT_BOT_ID: "  bot-7  " })).toBe("bot-7");
     expect(configuredFlyBotId({})).toBe("barebones");
@@ -276,14 +292,17 @@ describe("Fly Sprite computer", () => {
       name: "frockbot-viewer-gateway",
       httpPort: 6080,
     });
-    expect(client.sprite.services).toHaveLength(3);
-    expect(client.sprite.services[1]?.name).toStartWith("frockbot-desktop-");
+    // The durable-root sync's watcher is declared beside the gateway, because
+    // "Only Computer-provider-declared services may be reattached."
+    expect(client.sprite.services[1]?.name).toBe("frockbot-workspace-sync");
+    expect(client.sprite.services).toHaveLength(4);
     expect(client.sprite.services[2]?.name).toStartWith("frockbot-desktop-");
-    expect(client.sprite.services[1]?.name).not.toBe(
-      client.sprite.services[2]?.name,
+    expect(client.sprite.services[3]?.name).toStartWith("frockbot-desktop-");
+    expect(client.sprite.services[2]?.name).not.toBe(
+      client.sprite.services[3]?.name,
     );
-    expect(client.sprite.services[1]?.name.length).toBeLessThanOrEqual(63);
     expect(client.sprite.services[2]?.name.length).toBeLessThanOrEqual(63);
+    expect(client.sprite.services[3]?.name.length).toBeLessThanOrEqual(63);
     expect(client.sprite.auth).toBe("public");
     expect(general.botKey).not.toBe(health.botKey);
     expect(general.viewerUrl).toContain("/vnc.html#");
@@ -343,19 +362,33 @@ describe("Fly Sprite computer", () => {
     const providerComputer = await new FlySpriteComputerProvider(
       agentComputer,
     ).open(
-      { userId: "owner", botId: "general" },
+      { userId: "owner" },
+      { botId: "general" },
       { providerId: "fly-sprite", generation: 1 },
     );
-    const memory = await providerComputer.workspace?.openDirectory({
-      namespace: "memory",
-      scope: "bot",
-      durability: "durable",
-    });
     await expect(
-      memory?.writeFile("profile.md", new TextEncoder().encode("remember"), {
-        signal: signal(),
+      providerComputer.workspace?.write({
+        path: {
+          root: {
+            kind: "bot-instructions",
+            userId: "owner",
+            botId: "general",
+          },
+          path: "profile.md",
+        },
+        bytes: new TextEncoder().encode("remember"),
+        // The handle is open for a Bot, so the Bot is the only writer it may
+        // record.
+        writer: {
+          kind: "bot",
+          botId: "general",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          runId: "run-1",
+        },
+        expectedGenerationId: null,
       }),
-    ).resolves.toMatchObject({ path: "profile.md" });
+    ).resolves.toMatchObject({ status: "ok" });
     expect(
       await agentComputer.bot("health").run("echo tool-output", signal()),
     ).toContain("tool-output");
@@ -401,10 +434,13 @@ describe("Fly Sprite computer", () => {
     );
     await writeFile(
       statPath,
+      // `stat -c %Y` is GNU; the shim answers with the host's own stat in one
+      // exec. A scripting-language shim here was the slow half of a hundred
+      // tenant scans and flaked the suite under load.
       [
-        "#!/usr/bin/env python3",
-        "import os, sys",
-        "print(int(os.stat(sys.argv[-1]).st_mtime))",
+        "#!/usr/bin/env bash",
+        'if /usr/bin/stat -f %m / >/dev/null 2>&1; then exec /usr/bin/stat -f %m "${@: -1}"; fi',
+        'exec /usr/bin/stat -c %Y "${@: -1}"',
         "",
       ].join("\n"),
     );
@@ -457,57 +493,75 @@ describe("Fly Sprite computer", () => {
       new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
     );
     const computer = await provider.open(
-      { userId: "owner", botId: "health" },
+      { userId: "owner" },
+      { botId: "health" },
       { providerId: "fly-sprite", generation: 1 },
     );
-    const directory = await computer.workspace?.openDirectory({
-      namespace: "memory",
-      scope: "bot",
-      durability: "durable",
-    });
 
-    await directory?.writeFile(
-      "profile.md",
-      new TextEncoder().encode("remember"),
-      { signal: signal() },
-    );
+    await computer.workspace?.write({
+      path: {
+        root: { kind: "bot-instructions", userId: "owner", botId: "health" },
+        path: "profile.md",
+      },
+      bytes: new TextEncoder().encode("remember"),
+      writer: { kind: "user", userId: "owner" },
+      expectedGenerationId: null,
+    });
 
     expect(client.sprite.services).toEqual([]);
     expect(client.sprite.auth).toBeUndefined();
   });
 
-  test("paginates workspace listings before provider output limits", async () => {
+  // ADR 0012: one Sprite per User, every Bot a tenant on it. Two Bots resolve
+  // to one provider Computer, one Sprite name, and one browser profile; only
+  // their directories and desktops differ.
+  test("puts two Bots of one User on one Sprite with one browser profile", async () => {
     const client = new FakeClient();
-    const computer = await new FlySpriteComputerProvider(
-      new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
-    ).open(
-      { userId: "owner", botId: "health" },
-      { providerId: "fly-sprite", generation: 1 },
+    const provider = new FlySpriteComputerProvider(undefined, "token");
+
+    const first = provider.computerFor({ userId: "owner" });
+    const second = provider.computerFor({ userId: "owner" });
+    const other = provider.computerFor({ userId: "owner-2" });
+
+    expect(first).toBe(second);
+    expect(first.spriteName).toBe(
+      flySpriteNameForComputer({ userId: "owner" }),
     );
-    const directory = await computer.workspace?.openDirectory({
-      namespace: "memory",
-      scope: "bot",
-      durability: "durable",
-    });
+    expect(other.spriteName).not.toBe(first.spriteName);
 
-    const first = await directory?.listFiles({ limit: 100, signal: signal() });
-    const second = await directory?.listFiles({
-      limit: 100,
-      cursor: first?.cursor,
-      signal: signal(),
-    });
-    const third = await directory?.listFiles({
-      limit: 100,
-      cursor: second?.cursor,
-      signal: signal(),
-    });
+    const shared = new FlySpriteComputerProvider(
+      new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
+    );
+    const assignment = { providerId: "fly-sprite", generation: 1 };
+    const health = await shared.open(
+      { userId: "owner" },
+      { botId: "health" },
+      assignment,
+    );
+    const general = await shared.open(
+      { userId: "owner" },
+      { botId: "general" },
+      assignment,
+    );
 
-    expect(first?.files).toHaveLength(100);
-    expect(first?.cursor).toBe("100");
-    expect(second?.files[0]?.path).toBe("memory-100.md");
-    expect(second?.cursor).toBe("200");
-    expect(third?.files).toHaveLength(5);
-    expect(third?.cursor).toBeUndefined();
+    expect(health.identity).toEqual(general.identity);
+    expect(health.assignment).toBe(general.assignment);
+    expect(health.tenant.directory).not.toBe(general.tenant.directory);
+    expect(health.tenant.directory).toBe(
+      `agent-data/agents/${computerBotKey("health")}`,
+    );
+
+    await new FlySpriteComputer({ client, spriteName: "frockbot-test" })
+      .bot("health")
+      .ensure();
+    const provision = client.sprite.commands[0]?.args.join(" ") ?? "";
+    expect(provision).toContain("/home/box/chrome-profile ");
+    expect(provision).not.toContain("chrome-profiles");
+    const desktop = installedScript(
+      provision,
+      "/home/box/.frockbot/start-desktop.sh",
+    );
+    expect(desktop).toContain('--user-data-dir="/home/box/chrome-profile"');
   });
 
   test("adapts Fly execution through the provider-neutral Computer interface", async () => {
@@ -517,7 +571,8 @@ describe("Fly Sprite computer", () => {
     );
     const assignment = { providerId: "fly-sprite", generation: 1 };
     const computer = await provider.open(
-      { userId: "owner", botId: "health" },
+      { userId: "owner" },
+      { botId: "health" },
       assignment,
     );
 
@@ -556,34 +611,43 @@ describe("Fly Sprite computer", () => {
       accessibilitySnapshot: "- heading",
     });
 
-    const directory = await computer.workspace?.openDirectory({
-      namespace: "memory",
-      scope: "bot",
-      durability: "durable",
+    const skills = {
+      kind: "bot-instructions",
+      userId: "owner",
+      botId: "health",
+    } as const;
+    const written = await computer.workspace?.write({
+      path: { root: skills, path: "profile.md" },
+      bytes: new TextEncoder().encode("remember"),
+      // The handle is open for a Bot, so the Bot is the only writer it may
+      // record.
+      writer: {
+        kind: "bot",
+        botId: "health",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        runId: "run-1",
+      },
+      expectedGenerationId: null,
     });
-    const written = await directory?.writeFile(
-      "profile.md",
-      new TextEncoder().encode("remember"),
-      { ifVersion: null, signal: signal() },
-    );
-    const stored = await directory?.readFile("profile.md", {
-      signal: signal(),
+    const stored = await computer.workspace?.read({
+      root: skills,
+      path: "profile.md",
     });
 
-    expect(written).toMatchObject({ path: "profile.md", version: "version-1" });
-    expect(new TextDecoder().decode(stored?.bytes)).toBe("remember");
-    await expect(
-      directory?.readFile("missing.md", { signal: signal() }),
-    ).resolves.toBeNull();
-    await expect(
-      directory?.deleteFile("profile.md", { signal: signal() }),
-    ).resolves.toBe(true);
+    expect(written).toMatchObject({ status: "ok" });
+    expect(stored).toMatchObject({ status: "ok" });
+    expect(
+      await computer.workspace?.read({ root: skills, path: "missing.md" }),
+    ).toMatchObject({ status: "not-found" });
+    // The mount path comes from the declared layout and matches the GrokBot
+    // parity layout: durable per-Bot state under agent-data/agents/<key>.
     expect(
       client.sprite.commands.some(({ args }) =>
         args
           .at(-1)
           ?.includes(
-            `/home/box/agent-data/agents/${computerBotKey("health")}/packages/memory/profile.md`,
+            `ROOT='/home/box/agent-data/agents/${computerBotKey("health")}/skills'`,
           ),
       ),
     ).toBe(true);
@@ -595,4 +659,168 @@ describe("Fly Sprite computer", () => {
       contributionKinds: ["runtime", "desktop"],
     });
   });
+});
+
+describe("desktop slots are reclaimed from idle tenants only", () => {
+  /**
+   * Installs the ensure script into a temp tree, with `flock` and GNU `stat`
+   * stubbed the way the control-script test does: the script is production's,
+   * only its roots and its two coreutils are local.
+   */
+  async function installEnsureScript(): Promise<{
+    directory: string;
+    runtimeRoot: string;
+    run: (key: string) => Promise<{ exitCode: number; stdout: string }>;
+  }> {
+    const client = new FakeClient();
+    await new FlySpriteComputer({ client, spriteName: "frockbot-test" })
+      .bot("general")
+      .ensure();
+    const provision = client.sprite.commands[0]?.args.at(-1) ?? "";
+    const installed = installedScript(
+      provision,
+      "/home/box/.frockbot/ensure-agent.sh",
+    );
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-slots-"));
+    const runtimeRoot = join(directory, "runtime");
+    const scriptPath = join(directory, "ensure-agent.sh");
+    await writeFile(
+      scriptPath,
+      installed
+        .replaceAll("/home/box/.frockbot", runtimeRoot)
+        .replaceAll("/home/box", join(directory, "home"))
+        .replaceAll("/workspaces", join(directory, "workspaces")),
+    );
+    await writeFile(
+      join(directory, "flock"),
+      ["#!/usr/bin/env bash", "exit 0", ""].join("\n"),
+    );
+    await writeFile(
+      join(directory, "stat"),
+      // `stat -c %Y` is GNU; the shim answers with the host's own stat in one
+      // exec. A scripting-language shim here was the slow half of a hundred
+      // tenant scans and flaked the suite under load.
+      [
+        "#!/usr/bin/env bash",
+        'if /usr/bin/stat -f %m / >/dev/null 2>&1; then exec /usr/bin/stat -f %m "${@: -1}"; fi',
+        'exec /usr/bin/stat -c %Y "${@: -1}"',
+        "",
+      ].join("\n"),
+    );
+    await Promise.all([
+      chmod(scriptPath, 0o700),
+      chmod(join(directory, "flock"), 0o700),
+      chmod(join(directory, "stat"), 0o700),
+    ]);
+    return {
+      directory,
+      runtimeRoot,
+      run: async (key: string) => {
+        const child = Bun.spawn(
+          [scriptPath, key, Buffer.from("{}").toString("base64")],
+          {
+            env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+        const [exitCode, stdout] = await Promise.all([
+          child.exited,
+          new Response(child.stdout).text(),
+        ]);
+        return { exitCode, stdout };
+      },
+    };
+  }
+
+  /** A tenant holding one slot, last seen `idleSeconds` ago. */
+  async function seedTenant(
+    runtimeRoot: string,
+    slot: number,
+    idleSeconds: number,
+    lease?: number,
+  ): Promise<string> {
+    const key = `tenant-${String(slot).padStart(3, "0")}`;
+    const bot = join(runtimeRoot, "bots", key);
+    await mkdir(bot, { recursive: true });
+    await writeFile(join(bot, "slot"), `${slot}\n`);
+    await writeFile(join(bot, "last-seen"), "");
+    const seenAt = new Date(Date.now() - idleSeconds * 1000);
+    await utimes(join(bot, "last-seen"), seenAt, seenAt);
+    await utimes(join(bot, "slot"), seenAt, seenAt);
+    if (lease !== undefined) {
+      await writeFile(join(bot, "human-control"), "viewer-1\n");
+      const leasedAt = new Date(Date.now() - lease * 1000);
+      await utimes(join(bot, "human-control"), leasedAt, leasedAt);
+    }
+    return key;
+  }
+
+  test("reclaims an idle tenant's display and never a live one", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        // Slot 7's tenant went quiet long ago; every other tenant is one this
+        // provider ran something for moments ago.
+        await seedTenant(
+          runtimeRoot,
+          slot,
+          slot === 7 ? SLOT_IDLE_SECONDS + 600 : 5,
+        );
+      }
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(0);
+      expect(
+        (
+          await readFile(join(runtimeRoot, "bots/newcomer/slot"), "utf8")
+        ).trim(),
+      ).toBe("7");
+      // The idle tenant lost its slot; the live ones kept theirs.
+      expect(existsSync(join(runtimeRoot, "bots/tenant-007/slot"))).toBe(false);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-008/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("refuses the new tenant when every display is live, rather than sharing one", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        await seedTenant(runtimeRoot, slot, 5);
+      }
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(75);
+      expect(ensured.stdout).toContain("__FROCKBOT_NO_SLOTS__");
+      expect(existsSync(join(runtimeRoot, "bots/newcomer/slot"))).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("an idle tenant under human control keeps its display", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        // The only idle tenant is the one a human is watching right now.
+        await seedTenant(
+          runtimeRoot,
+          slot,
+          slot === 3 ? SLOT_IDLE_SECONDS + 600 : 5,
+          slot === 3 ? 5 : undefined,
+        );
+      }
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(75);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

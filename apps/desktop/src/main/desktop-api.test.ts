@@ -18,6 +18,13 @@ describe("desktop hosted protocol", () => {
       { schemaVersion: 1, path: "/app-manifest", method: "GET" },
       { schemaVersion: 1, path: "/api/identity", method: "GET" },
       { schemaVersion: 1, path: "/api/settings", method: "POST", body: "{}" },
+      { schemaVersion: 1, path: "/api/package-revisions", method: "GET" },
+      {
+        schemaVersion: 1,
+        path: "/api/package-revisions/rollback",
+        method: "POST",
+        body: "{}",
+      },
       { schemaVersion: 1, path: "/api/bots", method: "POST", body: "{}" },
       { schemaVersion: 1, path: "/api/bots/primary/settings", method: "GET" },
       { schemaVersion: 1, path: "/api/bots/primary/sheep", method: "GET" },
@@ -43,6 +50,17 @@ describe("desktop hosted protocol", () => {
         path: "/api/bots/primary/turns/run-1/reconcile",
         method: "POST",
         body: '{"action":"resume"}',
+      },
+      {
+        schemaVersion: 1,
+        path: "/api/connections",
+        method: "POST",
+        body: "{}",
+      },
+      {
+        schemaVersion: 1,
+        path: "/api/connection-commands?packageId=provider-ollama-cloud&commandId=connect-1",
+        method: "GET",
       },
       {
         schemaVersion: 1,
@@ -72,6 +90,17 @@ describe("desktop hosted protocol", () => {
         method: "DELETE",
       }),
     ).toThrow("invalid API request");
+    for (const path of [
+      "/api/connection-commands?packageId=provider-ollama-cloud",
+      "/api/connection-commands?packageId=provider-ollama-cloud&commandId=connect-1&extra=true",
+      "/api/connection-commands?packageId=bad%2Fpackage&commandId=connect-1",
+      "/api/connection-commands?packageId=provider-ollama-cloud&commandId=lost%20response",
+      "/api/connection-commands?packageId=provider-ollama-cloud&commandId=connect@1",
+    ]) {
+      expect(() =>
+        decodeDesktopApiRequest({ schemaVersion: 1, path, method: "GET" }),
+      ).toThrow("invalid API request");
+    }
     for (const botId of ["bad:bot", "bad@bot", "b".repeat(129)]) {
       expect(() =>
         decodeDesktopApiRequest({

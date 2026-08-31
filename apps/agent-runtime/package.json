@@ -12,12 +12,15 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/agent-core": "workspace:*",
-    "@frockbot/agent-loop": "workspace:*",
     "@frockbot/application-foundation": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
-    "@frockbot/plugin-catalog": "workspace:*",
+    "@frockbot/kernel-agent-loop": "workspace:*",
+    "@frockbot/kernel-composition": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
+    "@frockbot/plugin-models": "workspace:*",
+    "@frockbot/plugin-prompt": "workspace:*",
+    "@frockbot/plugin-tools": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "@frockbot/provider-openai-compatible": "workspace:*",
     "cordis": "4.0.0-rc.8"

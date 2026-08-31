@@ -1,14 +1,14 @@
 import {
-  configurationCommandFingerprintV1,
-  ConfigurationConflictError,
   decodeConnectionDependencyRequirementV1,
-  decodeUserConfigurationExecuteRpcV1,
-  decodeUserConfigurationReadRpcV1,
   type ConnectionDependencyRequirementV1,
-  type OperationReceiptV1,
-  type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import {
+  createUserSettingsBackendContribution,
+  type UserSettingsBackendContribution,
+  type UserSettingsTransaction,
+  // pi-lens-ignore: ts:2307
+} from "@frockbot/plugin-settings/user";
 import type { Plugin } from "cordis";
 import {
   acknowledgeDependentAssignment,
@@ -27,26 +27,7 @@ import {
 
 const STATE_KEY = "user-configuration";
 const IDENTITY_KEY = "user-id";
-const RECEIPT_PREFIX = "configuration-receipt:";
 const CONNECTION_EFFECT_ALARM_MS = 60_000;
-
-interface StoredConfigurationReceipt {
-  commandFingerprint: string;
-  receipt: OperationReceiptV1;
-}
-
-function requireMatchingConfigurationReceipt(
-  stored: StoredConfigurationReceipt,
-  commandFingerprint: string,
-  commandId: string,
-): OperationReceiptV1 {
-  if (stored.commandFingerprint !== commandFingerprint) {
-    throw new Error(
-      `Configuration command idempotency key "${commandId}" was reused for a different command`,
-    );
-  }
-  return stored.receipt;
-}
 
 function readyAuthorizationMetadata(
   connection: UserSettingsViewV1["connections"][number],
@@ -259,63 +240,10 @@ const initialState = (): UserSettingsViewV1 => ({
   connections: [],
 });
 
-function applyUserCommand(
-  current: UserSettingsViewV1,
-  command: UserConfigurationCommandV1,
-): UserSettingsViewV1 {
-  const revision = current.revision + 1;
-  switch (command.type) {
-    case "user/update-profile":
-      return { ...current, revision, profile: command.profile };
-    case "user/set-new-bot-model":
-      return { ...current, revision, newBotModelTemplate: command.model };
-    case "user/install-package": {
-      const existing = current.packages.find(
-        (pkg) => pkg.packageId === command.packageId,
-      );
-      return {
-        ...current,
-        revision,
-        packages: [
-          ...current.packages.filter(
-            (pkg) => pkg.packageId !== command.packageId,
-          ),
-          {
-            packageId: command.packageId,
-            version: command.version,
-            state: existing?.state === "failed" ? "failed" : "installed",
-            failure: existing?.failure,
-          },
-        ],
-      };
-    }
-    case "user/set-package-enabled": {
-      const installed = current.packages.some(
-        (pkg) => pkg.packageId === command.packageId,
-      );
-      if (!installed) {
-        throw new Error(`Package "${command.packageId}" is not installed`);
-      }
-      return {
-        ...current,
-        revision,
-        packages: current.packages.map((pkg) =>
-          pkg.packageId === command.packageId
-            ? {
-                ...pkg,
-                state: command.enabled ? "installed" : "disabled",
-                failure: undefined,
-              }
-            : pkg,
-        ),
-      };
-    }
-  }
-}
-
 export class ComposioUserBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: UserConfigurationEnv;
+  private readonly settings: UserSettingsBackendContribution;
   private readonly availablePackages: ReadonlySet<string>;
   private readonly reconcileProviderConnection: ComposioUserBackendHost["reconcileProviderConnection"];
   private readonly revokeConnectedAccount: ComposioUserBackendHost["revokeConnectedAccount"];
@@ -323,6 +251,10 @@ export class ComposioUserBackendContribution {
   constructor(host: ComposioUserBackendHost) {
     this.ctx = host.state;
     this.env = host.env;
+    this.settings = createUserSettingsBackendContribution({
+      storage: host.state.storage,
+      availablePackages: host.availablePackages,
+    });
     this.availablePackages = new Set(
       host.availablePackages.map(
         ({ packageId, version }) => `${packageId}\u0000${version}`,
@@ -332,91 +264,26 @@ export class ComposioUserBackendContribution {
     this.revokeConnectedAccount = host.revokeConnectedAccount;
   }
 
-  async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
-    const request = decodeUserConfigurationReadRpcV1(input);
-    return this.read(request.userId);
+  readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
+    return this.settings.readConfiguration(input);
   }
 
-  async executeConfiguration(input: unknown): Promise<OperationReceiptV1> {
-    const request = decodeUserConfigurationExecuteRpcV1(input);
-    const { command } = request;
-    const commandFingerprint = configurationCommandFingerprintV1(command);
-    await this.assertIdentity(request.userId);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
-      const existing =
-        await transaction.get<StoredConfigurationReceipt>(receiptKey);
-      if (existing) {
-        return requireMatchingConfigurationReceipt(
-          existing,
-          commandFingerprint,
-          command.commandId,
-        );
-      }
-      if (
-        command.type === "user/install-package" &&
-        !this.availablePackages.has(
-          `${command.packageId}\u0000${command.version}`,
-        )
-      ) {
-        throw new Error("Package is not available in this application");
-      }
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
-      if (command.type === "user/set-package-enabled" && command.enabled) {
-        const installed = current.packages.find(
-          (pkg) => pkg.packageId === command.packageId,
-        );
-        if (
-          installed &&
-          !this.availablePackages.has(
-            `${installed.packageId}\u0000${installed.version}`,
-          )
-        ) {
-          throw new Error("Package is not available in this application");
-        }
-      }
-      if (command.expectedRevision !== current.revision) {
-        throw new ConfigurationConflictError(current.revision);
-      }
-      const next = applyUserCommand(current, command);
-      const receipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId: command.commandId,
-        revision: next.revision,
-        status: "applied",
-      };
-      await transaction.put({
-        [STATE_KEY]: next,
-        [receiptKey]: { commandFingerprint, receipt },
-      });
-      return receipt;
-    });
+  executeConfiguration(
+    input: unknown,
+  ): ReturnType<UserSettingsBackendContribution["executeConfiguration"]> {
+    return this.settings.executeConfiguration(input);
   }
 
-  async readSnapshot(storage: {
-    get<T>(key: string): Promise<T | undefined>;
-  }): Promise<UserSettingsViewV1> {
-    return (await storage.get<UserSettingsViewV1>(STATE_KEY)) ?? initialState();
+  readSnapshot(storage: UserSettingsTransaction): Promise<UserSettingsViewV1> {
+    return this.settings.readSnapshot(storage);
   }
 
-  async read(userId: string): Promise<UserSettingsViewV1> {
-    await this.assertIdentity(userId);
-    return (
-      (await this.ctx.storage.get<UserSettingsViewV1>(STATE_KEY)) ??
-      initialState()
-    );
+  read(userId: string): Promise<UserSettingsViewV1> {
+    return this.settings.read(userId);
   }
 
-  async isPackageInstalled(
-    userId: string,
-    packageId: string,
-  ): Promise<boolean> {
-    const settings = await this.read(userId);
-    return settings.packages.some(
-      (pkg) => pkg.packageId === packageId && pkg.state === "installed",
-    );
+  isPackageInstalled(userId: string, packageId: string): Promise<boolean> {
+    return this.settings.isPackageInstalled(userId, packageId);
   }
 
   async getConnection(

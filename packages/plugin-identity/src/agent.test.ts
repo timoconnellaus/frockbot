@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry } from "@frockbot/agent-core";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import {
   createPluginHarness,
   verifyPluginPackage,
