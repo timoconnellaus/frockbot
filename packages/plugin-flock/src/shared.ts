@@ -163,7 +163,11 @@ function exact(
   optional: string[] = [],
 ): void {
   const allowed = new Set([...required, ...optional]);
-  const keys = Reflect.ownKeys(value);
+  // Values read over Durable Object RPC carry a disposal symbol as an own
+  // key; it is transport, not a field.
+  const keys = Reflect.ownKeys(value).filter(
+    (key) => key !== Symbol.dispose && key !== Symbol.asyncDispose,
+  );
   if (
     !required.every((key) => Object.hasOwn(value, key)) ||
     keys.some((key) => typeof key !== "string" || !allowed.has(key))

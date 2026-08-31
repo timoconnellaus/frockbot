@@ -573,6 +573,11 @@ function connectionIdentifier(value: unknown, label: string): string {
   return value;
 }
 
+const rpcDisposalKeys: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
+  Symbol.dispose,
+  Symbol.asyncDispose,
+]);
+
 function exactRecord(
   value: unknown,
   label: string,
@@ -581,9 +586,13 @@ function exactRecord(
 ): Record<string, unknown> {
   const decoded = record(value, label);
   const allowed = new Set<PropertyKey>([...required, ...optional]);
+  // Values returned over Durable Object RPC carry a disposal symbol as an own
+  // key; it is transport, not a field. Every other own key must be declared.
   if (
     !required.every((key) => Object.hasOwn(decoded, key)) ||
-    Reflect.ownKeys(decoded).some((key) => !allowed.has(key))
+    Reflect.ownKeys(decoded).some(
+      (key) => !allowed.has(key) && !rpcDisposalKeys.has(key),
+    )
   ) {
     throw new ConfigurationDecodeError(`${label} has invalid fields`);
   }

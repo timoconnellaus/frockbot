@@ -594,6 +594,23 @@ describe("configuration DTO seam", () => {
         })),
       }),
     ).toThrow(ConfigurationDecodeError);
+    // Values read over Durable Object RPC carry a `Symbol.dispose` own key;
+    // symbol keys are not fields and must not fail the exact-field check.
+    const disposableView = {
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "User" },
+      packages: [],
+      connections: [],
+      [Symbol.dispose]: () => undefined,
+    };
+    expect(decodeUserSettingsViewV1(disposableView)).toEqual({
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "User" },
+      packages: [],
+      connections: [],
+    });
     for (const value of [
       {
         schemaVersion: 1,
