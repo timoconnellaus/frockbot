@@ -31,10 +31,33 @@ export type SendToUserPayloadV1 =
   | { type: "attachment"; url: string; name?: string; mediaType?: string }
   | { type: "widget"; widget: SendToUserWidgetV1 }
   | { type: "secret-request"; prompt: string; secretName: string }
-  | { type: "agent-card"; agentId: string; title: string; body?: string };
+  | { type: "agent-card"; agentId: string; title: string; body?: string }
+  /**
+   * A Connection the Bot has recorded a pending authorization decision for.
+   *
+   * There is deliberately **no URL** on this payload, and there never will be.
+   * A Bot may create a durable *request* for authorization; only an
+   * authenticated User action mints a redirect, and a single-use ten-minute
+   * link sitting in a client-readable transcript would outlive the decision it
+   * belonged to. The client draws a card from the Connection's own projection
+   * and the User presses it; the host authors the link at that moment.
+   */
+  | {
+      type: "connect-card";
+      connectionId: string;
+      title: string;
+      body?: string;
+    };
 
 export const SEND_TO_USER_PAYLOAD_TYPES_V1: readonly SendToUserPayloadV1["type"][] =
-  ["text", "attachment", "widget", "secret-request", "agent-card"];
+  [
+    "text",
+    "attachment",
+    "widget",
+    "secret-request",
+    "agent-card",
+    "connect-card",
+  ];
 
 /**
  * Bounds, so a payload cannot be the way a Turn writes an unbounded record
@@ -53,6 +76,7 @@ export const SEND_TO_USER_LIMITS_V1 = {
   maxOptions: 6,
   secretName: 128,
   agentId: 128,
+  connectionId: 128,
   title: 200,
   body: 8_000,
 } as const;
@@ -230,6 +254,28 @@ export function decodeSendToUserPayloadV1(
           payload.agentId,
           limits.agentId,
           `${label}.agentId`,
+        ),
+        title: boundedString(payload.title, limits.title, `${label}.title`),
+        ...(body === undefined ? {} : { body }),
+      };
+    }
+    case "connect-card": {
+      exactPayloadKeys(
+        payload,
+        ["type", "connectionId", "title", "body"],
+        label,
+      );
+      const body = optionalBoundedString(
+        payload.body,
+        limits.body,
+        `${label}.body`,
+      );
+      return {
+        type: "connect-card",
+        connectionId: boundedString(
+          payload.connectionId,
+          limits.connectionId,
+          `${label}.connectionId`,
         ),
         title: boundedString(payload.title, limits.title, `${label}.title`),
         ...(body === undefined ? {} : { body }),

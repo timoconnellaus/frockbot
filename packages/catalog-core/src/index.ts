@@ -109,6 +109,27 @@ export interface CatalogEntryV1 {
   skills: CatalogSkillV1[];
 }
 
+/**
+ * The `values` key one `setupFields` entry fills in.
+ *
+ * A Catalog entry's setup fields are bare JSON Schemas: the shape carries a
+ * `title` and a `description` but no identifier, so the key an install records
+ * the answer under is derived from the title, and from its position when the
+ * schema declares none. Derived in one place because the form that collects
+ * the answer and anything that later reads it have to agree.
+ */
+export function catalogSetupFieldKeyV1(
+  field: { title?: string },
+  index: number,
+): string {
+  const slug = (field.title ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return slug || `setup-${index}`;
+}
+
 /** The mutable pointer at `catalog/current`, naming the live generation. */
 export interface CatalogPointerV1 {
   schemaVersion: 1;

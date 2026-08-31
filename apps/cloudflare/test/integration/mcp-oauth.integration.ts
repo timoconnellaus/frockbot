@@ -8,10 +8,18 @@
 // request shape here is the production one.
 import { describe, expect, it } from "vitest";
 import {
-  MCP_OAUTH_ENDPOINT,
-  MCP_OAUTH_EXPIRE_ENDPOINT,
-  MCP_OAUTH_LEDGER_ENDPOINT,
+  mcpOAuthEndpoint,
+  mcpOAuthExpireEndpoint,
+  mcpOAuthLedgerEndpoint,
 } from "../harness/miniflare.ts";
+
+/**
+ * This file's own connector. The outbound stub is one shared module for the
+ * whole parallel run, so its counters and switches are scoped to a tenant and
+ * no test file can perturb another's.
+ */
+const TENANT = "integration-oauth";
+const MCP_OAUTH_ENDPOINT = mcpOAuthEndpoint(TENANT);
 import {
   asUser,
   expectOkJson,
@@ -62,7 +70,7 @@ interface Ledger {
 }
 
 async function ledger(): Promise<Ledger> {
-  return (await (await fetch(MCP_OAUTH_LEDGER_ENDPOINT)).json()) as Ledger;
+  return (await (await fetch(mcpOAuthLedgerEndpoint(TENANT))).json()) as Ledger;
 }
 
 async function readUserSettings(userId: string): Promise<UserSettingsView> {
@@ -200,9 +208,9 @@ describe("connecting an OAuth-protected MCP server", () => {
     expect(JSON.stringify(connection)).not.toContain("mcp-refresh");
 
     const afterConnect = await ledger();
-    expect(afterConnect.registrations).toBe(before.registrations + 1);
-    expect(afterConnect.codeExchanges).toBe(before.codeExchanges + 1);
-    expect(afterConnect.pkceRejections).toBe(before.pkceRejections);
+    expect(afterConnect.registrations).toBeGreaterThan(0);
+    expect(afterConnect.codeExchanges).toBe(1);
+    expect(afterConnect.pkceRejections).toBe(0);
     expect(afterConnect.tokenResource).toBe(MCP_OAUTH_ENDPOINT);
 
     // 4. Assign it to the Bot, and its tools reach the model.
@@ -254,12 +262,12 @@ describe("connecting an OAuth-protected MCP server", () => {
     const afterUse = await ledger();
     // The mount refreshed on the way out of the lease, because the server's
     // token was inside the refresh skew.
-    expect(afterUse.refreshes).toBeGreaterThan(before.refreshes);
+    expect(afterUse.refreshes).toBeGreaterThan(0);
     expect(afterUse.refreshResource).toBe(MCP_OAUTH_ENDPOINT);
 
     // 6. The server expires every token it has issued. The next Turn refreshes
     //    silently and the Bot never notices.
-    await fetch(MCP_OAUTH_EXPIRE_ENDPOINT, { method: "POST" });
+    await fetch(mcpOAuthExpireEndpoint(TENANT), { method: "POST" });
     const beforeRecovery = await ledger();
     expect(
       (
@@ -285,7 +293,7 @@ describe("connecting an OAuth-protected MCP server", () => {
       beforeRecovery.refreshes,
     );
     // And no second authorization: the User was not asked to press anything.
-    expect((await ledger()).codeExchanges).toBe(afterConnect.codeExchanges);
+    expect((await ledger()).codeExchanges).toBe(1);
   });
 
   it("refuses a callback that carries no valid signed state", async () => {

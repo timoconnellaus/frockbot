@@ -214,8 +214,10 @@ export async function mcpServerStub(request: Request): Promise<Response> {
     return new Response("the MCP server is gone", { status: 503 });
   }
   if (
-    url.pathname === "/.well-known/oauth-protected-resource/mcp-oauth" ||
-    url.pathname === "/mcp-oauth"
+    url.pathname.startsWith(
+      "/.well-known/oauth-protected-resource/mcp-oauth/",
+    ) ||
+    url.pathname.startsWith("/mcp-oauth/")
   ) {
     return mcpOAuthProtectedStub(request, url);
   }
@@ -475,18 +477,46 @@ export function createOutboundService(): (
  * authorization redirect, both token grants, and RFC 7009 revocation.
  */
 export const MCP_OAUTH_ORIGIN = "https://mcp-oauth.example.test";
-/** The MCP endpoint that answers 401 until a live access token is presented. */
-export const MCP_OAUTH_ENDPOINT = `${MCP_ORIGIN}/mcp-oauth`;
-export const MCP_OAUTH_RESOURCE_METADATA = `${MCP_ORIGIN}/.well-known/oauth-protected-resource/mcp-oauth`;
 /**
- * Expires every live access token, as an authorization server does when one
- * times out. `POST` it and the next MCP request must be preceded by a refresh.
+ * The OAuth-protected MCP endpoint for one *tenant*.
+ *
+ * Tenants exist because the stub is one shared module for a whole parallel
+ * test run: a test that makes its connector refuse every bearer must not make
+ * another file's connector refuse one too. Each test names its own tenant, and
+ * every counter and every switch below is scoped to it.
  */
-export const MCP_OAUTH_EXPIRE_ENDPOINT = `${MCP_OAUTH_ORIGIN}/control/expire`;
-/** Revokes everything, as a User does in the server's own console. */
-export const MCP_OAUTH_REVOKE_ALL_ENDPOINT = `${MCP_OAUTH_ORIGIN}/control/revoke-all`;
-/** What the stub has issued and been asked, so a test can prove the wire. */
-export const MCP_OAUTH_LEDGER_ENDPOINT = `${MCP_OAUTH_ORIGIN}/control/ledger`;
+export function mcpOAuthEndpoint(tenant: string): string {
+  return `${MCP_ORIGIN}/mcp-oauth/${tenant}`;
+}
+
+export function mcpOAuthResourceMetadataUrl(tenant: string): string {
+  return `${MCP_ORIGIN}/.well-known/oauth-protected-resource/mcp-oauth/${tenant}`;
+}
+
+/**
+ * Makes one tenant's MCP endpoint refuse every bearer, however fresh — the
+ * shape of a grant a User withdrew at the resource rather than at the
+ * authorization server. A refresh still succeeds; the resource still says no,
+ * which is the only way to reach the mount-time 401 `needs-auth` is for.
+ */
+export function mcpOAuthRejectEndpoint(tenant: string): string {
+  return `${MCP_OAUTH_ORIGIN}/control/reject?tenant=${encodeURIComponent(tenant)}`;
+}
+
+/** Undoes it. */
+export function mcpOAuthAcceptEndpoint(tenant: string): string {
+  return `${MCP_OAUTH_ORIGIN}/control/accept?tenant=${encodeURIComponent(tenant)}`;
+}
+
+/** Expires every access token issued for one tenant. */
+export function mcpOAuthExpireEndpoint(tenant: string): string {
+  return `${MCP_OAUTH_ORIGIN}/control/expire?tenant=${encodeURIComponent(tenant)}`;
+}
+
+/** What the stub has issued and been asked for one tenant, so a test can prove the wire. */
+export function mcpOAuthLedgerEndpoint(tenant: string): string {
+  return `${MCP_OAUTH_ORIGIN}/control/ledger?tenant=${encodeURIComponent(tenant)}`;
+}
 
 /**
  * The access-token lifetime the stub advertises, in seconds.
@@ -498,6 +528,7 @@ export const MCP_OAUTH_LEDGER_ENDPOINT = `${MCP_OAUTH_ORIGIN}/control/ledger`;
  */
 const ACCESS_TOKEN_TTL_SECONDS = 60;
 
+/** What this client calls itself is irrelevant here; the stub registers anyone. */
 interface AuthorizationCode {
   codeChallenge: string;
   redirectUri: string;
@@ -508,36 +539,60 @@ interface AuthorizationCode {
 interface RefreshRecord {
   clientId: string;
   resource: string;
-  scope?: string;
 }
 
 const authorizationCodes = new Map<string, AuthorizationCode>();
-const accessTokens = new Map<string, { expired: boolean }>();
+const accessTokens = new Map<string, { expired: boolean; tenant: string }>();
 const refreshTokens = new Map<string, RefreshRecord>();
-const registeredClients = new Set<string>();
 
 /**
- * Every fact a test needs to assert about the wire, counted where it actually
- * happened. Assertions run in workerd and this handler runs in Node, so a
- * counter read back over HTTP is the only way to observe what left.
+ * Every fact a test needs to assert about the wire, counted per tenant where
+ * it actually happened. Assertions run in workerd and this handler runs in
+ * Node, so a counter read back over HTTP is the only way to observe what left.
  */
-const ledger = {
-  registrations: 0,
-  authorizations: 0,
-  codeExchanges: 0,
-  refreshes: 0,
-  revocations: 0,
-  /** `resource` seen on the authorization request and on each token request. */
-  authorizeResource: "",
-  tokenResource: "",
-  refreshResource: "",
-  /** The PKCE method the authorization request carried. */
-  codeChallengeMethod: "",
-  /** Set when a token request presented a verifier that did not match. */
-  pkceRejections: 0,
-  /** MCP calls that arrived with no live token. */
-  unauthorizedMcpCalls: 0,
-};
+interface TenantLedger {
+  registrations: number;
+  authorizations: number;
+  codeExchanges: number;
+  refreshes: number;
+  revocations: number;
+  authorizeResource: string;
+  tokenResource: string;
+  refreshResource: string;
+  codeChallengeMethod: string;
+  pkceRejections: number;
+  unauthorizedMcpCalls: number;
+  rejecting: boolean;
+}
+
+const tenants = new Map<string, TenantLedger>();
+
+function tenantOf(resource: string): string {
+  const match = resource.match(/\/mcp-oauth\/([^/?#]+)/);
+  return match?.[1] ?? "default";
+}
+
+function ledgerFor(tenant: string): TenantLedger {
+  let value = tenants.get(tenant);
+  if (!value) {
+    value = {
+      registrations: 0,
+      authorizations: 0,
+      codeExchanges: 0,
+      refreshes: 0,
+      revocations: 0,
+      authorizeResource: "",
+      tokenResource: "",
+      refreshResource: "",
+      codeChallengeMethod: "",
+      pkceRejections: 0,
+      unauthorizedMcpCalls: 0,
+      rejecting: false,
+    };
+    tenants.set(tenant, value);
+  }
+  return value;
+}
 
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
@@ -564,16 +619,19 @@ function oauthError(error: string, status = 400): Response {
   return Response.json({ error }, { status });
 }
 
-/** Whether a bearer token is one this stub issued and has not expired. */
-export function mcpOAuthTokenIsLive(token: string): boolean {
+/** Whether a bearer is one this stub issued for this tenant and still honours. */
+function mcpOAuthTokenIsLive(token: string, tenant: string): boolean {
+  if (ledgerFor(tenant).rejecting) return false;
   const record = accessTokens.get(token);
-  return record !== undefined && !record.expired;
+  return record !== undefined && !record.expired && record.tenant === tenant;
 }
 
 async function tokenGrant(request: Request): Promise<Response> {
   const form = new URLSearchParams(await request.text());
   const grant = form.get("grant_type");
   const resource = form.get("resource") ?? "";
+  const tenant = tenantOf(resource);
+  const ledger = ledgerFor(tenant);
   if (grant === "authorization_code") {
     ledger.codeExchanges += 1;
     ledger.tokenResource = resource;
@@ -596,7 +654,7 @@ async function tokenGrant(request: Request): Promise<Response> {
     if (resource !== issuedCode.resource) return oauthError("invalid_target");
     const accessToken = issued("mcp-access");
     const refreshToken = issued("mcp-refresh");
-    accessTokens.set(accessToken, { expired: false });
+    accessTokens.set(accessToken, { expired: false, tenant });
     refreshTokens.set(refreshToken, {
       clientId: issuedCode.clientId,
       resource,
@@ -617,7 +675,7 @@ async function tokenGrant(request: Request): Promise<Response> {
     if (!record) return oauthError("invalid_grant");
     if (resource !== record.resource) return oauthError("invalid_target");
     const accessToken = issued("mcp-access");
-    accessTokens.set(accessToken, { expired: false });
+    accessTokens.set(accessToken, { expired: false, tenant });
     // A server that does not rotate its refresh token: the client must carry
     // the old one forward rather than losing the ability to refresh again.
     return Response.json({
@@ -634,17 +692,23 @@ export async function mcpAuthorizationServerStub(
   request: Request,
 ): Promise<Response> {
   const url = new URL(request.url);
+  const tenant = url.searchParams.get("tenant") ?? "default";
   switch (url.pathname) {
     case "/control/ledger":
-      return Response.json(ledger);
+      return Response.json(ledgerFor(tenant));
     case "/control/expire": {
-      for (const record of accessTokens.values()) record.expired = true;
+      for (const record of accessTokens.values()) {
+        if (record.tenant === tenant) record.expired = true;
+      }
       return Response.json({ expired: true });
     }
-    case "/control/revoke-all": {
-      accessTokens.clear();
-      refreshTokens.clear();
-      return Response.json({ revoked: true });
+    case "/control/reject": {
+      ledgerFor(tenant).rejecting = true;
+      return Response.json({ rejecting: true });
+    }
+    case "/control/accept": {
+      ledgerFor(tenant).rejecting = false;
+      return Response.json({ rejecting: false });
     }
     case "/.well-known/oauth-authorization-server":
       return Response.json({
@@ -660,28 +724,33 @@ export async function mcpAuthorizationServerStub(
         scopes_supported: ["mcp:tools"],
       });
     case "/register": {
-      ledger.registrations += 1;
       const body = (await request.json().catch(() => ({}))) as {
         token_endpoint_auth_method?: unknown;
       };
       if (body.token_endpoint_auth_method !== "none") {
         return oauthError("invalid_client_metadata");
       }
-      const clientId = issued("mcp-client");
-      registeredClients.add(clientId);
       // A public client: no `client_secret`, which is what makes this server
-      // one FrockBot will talk to at all.
-      return Response.json({ client_id: clientId }, { status: 201 });
+      // one FrockBot will talk to at all. Registration carries no resource, so
+      // it is counted against every tenant that later uses it.
+      for (const ledger of tenants.values()) ledger.registrations += 1;
+      return Response.json(
+        { client_id: issued("mcp-client") },
+        { status: 201 },
+      );
     }
     case "/authorize": {
-      ledger.authorizations += 1;
       const redirectUri = url.searchParams.get("redirect_uri") ?? "";
       const state = url.searchParams.get("state") ?? "";
       const codeChallenge = url.searchParams.get("code_challenge") ?? "";
+      const resource = url.searchParams.get("resource") ?? "";
+      const clientId = url.searchParams.get("client_id") ?? "";
+      const ledger = ledgerFor(tenantOf(resource));
+      ledger.authorizations += 1;
+      ledger.registrations = Math.max(ledger.registrations, 1);
       ledger.codeChallengeMethod =
         url.searchParams.get("code_challenge_method") ?? "";
-      ledger.authorizeResource = url.searchParams.get("resource") ?? "";
-      const clientId = url.searchParams.get("client_id") ?? "";
+      ledger.authorizeResource = resource;
       if (!redirectUri || !state || !codeChallenge || !clientId) {
         return oauthError("invalid_request");
       }
@@ -689,7 +758,7 @@ export async function mcpAuthorizationServerStub(
       authorizationCodes.set(code, {
         codeChallenge,
         redirectUri,
-        resource: ledger.authorizeResource,
+        resource,
         clientId,
       });
       const destination = new URL(redirectUri);
@@ -703,9 +772,10 @@ export async function mcpAuthorizationServerStub(
     case "/token":
       return tokenGrant(request);
     case "/revoke": {
-      ledger.revocations += 1;
       const form = new URLSearchParams(await request.text());
       const token = form.get("token") ?? "";
+      const record = refreshTokens.get(token);
+      ledgerFor(record ? tenantOf(record.resource) : tenant).revocations += 1;
       refreshTokens.delete(token);
       accessTokens.delete(token);
       // RFC 7009 §2.2: an unknown token is a success, so the client cannot
@@ -718,34 +788,41 @@ export async function mcpAuthorizationServerStub(
 }
 
 /**
- * The OAuth-protected MCP endpoint, and the two documents that lead to it. It
- * answers 401 with the `WWW-Authenticate` challenge RFC 9728 §5.1 defines
- * until a live access token is presented, which is exactly what makes a
- * mount's failure classifiable as `needs-auth` rather than `error`.
+ * The OAuth-protected MCP endpoints, and the documents that lead to them. Each
+ * answers 401 with the `WWW-Authenticate` challenge RFC 9728 §5.1 defines until
+ * a live access token for *that tenant* is presented, which is exactly what
+ * makes a mount's failure classifiable as `needs-auth` rather than `error`.
  */
 export async function mcpOAuthProtectedStub(
   request: Request,
   url: URL,
 ): Promise<Response> {
-  if (url.pathname === "/.well-known/oauth-protected-resource/mcp-oauth") {
+  const metadata = url.pathname.match(
+    /^\/\.well-known\/oauth-protected-resource\/mcp-oauth\/([^/]+)$/,
+  );
+  if (metadata) {
+    const tenant = metadata[1]!;
     return Response.json({
-      resource: MCP_OAUTH_ENDPOINT,
+      resource: mcpOAuthEndpoint(tenant),
       authorization_servers: [MCP_OAUTH_ORIGIN],
       scopes_supported: ["mcp:tools"],
       bearer_methods_supported: ["header"],
     });
   }
+  const endpoint = url.pathname.match(/^\/mcp-oauth\/([^/]+)$/);
+  if (!endpoint) return new Response("unexpected MCP request", { status: 404 });
+  const tenant = endpoint[1]!;
   const header = request.headers.get("authorization") ?? "";
   const token = header.toLowerCase().startsWith("bearer ")
     ? header.slice(7)
     : "";
-  if (!mcpOAuthTokenIsLive(token)) {
-    ledger.unauthorizedMcpCalls += 1;
+  if (!mcpOAuthTokenIsLive(token, tenant)) {
+    ledgerFor(tenant).unauthorizedMcpCalls += 1;
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: {
         "content-type": "application/json",
-        "www-authenticate": `Bearer realm="mcp", resource_metadata="${MCP_OAUTH_RESOURCE_METADATA}"`,
+        "www-authenticate": `Bearer realm="mcp", resource_metadata="${mcpOAuthResourceMetadataUrl(tenant)}"`,
       },
     });
   }

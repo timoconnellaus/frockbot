@@ -111,6 +111,42 @@ export class McpProtocolError extends Error {
   }
 }
 
+/**
+ * The server said "authorize first".
+ *
+ * A 401 carrying `WWW-Authenticate: Bearer …` is the one MCP failure that is
+ * not a broken server: it is a durable pending decision for the User. It is a
+ * subclass rather than a sibling so every existing `McpProtocolError` handler
+ * keeps working, and typed rather than a status check so the runtime seam and
+ * the durable record agree on what it means without re-deriving it from prose.
+ */
+export class McpAuthorizationRequiredError extends McpProtocolError {
+  /** RFC 9728 §5.1's `resource_metadata`, when the server named one. */
+  readonly resourceMetadataUrl?: string;
+
+  constructor(message: string, wwwAuthenticate?: string | null) {
+    super(message, 401, wwwAuthenticate);
+    const named = mcpResourceMetadataChallengeV1(wwwAuthenticate ?? null);
+    if (named) this.resourceMetadataUrl = named;
+  }
+}
+
+/**
+ * The `resource_metadata` parameter of a `WWW-Authenticate` challenge. Parsed
+ * defensively: the header is the server's, and the URL it names is still put
+ * through the outbound classifier before anything fetches it.
+ */
+export function mcpResourceMetadataChallengeV1(
+  header: string | null,
+): string | undefined {
+  if (!header) return undefined;
+  const match = header.match(
+    /(?:^|[\s,])resource_metadata\s*=\s*(?:"([^"]*)"|([^\s,]+))/i,
+  );
+  const value = match?.[1] ?? match?.[2];
+  return value && value.length <= 2_048 ? value : undefined;
+}
+
 interface JsonRpcResponse {
   id: number;
   result?: unknown;
@@ -336,11 +372,12 @@ export class McpClient {
         await response.text().catch(() => ""),
         200,
       ).trim();
-      throw new McpProtocolError(
-        `MCP server answered ${response.status}${detail ? `: ${detail}` : ""}`,
-        response.status,
-        response.headers.get("www-authenticate"),
-      );
+      const message = `MCP server answered ${response.status}${detail ? `: ${detail}` : ""}`;
+      const challenge = response.headers.get("www-authenticate");
+      if (response.status === 401) {
+        throw new McpAuthorizationRequiredError(message, challenge);
+      }
+      throw new McpProtocolError(message, response.status, challenge);
     }
     return response;
   }
@@ -417,11 +454,12 @@ export class McpClient {
       headers: this.headers("text/event-stream"),
     });
     if (!response.ok || !response.body) {
-      throw new McpProtocolError(
-        `MCP server answered ${response.status} opening its event stream`,
-        response.status,
-        response.headers.get("www-authenticate"),
-      );
+      const message = `MCP server answered ${response.status} opening its event stream`;
+      const challenge = response.headers.get("www-authenticate");
+      if (response.status === 401) {
+        throw new McpAuthorizationRequiredError(message, challenge);
+      }
+      throw new McpProtocolError(message, response.status, challenge);
     }
     const session = new SseSession(
       response.body.getReader(),

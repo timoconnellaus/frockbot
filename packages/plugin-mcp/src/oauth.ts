@@ -32,7 +32,11 @@
  * and decodes requests, and the User Durable Object that calls it owns every
  * record and every sealed credential.
  */
-import { McpProtocolError, type McpFetch } from "./mcp-client.js";
+import {
+  McpAuthorizationRequiredError,
+  mcpResourceMetadataChallengeV1,
+  type McpFetch,
+} from "./mcp-client.js";
 import { decodeOutboundMcpUrlV1 } from "./ssrf.js";
 
 /** The driver id the manifest names for the `mcp-remote-oauth` grant. */
@@ -113,32 +117,6 @@ export class McpAuthorizationError extends Error {
   }
 }
 
-/**
- * The 401 an MCP server answers with when it wants a token — the whole of the
- * `needs-auth` classification, and the beginning of discovery.
- *
- * `WWW-Authenticate: Bearer realm="…", resource_metadata="https://…"`
- * (RFC 9728 §5.1). The header is the server's, so it is parsed defensively and
- * the URL it names is still put through the outbound classifier before it is
- * fetched.
- */
-export function parseResourceMetadataChallengeV1(
-  header: string | null,
-): string | undefined {
-  if (!header) return undefined;
-  const match = header.match(
-    /(?:^|[\s,])resource_metadata\s*=\s*(?:"([^"]*)"|([^\s,]+))/i,
-  );
-  const value = match?.[1] ?? match?.[2];
-  return value && value.length <= 2_048 ? value : undefined;
-}
-
-/**
- * Where a server's protected-resource metadata lives, in the order RFC 9728
- * §3.1 requires. A server URL with a path inserts that path *after* the
- * well-known segment; the bare well-known document is the fallback, which is
- * what a server mounted at the origin publishes.
- */
 export function mcpResourceMetadataUrlsV1(serverUrl: URL): string[] {
   const path = serverUrl.pathname.replace(/\/+$/, "");
   const urls =
@@ -752,17 +730,18 @@ export class McpOAuthClient {
 }
 
 /**
- * Whether an MCP failure is the server asking for authorization. The status is
- * the whole of it — a 401 is a token the User can replace, and everything else
- * is a server that is not there — and the `WWW-Authenticate` header carries
- * where the metadata lives when the server names it.
+ * Whether an MCP failure is the server asking for authorization, and where it
+ * said its metadata lives. `McpClient` throws a typed error for a 401, so this
+ * is a narrowing rather than a second classifier of the same header.
  */
 export function mcpAuthorizationRequiredV1(
   error: unknown,
 ): { resourceMetadataUrl?: string } | undefined {
-  if (!(error instanceof McpProtocolError) || error.status !== 401) {
-    return undefined;
-  }
-  const named = parseResourceMetadataChallengeV1(error.wwwAuthenticate ?? null);
-  return named ? { resourceMetadataUrl: named } : {};
+  if (!(error instanceof McpAuthorizationRequiredError)) return undefined;
+  return error.resourceMetadataUrl
+    ? { resourceMetadataUrl: error.resourceMetadataUrl }
+    : {};
 }
+
+/** Re-exported: the challenge parser lives beside the client that meets it. */
+export const parseResourceMetadataChallengeV1 = mcpResourceMetadataChallengeV1;

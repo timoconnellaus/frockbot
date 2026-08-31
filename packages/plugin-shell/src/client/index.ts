@@ -28,6 +28,7 @@ import type {
   BotProfilePatchV1,
   BotSettingsViewV1,
   ConfigurationCommandV1,
+  JsonValue,
   ModelAssignment,
   OperationReceiptV1,
   UserSettingsViewV1,
@@ -43,7 +44,12 @@ import {
   decodeMcpLifecycleReceiptV1,
   decodeMcpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
-import { MCP_SERVERS_ROUTE } from "@frockbot/plugin-mcp/backend";
+import {
+  MCP_CONNECTIONS_ROUTE,
+  MCP_SERVERS_ROUTE,
+} from "@frockbot/plugin-mcp/backend";
+import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
+import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
 import { ref } from "vue";
 import {
@@ -1523,6 +1529,53 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         instructions,
       });
     },
+    /**
+     * Connect, or reconnect, an OAuth MCP server.
+     *
+     * The redirect is minted by the host on this authenticated request and
+     * returned to exactly one client, once: it is never read out of a
+     * projection, and nothing stores it. `connectionId` reconnects an existing
+     * Connection — which is what the connect card's *Reconnect* does — and its
+     * absence creates one from the settings given.
+     */
+    async startMcpAuthorization(input: {
+      connectionId?: string;
+      label?: string;
+      settings?: Record<string, unknown>;
+    }): Promise<string | undefined> {
+      if (!ctx.transport.hostedRequest) {
+        throw new Error("MCP authorization is unavailable");
+      }
+      const nativeReturnNonce =
+        "frockbotDesktop" in (globalThis.window ?? {})
+          ? crypto.randomUUID()
+          : undefined;
+      const started = decodeStartConnectionResultV1(
+        await ctx.transport.hostedRequest(
+          MCP_CONNECTIONS_ROUTE,
+          "POST",
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "connection/start",
+            commandId: crypto.randomUUID(),
+            connectionTypeId: MCP_OAUTH_CONNECTION_TYPE_ID,
+            ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+            ...(input.label ? { label: input.label } : {}),
+            ...(input.settings ? { settings: input.settings } : {}),
+            ...(nativeReturnNonce ? { nativeReturnNonce } : {}),
+          }),
+        ),
+      );
+      await web.value.loadUserSettings();
+      await web.value.loadMcpServers();
+      if (started.status === "ready") return undefined;
+      authorizationOperations.set(started.redirectUrl, {
+        ...(started.nativeReturnNonce
+          ? { nativeReturnNonce: started.nativeReturnNonce }
+          : {}),
+      });
+      return started.redirectUrl;
+    },
     async restartMcpServer(serverId: string): Promise<void> {
       await executeMcpCommand({
         schemaVersion: 1,
@@ -1577,7 +1630,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         ),
       );
     },
-    async installCatalogPackage(entry: CatalogIndexEntryV1): Promise<void> {
+    async installCatalogPackage(
+      entry: CatalogIndexEntryV1,
+      values?: Record<string, JsonValue>,
+    ): Promise<void> {
       const settings = web.value.userSettings;
       const generation = web.value.packageCatalogGeneration;
       if (!settings || !ctx.transport.executeConfiguration) {
@@ -1593,6 +1649,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         version: entry.version,
         catalogId: entry.catalogId,
         catalogGeneration: generation,
+        // GrokBot's `InstallPlugin{values}`: the entry's `setupFields`, filled
+        // in by the User, recorded on the installation so the install is
+        // reproducible from durable state rather than from a form that is gone.
+        ...(values && Object.keys(values).length > 0 ? { values } : {}),
       });
       await web.value.loadPluginCatalog();
       if (receipt.status === "rejected") throw new Error(receipt.failure);

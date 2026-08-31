@@ -78,6 +78,7 @@ import {
   decodeMcpRefusalRecordV1,
   decodeMcpServerRecordV1,
   mcpConnectionMetadataV1,
+  mcpPendingAuthorizationV1,
   mcpRefusalKeyV1,
   mcpServerRecordKeyV1,
   MAX_MCP_REFUSALS_V1,
@@ -386,7 +387,7 @@ export class McpUserBackendContribution {
       return;
     }
     const at = new Date(this.now()).toISOString();
-    await this.writeServer({
+    const server = await this.writeServer({
       ...current,
       state: input.state,
       ...(input.protocolVersion === undefined
@@ -406,6 +407,59 @@ export class McpUserBackendContribution {
           }
         : {}),
     });
+    // The card the User presses is drawn from this projection, so a mount that
+    // met a 401 has to reach it. `needs-auth` sets it; anything else clears
+    // it, which is what makes "the tools came back" and "the card went away"
+    // the same event rather than two.
+    await this.projectPendingAuthorization(input.accountId, server, at).catch(
+      () => undefined,
+    );
+  }
+
+  /**
+   * Set or clear the Connection's `pendingAuthorization`.
+   *
+   * The projection is idempotent and carries no URL. It is written
+   * best-effort from a mount outcome — the Bot must not lose a Turn because
+   * the projection could not be updated — but the durable server record it
+   * mirrors is written first, so the reason is never lost.
+   */
+  private async projectPendingAuthorization(
+    accountId: string,
+    server: McpServerRecordV1,
+    at: string,
+  ): Promise<void> {
+    const connection = await this.host.settings.getConnection(
+      accountId,
+      server.serverId,
+    );
+    if (!connection) return;
+    const pending =
+      server.state === "needs-auth"
+        ? mcpPendingAuthorizationV1(server, at)
+        : undefined;
+    const current = connection.pendingAuthorization;
+    if (
+      (pending === undefined && current === undefined) ||
+      (pending !== undefined &&
+        current !== undefined &&
+        current.connectionId === pending.connectionId &&
+        current.label === pending.label)
+    ) {
+      return;
+    }
+    await this.host.settings.replaceConnection(
+      accountId,
+      connection.connectionId,
+      connection.generation,
+      // Rebuilt rather than spread, because clearing it must remove the key
+      // and a spread of `undefined` would leave it present.
+      {
+        ...connection,
+        pendingAuthorization: undefined,
+        ...(pending ? { pendingAuthorization: pending } : {}),
+      },
+    );
   }
 
   private async applyLifecycle(
@@ -424,6 +478,43 @@ export class McpUserBackendContribution {
             : { instructions: undefined }),
         });
         await this.mirrorConnectionMetadata(accountId, command.serverId);
+        return {
+          schemaVersion: 1,
+          commandId: command.commandId,
+          status: "applied",
+          serverId: command.serverId,
+        };
+      }
+      case "mcp/request-authorization": {
+        // A durable pending decision, never a grant. The server record is left
+        // exactly as it is — a Bot does not get to declare its User's server
+        // broken — and what changes is the Connection projection the User's
+        // own surface draws a connect card from. No URL is minted here, and
+        // none is returned: only an authenticated `connection/start` does that.
+        const server = await this.requireServer(accountId, command.serverId);
+        const connection = await this.requireConnection(
+          accountId,
+          command.serverId,
+        );
+        if (connection.connectionTypeId !== MCP_OAUTH_CONNECTION_TYPE_ID) {
+          return this.refuse(command, {
+            code: "unauthorized",
+            message:
+              "This MCP server does not use OAuth, so there is nothing for the User to authorize. A keyed server needs a new key instead.",
+          });
+        }
+        await this.host.settings.replaceConnection(
+          accountId,
+          connection.connectionId,
+          connection.generation,
+          {
+            ...connection,
+            pendingAuthorization: mcpPendingAuthorizationV1(
+              server,
+              new Date(this.now()).toISOString(),
+            ),
+          },
+        );
         return {
           schemaVersion: 1,
           commandId: command.commandId,
@@ -662,7 +753,7 @@ export class McpUserBackendContribution {
       const at = new Date(this.now()).toISOString();
       const server = await this.readServer(connection.connectionId);
       if (server) {
-        await this.writeServer({
+        const next = await this.writeServer({
           ...server,
           state: "needs-auth",
           toolCount: 0,
@@ -673,8 +764,18 @@ export class McpUserBackendContribution {
             at,
           },
         }).catch(() => undefined);
+        if (next) {
+          await this.projectPendingAuthorization(accountId, next, at).catch(
+            () => undefined,
+          );
+        }
       }
-      throw new Error(`MCP access token could not be refreshed: ${message}`);
+      // Classified, not narrated: a refresh that failed is a token the User
+      // must replace, and the mount that meets this has to record `needs-auth`
+      // rather than "the server is unreachable".
+      throw new McpAuthorizationError(
+        `MCP access token could not be refreshed: ${message}`,
+      );
     }
   }
 
@@ -1252,12 +1353,23 @@ export class McpUserBackendContribution {
         failure: { code, message: message.slice(0, 2_000), at },
       }).catch(() => undefined);
     }
+    const server = existing
+      ? await this.readServer(connection.connectionId)
+      : undefined;
     await this.host.settings
       .replaceConnection(
         accountId,
         connection.connectionId,
         connection.generation,
-        { ...connection, state: "failed", failure: message.slice(0, 2_000) },
+        {
+          ...connection,
+          state: "failed",
+          failure: message.slice(0, 2_000),
+          pendingAuthorization: undefined,
+          ...(server?.state === "needs-auth"
+            ? { pendingAuthorization: mcpPendingAuthorizationV1(server, at) }
+            : {}),
+        },
       )
       .catch(() => undefined);
   }
@@ -1588,6 +1700,9 @@ export class McpUserBackendContribution {
           ...connection,
           state: "ready",
           failure: undefined,
+          // A handshake that succeeded is the decision being made: the card
+          // goes away in the same write that brings the tools back.
+          pendingAuthorization: undefined,
           safeMetadata: {
             ...mcpConnectionMetadataV1(server),
             ...(handshake.serverName
@@ -1629,6 +1744,15 @@ export class McpUserBackendContribution {
           ...connection,
           state: "failed",
           failure: failure.slice(0, 2_000),
+          pendingAuthorization: undefined,
+          ...(server?.state === "needs-auth"
+            ? {
+                pendingAuthorization: mcpPendingAuthorizationV1(
+                  server,
+                  server.lastHandshakeAt,
+                ),
+              }
+            : {}),
           ...(server ? { safeMetadata: mcpConnectionMetadataV1(server) } : {}),
         },
       );

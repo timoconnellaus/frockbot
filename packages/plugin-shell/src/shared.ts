@@ -2,6 +2,7 @@ export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 import type {
   BotAvatarContentTypeV1,
+  JsonValue,
   BotNameProvenanceV1,
   BotNotificationPolicy,
   BotProfile,
@@ -204,6 +205,17 @@ export interface FrockBotWebData {
    * re-handshakes and re-lists its tools.
    */
   restartMcpServer(serverId: string): Promise<void>;
+  /**
+   * Connect or reconnect an OAuth MCP server, returning the host-authored
+   * redirect the User is about to follow. `connectionId` reconnects an
+   * existing Connection — the connect card's *Reconnect* — and its absence
+   * creates one from `settings`.
+   */
+  startMcpAuthorization(input: {
+    connectionId?: string;
+    label?: string;
+    settings?: Record<string, unknown>;
+  }): Promise<string | undefined>;
   loadPackageCatalog(): Promise<void>;
   /** One entry detail, for the panel a User opens before installing. */
   loadCatalogEntry(catalogId: string): Promise<CatalogEntryV1 | undefined>;
@@ -218,7 +230,11 @@ export interface FrockBotWebData {
     packageId: string,
     values: Record<string, string | number | boolean>,
   ): Promise<void>;
-  installCatalogPackage(entry: CatalogIndexEntryV1): Promise<void>;
+  installCatalogPackage(
+    entry: CatalogIndexEntryV1,
+    /** The entry's `setupFields`, as the User filled them in. */
+    values?: Record<string, JsonValue>,
+  ): Promise<void>;
   uninstallPackage(packageId: string): Promise<void>;
   startConnection(
     packageId: string,

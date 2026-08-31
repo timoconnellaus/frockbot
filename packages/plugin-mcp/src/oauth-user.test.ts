@@ -668,3 +668,108 @@ describe("revoking", () => {
     expect((await world.read(connectionId)).state).toBe("revoked");
   });
 });
+
+describe("the pending-authorization projection", () => {
+  test("is absent while the Connection is working", async () => {
+    const world = await fixture();
+    const { connectionId } = await connect(world);
+    expect(
+      (await world.read(connectionId)).pendingAuthorization,
+    ).toBeUndefined();
+  });
+
+  test("is set by a mount that met a 401, and cleared when the tools come back", async () => {
+    const world = await fixture();
+    const { connectionId } = await connect(world);
+
+    await world.mcp.recordMountOutcome({
+      accountId: ACCOUNT,
+      connectionId,
+      state: "needs-auth",
+      failure: { code: "unauthorized", message: "MCP server answered 401" },
+    });
+    const pending = (await world.read(connectionId)).pendingAuthorization;
+    expect(pending).toMatchObject({
+      reason: "needs-auth",
+      connectionId,
+      label: "Example",
+    });
+    // The card the User presses carries nothing that could be followed.
+    expect(JSON.stringify(pending)).not.toContain("http");
+
+    await world.mcp.recordMountOutcome({
+      accountId: ACCOUNT,
+      connectionId,
+      state: "ready",
+      toolCount: 1,
+    });
+    expect(
+      (await world.read(connectionId)).pendingAuthorization,
+    ).toBeUndefined();
+  });
+
+  test("is set when a refresh fails, beside the durable needs-auth record", async () => {
+    const world = await fixture({ accessTokenLifetimeSeconds: 120 });
+    const { connectionId } = await connect(world);
+    world.advance(90_000);
+    world.state.refreshTokens.clear();
+
+    await expect(
+      world.mcp.leaseToolCredential({
+        accountId: ACCOUNT,
+        connectionId,
+        effectId: "effect-dead-card",
+        connectionGeneration: (await world.read(connectionId)).generation!,
+      }),
+    ).rejects.toThrow();
+
+    expect((await world.read(connectionId)).pendingAuthorization).toMatchObject(
+      { reason: "needs-auth", connectionId },
+    );
+  });
+
+  test("is what a Bot's request writes, and it writes nothing else", async () => {
+    const world = await fixture();
+    const { connectionId } = await connect(world);
+
+    const receipt = await world.mcp.executeLifecycle(ACCOUNT, {
+      schemaVersion: 1,
+      type: "mcp/request-authorization",
+      commandId: "bot-asked-1",
+      serverId: connectionId,
+    });
+    expect(receipt.status).toBe("applied");
+
+    // The decision is pending, and nothing about the server changed: a Bot
+    // does not get to declare its User's server broken.
+    expect((await world.read(connectionId)).pendingAuthorization).toMatchObject(
+      { reason: "needs-auth", connectionId },
+    );
+    expect((await world.read(connectionId)).state).toBe("ready");
+    expect(
+      (await world.mcp.readServerStatus(ACCOUNT)).servers[0],
+    ).toMatchObject({ state: "ready" });
+  });
+
+  test("refuses a Bot's request against a server that has nothing to authorize", async () => {
+    const world = await fixture();
+    const receipt = await world.mcp.executeLifecycle(ACCOUNT, {
+      schemaVersion: 1,
+      type: "mcp/add-server",
+      commandId: "add-public-1",
+      label: "Public",
+      url: SERVER,
+      transport: "streamable-http",
+    });
+    // The public server has no token, so there is no 401 path to it here; the
+    // request-authorization refusal is the assertion.
+    const refused = await world.mcp.executeLifecycle(ACCOUNT, {
+      schemaVersion: 1,
+      type: "mcp/request-authorization",
+      commandId: "bot-asked-2",
+      serverId: receipt.serverId!,
+    });
+    expect(refused.status).toBe("refused");
+    expect(refused.code).toBe("unauthorized");
+  });
+});
