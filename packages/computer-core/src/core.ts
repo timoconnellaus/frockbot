@@ -1,14 +1,10 @@
 import {
   workspaceRootKeyV1,
-  type WorkspaceFileV1,
   type WorkspaceFilesV1,
-  type WorkspaceListRequestV1,
-  type WorkspacePathV1,
   type WorkspaceRootKindV1,
   type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
   type WorkspaceSyncEffectsV1,
-  type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
 import { type Context, Service } from "cordis";
 
@@ -232,49 +228,6 @@ export interface ComputerOperationOptions {
   signal?: AbortSignal;
 }
 
-export interface ComputerFileInfo {
-  path: string;
-  version: string;
-  size: number;
-  modifiedAt?: string;
-  mediaType?: string;
-}
-
-export interface ComputerFile extends ComputerFileInfo {
-  bytes: Uint8Array;
-}
-
-export interface ComputerFilePage {
-  files: ComputerFileInfo[];
-  cursor?: string;
-}
-
-export interface ComputerDirectory {
-  readFile(
-    path: string,
-    options?: ComputerOperationOptions,
-  ): Promise<ComputerFile | null>;
-  writeFile(
-    path: string,
-    bytes: Uint8Array,
-    options?: ComputerOperationOptions & {
-      ifVersion?: string | null;
-      mediaType?: string;
-    },
-  ): Promise<ComputerFileInfo>;
-  deleteFile(
-    path: string,
-    options?: ComputerOperationOptions & { ifVersion?: string },
-  ): Promise<boolean>;
-  listFiles(
-    options?: ComputerOperationOptions & {
-      prefix?: string;
-      cursor?: string;
-      limit?: number;
-    },
-  ): Promise<ComputerFilePage>;
-}
-
 /**
  * The Computer's Workspace surface.
  *
@@ -289,136 +242,6 @@ export interface ComputerDirectory {
  */
 export interface ComputerWorkspace extends WorkspaceFilesV1 {
   readonly layout: WorkspaceLayoutV1;
-}
-
-type WorkspaceOutcomeFailure = { status: string; reason: string };
-
-/**
- * Adapts one durable root of a `WorkspaceFilesV1` surface to the older
- * path-relative `ComputerDirectory` shape, recording `writer` on every write.
- *
- * `ComputerDirectory` has no unconditional write, so an unconditional
- * `writeFile` reads the current generation first and retries once on a losing
- * conditional write; a second conflict surfaces rather than being merged.
- */
-export function computerDirectoryForRootV1(
-  files: WorkspaceFilesV1,
-  root: WorkspaceRootV1,
-  writer: WorkspaceWriterV1,
-): ComputerDirectory {
-  const at = (path: string): WorkspacePathV1 => ({
-    root,
-    path: normalizeComputerPath(path),
-  });
-  const fail = (failure: WorkspaceOutcomeFailure, path: string): never => {
-    const code: ComputerErrorCode =
-      failure.status === "conflict"
-        ? "conflict"
-        : failure.status === "refused"
-          ? "capability-unavailable"
-          : failure.status === "unavailable"
-            ? "provider-unavailable"
-            : "invalid-request";
-    throw new ComputerError(code, `${failure.reason} (${path})`);
-  };
-  const currentGenerationId = async (
-    path: string,
-  ): Promise<string | null | undefined> => {
-    const current = await files.stat(at(path));
-    if (current.status === "ok") return current.entry.generation.generationId;
-    if (current.status === "not-found") return null;
-    return fail(current, path);
-  };
-  const write = async (
-    path: string,
-    bytes: Uint8Array,
-    options: ComputerOperationOptions & {
-      ifVersion?: string | null;
-      mediaType?: string;
-    },
-  ): Promise<ComputerFileInfo> => {
-    const media = options.mediaType ? { mediaType: options.mediaType } : {};
-    const attempt = async (expected: string | null) =>
-      files.write({
-        path: at(path),
-        bytes,
-        writer,
-        expectedGenerationId: expected,
-        ...media,
-      });
-    let outcome = await attempt(
-      options.ifVersion !== undefined
-        ? options.ifVersion
-        : ((await currentGenerationId(path)) ?? null),
-    );
-    if (outcome.status === "conflict" && options.ifVersion === undefined) {
-      outcome = await attempt((await currentGenerationId(path)) ?? null);
-    }
-    if (outcome.status !== "ok") return fail(outcome, path);
-    return {
-      path: normalizeComputerPath(path),
-      version: outcome.generation.generationId,
-      size: outcome.generation.size,
-      modifiedAt: outcome.generation.writtenAt,
-      ...media,
-    };
-  };
-  return {
-    async readFile(path, options = {}) {
-      options.signal?.throwIfAborted();
-      const outcome = await files.read(at(path));
-      if (outcome.status === "not-found") return null;
-      if (outcome.status !== "ok") return fail(outcome, path);
-      const file: WorkspaceFileV1 = outcome.file;
-      return {
-        path: file.path.path,
-        version: file.generation.generationId,
-        size: file.generation.size,
-        modifiedAt: file.generation.writtenAt,
-        bytes: file.bytes,
-      };
-    },
-    writeFile(path, bytes, options = {}) {
-      options.signal?.throwIfAborted();
-      return write(path, bytes, options);
-    },
-    async deleteFile(path, options = {}) {
-      options.signal?.throwIfAborted();
-      const expected =
-        options.ifVersion ?? (await currentGenerationId(path)) ?? null;
-      if (expected === null) return false;
-      const outcome = await files.delete({
-        path: at(path),
-        writer,
-        expectedGenerationId: expected,
-      });
-      if (outcome.status === "not-found") return false;
-      if (outcome.status !== "ok") return fail(outcome, path);
-      return true;
-    },
-    async listFiles(options = {}) {
-      options.signal?.throwIfAborted();
-      const request: WorkspaceListRequestV1 = {
-        root,
-        ...(options.prefix
-          ? { prefix: normalizeComputerPath(options.prefix) }
-          : {}),
-        ...(options.cursor ? { cursor: options.cursor } : {}),
-        ...(options.limit ? { limit: options.limit } : {}),
-      };
-      const outcome = await files.list(request);
-      if (outcome.status !== "ok") return fail(outcome, options.prefix ?? "");
-      return {
-        files: outcome.entries.map((entry) => ({
-          path: entry.path.path,
-          version: entry.generation.generationId,
-          size: entry.generation.size,
-          modifiedAt: entry.generation.writtenAt,
-        })),
-        ...(outcome.cursor ? { cursor: outcome.cursor } : {}),
-      };
-    },
-  };
 }
 
 export interface ComputerExecRequest {
@@ -583,12 +406,12 @@ export interface ComputerSyncHostV1 {
   effects?: WorkspaceSyncEffectsV1;
   /** The owning object's generation ledger, read to recover a removal writer. */
   generations?: WorkspaceGenerationsV1;
-  /**
-   * The writer a file written around the Workspace surface — a shell command
-   * on the Computer — is attributed to. Absent means `unattributed`, which the
-   * Skills loader refuses: such a file is data, never an instruction.
-   */
-  writer?: WorkspaceWriterV1;
+  // There is deliberately no writer here. "A file that reaches a durable root
+  // without passing through the Workspace file surface (a shell write on the
+  // Computer) is mirrored to object storage by the sync with an unattributed
+  // writer": one Computer serves all of a User's Bots, so no host can say
+  // which Bot's process wrote a file, and a sync that named the Turn's Bot
+  // would be recording a guess as provenance.
 }
 
 /**

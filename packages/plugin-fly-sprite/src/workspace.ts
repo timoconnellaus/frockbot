@@ -19,7 +19,10 @@
 //  - "a Bot's instruction root and Bot Memory root are writable only by that
 //    Bot or its User" — a write whose writer is neither is `refused`, as is
 //    every write to a Memory root through the kernel-consumed surface, because
-//    "The Memory Package is the single writer of Memory roots".
+//    "The Memory Package is the single writer of Memory roots". The writer a
+//    request names is a claim, and the handle's tenant decides it: a `bot`
+//    writer must be the Bot the handle was opened for, and a `user` writer is
+//    admitted only from a handle opened under User authority.
 //
 // Failures are declared variants, never exceptions: the Computer host is
 // non-authoritative and its connections drop on every pause, so `unavailable`
@@ -34,6 +37,7 @@ import {
 import {
   WORKSPACE_MAX_FILE_BYTES,
   WORKSPACE_MAX_LIST_ENTRIES,
+  decodeWorkspaceGenerationV1,
   normalizeWorkspaceRelativePathV1,
   workspaceRootAcceptsKernelWriteV1,
   workspaceWriterMayWriteV1,
@@ -119,6 +123,16 @@ export interface FlyWorkspaceFilesOptions {
   userId: string;
   /** The Bot tenant making the call. */
   botId: string;
+  /**
+   * Whether this handle was opened under the User's own authority rather than
+   * a Bot's. Default `false`: the shell and Turn paths open a Computer as the
+   * Bot, and a Bot may not present its User as the writer of a file.
+   *
+   * "every write to a durable root records its writer" is only true if the
+   * recorded writer is the one that actually called: the handle's tenant is
+   * the authority on that, and the `writer` field of a request is a claim.
+   */
+  userAuthority?: boolean;
   /** Maps a Bot id to the provider's directory key for that Bot. */
   botDirectoryKey: (botId: string) => string;
   /**
@@ -174,6 +188,13 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
    * "a Bot's instruction root and Bot Memory root are writable only by that
    * Bot or its User". A first-party Package is neither, and `unattributed` is
    * not a writer at all.
+   *
+   * The writer a request names is a claim, and this handle's tenant is the
+   * authority on it: a `bot` writer must be the tenant that opened the handle,
+   * and a `user` writer is admitted only from a handle opened under User
+   * authority. Without that, one Bot could write another Bot's root by naming
+   * that Bot, or write its own instruction root as its User and so author
+   * itself a loadable Skill under an authority it does not hold.
    */
   private admitWrite(
     root: WorkspaceRootV1,
@@ -186,6 +207,26 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
         "refused",
         "Every write to a durable root records its writer; an unattributed writer records none",
       );
+    }
+    if (writer.kind === "bot" && writer.botId !== this.options.botId) {
+      return failure(
+        "refused",
+        `This Computer handle is open for Bot "${this.options.botId}"; it may not write as another Bot`,
+      );
+    }
+    if (writer.kind === "user") {
+      if (!this.options.userAuthority) {
+        return failure(
+          "refused",
+          "This Computer handle is open for a Bot; only a handle opened under User authority may write as the User",
+        );
+      }
+      if (writer.userId !== this.options.userId) {
+        return failure(
+          "refused",
+          "This Computer belongs to a different User's Workspace",
+        );
+      }
     }
     if (
       this.options.surface === "kernel" &&
@@ -249,10 +290,19 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
    * *are* loadable, so any Bot with a shell could have written itself an
    * instruction. Unattributed files stay visible and readable, and are never
    * loaded as instructions.
+   *
+   * A sidecar is believed only while it still describes the bytes on disk.
+   * The sidecar is an ordinary file in an ordinary directory, so a shell can
+   * overwrite the file it describes — or plant a sidecar beside bytes it never
+   * saw — and the recorded `contentHash` is the one thing such a write cannot
+   * forge without also producing the bytes. A sidecar whose `contentHash` is
+   * not the sha-256 of the file is therefore stale or invented, and the file
+   * is `unattributed`: the previous writer's authority does not survive an
+   * overwrite that went around this surface.
    */
   private generationOf(raw: RawFile): WorkspaceGenerationV1 {
     const recorded = this.decodeMeta(raw.meta);
-    if (recorded) return recorded;
+    if (recorded && recorded.contentHash === raw.contentHash) return recorded;
     return {
       schemaVersion: 1,
       generationId: `${raw.modifiedSeconds.toString().padStart(15, "0")}-shell`,
@@ -268,9 +318,9 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
     try {
       const text = Buffer.from(encoded, "base64").toString("utf8");
       const body = text.slice(text.indexOf("\n") + 1);
-      const parsed: unknown = JSON.parse(body);
-      if (!parsed || typeof parsed !== "object") return undefined;
-      return parsed as WorkspaceGenerationV1;
+      // Decoded at the seam, never cast: the sidecar is a file on the
+      // Computer, which is non-authoritative, so it is inbound data.
+      return decodeWorkspaceGenerationV1(JSON.parse(body));
     } catch {
       return undefined;
     }

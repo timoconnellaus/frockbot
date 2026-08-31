@@ -4,9 +4,18 @@
 // which the Computer provider Package owns, and object storage, whose
 // authority is this Durable Object. This module supplies the second half for
 // one admitted Turn — the store surface, the effect records a push writes
-// before it runs, the generation ledger a removal's writer is recovered from,
-// and the writer a shell-written file is attributed to. It runs no sync and
-// implements no interface; the provider Package does both.
+// before it runs, and the generation ledger a removal's writer is recovered
+// from. It runs no sync and implements no interface; the provider Package does
+// both.
+//
+// ATTRIBUTION. Nothing here names a writer for what the sync finds. "A file
+// that reaches a durable root without passing through the Workspace file
+// surface (a shell write on the Computer) is mirrored to object storage by the
+// sync with an unattributed writer": one Computer serves all of a User's Bots,
+// so this object cannot know which Bot's process wrote a file, and the Turn
+// that happens to be running is not evidence. A Bot that means to author a
+// Skill writes it through the Workspace file surface, which records real
+// provenance.
 //
 // HIBERNATION. Nothing here reaches a Computer. It is a description of what a
 // sync may use if one happens, handed to the provider Package; whether a
@@ -56,8 +65,8 @@ export interface BotComputerSyncEnv {
  * object-storage side is unavailable.
  */
 export function createBotComputerSyncHost(
-  identity: BotComputerSyncIdentity,
-  turn: BotComputerSyncTurn,
+  _identity: BotComputerSyncIdentity,
+  _turn: BotComputerSyncTurn,
   env: object,
 ): ComputerSyncHostV1 | undefined {
   // SAFETY: these surfaces are constructed onto the Durable Object environment
@@ -73,17 +82,5 @@ export function createBotComputerSyncHost(
     ...(bound.WORKSPACE_SYNC_GENERATIONS
       ? { generations: bound.WORKSPACE_SYNC_GENERATIONS }
       : {}),
-    // A file a shell wrote on the Computer recorded no writer. It becomes a
-    // durable generation attributed to the Bot whose Turn had the Computer
-    // open — data the Bot can read, never an instruction it may load, because
-    // `isLoadableSkillSourceV1` answers on the root and the writer, not on the
-    // fact that a generation exists.
-    writer: {
-      kind: "bot",
-      botId: identity.botId,
-      sessionId: turn.sessionId,
-      turnId: turn.turnId,
-      runId: turn.runId,
-    },
   };
 }

@@ -1770,8 +1770,8 @@ export class ShellBotBackendContribution {
           ? { memory: createBotMemoryHost(identity, turn, this.env) }
           : {}),
         // The durable-root sync runs only inside a Turn that uses the
-        // Computer, and records that Turn's Bot as the writer of anything a
-        // shell wrote there.
+        // Computer. It attributes nothing: a file a shell wrote there reaches
+        // object storage with an unattributed writer.
         ...(turn
           ? {
               computerSync: createBotComputerSyncHost(identity, turn, this.env),

@@ -367,7 +367,15 @@ describe("Fly Sprite computer", () => {
           path: "profile.md",
         },
         bytes: new TextEncoder().encode("remember"),
-        writer: { kind: "user", userId: "owner" },
+        // The handle is open for a Bot, so the Bot is the only writer it may
+        // record.
+        writer: {
+          kind: "bot",
+          botId: "general",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          runId: "run-1",
+        },
         expectedGenerationId: null,
       }),
     ).resolves.toMatchObject({ status: "ok" });
@@ -598,7 +606,15 @@ describe("Fly Sprite computer", () => {
     const written = await computer.workspace?.write({
       path: { root: skills, path: "profile.md" },
       bytes: new TextEncoder().encode("remember"),
-      writer: { kind: "user", userId: "owner" },
+      // The handle is open for a Bot, so the Bot is the only writer it may
+      // record.
+      writer: {
+        kind: "bot",
+        botId: "health",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        runId: "run-1",
+      },
       expectedGenerationId: null,
     });
     const stored = await computer.workspace?.read({

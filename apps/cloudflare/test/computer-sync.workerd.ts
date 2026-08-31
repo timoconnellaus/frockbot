@@ -118,7 +118,7 @@ describe("the durable-root sync's records in the Bot Durable Object", () => {
     expect(settled.adopted).toEqual([]);
   });
 
-  test("a Turn's push writes the Bot's own instruction root with Bot provenance", async () => {
+  test("a Turn's push writes the Bot's own instruction root, unattributed", async () => {
     const suffix = crypto.randomUUID();
     const identity = identityFor(suffix);
     const root = instructionRoot(identity);
@@ -133,12 +133,11 @@ describe("the durable-root sync's records in the Bot Durable Object", () => {
       root,
       path: "notes.md",
     });
-    // "a file that reaches a durable root without passing through the
-    // Workspace file surface ... is mirrored to object storage by the sync":
-    // attributed to the Bot whose Turn had the Computer open.
-    expect(generation?.generation.writer).toMatchObject({
-      kind: "bot",
-      botId: identity.botId,
-    });
+    // "A file that reaches a durable root without passing through the
+    // Workspace file surface (a shell write on the Computer) is mirrored to
+    // object storage by the sync with an unattributed writer." A Turn was
+    // open, and it is still not evidence: one Computer serves all of a User's
+    // Bots, so nothing on this path knows which process wrote the file.
+    expect(generation?.generation.writer).toEqual({ kind: "unattributed" });
   });
 });
