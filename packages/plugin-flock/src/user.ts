@@ -33,11 +33,15 @@ interface Storage extends FlockUserTransaction {
 }
 export interface FlockUserBackendHost {
   storage: Storage;
-  readUserSettings(
+  /**
+   * Retained for hosts that materialize a Bot from User state. A new Bot no
+   * longer copies the User default model, so neither seam is called here.
+   */
+  readUserSettings?(
     storage: FlockUserTransaction,
     userId: string,
   ): Promise<UserSettingsViewV1>;
-  claimInitialModelBinding(
+  claimInitialModelBinding?(
     storage: FlockUserTransaction,
     input: {
       userId: string;
@@ -102,7 +106,6 @@ export class FlockUserBackendContribution {
           : decodeDirectoryViewV1(currentValue);
       if (current.revision !== command.expectedRevision)
         throw new FlockConflictError(current.revision);
-      const defaults = await this.host.readUserSettings(storage, userId);
       let receipt: FlockReceiptV1;
       if (current.bots.some((bot) => bot.botId === command.botId)) {
         receipt = {
@@ -121,40 +124,17 @@ export class FlockUserBackendContribution {
           failure: "Bot directory limit reached",
         };
       } else {
-        const initialModel = defaults.newBotModelTemplate
-          ? structuredClone(defaults.newBotModelTemplate)
-          : undefined;
-        const initialModelAssignment = initialModel
-          ? await this.host.claimInitialModelBinding(storage, {
-              userId,
-              botId: command.botId,
-              generation: command.commandId,
-              model: initialModel,
-            })
-          : undefined;
-        if (initialModel && !initialModelAssignment) {
-          receipt = {
-            schemaVersion: 1,
-            commandId: command.commandId,
-            status: "rejected",
-            revision: current.revision,
-            failure: "Default model Connection is unavailable",
-          };
-          await storage.put(receiptKey, { fingerprint, receipt });
-          return structuredClone(receipt);
-        }
+        // A new Bot carries no model of its own: it follows the User's
+        // default model dynamically, and claims the Connection's model
+        // Capability the first time it resolves its execution context. Only a
+        // Bot that overrides the default owns a durable `model`.
         const registration: BotRegistrationV1 = {
           schemaVersion: 1,
           botId: command.botId,
           registeredAt: (this.host.now?.() ?? new Date()).toISOString(),
           initialName: command.name,
-          initialModel,
-          initialModelBinding: initialModelAssignment
-            ? {
-                assignment: initialModelAssignment,
-                generation: command.commandId,
-              }
-            : undefined,
+          initialModel: undefined,
+          initialModelBinding: undefined,
           sheep: structuredClone(
             command.sheep ?? randomSheepRecipeV1(this.host.random),
           ),

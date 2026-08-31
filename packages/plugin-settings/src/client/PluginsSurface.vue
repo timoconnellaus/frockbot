@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { UiButton, UiIcon } from "@frockbot/client-ui";
-import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import type { ConnectionView } from "@frockbot/configuration-core";
+import {
+  frockBotWebDataKey,
+  type PluginCatalogItem,
+} from "@frockbot/plugin-shell/shared";
 import { computed, inject, onMounted, ref } from "vue";
 
 const providedWeb = inject(frockBotWebDataKey);
 if (!providedWeb) throw new Error("shell client data was not provided");
 const web = providedWeb;
 const search = ref("");
+const expandedPackageId = ref<string>();
 const apiKeyPackageId = ref<string>();
 const apiKeyConnectionTypeId = ref<string>();
 const apiKeyLabel = ref("");
@@ -37,18 +42,66 @@ function isPackageInstalled(packageId: string): boolean {
   );
 }
 
-function hasReadyConnection(
-  packageId: string,
-  connectionTypeId: string,
-): boolean {
-  return Boolean(
-    web.value.userSettings?.connections.some(
-      (connection) =>
-        connection.packageId === packageId &&
-        connection.connectionTypeId === connectionTypeId &&
-        connection.state === "ready",
-    ),
+/**
+ * The accounts a card speaks for. A revoked Connection is a tombstone the User
+ * has already dismissed, so it neither counts towards the card's summary nor
+ * appears in its accounts list.
+ */
+function packageConnections(packageId: string): ConnectionView[] {
+  return (web.value.userSettings?.connections ?? []).filter(
+    (connection) =>
+      connection.packageId === packageId && connection.state !== "revoked",
   );
+}
+
+type StatusTone = "ready" | "muted" | "attention";
+
+interface CardStatus {
+  tone: StatusTone;
+  label: string;
+}
+
+/** The single status a connected card shows on its summary row. */
+function cardStatus(packageId: string): CardStatus {
+  const connections = packageConnections(packageId);
+  if (connections.some((connection) => connection.state === "ready")) {
+    return {
+      tone: "ready",
+      label:
+        connections.length > 1 ? `${connections.length} accounts` : "Connected",
+    };
+  }
+  if (connections.some((connection) => connection.state === "disabled")) {
+    return { tone: "muted", label: "Disabled" };
+  }
+  if (connections.some((connection) => connection.state === "authorizing")) {
+    return { tone: "muted", label: "Connecting" };
+  }
+  if (connections.some((connection) => connection.state === "revoking")) {
+    return { tone: "muted", label: "Disconnecting" };
+  }
+  return { tone: "attention", label: "Needs attention" };
+}
+
+function connectionTone(connection: ConnectionView): StatusTone {
+  if (connection.state === "ready") return "ready";
+  if (connection.state === "failed") return "attention";
+  if (connection.state === "reconciliation-required") return "attention";
+  return "muted";
+}
+
+function primaryConnectionType(
+  item: PluginCatalogItem,
+): PluginCatalogItem["connectionTypes"][number] | undefined {
+  return item.connectionTypes[0];
+}
+
+function isExpanded(packageId: string): boolean {
+  return expandedPackageId.value === packageId;
+}
+
+function toggleExpanded(packageId: string): void {
+  expandedPackageId.value = isExpanded(packageId) ? undefined : packageId;
 }
 
 async function install(packageId: string, version: string): Promise<void> {
@@ -71,6 +124,17 @@ function beginApiKeyConnection(
   apiKey.value = "";
 }
 
+/** Start whichever authorization the card's Connection type declares. */
+function beginConnect(item: PluginCatalogItem): void {
+  const connectionType = primaryConnectionType(item);
+  if (!connectionType) return;
+  if (connectionType.authorizationKind === "api-key") {
+    beginApiKeyConnection(item.packageId, connectionType.id, item.displayName);
+    return;
+  }
+  void connect(item.packageId, connectionType.id);
+}
+
 async function connectApiKey(): Promise<void> {
   if (!apiKeyPackageId.value || !apiKeyConnectionTypeId.value) return;
   try {
@@ -83,11 +147,18 @@ async function connectApiKey(): Promise<void> {
     apiKey.value = "";
     apiKeyPackageId.value = undefined;
     apiKeyConnectionTypeId.value = undefined;
+    expandedPackageId.value = undefined;
   } catch (error) {
     apiKey.value = "";
     web.value.settingsError =
       error instanceof Error ? error.message : "Could not create Connection";
   }
+}
+
+function cancelApiKeyConnection(): void {
+  apiKey.value = "";
+  apiKeyPackageId.value = undefined;
+  apiKeyConnectionTypeId.value = undefined;
 }
 
 async function rotateApiKey(connectionId: string): Promise<void> {
@@ -128,6 +199,11 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
     web.value.settingsError =
       error instanceof Error ? error.message : "Could not revoke Connection";
   }
+}
+
+function beginLabeling(connection: ConnectionView): void {
+  labelingConnectionId.value = connection.connectionId;
+  connectionLabel.value = connection.displayName;
 }
 
 async function saveLabel(connectionId: string): Promise<void> {
@@ -191,51 +267,203 @@ async function disconnect(connectionId: string): Promise<void> {
         :key="item.packageId"
         class="plugin-card"
       >
-        <div class="plugin-logo" aria-hidden="true">
-          {{ item.displayName.slice(0, 1) }}
+        <button
+          v-if="packageConnections(item.packageId).length"
+          type="button"
+          class="plugin-summary plugin-summary--interactive"
+          :aria-expanded="isExpanded(item.packageId)"
+          :aria-controls="`plugin-accounts-${item.packageId}`"
+          :aria-label="`${item.displayName} accounts, ${cardStatus(item.packageId).label}`"
+          @click="toggleExpanded(item.packageId)"
+        >
+          <span class="plugin-logo" aria-hidden="true">
+            {{ item.displayName.slice(0, 1) }}
+          </span>
+          <span class="plugin-card-copy">
+            <strong>{{ item.displayName }}</strong>
+            <small>
+              {{
+                item.connectionTypes
+                  .map((connection) => connection.displayName)
+                  .join(", ")
+              }}
+            </small>
+          </span>
+          <span
+            class="plugin-status"
+            :class="`plugin-status--${cardStatus(item.packageId).tone}`"
+          >
+            <span
+              v-if="cardStatus(item.packageId).tone === 'ready'"
+              class="plugin-status-badge"
+              aria-hidden="true"
+            >
+              <UiIcon name="check" :size="12" :weight="2.5" />
+            </span>
+            <span v-else class="plugin-status-dot" aria-hidden="true" />
+            {{ cardStatus(item.packageId).label }}
+          </span>
+          <UiIcon
+            class="plugin-chevron"
+            :class="{ 'plugin-chevron--open': isExpanded(item.packageId) }"
+            name="chevrons-right"
+            size="sm"
+          />
+        </button>
+        <div v-else class="plugin-summary">
+          <span class="plugin-logo" aria-hidden="true">
+            {{ item.displayName.slice(0, 1) }}
+          </span>
+          <span class="plugin-card-copy">
+            <strong>{{ item.displayName }}</strong>
+            <small>
+              {{
+                item.connectionTypes
+                  .map((connection) => connection.displayName)
+                  .join(", ")
+              }}
+            </small>
+          </span>
+          <UiButton
+            v-if="isPackageInstalled(item.packageId)"
+            @click="beginConnect(item)"
+          >
+            Connect
+          </UiButton>
+          <UiButton
+            v-else
+            variant="primary"
+            @click="install(item.packageId, item.version)"
+          >
+            Add
+          </UiButton>
         </div>
-        <div class="plugin-card-copy">
-          <strong>{{ item.displayName }}</strong>
-          <small>
-            {{
-              item.connectionTypes
-                .map((connection) => connection.displayName)
-                .join(", ")
-            }}
-          </small>
+
+        <div
+          :id="`plugin-accounts-${item.packageId}`"
+          class="plugin-accounts"
+          :class="{ 'plugin-accounts--open': isExpanded(item.packageId) }"
+          :inert="isExpanded(item.packageId) ? undefined : true"
+        >
+          <div class="plugin-accounts-inner">
+            <div
+              v-for="connection in packageConnections(item.packageId)"
+              :key="connection.connectionId"
+              class="plugin-account"
+            >
+              <div class="account-identity">
+                <span
+                  class="account-dot"
+                  :class="`account-dot--${connectionTone(connection)}`"
+                  aria-hidden="true"
+                />
+                <strong>{{ connection.displayName }}</strong>
+                <small>{{ connection.state }}</small>
+                <small v-if="connection.modelCatalog">
+                  · models {{ connection.modelCatalog.state }}
+                </small>
+              </div>
+              <div class="account-actions">
+                <UiButton @click="beginLabeling(connection)">Rename</UiButton>
+                <template v-if="connection.authorization?.kind === 'api-key'">
+                  <UiButton
+                    v-if="
+                      connection.modelCatalog && connection.state === 'ready'
+                    "
+                    @click="refreshModels(connection.connectionId)"
+                  >
+                    Refresh models
+                  </UiButton>
+                  <UiButton
+                    v-if="connection.state === 'ready'"
+                    @click="setEnabled(connection.connectionId, false)"
+                  >
+                    Disable
+                  </UiButton>
+                  <UiButton
+                    v-if="connection.state === 'disabled'"
+                    @click="setEnabled(connection.connectionId, true)"
+                  >
+                    Enable
+                  </UiButton>
+                  <UiButton
+                    v-if="
+                      connection.state === 'ready' ||
+                      connection.state === 'disabled'
+                    "
+                    @click="rotatingConnectionId = connection.connectionId"
+                  >
+                    Rotate key
+                  </UiButton>
+                  <UiButton
+                    v-if="connection.state !== 'revoking'"
+                    variant="danger"
+                    @click="disconnect(connection.connectionId)"
+                  >
+                    Disconnect
+                  </UiButton>
+                </template>
+                <UiButton
+                  v-else-if="connection.state !== 'revoking'"
+                  variant="danger"
+                  @click="revoke(connection.packageId, connection.connectionId)"
+                >
+                  Revoke
+                </UiButton>
+              </div>
+              <p
+                v-if="connection.failure"
+                class="connection-failure"
+                role="alert"
+              >
+                {{ connection.failure }}
+              </p>
+              <p
+                v-if="connection.modelCatalog?.failure"
+                class="connection-failure"
+                role="alert"
+              >
+                {{ connection.modelCatalog.failure }}
+              </p>
+              <form
+                v-if="labelingConnectionId === connection.connectionId"
+                class="inline-form"
+                @submit.prevent="saveLabel(connection.connectionId)"
+              >
+                <input
+                  v-model="connectionLabel"
+                  maxlength="120"
+                  aria-label="Connection label"
+                  required
+                />
+                <UiButton type="submit">Save label</UiButton>
+              </form>
+              <form
+                v-if="rotatingConnectionId === connection.connectionId"
+                class="inline-form"
+                @submit.prevent="rotateApiKey(connection.connectionId)"
+              >
+                <input
+                  v-model="rotationKey"
+                  type="password"
+                  autocomplete="new-password"
+                  aria-label="New API key"
+                  required
+                />
+                <UiButton type="submit">Save new key</UiButton>
+              </form>
+            </div>
+            <div
+              v-if="primaryConnectionType(item)?.allowMultiple"
+              class="account-add"
+            >
+              <UiButton @click="beginConnect(item)">
+                Add another account
+              </UiButton>
+            </div>
+          </div>
         </div>
-        <span
-          v-if="
-            hasReadyConnection(
-              item.packageId,
-              item.connectionTypes[0]?.id ?? '',
-            ) && !item.connectionTypes[0]?.allowMultiple
-          "
-          class="plugin-connected"
-        >
-          ✓ Connected
-        </span>
-        <UiButton
-          v-else-if="isPackageInstalled(item.packageId)"
-          @click="
-            item.connectionTypes[0]?.authorizationKind === 'api-key'
-              ? beginApiKeyConnection(
-                  item.packageId,
-                  item.connectionTypes[0]?.id ?? '',
-                  item.displayName,
-                )
-              : connect(item.packageId, item.connectionTypes[0]?.id ?? '')
-          "
-        >
-          Connect
-        </UiButton>
-        <UiButton
-          v-else
-          variant="primary"
-          @click="install(item.packageId, item.version)"
-        >
-          Add
-        </UiButton>
+
         <form
           v-if="apiKeyPackageId === item.packageId"
           class="api-key-form"
@@ -254,124 +482,13 @@ async function disconnect(connectionId: string): Promise<void> {
               required
             />
           </label>
-          <UiButton type="submit" variant="primary">Connect account</UiButton>
+          <div class="api-key-actions">
+            <UiButton @click="cancelApiKeyConnection">Cancel</UiButton>
+            <UiButton type="submit" variant="primary">Connect account</UiButton>
+          </div>
         </form>
       </article>
     </div>
-
-    <section
-      v-if="web.userSettings?.connections.length"
-      class="connected-accounts"
-    >
-      <h3>Connected accounts</h3>
-      <article
-        v-for="connection in web.userSettings.connections"
-        :key="connection.connectionId"
-        class="connected-account"
-      >
-        <div class="connection-status">
-          <strong>{{ connection.displayName }}</strong>
-          <small>Connection: {{ connection.state }}</small>
-          <small v-if="connection.modelCatalog">
-            Models: {{ connection.modelCatalog.state }}
-          </small>
-          <p v-if="connection.failure" class="connection-failure" role="alert">
-            {{ connection.failure }}
-          </p>
-          <p
-            v-if="connection.modelCatalog?.failure"
-            class="connection-failure"
-            role="alert"
-          >
-            {{ connection.modelCatalog.failure }}
-          </p>
-        </div>
-        <div class="connection-actions">
-          <UiButton
-            @click="
-              labelingConnectionId = connection.connectionId;
-              connectionLabel = connection.displayName;
-            "
-          >
-            Rename
-          </UiButton>
-          <template v-if="connection.authorization?.kind === 'api-key'">
-            <UiButton
-              v-if="connection.modelCatalog && connection.state === 'ready'"
-              @click="refreshModels(connection.connectionId)"
-            >
-              Refresh models
-            </UiButton>
-            <UiButton
-              v-if="connection.state === 'ready'"
-              @click="setEnabled(connection.connectionId, false)"
-            >
-              Disable
-            </UiButton>
-            <UiButton
-              v-if="connection.state === 'disabled'"
-              @click="setEnabled(connection.connectionId, true)"
-            >
-              Enable
-            </UiButton>
-            <UiButton
-              v-if="
-                connection.state === 'ready' || connection.state === 'disabled'
-              "
-              @click="rotatingConnectionId = connection.connectionId"
-            >
-              Rotate key
-            </UiButton>
-            <UiButton
-              v-if="
-                connection.state !== 'revoked' &&
-                connection.state !== 'revoking'
-              "
-              variant="danger"
-              @click="disconnect(connection.connectionId)"
-            >
-              Disconnect
-            </UiButton>
-          </template>
-          <UiButton
-            v-else-if="
-              connection.state !== 'revoked' && connection.state !== 'revoking'
-            "
-            variant="danger"
-            @click="revoke(connection.packageId, connection.connectionId)"
-          >
-            Revoke
-          </UiButton>
-        </div>
-        <form
-          v-if="labelingConnectionId === connection.connectionId"
-          class="rotation-form"
-          @submit.prevent="saveLabel(connection.connectionId)"
-        >
-          <input
-            v-model="connectionLabel"
-            maxlength="120"
-            aria-label="Connection label"
-            required
-          />
-          <UiButton type="submit">Save label</UiButton>
-        </form>
-        <form
-          v-if="rotatingConnectionId === connection.connectionId"
-          class="rotation-form"
-          @submit.prevent="rotateApiKey(connection.connectionId)"
-        >
-          <input
-            v-model="rotationKey"
-            type="password"
-            autocomplete="new-password"
-            aria-label="New API key"
-            required
-          />
-          <UiButton type="submit">Save new key</UiButton>
-        </form>
-      </article>
-    </section>
 
     <p
       v-if="web.pluginCatalog.length === 0 && !web.settingsError"
@@ -429,12 +546,8 @@ async function disconnect(connectionId: string): Promise<void> {
 }
 
 .plugin-card {
-  display: grid;
   min-width: 0;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 14px;
+  padding: 8px;
   border: 1px solid var(--frock-border);
   border-radius: var(--frock-radius-card);
   background: var(--frock-surface-raised);
@@ -447,6 +560,31 @@ async function disconnect(connectionId: string): Promise<void> {
 .plugin-card:hover {
   transform: translateY(-1px);
   box-shadow: var(--frock-shadow-control);
+}
+
+.plugin-summary {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--frock-radius-control);
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.plugin-summary--interactive {
+  grid-template-columns: 44px minmax(0, 1fr) auto 16px;
+  cursor: pointer;
+  transition: background-color var(--frock-motion-fast);
+}
+
+.plugin-summary--interactive:hover {
+  background: var(--frock-fill-hover);
 }
 
 .plugin-card-copy strong {
@@ -469,35 +607,6 @@ async function disconnect(connectionId: string): Promise<void> {
   min-width: 0;
 }
 
-.api-key-form {
-  display: grid;
-  grid-column: 1 / -1;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--frock-border);
-}
-
-.api-key-form label,
-.rotation-form {
-  display: grid;
-  gap: 6px;
-}
-
-.api-key-form span {
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-}
-
-.api-key-form input,
-.rotation-form input {
-  min-width: 0;
-  padding: 9px 11px;
-  border: 1px solid var(--frock-border);
-  border-radius: 9px;
-  background: var(--frock-surface-raised);
-  color: var(--frock-text);
-}
-
 .plugin-card-copy strong,
 .plugin-card-copy small {
   display: block;
@@ -512,57 +621,184 @@ async function disconnect(connectionId: string): Promise<void> {
   font-size: var(--frock-text-sm);
 }
 
-.plugin-connected {
-  color: var(--frock-success);
+.plugin-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: var(--frock-text-sm);
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.connected-accounts {
-  margin-top: 28px;
+.plugin-status--ready {
+  color: var(--frock-success);
 }
 
-.connected-accounts h3 {
-  font-family: var(--frock-font-display);
-  font-size: var(--frock-text-lg);
+.plugin-status--muted {
+  color: var(--frock-text-muted);
 }
 
-.connected-account {
+.plugin-status--attention {
+  color: var(--frock-danger-text);
+}
+
+.plugin-status-badge {
   display: grid;
-  min-height: 58px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  padding: 11px 0;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--frock-on-accent);
+  background: var(--frock-success);
+}
+
+.plugin-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentcolor;
+}
+
+.plugin-chevron {
+  color: var(--frock-text-subtle);
+  transform: rotate(0deg);
+  transition: transform var(--frock-motion-panel);
+}
+
+.plugin-chevron--open {
+  transform: rotate(90deg);
+}
+
+.plugin-accounts {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--frock-motion-panel),
+    opacity var(--frock-motion-panel);
+}
+
+.plugin-accounts--open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.plugin-accounts-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.plugin-account {
+  display: grid;
+  gap: 8px;
+  padding: 12px 8px;
   border-top: 1px solid var(--frock-border);
 }
 
-.connection-actions {
+.account-identity {
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: baseline;
   gap: 8px;
 }
 
-.rotation-form {
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) auto;
+.account-identity strong {
+  overflow: hidden;
+  font-size: var(--frock-text-base);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.connected-account strong,
-.connected-account small {
-  display: block;
-}
-
-.connected-account small {
-  margin-top: 3px;
+.account-identity small {
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
   text-transform: capitalize;
 }
 
+.account-dot {
+  width: 8px;
+  height: 8px;
+  align-self: center;
+  border-radius: 999px;
+}
+
+.account-dot--ready {
+  background: var(--frock-success);
+}
+
+.account-dot--muted {
+  background: var(--frock-text-subtle);
+}
+
+.account-dot--attention {
+  background: var(--frock-danger-text);
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-add {
+  padding: 12px 8px;
+  border-top: 1px solid var(--frock-border);
+}
+
+.account-actions :deep(.ui-button),
+.account-add :deep(.ui-button),
+.inline-form :deep(.ui-button) {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: var(--frock-text-sm);
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  animation: frock-rise-in var(--frock-motion-panel) both;
+}
+
+.api-key-form {
+  display: grid;
+  gap: 12px;
+  margin: 0 8px;
+  padding: 12px 0 8px;
+  border-top: 1px solid var(--frock-border);
+  animation: frock-rise-in var(--frock-motion-enter) both;
+}
+
+.api-key-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.api-key-form span {
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+
+.api-key-form input,
+.inline-form input {
+  min-width: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--frock-border);
+  border-radius: 9px;
+  background: var(--frock-surface-raised);
+  color: var(--frock-text);
+  font-size: var(--frock-text-base);
+}
+
+.api-key-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .connection-failure {
-  margin: 6px 0 0;
+  margin: 0;
   color: var(--frock-danger-text);
   font-size: var(--frock-text-sm);
 }

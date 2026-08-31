@@ -66,23 +66,14 @@ describe("Flock User contribution", () => {
     expect(await contribution.registration("alpha")).toMatchObject({
       schemaVersion: 1,
       initialName: "Alpha",
-      initialModel: settings.newBotModelTemplate,
-      initialModelBinding: {
-        assignment: {
-          assignmentId: "create-1",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "provider",
-          state: "enabled",
-        },
-        generation: "create-1",
-      },
       registeredAt: "2026-08-29T00:00:00.000Z",
     });
-    settings.newBotModelTemplate.providerModelId = "changed";
-    expect(
-      (await contribution.registration("alpha")).initialModel?.providerModelId,
-    ).toBe("model");
+    // A new Bot follows the User's default model instead of copying it, so
+    // the registration seed carries no model and no claimed binding.
+    expect(await contribution.registration("alpha")).toMatchObject({
+      initialModel: undefined,
+      initialModelBinding: undefined,
+    });
     await expect(
       contribution.createBot("user-1", { ...command(), name: "Different" }),
     ).rejects.toThrow("command ID collision");
@@ -94,21 +85,25 @@ describe("Flock User contribution", () => {
     ).rejects.toBeInstanceOf(FlockConflictError);
   });
 
-  test("rejects a default model without a claimable Connection binding", async () => {
+  test("admits a Bot while the User default model is unclaimable", async () => {
     const storage = new MemoryStorage();
+    let claims = 0;
     const contribution = createFlockUserBackendContribution({
       storage,
       readUserSettings: () => Promise.resolve(settings),
-      claimInitialModelBinding: () => Promise.resolve(undefined),
+      claimInitialModelBinding: () => {
+        claims += 1;
+        return Promise.resolve(undefined);
+      },
     });
 
     await expect(
       contribution.createBot("user-1", command()),
-    ).resolves.toMatchObject({
-      status: "rejected",
-      failure: "Default model Connection is unavailable",
-    });
-    expect((await contribution.listBots()).bots).toEqual([]);
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(claims).toBe(0);
+    expect((await contribution.listBots()).bots).toMatchObject([
+      { botId: "alpha", initialModel: undefined },
+    ]);
   });
 
   test("rejects malformed durable directories and receipts at the storage seam", async () => {

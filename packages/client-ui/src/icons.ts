@@ -4,6 +4,7 @@
  * fall back to Unicode symbols, whose ink offsets differ per font.
  */
 export type UiIconName =
+  | "arrow-down"
   | "arrow-up"
   | "check"
   | "chevrons-left"
@@ -21,6 +22,7 @@ export type UiIconName =
   | "user";
 
 export const uiIconPaths: Record<UiIconName, string[]> = {
+  "arrow-down": ["m19 12-7 7-7-7", "M12 5v14"],
   "arrow-up": ["m5 12 7-7 7 7", "M12 19V5"],
   check: ["M20 6 9 17l-5-5"],
   "chevrons-left": ["m11 17-5-5 5-5", "m18 17-5-5 5-5"],

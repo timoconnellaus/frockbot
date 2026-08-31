@@ -16,6 +16,7 @@ if (!surfaces || !web)
     class="bot-settings-trigger"
     icon="gear"
     label="Bot settings"
+    :pressed="surfaces.activeId.value === 'bot-settings'"
     @click="surfaces.open('bot-settings')"
   />
 </template>

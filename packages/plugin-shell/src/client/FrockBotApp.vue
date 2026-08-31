@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
-import { UiIcon, UiIconButton, UiSidebarOverlay } from "@frockbot/client-ui";
-import { computed, inject, onMounted, ref, watch } from "vue";
+import {
+  UiIcon,
+  UiIconButton,
+  UiMarkdown,
+  UiSidebarOverlay,
+} from "@frockbot/client-ui";
+import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
-  type WebToolActivity,
+  type WebChatMessage,
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
 
@@ -15,6 +20,17 @@ const web = injectedWeb;
 const surfaces = inject(clientSurfaceRegistryKey);
 if (!surfaces) throw new Error("client surface registry was not provided");
 const activeSurface = surfaces.active;
+/*
+ * A registered surface either floats over the workspace or takes the right
+ * panel's place. A panel-placed surface swaps the panel's content and forces
+ * the panel open; closing it hands the panel back to its plugins.
+ */
+const panelSurface = computed(() =>
+  activeSurface.value?.placement === "panel" ? activeSurface.value : undefined,
+);
+const overlaySurface = computed(() =>
+  activeSurface.value?.placement === "panel" ? undefined : activeSurface.value,
+);
 const state = computed(() => web.value);
 const composerContext = computed(
   () =>
@@ -43,7 +59,80 @@ const canSend = computed(
     draft.value.trim().length > 0,
 );
 
-onMounted(() => web.value.loadPluginCatalog());
+/*
+ * Tool activity is internal to the Turn. A Turn that produced only tool calls
+ * shows the Bot avatar while it runs and nothing once it finishes with no
+ * text, so an empty bubble never appears in the thread.
+ */
+function isVisible(message: WebChatMessage): boolean {
+  if (message.role === "user") return message.text.length > 0;
+  return message.text.length > 0 || message.status === "streaming";
+}
+const messages = computed(() => state.value.messages.filter(isVisible));
+
+/*
+ * The thread follows new content only while the reader is already at the
+ * bottom. Someone reading back through history is never yanked forward; the
+ * jump control tells them there is something newer.
+ */
+const thread = ref<HTMLElement>();
+const pinnedToLatest = ref(true);
+const hasUnseenBelow = ref(false);
+const nearBottomThreshold = 80;
+const prefersReducedMotion =
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function onThreadScroll(): void {
+  const element = thread.value;
+  if (!element) return;
+  pinnedToLatest.value =
+    element.scrollHeight - element.scrollTop - element.clientHeight <=
+    nearBottomThreshold;
+  if (pinnedToLatest.value) hasUnseenBelow.value = false;
+}
+
+async function scrollToLatest(
+  behavior: ScrollBehavior = "smooth",
+): Promise<void> {
+  await nextTick();
+  const element = thread.value;
+  if (!element) return;
+  element.scrollTo({
+    top: element.scrollHeight,
+    behavior: prefersReducedMotion ? "auto" : behavior,
+  });
+  pinnedToLatest.value = true;
+  hasUnseenBelow.value = false;
+}
+
+onMounted(() => {
+  void web.value.loadPluginCatalog();
+  void scrollToLatest("auto");
+});
+
+watch(
+  // Message count moves on a new Turn; the last message's length moves on
+  // every streamed delta.
+  () =>
+    [messages.value.length, messages.value.at(-1)?.text.length ?? 0] as const,
+  ([count], [previousCount]) => {
+    if (!pinnedToLatest.value) {
+      hasUnseenBelow.value = true;
+      return;
+    }
+    // Streamed deltas jump instantly so the smooth scroll never falls behind.
+    void scrollToLatest(count === previousCount ? "auto" : "smooth");
+  },
+);
+watch(
+  () => state.value.activeBotId,
+  () => {
+    pinnedToLatest.value = true;
+    void scrollToLatest("auto");
+  },
+);
 
 watch(
   composerContext,
@@ -56,18 +145,18 @@ watch(
 watch(draft, (value) => draftStore.setDraft(composerContext.value, value), {
   flush: "sync",
 });
-
-function toolSymbol(tool: WebToolActivity): string {
-  if (tool.status === "running") return "···";
-  if (tool.status === "failed") return "!";
-  return "✓";
-}
+watch(panelSurface, (surface) => {
+  if (surface) rightPanelOpen.value = true;
+});
 
 async function sendMessage(): Promise<void> {
   const text = draft.value.trim();
   if (!text || !canSend.value) return;
   const submission = draftStore.begin(composerContext.value, text);
   draft.value = "";
+  // Sending is an explicit request to follow along again.
+  pinnedToLatest.value = true;
+  void scrollToLatest();
   const result = await web.value.sendPrompt(text);
   if (!result.accepted) {
     const restored = draftStore.reject(submission);
@@ -91,7 +180,11 @@ function handleComposerKeydown(event: KeyboardEvent): void {
   <div class="frockbot-root">
     <div
       class="app-shell"
-      :class="{ 'panel-open': rightPanelOpen, 'mac-desktop': macDesktop }"
+      :class="{
+        'panel-open': rightPanelOpen,
+        'panel-surface': Boolean(panelSurface),
+        'mac-desktop': macDesktop,
+      }"
     >
       <aside class="sidebar">
         <div class="brand" aria-hidden="true">
@@ -118,8 +211,13 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           </div>
         </header>
 
-        <section class="thread" aria-live="polite">
-          <div v-if="state.messages.length === 0" class="empty-thread">
+        <section
+          ref="thread"
+          class="thread"
+          aria-live="polite"
+          @scroll.passive="onThreadScroll"
+        >
+          <div v-if="messages.length === 0" class="empty-thread">
             <div class="empty-mark"><UiIcon name="sparkle" size="lg" /></div>
             <h1>
               {{ state.modelReady ? `${botName} is ready.` : "Choose a model" }}
@@ -128,12 +226,12 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               {{
                 state.modelReady
                   ? "Start with a conversation. Cordis plugins can add the rest."
-                  : "Select a model Connection in Bot settings to begin."
+                  : "Choose a default model in Settings to begin."
               }}
             </p>
           </div>
           <article
-            v-for="message in state.messages"
+            v-for="message in messages"
             v-else
             :key="message.id"
             class="message"
@@ -141,28 +239,44 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               message.role === 'user' ? 'message-user' : 'message-assistant'
             "
           >
-            <div class="message-bubble">
-              <span v-if="message.text">{{ message.text }}</span>
-              <span v-else class="typing" aria-label="Thinking"
-                ><i /><i /><i
-              /></span>
-            </div>
-            <div v-if="message.tools.length" class="tool-list">
-              <details
-                v-for="tool in message.tools"
-                :key="tool.id"
-                class="tool-row"
-                :class="`tool-${tool.status}`"
+            <template v-if="message.role === 'assistant'">
+              <!--
+                The Bot's own avatar comes from whichever Package owns Bot
+                identity. When no Package fills the slot the sparkle tile is
+                the only child and shows through.
+              -->
+              <div
+                class="bot-avatar"
+                :class="{
+                  'bot-avatar-live': message.status === 'streaming',
+                  'bot-avatar-waiting':
+                    message.status === 'streaming' && !message.text,
+                }"
               >
-                <summary>
-                  <span class="tool-symbol">{{ toolSymbol(tool) }}</span>
-                  <span>{{ tool.name }}</span>
-                </summary>
-                <pre v-if="tool.text">{{ tool.text }}</pre>
-              </details>
-            </div>
+                <span class="bot-avatar-fallback" aria-hidden="true"
+                  ><UiIcon name="sparkle" size="sm"
+                /></span>
+                <k-slot name="frockbot.bot-avatar" />
+              </div>
+              <div v-if="message.text" class="message-bubble">
+                <UiMarkdown :text="message.text" />
+              </div>
+            </template>
+            <div v-else class="message-bubble">{{ message.text }}</div>
           </article>
         </section>
+
+        <Transition name="banner">
+          <UiIconButton
+            v-if="hasUnseenBelow && !state.error && !state.activeRun"
+            class="jump-latest"
+            icon="arrow-down"
+            label="Jump to latest"
+            variant="outlined"
+            size="sm"
+            @click="scrollToLatest()"
+          />
+        </Transition>
 
         <Transition name="banner">
           <div
@@ -192,7 +306,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               isConnecting
                 ? 'Connecting…'
                 : !state.modelReady
-                  ? 'Select a model in Bot settings'
+                  ? 'Choose a default model in Settings'
                   : `Message ${botName}`
             "
             :disabled="isConnecting || !state.modelReady || isRunning"
@@ -223,8 +337,36 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         :aria-hidden="!rightPanelOpen"
         :inert="!rightPanelOpen"
       >
-        <div class="right-panel-content">
-          <k-slot name="frockbot.right-panel" />
+        <!--
+          Both layers live in one stack so panel plugins keep their state
+          while a surface holds their place.
+        -->
+        <div class="right-panel-stack">
+          <Transition name="panel-swap">
+            <div v-show="!panelSurface" class="right-panel-content">
+              <k-slot name="frockbot.right-panel" />
+            </div>
+          </Transition>
+          <Transition name="panel-swap">
+            <section
+              v-if="panelSurface"
+              class="panel-surface-view"
+              :aria-label="panelSurface.title"
+            >
+              <header class="panel-surface-header">
+                <UiIconButton
+                  icon="close"
+                  label="Close settings"
+                  size="sm"
+                  @click="surfaces.close()"
+                />
+                <h2>{{ panelSurface.title }}</h2>
+              </header>
+              <div class="panel-surface-content">
+                <component :is="panelSurface.component" />
+              </div>
+            </section>
+          </Transition>
         </div>
       </aside>
 
@@ -242,11 +384,11 @@ function handleComposerKeydown(event: KeyboardEvent): void {
     <k-slot name="frockbot.overlays" />
 
     <UiSidebarOverlay
-      :open="Boolean(activeSurface)"
-      :title="activeSurface?.title ?? ''"
+      :open="Boolean(overlaySurface)"
+      :title="overlaySurface?.title ?? ''"
       @close="surfaces.close()"
     >
-      <component :is="activeSurface.component" v-if="activeSurface" />
+      <component :is="overlaySurface.component" v-if="overlaySurface" />
     </UiSidebarOverlay>
   </div>
 </template>

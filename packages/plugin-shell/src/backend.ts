@@ -49,6 +49,7 @@ import {
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
   resolveBotModelBindingV1,
+  resolveEffectiveBotModelV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
@@ -1473,7 +1474,7 @@ export class ShellBotBackendContribution {
       }
     | undefined
   > {
-    if (!settings?.model) return undefined;
+    if (!settings) return undefined;
     let runtime: {
       agentPackages: FoundationAgentPackage[];
       modelSelection: RuntimeModelSelection;
@@ -1808,7 +1809,16 @@ export class ShellBotBackendContribution {
         },
       )),
     ];
-    if (!settings.model) {
+    // A Bot without its own `model` follows the User's default model. The
+    // Bot's own Assignment still carries the authority (ADR 0003); the default
+    // only names which model that Assignment's Connection should run.
+    const effective = resolveEffectiveBotModelV1({
+      bot: settings,
+      user,
+      packages: packageDefinitions,
+    });
+    const effectiveModel = effective.model;
+    if (!effectiveModel) {
       throw new Error("Bot model Connection is not configured");
     }
 
@@ -1832,14 +1842,14 @@ export class ShellBotBackendContribution {
         !assignment?.connectionId ||
         !pkg ||
         !connectionTypeId ||
-        settings.model.connectionId !== admittedBinding.connectionId ||
-        settings.model.providerModelId !== admittedRequest.model
+        effectiveModel.connectionId !== admittedBinding.connectionId ||
+        effectiveModel.providerModelId !== admittedRequest.model
       ) {
         throw new Error("Admitted model binding is unavailable");
       }
       binding = {
         state: "ready",
-        assignment: structuredClone(settings.model),
+        assignment: structuredClone(effectiveModel),
         packageId: pkg.id,
         providerType: admittedRequest.provider,
         connection: {
@@ -1854,12 +1864,11 @@ export class ShellBotBackendContribution {
         },
       };
     } else {
-      binding = resolveBotModelBindingV1({
-        model: settings.model,
-        assignments: settings.assignments,
-        user,
-        packages: packageDefinitions,
-      });
+      binding = effective.binding ?? {
+        assignment: structuredClone(effectiveModel),
+        state: "unavailable",
+        failure: "Bot model Connection is unavailable",
+      };
     }
     if (
       binding.state === "unavailable" ||
@@ -1886,7 +1895,7 @@ export class ShellBotBackendContribution {
           return userConfiguration.leaseModelCredential(
             identity.userId,
             binding.connection!.connectionId,
-            settings.model!.providerModelId,
+            effectiveModel.providerModelId,
             effectId,
             expectedGeneration,
           );
@@ -1905,7 +1914,7 @@ export class ShellBotBackendContribution {
       agentPackages,
       modelSelection: {
         provider: binding.providerType,
-        model: settings.model.providerModelId,
+        model: effectiveModel.providerModelId,
         connectionId: binding.connection.connectionId,
         ...(binding.connection.generation
           ? { connectionGeneration: binding.connection.generation }
@@ -2438,6 +2447,85 @@ export class ShellBotBackendContribution {
     return existing;
   }
 
+  /**
+   * A Bot that follows the User's default model still needs its own durable
+   * Assignment: authority reaches a Bot only through an explicit Assignment
+   * and, when required, a Connection (ADR 0003). The Assignment is claimed
+   * lazily the first time the Bot resolves its execution context under a
+   * default it has not yet claimed, exactly as Flock claims one when a Bot is
+   * created, so the User Connection's dependency ledger stays accurate and
+   * revocation still fails closed.
+   */
+  private async claimDefaultModelAssignment(
+    identity: BotIdentity,
+    settings: BotSettingsViewV1,
+    user: UserSettingsViewV1,
+    application: Awaited<ReturnType<typeof compileFoundationApplication>>,
+  ): Promise<BotSettingsViewV1> {
+    const model = user.newBotModelTemplate;
+    if (settings.model || !model) return settings;
+    const connection = user.connections.find(
+      (candidate) => candidate.connectionId === model.connectionId,
+    );
+    const installation = user.packages.find(
+      (candidate) =>
+        candidate.packageId === connection?.packageId &&
+        candidate.state === "installed",
+    );
+    const pkg = application.packages.find(
+      (candidate) =>
+        candidate.id === connection?.packageId &&
+        candidate.version === installation?.version,
+    );
+    const connectionType = pkg?.manifest.configuration?.connectionTypes.find(
+      (candidate) => candidate.id === connection?.connectionTypeId,
+    );
+    const capability = pkg?.manifest.configuration?.capabilities.find(
+      (candidate) =>
+        candidate.kind === "model" &&
+        connectionType?.capabilities.includes(candidate.id) &&
+        candidate.connectionTypes.includes(connectionType.id),
+    );
+    if (connection?.state !== "ready" || !pkg || !capability) return settings;
+    if (
+      settings.assignments.some(
+        (assignment) =>
+          assignment.packageId === pkg.id &&
+          assignment.capabilityId === capability.id &&
+          assignment.connectionId === connection.connectionId,
+      )
+    ) {
+      return settings;
+    }
+    const commandId = crypto.randomUUID();
+    try {
+      const receipt = await this.executeConfigurationCommand(identity, {
+        schemaVersion: 1,
+        type: "bot/assign-capability",
+        commandId,
+        expectedRevision: settings.revision,
+        botId: identity.botId,
+        assignment: {
+          assignmentId: commandId,
+          packageId: pkg.id,
+          capabilityId: capability.id,
+          connectionId: connection.connectionId,
+        },
+      });
+      if (receipt.status !== "applied") return settings;
+    } catch (error) {
+      // The default model is not the Bot's own binding: a claim that cannot be
+      // made leaves the Bot without a model, visibly, rather than failing the
+      // caller that only wanted to read the plan.
+      console.error(
+        "Default model Assignment claim failed",
+        error instanceof Error ? error.message : "unknown failure",
+      );
+      return settings;
+    }
+    return this.ensureBotSettings(identity);
+  }
+
   private async resolveExecutionContext(identity: BotIdentity): Promise<{
     settings: BotSettingsViewV1;
     user: UserSettingsViewV1;
@@ -2459,6 +2547,24 @@ export class ShellBotBackendContribution {
         connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
       })),
     });
+    settings = await this.claimDefaultModelAssignment(
+      identity,
+      settings,
+      user,
+      application,
+    );
+    if (settings.revision !== plan.revision) {
+      plan = resolveBotExecutionPlanV1({
+        bot: settings,
+        user,
+        packages: application.packages.map((pkg) => ({
+          packageId: pkg.id,
+          version: pkg.version,
+          capabilities: pkg.manifest.configuration?.capabilities ?? [],
+          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+        })),
+      });
+    }
     const changed = settings.assignments.some(
       (assignment, index) =>
         assignment.state !== plan.assignments[index]?.state,

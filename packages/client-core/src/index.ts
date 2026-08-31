@@ -293,6 +293,12 @@ export interface ClientSurfaceRegistration {
   id: string;
   title: string;
   component: Component;
+  /**
+   * Where the shell renders the surface. "overlay" (the default) floats the
+   * surface over the workspace; "panel" swaps it into the right panel in place
+   * of that panel's normal content, so the surrounding chrome stays put.
+   */
+  placement?: "overlay" | "panel";
 }
 
 export interface ClientSurfaceRegistry {
