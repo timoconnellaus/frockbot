@@ -7,14 +7,8 @@ import {
 } from "./test/computer-host-fake.ts";
 import {
   createOutboundService,
-  readDevVariable,
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
-
-const runLiveSpriteTest = process.env.FROCKBOT_RUN_LIVE_SPRITE_TEST === "1";
-const spritesToken = runLiveSpriteTest
-  ? (process.env.SPRITES_TOKEN ?? readDevVariable("SPRITES_TOKEN") ?? "")
-  : "";
 
 // One instance for the whole project. It runs in Node, so the suites reach its
 // state over the same binding, under `/__fake/*`.
@@ -25,9 +19,7 @@ export default defineConfig({
     cloudflareTest({
       main: "./test/fly-compatibility-worker.ts",
       miniflare: {
-        outboundService: createOutboundService({
-          liveSpriteProbe: runLiveSpriteTest,
-        }),
+        outboundService: createOutboundService(),
         compatibilityDate: "2026-08-27",
         compatibilityFlags: ["nodejs_compat"],
         workerLoaders: {
@@ -58,8 +50,9 @@ export default defineConfig({
         },
         bindings: {
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
-          FROCKBOT_RUN_LIVE_SPRITE_TEST: runLiveSpriteTest ? "1" : "0",
-          SPRITES_TOKEN: spritesToken,
+          // No Sprites credential reaches this Worker, in tests or in
+          // production: the Computer host holds the only copy (ADR 0004).
+          SPRITES_TOKEN: "",
           COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
           COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
           // A leak canary: a Bot isolate must never see a host binding.

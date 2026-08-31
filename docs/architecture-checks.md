@@ -329,11 +329,17 @@ Durable Object prepares, admits, journals and executes the call for real.
 
 Not covered here, and why:
 
-- **S8 Bot Durable Object → Computer/Sprite.** Unreachable from workerd at all
-  (ADR 0004): the Sprites HTTP exec protocol needs preserved chunk boundaries
-  that workerd does not preserve, so every exec fails in local dev, in this
-  pool, and in the deployed Worker alike. `test:fly:workerd:live` records that
-  boundary as an opt-in probe.
+- **S8 Bot Durable Object → Computer.** Covered now, and by a fake host rather
+  than a Sprite. The Durable Object reaches a Computer only through the
+  `COMPUTER_HOST` service binding (ADR 0004), so
+  `apps/cloudflare/test/computer-host-fake.ts` answers that binding with the
+  real v1 protocol over an in-memory Computer, and
+  `test/computer-host-client.workerd.ts` proves streaming, truncation,
+  cancellation, timeout, load shedding, and DTO refusal against real Durable
+  Object storage. What no local pool can cover is the container itself:
+  `@cloudflare/vitest-plugin` never touches Docker, so a real container runs
+  only under `wrangler dev` or in production, and `apps/computer-host/live-test.ts`
+  drives it there against a real disposable Sprite.
 - **S9 client HTTP error decoding.** `apiRequest` runs in a browser. This layer
   proves the bodies it receives are always JSON; proving what the browser does
   with them needs the Playwright layer.

@@ -13,7 +13,9 @@ import { resolve } from "node:path";
 
 /**
  * Reads one variable out of `apps/cloudflare/.dev.vars` without importing it
- * into the process environment. Only the opt-in live Sprite probe uses it.
+ * into the process environment. Nothing in the suite needs one today; it is
+ * kept because a live opt-in probe is one edit away and reading `.dev.vars`
+ * correctly (quoted values included) is the part that is easy to get wrong.
  */
 export function readDevVariable(name: string): string | undefined {
   let source: string;
@@ -229,34 +231,17 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
   return new Response("unexpected Ollama Cloud request", { status: 404 });
 }
 
-/** The only host the `@fly/sprites` 0.1.0 SDK contacts. */
-const SPRITES_HOST = "api.sprites.dev";
-
 /**
  * The `outboundService` both configs install.
  *
- * Every request is answered by {@link ollamaCloudStub}, with one exception:
- * the opt-in live Sprite probe has to reach the real Sprites API. Without the
- * pass-through the stub 403s `api.sprites.dev` and the probe records a network
- * refusal instead of the workerd chunk-framing failure it exists to observe.
- * Nothing else is ever let out, and the pass-through is off unless
- * `FROCKBOT_RUN_LIVE_SPRITE_TEST=1`.
+ * Every outbound request is answered by {@link ollamaCloudStub}, and nothing
+ * is ever let out. There is no longer an exception for the Sprites API: the
+ * Computer host holds the SDK and the token (ADR 0004), so no Worker under
+ * test has any business reaching `api.sprites.dev` at all.
  */
-export function createOutboundService(options: {
-  liveSpriteProbe: boolean;
-}): (request: Request) => Promise<Response> {
-  return async (request: Request): Promise<Response> => {
-    if (options.liveSpriteProbe && new URL(request.url).host === SPRITES_HOST) {
-      // This callback runs in Node, where `fetch(request)` cannot consume a
-      // Miniflare `Request` ("Failed to parse URL from [object Request]"), so
-      // the request is replayed field by field.
-      return (await fetch(request.url, {
-        method: request.method,
-        headers: request.headers as unknown as HeadersInit,
-        body: request.body as unknown as BodyInit | null,
-        ...(request.body ? { duplex: "half" } : {}),
-      } as RequestInit)) as unknown as Response;
-    }
-    return ollamaCloudStub(request);
-  };
+export function createOutboundService(): (
+  request: Request,
+) => Promise<Response> {
+  return (request: Request): Promise<Response> =>
+    Promise.resolve(ollamaCloudStub(request));
 }

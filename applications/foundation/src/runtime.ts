@@ -53,6 +53,10 @@ import notificationsManifest from "@frockbot/plugin-desktop-notifications/manife
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
 import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
+import {
+  ComputerHostClient,
+  type ComputerHostFetcherV1,
+} from "@frockbot/plugin-fly-sprite/host-client";
 import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
 // Flock contributes lifecycle routes and durable User/Bot state.
 import flockManifest from "@frockbot/plugin-flock/manifest";
@@ -469,9 +473,27 @@ function computerProviderPlugin(host: {
   readSecret(name: string): string | undefined;
   computerSync?: ComputerSyncHostV1;
   computerHost?: SharedComputerHostClient;
+  computerHostBinding?: ComputerHostBinding;
 }): Plugin.Function {
+  // `SPRITES_TOKEN` is no longer a credential here — the Computer host holds
+  // the only copy, and this Worker could not use one if it had it. It survives
+  // as the answer to one question: has this deployment a Computer at all? With
+  // it unset the Computer card still reads "Set SPRITES_TOKEN to attach a
+  // computer", which is the truth: no host of ours has a Sprites account.
+  const configured = Boolean(host.readSecret("SPRITES_TOKEN")?.trim());
+  const binding = host.computerHostBinding;
   const fly = createFlySpriteProviderPlugin(undefined, {
-    token: host.readSecret("SPRITES_TOKEN"),
+    ...(configured && binding
+      ? {
+          host: (identity, tenant) =>
+            new ComputerHostClient({
+              fetcher: binding.fetcher,
+              hostToken: binding.hostToken,
+              identity,
+              tenant,
+            }),
+        }
+      : {}),
     ...(host.computerSync ? { sync: host.computerSync } : {}),
   });
   const shared = host.computerHost
@@ -486,6 +508,18 @@ function computerProviderPlugin(host: {
   return plugin;
 }
 
+/**
+ * The `COMPUTER_HOST` service binding and the secret presented on it.
+ *
+ * Both or neither: a binding with no token reaches a host that refuses every
+ * call, which would surface as a 401 on each Turn rather than as a Computer
+ * that is not configured.
+ */
+export interface ComputerHostBinding {
+  fetcher: ComputerHostFetcherV1;
+  hostToken: string;
+}
+
 export function createFoundationHostedRuntimePackages(
   plan: ApplicationPlan,
   host: {
@@ -498,6 +532,13 @@ export function createFoundationHostedRuntimePackages(
      * `shared-computer` provider is registered beside the in-worker provider.
      */
     computerHost?: SharedComputerHostClient;
+    /**
+     * The shared Computer host of ADR 0004: the service binding the Bot
+     * Durable Object reaches a Computer through, and the secret it presents.
+     * Absent, and the Fly provider registers unconfigured — this Worker holds
+     * no Sprites SDK and no way to reach a Computer without it.
+     */
+    computerHostBinding?: ComputerHostBinding;
     /**
      * The Package authoring seam, supplied by the Bot Durable Object for one
      * admitted Turn. Absent outside a Turn, and the Authoring Package is then

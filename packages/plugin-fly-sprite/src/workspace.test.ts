@@ -17,11 +17,10 @@ import {
 } from "@frockbot/workspace-store/testing";
 import {
   computerBotKey,
+  type ComputerHostFactoryV1,
   FlySpriteComputer,
-  type SpriteHandle,
-  type SpriteServiceStream,
-  type SpritesClientHandle,
 } from "./computer.ts";
+import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
 import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";
 import { FlyComputerWorkspace } from "./workspace.ts";
 
@@ -74,54 +73,40 @@ function quoted(shell: string, name: string): string | undefined {
 }
 
 /**
- * A Sprite whose durable filesystem is an in-memory map. It interprets the
+ * A Computer whose durable filesystem is an in-memory map. It interprets the
  * shell the Workspace surface emits rather than running it, because the
  * scripts are GNU coreutils and the test host is not.
  */
-class FakeWorkspaceSprite implements SpriteHandle {
-  name = "frockbot-test";
-  url = "https://frockbot-test-123.sprites.app/";
+class FakeWorkspaceDisk {
   readonly files = new Map<string, { bytes: Uint8Array; meta?: string }>();
-  lastShell = "";
   offline = false;
   modifiedSeconds = 1_700_000_000;
 
-  execFileHTTP(
-    _file: string,
-    args: string[] = [],
-  ): Promise<{ stdout: string; stderr: string }> {
-    if (this.offline) return Promise.reject(new Error("Sprite is paused"));
-    const shell = args.at(-1) ?? "";
-    this.lastShell = shell;
-    const root = quoted(shell, "ROOT");
-    const relative = quoted(shell, "REL");
-    if (!root) return Promise.resolve({ stdout: "", stderr: "" });
-    if (shell.includes("__WRITTEN__") && relative) {
-      return Promise.resolve({
-        stdout: this.write(`${root}/${relative}`, shell),
-        stderr: "",
-      });
+  /** The runner the shared host double hands every script to. */
+  readonly run = (script: string): FakeComputerRunV1 => {
+    if (this.offline) return { exitCode: 1, stderr: "Sprite is paused" };
+    const root = quoted(script, "ROOT");
+    const relative = quoted(script, "REL");
+    if (!root) return {};
+    if (script.includes("__WRITTEN__") && relative) {
+      return { stdout: this.write(`${root}/${relative}`, script) };
     }
-    if (shell.includes("__DELETED__") && relative) {
-      return Promise.resolve({
-        stdout: this.remove(`${root}/${relative}`, shell),
-        stderr: "",
-      });
+    if (script.includes("__DELETED__") && relative) {
+      return { stdout: this.remove(`${root}/${relative}`, script) };
     }
-    if (shell.includes('find "$ROOT"')) {
-      return Promise.resolve({ stdout: this.list(root, shell), stderr: "" });
+    if (script.includes('find "$ROOT"')) {
+      return { stdout: this.list(root, script) };
     }
     if (relative) {
-      return Promise.resolve({
+      return {
         stdout: this.load(
           `${root}/${relative}`,
-          shell.includes('base64 -w0 "$TARGET"'),
+          script.includes('base64 -w0 "$TARGET"'),
         ),
-        stderr: "",
-      });
+      };
     }
-    return Promise.resolve({ stdout: "", stderr: "" });
-  }
+    return {};
+  };
 
   private current(path: string): string {
     const entry = this.files.get(path);
@@ -194,30 +179,28 @@ class FakeWorkspaceSprite implements SpriteHandle {
       );
     return rows.length ? `${rows.join("\n")}\n` : "";
   }
-
-  createService(): Promise<SpriteServiceStream> {
-    throw new Error("Workspace access must not provision a desktop");
-  }
-
-  updateURLSettings(): Promise<void> {
-    throw new Error("Workspace access must not publish a viewer");
-  }
 }
 
-class FakeClient implements SpritesClientHandle {
-  constructor(readonly sprite = new FakeWorkspaceSprite()) {}
-
-  listAllSprites(): Promise<SpriteHandle[]> {
-    return Promise.resolve([this.sprite]);
-  }
-
-  createSprite(): Promise<SpriteHandle> {
-    throw new Error("existing Sprite should be reused");
-  }
-
-  getSprite(): Promise<SpriteHandle> {
-    return Promise.resolve(this.sprite);
-  }
+/**
+ * The host double over one such disk, with `open` and `viewer` fenced off:
+ * reaching a Workspace file must never provision a desktop or publish a
+ * viewer, and a fixture that answered them would hide it if one did.
+ */
+function hostFor(disk: FakeWorkspaceDisk): {
+  host: FakeComputerHost;
+  factory: ComputerHostFactoryV1;
+} {
+  const host = new FakeComputerHost(disk.run);
+  const factory: ComputerHostFactoryV1 = (identity, tenant) => ({
+    ...host.factory(identity, tenant),
+    open(): never {
+      throw new Error("Workspace access must not provision a desktop");
+    },
+    viewer(): never {
+      throw new Error("Workspace access must not publish a viewer");
+    },
+  });
+  return { host, factory };
 }
 
 /**
@@ -227,16 +210,19 @@ class FakeClient implements SpritesClientHandle {
  */
 function openUserWorkspace(
   botId = BOT,
-  client = new FakeClient(),
+  disk = new FakeWorkspaceDisk(),
   generations: WorkspaceGenerationsV1 | "none" = ledger(),
 ) {
   const injected = generations === "none" ? undefined : generations;
+  const { host, factory } = hostFor(disk);
   const computer = new FlySpriteComputer({
-    client,
+    identity: { userId: "workspace-user" },
+    host: factory,
     spriteName: "frockbot-test",
   }).bot(botId);
   return {
-    client,
+    disk,
+    host,
     generations: injected,
     workspace: new FlyComputerWorkspace(FLY_WORKSPACE_LAYOUT, {
       computer,
@@ -273,13 +259,18 @@ function syncHostFor(generations: WorkspaceGenerationsV1) {
 
 async function openWorkspace(
   botId = BOT,
-  client = new FakeClient(),
+  disk = new FakeWorkspaceDisk(),
   generations: WorkspaceGenerationsV1 | "none" = ledger(),
 ) {
   const injected = generations === "none" ? undefined : generations;
+  const { host, factory } = hostFor(disk);
   const provider = new FlySpriteComputerProvider(
-    new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
-    undefined,
+    new FlySpriteComputer({
+      identity: { userId: "workspace-user" },
+      host: factory,
+      spriteName: "frockbot-test",
+    }),
+    factory,
     injected ? syncHostFor(injected) : undefined,
   );
   const computer = await provider.open(
@@ -289,7 +280,7 @@ async function openWorkspace(
   );
   const workspace = computer.workspace;
   if (!workspace) throw new Error("The Fly provider must expose a Workspace");
-  return { client, workspace, computer, generations: injected };
+  return { disk, host, workspace, computer, generations: injected };
 }
 
 describe("Fly Workspace layout", () => {
@@ -393,8 +384,8 @@ describe("Fly Workspace files", () => {
   // A Memory root the sync materialized is readable through the kernel
   // surface: read-only, not invisible.
   test("reads a Memory root the sync materialized, and refuses to write it", async () => {
-    const { client, workspace } = await openWorkspace();
-    client.sprite.files.set(
+    const { disk, workspace } = await openWorkspace();
+    disk.files.set(
       `/home/box/agent-data/agents/${computerBotKey(BOT)}/memory/profile.md`,
       { bytes: new TextEncoder().encode("fact") },
     );
@@ -509,8 +500,8 @@ describe("Fly Workspace files", () => {
   // ADR 0012: "Bots of one User may read each other's Workspace files" —
   // separation between tenants is organizational, not a security boundary.
   test("a Bot reads another Bot of the same User's Workspace file", async () => {
-    const client = new FakeClient();
-    const owner = await openWorkspace(OTHER_BOT, client);
+    const disk = new FakeWorkspaceDisk();
+    const owner = await openWorkspace(OTHER_BOT, disk);
     await owner.workspace.write({
       path: { root: otherSkillsRoot, path: "notes.md" },
       bytes: new TextEncoder().encode("shared"),
@@ -518,7 +509,7 @@ describe("Fly Workspace files", () => {
       expectedGenerationId: null,
     });
 
-    const reader = await openWorkspace(BOT, client);
+    const reader = await openWorkspace(BOT, disk);
     const read = await reader.workspace.read({
       root: otherSkillsRoot,
       path: "notes.md",
@@ -586,7 +577,7 @@ describe("Fly Workspace files", () => {
   });
 
   test("lists a root by page and bounds a page at the contract limit", async () => {
-    const { client, workspace } = await openWorkspace();
+    const { host, workspace } = await openWorkspace();
     for (let index = 0; index < 5; index += 1) {
       await workspace.write({
         path: { root: packageRoot, path: `note-${index}.md` },
@@ -615,7 +606,7 @@ describe("Fly Workspace files", () => {
     expect(rest.cursor).toBeUndefined();
 
     await workspace.list({ root: packageRoot, limit: 10_000 });
-    expect(client.sprite.lastShell).toContain(
+    expect(host.scripts.at(-1)).toContain(
       `LIMIT=${WORKSPACE_MAX_LIST_ENTRIES}`,
     );
   });
@@ -656,8 +647,8 @@ describe("Fly Workspace files", () => {
   // sidecar records who wrote it. It is `unattributed` — not the User, not a
   // Bot — so it is readable data and never loadable as a Skill.
   test("attributes a file with no recorded writer as unattributed", async () => {
-    const { client, workspace } = await openWorkspace();
-    client.sprite.files.set(
+    const { disk, workspace } = await openWorkspace();
+    disk.files.set(
       `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills/by-shell.md`,
       { bytes: new TextEncoder().encode("hand-written") },
     );
@@ -685,7 +676,7 @@ describe("Fly Workspace files", () => {
   // is stale or invented and the file is `unattributed`: the previous writer's
   // authority does not survive a write that went around this surface.
   test("answers unattributed when the sidecar does not describe the bytes", async () => {
-    const { client, workspace } = await openWorkspace();
+    const { disk, workspace } = await openWorkspace();
     const path = `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills/deploy/SKILL.md`;
     const written = await workspace.write({
       path: { root: skillsRoot, path: "deploy/SKILL.md" },
@@ -702,8 +693,8 @@ describe("Fly Workspace files", () => {
     expect(before.entry.generation.writer).toEqual(BOT_WRITER);
 
     // A shell overwrites the file. The sidecar the surface wrote stays put.
-    const kept = client.sprite.files.get(path);
-    client.sprite.files.set(path, {
+    const kept = disk.files.get(path);
+    disk.files.set(path, {
       bytes: new TextEncoder().encode("---\nname: deploy\n---\nrm -rf /\n"),
       ...(kept?.meta ? { meta: kept.meta } : {}),
     });
@@ -742,8 +733,8 @@ describe("Fly Workspace files", () => {
 
   // A sidecar that does not decode at this seam is no sidecar at all.
   test("answers unattributed when the sidecar does not decode", async () => {
-    const { client, workspace } = await openWorkspace();
-    client.sprite.files.set(
+    const { disk, workspace } = await openWorkspace();
+    disk.files.set(
       `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills/planted.md`,
       {
         bytes: new TextEncoder().encode("body"),
@@ -784,8 +775,8 @@ describe("Fly Workspace files", () => {
   // Constitution — Computer and Workspace: connections drop on every pause, so
   // "unavailable" is an ordinary answer, not an exception.
   test("answers unavailable rather than throwing when the Sprite is paused", async () => {
-    const { client, workspace } = await openWorkspace();
-    client.sprite.offline = true;
+    const { disk, workspace } = await openWorkspace();
+    disk.offline = true;
 
     expect(
       await workspace.read({ root: packageRoot, path: "a.md" }),
@@ -809,7 +800,7 @@ describe("the Computer's sidecar is a hint; the Durable Object is the authority"
 
   /** What a shell on the Computer can write: bytes, and a sidecar for them. */
   function plant(
-    client: FakeClient,
+    disk: FakeWorkspaceDisk,
     relative: string,
     text: string,
     generation: {
@@ -828,7 +819,7 @@ describe("the Computer's sidecar is a hint; the Durable Object is the authority"
       writer: generation.writer,
       writtenAt: generation.writtenAt ?? new Date(0).toISOString(),
     };
-    client.sprite.files.set(`${SKILLS_MOUNT}/${relative}`, {
+    disk.files.set(`${SKILLS_MOUNT}/${relative}`, {
       bytes,
       meta: Buffer.from(
         `${meta.generationId}\n${JSON.stringify(meta)}`,
@@ -837,11 +828,11 @@ describe("the Computer's sidecar is a hint; the Durable Object is the authority"
   }
 
   test("a forged sidecar whose hash matches the bytes is still unattributed", async () => {
-    const { client, workspace } = await openWorkspace();
+    const { disk, workspace } = await openWorkspace();
     // A shell writes the file *and* a perfectly-formed sidecar claiming the
     // Bot itself wrote it. Nothing about the bytes is wrong; only the ledger
     // can tell, and it never recorded this generation.
-    plant(client, "forged/SKILL.md", "# Forged", {
+    plant(disk, "forged/SKILL.md", "# Forged", {
       generationId: "000001700000000000-000001",
       writer: BOT_WRITER,
     });
@@ -870,7 +861,7 @@ describe("the Computer's sidecar is a hint; the Durable Object is the authority"
   });
 
   test("a write through the surface is attributed, because the ledger holds it", async () => {
-    const { client, workspace, generations } = await openWorkspace();
+    const { disk, workspace, generations } = await openWorkspace();
     const written = await workspace.write({
       path: { root: skillsRoot, path: "authored/SKILL.md" },
       bytes: new TextEncoder().encode("# Authored"),
@@ -897,7 +888,7 @@ describe("the Computer's sidecar is a hint; the Durable Object is the authority"
     // record the ledger holds no longer describes what is on disk, and a
     // sidecar re-forged over the new bytes names a generation the ledger
     // never minted.
-    plant(client, "authored/SKILL.md", "# Overwritten", {
+    plant(disk, "authored/SKILL.md", "# Overwritten", {
       generationId: written.generation.generationId,
       writer: BOT_WRITER,
     });
@@ -910,8 +901,8 @@ describe("the Computer's sidecar is a hint; the Durable Object is the authority"
   });
 
   test("with no ledger injected, every file is unattributed", async () => {
-    const client = new FakeClient();
-    const { workspace } = openUserWorkspace(BOT, client, "none");
+    const disk = new FakeWorkspaceDisk();
+    const { workspace } = openUserWorkspace(BOT, disk, "none");
     const written = await workspace.write({
       path: { root: skillsRoot, path: "local/SKILL.md" },
       bytes: new TextEncoder().encode("# Local"),

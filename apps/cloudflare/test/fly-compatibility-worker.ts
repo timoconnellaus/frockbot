@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
-import { SpritesClient } from "@fly/sprites";
 import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import {
+  ComputerHostClient,
   createFlySpriteProviderPlugin,
   FlySpriteComputer,
 } from "@frockbot/plugin-fly-sprite";
@@ -66,7 +66,9 @@ import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
 import { UserConfiguration } from "../src/user-configuration.ts";
 
 interface FlyCompatibilityEnv {
-  SPRITES_TOKEN: string;
+  /** The shared Computer host (ADR 0004). The provider reaches a Sprite here. */
+  COMPUTER_HOST: Fetcher;
+  COMPUTER_HOST_TOKEN: string;
 }
 
 export interface FlyMountResult {
@@ -953,6 +955,16 @@ export class CompositionProbe extends DurableObject {
   }
 }
 
+/**
+ * The Fly provider mounted in workerd, through the shared Computer host.
+ *
+ * This probe used to prove the opposite: that the provider could reach a
+ * Sprite from workerd only far enough to fail on HTTP chunk framing. It no
+ * longer can reach one at all — the SDK is on the host now (ADR 0004) — so
+ * what is left to prove here is that the provider still mounts behind the
+ * provider-neutral Computer interface and opens a Computer over the binding.
+ * The live probe it used to carry is retired with the path it probed.
+ */
 export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
   private root: Context | undefined;
 
@@ -962,7 +974,14 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       await root.plugin(ComputerRegistry);
       const computer = new FlySpriteComputer({
         spriteName,
-        token: this.env.SPRITES_TOKEN || undefined,
+        identity: { userId: "workerd" },
+        host: (identity, tenant) =>
+          new ComputerHostClient({
+            fetcher: this.env.COMPUTER_HOST,
+            hostToken: this.env.COMPUTER_HOST_TOKEN,
+            identity,
+            tenant,
+          }),
       });
       await root.plugin(createFlySpriteProviderPlugin(computer));
       return root;
@@ -984,68 +1003,5 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
       providerId: assignment.providerId,
       generation: assignment.generation,
     };
-  }
-
-  async deleteLiveSprite(spriteName: string): Promise<void> {
-    if (!this.env.SPRITES_TOKEN) return;
-    const client = new SpritesClient(this.env.SPRITES_TOKEN);
-    const sprites = await client.listAllSprites(spriteName);
-    if (sprites.some((sprite) => sprite.name === spriteName)) {
-      await client.deleteSprite(spriteName);
-    }
-  }
-
-  async probeLiveWorkspace(spriteName: string, text: string): Promise<void> {
-    if (!this.env.SPRITES_TOKEN) {
-      throw new Error("SPRITES_TOKEN is required for the live Fly test");
-    }
-    const root = await this.createRoot(spriteName);
-    try {
-      const identity = { userId: "workerd-live" };
-      root.computers.assign(identity, "fly-sprite");
-      const computer = await root.computers.open(identity, {
-        botId: spriteName,
-      });
-      try {
-        if (!computer.exec || !computer.workspace) {
-          throw new Error("Fly provider did not expose exec and workspace");
-        }
-        const result = await computer.exec.execute({
-          executable: "/bin/echo",
-          args: [text],
-          timeoutMs: 10 * 60_000,
-          maxOutputBytes: 10_000,
-        });
-        if (result.exitCode !== 0) {
-          throw new Error(`Fly echo exited with ${result.exitCode}`);
-        }
-        const root_ = {
-          kind: "package-declared",
-          userId: "workerd-live",
-          packageId: "@frockbot/plugin-fly-sprite",
-          rootId: "live-smoke",
-        } as const;
-        const written = await computer.workspace.write({
-          path: { root: root_, path: "probe.txt" },
-          bytes: new TextEncoder().encode(text),
-          writer: { kind: "user", userId: "workerd-live" },
-          expectedGenerationId: null,
-        });
-        if (written.status !== "ok" && written.status !== "conflict") {
-          throw new Error(`Fly Workspace write failed: ${written.reason}`);
-        }
-        const read = await computer.workspace.read({
-          root: root_,
-          path: "probe.txt",
-        });
-        if (read.status !== "ok") {
-          throw new Error(`Fly Workspace read failed: ${read.reason}`);
-        }
-      } finally {
-        await computer.close();
-      }
-    } finally {
-      await root.fiber.dispose();
-    }
   }
 }

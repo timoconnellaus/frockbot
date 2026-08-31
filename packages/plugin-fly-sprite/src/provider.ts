@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   ComputerError,
   computerIdentityKeyV1,
@@ -6,6 +7,8 @@ import {
   type ComputerAssignment,
   type ComputerBrowserAction,
   type ComputerBrowserState,
+  type ComputerControlLease,
+  type ComputerExecRequest,
   type ComputerHandle,
   type ComputerIdentityV1,
   type ComputerOperationOptions,
@@ -21,6 +24,7 @@ import type { Plugin } from "cordis";
 import {
   computerBotKey,
   type BrowserAction,
+  type ComputerHostFactoryV1,
   FlySpriteComputer,
   type FlySpriteAgentComputer,
   flySpriteNameForBot,
@@ -241,6 +245,51 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
   return summary;
 }
 
+/**
+ * One bash document for one exec request.
+ *
+ * `cwd` and `env` become `cd` and `export` lines rather than transport
+ * options, and `stdin` is fed to the command from a heredoc, because the whole
+ * request travels as a script on the command's own stdin. Nothing reaches an
+ * argv, which is what the 431 recorded in ADR 0004 cost to learn.
+ */
+function composed(request: ComputerExecRequest): string {
+  const command = commandFor(request.executable, request.args);
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(request.env ?? {})) {
+    lines.push(`export ${key}=${shellQuote(value)}`);
+  }
+  if (request.cwd) lines.push(`cd ${shellQuote(request.cwd)}`);
+  if (request.stdin === undefined) {
+    lines.push(command);
+  } else {
+    // A quoted heredoc: the bytes reach the command unexpanded, and a
+    // delimiter derived from them cannot appear inside them.
+    const marker = `FROCKBOT_STDIN_${createHash("sha256")
+      .update(request.stdin)
+      .digest("hex")
+      .slice(0, 16)
+      .toUpperCase()}`;
+    lines.push(`${command} <<'${marker}'`);
+    lines.push(new TextDecoder().decode(request.stdin));
+    lines.push(marker);
+  }
+  return lines.join("\n");
+}
+
+function lease(result: {
+  ownerId: string;
+  expiresAt?: string;
+}): ComputerControlLease {
+  return {
+    id: result.ownerId,
+    // A lease with no expiry would be a lease nothing can reclaim. The host
+    // always dates an acquire and a renew; this is the refusal if it ever
+    // does not.
+    expiresAt: result.expiresAt ?? new Date(0).toISOString(),
+  };
+}
+
 function handle(
   identity: ComputerIdentityV1,
   tenant: ComputerTenantV1,
@@ -269,18 +318,12 @@ function handle(
     }),
     exec: {
       execute: async (request, options) => {
-        if (
-          request.cwd !== undefined ||
-          request.env !== undefined ||
-          request.stdin !== undefined
-        ) {
-          throw new ComputerError(
-            "invalid-request",
-            "The Fly Computer provider does not support cwd, env, or stdin",
-          );
-        }
+        // `cwd`, `env`, and `stdin` used to be refused because the Sprites SDK
+        // put every one of them into a request URL. The host compiles them
+        // into the script it delivers on the command's stdin instead, so they
+        // are ordinary parts of a request now.
         const result = await computer.exec(
-          commandFor(request.executable, request.args),
+          composed(request),
           options?.signal ?? new AbortController().signal,
           {
             timeoutMs: request.timeoutMs,
@@ -304,6 +347,38 @@ function handle(
           ),
         ),
     },
+    // A viewer and a human-control lease are reachable from the Durable
+    // Object now. They were not before: both need the Sprite's URL and its
+    // `flock`, and neither was reachable from workerd (ADR 0004).
+    viewer: {
+      open: async (options) => {
+        const result = await computer.viewer(options?.signal);
+        if (!result.session) {
+          throw new ComputerError(
+            "provider-unavailable",
+            "The Computer host returned no viewer session",
+            true,
+          );
+        }
+        return {
+          id: result.session.id,
+          url: result.session.url,
+          ...(result.session.expiresAt
+            ? { expiresAt: result.session.expiresAt }
+            : {}),
+        };
+      },
+      revoke: async (sessionId, options) => {
+        await computer.revokeViewer(sessionId, options?.signal);
+      },
+    },
+    control: {
+      acquire: async (options) =>
+        lease(await computer.takeControl(options?.signal)),
+      renew: async (_current, options) =>
+        lease(await computer.refreshControl(options?.signal)),
+      release: (_current, options) => computer.releaseControl(options?.signal),
+    },
     close: () => Promise.resolve(),
   };
 }
@@ -325,7 +400,12 @@ export class FlySpriteComputerProvider implements ComputerProvider {
 
   constructor(
     private readonly fixedComputer?: FlySpriteComputer,
-    private readonly token?: string,
+    /**
+     * The shared Computer host (ADR 0004). Absent, and every Computer this
+     * provider opens is unconfigured: the provider Package holds no Sprites
+     * SDK and no token, so without a host there is no compute to reach.
+     */
+    private readonly host?: ComputerHostFactoryV1,
     /**
      * The object-storage side of the durable roots, and the Durable Object
      * records a push depends on. Supplied by the host for one admitted Turn;
@@ -345,7 +425,8 @@ export class FlySpriteComputerProvider implements ComputerProvider {
     let computer = this.computers.get(key);
     if (!computer) {
       computer = new FlySpriteComputer({
-        token: this.token,
+        identity: { userId: identity.userId },
+        ...(this.host ? { host: this.host } : {}),
         respectHumanControl: true,
         spriteName: flySpriteNameForComputer(identity),
       });
@@ -381,11 +462,11 @@ export class FlySpriteComputerProvider implements ComputerProvider {
 
 export function createFlySpriteProviderPlugin(
   computer?: FlySpriteComputer,
-  options?: { token?: string; sync?: ComputerSyncHostV1 },
+  options?: { host?: ComputerHostFactoryV1; sync?: ComputerSyncHostV1 },
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) =>
     ctx.computers.register(
-      new FlySpriteComputerProvider(computer, options?.token, options?.sync),
+      new FlySpriteComputerProvider(computer, options?.host, options?.sync),
     );
   plugin.inject = ["computers"];
   return plugin;

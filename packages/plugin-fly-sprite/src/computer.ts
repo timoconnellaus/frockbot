@@ -1,23 +1,28 @@
 import { createHash, randomUUID } from "node:crypto";
-import { APIError, SpritesClient } from "@fly/sprites";
+import { ComputerError } from "@frockbot/computer-core";
+import type {
+  ComputerHostControlResultV1,
+  ComputerHostOpenResultV1,
+  ComputerHostViewerResultV1,
+} from "@frockbot/computer-host-protocol";
 import {
-  base64,
   BOTS_ROOT,
   CONTROL_SCRIPT,
   DATA_ROOT,
-  DESKTOP_SERVICE,
-  ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
   LEASE_MAX_AGE_SECONDS,
   NO_SLOTS_MARKER,
-  provisionScript,
   RUNTIME_ROOT,
   shellQuote,
   SLOT_IDLE_SECONDS,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
 } from "@frockbot/computer-host-runtime";
-import { ComputerError } from "@frockbot/computer-core";
+import type {
+  ComputerHostCallOptions,
+  ComputerHostExecCommandV1,
+  ComputerHostExecOutcomeV1,
+} from "./host-client.js";
 
 // The Computer's on-Sprite layout, its provisioning script, and its declared
 // services live in `@frockbot/computer-host-runtime`, so the shared Computer
@@ -31,6 +36,55 @@ const MAX_OUTPUT = 30_000;
 const MAX_STORAGE_OUTPUT = 500_000;
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 
+/** Deadlines this provider asks the host for, per phase. */
+const TIMEOUTS = {
+  /** Provisioning apt-installs a desktop stack on a cold Computer. */
+  open: 10 * 60_000,
+  command: 120_000,
+  browser: 45_000,
+  control: 15_000,
+  viewer: 30_000,
+} as const;
+
+/**
+ * The shared Computer host as this provider uses it (ADR 0004).
+ *
+ * `ComputerHostClient` satisfies it, and so does a test double. It is declared
+ * here rather than imported as a class so this module depends on the *shape*
+ * of the host and not on the transport: the client owns the service binding,
+ * the framing, and the retry classification, and this module owns what a Bot
+ * tenant means on a Computer.
+ */
+export interface ComputerHostSurfaceV1 {
+  open(options?: ComputerHostCallOptions): Promise<ComputerHostOpenResultV1>;
+  exec(
+    command: ComputerHostExecCommandV1,
+    options?: ComputerHostCallOptions,
+  ): Promise<ComputerHostExecOutcomeV1>;
+  control(
+    action: "acquire" | "renew" | "release",
+    ownerId: string,
+    maxAgeSeconds: number,
+    options?: ComputerHostCallOptions,
+  ): Promise<ComputerHostControlResultV1>;
+  viewer(
+    action: "open" | "revoke",
+    options?: ComputerHostCallOptions & { sessionId?: string },
+  ): Promise<ComputerHostViewerResultV1>;
+}
+
+/**
+ * Makes the host surface for one Bot on one User's Computer.
+ *
+ * The identity and the tenant are both arguments because they mean different
+ * things (ADR 0012): the User names the Computer, the Bot names the tenant on
+ * it, and the host has to be told both on every call.
+ */
+export type ComputerHostFactoryV1 = (
+  identity: { userId: string },
+  tenant: { botId: string },
+) => ComputerHostSurfaceV1;
+
 export interface ComputerBotIdentity {
   id: string;
   name?: string;
@@ -42,12 +96,6 @@ interface AgentLayout {
   key: string;
   runtimeDir: string;
   workspaceDir: string;
-  profileJson: string;
-}
-
-export interface SpriteExecResult {
-  stdout: string | Buffer;
-  stderr: string | Buffer;
 }
 
 export interface SpriteAgentExecResult {
@@ -57,40 +105,17 @@ export interface SpriteAgentExecResult {
   outputTruncated: boolean;
 }
 
-export interface SpriteServiceStream extends AsyncIterable<unknown> {}
-
-export interface SpriteHandle {
-  name: string;
-  url?: string;
-  execFileHTTP(
-    file: string,
-    args?: string[],
-    options?: { signal?: AbortSignal; timeout?: number; maxBuffer?: number },
-  ): Promise<SpriteExecResult>;
-  createService(
-    name: string,
-    config: {
-      cmd: string;
-      args?: string[];
-      env?: Record<string, string>;
-      dir?: string;
-      httpPort?: number;
-    },
-    duration?: string,
-  ): Promise<SpriteServiceStream>;
-  updateURLSettings(settings: { auth: string }): Promise<void>;
-}
-
-export interface SpritesClientHandle {
-  listAllSprites(prefix?: string): Promise<SpriteHandle[]>;
-  createSprite(name: string): Promise<SpriteHandle>;
-  getSprite(name: string): Promise<SpriteHandle>;
-}
-
 export interface FlySpriteComputerOptions {
-  token?: string;
+  /** Whose Computer this is. One Computer per User (ADR 0012). */
+  identity?: { userId: string };
+  /**
+   * The shared Computer host. Absent, and this Computer is unconfigured: the
+   * provider Package can no longer reach a Sprite from the Durable Object on
+   * its own, so a Computer with no host is a Computer with no compute.
+   */
+  host?: ComputerHostFactoryV1;
+  /** The Sprite name this Computer expects, before the host answers with one. */
   spriteName?: string;
-  client?: SpritesClientHandle;
   respectHumanControl?: boolean;
 }
 
@@ -115,10 +140,6 @@ export interface ComputerConnection {
   display: string;
   /** The tenant's durable directory, relative to the Workspace home. */
   directory: string;
-}
-
-function configuredToken(): string | undefined {
-  return process.env.SPRITES_TOKEN?.trim() || process.env.SPRITE_TOKEN?.trim();
 }
 
 function configuredName(): string {
@@ -176,23 +197,11 @@ export function computerBotKey(botId: string): string {
 function layoutFor(input: string | ComputerBotIdentity): AgentLayout {
   const identity = normalizedIdentity(input);
   const key = computerBotKey(identity.id);
-  const name = identity.name ?? identity.id;
-  const profileJson = JSON.stringify(
-    {
-      id: identity.id,
-      name,
-      description: identity.description ?? "FrockBot Bot",
-      computer: { botKey: key, sharedHome: HOME_ROOT },
-    },
-    null,
-    2,
-  );
   return {
     identity,
     key,
     runtimeDir: `${BOTS_ROOT}/${key}`,
     workspaceDir: `${WORKSPACES_ROOT}/${key}`,
-    profileJson,
   };
 }
 
@@ -200,8 +209,10 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function outputText(value: string | Buffer): string {
-  return typeof value === "string" ? value : value.toString();
+const decoder = new TextDecoder();
+
+function outputText(bytes: Uint8Array): string {
+  return decoder.decode(bytes);
 }
 
 function clipped(text: string, limit = MAX_OUTPUT): string {
@@ -209,36 +220,14 @@ function clipped(text: string, limit = MAX_OUTPUT): string {
   return `${text.slice(0, limit)}\n… output truncated`;
 }
 
-function isNotFound(error: unknown): boolean {
-  return error instanceof APIError && error.statusCode === 404;
-}
-
-async function settleService(
-  stream: SpriteServiceStream,
-  label: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  for await (const event of stream) {
-    signal?.throwIfAborted();
-    if (typeof event !== "object" || event === null) continue;
-    const serviceEvent = event as {
-      type?: unknown;
-      data?: unknown;
-      exitCode?: unknown;
-    };
-    if (serviceEvent.type === "error") {
-      throw new Error(
-        `${label} failed: ${String(serviceEvent.data ?? "unknown error")}`,
-      );
-    }
-    if (
-      serviceEvent.type === "exit" &&
-      typeof serviceEvent.exitCode === "number" &&
-      serviceEvent.exitCode !== 0
-    ) {
-      throw new Error(`${label} exited with code ${serviceEvent.exitCode}`);
-    }
-  }
+/** True when the host refused because no desktop slot was free. */
+function isSlotExhaustion(error: unknown): boolean {
+  const text = errorText(error);
+  return (
+    text.includes(NO_SLOTS_MARKER) ||
+    text.includes("no desktop slots available") ||
+    text.includes("no display until one is idle")
+  );
 }
 
 export class FlySpriteAgentComputer {
@@ -288,40 +277,86 @@ export class FlySpriteAgentComputer {
     return this.computer.browserForAgent(this.layout, action, signal);
   }
 
-  takeControl(signal?: AbortSignal): Promise<void> {
+  /** Opens a viewer session on this tenant's desktop. */
+  viewer(signal?: AbortSignal): Promise<ComputerHostViewerResultV1> {
+    return this.computer.viewerForAgent(this.layout, "open", signal);
+  }
+
+  revokeViewer(
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<ComputerHostViewerResultV1> {
+    return this.computer.viewerForAgent(
+      this.layout,
+      "revoke",
+      signal,
+      sessionId,
+    );
+  }
+
+  takeControl(signal?: AbortSignal): Promise<ComputerHostControlResultV1> {
     return this.computer.control(this.layout, "acquire", signal);
   }
 
-  refreshControl(signal?: AbortSignal): Promise<void> {
+  refreshControl(signal?: AbortSignal): Promise<ComputerHostControlResultV1> {
     return this.computer.control(this.layout, "renew", signal);
   }
 
   releaseControl(signal?: AbortSignal): Promise<void> {
     return this.computer.releaseForAgent(this.layout, signal);
   }
+
+  /** The human-control lease owner this Computer holds leases under. */
+  get controlOwnerId(): string {
+    return this.computer.ownerId;
+  }
 }
 
+/**
+ * One User's Computer, driven through the shared host.
+ *
+ * Everything Fly-specific that used to live here — the Sprites SDK, the
+ * provisioning script, the declared services, the viewer token files — is on
+ * the host now (ADR 0004). What remains is what a Bot *tenant* means on a
+ * Computer: its directory key, its human-control guard, and the shape of the
+ * commands it runs. That is why `FlySpriteAgentComputer`'s method surface is
+ * unchanged: `workspace.ts` and `sync.ts` generate bash against it and neither
+ * knows, or needs to know, that the bash now travels on a command's stdin.
+ */
 export class FlySpriteComputer {
-  readonly spriteName: string;
   readonly configured: boolean;
-  private readonly client?: SpritesClientHandle;
-  private readonly ownerId = randomUUID();
+  /** The lease owner every human-control call from this Computer names. */
+  readonly ownerId = randomUUID();
+  private readonly identity: { userId: string };
+  private readonly host?: ComputerHostFactoryV1;
   private readonly respectHumanControl: boolean;
-  private runtimePromise?: Promise<SpriteHandle>;
+  private expectedSpriteName: string;
+  private readonly surfaces = new Map<string, ComputerHostSurfaceV1>();
   private readonly agentPromises = new Map<
     string,
     Promise<ComputerConnection>
   >();
-  private readonly storagePromises = new Map<string, Promise<SpriteHandle>>();
+  private readonly storagePromises = new Map<string, Promise<unknown>>();
   private readonly displays = new Map<string, string>();
+  private readonly generations = new Map<string, number>();
 
   constructor(options: FlySpriteComputerOptions = {}) {
-    const token = options.token?.trim() || configuredToken();
-    this.spriteName = options.spriteName ?? configuredName();
-    this.client =
-      options.client ?? (token ? new SpritesClient(token) : undefined);
-    this.configured = Boolean(this.client);
+    this.identity = options.identity ?? {
+      userId: process.env.FROCKBOT_USER_ID?.trim() || "local-user",
+    };
+    this.host = options.host;
+    this.expectedSpriteName = options.spriteName ?? configuredName();
+    this.configured = Boolean(options.host);
     this.respectHumanControl = options.respectHumanControl ?? true;
+  }
+
+  /**
+   * The Sprite backing this Computer. It is the host's answer once one has
+   * been opened, and the configured expectation before that: the host derives
+   * the name from the User, so the two agree, and only the host's is a fact.
+   */
+  get spriteName(): string {
+    return this.expectedSpriteName;
   }
 
   bot(identity: string | ComputerBotIdentity): FlySpriteAgentComputer {
@@ -338,16 +373,19 @@ export class FlySpriteComputer {
     return this.displays.get(botKey);
   }
 
+  /** The Computer's provisioning generation, as the host last reported it. */
+  generationForTenant(botKey: string): number | undefined {
+    return this.generations.get(botKey);
+  }
+
   async ensureAgent(
     layout: AgentLayout,
     signal?: AbortSignal,
   ): Promise<ComputerConnection> {
-    if (!this.client) {
-      throw new Error("Set SPRITES_TOKEN to attach a Fly Sprite computer");
-    }
+    this.hostFor(layout);
     let promise = this.agentPromises.get(layout.key);
     if (!promise) {
-      promise = this.provisionAgent(layout, signal).catch((error) => {
+      promise = this.openAgent(layout, signal).catch((error: unknown) => {
         this.agentPromises.delete(layout.key);
         throw error;
       });
@@ -361,29 +399,23 @@ export class FlySpriteComputer {
     command: string,
     signal: AbortSignal,
   ): Promise<string> {
-    const sprite = await this.readySprite(layout, signal);
-    const guarded = [
+    const host = await this.readyHost(layout, signal);
+    const script = [
       this.agentControlGuard(layout),
-      `export HOME=${HOME_ROOT}`,
-      `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
-      `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
-      `cd ${shellQuote(layout.workspaceDir)}`,
+      ...this.tenantEnvironment(layout),
       command,
     ].join("\n");
-    try {
-      const result = await sprite.execFileHTTP("bash", ["-c", guarded], {
-        signal,
-        timeout: 120_000,
-        maxBuffer: MAX_OUTPUT * 2,
-      });
-      return clipped(
-        [outputText(result.stdout), outputText(result.stderr)]
-          .filter(Boolean)
-          .join("\n"),
-      );
-    } catch (error) {
-      throw new Error(`Sprite command failed: ${errorText(error)}`);
-    }
+    const outcome = await this.execute(
+      host,
+      script,
+      { signal, timeoutMs: TIMEOUTS.command, maxOutputBytes: MAX_OUTPUT * 2 },
+      "Sprite command failed",
+    );
+    return clipped(
+      [outputText(outcome.stdout), outputText(outcome.stderr)]
+        .filter(Boolean)
+        .join("\n"),
+    );
   }
 
   async execForAgent(
@@ -392,68 +424,78 @@ export class FlySpriteComputer {
     signal: AbortSignal,
     limits: { timeoutMs?: number; maxOutputBytes?: number } = {},
   ): Promise<SpriteAgentExecResult> {
-    const sprite = await this.readySprite(layout, signal);
-    const guarded = [
-      this.agentControlGuard(layout),
-      `export HOME=${HOME_ROOT}`,
-      `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
-      `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
-      `cd ${shellQuote(layout.workspaceDir)}`,
-      `bash -c ${shellQuote(command)}`,
-      `printf '\\n%s%s\\n' ${shellQuote(EXEC_EXIT_MARKER)} "$?"`,
-    ].join("\n");
+    const host = await this.readyHost(layout, signal);
     const maxOutput = Math.max(
       1,
       Math.min(limits.maxOutputBytes ?? MAX_OUTPUT, MAX_OUTPUT),
     );
-    let result: SpriteExecResult;
-    try {
-      result = await sprite.execFileHTTP("bash", ["-c", guarded], {
+    // The marker survives the move to the host for one reason: the outer
+    // script's exit code belongs to the control guard, and the Bot's command
+    // has an exit code of its own. Collapsing the two would make a Computer
+    // under human control indistinguishable from a command that failed.
+    const script = [
+      this.agentControlGuard(layout),
+      ...this.tenantEnvironment(layout),
+      `bash -c ${shellQuote(command)}`,
+      `printf '\\n%s%s\\n' ${shellQuote(EXEC_EXIT_MARKER)} "$?"`,
+    ].join("\n");
+    const outcome = await this.execute(
+      host,
+      script,
+      {
         signal,
-        timeout: Math.max(1, Math.min(limits.timeoutMs ?? 120_000, 120_000)),
-        maxBuffer: MAX_OUTPUT * 2,
-      });
-    } catch (error) {
-      throw new Error(`Sprite command failed: ${errorText(error)}`);
-    }
-    const raw = outputText(result.stdout);
+        timeoutMs: Math.max(
+          1,
+          Math.min(limits.timeoutMs ?? TIMEOUTS.command, TIMEOUTS.command),
+        ),
+        maxOutputBytes: MAX_OUTPUT * 2,
+      },
+      "Sprite command failed",
+    );
+    const raw = outputText(outcome.stdout);
     const match = new RegExp(`\\n?${EXEC_EXIT_MARKER}(\\d+)\\n?$`).exec(raw);
     const stdout = match ? raw.slice(0, match.index) : raw;
-    const stderr = outputText(result.stderr);
+    const stderr = outputText(outcome.stderr);
     return {
       exitCode: match ? Number(match[1]) : null,
       stdout: stdout.slice(0, maxOutput),
       stderr: stderr.slice(0, maxOutput),
       outputTruncated:
-        !match || stdout.length > maxOutput || stderr.length > maxOutput,
+        !match ||
+        outcome.outputTruncated ||
+        stdout.length > maxOutput ||
+        stderr.length > maxOutput,
     };
   }
 
+  /**
+   * The Workspace and the durable-root sync's own commands.
+   *
+   * They carry no human-control guard on purpose: reconciling durable state is
+   * not the Bot acting on the Computer, and a human holding the screen must
+   * not stop a Turn's files from reaching object storage.
+   */
   async runStorageForAgent(
     layout: AgentLayout,
     command: string,
     signal: AbortSignal,
   ): Promise<string> {
-    const sprite = await this.readyStorageSprite(layout, signal);
-    const storageCommand = [
-      `export HOME=${HOME_ROOT}`,
-      `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
-      `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
-      `cd ${shellQuote(layout.workspaceDir)}`,
-      command,
-    ].join("\n");
-    let result: SpriteExecResult;
-    try {
-      result = await sprite.execFileHTTP("bash", ["-c", storageCommand], {
+    const host = this.hostFor(layout);
+    signal.throwIfAborted();
+    await this.readyStorage(layout, host, signal);
+    const script = [...this.tenantEnvironment(layout), command].join("\n");
+    const outcome = await this.execute(
+      host,
+      script,
+      {
         signal,
-        timeout: 120_000,
-        maxBuffer: MAX_STORAGE_OUTPUT * 2,
-      });
-    } catch (error) {
-      throw new Error(`Sprite storage operation failed: ${errorText(error)}`);
-    }
-    const stdout = outputText(result.stdout);
-    if (stdout.length > MAX_STORAGE_OUTPUT) {
+        timeoutMs: TIMEOUTS.command,
+        maxOutputBytes: MAX_STORAGE_OUTPUT * 2,
+      },
+      "Sprite storage operation failed",
+    );
+    const stdout = outputText(outcome.stdout);
+    if (stdout.length > MAX_STORAGE_OUTPUT || outcome.outputTruncated) {
       throw new ComputerError(
         "limit-exceeded",
         "Sprite storage output exceeded the maximum size",
@@ -467,37 +509,34 @@ export class FlySpriteComputer {
     action: BrowserAction,
     signal: AbortSignal,
   ): Promise<string> {
-    const sprite = await this.readySprite(layout, signal);
+    const host = await this.readyHost(layout, signal);
     const encoded = Buffer.from(JSON.stringify(action)).toString("base64url");
-    const command = [
+    const script = [
       this.agentControlGuard(layout),
       `PORT=$(cat ${layout.runtimeDir}/cdp-port)`,
       `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)}`,
     ].join("\n");
-    try {
-      const result = await sprite.execFileHTTP("bash", ["-c", command], {
-        signal,
-        timeout: 45_000,
-        maxBuffer: MAX_OUTPUT * 2,
-      });
-      return clipped(
-        outputText(result.stdout).trim() || outputText(result.stderr).trim(),
-      );
-    } catch (error) {
-      throw new Error(`Sprite browser action failed: ${errorText(error)}`);
-    }
+    const outcome = await this.execute(
+      host,
+      script,
+      { signal, timeoutMs: TIMEOUTS.browser, maxOutputBytes: MAX_OUTPUT * 2 },
+      "Sprite browser action failed",
+    );
+    return clipped(
+      outputText(outcome.stdout).trim() || outputText(outcome.stderr).trim(),
+    );
   }
 
-  async control(
+  control(
     layout: AgentLayout,
     action: "acquire" | "renew",
     signal?: AbortSignal,
-  ): Promise<void> {
-    const sprite = await this.readySprite(layout, signal);
-    await sprite.execFileHTTP(
-      CONTROL_SCRIPT,
-      [action, layout.key, this.ownerId, String(LEASE_MAX_AGE_SECONDS)],
-      { signal, timeout: 15_000 },
+  ): Promise<ComputerHostControlResultV1> {
+    return this.hostFor(layout).control(
+      action,
+      this.ownerId,
+      LEASE_MAX_AGE_SECONDS,
+      { signal, timeoutMs: TIMEOUTS.control },
     );
   }
 
@@ -505,199 +544,178 @@ export class FlySpriteComputer {
     layout: AgentLayout,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (!this.client) return;
-    let sprite: SpriteHandle;
+    if (!this.host) return;
     try {
-      sprite = await this.client.getSprite(this.spriteName);
+      await this.hostFor(layout).control(
+        "release",
+        this.ownerId,
+        LEASE_MAX_AGE_SECONDS,
+        { signal, timeoutMs: TIMEOUTS.control },
+      );
     } catch (error) {
-      if (isNotFound(error)) return;
+      // A Computer that is not there holds no lease to release. Every other
+      // refusal is real and the caller has to see it.
+      if (error instanceof ComputerError && error.code === "conflict") return;
       throw error;
     }
-    await sprite.execFileHTTP(
-      CONTROL_SCRIPT,
-      ["release", layout.key, this.ownerId, String(LEASE_MAX_AGE_SECONDS)],
-      { signal, timeout: 15_000 },
-    );
   }
 
-  private async provisionRuntime(signal?: AbortSignal): Promise<SpriteHandle> {
-    signal?.throwIfAborted();
-    const sprite = await this.findOrCreate();
-    await sprite.execFileHTTP("bash", ["-lc", provisionScript], {
+  viewerForAgent(
+    layout: AgentLayout,
+    action: "open" | "revoke",
+    signal?: AbortSignal,
+    sessionId?: string,
+  ): Promise<ComputerHostViewerResultV1> {
+    return this.hostFor(layout).viewer(action, {
       signal,
-      timeout: 10 * 60_000,
-      maxBuffer: MAX_OUTPUT * 2,
+      timeoutMs: TIMEOUTS.viewer,
+      ...(sessionId === undefined ? {} : { sessionId }),
     });
-    const stream = await sprite.createService(
-      DESKTOP_SERVICE,
-      { cmd: `${RUNTIME_ROOT}/start-gateway.sh`, httpPort: 6080 },
-      "30s",
-    );
-    await settleService(stream, "Desktop gateway", signal);
-    // The durable-root sync's watcher is a declared service, so a cold pause
-    // ends with it running again rather than with a silently stopped process.
-    const sync = await sprite.createService(WORKSPACE_SYNC_SERVICE, {
-      cmd: `${RUNTIME_ROOT}/watch-workspace.sh`,
-    });
-    await settleService(sync, "Workspace sync watcher", signal);
-    await sprite.updateURLSettings({ auth: "public" });
-    return sprite;
   }
 
-  private async provisionAgent(
+  // --- internals -----------------------------------------------------------
+
+  /**
+   * Creates the tenant's durable directories once per Computer.
+   *
+   * The Workspace and the sync both assume their roots exist. They are made
+   * here rather than by the host's `open` because storage is reachable while
+   * the tenant has no desktop: a Turn that only reads files must not have to
+   * provision a screen first.
+   */
+  private readyStorage(
+    layout: AgentLayout,
+    host: ComputerHostSurfaceV1,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    let held = this.storagePromises.get(layout.key);
+    if (!held) {
+      held = this.execute(
+        host,
+        `mkdir -p ${[
+          layout.workspaceDir,
+          `${DATA_ROOT}/agents/${layout.key}/memory`,
+          `${DATA_ROOT}/agents/${layout.key}/skills`,
+          `${DATA_ROOT}/user-memory`,
+          `${DATA_ROOT}/user-packages`,
+          `${RUNTIME_ROOT}/sync`,
+        ]
+          .map(shellQuote)
+          .join(" ")}\n`,
+        { signal, timeoutMs: TIMEOUTS.control, maxOutputBytes: MAX_OUTPUT },
+        "Sprite storage operation failed",
+      ).catch((error: unknown) => {
+        this.storagePromises.delete(layout.key);
+        throw error;
+      });
+      this.storagePromises.set(layout.key, held);
+    }
+    return held;
+  }
+
+  private hostFor(layout: AgentLayout): ComputerHostSurfaceV1 {
+    if (!this.host) {
+      throw new ComputerError(
+        "provider-unavailable",
+        "Set SPRITES_TOKEN to attach a Fly Sprite computer",
+      );
+    }
+    let held = this.surfaces.get(layout.key);
+    if (!held) {
+      held = this.host(this.identity, { botId: layout.identity.id });
+      this.surfaces.set(layout.key, held);
+    }
+    return held;
+  }
+
+  private async readyHost(
+    layout: AgentLayout,
+    signal?: AbortSignal,
+  ): Promise<ComputerHostSurfaceV1> {
+    await this.ensureAgent(layout, signal);
+    return this.hostFor(layout);
+  }
+
+  /**
+   * Opens the Computer and attaches this tenant to it.
+   *
+   * One call: the host provisions the Sprite if it must, runs the ensure
+   * script, allocates a display slot, and answers with the tenant's directory
+   * and generation. The Durable Object no longer sequences provisioning steps
+   * because it can no longer see the Sprite — and that is the point.
+   */
+  private async openAgent(
     layout: AgentLayout,
     signal?: AbortSignal,
   ): Promise<ComputerConnection> {
-    const sprite = await this.runtime(signal);
-    if (this.respectHumanControl)
-      await this.assertAgentControl(sprite, layout, signal);
-    // Every display belonging to a tenant this provider still has open is a
-    // declared outcome, not a crash: the alternative would be two Bots sharing
-    // one screen, and Bots are separated on a Computer exactly so that does
-    // not happen silently.
-    const refused = (cause: unknown) =>
-      new ComputerError(
-        "capability-unavailable",
-        `Every desktop on this Computer is in use; Bot "${layout.identity.id}" has no display until one is idle`,
-        true,
-        { cause },
-      );
-    let ensured: SpriteExecResult;
+    const host = this.hostFor(layout);
+    let opened: ComputerHostOpenResultV1;
     try {
-      ensured = await sprite.execFileHTTP(
-        ENSURE_AGENT_SCRIPT,
-        [layout.key, base64(layout.profileJson)],
-        { signal, timeout: 60_000, maxBuffer: MAX_OUTPUT * 2 },
-      );
+      opened = await host.open({ signal, timeoutMs: TIMEOUTS.open });
     } catch (error) {
-      if (
-        errorText(error).includes(NO_SLOTS_MARKER) ||
-        errorText(error).includes("no desktop slots available")
-      ) {
-        throw refused(error);
+      // Every display belonging to a tenant this Computer still has open is a
+      // declared outcome, not a crash: the alternative would be two Bots
+      // sharing one screen, and Bots are separated on a Computer exactly so
+      // that does not happen silently.
+      if (isSlotExhaustion(error)) {
+        throw new ComputerError(
+          "capability-unavailable",
+          `Every desktop on this Computer is in use; Bot "${layout.identity.id}" has no display until one is idle`,
+          true,
+          { cause: error },
+        );
       }
       throw error;
     }
-    if (outputText(ensured.stdout).includes(NO_SLOTS_MARKER)) {
-      throw refused(undefined);
-    }
+    this.expectedSpriteName = opened.spriteName;
+    this.generations.set(layout.key, opened.generation);
+    if (opened.display) this.displays.set(layout.key, opened.display);
     if (this.respectHumanControl) {
-      await this.assertAgentControl(sprite, layout, signal);
+      await this.assertAgentControl(host, layout, signal);
     }
-    const desktop = await sprite.createService(
-      `frockbot-desktop-${layout.key}`,
-      { cmd: `${RUNTIME_ROOT}/start-desktop.sh`, args: [layout.key] },
-      "30s",
-    );
-    await settleService(desktop, `Desktop for ${layout.identity.id}`, signal);
-    const current = await this.client?.getSprite(this.spriteName);
-    const url = current?.url ?? sprite.url;
-    if (!url) throw new Error("Sprites API did not return a computer URL");
-    const [password, token, slot] = await Promise.all([
-      sprite.execFileHTTP("cat", [`${layout.runtimeDir}/vnc-password`], {
-        signal,
-        timeout: 15_000,
-      }),
-      sprite.execFileHTTP("cat", [`${layout.runtimeDir}/viewer-token`], {
-        signal,
-        timeout: 15_000,
-      }),
-      sprite.execFileHTTP("cat", [`${layout.runtimeDir}/slot`], {
-        signal,
-        timeout: 15_000,
-      }),
-    ]);
-    const display = `:${100 + Number(outputText(slot.stdout).trim() || 0)}`;
-    this.displays.set(layout.key, display);
-    const viewer = new URL("vnc.html", url.endsWith("/") ? url : `${url}/`);
-    viewer.hash = new URLSearchParams({
-      autoconnect: "1",
-      reconnect: "1",
-      resize: "scale",
-      path: `websockify?token=${outputText(token.stdout).trim()}`,
-      password: outputText(password.stdout).trim(),
-    }).toString();
+    const viewer = await host.viewer("open", {
+      signal,
+      timeoutMs: TIMEOUTS.viewer,
+    });
+    if (!viewer.session) {
+      throw new ComputerError(
+        "provider-unavailable",
+        "The Computer host returned no viewer session",
+        true,
+      );
+    }
     return {
       botId: layout.identity.id,
       botKey: layout.key,
-      spriteName: this.spriteName,
-      viewerUrl: viewer.toString(),
-      display,
+      spriteName: opened.spriteName,
+      viewerUrl: viewer.session.url,
+      display: opened.display ?? "",
       directory: `agent-data/agents/${layout.key}`,
     };
   }
 
-  private runtime(signal?: AbortSignal): Promise<SpriteHandle> {
-    if (!this.client) {
-      return Promise.reject(
-        new Error("Set SPRITES_TOKEN to attach a Fly Sprite computer"),
-      );
-    }
-    if (!this.runtimePromise) {
-      this.runtimePromise = this.provisionRuntime(signal).catch((error) => {
-        this.runtimePromise = undefined;
-        throw error;
-      });
-    }
-    return this.runtimePromise;
-  }
-
-  private async readySprite(
+  private async assertAgentControl(
+    host: ComputerHostSurfaceV1,
     layout: AgentLayout,
     signal?: AbortSignal,
-  ): Promise<SpriteHandle> {
-    await this.ensureAgent(layout, signal);
-    if (!this.client) throw new Error("Sprites client is unavailable");
-    return this.client.getSprite(this.spriteName);
-  }
-
-  private readyStorageSprite(
-    layout: AgentLayout,
-    signal?: AbortSignal,
-  ): Promise<SpriteHandle> {
-    signal?.throwIfAborted();
-    let promise = this.storagePromises.get(layout.key);
-    if (!promise) {
-      promise = this.provisionStorage(layout, signal).catch((error) => {
-        this.storagePromises.delete(layout.key);
-        throw error;
-      });
-      this.storagePromises.set(layout.key, promise);
-    }
-    return promise;
-  }
-
-  private async provisionStorage(
-    layout: AgentLayout,
-    signal?: AbortSignal,
-  ): Promise<SpriteHandle> {
-    const sprite = await this.findOrCreate();
-    await sprite.execFileHTTP(
-      "mkdir",
-      [
-        "-p",
-        layout.workspaceDir,
-        `${DATA_ROOT}/agents/${layout.key}/memory`,
-        `${DATA_ROOT}/agents/${layout.key}/skills`,
-        `${DATA_ROOT}/user-memory`,
-        `${DATA_ROOT}/user-packages`,
-        `${RUNTIME_ROOT}/sync`,
-      ],
-      { signal, timeout: 15_000, maxBuffer: MAX_OUTPUT },
+  ): Promise<void> {
+    await this.execute(
+      host,
+      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(
+        this.ownerId,
+      )} ${LEASE_MAX_AGE_SECONDS}\n`,
+      { signal, timeoutMs: TIMEOUTS.control, maxOutputBytes: MAX_OUTPUT },
+      "Sprite command failed",
     );
-    return sprite;
   }
 
-  private assertAgentControl(
-    sprite: SpriteHandle,
-    layout: AgentLayout,
-    signal?: AbortSignal,
-  ): Promise<SpriteExecResult> {
-    return sprite.execFileHTTP(
-      CONTROL_SCRIPT,
-      ["assert-agent", layout.key, this.ownerId, String(LEASE_MAX_AGE_SECONDS)],
-      { signal, timeout: 15_000 },
-    );
+  private tenantEnvironment(layout: AgentLayout): string[] {
+    return [
+      `export HOME=${HOME_ROOT}`,
+      `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
+      `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
+      `cd ${shellQuote(layout.workspaceDir)}`,
+    ];
   }
 
   /**
@@ -716,20 +734,45 @@ export class FlySpriteComputer {
     ].join("\n");
   }
 
-  private async findOrCreate(): Promise<SpriteHandle> {
-    if (!this.client) throw new Error("Sprites client is unavailable");
-    const existing = (await this.client.listAllSprites(this.spriteName)).find(
-      (sprite) => sprite.name === this.spriteName,
-    );
-    if (existing) return existing;
+  /**
+   * Runs one script and refuses a non-zero exit.
+   *
+   * A non-zero exit here is the outer document's, not the Bot's command's: the
+   * control guard, a missing directory, an unreadable file. Those are failures
+   * of the operation the caller asked for, so they throw with the label the
+   * caller named, exactly as the SDK's own rejection used to.
+   */
+  private async execute(
+    host: ComputerHostSurfaceV1,
+    script: string,
+    options: {
+      signal?: AbortSignal;
+      timeoutMs: number;
+      maxOutputBytes: number;
+    },
+    label: string,
+  ): Promise<ComputerHostExecOutcomeV1> {
+    let outcome: ComputerHostExecOutcomeV1;
     try {
-      return await this.client.createSprite(this.spriteName);
+      outcome = await host.exec(
+        {
+          script,
+          timeoutMs: options.timeoutMs,
+          maxOutputBytes: options.maxOutputBytes,
+        },
+        options.signal ? { signal: options.signal } : {},
+      );
     } catch (error) {
-      try {
-        return await this.client.getSprite(this.spriteName);
-      } catch {
-        throw error;
-      }
+      if (error instanceof ComputerError) throw error;
+      throw new Error(`${label}: ${errorText(error)}`);
     }
+    if (outcome.exitCode !== 0) {
+      const detail =
+        outputText(outcome.stderr).trim() ||
+        outputText(outcome.stdout).trim() ||
+        `exit ${String(outcome.exitCode)}`;
+      throw new Error(`${label}: ${detail}`);
+    }
+    return outcome;
   }
 }

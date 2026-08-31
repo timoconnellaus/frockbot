@@ -2459,6 +2459,16 @@ export class ShellBotBackendContribution {
               computerSync: createBotComputerSyncHost(this.env),
             }
           : {}),
+        // The Computer host, when this deployment has one. Both halves or
+        // neither: a binding with no token reaches a host that refuses.
+        ...(this.env.COMPUTER_HOST && this.env.COMPUTER_HOST_TOKEN
+          ? {
+              computerHostBinding: {
+                fetcher: this.env.COMPUTER_HOST,
+                hostToken: this.env.COMPUTER_HOST_TOKEN,
+              },
+            }
+          : {}),
         packagePublisher: {
           read: () =>
             this.userConfiguration(identity).readPackageRevisions(
