@@ -6,6 +6,10 @@ import {
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
+  decodeCompositionGenerationIdV1,
+  decodeRevertCompositionCommandV1,
+  MAX_COMPOSITION_GENERATION_PAGE_V1,
+  type RevertCompositionCommandV1,
 } from "@frockbot/configuration-core";
 import { BotDurableAuthority } from "@frockbot/kernel-do";
 import type {
@@ -40,7 +44,9 @@ import {
   rpcBotId,
   rpcDecoded,
   rpcIdentifier,
+  rpcInteger,
   rpcObject,
+  rpcString,
 } from "./durable-rpc.js";
 
 export type { BotStateEnv, OwnedBotTurnCommand };
@@ -395,6 +401,78 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.acknowledgeNotification(request.notificationId as string);
+  }
+
+  /**
+   * The Bot's durable Composition generations, newest first. Bot-scoped, so it
+   * proves directory membership the same way the other Bot RPCs do.
+   */
+  async listCompositionGenerations(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      query: rpcObject(
+        {
+          limit: rpcInteger({
+            minimum: 1,
+            maximum: MAX_COMPOSITION_GENERATION_PAGE_V1,
+          }),
+        },
+        { cursor: rpcString(512) },
+      ),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.listCompositionGenerations(
+      identity,
+      request.query as { limit: number; cursor?: string },
+    );
+  }
+
+  /**
+   * One generation, including the recorded source of each isolate member once
+   * authoring records exist (plan Step 5); the member list until then.
+   */
+  async getCompositionGeneration(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      generationId: rpcDecoded(decodeCompositionGenerationIdV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.getCompositionGeneration(
+      identity,
+      request.generationId as string,
+    );
+  }
+
+  /** Reverting records a new pending generation; it never mutates a record. */
+  async revertComposition(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeRevertCompositionCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const command = request.command as RevertCompositionCommandV1;
+    if (command.botId !== identity.botId) {
+      throw new Error("Composition revert command does not match its Bot");
+    }
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.revertComposition(identity, command);
   }
 
   async listRuns(input: unknown) {

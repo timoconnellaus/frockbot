@@ -26,6 +26,12 @@ import {
   ConfigurationConflictError,
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
+  decodeCompositionCommandReceiptV1,
+  MAX_COMPOSITION_GENERATION_PAGE_V1,
+  type CompositionCommandReceiptV1,
+  type CompositionGenerationListViewV1,
+  type CompositionGenerationViewV1,
+  type RevertCompositionCommandV1,
   type ConnectionDependencyRequirementV1,
   type BotExecutionPlanV1,
   type BotSettingsViewV1,
@@ -70,6 +76,8 @@ import type {
   IsolatePendingDecisionV1,
 } from "@frockbot/kernel-contracts";
 import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
+import type { CompositionMemberV1 } from "@frockbot/kernel-composition/generation";
+import { projectCompositionGenerationV1 } from "./composition-views.js";
 import { executeBotTurn } from "./backend-runner.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
@@ -100,6 +108,8 @@ const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
 const ASSIGNMENT_TOMBSTONE_PREFIX = "assignment-tombstone:";
 const ASSIGNMENT_SAGA_PREFIX = "assignment-saga:";
 const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
+/** Idempotency records for Composition commands this Package admits. */
+const COMPOSITION_COMMAND_PREFIX = "composition-command:";
 
 function assignmentGenerationKey(assignmentId: string): string {
   return `${ASSIGNMENT_GENERATION_PREFIX}${assignmentId}`;
@@ -1824,6 +1834,125 @@ export class ShellBotBackendContribution {
   async acknowledgeNotification(notificationId: string): Promise<void> {
     return this.authority.acknowledgeNotification(notificationId);
   }
+  /**
+   * The Bot's durable Composition generations, newest first. Bot-scoped: the
+   * caller proves directory membership before this runs.
+   */
+  async listCompositionGenerations(
+    identity: BotIdentity,
+    query: { limit: number; cursor?: string },
+  ): Promise<CompositionGenerationListViewV1> {
+    const current = await this.authority.composition.current();
+    const page = await this.authority.composition.list({
+      limit: Math.min(query.limit, MAX_COMPOSITION_GENERATION_PAGE_V1),
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+    });
+    return {
+      schemaVersion: 1,
+      botId: identity.botId,
+      currentGenerationId: current.generationId,
+      generations: await Promise.all(
+        page.generations.map((generation) =>
+          projectCompositionGenerationV1({
+            botId: identity.botId,
+            generation,
+            currentGenerationId: current.generationId,
+          }),
+        ),
+      ),
+      ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
+    };
+  }
+
+  /** One generation, with the recorded source of each isolate member. */
+  async getCompositionGeneration(
+    identity: BotIdentity,
+    generationId: string,
+  ): Promise<CompositionGenerationViewV1 | undefined> {
+    const generation = await this.authority.composition.read(generationId);
+    if (!generation) return undefined;
+    const current = await this.authority.composition.current();
+    return projectCompositionGenerationV1({
+      botId: identity.botId,
+      generation,
+      currentGenerationId: current.generationId,
+      readMemberSource: (member) => this.readCompositionMemberSource(member),
+    });
+  }
+
+  /**
+   * SEAM — plan Step 5 (authoring) owns `authorship:intent:<effectId>` and
+   * `artifact:<contentHash>`. Those records do not exist yet, so an isolate
+   * member has no recorded source to show and the view carries members only.
+   */
+  private readCompositionMemberSource(
+    _member: CompositionMemberV1,
+  ): Promise<string | undefined> {
+    return Promise.resolve(undefined);
+  }
+
+  /**
+   * Reverting is a recorded generation, not a mutation: it proposes a new
+   * pending generation carrying the target's members, which the next admitted
+   * Turn activates. The command is idempotent on its `commandId`, and its
+   * `expectedGenerationId` is the optimistic check that the User acted on the
+   * Composition they were looking at.
+   */
+  async revertComposition(
+    identity: BotIdentity,
+    command: RevertCompositionCommandV1,
+  ): Promise<CompositionCommandReceiptV1> {
+    if (command.botId !== identity.botId) {
+      throw new Error("Composition revert command does not match its Bot");
+    }
+    const receiptKey = `${COMPOSITION_COMMAND_PREFIX}${command.commandId}`;
+    const recorded =
+      await this.ctx.storage.get<CompositionCommandReceiptV1>(receiptKey);
+    if (recorded) return decodeCompositionCommandReceiptV1(recorded);
+    const current = await this.authority.composition.current();
+    const reject = async (
+      failure: string,
+    ): Promise<CompositionCommandReceiptV1> => {
+      const receipt = decodeCompositionCommandReceiptV1({
+        schemaVersion: 1,
+        commandId: command.commandId,
+        status: "rejected",
+        failure,
+        currentGenerationId: current.generationId,
+      });
+      await this.ctx.storage.put(receiptKey, receipt);
+      return receipt;
+    };
+    if (current.generationId !== command.expectedGenerationId) {
+      return reject(`composition generation is ${current.generationId}`);
+    }
+    let generationId: string;
+    try {
+      const reverted = await this.authority.composition.revert(
+        command.toGenerationId,
+        {
+          kind: "revert",
+          revertsTo: command.toGenerationId,
+          userId: identity.userId,
+        },
+      );
+      generationId = reverted.generationId;
+    } catch (error) {
+      return reject(
+        error instanceof Error ? error.message : "Composition revert failed",
+      );
+    }
+    const receipt = decodeCompositionCommandReceiptV1({
+      schemaVersion: 1,
+      commandId: command.commandId,
+      status: "applied",
+      generationId,
+      currentGenerationId: current.generationId,
+    });
+    await this.ctx.storage.put(receiptKey, receipt);
+    return receipt;
+  }
+
   private createNotification(
     settings: BotSettingsViewV1,
     result: BotTurnCompletion,

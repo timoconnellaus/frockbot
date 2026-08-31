@@ -77,12 +77,12 @@ import settingsManifest from "@frockbot/plugin-settings/manifest";
 // Provider-neutral Connection transport is owned by the Settings gateway Contribution.
 import {
   createSettingsBackendContribution,
-  type SettingsConnectionGatewayHost,
+  type SettingsGatewayHost,
 } from "@frockbot/plugin-settings/backend";
 const createSettingsGatewayPlugin = (
   createSettingsBackendContribution as typeof createSettingsBackendContribution & {
     plugin(
-      host: SettingsConnectionGatewayHost,
+      host: SettingsGatewayHost,
       lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
     ): Plugin;
   }
@@ -228,7 +228,7 @@ export interface MountedFoundationBackend<T> {
 export type FoundationGatewayHost = {
   backendHost: "gateway";
 } & FlockGatewayHost &
-  SettingsConnectionGatewayHost;
+  SettingsGatewayHost;
 
 export async function createFoundationBackendContributions(
   plan: ApplicationPlan,

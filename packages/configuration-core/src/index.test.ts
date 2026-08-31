@@ -5,6 +5,10 @@ import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
   decodeBotIdV1,
+  decodeCompositionCommandReceiptV1,
+  decodeCompositionGenerationListViewV1,
+  decodeCompositionGenerationViewV1,
+  decodeRevertCompositionCommandV1,
   decodeConnectionDependencyRequirementV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
@@ -758,5 +762,168 @@ describe("Bot execution-plan authority", () => {
         packages,
       }).assignments[0]?.state,
     ).toBe("unavailable");
+  });
+});
+
+const BOOTSTRAP_GENERATION = "2026-08-31T00:00:00.000Z:0123456789abcdef";
+const AUTHORED_GENERATION = "2026-09-01T00:00:00.000Z:fedcba9876543210";
+
+const authoredGenerationView = {
+  schemaVersion: 1,
+  botId: "alpha",
+  generationId: AUTHORED_GENERATION,
+  createdAt: "2026-09-01T00:00:00.000Z",
+  status: "active",
+  isCurrent: true,
+  parentGenerationId: BOOTSTRAP_GENERATION,
+  origin: {
+    kind: "bot-authored",
+    runId: "run-1",
+    sessionId: "alice:alpha",
+    turnId: "turn-1",
+  },
+  members: [
+    {
+      packageId: "shell",
+      version: "0.0.1",
+      provenance: { kind: "first-party" },
+    },
+    {
+      packageId: "greeter",
+      version: "0.0.1",
+      contentHash: "b".repeat(64),
+      source: "export default {}",
+      provenance: {
+        kind: "bot",
+        botId: "alpha",
+        sessionId: "alice:alpha",
+        turnId: "turn-1",
+        runId: "run-1",
+        authoredAt: "2026-09-01T00:00:00.000Z",
+      },
+    },
+  ],
+};
+
+describe("Composition generation views", () => {
+  test("decodes a generation with Bot provenance and artifact identity", () => {
+    const view = decodeCompositionGenerationViewV1(authoredGenerationView);
+    expect(view.members[1]?.contentHash).toBe("b".repeat(64));
+    expect(view.members[1]?.provenance).toEqual({
+      kind: "bot",
+      botId: "alpha",
+      sessionId: "alice:alpha",
+      turnId: "turn-1",
+      runId: "run-1",
+      authoredAt: "2026-09-01T00:00:00.000Z",
+    });
+    expect(view.isCurrent).toBe(true);
+    expect(view.parentGenerationId).toBe(BOOTSTRAP_GENERATION);
+  });
+
+  test("refuses fields the redacted view does not declare", () => {
+    for (const invalid of [
+      { ...authoredGenerationView, artifactSetHash: "a".repeat(64) },
+      { ...authoredGenerationView, status: "unknown" },
+      { ...authoredGenerationView, isCurrent: "yes" },
+      {
+        ...authoredGenerationView,
+        members: [
+          {
+            packageId: "greeter",
+            version: "0.0.1",
+            provenance: { kind: "first-party" },
+            bytes: "AAAA",
+          },
+        ],
+      },
+      {
+        ...authoredGenerationView,
+        members: [
+          {
+            packageId: "greeter",
+            version: "0.0.1",
+            provenance: { kind: "first-party" },
+            contentHash: "not-a-hash",
+          },
+        ],
+      },
+      {
+        ...authoredGenerationView,
+        members: [
+          authoredGenerationView.members[0],
+          authoredGenerationView.members[0],
+        ],
+      },
+    ]) {
+      expect(() => decodeCompositionGenerationViewV1(invalid)).toThrow(
+        ConfigurationDecodeError,
+      );
+    }
+  });
+
+  test("decodes a list and refuses a generation belonging to another Bot", () => {
+    const list = decodeCompositionGenerationListViewV1({
+      schemaVersion: 1,
+      botId: "alpha",
+      currentGenerationId: AUTHORED_GENERATION,
+      generations: [authoredGenerationView],
+      cursor: "composition:index:x",
+    });
+    expect(list.generations).toHaveLength(1);
+    expect(list.cursor).toBe("composition:index:x");
+    expect(() =>
+      decodeCompositionGenerationListViewV1({
+        schemaVersion: 1,
+        botId: "beta",
+        currentGenerationId: AUTHORED_GENERATION,
+        generations: [authoredGenerationView],
+      }),
+    ).toThrow(ConfigurationDecodeError);
+  });
+
+  test("decodes revert commands and their receipts", () => {
+    const command = {
+      schemaVersion: 1,
+      type: "composition/revert",
+      commandId: "composition-revert-1",
+      botId: "alpha",
+      toGenerationId: BOOTSTRAP_GENERATION,
+      expectedGenerationId: AUTHORED_GENERATION,
+    } as const;
+    expect(decodeRevertCompositionCommandV1(command)).toEqual(command);
+    expect(() =>
+      decodeRevertCompositionCommandV1({
+        ...command,
+        expectedGenerationId: BOOTSTRAP_GENERATION,
+      }),
+    ).toThrow(ConfigurationDecodeError);
+
+    expect(
+      decodeCompositionCommandReceiptV1({
+        schemaVersion: 1,
+        commandId: "composition-revert-1",
+        status: "applied",
+        generationId: "2026-09-02T00:00:00.000Z:0123456789abcdef",
+        currentGenerationId: AUTHORED_GENERATION,
+      }).status,
+    ).toBe("applied");
+    expect(
+      decodeCompositionCommandReceiptV1({
+        schemaVersion: 1,
+        commandId: "composition-revert-1",
+        status: "rejected",
+        failure: "composition generation is newer",
+        currentGenerationId: AUTHORED_GENERATION,
+      }).status,
+    ).toBe("rejected");
+    expect(() =>
+      decodeCompositionCommandReceiptV1({
+        schemaVersion: 1,
+        commandId: "composition-revert-1",
+        status: "applied",
+        currentGenerationId: AUTHORED_GENERATION,
+      }),
+    ).toThrow(ConfigurationDecodeError);
   });
 });

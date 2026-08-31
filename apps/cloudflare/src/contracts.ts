@@ -7,7 +7,11 @@ import type {
   BotConfigurationExecuteRpcV1,
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
+  CompositionCommandReceiptV1,
+  CompositionGenerationListViewV1,
+  CompositionGenerationViewV1,
   ConnectionView,
+  RevertCompositionCommandV1,
   OperationReceiptV1,
   UserConfigurationExecuteRpcV1,
   UserConfigurationReadRpcV1,
@@ -390,6 +394,24 @@ export interface BotConfigurationBinding {
   executeConfiguration(
     request: BotConfigurationExecuteRpcV1,
   ): Promise<OperationReceiptV1>;
+  listCompositionGenerations(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    query: { limit: number; cursor?: string };
+  }): Promise<CompositionGenerationListViewV1>;
+  getCompositionGeneration(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    generationId: string;
+  }): Promise<CompositionGenerationViewV1 | undefined>;
+  revertComposition(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: RevertCompositionCommandV1;
+  }): Promise<CompositionCommandReceiptV1>;
 }
 
 export interface GatewayDependencies {

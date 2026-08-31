@@ -75,6 +75,22 @@ export const rpcBotId: RpcValueDecoder = (value, label) => {
   }
 };
 
+export function rpcInteger(bounds: {
+  minimum: number;
+  maximum: number;
+}): RpcValueDecoder {
+  return (value, label) => {
+    if (
+      !Number.isSafeInteger(value) ||
+      (value as number) < bounds.minimum ||
+      (value as number) > bounds.maximum
+    ) {
+      throw new Error(`${label} must be a bounded integer`);
+    }
+    return value;
+  };
+}
+
 export function rpcEnum<const T extends readonly string[]>(
   values: T,
 ): RpcValueDecoder {

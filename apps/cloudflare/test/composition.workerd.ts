@@ -47,6 +47,39 @@ describe("Composition generations in Workerd", () => {
     expect(await stub.storedPin("run-1")).toBe(admitted);
   });
 
+  test("a revert records a new generation the next admitted Turn pins", async () => {
+    const stub = probe(`revert-${crypto.randomUUID()}`);
+    const bootstrap = await stub.currentGenerationId();
+    const authored = await stub.proposeGeneration("2026-09-01T00:00:00.000Z");
+    await stub.commitGeneration(authored);
+    await stub.runTurn("run-1");
+
+    const reverted = await stub.revertGeneration(bootstrap);
+
+    expect(reverted).not.toBe(bootstrap);
+    expect(reverted).not.toBe(authored);
+    // The target is a record: reverting to it never mutates or reactivates it.
+    expect(await stub.generationStatus(bootstrap)).toBe("superseded");
+    expect(await stub.generationStatus(reverted)).toBe("pending");
+    expect(await stub.currentGenerationId()).toBe(authored);
+
+    await evictDurableObject(stub);
+    await stub.commitGeneration(reverted);
+    await stub.runTurn("run-2");
+
+    expect(await stub.currentGenerationId()).toBe(reverted);
+    expect(await stub.storedPin("run-1")).toBe(authored);
+    expect(await stub.storedPin("run-2")).toBe(reverted);
+  });
+
+  test("refuses reverting to an unknown or already current generation", async () => {
+    const stub = probe(`revert-refuse-${crypto.randomUUID()}`);
+    const bootstrap = await stub.currentGenerationId();
+
+    expect(await stub.revertRefusal("missing")).toContain("is unknown");
+    expect(await stub.revertRefusal(bootstrap)).toContain("is already current");
+  });
+
   test("lists generations newest first and paginates by cursor", async () => {
     const stub = probe(`list-${crypto.randomUUID()}`);
     const bootstrap = await stub.currentGenerationId();
