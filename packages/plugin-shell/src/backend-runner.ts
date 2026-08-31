@@ -5,6 +5,7 @@ import type {
 import {
   type PersistSessionEvents,
   type SessionEvent,
+  type SkillRefV1,
   turnFailureMessage,
   type TurnTypeV1,
   validateToolOccurrenceJournal,
@@ -161,7 +162,12 @@ export async function executeBotTurn(
   const runtime = composition.runtime;
   try {
     if (resume) runtime.agent.agent.resume();
-    else runtime.agent.agent.send(command.text);
+    else {
+      runtime.agent.agent.send({
+        text: command.text,
+        ...(command.skills ? { skills: command.skills } : {}),
+      });
+    }
     await runtime.agent.agent.whenIdle();
     return settleBotTurn(runtime.agent, command, previousEvents);
   } catch (error) {
@@ -194,6 +200,7 @@ export interface ResidentTurnRuntime {
     admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
     resume?: boolean;
     text: string;
+    skills?: SkillRefV1[];
     turnType: TurnTypeV1;
   }): Promise<AgentHandle>;
 }
@@ -228,6 +235,7 @@ export async function executeResidentBotTurn(
       admitEffect,
       resume,
       text: command.text,
+      ...(command.skills ? { skills: command.skills } : {}),
       turnType: command.turnType ?? "chat",
     });
     return settleBotTurn(handle, command, previousEvents);

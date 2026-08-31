@@ -467,6 +467,109 @@
   color: var(--frock-text-muted);
 }
 
+/*
+ * Skill invocation. The popover floats above the composer rather than pushing
+ * it, so the message the User is writing never moves under their caret; the
+ * chips sit inside the composer with the textarea because they are part of the
+ * message being composed, not a separate control.
+ */
+
+.composer-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-self: center;
+  gap: 6px;
+}
+
+.skill-chips {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+}
+
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 8px;
+  border: 1px solid var(--frock-accent-border);
+  border-radius: var(--frock-radius-control);
+  color: var(--frock-accent-text);
+  background: var(--frock-accent-surface);
+  cursor: pointer;
+  font-size: var(--frock-text-xs);
+  line-height: var(--frock-leading-tight);
+}
+
+.skill-chip:hover {
+  border-color: var(--frock-border-strong);
+}
+
+.skill-chip-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: var(--frock-layer-menu);
+  max-height: 240px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-card);
+  background: var(--frock-surface-raised);
+  box-shadow: var(--frock-shadow-floating);
+  list-style: none;
+}
+
+.skill-option {
+  display: grid;
+  padding: 6px 8px;
+  border-radius: var(--frock-radius-control);
+  cursor: pointer;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+}
+
+.skill-option-active {
+  background: var(--frock-fill-hover);
+}
+
+.skill-option-name {
+  color: var(--frock-text);
+  font-size: var(--frock-text-base);
+  line-height: var(--frock-leading-tight);
+}
+
+.skill-option-ref {
+  color: var(--frock-text-subtle);
+  font-family: var(--frock-font-mono);
+  font-size: var(--frock-text-xs);
+  line-height: var(--frock-leading-tight);
+}
+
+.skill-option-description {
+  overflow: hidden;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+  grid-column: 1 / -1;
+  line-height: var(--frock-leading-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-busy .stop-button {
   background: var(--frock-danger-text);
 }

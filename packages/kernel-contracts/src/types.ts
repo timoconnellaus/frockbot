@@ -2,6 +2,11 @@ import {
   decodeSendToUserPayloadV1,
   type SendToUserPayloadV1,
 } from "./send-to-user.js";
+import {
+  decodeSkillRefV1,
+  decodeSkillRefsV1,
+  type SkillRefV1,
+} from "./skills.js";
 
 export interface ToolCall {
   id: string;
@@ -181,7 +186,16 @@ export type MemoryScopeNameV1 = "bot" | "user" | "project";
 
 export interface SessionEventMap {
   "session/created": { createdAt: string };
-  "input/queued": { messageId: string; text: string };
+  /**
+   * `skills` is the Skills this input invoked with `/` or `@`. Optional
+   * because an input that invokes none carries no field at all, so every
+   * `input/queued` recorded before invocation existed still decodes.
+   */
+  "input/queued": {
+    messageId: string;
+    text: string;
+    skills?: SkillRefV1[];
+  };
   "input/admitted": { messageId: string; turn: number };
   "input/cancelled": { messageId: string; reason: "user" | "shutdown" };
   "turn/start": { turn: number };
@@ -313,6 +327,19 @@ export interface SessionEventMap {
       contentHash: string;
     }>;
     refusals: Array<{ path: string; reason: string }>;
+  };
+  /**
+   * A Skill the User invoked from the composer, resolved to the exact
+   * generation this Turn expanded. Invocation is not disclosure-on-demand: the
+   * body is expanded into the Turn's first step, so what the model was told is
+   * reconstructable from `model/request` and *which* Skill the User asked for
+   * is reconstructable from here. One event per invoked ref.
+   */
+  "skill/invoked": {
+    turn: number;
+    ref: SkillRefV1;
+    generationId: string;
+    contentHash: string;
   };
   /** The Bot recorded the intent to write a Skill, before the write ran. */
   "skill/write-intent": {
@@ -706,9 +733,20 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventTimestamp(event.createdAt, "session event.createdAt");
       break;
     case "input/queued":
-      requireEventKeys(event, keys("messageId", "text"), "session event");
+      // Exact keys either way: an input that invoked no Skill carries no
+      // `skills` field, and one that did carries a bounded, decoded list.
+      requireEventKeys(
+        event,
+        event.skills === undefined
+          ? keys("messageId", "text")
+          : keys("messageId", "text", "skills"),
+        "session event",
+      );
       eventString(event.messageId, "session event.messageId");
       text();
+      if (event.skills !== undefined) {
+        decodeSkillRefsV1(event.skills, "session event.skills");
+      }
       break;
     case "input/admitted":
       requireEventKeys(event, keys("messageId", "turn"), "session event");
@@ -929,6 +967,17 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       });
       break;
     }
+    case "skill/invoked":
+      requireEventKeys(
+        event,
+        keys("turn", "ref", "generationId", "contentHash"),
+        "session event",
+      );
+      turn();
+      decodeSkillRefV1(event.ref, "session event.ref");
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.contentHash, "session event.contentHash");
+      break;
     case "skill/write-intent":
       requireEventKeys(
         event,

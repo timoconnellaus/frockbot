@@ -21,7 +21,10 @@
 // mounted at all: a Turn with no readable instruction root loads no
 // instructions, visibly, rather than inventing a second store to read them
 // from.
-import type { WorkspaceFilesV1 } from "@frockbot/kernel-contracts";
+import type {
+  WorkspaceFilesV1,
+  WorkspaceReadsV1,
+} from "@frockbot/kernel-contracts";
 import type { SkillsRuntimeHostV1 } from "@frockbot/plugin-skills/agent";
 
 /** The Bot and User whose Skills a Turn may load. */
@@ -71,4 +74,18 @@ export function createBotSkillsHost(
       runId: turn.runId,
     },
   };
+}
+
+/**
+ * The read-only half of the same seam, for a question asked outside a Turn.
+ *
+ * The composer's `/` and `@` popover needs the Bot's Skill catalog before any
+ * Turn exists, and reading a catalog needs no provenance: there is nothing to
+ * attribute. So this returns reads and no writer at all — a caller holding it
+ * can enumerate an instruction root and can write nothing.
+ */
+export function createBotSkillsReads(
+  env: object,
+): WorkspaceReadsV1 | undefined {
+  return (env as BotSkillsEnv).WORKSPACE_FILES;
 }

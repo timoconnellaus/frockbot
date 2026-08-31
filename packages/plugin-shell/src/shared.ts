@@ -15,7 +15,11 @@ import type {
   CatalogEntryV1,
   CatalogIndexEntryV1,
 } from "@frockbot/catalog-core";
-import type { SendToUserPayloadV1 } from "@frockbot/kernel-contracts";
+import type {
+  SendToUserPayloadV1,
+  SkillRefV1,
+} from "@frockbot/kernel-contracts";
+import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { InjectionKey, Ref } from "vue";
 
 export type { CatalogEntryV1, CatalogIndexEntryV1 };
@@ -121,6 +125,11 @@ export interface FrockBotWebData {
   packageCatalog: CatalogIndexEntryV1[];
   /** The generation `packageCatalog` was read from; every install names it. */
   packageCatalogGeneration?: string;
+  /**
+   * The Bot's invocable Skills, for the composer's `/` and `@` popover. Refs,
+   * names and descriptions — never a body.
+   */
+  skillCatalog: ClientSkillCatalogEntryV1[];
   settingsError?: string;
   selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
@@ -155,6 +164,8 @@ export interface FrockBotWebData {
   loadPackageCatalog(): Promise<void>;
   /** One entry detail, for the panel a User opens before installing. */
   loadCatalogEntry(catalogId: string): Promise<CatalogEntryV1 | undefined>;
+  /** Refreshes {@link FrockBotWebData.skillCatalog} for the active Bot. */
+  loadSkillCatalog(): Promise<void>;
   installPackage(packageId: string, version: string): Promise<void>;
   installCatalogPackage(entry: CatalogIndexEntryV1): Promise<void>;
   uninstallPackage(packageId: string): Promise<void>;
@@ -178,7 +189,11 @@ export interface FrockBotWebData {
     connectionId: string,
     revokeUpstream?: boolean,
   ): Promise<void>;
-  sendPrompt(text: string): Promise<SendPromptResult>;
+  /** `skills` are the refs the composer attached; absent means none. */
+  sendPrompt(
+    text: string,
+    skills?: readonly SkillRefV1[],
+  ): Promise<SendPromptResult>;
   resumeRun(runId: string): Promise<void>;
   /** Sends the durable Stop command for the observed active run. */
   stopRun(): Promise<void>;

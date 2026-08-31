@@ -337,6 +337,61 @@ describe("client run protocol v1", () => {
     ).toThrow("run lookup query.extra is not allowed");
   });
 
+  test("carries invoked Skills on a Turn command, bounded and exact", () => {
+    const ref = (slug: string) => ({
+      schemaVersion: 1 as const,
+      source: "bot" as const,
+      slug,
+    });
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "run it",
+        skills: [ref("daily-standup")],
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      commandId: "command-1",
+      text: "run it",
+      skills: [ref("daily-standup")],
+    });
+    // Absent and empty mean the same thing, and both leave the field off, so
+    // an unchanged client is byte-identical to what it sent before.
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "run it",
+        skills: [],
+      }),
+    ).toEqual({ schemaVersion: 1, commandId: "command-1", text: "run it" });
+    // The wire admits every declared source, so K1 and K2 add no codec change.
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "run it",
+        skills: [{ schemaVersion: 1, source: "managed", slug: "teach" }],
+      }).skills,
+    ).toEqual([{ schemaVersion: 1, source: "managed", slug: "teach" }]);
+    for (const skills of [
+      [ref("a"), ref("b"), ref("c"), ref("d")],
+      [{ schemaVersion: 1, source: "workflow", slug: "a" }],
+      [{ schemaVersion: 1, source: "bot", slug: "a", body: "text" }],
+      "bot/a",
+    ]) {
+      expect(() =>
+        decodeClientTurnCommandV1({
+          schemaVersion: 1,
+          commandId: "command-1",
+          text: "run it",
+          skills,
+        }),
+      ).toThrow();
+    }
+  });
+
   test("strictly decodes hosted Turn, notification, and reconciliation commands", () => {
     expect(
       decodeClientTurnCommandV1({

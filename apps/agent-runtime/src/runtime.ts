@@ -9,6 +9,7 @@ import {
   type PersistSessionEvents,
   type SessionEvent,
   SessionStore,
+  type SkillRefV1,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 import {
@@ -82,6 +83,8 @@ export interface FoundationResidentExecution {
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   resume?: boolean;
   text: string;
+  /** The Skills the User invoked with this message; absent means none. */
+  skills?: SkillRefV1[];
   /** Absent ⇒ `chat`. The resident Agent is created on this turn type. */
   turnType?: TurnTypeV1;
 }
@@ -390,7 +393,12 @@ export async function createFoundationResidentRuntime(
           throw new Error("resident Bot execution was durably fenced");
         }
         if (execution.resume) agent.agent.resume();
-        else agent.agent.send(execution.text);
+        else {
+          agent.agent.send({
+            text: execution.text,
+            ...(execution.skills ? { skills: execution.skills } : {}),
+          });
+        }
         await agent.agent.whenIdle();
         await agent.agent.session.flush();
         return agent;

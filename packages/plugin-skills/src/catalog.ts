@@ -23,13 +23,17 @@
 // a throw, because a hostile or malformed file in an instruction root must not
 // abort the Turn that enumerated it.
 import {
+  formatSkillRefV1,
   isLoadableSkillSourceV1,
+  isSkillRefSlugV1,
+  type SkillRefV1,
   type SkillSourceV1,
   type WorkspaceEntryV1,
   type WorkspaceInstructionRootV1,
   type WorkspaceReadsV1,
 } from "@frockbot/kernel-contracts";
 import {
+  SKILL_FILE_NAME,
   isSkillDocumentPathV1,
   parseSkillDocumentV1,
   SKILL_MAX_FILE_BYTES,
@@ -326,6 +330,86 @@ export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
     "These are your Skills: recipes you wrote, or your User wrote, for you.",
     "Only names, paths and descriptions are listed above. Call skill_load with a path to read a Skill's full instructions before you follow it.",
     "Mentioning a Skill is not running it.",
+  ].join("\n");
+}
+
+/**
+ * The slug a Skill document path carries, or `undefined` when the path names
+ * no usable slug.
+ *
+ * An instruction root is an ordinary durable root, so a `SKILL.md` can sit
+ * anywhere a Bot or a shell put it. The slug is the directory that holds it,
+ * and a directory that is not a well-formed slug simply has no ref: the Skill
+ * is still listed and still loadable by path, it just cannot be invoked from
+ * the composer, which is the honest answer rather than an invented name.
+ */
+export function skillSlugFromDocumentPathV1(path: string): string | undefined {
+  const segments = path.split("/");
+  if (segments[segments.length - 1] !== SKILL_FILE_NAME) return undefined;
+  const slug = segments[segments.length - 2];
+  return isSkillRefSlugV1(slug) ? slug : undefined;
+}
+
+/** The ref that names a loaded Skill, or `undefined` when it has no slug. */
+export function skillRefForLoadedSkillV1(
+  skill: LoadedSkillV1,
+): SkillRefV1 | undefined {
+  const slug = skillSlugFromDocumentPathV1(skill.path);
+  // Every Skill in this catalog came from the Bot's own instruction root, so
+  // `bot` is the only source it can carry. K1 and K2 add the other three by
+  // widening the catalog, not by changing this function's callers.
+  return slug ? { schemaVersion: 1, source: "bot", slug } : undefined;
+}
+
+/**
+ * Resolves an invoked ref against what this Turn actually loaded.
+ *
+ * `undefined` is the whole answer for an unresolvable ref: the caller fails
+ * the command with a visible reason rather than dropping the invocation, so a
+ * User who asked for a Skill is never silently answered without it.
+ */
+export function resolveSkillRefV1(
+  catalog: SkillCatalogV1,
+  ref: SkillRefV1,
+): LoadedSkillV1 | undefined {
+  if (ref.source !== "bot") return undefined;
+  return catalog.skills.find((skill) => {
+    const candidate = skillRefForLoadedSkillV1(skill);
+    return candidate !== undefined && candidate.slug === ref.slug;
+  });
+}
+
+/** One Skill the User invoked, with the ref that named it. */
+export interface InvokedSkillV1 {
+  ref: SkillRefV1;
+  skill: LoadedSkillV1;
+}
+
+/**
+ * The invoked Skills' bodies, expanded for the Turn's first step.
+ *
+ * This is what makes `/` an *invocation* rather than a mention. The catalog
+ * block above says bodies are read on demand and that mentioning a Skill is
+ * not running it; that stays true for every Skill the User did not invoke.
+ * The expansion sits in the system prompt so the exact instructions the model
+ * received are reconstructable from the Turn's `model/request` alone.
+ */
+export function renderInvokedSkillsPromptV1(
+  invoked: readonly InvokedSkillV1[],
+): string {
+  if (invoked.length === 0) return "";
+  const blocks = invoked.map((entry) =>
+    [
+      `  <skill ref="${escapeAttribute(formatSkillRefV1(entry.ref))}" name="${escapeAttribute(entry.skill.name)}" path="${escapeAttribute(entry.skill.path)}" generation="${escapeAttribute(entry.skill.generationId)}">`,
+      escapeText(entry.skill.body),
+      "  </skill>",
+    ].join("\n"),
+  );
+  return [
+    "<invoked_skills>",
+    ...blocks,
+    "</invoked_skills>",
+    "Your User invoked these Skills for this message. Their full instructions are above; follow them.",
   ].join("\n");
 }
 

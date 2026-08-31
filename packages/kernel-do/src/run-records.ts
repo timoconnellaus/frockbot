@@ -1,7 +1,9 @@
 import {
   decodeSessionEvent,
   decodeTurnTypeV1,
+  formatSkillRefV1,
   type SessionEvent,
+  type SkillRefV1,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 
@@ -445,6 +447,12 @@ export interface BotTurnCommand {
    * path never forwards it.
    */
   origin?: StoredRunOriginV1;
+  /**
+   * The Skills the User invoked with this message. Part of the command's
+   * identity: the same text with a different Skill attached is a different
+   * command, so it must not collide on an idempotency record.
+   */
+  skills?: SkillRefV1[];
 }
 
 /**
@@ -458,7 +466,12 @@ export function botTurnCommandFingerprintV1(
   command: BotTurnCommand & { userId: string; botId: string },
 ): string {
   const turnType = command.turnType ?? "chat";
-  if (turnType !== "chat" || command.origin !== undefined) {
+  const skills = command.skills ?? [];
+  if (
+    turnType !== "chat" ||
+    command.origin !== undefined ||
+    skills.length > 0
+  ) {
     return `bot-turn-command-v2:${JSON.stringify({
       userId: command.userId,
       botId: command.botId,
@@ -466,6 +479,7 @@ export function botTurnCommandFingerprintV1(
       text: command.text,
       turnType,
       ...(command.origin ? { origin: command.origin } : {}),
+      ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
     })}`;
   }
   return `bot-turn-command-v1:${JSON.stringify({
