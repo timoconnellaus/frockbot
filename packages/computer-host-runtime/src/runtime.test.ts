@@ -24,6 +24,11 @@ import {
   PROVISION_LOCK,
   PROVISION_PHASES,
   PROVISION_SCRIPT,
+  PROVISION_TASK,
+  PLAYWRIGHT_PLATFORM,
+  PLAYWRIGHT_VERSION,
+  DESKTOP_PACKAGES,
+  SPRITE_API_SOCKET,
   provisionLaunchScript,
   provisionPollScript,
   BOUNDED_LOG_SCRIPT,
@@ -135,14 +140,56 @@ describe("provisioning script", () => {
   });
 
   test("installs the desktop, sync, and gateway runtime", () => {
-    expect(provisionScript).toContain("apt-get install -y chromium xvfb");
+    expect(provisionScript).toContain(
+      "apt-get install -y --no-install-recommends",
+    );
     // `computer_screenshot` runs `scrot` under the tenant's own display, so
     // provisioning installs it and the capability probe asks for it. Without
     // the probe, an already-provisioned Computer would never gain it.
-    expect(provisionScript).toContain("util-linux scrot");
+    expect(DESKTOP_PACKAGES).toContain("scrot");
     expect(provisionScript).toContain("! command -v scrot >/dev/null");
-    expect(provisionScript).toContain("playwright-core@1.55.0");
+    expect(provisionScript).toContain(`playwright-core@${PLAYWRIGHT_VERSION}`);
     expect(provisionScript).toContain(`chmod 600 ${RUNTIME_ROOT}/tokens`);
+  });
+
+  test("installs no browser from the distribution", () => {
+    // ADR 0004: on the Sprite base image `chromium` is a snap transitional
+    // package. Installing it pulls `snapd` and `systemd` and had not finished
+    // after 25 minutes, which is the whole reason a cold Computer could not
+    // open. The browser is Playwright's own build instead, and the way that
+    // stays true is that the package list never names one again.
+    expect(DESKTOP_PACKAGES).not.toContain("chromium");
+    expect(provisionScript).not.toMatch(/apt-get install[^\n]*\bchromium\b/);
+    expect(provisionScript).toContain("cli.js install chromium");
+    expect(provisionScript).toContain(
+      `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=${PLAYWRIGHT_PLATFORM}`,
+    );
+  });
+
+  test("holds the Sprite awake for the whole detached run", () => {
+    // The defect that made every package list look too heavy: a Sprite is
+    // active while there is "a command running, a session producing output, an
+    // open TCP connection to its URL, a service handling traffic", and a
+    // `setsid nohup` provisioner is none of those. Measured, the Sprite's own
+    // clock advanced ~4 minutes across ~25 minutes of wall time. The task is
+    // the documented hold, and it is released on EXIT so a failed run stops
+    // paying for the Sprite rather than pinning it awake.
+    expect(provisionScript).toContain(SPRITE_API_SOCKET);
+    expect(provisionScript).toContain(`http://sprite/v1/tasks`);
+    expect(provisionScript).toContain(
+      `-X DELETE http://sprite/v1/tasks/${PROVISION_TASK}`,
+    );
+    expect(provisionScript).toContain("trap release EXIT");
+  });
+
+  test("puts the real toolchain on PATH before it runs node", () => {
+    // `/.sprite/bin/node` is an nvm shim whose last resort is `command -v
+    // node` — itself, in a non-login shell — so a detached `node` re-execs for
+    // ever. Measured on a real Sprite: it never returned.
+    const preamble = provisionScript.indexOf("/etc/profile.d/languages_paths");
+    const firstNode = provisionScript.indexOf("npm install --prefix");
+    expect(preamble).toBeGreaterThan(-1);
+    expect(preamble).toBeLessThan(firstNode);
   });
 
   test("guards every phase with its own resume marker", () => {

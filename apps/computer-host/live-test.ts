@@ -162,6 +162,29 @@ async function waitForHealth(deadlineMs = 120_000): Promise<void> {
   throw new Error("Timed out waiting for the Computer host container");
 }
 
+/**
+ * What a cold Computer is allowed to cost, measured rather than guessed.
+ *
+ * Measured at **166 s**, **135 s**, and **120 s** on 2026-09-01, each over a single
+ * connection, once the run
+ * held the Sprite awake with a Tasks-API task and stopped asking the
+ * distribution for a browser: `apt-get update` 6 s, the desktop packages 82 s,
+ * Playwright's Chromium build about a minute, and the rest cold-start first
+ * reads. The budget is a wide margin over that — the point is to fail
+ * when a regression puts the install back into the ten-minute bound (ADR
+ * 0004), not to police a minute either way on a shared archive.
+ */
+const COLD_OPEN_BUDGET_SECONDS = 8 * 60;
+
+/**
+ * What a warm Computer is allowed to cost.
+ *
+ * A second `open` runs the ensure script and nothing else; it was measured at
+ * **463 ms**, **348 ms**, and **355 ms**. Anything approaching this budget means a
+ * phase marker was lost and the Computer is reinstalling itself.
+ */
+const WARM_OPEN_BUDGET_MS = 30_000;
+
 let coldAttempts = 0;
 
 /**
@@ -326,6 +349,10 @@ try {
     "the ensure script allocated the tenant a display slot",
   );
   check(opened.generation === 1, "the Computer records its first generation");
+  check(
+    coldSeconds < COLD_OPEN_BUDGET_SECONDS,
+    `a cold Computer opens inside ${COLD_OPEN_BUDGET_SECONDS}s (took ${coldSeconds}s)`,
+  );
 
   // Idempotence: the second open adopts what the first provisioned. Anything
   // else would mean a Bot's second turn reinstalled its own desktop.
@@ -336,9 +363,14 @@ try {
       "second open",
     ),
   );
+  const adoptedMs = Date.now() - adoptedStarted;
   check(
     adopted.provisioning === undefined,
-    `a second open adopts the Computer and provisions nothing (${Date.now() - adoptedStarted}ms)`,
+    `a second open adopts the Computer and provisions nothing (${adoptedMs}ms)`,
+  );
+  check(
+    adoptedMs < WARM_OPEN_BUDGET_MS,
+    `and adopts it in seconds rather than minutes (${adoptedMs}ms, budget ${WARM_OPEN_BUDGET_MS}ms)`,
   );
 
   // --- the 431 regression -------------------------------------------------
