@@ -31,9 +31,9 @@ says so at HEAD.
 
 Four ADRs were written during the run: 0012 (one Computer per User), 0013
 (bidirectional sync, Memory single-writer), 0014 (`catalog` provenance) and 0015
-(a Bot template is a recipe and carries no Memory). ADR 0011 moved from
-`proposed` to `accepted` in this documentation pass, because the plan that
-carries it records itself implemented and each of its claims has a named check.
+(a Bot template is a recipe and carries no Memory). ADR 0011 is still `proposed`
+while the plan that carries it records itself implemented; see the owner
+decisions below.
 
 ## Register statuses this pass changed
 
@@ -51,8 +51,26 @@ title. Each has a footnote under the register table giving its evidence.
 
 ## Deferred, pending an owner decision
 
-Three things are not backlog items. Each needs a decision the owner has not
+Four things are not backlog items. Each needs a decision the owner has not
 made, and none of them is blocked on code.
+
+**ADR 0011 is ready to be marked accepted, and was left `proposed`.** The plan
+that carries it, [`../plans/kernel-and-isolate.md`](../plans/kernel-and-isolate.md),
+records itself implemented, and each of the decision's load-bearing claims has a
+named check in [`../architecture-checks.md`](../architecture-checks.md): the
+three-part kernel exists as `kernel-contracts`, `kernel-agent-loop`,
+`kernel-composition` and `kernel-do`, with `scripts/check-kernel-imports.ts`
+failing `typecheck` on a kernel that imports a Package; a non-first-party Package
+loads through Worker Loader with `globalOutbound` disabled and only
+Assignment-derived bindings, and an authority-widening request becomes a durable
+pending User decision (`apps/cloudflare/test/bot-isolate.workerd.ts`); activation
+fails closed and quarantines a generation that fails three consecutive times
+(`packages/kernel-composition/src/activation.ts`), and a revert records a new
+generation the next admitted Turn activates
+(`apps/cloudflare/test/composition.workerd.ts`); authoring is bounded by durable
+per-User quota, and a breach is a visible failure rather than a throw
+(`apps/cloudflare/test/authoring.workerd.ts`). Flipping the status is the owner's
+call under "constitution before code", so this pass did not flip it.
 
 **K1 — the user-global Skills root.** Two of row 21's three halves landed;
 the third cannot without amending the constitution. `AGENTS.md` says: "Only
