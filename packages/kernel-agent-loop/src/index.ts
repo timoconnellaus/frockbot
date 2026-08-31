@@ -19,6 +19,7 @@ import {
   type ToolCallOccurrence,
   type ToolExecutionResult,
   toolCallOccurrences,
+  turnEndReason,
   validateSettledToolOccurrenceJournal,
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
@@ -275,6 +276,7 @@ class LoopAgent implements Agent {
     }
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
+    let turnReason: string | undefined;
     let reconciliationRequired = false;
     try {
       if (latestAssistant) {
@@ -289,6 +291,7 @@ class LoopAgent implements Agent {
             "not-started",
           );
           turnOutcome = "model-error";
+          turnReason = turnEndReason(definitiveNoEffect.reason);
           this.#ctx.emit(
             "agent/error",
             this,
@@ -470,6 +473,7 @@ class LoopAgent implements Agent {
         this.#ctx.emit("agent/error", this, error);
       } else {
         turnOutcome = "model-error";
+        turnReason = turnEndReason(modelFailureMessage(error));
         this.#ctx.emit("agent/error", this, error);
       }
     } finally {
@@ -489,6 +493,9 @@ class LoopAgent implements Agent {
           type: "turn/end",
           turn: openTurn,
           outcome: turnOutcome,
+          ...(turnOutcome !== "completed" && turnReason !== undefined
+            ? { reason: turnReason }
+            : {}),
         });
       }
       await this.session.flush();
@@ -516,6 +523,7 @@ class LoopAgent implements Agent {
 
     let openStep: number | undefined;
     let turnOutcome: StepOutcome = "interrupted";
+    let turnReason: string | undefined;
     let reconciliationRequired = false;
     try {
       let inputs = [input];
@@ -531,6 +539,7 @@ class LoopAgent implements Agent {
         );
         if (decision.kind === "reject") {
           turnOutcome = "blocked";
+          turnReason = turnEndReason(decision.reason);
           return;
         }
 
@@ -595,6 +604,7 @@ class LoopAgent implements Agent {
         this.#ctx.emit("agent/error", this, error);
       } else {
         turnOutcome = "model-error";
+        turnReason = turnEndReason(modelFailureMessage(error));
         this.#ctx.emit("agent/error", this, error);
       }
     } finally {
@@ -610,7 +620,14 @@ class LoopAgent implements Agent {
             outcome: turnOutcome,
           });
         }
-        this.session.append({ type: "turn/end", turn, outcome: turnOutcome });
+        this.session.append({
+          type: "turn/end",
+          turn,
+          outcome: turnOutcome,
+          ...(turnOutcome !== "completed" && turnReason !== undefined
+            ? { reason: turnReason }
+            : {}),
+        });
       }
       await this.session.flush();
       await this.#ctx.serial("agent/turn-stopping", this, turn);

@@ -1,4 +1,7 @@
-import { type SessionEvent } from "@frockbot/kernel-contracts";
+import {
+  type SessionEvent,
+  turnFailureMessage,
+} from "@frockbot/kernel-contracts";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import {
   BotTurnExecutionError,
@@ -89,7 +92,7 @@ export async function executeBotTurn(
     }
     if (terminalTurn.outcome !== "completed") {
       throw new BotTurnExecutionError(
-        `Bot turn ended with outcome ${terminalTurn.outcome}`,
+        turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
         appendedSessionEvents(previousEvents, events),
       );
     }
