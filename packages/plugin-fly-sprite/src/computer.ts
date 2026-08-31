@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { ComputerError } from "@frockbot/computer-core";
+import {
+  ComputerError,
+  decodeComputerDoctorReportV1,
+  type ComputerDoctorReportV1,
+} from "@frockbot/computer-core";
 import type {
   ComputerHostControlResultV1,
   ComputerHostFileReadResultV1,
@@ -7,14 +11,20 @@ import type {
   ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
 import {
+  BIN_ROOT,
   BOTS_ROOT,
   BOUNDED_LOG_SCRIPT,
   CONTROL_SCRIPT,
   DATA_ROOT,
+  DOCTOR_MARKER,
+  DOCTOR_SCRIPT,
   HOME_ROOT,
   LEASE_MAX_AGE_SECONDS,
   NO_SLOTS_MARKER,
   RUNTIME_ROOT,
+  SANCTIONED_SURFACE_ENV,
+  SCRATCH_ENV,
+  SCRATCH_ROOT,
   shellQuote,
   SLOT_IDLE_SECONDS,
   WORKSPACE_SYNC_SERVICE,
@@ -53,6 +63,8 @@ const TIMEOUTS = {
   command: 120_000,
   browser: 45_000,
   screenshot: 30_000,
+  /** box-doctor probes a dozen things, none of them slow. */
+  doctor: 45_000,
   control: 15_000,
   viewer: 30_000,
 } as const;
@@ -319,6 +331,11 @@ export class FlySpriteAgentComputer {
   /** Captures this tenant's own desktop. */
   screenshot(signal: AbortSignal): Promise<SpriteScreenshotV1> {
     return this.computer.screenshotForAgent(this.layout, signal);
+  }
+
+  /** Runs the Computer's self-check for this tenant. */
+  doctor(signal: AbortSignal): Promise<ComputerDoctorReportV1> {
+    return this.computer.doctorForAgent(this.layout, signal);
   }
 
   launchProcess(
@@ -628,6 +645,9 @@ export class FlySpriteComputer {
       this.agentControlGuard(layout),
       ...this.tenantEnvironment(layout),
       `export DISPLAY=${shellQuote(display)}`,
+      // `scrot` is one of the shimmed names, and this is the surface the shim
+      // exists to point at, so it is allowed through here and nowhere else.
+      `export ${SANCTIONED_SURFACE_ENV}=1`,
       `rm -f ${shellQuote(path)}`,
       `scrot --overwrite ${shellQuote(path)}`,
       `stat -c %s ${shellQuote(path)}`,
@@ -672,6 +692,74 @@ export class FlySpriteComputer {
       path,
       capturedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Runs box-doctor and decodes its report.
+   *
+   * No human-control guard, and deliberately: a Computer a human has taken
+   * over is exactly a Computer somebody may need to ask what is wrong with,
+   * and every check reads. The tenant stamp still runs, because asking is
+   * using and a tenant being asked about must not lose its display slot
+   * mid-answer.
+   *
+   * The script prints its report on one marked line and its human-readable
+   * lines to `/tmp/box-doctor.log`, so the marker is what separates the report
+   * from anything else the Computer said.
+   */
+  async doctorForAgent(
+    layout: AgentLayout,
+    signal: AbortSignal,
+  ): Promise<ComputerDoctorReportV1> {
+    const host = await this.readyHost(layout, signal);
+    const generation = this.generations.get(layout.key) ?? 0;
+    const script = [
+      this.tenantStamp(layout),
+      ...this.tenantEnvironment(layout),
+      `if [ ! -x ${DOCTOR_SCRIPT} ]; then echo "missing" >&2; exit 69; fi`,
+      `${DOCTOR_SCRIPT} ${shellQuote(layout.key)} ${String(generation)}`,
+    ].join("\n");
+    let outcome: ComputerHostExecOutcomeV1;
+    try {
+      outcome = await this.execute(
+        host,
+        script,
+        {
+          signal,
+          timeoutMs: TIMEOUTS.doctor,
+          maxOutputBytes: MAX_OUTPUT * 2,
+        },
+        "Sprite self-check failed",
+      );
+    } catch (error) {
+      // A Computer provisioned before the self-check existed has no script to
+      // run. That is a stated outcome — it installs on the next open — not a
+      // crash, and saying which it is costs one sentence.
+      if (errorText(error).includes("missing")) {
+        throw new ComputerError(
+          "capability-unavailable",
+          "This Computer has no self-check installed yet; it is installed the next time the Computer is opened",
+        );
+      }
+      throw error;
+    }
+    const line = outputText(outcome.stdout)
+      .split("\n")
+      .find((candidate) => candidate.startsWith(DOCTOR_MARKER));
+    let parsed: unknown;
+    try {
+      parsed = line ? JSON.parse(line.slice(DOCTOR_MARKER.length)) : undefined;
+    } catch {
+      parsed = undefined;
+    }
+    const report = decodeComputerDoctorReportV1(parsed);
+    if (!report) {
+      throw new ComputerError(
+        "provider-failure",
+        "The Computer's self-check produced no readable report",
+      );
+    }
+    return report;
   }
 
   /**
@@ -1075,11 +1163,27 @@ export class FlySpriteComputer {
     );
   }
 
+  /**
+   * The environment every command this provider runs for a tenant starts in.
+   *
+   * `PATH` leads with the Computer's own `bin`, which holds the browser
+   * launcher and the sanctioned-surface shims: a command that reaches for
+   * `chromium` or `xdotool` by name finds the refusal rather than the binary.
+   * That is policy, not a boundary — the real binaries are still on the box,
+   * one absolute path away — and it is stated as policy in `browser.md` and in
+   * the refusal itself.
+   *
+   * The Bot's working directory stays its own private workspace; the shared
+   * scratch is named in the environment rather than entered, because a default
+   * cwd every Bot of a User shares is a default cwd where files collide.
+   */
   private tenantEnvironment(layout: AgentLayout): string[] {
     return [
       `export HOME=${HOME_ROOT}`,
+      `export PATH=${BIN_ROOT}:$PATH`,
       `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
       `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
+      `export ${SCRATCH_ENV}=${SCRATCH_ROOT}`,
       `cd ${shellQuote(layout.workspaceDir)}`,
     ];
   }

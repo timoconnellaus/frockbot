@@ -383,6 +383,83 @@ export interface ComputerScreenshotCapabilityV1 {
   capture(options?: ComputerOperationOptions): Promise<ComputerScreenshotV1>;
 }
 
+/** One thing box-doctor looked at, and what it saw. */
+export interface ComputerDoctorCheckV1 {
+  name: string;
+  status: "pass" | "fail";
+  detail: string;
+}
+
+/**
+ * One run of the Computer's self-check (parity row 27).
+ *
+ * `generation` is the Computer's provisioning generation as the host reported
+ * it, so a report read later says which Computer it describes — a report from
+ * before a reprovisioning is history, not a current answer.
+ */
+export interface ComputerDoctorReportV1 {
+  schemaVersion: 1;
+  generation: number;
+  capturedAt: string;
+  checks: ComputerDoctorCheckV1[];
+  summary: string;
+}
+
+/**
+ * Decodes one report at the seam it crosses: the Computer's stdout.
+ *
+ * Exact-field and unversioned-migration-free, like every other decoder here. A
+ * report that does not decode is a Computer that answered something else, and
+ * the caller says so rather than guessing at half a report.
+ */
+export function decodeComputerDoctorReportV1(
+  value: unknown,
+): ComputerDoctorReportV1 | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion !== 1) return undefined;
+  const { generation, capturedAt, checks, summary } = record;
+  if (typeof generation !== "number" || !Number.isSafeInteger(generation)) {
+    return undefined;
+  }
+  if (typeof capturedAt !== "string" || !capturedAt) return undefined;
+  if (typeof summary !== "string" || !summary) return undefined;
+  if (!Array.isArray(checks)) return undefined;
+  const decoded: ComputerDoctorCheckV1[] = [];
+  for (const entry of checks) {
+    if (typeof entry !== "object" || entry === null) return undefined;
+    const check = entry as Record<string, unknown>;
+    if (typeof check.name !== "string" || !check.name) return undefined;
+    if (check.status !== "pass" && check.status !== "fail") return undefined;
+    if (typeof check.detail !== "string") return undefined;
+    decoded.push({
+      name: check.name,
+      status: check.status,
+      detail: check.detail,
+    });
+  }
+  if (decoded.length === 0) return undefined;
+  return {
+    schemaVersion: 1,
+    generation,
+    capturedAt,
+    checks: decoded,
+    summary,
+  };
+}
+
+/**
+ * Runs the Computer's self-check and answers a report.
+ *
+ * Read-only by declaration: every check reads and none repairs, so it records
+ * no durable intent. Unlike a screenshot it is *not* refused during a human
+ * takeover — a Computer a human is holding is exactly a Computer somebody may
+ * need to ask what is wrong with.
+ */
+export interface ComputerDoctorCapabilityV1 {
+  run(options?: ComputerOperationOptions): Promise<ComputerDoctorReportV1>;
+}
+
 export interface ComputerViewerSession {
   id: string;
   url: string;
@@ -523,6 +600,8 @@ export interface ComputerHandle {
   browser?: ComputerBrowser;
   screenshot?: ComputerScreenshotCapabilityV1;
   processes?: ComputerBackgroundProcessesV1;
+  /** The Computer's self-check, when the provider ships one. */
+  doctor?: ComputerDoctorCapabilityV1;
   viewer?: ComputerViewer;
   control?: ComputerControl;
   close(): Promise<void>;
@@ -598,6 +677,7 @@ function guardedHandle(
     browser,
     screenshot,
     processes,
+    doctor,
     viewer,
     control,
   } = handle;
@@ -658,6 +738,12 @@ function guardedHandle(
             guardedOperation(assertCurrent, () =>
               processes.generation(options),
             ),
+        }
+      : undefined,
+    doctor: doctor
+      ? {
+          run: (options) =>
+            guardedOperation(assertCurrent, () => doctor.run(options)),
         }
       : undefined,
     viewer: viewer

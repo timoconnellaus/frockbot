@@ -39,6 +39,7 @@ import {
 import {
   computerBotPathKeyV1,
   ComputerError,
+  type ComputerDoctorReportV1,
   type ComputerBackgroundStateV1,
   type ComputerBrowserAction,
   type ComputerHandle,
@@ -46,6 +47,11 @@ import {
   type ComputerSyncReasonV1,
   type ComputerSyncSummaryV1,
 } from "@frockbot/computer-core";
+import {
+  computerGuiRefusalV1,
+  SCRATCH_ROOT,
+  shellGuiCommandV1,
+} from "@frockbot/computer-host-runtime";
 // Merges the Agent loop's event declarations into the cordis Context type.
 import type {} from "@frockbot/kernel-agent-loop/agent";
 import type { Plugin } from "cordis";
@@ -147,6 +153,9 @@ function decodeExec(input: unknown): ExecInput | undefined {
   }
   return { command, background: background === true };
 }
+
+/** The Package-declared durable root a self-check report is filed in. */
+export const COMPUTER_DOCTOR_ROOT_ID = "doctor";
 
 /** The durable root a finished process's log tail is mirrored into. */
 export const COMPUTER_PROCESSES_ROOT_ID = "processes";
@@ -416,6 +425,7 @@ export function createComputerAgentPlugin(
     ) => {
       const computer = await attach(botId, signal);
       await turnSync.beforeUse(computer, sessionId, signal);
+      await selfCheck(computer, botId, signal);
       return computer;
     };
 
@@ -426,6 +436,8 @@ export function createComputerAgentPlugin(
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
         "With background:true the command keeps running after this call returns and after this Turn ends, and you get a processId to check later.",
         "A background process runs only while the Computer is awake. Nothing keeps it awake for you: if the Computer hibernates first, the outcome is reported as unknown, with whatever log was durable at the time.",
+        `${SCRATCH_ROOT} (also $FROCKBOT_SCRATCH) is scratch shared with your User's other Bots: it survives hibernation but is not durable and never reaches storage, so keep nothing there you cannot lose.`,
+        "The Computer's GUI is never driven from the shell; use computer_browser and computer_screenshot instead of launching or poking at a browser yourself.",
       ].join(" "),
       inputSchema: {
         type: "object",
@@ -448,6 +460,16 @@ export function createComputerAgentPlugin(
             content: `A command of at most ${MAX_EXEC_COMMAND_LENGTH} characters is required`,
             isError: true,
           };
+        // "The GUI is never driven from the shell" (parity row 33), refused at
+        // the seam where the model can be told why. This is policy and not a
+        // boundary — a regex over a shell string is defeatable, and the
+        // Computer is the User's trust boundary anyway — so it is paired with
+        // a PATH shim on the Computer that prints the same sentence, and both
+        // exist to make the sanctioned surface the easy one.
+        const guiCommand = shellGuiCommandV1(decoded.command);
+        if (guiCommand) {
+          return { content: computerGuiRefusalV1(guiCommand), isError: true };
+        }
         if (decoded.background) {
           return processes
             ? launchBackground(decoded.command, context)
@@ -921,6 +943,138 @@ export function createComputerAgentPlugin(
     };
 
     /**
+     * Files one self-check report in the Package-declared `doctor` root.
+     *
+     * Through the Workspace, for the same reason a screenshot is: a file left
+     * on the Computer by a shell reaches object storage `unattributed`, and a
+     * report nobody can attribute is a report nobody can act on. One path per
+     * Bot, overwritten: the log on the Computer is the history, and this is
+     * the last answer, readable while the Computer sleeps.
+     */
+    const fileDoctorReport = async (
+      computer: ComputerHandle,
+      botId: string,
+      report: ComputerDoctorReportV1,
+    ): Promise<string | undefined> => {
+      if (!writer || !computer.workspace) return undefined;
+      const root: WorkspaceRootV1 = {
+        kind: "package-declared",
+        userId,
+        packageId: "computer",
+        rootId: COMPUTER_DOCTOR_ROOT_ID,
+      };
+      const path = `${computerBotPathKeyV1(botId)}/latest.json`;
+      const existing = await computer.workspace.stat({ root, path });
+      const written = await computer.workspace.write({
+        path: { root, path },
+        bytes: new TextEncoder().encode(`${JSON.stringify(report, null, 2)}\n`),
+        writer: {
+          kind: "bot",
+          botId,
+          sessionId: writer.sessionId,
+          turnId: writer.turnId,
+          runId: writer.runId,
+        },
+        expectedGenerationId:
+          existing.status === "ok"
+            ? existing.entry.generation.generationId
+            : null,
+        mediaType: "application/json",
+      });
+      return written.status === "ok" ? path : undefined;
+    };
+
+    /**
+     * The self-check, run once for the Computer this Package instance opened.
+     *
+     * "box-doctor runs at startup and on demand" (parity row 27). Startup here
+     * is the first time this Bot reaches its Computer after this Package
+     * loaded — which is the first Turn after a cold provisioning, and after a
+     * Durable Object eviction as well. Repeating it costs one read-only exec
+     * and no effect, so a second run is waste and never damage.
+     *
+     * Nothing here can fail a Turn: a Computer that cannot answer a self-check
+     * is a Computer the next tool call will report on anyway.
+     */
+    let selfChecked = false;
+    const selfCheck = async (
+      computer: ComputerHandle,
+      botId: string,
+      signal: AbortSignal,
+    ): Promise<void> => {
+      if (selfChecked || !computer.doctor || !writer) return;
+      selfChecked = true;
+      try {
+        const report = await computer.doctor.run({ signal });
+        await fileDoctorReport(computer, botId, report);
+      } catch {
+        // An unreadable self-check is not a reason to refuse the tool call the
+        // Bot actually made.
+      }
+    };
+
+    /**
+     * `computer_doctor` — the Computer's self-check, on demand (row 27).
+     *
+     * Declared read-only: every check reads and none repairs, so it records no
+     * durable intent. It is admitted on every turn type, because a Routine
+     * that finds a Computer misbehaving must be able to say what is wrong with
+     * it, and it is *not* refused under a human takeover — a Computer somebody
+     * has taken over is exactly a Computer somebody is debugging.
+     */
+    const doctorTool: ToolDefinition = {
+      name: "computer_doctor",
+      idempotent: true,
+      admission: { turnTypes: ["chat", "automation", "subagent", "channel"] },
+      description:
+        "Run the Computer's self-check and read the report: disk, the shared scratch, the desktop gateway, your display, the browser profile, the durable-root sync and its conflicts, the reference docs, the browser launcher, the clock, and DNS. Read-only; it changes nothing and repairs nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      validate: (input) =>
+        input === undefined ||
+        input === null ||
+        (typeof input === "object" && Object.keys(input).length === 0),
+      execute: async (_input, context) => {
+        try {
+          return await useComputer(
+            await open(context.botId, context.sessionId, context.signal),
+            async (computer) => {
+              if (!computer.doctor) {
+                throw new ComputerError(
+                  "capability-unavailable",
+                  "The selected Computer does not support a self-check",
+                );
+              }
+              const report = await computer.doctor.run({
+                signal: context.signal,
+              });
+              let path: string | undefined;
+              try {
+                path = await fileDoctorReport(computer, context.botId, report);
+              } catch {
+                // A report that could not be filed is still a report that was
+                // read, and withholding it would hide the very failure it
+                // describes.
+              }
+              return {
+                content: JSON.stringify({
+                  ...report,
+                  ...(path ? { rootId: COMPUTER_DOCTOR_ROOT_ID, path } : {}),
+                }),
+                isError: false,
+              };
+            },
+          );
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    };
+
+    /**
      * The three background-process tools.
      *
      * `check` and `logs` declare their turn types explicitly — every one of
@@ -1060,6 +1214,7 @@ export function createComputerAgentPlugin(
     return [
       ctx.tools.register(execTool),
       ...(writer ? [ctx.tools.register(screenshotTool)] : []),
+      ctx.tools.register(doctorTool),
       ...(processes && writer
         ? [
             ctx.tools.register(processCheckTool),
@@ -1105,6 +1260,7 @@ export function createComputerAgentPlugin(
             "Use computer_exec to inspect the filesystem before claiming that a path or file exists.",
             "Use computer_screenshot to see your own desktop; each capture is filed in your durable screenshots root.",
             "For a job that outlasts this Turn, use computer_exec with background:true and check it later with computer_process_check. Do not poll it in a loop.",
+            "Use computer_doctor when the Computer misbehaves; it reports disk, desktop, sync, and network in one read-only call.",
             "Never invent a directory listing.",
           ].join("\n"),
       }),

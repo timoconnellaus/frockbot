@@ -351,6 +351,13 @@ function handle(
         };
       },
     },
+    // The Computer's self-check. Read-only, and not lease-guarded: a Computer
+    // under human control is exactly a Computer somebody may need to ask what
+    // is wrong with.
+    doctor: {
+      run: (options) =>
+        computer.doctor(options?.signal ?? new AbortController().signal),
+    },
     processes: {
       launch: async (request, options) => {
         const launched = await computer.launchProcess(

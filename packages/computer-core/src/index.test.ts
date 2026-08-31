@@ -4,6 +4,7 @@ import {
   ComputerError,
   ComputerRegistry,
   computerIdentityKeyV1,
+  decodeComputerDoctorReportV1,
   workspaceMountPathV1,
   type ComputerHandle,
   type ComputerProvider,
@@ -254,5 +255,60 @@ describe("ComputerRegistry", () => {
       root.computers.open({ userId: "user-1" }, { botId: " " }),
     ).rejects.toMatchObject({ code: "invalid-request" });
     await root.fiber.dispose();
+  });
+});
+
+// Parity row 27: the report a Computer's self-check prints, decoded at the
+// seam it crosses. Exact-field, no migrations: a Computer that answered
+// something else is a Computer that answered something else.
+describe("the self-check report", () => {
+  const report = {
+    schemaVersion: 1,
+    generation: 3,
+    capturedAt: "2026-09-01T00:00:00Z",
+    checks: [{ name: "disk-root", status: "pass", detail: "12% full" }],
+    summary: "1 checks, 1 passed, 0 failed",
+  };
+
+  test("decodes a report the Computer printed", () => {
+    expect(decodeComputerDoctorReportV1(report)).toEqual({
+      schemaVersion: 1,
+      generation: 3,
+      capturedAt: "2026-09-01T00:00:00Z",
+      checks: [{ name: "disk-root", status: "pass", detail: "12% full" }],
+      summary: "1 checks, 1 passed, 0 failed",
+    });
+  });
+
+  test("keeps a failing check as a report, not as a decode failure", () => {
+    const failing = {
+      ...report,
+      checks: [{ name: "dns", status: "fail", detail: "no resolver" }],
+    };
+    expect(decodeComputerDoctorReportV1(failing)?.checks[0]?.status).toBe(
+      "fail",
+    );
+  });
+
+  test("refuses anything that is not this schema", () => {
+    for (const value of [
+      undefined,
+      null,
+      "{}",
+      { ...report, schemaVersion: 2 },
+      { ...report, generation: "3" },
+      { ...report, capturedAt: "" },
+      { ...report, summary: 12 },
+      { ...report, checks: [] },
+      { ...report, checks: "none" },
+      { ...report, checks: [{ name: "x", status: "maybe", detail: "" }] },
+      { ...report, checks: [{ name: "", status: "pass", detail: "" }] },
+      { ...report, checks: [{ status: "pass", detail: "" }] },
+    ]) {
+      expect(
+        decodeComputerDoctorReportV1(value),
+        JSON.stringify(value),
+      ).toBeUndefined();
+    }
   });
 });
