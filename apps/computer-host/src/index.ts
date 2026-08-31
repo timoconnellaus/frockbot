@@ -26,9 +26,9 @@ import {
 } from "./router.ts";
 
 export interface ComputerHostEnv extends ComputerEffectJournalEnv {
-  COMPUTER_HOST_CONTAINER: DurableObjectNamespace<ComputerHostContainer>;
+  COMPUTER_HOST_CONTAINER: DurableObjectNamespace<FlyHostContainer>;
   /** The superseded seam's binding onto the same container class. */
-  FLY_HOST: DurableObjectNamespace<ComputerHostContainer>;
+  FLY_HOST: DurableObjectNamespace<FlyHostContainer>;
   COMPUTER_EFFECTS: DurableObjectNamespace;
   COMPUTER_HOST_SHARDS: string;
   FLY_HOST_SHARDS: string;
@@ -47,8 +47,18 @@ export interface ComputerHostEnv extends ComputerEffectJournalEnv {
  * request re-derives everything it needs from the Sprite. `sleepAfter` is
  * therefore a cost knob rather than a correctness one — a cold start costs one
  * caller a few seconds, never a lost effect.
+ *
+ * The class keeps the prototype's `FlyHostContainer` name on purpose. A
+ * Cloudflare container application is bound to one Durable Object class for
+ * its lifetime, and the deployed application
+ * (`frockbot-computer-host-flyhostcontainer`) is already bound to this name.
+ * Renaming the class asks Cloudflare to create a second application for the
+ * same script and the deploy fails with `DURABLE_OBJECT_ALREADY_HAS_APPLICATION`;
+ * the only way to take a new name is to delete the container application
+ * first, which would drop the running containers. The legacy name is the
+ * cheap half of that trade, so it stays.
  */
-export class ComputerHostContainer extends Container<ComputerHostEnv> {
+export class FlyHostContainer extends Container<ComputerHostEnv> {
   defaultPort = 8080;
   requiredPorts = [8080];
   sleepAfter = "10m";
