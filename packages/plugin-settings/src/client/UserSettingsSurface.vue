@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
-import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
+import { UiAnchor, UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, onMounted, ref } from "vue";
 import {
   decodeModelSelection,
@@ -17,6 +18,9 @@ if (!providedSurfaces || !providedWeb) {
 }
 const surfaces = providedSurfaces;
 const web = providedWeb;
+// Application settings rows are User-scoped, so their links name no Bot.
+const profileLink = settingsLinkV1({ anchor: "user-profile" });
+const defaultModelLink = settingsLinkV1({ anchor: "user-default-model" });
 const name = ref("");
 const email = ref("");
 const defaultModel = ref("");
@@ -60,44 +64,58 @@ async function save(): Promise<void> {
 
 <template>
   <form class="settings-form" @submit.prevent="save">
-    <div class="profile-intro">
-      <span class="profile-face" aria-hidden="true" />
-      <div>
-        <strong>Your profile</strong>
-        <p>This identity is shared across your Bots.</p>
-      </div>
-    </div>
-    <UiField label="Name">
-      <input v-model="name" maxlength="100" required />
-    </UiField>
-    <UiField label="Email" hint="optional">
-      <input v-model="email" maxlength="320" type="email" />
-    </UiField>
-    <UiField
-      v-if="modelOptions.length > 0"
-      label="Default model"
-      hint="used by every Bot"
+    <UiAnchor
+      anchor="user-profile"
+      label="Your profile"
+      :href="profileLink"
+      class="settings-row"
     >
-      <select v-model="defaultModel">
-        <option value="">No default model</option>
-        <option
-          v-for="model in modelOptions"
-          :key="model.value"
-          :value="model.value"
-        >
-          {{ model.label }}
-        </option>
-      </select>
-    </UiField>
-    <p v-if="modelOptions.length > 0" class="field-hint">
-      Used by every Bot unless a Bot overrides it in its advanced settings.
-    </p>
-    <div v-else class="model-empty">
-      <p>Connect a model provider in Plugins first.</p>
-      <UiButton type="button" @click="surfaces.open('plugins')">
-        Open Plugins
-      </UiButton>
-    </div>
+      <div class="profile-intro">
+        <span class="profile-face" aria-hidden="true" />
+        <div>
+          <strong>Your profile</strong>
+          <p>This identity is shared across your Bots.</p>
+        </div>
+      </div>
+      <UiField label="Name">
+        <input v-model="name" maxlength="100" required />
+      </UiField>
+      <UiField label="Email" hint="optional">
+        <input v-model="email" maxlength="320" type="email" />
+      </UiField>
+    </UiAnchor>
+    <UiAnchor
+      anchor="user-default-model"
+      label="Default model"
+      :href="defaultModelLink"
+      class="settings-row"
+    >
+      <UiField
+        v-if="modelOptions.length > 0"
+        label="Default model"
+        hint="used by every Bot"
+      >
+        <select v-model="defaultModel">
+          <option value="">No default model</option>
+          <option
+            v-for="model in modelOptions"
+            :key="model.value"
+            :value="model.value"
+          >
+            {{ model.label }}
+          </option>
+        </select>
+      </UiField>
+      <p v-if="modelOptions.length > 0" class="field-hint">
+        Used by every Bot unless a Bot overrides it in its advanced settings.
+      </p>
+      <div v-else class="model-empty">
+        <p>Connect a model provider in Plugins first.</p>
+        <UiButton type="button" @click="surfaces.open('plugins')">
+          Open Plugins
+        </UiButton>
+      </div>
+    </UiAnchor>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
     </p>
@@ -121,6 +139,13 @@ async function save(): Promise<void> {
 </template>
 
 <style scoped>
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: var(--frock-control-sm);
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;

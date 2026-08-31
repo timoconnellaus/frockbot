@@ -12,6 +12,7 @@ export type UiIconName =
   | "close"
   | "gear"
   | "history"
+  | "link"
   | "mic"
   | "plugins"
   | "plus"
@@ -36,6 +37,10 @@ export const uiIconPaths: Record<UiIconName, string[]> = {
     "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8",
     "M3 3v5h5",
     "M12 7v5l4 2",
+  ],
+  link: [
+    "M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5",
+    "M14 11a5 5 0 0 0-7.07 0l-2.83 2.83a5 5 0 0 0 7.07 7.07L12.5 19.5",
   ],
   mic: [
     "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z",

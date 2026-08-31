@@ -1,12 +1,22 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import {
+  announceUiAnchor,
   UiIcon,
   UiIconButton,
   UiMarkdown,
   UiSidebarOverlay,
 } from "@frockbot/client-ui";
-import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import { decodeSettingsLinkV1 } from "../settings-links.js";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
@@ -182,9 +192,33 @@ async function scrollToLatest(
   hasUnseenBelow.value = false;
 }
 
+/*
+ * Settings deep links. `?settings=<surface>#<anchor>` names a registered
+ * surface and one row inside it; the shell opens the surface and announces the
+ * anchor, and the anchored row highlights itself. The row is deliberately not
+ * hunted for here: a panel loads its state after it mounts, so `UiAnchor` also
+ * reads the fragment on its own mount and the two paths cover a link followed
+ * cold and a link followed while the panel is already open.
+ */
+const applySettingsDeepLink = (): void => {
+  const target = decodeSettingsLinkV1(window.location.href);
+  if (!target || !surfaces.has(target.surface)) return;
+  if (surfaces.activeId.value !== target.surface) surfaces.open(target.surface);
+  const anchor = target.anchor;
+  if (anchor) void nextTick(() => announceUiAnchor(anchor));
+};
+
 onMounted(() => {
   void web.value.loadPluginCatalog();
   void scrollToLatest("auto");
+  applySettingsDeepLink();
+  window.addEventListener("popstate", applySettingsDeepLink);
+  window.addEventListener("hashchange", applySettingsDeepLink);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("popstate", applySettingsDeepLink);
+  window.removeEventListener("hashchange", applySettingsDeepLink);
 });
 
 watch(

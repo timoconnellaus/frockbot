@@ -564,8 +564,8 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 47  | Web search, web fetch and image generation as first-class tools                                                                  | `WebSearch`, `WebFetch`, `GenerateImage`                                                                                                                        | §17              | `plugin-web` + `plugin-provider-ollama-cloud` + `plugin-image`                           | landed      |
 | 48  | **Registered machine** — registry of the user's own machines with live connected state                                           | `ListMachines` → `{machineId, label, connected}`                                                                                                                | §2.16            | new `plugin-user-machine`                                                                | not started |
 | 49  | Shell/Read/AwaitShell targeted at a machine by id with local-exec approval; copy files both ways                                 | `machineId`; `CopyToBox`/`CopyFromBox`                                                                                                                          | §2.16, §2A       | `plugin-user-machine`                                                                    | not started |
-| 50  | **UI** — settings tabs with per-row deep links the agent may cite but never invent                                               | `grokbot://app/v1/settings?id=<anchor>`                                                                                                                         | §2A              | `plugin-settings`                                                                        | partial     |
-| 51  | Per-Bot info pane: live computer preview + routines + channels + members                                                         | chat header / `Cmd+Shift+I`                                                                                                                                     | §2A              | `webui-shell` + Packages                                                                 | not started |
+| 50  | **UI** — settings tabs with per-row deep links the agent may cite but never invent                                               | `grokbot://app/v1/settings?id=<anchor>`                                                                                                                         | §2A              | `plugin-shell/settings-links` + `plugin-settings`                                        | landed      |
+| 51  | Per-Bot info pane: live computer preview + routines + channels + members                                                         | chat header / `Cmd+Shift+I`                                                                                                                                     | §2A              | `plugin-settings` surface + `plugin-computer` / `plugin-routines` slots                  | partial     |
 | 52  | Search across every Bot's transcript and media (the agent gets no tool over it)                                                  | `search-index.db` `messages` / `media`                                                                                                                          | §2.4             | new `plugin-search`                                                                      | partial     |
 | 53  | Approval cards for the Bot's own risky actions (Auto-review)                                                                     | harness "when your own action needs approval"                                                                                                                   | §2.17            | `plugin-settings` + WebUI                                                                | not started |
 | 54  | **Learn from demonstration** — a screen recording becomes a user-global skill, then the video is deleted                         | `learn-from-demonstration`: teach queue → `session.json` → `watchVideo` → `update_state skill write`                                                            | §3.9             | `plugin-skills` + capture UI                                                             | not started |
@@ -857,6 +857,20 @@ than a silent absence. Row 44 is the only one.
   One known limitation, recorded rather than papered over: workerd exposes no
   resolve-then-connect hook, so host classification is exact for IP literals
   and known-internal name shapes and **best-effort against DNS rebinding**.
+
+- **51** — the pane exists and assembles three of the four halves. Identity
+  (avatar, name, title, label, description, `namedBy` provenance), Members, the
+  Computer preview through `frockbot.computer`, a Routines glance through the
+  new `frockbot.bot-info-sections` outlet, and the notification toggle all
+  render; a Playwright spec opens the pane and asserts every section at 1351px
+  and at 390px. What is missing is **Channels**, deferred by an owner decision
+  because neither sense of the word exists yet — row 35's Bot-to-Bot group
+  chats and row 43's channel connectors are both `not started`. The pane
+  carries a labelled, empty Channels section where they will mount, and
+  "Members" therefore means the Bot's own identity plus its Capability
+  Assignments rather than a roster of a group chat that cannot be created.
+  GrokBot's `Cmd+Shift+I` shortcut is not bound; the pane opens from the
+  window's Bot actions and from its own deep link.
 
 ## Open questions for GrokBot
 
