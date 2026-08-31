@@ -27,6 +27,7 @@ import {
 } from "@frockbot/client-core";
 import {
   decodeClientRunListV1,
+  decodeClientRunPageV1,
   decodeClientRunLookupV1,
   decodeClientRunStopReceiptV1,
   decodeClientTurnV1,
@@ -170,6 +171,11 @@ const application = new ClientApplication({
     return decodeClientRunListV1(
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
     );
+  },
+  async listAnnouncements(botId: string) {
+    return decodeClientRunPageV1(
+      await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
+    ).announcements;
   },
   async lookupRun(botId: string, runId: string) {
     const lookup = decodeClientRunLookupV1(

@@ -507,10 +507,10 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 
 | #   | Capability                                                                                                                       | GrokBot mechanism                                                                                                                                               | Evidence         | FrockBot Package (proposed)                  | Status      |
 | --- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------- | ----------- |
-| 1   | **Bot model** — identity record: name, description, title, avatar shape/colour, `namedBy`                                        | `agents/<id>/profile.json`                                                                                                                                      | §2.18            | `plugin-flock`                               | partial     |
+| 1   | **Bot model** — identity record: name, description, title, avatar shape/colour, `namedBy`                                        | `agents/<id>/profile.json`                                                                                                                                      | §2.18            | `plugin-flock`                               | landed      |
 | 2   | Create and edit a Bot from inside a Bot; only provided fields change; no delete tool                                             | `CreateAgent{name, description?}`, `UpdateAgent{agent_id, …}`                                                                                                   | §2.12            | `plugin-flock`                               | not started |
-| 3   | Bot deletion is a user-only permanent UI action; no archive, no hide                                                             | sidebar right-click → Delete, removes transcript                                                                                                                | §2A              | `plugin-flock` + settings UI                 | not started |
-| 4   | Per-Bot settings: `hidden_from_sidebar` (still reachable by palette), `notify_on_updates`                                        | `update_state settings set` → `settings.json`                                                                                                                   | §2.18            | `plugin-settings`                            | partial     |
+| 3   | Bot deletion is a user-only permanent UI action; no archive, no hide                                                             | sidebar right-click → Delete, removes transcript                                                                                                                | §2A              | `plugin-flock` + settings UI                 | divergent   |
+| 4   | Per-Bot settings: `hidden_from_sidebar` (still reachable by palette), `notify_on_updates`                                        | `update_state settings set` → `settings.json`                                                                                                                   | §2.18            | `plugin-settings`                            | landed      |
 | 5   | Per-Bot avatar set from a file on disk or cleared; self-rename announced, provenance recorded                                    | `update_state avatar`; `profile.json.namedBy`                                                                                                                   | §2.2, §2.18      | `plugin-flock`                               | partial     |
 | 6   | Export/import a Bot as a shareable template: scrubbed prose, visibility scope, review card                                       | `export-bot-template` + `create_bot_share_json`; `import-bot-template`                                                                                          | §2.11, §2A       | new `plugin-bot-template`                    | not started |
 | 7   | **Memory** — profile tier: enduring facts, one per line, injected every turn                                                     | `agents/<id>/memory/profile.md`                                                                                                                                 | §5, §2.2         | `plugin-memory`                              | partial     |
@@ -589,6 +589,29 @@ it injected instead. The reasoning is in `docs/plans/slice-2.md` Step 3.
 
 **Status `partial`** means some of the row exists at HEAD. What is missing, for
 the rows whose status the code moved:
+
+- **3** — **`divergent`, deliberately.** FrockBot ships reversible archive and
+  restore (`bot/archive`, `bot/restore` in `plugin-flock/src/shared.ts`, the
+  saga in `user.ts` and `bot.ts`, ADR 0006) where GrokBot has a permanent
+  user-only delete and no archive or hide. The two states GrokBot lacks are both
+  present here and are distinct: archive stops a Bot working, while
+  `hidden_from_sidebar` (row 4) only takes it out of the list. Nothing deletes a
+  Bot, so this row will not reach `landed` without a decision to add permanent
+  deletion.
+- **4** — landed, with one shape difference: GrokBot keeps a hidden Bot
+  reachable through a command palette, and FrockBot has no palette, so the Flock
+  sidebar grows a "Show N hidden" group instead (`FlockSidebar.vue`). The
+  durable field is `BotProfile.hiddenFromSidebar`, beside — not inside — the
+  notification policy, because it describes how the Bot presents itself rather
+  than when it notifies.
+- **5** — the avatar half is landed: an uploaded PNG, JPEG, WebP, GIF or SVG up
+  to 5 MB is set through `POST /api/bots/:id/avatar`, served back from
+  `GET /api/bots/:id/avatar`, and cleared by setting the avatar back to the
+  sheep; the provenance is recorded in `BotProfile.namedBy` and a rename appends
+  a durable `bot/renamed` Session event the WebUI renders as a system line. What
+  is missing is the _self_-rename: a Bot cannot call the command yet, because no
+  agent tool reaches it. `bot/set-profile` already accepts `namedBy: "bot"` for
+  the slice that adds one (row 2).
 
 - **9** — the note tier is accepted and stored (`[note] ` prefix into the
   monthly log, `plugin-memory/src/agent.ts`), and dedupe-on-write and

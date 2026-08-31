@@ -3,6 +3,7 @@ import type { InjectionKey, Ref } from "vue";
 import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
 import type {
   BotDirectoryViewV1,
+  BotIdentityViewV1,
   BotLifecycleStatusV1,
   SheepIdentityViewV1,
   SheepRecipeV1,
@@ -11,6 +12,10 @@ import type {
 export interface FlockWebData {
   directory: BotDirectoryViewV1;
   identities: Record<string, SheepIdentityViewV1>;
+  /** Live Bot identity — the current name, title, avatar and hidden flag. */
+  profiles: Record<string, BotIdentityViewV1>;
+  /** Reveals Bots their own settings hide from the list. */
+  showHidden: boolean;
   loading: boolean;
   error?: string;
   overlay?: "create" | "edit" | "archive";
@@ -25,6 +30,7 @@ export interface FlockWebData {
   openCreate(): void;
   openEdit(): Promise<void>;
   toggleArchived(): void;
+  toggleHidden(): void;
   openArchive(botId: string): void;
   archive(): Promise<void>;
   restore(botId: string): Promise<void>;

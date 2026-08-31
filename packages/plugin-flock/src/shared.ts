@@ -1,9 +1,23 @@
 // Shared configuration types remain provider-neutral at this package seam.
 import {
+  decodeBotAvatarV1,
   decodeBotIdV1,
   isPublicIdentifier,
+  type BotAvatarV1,
+  type BotNameProvenanceV1,
   type CapabilityAssignmentView,
   type ModelAssignment,
+} from "@frockbot/configuration-core";
+export {
+  BOT_AVATAR_CONTENT_TYPES,
+  BOT_AVATAR_MAX_BYTES,
+  botAvatarObjectKeyV1,
+  decodeBotAvatarBytesV1,
+  decodeBotAvatarUploadReceiptV1,
+  decodeUploadBotAvatarCommandV1,
+  type BotAvatarContentTypeV1,
+  type BotAvatarUploadReceiptV1,
+  type UploadBotAvatarCommandV1,
 } from "@frockbot/configuration-core";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
 
@@ -106,6 +120,30 @@ export interface FlockReceiptV1 {
 export interface StoredFlockReceiptV1 {
   fingerprint: string;
   receipt: FlockReceiptV1;
+}
+
+/**
+ * One Bot's live identity, as the Flock directory surfaces it.
+ *
+ * The registration seed in the User Durable Object is immutable (ADR 0006), so
+ * the mutable half of a Bot's identity — the current name, its provenance, a
+ * title, an uploaded avatar, and whether the sidebar hides it — is read through
+ * from the Bot Durable Object that owns it rather than copied into the seed.
+ */
+export interface BotIdentityViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  name: string;
+  namedBy: BotNameProvenanceV1;
+  hiddenFromSidebar: boolean;
+  title?: string;
+  /** Present only for an uploaded image; absent means the sheep recipe. */
+  avatar?: Extract<BotAvatarV1, { kind: "image" }>;
+}
+
+export interface BotIdentityDirectoryViewV1 {
+  schemaVersion: 1;
+  identities: BotIdentityViewV1[];
 }
 
 export class FlockDecodeError extends Error {
@@ -538,6 +576,65 @@ export function decodeSheepIdentityViewV1(input: unknown): SheepIdentityViewV1 {
     revision: revision(value.revision),
     sheep: decodeSheepRecipeV1(value.sheep),
   };
+}
+
+function nameProvenance(value: unknown): BotNameProvenanceV1 {
+  if (value !== "user" && value !== "bot")
+    throw new FlockDecodeError("namedBy is invalid");
+  return value;
+}
+
+export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
+  const value = record(input, "Bot identity");
+  exact(
+    value,
+    ["schemaVersion", "botId", "name", "namedBy", "hiddenFromSidebar"],
+    ["title", "avatar"],
+  );
+  if (value.schemaVersion !== 1 || typeof value.hiddenFromSidebar !== "boolean")
+    throw new FlockDecodeError("Bot identity is invalid");
+  let avatar: Extract<BotAvatarV1, { kind: "image" }> | undefined;
+  if (value.avatar !== undefined) {
+    let decoded: BotAvatarV1;
+    try {
+      decoded = decodeBotAvatarV1(value.avatar, "avatar");
+    } catch (error) {
+      throw new FlockDecodeError(
+        error instanceof Error ? error.message : "avatar is invalid",
+      );
+    }
+    if (decoded.kind !== "image")
+      throw new FlockDecodeError("Bot identity avatar is invalid");
+    avatar = decoded;
+  }
+  return {
+    schemaVersion: 1,
+    botId: botIdentifier(value.botId),
+    name: boundedText(value.name, "name", 100),
+    namedBy: nameProvenance(value.namedBy),
+    hiddenFromSidebar: value.hiddenFromSidebar,
+    ...(value.title === undefined
+      ? {}
+      : { title: boundedText(value.title, "title", 120) }),
+    ...(avatar ? { avatar } : {}),
+  };
+}
+
+export function decodeBotIdentityDirectoryViewV1(
+  input: unknown,
+): BotIdentityDirectoryViewV1 {
+  const value = record(input, "Bot identity directory");
+  exact(value, ["schemaVersion", "identities"]);
+  if (
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.identities) ||
+    value.identities.length > FLOCK_DIRECTORY_LIMIT
+  )
+    throw new FlockDecodeError("Bot identity directory is invalid");
+  const identities = value.identities.map(decodeBotIdentityViewV1);
+  if (new Set(identities.map((item) => item.botId)).size !== identities.length)
+    throw new FlockDecodeError("Bot identity directory contains duplicate IDs");
+  return { schemaVersion: 1, identities };
 }
 
 export function randomSheepRecipeV1(

@@ -223,6 +223,22 @@
   margin-top: 18px;
 }
 
+/* A Session announcement: the conversation narrating itself, not a party. */
+.message-system {
+  align-items: center;
+  margin-top: 14px;
+}
+
+.message-system-line {
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: var(--frock-radius-control);
+  background: var(--frock-surface-subtle);
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+  text-align: center;
+}
+
 /* An assistant Turn is its avatar and, once there is text, its bubble. */
 .message-assistant {
   flex-direction: row;

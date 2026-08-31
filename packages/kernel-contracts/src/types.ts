@@ -366,6 +366,19 @@ export interface SessionEventMap {
     conflicts: number;
     failures: number;
   };
+  /**
+   * The Bot's name changed, and who changed it. A rename is a durable write
+   * that happens outside any Turn — a User edits the Bot's settings, or (from
+   * the slice that gives a Bot its own profile tool) the Bot renames itself —
+   * so the event carries no `turn` or `step`. `namedBy` is the writer the
+   * durable profile now records, so the announcement and the provenance in
+   * `BotProfile.namedBy` can never disagree.
+   */
+  "bot/renamed": {
+    from: string;
+    to: string;
+    namedBy: "user" | "bot";
+  };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   /**
    * `reason` states why a Turn ended in a non-`completed` outcome, so the
@@ -1019,6 +1032,14 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       }
       break;
     }
+    case "bot/renamed":
+      requireEventKeys(event, keys("from", "to", "namedBy"), "session event");
+      eventString(event.from, "session event.from");
+      eventString(event.to, "session event.to");
+      if (event.namedBy !== "user" && event.namedBy !== "bot") {
+        throw new Error("session event.namedBy is invalid");
+      }
+      break;
     case "step/end":
       requireEventKeys(event, keys("turn", "step", "outcome"), "session event");
       turn();

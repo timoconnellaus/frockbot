@@ -16,6 +16,8 @@ import {
   decodeClientTurnV1,
   decodeClientRunPageV1,
   decodeClientRunListV1,
+  createClientRunListV1,
+  projectClientAnnouncementsV1,
   decodeClientRunListQueryV1,
   projectClientRunLookupV1,
   projectClientRunListV1,
@@ -971,5 +973,53 @@ describe("client run protocol v1", () => {
           "Bot turn ended with outcome model-error: Ollama Cloud responded 401: invalid api key",
       },
     });
+  });
+
+  test("carries rename announcements beside the Turns, and refuses a bad one", () => {
+    const announcements = projectClientAnnouncementsV1([
+      { type: "turn/start", seq: 0, timestamp, turn: 1 },
+      {
+        type: "bot/renamed",
+        seq: 3,
+        timestamp,
+        from: "Housework",
+        to: "Atlas",
+        namedBy: "bot",
+      },
+    ]);
+    expect(announcements).toEqual([
+      {
+        type: "bot/renamed",
+        announcementId: "announcement-3",
+        at: timestamp,
+        from: "Housework",
+        to: "Atlas",
+        namedBy: "bot",
+      },
+    ]);
+    const page = createClientRunListV1([], { truncated: false }, announcements);
+    expect(decodeClientRunPageV1(structuredClone(page)).announcements).toEqual(
+      announcements,
+    );
+    // A page written before announcements existed still decodes.
+    expect(
+      decodeClientRunPageV1({
+        schemaVersion: 1,
+        runs: [],
+        page: { truncated: false },
+      }).announcements,
+    ).toEqual([]);
+    expect(() =>
+      decodeClientRunPageV1({
+        ...page,
+        announcements: [{ ...announcements[0], namedBy: "admin" }],
+      }),
+    ).toThrow("run list.announcement.namedBy is invalid");
+    expect(() =>
+      decodeClientRunPageV1({
+        ...page,
+        announcements: [{ ...announcements[0], at: "not a date" }],
+      }),
+    ).toThrow("run list.announcement.at is invalid");
   });
 });

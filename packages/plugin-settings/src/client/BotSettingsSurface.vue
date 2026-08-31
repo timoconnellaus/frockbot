@@ -8,6 +8,11 @@ import {
   projectAssignmentOperations,
 } from "./assignment-operations.js";
 import {
+  BOT_AVATAR_ACCEPT,
+  botAvatarUrl,
+  prepareAvatarUpload,
+} from "./avatar-upload.js";
+import {
   describeModelAssignment,
   eligibleModelConnections,
   encodeModelSelection,
@@ -25,8 +30,58 @@ const web = providedWeb;
 const name = ref("");
 const label = ref("");
 const description = ref("");
+const title = ref("");
+const hiddenFromSidebar = ref(false);
 const notifications = ref(false);
 const saving = ref(false);
+const avatarBusy = ref(false);
+const avatarInput = ref<HTMLInputElement>();
+
+/*
+ * The avatar is bytes, not a form field: it is uploaded and recorded the
+ * moment it is chosen, so a half-filled form is never carrying a five-megabyte
+ * payload waiting for Save.
+ */
+const avatar = computed(() => {
+  const profile = web.value.botSettings?.profile;
+  const botId = web.value.activeBotId;
+  return profile?.avatar?.kind === "image" && botId
+    ? { src: botAvatarUrl(botId, profile.avatar.digest) }
+    : undefined;
+});
+
+async function chooseAvatar(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  avatarBusy.value = true;
+  try {
+    await web.value.uploadBotAvatar(
+      prepareAvatarUpload({
+        contentType: file.type,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      }),
+    );
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not upload the avatar";
+  } finally {
+    input.value = "";
+    avatarBusy.value = false;
+  }
+}
+
+async function clearAvatar(): Promise<void> {
+  avatarBusy.value = true;
+  try {
+    await web.value.clearBotAvatar();
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not clear the avatar";
+  } finally {
+    avatarBusy.value = false;
+  }
+}
 const modelMode = ref<"default" | "custom">("default");
 const assignmentBusy = ref<string>();
 const selectedConnections = reactive<Record<string, string>>({});
@@ -123,6 +178,8 @@ onMounted(async () => {
   name.value = settings.profile.name;
   label.value = settings.profile.label ?? "";
   description.value = settings.profile.description ?? "";
+  title.value = settings.profile.title ?? "";
+  hiddenFromSidebar.value = settings.profile.hiddenFromSidebar === true;
   notifications.value = settings.notifications.enabled;
   modelMode.value = settings.model ? "custom" : "default";
   selectedModel.value = encodeModelSelection(settings.model);
@@ -156,10 +213,14 @@ async function saveModel(): Promise<void> {
 async function save(): Promise<void> {
   saving.value = true;
   try {
-    await web.value.saveBotProfile({
+    // A partial update: the empty string clears an optional field, and the
+    // avatar is left exactly as the upload control set it.
+    await web.value.setBotProfile({
       name: name.value,
-      label: label.value || undefined,
-      description: description.value || undefined,
+      label: label.value,
+      description: description.value,
+      title: title.value,
+      hiddenFromSidebar: hiddenFromSidebar.value,
     });
     await saveModel();
     await web.value.saveBotNotifications({ enabled: notifications.value });
@@ -240,7 +301,10 @@ async function unassign(
 <template>
   <form class="settings-form" @submit.prevent="save">
     <div class="settings-intro">
-      <span class="settings-avatar" aria-hidden="true"
+      <span v-if="avatar" class="settings-avatar settings-avatar--image">
+        <img :src="avatar.src" alt="" />
+      </span>
+      <span v-else class="settings-avatar" aria-hidden="true"
         ><UiIcon name="sparkle" size="lg"
       /></span>
       <div>
@@ -250,8 +314,40 @@ async function unassign(
         </p>
       </div>
     </div>
+    <div class="avatar-actions">
+      <input
+        ref="avatarInput"
+        class="avatar-picker"
+        type="file"
+        :accept="BOT_AVATAR_ACCEPT"
+        @change="chooseAvatar"
+      />
+      <UiButton
+        type="button"
+        :disabled="avatarBusy"
+        @click="avatarInput?.click()"
+      >
+        {{ avatar ? "Replace avatar" : "Upload avatar" }}
+      </UiButton>
+      <UiButton
+        v-if="avatar"
+        type="button"
+        variant="danger"
+        :disabled="avatarBusy"
+        @click="clearAvatar"
+      >
+        Use the sheep
+      </UiButton>
+    </div>
     <UiField label="Name">
       <input v-model="name" maxlength="100" required />
+    </UiField>
+    <UiField label="Title" hint="optional">
+      <input
+        v-model="title"
+        maxlength="120"
+        placeholder="Chief of staff, night-shift researcher"
+      />
     </UiField>
     <UiField label="Label" hint="optional">
       <input
@@ -269,6 +365,13 @@ async function unassign(
         <small>Get notified when this Bot finishes or needs input.</small>
       </span>
       <input v-model="notifications" type="checkbox" />
+    </label>
+    <label class="notification-setting">
+      <span>
+        <strong>Hidden from sidebar</strong>
+        <small>Keeps this Bot out of the list without archiving it.</small>
+      </span>
+      <input v-model="hiddenFromSidebar" type="checkbox" />
     </label>
     <p v-if="overriding" class="model-note">Overrides default model</p>
     <details class="advanced">
@@ -502,6 +605,27 @@ async function unassign(
   border: 1px solid var(--frock-border);
   border-radius: var(--frock-radius-card);
   background: var(--frock-surface-subtle);
+}
+
+.settings-avatar--image {
+  overflow: hidden;
+  padding: 0;
+}
+
+.settings-avatar--image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.avatar-picker {
+  display: none;
 }
 
 .settings-avatar {

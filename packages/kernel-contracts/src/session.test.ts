@@ -509,6 +509,29 @@ describe("SessionStore", () => {
     ).toThrow("session event has invalid fields");
   });
 
+  test("decodes a rename announcement and refuses a malformed one", () => {
+    // A rename happens outside any Turn, so the event carries no turn or step
+    // and every other session event keeps decoding exactly as before.
+    const renamed = {
+      type: "bot/renamed" as const,
+      seq: 4,
+      timestamp,
+      from: "Housework",
+      to: "Atlas",
+      namedBy: "bot" as const,
+    };
+    expect(decodeSessionEvent(structuredClone(renamed))).toEqual(renamed);
+    expect(() => decodeSessionEvent({ ...renamed, namedBy: "admin" })).toThrow(
+      "session event.namedBy is invalid",
+    );
+    expect(() => decodeSessionEvent({ ...renamed, from: "" })).toThrow(
+      "session event.from must be a string",
+    );
+    expect(() => decodeSessionEvent({ ...renamed, turn: 1 })).toThrow(
+      "session event has invalid fields",
+    );
+  });
+
   test("composes a failure message from a turn outcome and its reason", () => {
     expect(turnFailureMessage("model-error", "provider said no")).toBe(
       "Bot turn ended with outcome model-error: provider said no",

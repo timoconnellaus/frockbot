@@ -3,6 +3,7 @@ import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
 import { ref, type Ref } from "vue";
 import {
   decodeBotLifecycleDirectoryViewV1,
+  decodeBotIdentityDirectoryViewV1,
   decodeBotLifecycleReceiptV1,
   decodeCreateBotCommandV1,
   decodeDirectoryViewV1,
@@ -72,8 +73,10 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
   const state = ref<FlockWebData>({
     directory: { schemaVersion: 1, revision: 0, bots: [] },
     identities: {},
+    profiles: {},
     lifecycles: {},
     showArchived: false,
+    showHidden: false,
     loading: false,
     draftName: "",
     draftSheep: randomSheepRecipeV1(),
@@ -148,8 +151,14 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
               ] as const,
           ),
         );
+        const profiles = decodeBotIdentityDirectoryViewV1(
+          await request("/api/bots/identities"),
+        );
         if (generation !== loadGeneration) return;
         state.value.identities = Object.fromEntries(identities);
+        state.value.profiles = Object.fromEntries(
+          profiles.identities.map((profile) => [profile.botId, profile]),
+        );
         for (const [botId, identity] of identities) {
           const pendingSheep = readPendingSheep(userId, botId);
           if (
@@ -205,6 +214,9 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         : randomSheepRecipeV1();
       state.value.overlay = "create";
       state.value.error = undefined;
+    },
+    toggleHidden() {
+      state.value.showHidden = !state.value.showHidden;
     },
     toggleArchived() {
       state.value.showArchived = !state.value.showArchived;

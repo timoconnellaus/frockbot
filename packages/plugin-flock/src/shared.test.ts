@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeBotIdentityDirectoryViewV1,
+  decodeBotIdentityViewV1,
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
   decodeBotMembershipViewV1,
@@ -155,5 +157,44 @@ describe("Flock v1 contracts", () => {
     expect(sheepCatalog.trees.middle).toHaveLength(14);
     expect(sheepCatalog.trees.lower).toHaveLength(8);
     expect(sheepCatalog.assets).toHaveLength(50);
+  });
+
+  test("decodes the live Bot identity directory exactly", () => {
+    const identity = {
+      schemaVersion: 1 as const,
+      botId: "alpha",
+      name: "Atlas",
+      namedBy: "bot" as const,
+      hiddenFromSidebar: true,
+      title: "Chief of staff",
+      avatar: {
+        kind: "image" as const,
+        digest: "b".repeat(64),
+        contentType: "image/webp" as const,
+        size: 900,
+      },
+    };
+    expect(decodeBotIdentityViewV1(structuredClone(identity))).toEqual(
+      identity,
+    );
+    expect(
+      decodeBotIdentityDirectoryViewV1({
+        schemaVersion: 1,
+        identities: [identity],
+      }).identities,
+    ).toHaveLength(1);
+    expect(() =>
+      decodeBotIdentityViewV1({ ...identity, namedBy: "admin" }),
+    ).toThrow("namedBy is invalid");
+    // A sheep avatar is the absence of an uploaded one, never a directory row.
+    expect(() =>
+      decodeBotIdentityViewV1({ ...identity, avatar: { kind: "sheep" } }),
+    ).toThrow("Bot identity avatar is invalid");
+    expect(() =>
+      decodeBotIdentityDirectoryViewV1({
+        schemaVersion: 1,
+        identities: [identity, identity],
+      }),
+    ).toThrow("duplicate IDs");
   });
 });

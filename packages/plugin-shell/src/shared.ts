@@ -1,8 +1,11 @@
 export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 import type {
+  BotAvatarContentTypeV1,
+  BotNameProvenanceV1,
   BotNotificationPolicy,
   BotProfile,
+  BotProfilePatchV1,
   BotSettingsViewV1,
   CapabilityAssignmentView,
   ModelAssignment,
@@ -22,8 +25,14 @@ export interface WebToolActivity {
 export interface WebChatMessage {
   id: string;
   runId: string;
-  role: "user" | "assistant";
+  /**
+   * `system` is the Session speaking rather than either party: a rename
+   * announcement, for instance. It carries no avatar and no tools.
+   */
+  role: "user" | "assistant" | "system";
   text: string;
+  /** When the line happened, so system lines sort into the conversation. */
+  at?: string;
   status:
     | "streaming"
     | "completed"
@@ -89,6 +98,18 @@ export interface FrockBotWebData {
   selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;
+  /** Partial profile update: only the fields it carries change. */
+  setBotProfile(
+    profile: BotProfilePatchV1,
+    namedBy?: BotNameProvenanceV1,
+  ): Promise<void>;
+  /** Uploads avatar bytes and records the reference on the Bot's profile. */
+  uploadBotAvatar(input: {
+    contentType: BotAvatarContentTypeV1;
+    bytes: string;
+  }): Promise<void>;
+  /** Restores the generated sheep avatar. */
+  clearBotAvatar(): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;
   assignCapability(
     assignment: Omit<CapabilityAssignmentView, "state">,
