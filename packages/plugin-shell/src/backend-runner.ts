@@ -1,6 +1,12 @@
+import type {
+  AgentEffectAdmission,
+  AgentHandle,
+} from "@frockbot/kernel-agent-loop/agent";
 import {
+  type PersistSessionEvents,
   type SessionEvent,
   turnFailureMessage,
+  validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import {
@@ -32,6 +38,98 @@ function appendedSessionEvents(
   return structuredClone(candidate.slice(previous.length));
 }
 
+/**
+ * Classifies one finished Agent handle against the durable history it started
+ * from. Shared by the Composition-mounted and the resident execution paths, so
+ * both reach exactly the same durable terminal, recovery, or reconciliation
+ * outcome.
+ */
+function settleBotTurn(
+  handle: AgentHandle,
+  command: BotTurnCommand,
+  previousEvents: readonly SessionEvent[],
+): BotTurnCompletion {
+  const events = [...handle.agent.session.events];
+  const turnStart = events.findLast((event) => event.type === "turn/start");
+  const currentTurn =
+    turnStart?.type === "turn/start" ? turnStart.turn : undefined;
+  const terminalTurn = events.findLast(
+    (event) => event.type === "turn/end" && event.turn === currentTurn,
+  );
+  if (!terminalTurn || terminalTurn.type !== "turn/end") {
+    const unresolvedTool = [
+      ...validateToolOccurrenceJournal(events).values(),
+    ].find((entry) => entry.intent && !entry.result);
+    if (unresolvedTool) {
+      throw new BotTurnReconciliationRequiredError(
+        `Tool effect "${unresolvedTool.occurrence.occurrenceId}" requires reconciliation`,
+        appendedSessionEvents(previousEvents, events),
+      );
+    }
+    const reconciliation = events.findLast(
+      (event) =>
+        event.type === "model/reconciliation-required" &&
+        event.turn === currentTurn,
+    );
+    if (reconciliation?.type === "model/reconciliation-required") {
+      throw new BotTurnReconciliationRequiredError(
+        reconciliation.reason,
+        appendedSessionEvents(previousEvents, events),
+      );
+    }
+    const latestRequest = events.findLast(
+      (event) => event.type === "model/request" && event.turn === currentTurn,
+    );
+    const hasDurableOutcome =
+      latestRequest?.type === "model/request" &&
+      events.some(
+        (event) =>
+          (event.type === "assistant/message" ||
+            event.type === "model/effect-not-started") &&
+          event.requestId === latestRequest.request.requestId,
+      );
+    if (hasDurableOutcome) {
+      throw new BotTurnRecoveryRequiredError(
+        appendedSessionEvents(previousEvents, events),
+      );
+    }
+    throw new BotTurnExecutionError(
+      "Bot turn did not reach a durable terminal state",
+      appendedSessionEvents(previousEvents, events),
+    );
+  }
+  if (terminalTurn.outcome !== "completed") {
+    throw new BotTurnExecutionError(
+      turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
+      appendedSessionEvents(previousEvents, events),
+    );
+  }
+  const message = handle.agent.session.deriveMessages().at(-1);
+  return {
+    runId: command.runId,
+    text: message?.role === "assistant" ? message.content : "",
+    events: appendedSessionEvents(previousEvents, events),
+  };
+}
+
+function turnExecutionError(
+  error: unknown,
+  previousEvents: readonly SessionEvent[],
+  events: readonly SessionEvent[],
+): never {
+  if (
+    error instanceof BotTurnExecutionError ||
+    error instanceof BotTurnReconciliationRequiredError ||
+    error instanceof BotTurnRecoveryRequiredError
+  ) {
+    throw error;
+  }
+  throw new BotTurnExecutionError(
+    error instanceof Error ? error.message : "Bot turn failed",
+    appendedSessionEvents(previousEvents, events),
+  );
+}
+
 export interface ExecuteBotTurnOptions {
   command: BotTurnCommand;
   previousEvents: readonly SessionEvent[];
@@ -45,77 +143,81 @@ export async function executeBotTurn(
 ): Promise<BotTurnCompletion> {
   const { command, previousEvents, composition, resume } = options;
   const runtime = composition.runtime;
-
   try {
     if (resume) runtime.agent.agent.resume();
     else runtime.agent.agent.send(command.text);
     await runtime.agent.agent.whenIdle();
-    const events = [...runtime.agent.agent.session.events];
-    const turnStart = events.findLast((event) => event.type === "turn/start");
-    const currentTurn =
-      turnStart?.type === "turn/start" ? turnStart.turn : undefined;
-    const terminalTurn = events.findLast(
-      (event) => event.type === "turn/end" && event.turn === currentTurn,
-    );
-    if (!terminalTurn || terminalTurn.type !== "turn/end") {
-      const reconciliation = events.findLast(
-        (event) =>
-          event.type === "model/reconciliation-required" &&
-          event.turn === currentTurn,
-      );
-      if (reconciliation?.type === "model/reconciliation-required") {
-        throw new BotTurnReconciliationRequiredError(
-          reconciliation.reason,
-          appendedSessionEvents(previousEvents, events),
-        );
-      }
-      const latestRequest = events.findLast(
-        (event) => event.type === "model/request" && event.turn === currentTurn,
-      );
-      const hasDurableOutcome =
-        latestRequest?.type === "model/request" &&
-        events.some(
-          (event) =>
-            (event.type === "assistant/message" ||
-              event.type === "model/effect-not-started") &&
-            event.requestId === latestRequest.request.requestId,
-        );
-      if (hasDurableOutcome) {
-        throw new BotTurnRecoveryRequiredError(
-          appendedSessionEvents(previousEvents, events),
-        );
-      }
-      throw new BotTurnExecutionError(
-        "Bot turn did not reach a durable terminal state",
-        appendedSessionEvents(previousEvents, events),
-      );
-    }
-    if (terminalTurn.outcome !== "completed") {
-      throw new BotTurnExecutionError(
-        turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
-        appendedSessionEvents(previousEvents, events),
-      );
-    }
-    const message = runtime.agent.agent.session.deriveMessages().at(-1);
-    return {
-      runId: command.runId,
-      text: message?.role === "assistant" ? message.content : "",
-      events: appendedSessionEvents(previousEvents, events),
-    };
+    return settleBotTurn(runtime.agent, command, previousEvents);
   } catch (error) {
-    if (
-      error instanceof BotTurnExecutionError ||
-      error instanceof BotTurnReconciliationRequiredError ||
-      error instanceof BotTurnRecoveryRequiredError
-    ) {
-      throw error;
-    }
-    const events = [...runtime.agent.agent.session.events];
-    throw new BotTurnExecutionError(
-      error instanceof Error ? error.message : "Bot turn failed",
-      appendedSessionEvents(previousEvents, events),
-    );
+    turnExecutionError(error, previousEvents, [
+      ...runtime.agent.agent.session.events,
+    ]);
   } finally {
     await composition.dispose();
+  }
+}
+
+export interface ExecuteResidentBotTurnOptions {
+  botId: string;
+  command: BotTurnCommand;
+  previousEvents: readonly SessionEvent[];
+  persistSessionEvents: PersistSessionEvents;
+  beforeStart(): Promise<boolean>;
+  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
+  resume?: boolean;
+}
+
+export interface ResidentTurnRuntime {
+  execute(input: {
+    botId: string;
+    sessionId: string;
+    runId: string;
+    previousEvents: readonly SessionEvent[];
+    persistSessionEvents: PersistSessionEvents;
+    beforeStart(): Promise<boolean>;
+    admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
+    resume?: boolean;
+    text: string;
+  }): Promise<AgentHandle>;
+}
+
+/**
+ * Runs one Turn on the Bot Durable Object's resident Cordis root. The root
+ * outlives the Turn, so nothing is disposed here; the durable effect fence and
+ * the session persistence are the caller's.
+ */
+export async function executeResidentBotTurn(
+  runtime: ResidentTurnRuntime,
+  options: ExecuteResidentBotTurnOptions,
+): Promise<BotTurnCompletion> {
+  const {
+    botId,
+    command,
+    previousEvents,
+    persistSessionEvents,
+    beforeStart,
+    admitEffect,
+    resume,
+  } = options;
+  let handle: AgentHandle | undefined;
+  try {
+    handle = await runtime.execute({
+      botId,
+      sessionId: command.sessionId,
+      runId: command.runId,
+      previousEvents,
+      persistSessionEvents,
+      beforeStart,
+      admitEffect,
+      resume,
+      text: command.text,
+    });
+    return settleBotTurn(handle, command, previousEvents);
+  } catch (error) {
+    turnExecutionError(
+      error,
+      previousEvents,
+      handle ? [...handle.agent.session.events] : [...previousEvents],
+    );
   }
 }

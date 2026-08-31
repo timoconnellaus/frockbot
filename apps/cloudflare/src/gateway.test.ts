@@ -13,23 +13,30 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
+import { createFlockBackendContribution } from "@frockbot/plugin-flock/backend";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
 } from "@frockbot/plugin-shell/backend-composition";
+import { executeBotTurn } from "@frockbot/plugin-shell/backend-runner";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import {
+  createClientRunStopReceiptV1,
   decodeClientRunLookupV1,
   decodeClientRunListV1,
+  decodeClientRunStopReceiptV1,
   decodeClientTurnV1,
   projectClientRunLookupV1,
   projectClientRunListV1,
+  projectClientRunV1,
   projectClientTurnV1,
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
+  type ClientRunStopCommandV1,
+  type ClientRunStopReceiptV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import type {
   BotNotificationIntent,
@@ -45,7 +52,7 @@ import type {
   WorkerCode,
   WorkerLoader,
 } from "./contracts.js";
-import { executeBotTurn } from "./bot-runner.js";
+import { executeResidentBotTurn } from "./bot-runner.js";
 import { applicationDeploymentId, createGateway } from "./gateway.js";
 import { createUserApplication } from "./user-application.js";
 
@@ -86,6 +93,7 @@ class MemoryBotState implements BotStateBinding {
       acceptedAt: command.acceptedAt,
       input: command.text,
       events: [],
+      effectAdmissions: [],
       status: "running",
       phase: "admitted",
       compositionGenerationId: generation.generationId,
@@ -96,6 +104,7 @@ class MemoryBotState implements BotStateBinding {
         profile: { name: "Internal Bot configuration" },
         notifications: { enabled: false },
         assignments: [],
+        assignmentOperations: [],
       },
       previousEventCount: previousEvents.length,
     };
@@ -106,6 +115,7 @@ class MemoryBotState implements BotStateBinding {
         botId,
         sessionId: command.sessionId,
         sessionEvents: previousEvents,
+        admitEffect: () => Promise.resolve(true),
       }).mount(generation, new AbortController().signal);
       const result = await executeBotTurn({
         command,
@@ -180,6 +190,27 @@ class MemoryBotState implements BotStateBinding {
     return Promise.resolve();
   }
 
+  stopRun(
+    botId: string,
+    command: ClientRunStopCommandV1,
+  ): Promise<ClientRunStopReceiptV1> {
+    const run = (this.runs.get(botId) ?? []).find(
+      (candidate) => candidate.runId === command.runId,
+    );
+    if (!run) {
+      return Promise.reject(
+        new Error(`run "${command.runId}" was not admitted`),
+      );
+    }
+    run.stopRequestedAt = run.stopRequestedAt ?? new Date().toISOString();
+    return Promise.resolve(
+      createClientRunStopReceiptV1(
+        command,
+        projectClientRunV1(structuredClone(run)),
+      ),
+    );
+  }
+
   reconcileRun(botId: string, runId: string): Promise<BotTurnResult> {
     const run = (this.runs.get(botId) ?? []).find(
       (candidate) => candidate.runId === runId,
@@ -209,6 +240,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
+    stopRun: ({ botId, command }) => state.stopRun(botId, command),
   };
 }
 
@@ -224,6 +256,7 @@ class MemoryConfiguration
   };
   private readonly bots = new Map<string, BotSettingsViewV1>();
   private readonly receipts = new Map<string, OperationReceiptV1>();
+  private readonly lifecycles = new Map<string, "active" | "archived">();
   private readonly connectionReceipts = new Map<
     string,
     ConnectionCommandReceiptV1
@@ -253,6 +286,7 @@ class MemoryConfiguration
       profile: { name: query.botId },
       notifications: { enabled: false },
       assignments: [],
+      assignmentOperations: [],
     };
     this.bots.set(query.botId, current);
     return Promise.resolve(current);
@@ -283,25 +317,32 @@ class MemoryConfiguration
             ? { notifications: command.notifications }
             : command.type === "bot/select-model"
               ? { model: command.model }
-              : command.type === "bot/unbind-model"
+              : command.type === "bot/unassign-capability"
                 ? {
-                    model: undefined,
-                    assignments: bot.assignments.map((assignment) =>
-                      assignment.assignmentId === command.assignmentId
-                        ? { ...assignment, state: "unavailable" as const }
-                        : assignment,
+                    assignments: bot.assignments.filter(
+                      (assignment) =>
+                        assignment.assignmentId !== command.assignmentId,
                     ),
                   }
-                : {
-                    assignments: [
-                      ...bot.assignments.filter(
-                        (assignment) =>
-                          assignment.assignmentId !==
-                          command.assignment.assignmentId,
+                : command.type === "bot/unbind-model"
+                  ? {
+                      model: undefined,
+                      assignments: bot.assignments.map((assignment) =>
+                        assignment.assignmentId === command.assignmentId
+                          ? { ...assignment, state: "unavailable" as const }
+                          : assignment,
                       ),
-                      { ...command.assignment, state: "enabled" as const },
-                    ],
-                  }),
+                    }
+                  : {
+                      assignments: [
+                        ...bot.assignments.filter(
+                          (assignment) =>
+                            assignment.assignmentId !==
+                            command.assignment.assignmentId,
+                        ),
+                        { ...command.assignment, state: "enabled" as const },
+                      ],
+                    }),
       });
     } else {
       const user = current as UserSettingsViewV1;
@@ -448,6 +489,36 @@ class MemoryConfiguration
         initialName: botId,
         sheep: randomSheepRecipeV1(() => 0),
       })),
+    });
+  }
+  listBotLifecycles() {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      lifecycles: [...this.bots.keys()].map((botId) => ({
+        schemaVersion: 1 as const,
+        botId,
+        status: this.lifecycles.get(botId) ?? ("active" as const),
+        revision: 0,
+      })),
+    });
+  }
+  executeBotLifecycle(
+    request: Parameters<UserConfigurationBinding["executeBotLifecycle"]>[0],
+  ) {
+    const status: "active" | "archived" =
+      request.command.type === "bot/archive" ? "archived" : "active";
+    this.lifecycles.set(request.command.botId, status);
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      botId: request.command.botId,
+      status: "applied" as const,
+      lifecycle: {
+        schemaVersion: 1 as const,
+        botId: request.command.botId,
+        status,
+        revision: 1,
+      },
     });
   }
   createBot(request: Parameters<UserConfigurationBinding["createBot"]>[0]) {
@@ -659,6 +730,12 @@ function createTestGateway(
   const configurations = new Map<string, MemoryConfiguration>();
   const configurationRoutes: string[] = [];
   const connections = new Map<string, MemoryConnections>();
+  const configurationFor = (userId: string) => {
+    const configuration =
+      configurations.get(userId) ?? new MemoryConfiguration();
+    configurations.set(userId, configuration);
+    return configuration;
+  };
   const gateway = createGateway({
     loader,
     artifacts: { load: () => Promise.resolve("export default {}") },
@@ -671,19 +748,43 @@ function createTestGateway(
     },
     userConfigurationFor: (userId) => {
       configurationRoutes.push(`user:${userId}`);
-      const configuration =
-        configurations.get(userId) ?? new MemoryConfiguration();
-      configurations.set(userId, configuration);
-      return configuration;
+      return configurationFor(userId);
     },
     botConfigurationFor: (userId, botId) => {
       configurationRoutes.push(`bot:${userId}:${botId}`);
-      const configuration =
-        configurations.get(userId) ?? new MemoryConfiguration();
-      configurations.set(userId, configuration);
-      return configuration;
+      return configurationFor(userId);
     },
     backendContributions: [
+      createFlockBackendContribution({
+        listBots: (userId) => configurationFor(userId).listBots(),
+        createBot: (userId, command) =>
+          configurationFor(userId).createBot({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        listBotLifecycles: (userId) =>
+          configurationFor(userId).listBotLifecycles(),
+        executeBotLifecycle: (userId, command) =>
+          configurationFor(userId).executeBotLifecycle({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        readSheep: (userId, botId) =>
+          configurationFor(userId).readSheep({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        updateSheep: (userId, botId, command) =>
+          configurationFor(userId).updateSheep({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+      }),
       createSettingsBackendContribution({
         executeConnection: (userId, command) => {
           const configuration =
@@ -780,8 +881,8 @@ function createTestGateway(
         },
       },
     ],
-    allowedClientOrigins,
     allowDevelopmentIdentity,
+    ...(allowedClientOrigins ? { allowedClientOrigins } : {}),
   });
   return {
     gateway,
@@ -1093,6 +1194,32 @@ describe("Cloudflare user application gateway", () => {
     expect(configurationRoutes).toEqual([]);
   });
 
+  test("routes authenticated Bot archive and lifecycle projection", async () => {
+    const { gateway } = createTestGateway();
+    await gateway(request("/api/bots/primary/settings", "alice"));
+    const archived = await gateway(
+      request("/api/bots/primary/lifecycle", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "bot/archive",
+          commandId: "archive-primary",
+          botId: "primary",
+        }),
+      }),
+    );
+    expect(archived.status).toBe(200);
+    expect(await archived.json()).toMatchObject({
+      status: "applied",
+      lifecycle: { status: "archived" },
+    });
+    const lifecycles = await gateway(request("/api/bots/lifecycles", "alice"));
+    expect(await lifecycles.json()).toMatchObject({
+      lifecycles: [{ botId: "primary", status: "archived" }],
+    });
+  });
+
   test("assigns a Connection only through an authenticated Bot command receipt", async () => {
     const { gateway } = createTestGateway();
     const assign = () =>
@@ -1141,6 +1268,44 @@ describe("Cloudflare user application gateway", () => {
         },
       ],
     });
+
+    for (const command of [
+      {
+        schemaVersion: 1,
+        type: "bot/replace-capability",
+        commandId: "replace-gmail-1",
+        botId: "primary",
+        expectedRevision: 1,
+        assignment: {
+          assignmentId: "gmail-primary",
+          packageId: "composio",
+          capabilityId: "gmail-tools",
+          connectionId: "connection-gmail-2",
+        },
+      },
+      {
+        schemaVersion: 1,
+        type: "bot/unassign-capability",
+        commandId: "unassign-gmail-1",
+        botId: "primary",
+        expectedRevision: 2,
+        assignmentId: "gmail-primary",
+      },
+    ]) {
+      const response = await gateway(
+        request("/api/bots/primary/settings", "alice", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(command),
+        }),
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(
+      await (
+        await gateway(request("/api/bots/primary/settings", "alice"))
+      ).json(),
+    ).toMatchObject({ revision: 3, assignments: [] });
   });
 
   test("replays and acknowledges durable Bot notification intents", async () => {
@@ -1342,6 +1507,75 @@ describe("Cloudflare user application gateway", () => {
     expect(states.get("alice")?.storedRuns("primary")).toHaveLength(1);
   });
 
+  test("routes an authenticated Stop to the owning Bot and back", async () => {
+    const { gateway, states } = createTestGateway();
+    await gateway(
+      request("/api/bots/primary/turns", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          text: "hello",
+          commandId: "stop-turn-1",
+        }),
+      }),
+    );
+
+    const stop = (userId: string, body: unknown) =>
+      gateway(
+        request("/api/bots/primary/turns/stop-turn-1/stop", userId, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const accepted = await stop("alice", {
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-command-1",
+      runId: "stop-turn-1",
+    });
+    expect(accepted.status).toBe(200);
+    expect(decodeClientRunStopReceiptV1(await accepted.json())).toMatchObject({
+      commandId: "stop-command-1",
+      runId: "stop-turn-1",
+    });
+    expect(
+      states.get("alice")?.storedRuns("primary")[0]?.stopRequestedAt,
+    ).toBeString();
+
+    // Another authenticated user reaches only their own isolated Bot state.
+    const isolated = await stop("bob", {
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-command-1",
+      runId: "stop-turn-1",
+    });
+    expect(isolated.status).toBe(409);
+    expect((await isolated.json()) as { error: string }).toEqual({
+      error: 'run "stop-turn-1" was not admitted',
+    });
+
+    for (const invalid of [
+      { schemaVersion: 1, action: "stop", commandId: "stop-command-2" },
+      {
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop-command-2",
+        runId: "other-run",
+      },
+      {
+        schemaVersion: 2,
+        action: "stop",
+        commandId: "stop-command-2",
+        runId: "stop-turn-1",
+      },
+    ]) {
+      expect((await stop("alice", invalid)).status).toBe(400);
+    }
+  });
+
   test("returns only the versioned client run wire contract", async () => {
     const { gateway } = createTestGateway();
     await gateway(
@@ -1471,6 +1705,9 @@ describe("Cloudflare user application gateway", () => {
       new Request("https://frockbot.test/?as_user=alice"),
     );
     expect(page.status).toBe(200);
+    expect(await page.clone().text()).toContain(
+      'data-frockbot-auth-mode="development"',
+    );
     expect(page.headers.get("set-cookie")).toContain("frockbot_dev_user=alice");
     const script = await gateway(
       new Request("https://frockbot.test/app.js", {
@@ -1497,7 +1734,9 @@ describe("Cloudflare user application gateway", () => {
     const { gateway } = createTestGateway();
     const page = await gateway(new Request("https://frockbot.test/"));
     expect(page.status).toBe(200);
-    expect(await page.text()).toContain('data-frockbot-user-id="anonymous"');
+    const publicHtml = await page.text();
+    expect(publicHtml).toContain('data-frockbot-user-id="anonymous"');
+    expect(publicHtml).toContain('data-frockbot-auth-mode="anonymous"');
 
     const response = await gateway(
       new Request("https://frockbot.test/api/bots/default/turns"),
@@ -1524,14 +1763,53 @@ describe("Cloudflare user application gateway", () => {
     expect(loader.ids).toEqual([]);
   });
 
+  test("routes hosted sign-out only through Better Auth", async () => {
+    const requests: Array<{ method: string; pathname: string }> = [];
+    const auth: GatewayAuth = {
+      handler: (request) => {
+        const url = new URL(request.url);
+        requests.push({ method: request.method, pathname: url.pathname });
+        return Promise.resolve(
+          Response.json(
+            { success: true },
+            { headers: { "set-cookie": "session=; Max-Age=0" } },
+          ),
+        );
+      },
+      getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
+    };
+    const { gateway, loader } = createTestGateway(undefined, auth);
+
+    const response = await gateway(
+      new Request("https://frockbot.test/api/auth/sign-out", {
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: unknown = await response.json();
+    expect(body).toEqual({ success: true });
+    expect(requests).toEqual([
+      { method: "POST", pathname: "/api/auth/sign-out" },
+    ]);
+    expect(loader.ids).toEqual([]);
+  });
+
   test("derives the application identity from the Better Auth session", async () => {
     const auth: GatewayAuth = {
       handler: unauthenticatedAuth.handler,
       getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
     };
     const { gateway, loader } = createTestGateway(undefined, auth);
-    const response = await gateway(new Request("https://frockbot.test/"));
+    const response = await gateway(
+      new Request("https://frockbot.test/", {
+        headers: { "x-frockbot-auth-session-v1": "development" },
+      }),
+    );
     expect(response.status).toBe(200);
+    expect(await response.text()).toContain(
+      'data-frockbot-auth-mode="better-auth"',
+    );
     expect(loader.ids).toEqual(["signed-in-user:foundation-v1"]);
   });
 

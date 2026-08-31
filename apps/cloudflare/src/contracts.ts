@@ -29,6 +29,9 @@ import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
   BotDirectoryViewV1,
+  BotLifecycleCommandV1,
+  BotLifecycleDirectoryViewV1,
+  BotLifecycleReceiptV1,
   BotMembershipViewV1,
   BotRegistrationV1,
   CreateBotCommandV1,
@@ -47,6 +50,8 @@ import type {
   ClientRunLookupV1,
   ClientRunListQueryV1,
   ClientRunListV1,
+  ClientRunStopCommandV1,
+  ClientRunStopReceiptV1,
   ClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
 
@@ -125,6 +130,10 @@ export interface BotStateBinding {
   listNotifications(botId: string): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
   reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;
+  stopRun(
+    botId: string,
+    command: ClientRunStopCommandV1,
+  ): Promise<ClientRunStopReceiptV1>;
 }
 
 export interface MemoryBinding {
@@ -184,6 +193,11 @@ export interface UserBotStateBinding {
     botId: string;
     runId: string;
   }): Promise<BotTurnResult>;
+  stopRun(input: {
+    schemaVersion: 1;
+    botId: string;
+    command: ClientRunStopCommandV1;
+  }): Promise<ClientRunStopReceiptV1>;
 }
 
 export interface UserApplicationEnv {
@@ -328,6 +342,15 @@ export interface UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<BotDirectoryViewV1>;
+  listBotLifecycles(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<BotLifecycleDirectoryViewV1>;
+  executeBotLifecycle(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: BotLifecycleCommandV1;
+  }): Promise<BotLifecycleReceiptV1>;
   createBot(request: {
     schemaVersion: 1;
     userId: string;
@@ -447,6 +470,7 @@ export interface GatewayDependencies {
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   backendContributions?: readonly BackendRouteContribution[];
+  /** Webview origins allowed to call `/api/*` cross-origin. */
   allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;

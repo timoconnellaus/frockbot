@@ -1,20 +1,18 @@
-# Shared Fly host compatibility prototype
+# Shared Computer host
 
-This local-only prototype exercises the versioned boundary selected in [ADR 0004](../../docs/adr/0004-host-fly-computer-in-cloudflare-containers.md): Bot Durable Objects call one logical, shared Computer host; Cloudflare routes each Bot deterministically across a bounded container pool; the container runs the Sprites SDK without owning canonical Bot state.
+This Worker is the replaceable, non-authoritative production Computer host selected in [ADR 0004](../../docs/adr/0004-host-fly-computer-in-cloudflare-containers.md). Bot Durable Objects call it through an internal service binding with exact provider-neutral effect DTOs. A durable journal records each effect identity before dispatch and replays completed outcomes without duplicating uncertain work. The container alone loads the Sprites SDK and `SPRITES_TOKEN`.
 
 ## Checks
 
 ```sh
-bun run --filter @frockbot/fly-host-prototype typecheck
-bun run --filter @frockbot/fly-host-prototype test
+bun run --filter @frockbot/computer-host typecheck
+bun run --filter @frockbot/computer-host test
 ```
 
-The opt-in live smoke requires Docker and `SPRITES_TOKEN` in either gitignored `apps/fly-host-prototype/.dev.vars` or `apps/cloudflare/.dev.vars`. The prototype-local file takes precedence:
+The opt-in live smoke requires Docker and `SPRITES_TOKEN` in gitignored `apps/fly-host-prototype/.dev.vars`:
 
 ```sh
-bun run --filter @frockbot/fly-host-prototype test:live
+bun run --filter @frockbot/computer-host test:live
 ```
 
-The script starts Wrangler locally, builds the Node container, sends a decoded `/v1/computer/smoke` DTO, and verifies streaming command output, file persistence, cancellation, adapter reconstruction, and cleanup against a disposable `frockbot-test-*` Sprite. Temporary secret material and local processes are removed in a `finally` path.
-
-This is a compatibility prototype, not a production Contribution. The prototype recognizes one local credential reference; production work must resolve User-scoped opaque references through the credential broker and add authenticated service-to-service authorization, durable effect reconciliation, and bounded load shedding before routing Bot work here.
+The smoke starts Wrangler locally, builds the Node container, sends a decoded `/v1/computer/smoke` DTO, and verifies streaming command output, file persistence, cancellation, reconstruction, and cleanup against a disposable `frockbot-test-*` Sprite.

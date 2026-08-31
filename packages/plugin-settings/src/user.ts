@@ -445,6 +445,26 @@ export class UserSettingsBackendContribution {
     );
   }
 
+  /**
+   * The durable state of one Bot's dependency on one Connection. `absent` is
+   * the answer for a Connection this object does not hold, so a reconciling
+   * saga can distinguish "never claimed" from "claimed and pending".
+   */
+  async readConnectionDependency(
+    userId: string,
+    connectionId: string,
+    botId: string,
+    generation: string,
+  ): Promise<"absent" | "pending" | "acknowledged"> {
+    const connection = await this.getConnection(userId, connectionId);
+    if (!connection) return "absent";
+    const dependency = connectionDependencies(connection).find(
+      (candidate) =>
+        candidate.botId === botId && candidate.generation === generation,
+    );
+    return dependency?.status ?? "absent";
+  }
+
   async claimConnectionDependency(
     userId: string,
     connectionId: string,

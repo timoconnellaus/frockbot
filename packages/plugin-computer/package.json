@@ -9,6 +9,7 @@
     "./client": "./src/client/application.ts",
     "./src/client/index.ts": "./src/client/index.ts",
     "./shared": "./src/shared.ts",
+    "./shared-provider": "./src/shared-provider.ts",
     "./manifest": "./src/manifest.ts",
     "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"

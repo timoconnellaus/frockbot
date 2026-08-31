@@ -76,7 +76,7 @@ export interface IsolateIdentityV1 {
 }
 
 export type IsolateCapabilityKindV1 =
-  "tool" | "model" | "memory" | "notification";
+  "tool" | "model" | "memory" | "notification" | "computer";
 
 export interface IsolateCapabilityDescriptorV1 {
   capabilityId: string;
@@ -431,6 +431,7 @@ const CAPABILITY_KINDS: readonly IsolateCapabilityKindV1[] = [
   "model",
   "memory",
   "notification",
+  "computer",
 ];
 
 export function decodeIsolateCapabilityDescriptorV1(

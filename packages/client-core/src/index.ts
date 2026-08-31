@@ -69,9 +69,16 @@ export interface ClientRun {
   admittedAt?: string;
   input: string;
   events: ClientTurnEvent[];
-  status: "running" | "completed" | "failed" | "reconciliation-required";
+  status:
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "reconciliation-required";
   responseText?: string;
   failure?: string;
+  /** Durable Stop intent, projected independently of the run status. */
+  stopRequestedAt?: string;
   recovery?: { action: "resume"; message: string };
 }
 
@@ -111,6 +118,8 @@ export interface AgentTransport {
     runId: string,
   ): Promise<ClientRun | undefined>;
   reconcileRun?(botId: string, runId: string): Promise<ClientTurnResponse>;
+  /** Sends the durable Stop command and returns the acknowledged projection. */
+  stopRun?(botId: string, runId: string, commandId: string): Promise<ClientRun>;
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;
   listNotifications?(botId: string): Promise<ClientNotificationIntent[]>;
   acknowledgeNotification?(

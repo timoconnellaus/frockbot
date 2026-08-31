@@ -59,6 +59,7 @@ describe("Composio router Plugin", () => {
       agentId: "primary",
       compositionGenerationId: "bootstrap",
       sessionId: "user-1:primary",
+      effectId: "tool:1:1:0",
       signal: new AbortController().signal,
     };
 
@@ -183,6 +184,7 @@ describe("Composio router Plugin", () => {
       agentId: "primary",
       compositionGenerationId: "bootstrap",
       sessionId: "resumed-session",
+      effectId: "tool:1:1:1",
       signal: new AbortController().signal,
     };
     const execution = await root.tools.prepare(

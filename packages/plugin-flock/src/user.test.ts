@@ -23,6 +23,23 @@ class MemoryStorage {
   transaction<T>(callback: (storage: MemoryStorage) => Promise<T>): Promise<T> {
     return callback(this);
   }
+  list<T>({ prefix }: { prefix: string }): Promise<Map<string, T>> {
+    return Promise.resolve(
+      new Map(
+        [...this.values.entries()].filter(([key]) =>
+          key.startsWith(prefix),
+        ) as Array<[string, T]>,
+      ),
+    );
+  }
+  delete(key: string): Promise<boolean> {
+    return Promise.resolve(this.values.delete(key));
+  }
+  alarm: number | Date | undefined;
+  setAlarm(timestamp: number | Date): Promise<void> {
+    this.alarm = timestamp;
+    return Promise.resolve();
+  }
 }
 const settings = {
   schemaVersion: 1 as const,
@@ -59,6 +76,8 @@ describe("Flock User contribution", () => {
           state: "enabled",
         }),
       now: () => new Date("2026-08-29T00:00:00.000Z"),
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
     });
     const first = await contribution.createBot("user-1", command());
     const replay = await contribution.createBot("user-1", command());
@@ -100,6 +119,8 @@ describe("Flock User contribution", () => {
       storage,
       readUserSettings: () => Promise.resolve(settings),
       claimInitialModelBinding: () => Promise.resolve(undefined),
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
     });
 
     await expect(
@@ -116,6 +137,8 @@ describe("Flock User contribution", () => {
     const contribution = createFlockUserBackendContribution({
       storage,
       readUserSettings: () => Promise.resolve(settings),
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
       claimInitialModelBinding: () => Promise.resolve(undefined),
     });
     await storage.put("flock:directory:v1", {
@@ -137,11 +160,222 @@ describe("Flock User contribution", () => {
     );
   });
 
+  test("coordinates archive through durable intent and reconciles a lost response", async () => {
+    const storage = new MemoryStorage();
+    let botStatus: "active" | "archived" = "active";
+    let calls = 0;
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      readUserSettings: () => Promise.resolve(settings),
+      claimInitialModelBinding: (_storage, input) =>
+        Promise.resolve({
+          assignmentId: input.generation,
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: input.model.connectionId,
+          state: "enabled" as const,
+        }),
+      commandBotLifecycle: (_userId, lifecycleCommand) => {
+        calls += 1;
+        botStatus =
+          lifecycleCommand.type === "bot/archive" ? "archived" : "active";
+        return Promise.reject(new Error("response lost"));
+      },
+      readBotLifecycle: (_userId, botId) =>
+        Promise.resolve({
+          schemaVersion: 1,
+          botId,
+          status: botStatus,
+          revision: calls,
+        }),
+    });
+    await expect(
+      contribution.executeLifecycle("user-1", {
+        schemaVersion: 1,
+        type: "bot/archive",
+        commandId: "archive-missing",
+        botId: "missing",
+      }),
+    ).rejects.toThrow("not registered");
+    await contribution.createBot("user-1", command());
+    const seedBefore = structuredClone(
+      storage.values.get("flock:directory:v1"),
+    );
+    const archive = {
+      schemaVersion: 1 as const,
+      type: "bot/archive" as const,
+      commandId: "archive-1",
+      botId: "alpha",
+    };
+    expect(
+      await contribution.executeLifecycle("user-1", archive),
+    ).toMatchObject({
+      status: "applied",
+      lifecycle: { status: "archived" },
+    });
+    expect(
+      await contribution.executeLifecycle("user-1", archive),
+    ).toMatchObject({
+      status: "applied",
+    });
+    expect(storage.values.get("flock:directory:v1")).toEqual(seedBefore);
+    await expect(
+      contribution.executeLifecycle("user-1", {
+        ...archive,
+        type: "bot/restore",
+      }),
+    ).rejects.toThrow("command ID collision");
+    expect((await contribution.listBotLifecycles()).lifecycles).toEqual([
+      { schemaVersion: 1, botId: "alpha", status: "archived", revision: 1 },
+    ]);
+  });
+
+  test("resumes an uncertain lifecycle saga from its User alarm", async () => {
+    const storage = new MemoryStorage();
+    let recovered = false;
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      readUserSettings: () => Promise.resolve(settings),
+      claimInitialModelBinding: (_storage, input) =>
+        Promise.resolve({
+          assignmentId: input.generation,
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: input.model.connectionId,
+          state: "enabled" as const,
+        }),
+      commandBotLifecycle: () => Promise.reject(new Error("response lost")),
+      readBotLifecycle: (_userId, botId) =>
+        recovered
+          ? Promise.resolve({
+              schemaVersion: 1,
+              botId,
+              status: "archived",
+              revision: 1,
+            })
+          : Promise.reject(new Error("Bot unavailable")),
+    });
+    await contribution.createBot("user-1", command());
+    const lifecycleCommand = {
+      schemaVersion: 1 as const,
+      type: "bot/archive" as const,
+      commandId: "archive-alarm",
+      botId: "alpha",
+    };
+    expect(
+      await contribution.executeLifecycle("user-1", lifecycleCommand),
+    ).toMatchObject({ status: "pending" });
+    expect(storage.alarm).toBeDefined();
+    await expect(
+      contribution.executeLifecycle("user-1", {
+        schemaVersion: 1,
+        type: "bot/restore",
+        commandId: "restore-too-soon",
+        botId: "alpha",
+      }),
+    ).rejects.toThrow("operation retrying");
+    recovered = true;
+    const reconstructed = createFlockUserBackendContribution({
+      storage,
+      readUserSettings: () => Promise.resolve(settings),
+      claimInitialModelBinding: (_storage, input) =>
+        Promise.resolve({
+          assignmentId: input.generation,
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: input.model.connectionId,
+          state: "enabled" as const,
+        }),
+      commandBotLifecycle: () => Promise.reject(new Error("response lost")),
+      readBotLifecycle: (_userId, botId) =>
+        Promise.resolve({
+          schemaVersion: 1,
+          botId,
+          status: "archived",
+          revision: 1,
+        }),
+    });
+    await reconstructed.alarm();
+    expect(
+      await reconstructed.executeLifecycle("user-1", lifecycleCommand),
+    ).toMatchObject({ status: "applied", lifecycle: { status: "archived" } });
+  });
+
+  test("reconciles uncorrelated, pending, and wrong-target Bot replies", async () => {
+    for (const variant of [
+      "wrong-command",
+      "pending",
+      "wrong-target",
+    ] as const) {
+      const storage = new MemoryStorage();
+      let marker: "active" | "archived" = "active";
+      const lifecycleCommand = {
+        schemaVersion: 1 as const,
+        type: "bot/archive" as const,
+        commandId: `archive-${variant}`,
+        botId: "alpha",
+      };
+      const create = () =>
+        createFlockUserBackendContribution({
+          storage,
+          readUserSettings: () => Promise.resolve(settings),
+          claimInitialModelBinding: (_storage, input) =>
+            Promise.resolve({
+              assignmentId: input.generation,
+              packageId: "provider-ollama-cloud",
+              capabilityId: "ollama-cloud-models",
+              connectionId: input.model.connectionId,
+              state: "enabled" as const,
+            }),
+          commandBotLifecycle: () =>
+            Promise.resolve({
+              schemaVersion: 1,
+              commandId:
+                variant === "wrong-command"
+                  ? "another-command"
+                  : lifecycleCommand.commandId,
+              botId: "alpha",
+              status: variant === "pending" ? "pending" : "applied",
+              lifecycle: {
+                schemaVersion: 1,
+                botId: "alpha",
+                status: variant === "wrong-target" ? "active" : marker,
+                revision: 0,
+              },
+            }),
+          readBotLifecycle: (_userId, botId) =>
+            Promise.resolve({
+              schemaVersion: 1,
+              botId,
+              status: marker,
+              revision: marker === "archived" ? 1 : 0,
+            }),
+        });
+      const contribution = create();
+      await contribution.createBot("user-1", command());
+      expect(
+        await contribution.executeLifecycle("user-1", lifecycleCommand),
+      ).toMatchObject({ status: "pending", lifecycle: { status: "active" } });
+      marker = "archived";
+      const reconstructed = create();
+      await reconstructed.alarm();
+      expect(
+        await reconstructed.executeLifecycle("user-1", lifecycleCommand),
+      ).toMatchObject({
+        commandId: lifecycleCommand.commandId,
+        status: "applied",
+        lifecycle: { status: "archived" },
+      });
+    }
+  });
+
   test("durably rejects duplicate IDs and the bounded directory limit", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({
       storage,
       readUserSettings: () => Promise.resolve(settings),
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
       claimInitialModelBinding: (_storage, input) =>
         Promise.resolve({
           assignmentId: input.generation,

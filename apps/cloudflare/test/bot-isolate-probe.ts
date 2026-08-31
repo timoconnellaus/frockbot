@@ -300,6 +300,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     // workers-types cannot infer the generated local RPC stubs.
     const exports = this.ctx.exports as unknown as ProbeExports;
     const composition = await createShellCompositionHost({
+      admitEffect: () => Promise.resolve(true),
       botId: input.botId,
       sessionId: `${input.userId}:${input.botId}`,
       sessionEvents: [],
@@ -375,6 +376,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           agentId: input.botId,
           sessionId: `${input.userId}:${input.botId}`,
           compositionGenerationId: generation.generationId,
+          effectId: "tool:1:1:0",
           signal: new AbortController().signal,
         },
       );
@@ -384,6 +386,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
         agentId: input.botId,
         sessionId: `${input.userId}:${input.botId}`,
         compositionGenerationId: generation.generationId,
+        effectId: "tool:1:1:0",
         signal: new AbortController().signal,
       });
     } finally {

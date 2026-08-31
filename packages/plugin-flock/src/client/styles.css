@@ -31,6 +31,30 @@
   text-transform: uppercase;
 }
 
+.flock-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.flock-manage,
+.flock-lifecycle {
+  border: 0;
+  border-radius: var(--frock-radius-control);
+  background: transparent;
+  color: var(--frock-text-muted);
+  padding: 2px 6px;
+  font: inherit;
+  font-size: var(--frock-text-xs);
+  cursor: pointer;
+}
+
+.flock-manage:hover,
+.flock-lifecycle:hover {
+  background: var(--frock-fill-hover);
+  color: var(--frock-text);
+}
+
 .flock-rows {
   display: grid;
   gap: 2px;
@@ -41,7 +65,7 @@
   position: relative;
   display: grid;
   width: 100%;
-  grid-template-columns: var(--frock-avatar-md) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
@@ -55,6 +79,25 @@
     background-color var(--frock-motion-fast),
     box-shadow var(--frock-motion-fast),
     transform var(--frock-motion-fast);
+}
+
+.flock-bot-select {
+  display: grid;
+  grid-template-columns: var(--frock-avatar-md) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flock-bot-row.archived {
+  opacity: 0.72;
 }
 
 .flock-bot-row:hover {

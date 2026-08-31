@@ -170,6 +170,9 @@ describe("production setup", () => {
     const validation = deploymentSteps.find(
       (step) => step.name === "Validate deployment configuration",
     );
+    const computerHost = deploymentSteps.find(
+      (step) => step.name === "Deploy shared Computer host",
+    );
     const deploy = deploymentSteps.find(
       (step) => step.name === "Deploy Worker",
     );
@@ -177,6 +180,9 @@ describe("production setup", () => {
     expect(validation?.env).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
     expect(validation?.env).not.toHaveProperty(
       "FROCKBOT_AUTHORIZATION_STATE_SECRET",
+    );
+    expect(computerHost?.env?.SPRITES_TOKEN).toBe(
+      "${{ secrets.SPRITES_TOKEN }}",
     );
     expect(deploy?.env?.SPRITES_TOKEN).toBe("${{ secrets.SPRITES_TOKEN }}");
     expect(validation?.env?.CREDENTIAL_KEYRING).toBe(
@@ -257,14 +263,29 @@ exit 1
 `,
     );
     await chmod(bunx, 0o755);
+    const workflowEnvironment = {
+      ...productionEnvironment,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      RUNNER_TEMP: runner,
+      WORKFLOW_CAPTURE: capture,
+    };
+    const hostExecution = Bun.spawnSync(
+      ["bash", "-c", computerHost?.run ?? ""],
+      {
+        cwd: directory,
+        env: workflowEnvironment,
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    expect(hostExecution.exitCode).toBe(0);
+    expect(await Bun.file(capture).text()).toContain(
+      'SPRITES_TOKEN="sprites-production"',
+    );
+
     const execution = Bun.spawnSync(["bash", "-c", deploy?.run ?? ""], {
       cwd: directory,
-      env: {
-        ...productionEnvironment,
-        PATH: `${bin}:${process.env.PATH ?? ""}`,
-        RUNNER_TEMP: runner,
-        WORKFLOW_CAPTURE: capture,
-      },
+      env: workflowEnvironment,
       stdout: "pipe",
       stderr: "pipe",
     });

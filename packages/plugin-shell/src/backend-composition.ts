@@ -10,6 +10,7 @@ import {
   type RuntimeModelSelection,
 } from "@frockbot/agent-runtime/runtime";
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
+import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import {
   CompositionMountFailureError,
   type CompositionFailurePhaseV1,
@@ -88,6 +89,12 @@ export interface ShellCompositionMountOptions {
   agentPackages?: readonly FoundationAgentPackage[];
   modelSelection?: RuntimeModelSelection;
   systemPromptSection?: string;
+  /**
+   * Durably linearizes each provider or tool effect against Stop immediately
+   * before it is used. The Bot Durable Object owns the transaction; the mounted
+   * runtime only presents the exact effect identity.
+   */
+  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
 }
@@ -131,6 +138,7 @@ export function createShellCompositionHost(
           artifactSetHash: generation.artifactSetHash,
         },
         persistSessionEvents: options.persistSessionEvents,
+        admitEffect: options.admitEffect,
         agentPackages: options.agentPackages,
         modelSelection: options.modelSelection,
         systemPromptSection: options.systemPromptSection,

@@ -1,6 +1,7 @@
 // Kernel run-terminal transitions, bound to the Shell Package's run codec.
 import { type SessionEvent } from "@frockbot/kernel-contracts";
 import {
+  cancelStoredRun as cancelKernelStoredRun,
   completeStoredRun as completeKernelStoredRun,
   failStoredRun as failKernelStoredRun,
   requireStoredRunReconciliation as requireKernelStoredRunReconciliation,
@@ -19,7 +20,7 @@ export function completeStoredRun(
   runId: string,
   previous: readonly SessionEvent[],
   result: BotTurnCompletion,
-): Promise<void> {
+): Promise<"completed" | "cancelled"> {
   return completeKernelStoredRun(
     storedRunCodecV1,
     storage,
@@ -37,7 +38,7 @@ export function failStoredRun(
   previous: readonly SessionEvent[],
   events: readonly SessionEvent[],
   failure: string,
-): Promise<"failed" | "preserved-completion" | "missing"> {
+): Promise<"failed" | "cancelled" | "preserved-completion" | "missing"> {
   return failKernelStoredRun(
     storedRunCodecV1,
     storage,
@@ -46,6 +47,27 @@ export function failStoredRun(
     previous,
     events,
     failure,
+  );
+}
+
+/**
+ * Settles a stopped run as terminal `cancelled` and clears its active marker.
+ * A cancelled run produces no response text, no failure, and no notification.
+ */
+export function cancelStoredRun(
+  storage: RunTerminalStorage,
+  keys: RunTerminalKeys,
+  runId: string,
+  previous: readonly SessionEvent[],
+  events: readonly SessionEvent[],
+): Promise<"cancelled" | "preserved-completion" | "missing"> {
+  return cancelKernelStoredRun(
+    storedRunCodecV1,
+    storage,
+    keys,
+    runId,
+    previous,
+    events,
   );
 }
 

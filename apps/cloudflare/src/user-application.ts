@@ -14,8 +14,10 @@ import {
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
   decodeClientRunReconciliationCommandV1,
+  decodeClientRunStopCommandV1,
   decodeClientTurnCommandV1,
   type ClientRunLookupQueryV1,
+  type ClientRunStopCommandV1,
   type ClientTurnCommandV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import type { UserApplicationEnv } from "./contracts.js";
@@ -32,7 +34,25 @@ const APP_JS =
 const APP_CSS =
   typeof __FROCKBOT_CLIENT_CSS__ === "string" ? __FROCKBOT_CLIENT_CSS__ : "";
 
-function appHtml(userId: string, applicationHash: string): string {
+type HostedAuthModeV1 = "anonymous" | "better-auth" | "development";
+
+function hostedAuthMode(request: Request): HostedAuthModeV1 {
+  const mode = request.headers.get("x-frockbot-auth-session-v1");
+  if (
+    mode !== "anonymous" &&
+    mode !== "better-auth" &&
+    mode !== "development"
+  ) {
+    throw new Error("hosted auth session projection is invalid");
+  }
+  return mode;
+}
+
+function appHtml(
+  userId: string,
+  applicationHash: string,
+  authMode: HostedAuthModeV1,
+): string {
   if (!isRpcIdentifier(userId)) throw new Error("invalid user id");
   if (!isApplicationDeploymentHash(applicationHash)) {
     throw new Error("invalid application hash");
@@ -46,7 +66,7 @@ function appHtml(userId: string, applicationHash: string): string {
   <title>FrockBot</title>
   <link rel="stylesheet" href="/app.css">
 </head>
-<body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}">
+<body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}" data-frockbot-auth-mode="${authMode}">
   <div id="app"></div>
   <script type="module" src="/app.js"></script>
 </body>
@@ -59,7 +79,7 @@ function withSecurityHeaders(response: Response): Response {
   secured.headers.set("referrer-policy", "no-referrer");
   secured.headers.set(
     "content-security-policy",
-    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors capacitor://localhost frockbot://localhost; base-uri 'none'",
+    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
   );
   return secured;
 }
@@ -76,16 +96,18 @@ async function requireRegisteredBot(
     await env.BOT_STATE.assertRegistered({ schemaVersion: 1, botId });
     return undefined;
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "name" in error &&
-      error.name === "BotNotFoundError"
-    )
-      return jsonError(
-        404,
-        error instanceof Error ? error.message : "Bot not found",
-      );
+    if (typeof error === "object" && error !== null && "name" in error) {
+      if (error.name === "BotNotFoundError")
+        return jsonError(
+          404,
+          error instanceof Error ? error.message : "Bot not found",
+        );
+      if (error.name === "BotArchivedError")
+        return jsonError(
+          409,
+          error instanceof Error ? error.message : "Bot is archived",
+        );
+    }
     return jsonError(
       503,
       error instanceof Error
@@ -119,7 +141,11 @@ export function createUserApplication() {
     if (request.method === "GET" && url.pathname === "/") {
       return withSecurityHeaders(
         new Response(
-          appHtml(env.DEPLOYMENT.userId, env.DEPLOYMENT.applicationHash),
+          appHtml(
+            env.DEPLOYMENT.userId,
+            env.DEPLOYMENT.applicationHash,
+            hostedAuthMode(request),
+          ),
           {
             headers: { "content-type": "text/html; charset=utf-8" },
           },
@@ -230,14 +256,23 @@ export function createUserApplication() {
     const fenceMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/fence$/,
     );
-    if (!turnMatch && !lookupMatch && !reconcileMatch && !fenceMatch) {
+    const stopMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/stop$/,
+    );
+    if (
+      !turnMatch &&
+      !lookupMatch &&
+      !reconcileMatch &&
+      !fenceMatch &&
+      !stopMatch
+    ) {
       return jsonError(404, "not found");
     }
     let botId: string;
     try {
-      botId = decodeURIComponent(
-        (turnMatch ?? lookupMatch ?? reconcileMatch ?? fenceMatch)![1],
-      );
+      const matched =
+        turnMatch ?? lookupMatch ?? reconcileMatch ?? fenceMatch ?? stopMatch;
+      botId = decodeURIComponent(matched![1]);
     } catch {
       return jsonError(400, "invalid bot id");
     }
@@ -314,6 +349,35 @@ export function createUserApplication() {
         return jsonError(
           500,
           error instanceof Error ? error.message : "admission fence failed",
+        );
+      }
+    }
+
+    if (stopMatch) {
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let command: ClientRunStopCommandV1;
+      try {
+        const body: unknown = await request.json();
+        command = decodeClientRunStopCommandV1(body);
+        if (command.runId !== decodeURIComponent(stopMatch[2])) {
+          throw new Error("run stop command does not match the request path");
+        }
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid stop command",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.stopRun({ schemaVersion: 1, botId, command }),
+        );
+      } catch (error) {
+        return jsonError(
+          409,
+          error instanceof Error ? error.message : "Stop failed",
         );
       }
     }

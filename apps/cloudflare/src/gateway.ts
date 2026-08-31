@@ -137,6 +137,11 @@ export function createGateway(dependencies: GatewayDependencies) {
       ? null
       : await dependencies.auth.getSession(request.headers);
     let userId = development.userId ?? session?.user.id;
+    const authMode = development.userId
+      ? "development"
+      : session
+        ? "better-auth"
+        : "anonymous";
     const isPublicAsset =
       request.method === "GET" && PUBLIC_ASSET_PATHS.has(url.pathname);
     if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
@@ -314,6 +319,7 @@ export function createGateway(dependencies: GatewayDependencies) {
     const forwardedHeaders = new Headers(request.headers);
     forwardedHeaders.delete("x-frockbot-user-id");
     forwardedHeaders.set("x-frockbot-deployment", workerId);
+    forwardedHeaders.set("x-frockbot-auth-session-v1", authMode);
     const forwardedUrl = URL.parse(request.url);
     if (!forwardedUrl) return jsonError(400, "invalid request URL");
     if (development.persist) forwardedUrl.searchParams.delete("as_user");

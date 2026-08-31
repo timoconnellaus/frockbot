@@ -38,6 +38,17 @@ export function decodeShowNotificationInput(
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error("notification input must be an object");
   }
+  const keys = Reflect.ownKeys(input);
+  if (
+    keys.some(
+      (key) =>
+        typeof key !== "string" ||
+        !["title", "body", "urgency"].includes(key) ||
+        !Object.prototype.propertyIsEnumerable.call(input, key),
+    )
+  ) {
+    throw new Error("notification input has unknown fields");
+  }
   const record = input as Record<string, unknown>;
   const title = optionalString(record, "title", 200);
   if (!title) throw new Error("notification title is required");

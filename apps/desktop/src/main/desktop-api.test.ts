@@ -240,6 +240,33 @@ describe("desktop hosted protocol", () => {
       type: "auth/request",
       provider: "google",
     });
+    const hiddenSignOut = { schemaVersion: 1, type: "auth/sign-out" };
+    Object.defineProperty(hiddenSignOut, "hidden", { value: true });
+    const symbolSignOut = { schemaVersion: 1, type: "auth/sign-out" };
+    Object.defineProperty(symbolSignOut, Symbol("hidden"), { value: true });
+    for (const invalid of [hiddenSignOut, symbolSignOut]) {
+      expect(() => decodeDesktopAuthRequest(invalid)).toThrow(
+        "invalid desktop auth request",
+      );
+    }
+
+    const hiddenApiRequest = {
+      schemaVersion: 1,
+      path: "/app-manifest",
+      method: "GET",
+    };
+    Object.defineProperty(hiddenApiRequest, "hidden", { value: true });
+    const symbolApiRequest = {
+      schemaVersion: 1,
+      path: "/app-manifest",
+      method: "GET",
+    };
+    Object.defineProperty(symbolApiRequest, Symbol("hidden"), { value: true });
+    for (const invalid of [hiddenApiRequest, symbolApiRequest]) {
+      expect(() => decodeDesktopApiRequest(invalid)).toThrow(
+        "invalid API request",
+      );
+    }
     const user = { id: "user-1", name: "Alice", email: "a@example.com" };
     expect(
       decodeDesktopAuthUserResponse({

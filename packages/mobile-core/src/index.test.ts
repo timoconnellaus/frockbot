@@ -142,9 +142,17 @@ describe("decodeMobileShareRequest", () => {
     ).toEqual({ title: "Turn", text: "done", url: undefined });
   });
 
-  test("requires text or url", () => {
+  test("requires an exact request carrying text or url", () => {
     expect(() => decodeMobileShareRequest({ title: "Turn" })).toThrow(
       "share request must include text or url",
+    );
+    expect(() =>
+      decodeMobileShareRequest({ text: "done", extra: true }),
+    ).toThrow("share request has unknown fields");
+    const hidden = { text: "done" };
+    Object.defineProperty(hidden, "secret", { value: true });
+    expect(() => decodeMobileShareRequest(hidden)).toThrow(
+      "share request has unknown fields",
     );
   });
 });

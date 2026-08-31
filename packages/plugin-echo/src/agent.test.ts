@@ -63,6 +63,7 @@ describe("echo plugin", () => {
       agentId: "echo-agent",
       compositionGenerationId: "bootstrap",
       sessionId: "session",
+      effectId: "tool:1:1:0",
       signal: controller.signal,
     });
     if (preparation.kind !== "ready") throw new Error("echo tool was denied");
@@ -72,6 +73,7 @@ describe("echo plugin", () => {
         agentId: "echo-agent",
         compositionGenerationId: "bootstrap",
         sessionId: "session",
+        effectId: "tool:1:1:0",
         signal: controller.signal,
       }),
     ).toEqual({ content: "hello plugins", isError: false });

@@ -38,6 +38,10 @@ export interface BackendRouteContribution {
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
+import {
+  createSharedComputerProviderPlugin,
+  type SharedComputerHostClient,
+} from "@frockbot/plugin-computer/shared-provider";
 import credentialsManifest from "@frockbot/plugin-credentials/manifest";
 import { createCredentialRuntimePlugin } from "@frockbot/plugin-credentials/user";
 // Desktop and mobile Package manifests remain part of the immutable plan.
@@ -268,12 +272,16 @@ export async function createFoundationBackendContributions(
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host: FoundationBackendPluginHost<T>,
+  root?: Context,
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
   host: FoundationGatewayHost | FoundationBackendPluginHost<T>,
+  residentRoot?: Context,
 ): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
-  const root = new Context();
+  const ownsRoot = !residentRoot;
+  const root = residentRoot ?? new Context();
+  const fibers: Array<ReturnType<Context["plugin"]>> = [];
   const contributions: Array<BackendRouteContribution | T> = [];
   const lifecycle: BackendContributionLifecycle<BackendRouteContribution | T> =
     {
@@ -317,11 +325,14 @@ export async function createFoundationBackendContributions<T>(
         } else {
           plugin = host.resolve(specifier, lifecycle);
         }
-        await root.plugin(plugin);
+        const fiber = root.plugin(plugin);
+        fibers.push(fiber);
+        await fiber;
       }
     }
   } catch (error) {
-    await root.fiber.dispose();
+    await Promise.allSettled(fibers.reverse().map((fiber) => fiber.dispose()));
+    if (ownsRoot) await root.fiber.dispose();
     throw error;
   }
   let disposed = false;
@@ -330,7 +341,10 @@ export async function createFoundationBackendContributions<T>(
     async dispose() {
       if (disposed) return;
       disposed = true;
-      await root.fiber.dispose();
+      await Promise.allSettled(
+        fibers.reverse().map((fiber) => fiber.dispose()),
+      );
+      if (ownsRoot) await root.fiber.dispose();
     },
   };
 }
@@ -360,11 +374,47 @@ function runtimePackage(
   };
 }
 
+/**
+ * The Computer providers this application registers. The in-worker Fly Sprites
+ * provider is the default: it is the one that carries a Computer's per-User
+ * identity, its Workspace file surface, and the durable-root sync (ADR 0013).
+ * When the host also supplies the shared Computer host, its effect-journaling
+ * proxy is registered beside it so an identified effect can be replayed rather
+ * than repeated across Durable Object eviction.
+ */
+function computerProviderPlugin(host: {
+  readSecret(name: string): string | undefined;
+  computerSync?: ComputerSyncHostV1;
+  computerHost?: SharedComputerHostClient;
+}): Plugin.Function {
+  const fly = createFlySpriteProviderPlugin(undefined, {
+    token: host.readSecret("SPRITES_TOKEN"),
+    ...(host.computerSync ? { sync: host.computerSync } : {}),
+  });
+  const shared = host.computerHost
+    ? createSharedComputerProviderPlugin(host.computerHost)
+    : undefined;
+  if (!shared) return fly;
+  const plugin: Plugin.Function = (ctx) => {
+    ctx.plugin(fly);
+    ctx.plugin(shared);
+  };
+  plugin.inject = ["computers"];
+  return plugin;
+}
+
 export function createFoundationHostedRuntimePackages(
   plan: ApplicationPlan,
   host: {
     userId: string;
     readSecret(name: string): string | undefined;
+    /**
+     * The shared Computer host seam: a non-authoritative backend host that
+     * journals each identified Computer effect so a retried effect replays its
+     * recorded outcome instead of executing twice. Supplied, the
+     * `shared-computer` provider is registered beside the in-worker provider.
+     */
+    computerHost?: SharedComputerHostClient;
     /**
      * The Package authoring seam, supplied by the Bot Durable Object for one
      * admitted Turn. Absent outside a Turn, and the Authoring Package is then
@@ -427,14 +477,7 @@ export function createFoundationHostedRuntimePackages(
         defaultProviderId: "fly-sprite",
       }),
     ),
-    runtimePackage(
-      plan,
-      "fly-sprite",
-      createFlySpriteProviderPlugin(undefined, {
-        token: host.readSecret("SPRITES_TOKEN"),
-        ...(host.computerSync ? { sync: host.computerSync } : {}),
-      }),
-    ),
+    runtimePackage(plan, "fly-sprite", computerProviderPlugin(host)),
     runtimePackage(
       plan,
       "computer",

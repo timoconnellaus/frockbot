@@ -155,6 +155,7 @@ describe("BotState Ollama execution", () => {
     const leases: Array<Record<string, unknown>> = [];
     const settlements: Array<Record<string, unknown>> = [];
     const dependencyEffects: string[] = [];
+    const claimedDependencies = new Set<string>();
     const rpc = {
       getBotRegistration: () =>
         Promise.resolve({
@@ -181,6 +182,39 @@ describe("BotState Ollama execution", () => {
       readConfiguration: () => Promise.resolve(structuredClone(user)),
       getConnection: () =>
         Promise.resolve(structuredClone(user.connections[0])),
+      executeConnectionDependency: (request: {
+        action: string;
+        generation: string;
+      }) => {
+        if (request.action === "claim") {
+          dependencyEffects.push("claim");
+          claimedDependencies.add(request.generation);
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "claimed" as const,
+          });
+        }
+        if (request.action === "acknowledge") {
+          dependencyEffects.push("acknowledge");
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "acknowledged" as const,
+          });
+        }
+        if (request.action === "read") {
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: claimedDependencies.has(request.generation)
+              ? ("acknowledged" as const)
+              : ("absent" as const),
+          });
+        }
+        claimedDependencies.delete(request.generation);
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "released" as const,
+        });
+      },
       claimConnectionDependency: () => {
         dependencyEffects.push("claim");
         return Promise.resolve(true);

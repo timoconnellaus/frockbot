@@ -6,6 +6,7 @@ import {
   type ClientNotificationIntent,
   type ClientPlugin,
   type ClientRun,
+  type ClientStartConnectionResult,
   type ClientTurnEvent,
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
@@ -20,7 +21,9 @@ import type {
   BotNotificationPolicy,
   BotProfile,
   BotSettingsViewV1,
+  ConfigurationCommandV1,
   ModelAssignment,
+  OperationReceiptV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import { ref } from "vue";
@@ -69,7 +72,9 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
     return {
       runId: run.runId,
       status: run.status,
-      message: "This Turn is still running in the backend.",
+      message: run.stopRequestedAt
+        ? "Stop accepted; waiting for durable settlement."
+        : "This Turn is still running in the backend.",
       canResume: false,
     };
   }
@@ -77,14 +82,23 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
     return {
       runId: run.runId,
       status: run.status,
-      message:
-        run.recovery?.message ??
-        run.failure ??
-        "This Turn requires provider reconciliation before it can continue.",
-      canResume: run.recovery?.action === "resume",
+      message: run.stopRequestedAt
+        ? "Stop accepted; reconciling the provider outcome before cancelling."
+        : (run.recovery?.message ??
+          run.failure ??
+          "This Turn requires provider reconciliation before it can continue."),
+      canResume: !run.stopRequestedAt && run.recovery?.action === "resume",
     };
   }
   return undefined;
+}
+
+function isTerminalRun(run: ClientRun): boolean {
+  return (
+    run.status === "completed" ||
+    run.status === "failed" ||
+    run.status === "cancelled"
+  );
 }
 
 function assistantMessage(
@@ -111,6 +125,16 @@ function assistantMessage(
         run.failure ??
         "Provider reconciliation is required before this Turn can continue.",
       status: "reconciliation-required",
+      tools: toolsFrom(run.events),
+    };
+  }
+  if (run.status === "cancelled") {
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text: run.failure ?? "Stopped by an authenticated Stop command.",
+      status: "aborted",
       tools: toolsFrom(run.events),
     };
   }
@@ -161,10 +185,7 @@ export function projectDurableRuns(
     else state.messages.push(assistant);
 
     activeRun = activeRunView(run) ?? activeRun;
-    if (
-      notification &&
-      (run.status === "completed" || run.status === "failed")
-    ) {
+    if (notification && isTerminalRun(run)) {
       projected.add(notification.notificationId);
     }
   }
@@ -178,9 +199,7 @@ export function projectDurableRuns(
     state.activeRun = activeRun;
   } else {
     const terminalRunIds = new Set(
-      runs
-        .filter((run) => run.status === "completed" || run.status === "failed")
-        .map((run) => run.runId),
+      runs.filter(isTerminalRun).map((run) => run.runId),
     );
     if (state.activeRunId && terminalRunIds.has(state.activeRunId)) {
       state.activeRunId = undefined;
@@ -200,7 +219,7 @@ export function projectCompletedRuns(
   return projectDurableRuns(
     { messages },
     notifications,
-    runs.filter((run) => run.status === "completed" || run.status === "failed"),
+    runs.filter(isTerminalRun),
   );
 }
 
@@ -477,7 +496,18 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
       configuration: candidate.configuration,
     });
     const connectionTypes = decoded.configuration?.connectionTypes ?? [];
-    if (connectionTypes.length === 0) return [];
+    const decodedCapabilities = (decoded.configuration?.capabilities ?? []).map(
+      (capability) => ({
+        id: capability.id,
+        kind: capability.kind,
+        connectionTypes: capability.connectionTypes,
+      }),
+    );
+    // A Package with neither a Connection Type nor a Capability contributes
+    // nothing the Plugins surface can install or assign.
+    if (connectionTypes.length === 0 && decodedCapabilities.length === 0) {
+      return [];
+    }
     const decodedConnections = connectionTypes.map((connection) => {
       const authorizationKind: PluginCatalogItem["connectionTypes"][number]["authorizationKind"] =
         connection.authorization.kind;
@@ -497,12 +527,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
             ? candidate.displayName
             : candidate.id,
         version: candidate.version,
-        capabilities: (decoded.configuration?.capabilities ?? []).map(
-          (capability) => ({
-            id: capability.id,
-            kind: capability.kind,
-          }),
-        ),
+        capabilities: decodedCapabilities,
         connectionTypes: decodedConnections,
       },
     ];
@@ -513,11 +538,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   const surfaces = createClientSurfaceRegistry();
   let activeRequest: AbortController | undefined;
   let admissionObserver: AbortController | undefined;
+  let runObserver: AbortController | undefined;
   let selectionGeneration = 0;
   let userSettingsGeneration = 0;
   let pluginCatalogGeneration = 0;
   const settingsLoadErrors = new Map<"bot" | "user" | "catalog", string>();
   const connectionOperations = readConnectionOperations();
+  const stopCommands = new Map<string, string>();
   const authorizationOperations = new Map<
     string,
     { nativeReturnNonce?: string }
@@ -650,9 +677,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           return "not-admitted";
         }
         projectDurableRuns(web.value, [], [run]);
-        if (run.status === "completed" || run.status === "failed") {
-          return "admitted";
-        }
+        if (isTerminalRun(run)) return "admitted";
       } catch (error) {
         if (signal.aborted) return "detached";
         reconciliationError = `${
@@ -666,6 +691,47 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       delayMs = Math.min(delayMs * 2, 5_000);
     }
     return "detached";
+  }
+
+  async function observeRunUntilTerminal(
+    botId: string,
+    runId: string,
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!ctx.transport.lookupRun) return;
+    let delayMs = 250;
+    let observationError: string | undefined;
+    while (!signal.aborted) {
+      try {
+        const run = await observeWhileAttached(
+          ctx.transport.lookupRun(botId, runId),
+          signal,
+        );
+        if (
+          signal.aborted ||
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        ) {
+          return;
+        }
+        if (!run) throw new Error("Stopped Turn is unavailable");
+        if (web.value.settingsError === observationError) {
+          web.value.settingsError = undefined;
+        }
+        observationError = undefined;
+        projectDurableRuns(web.value, [], [run]);
+        if (isTerminalRun(run)) return;
+      } catch (error) {
+        if (signal.aborted) return;
+        observationError = `${
+          error instanceof Error ? error.message : "Turn lookup failed"
+        } Retrying…`;
+        web.value.settingsError = observationError;
+      }
+      await waitForRunLookup(delayMs, signal);
+      delayMs = Math.min(delayMs * 2, 5_000);
+    }
   }
 
   async function deliverNotifications(
@@ -715,6 +781,31 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         botId,
         notification.notificationId,
       );
+    }
+  }
+
+  async function executeAssignmentOperation(
+    command: Extract<
+      ConfigurationCommandV1,
+      {
+        type:
+          | "bot/assign-capability"
+          | "bot/replace-capability"
+          | "bot/unassign-capability";
+      }
+    >,
+  ): Promise<void> {
+    const execute = ctx.transport.executeConfiguration;
+    if (!execute) throw new Error("Settings are unavailable");
+    const receipt = (await execute(command)) as OperationReceiptV1;
+    await web.value.loadBotSettings();
+    if (receipt.status === "rejected") {
+      const failure = receipt.failure ?? "Assignment operation was rejected";
+      web.value.settingsError = failure;
+      throw new Error(failure);
+    }
+    if (receipt.status === "pending") {
+      web.value.settingsError = "Assignment operation is retrying.";
     }
   }
 
@@ -783,6 +874,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     async selectBot(botId: string): Promise<void> {
       activeRequest?.abort();
       admissionObserver?.abort();
+      runObserver?.abort();
       selectionGeneration += 1;
       web.value.activeBotId = botId;
       web.value.composerContext = botId;
@@ -877,6 +969,51 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       });
       await web.value.loadBotSettings();
     },
+    async assignCapability(assignment): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await executeAssignmentOperation({
+        schemaVersion: 1,
+        type: "bot/assign-capability",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        assignment,
+      });
+    },
+    async replaceCapability(assignment): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await executeAssignmentOperation({
+        schemaVersion: 1,
+        type: "bot/replace-capability",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        assignment,
+      });
+    },
+    async unassignCapability(assignmentId): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      await executeAssignmentOperation({
+        schemaVersion: 1,
+        type: "bot/unassign-capability",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        assignmentId,
+      });
+    },
     async saveBotModel(model: ModelAssignment): Promise<void> {
       const current = web.value.botSettings;
       const user = web.value.userSettings;
@@ -914,25 +1051,29 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       );
       if (assigned && !modelChanged) return;
       if (!assigned) {
-        const assignmentReceipt = await ctx.transport.executeConfiguration({
+        // The binding commits inside the Assignment saga's commit phase, so
+        // the Connection claim and the Bot's model are one durable unit. An
+        // existing model Assignment on another Connection is replaced
+        // atomically rather than unassigned and assigned again.
+        const superseded = current.assignments.find(
+          (assignment) =>
+            assignment.packageId === pkg.packageId &&
+            assignment.capabilityId === capability.id,
+        );
+        await executeAssignmentOperation({
           schemaVersion: 1,
-          type: "bot/assign-capability",
+          type: superseded ? "bot/replace-capability" : "bot/assign-capability",
           commandId: crypto.randomUUID(),
           botId,
           expectedRevision: current.revision,
           assignment: {
-            assignmentId: crypto.randomUUID(),
+            assignmentId: superseded?.assignmentId ?? crypto.randomUUID(),
             packageId: pkg.packageId,
             capabilityId: capability.id,
             connectionId: connection.connectionId,
           },
           model,
         });
-        if (assignmentReceipt.status === "rejected") {
-          await web.value.loadBotSettings();
-          throw new Error(assignmentReceipt.failure);
-        }
-        await web.value.loadBotSettings();
         return;
       }
       const receipt = await ctx.transport.executeConfiguration({
@@ -1111,7 +1252,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             : {}),
         }),
       );
-      let result;
+      let result: ClientStartConnectionResult;
       try {
         result = await ctx.transport.startConnection({
           commandId: operation.commandId,
@@ -1364,11 +1505,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           status: "interrupted",
           tools: [],
         });
-        web.value.error = aborted
-          ? undefined
-          : error instanceof Error
-            ? error.message
-            : "Agent request failed";
+        if (aborted) {
+          web.value.error = undefined;
+        } else {
+          web.value.error =
+            error instanceof Error ? error.message : "Agent request failed";
+        }
         const observer = new AbortController();
         admissionObserver = observer;
         let disposition: "admitted" | "not-admitted" | "detached";
@@ -1433,6 +1575,51 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             : "Could not refresh the reconciled Turn";
       }
     },
+    async stopRun(): Promise<void> {
+      const botId = web.value.activeBotId;
+      const runId = web.value.activeRun?.runId ?? web.value.activeRunId;
+      if (!botId || !runId) return;
+      if (!ctx.transport.stopRun) {
+        web.value.settingsError = "Stop is unavailable";
+        return;
+      }
+      const generation = selectionGeneration;
+      // One durable command per observed run, so repeated Stops replay exactly.
+      const commandId = stopCommands.get(runId) ?? crypto.randomUUID();
+      stopCommands.set(runId, commandId);
+      try {
+        const run = await ctx.transport.stopRun(botId, runId, commandId);
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        projectDurableRuns(web.value, [], [run]);
+        if (!isTerminalRun(run) && ctx.transport.lookupRun) {
+          runObserver?.abort();
+          const observer = new AbortController();
+          runObserver = observer;
+          try {
+            await observeRunUntilTerminal(
+              botId,
+              runId,
+              generation,
+              observer.signal,
+            );
+          } finally {
+            if (runObserver === observer) runObserver = undefined;
+          }
+        }
+      } catch (error) {
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.settingsError =
+          error instanceof Error ? error.message : "Stop failed";
+      }
+    },
     async abort() {
       activeRequest?.abort();
     },
@@ -1449,6 +1636,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     () => {
       activeRequest?.abort();
       admissionObserver?.abort();
+      runObserver?.abort();
     },
   ];
 };

@@ -59,7 +59,7 @@ export function acknowledgeDependentAssignment(
     ? connection.safeMetadata.dependentAssignments
     : [];
   let matched = false;
-  const acknowledged = dependencies.flatMap((candidate) => {
+  const acknowledged = dependencies.map((candidate) => {
     if (
       candidate &&
       typeof candidate === "object" &&
@@ -68,17 +68,9 @@ export function acknowledgeDependentAssignment(
       (candidate as Record<string, unknown>).generation === generation
     ) {
       matched = true;
-      return [{ ...candidate, status: "acknowledged" }];
+      return { ...candidate, status: "acknowledged" };
     }
-    if (
-      candidate &&
-      typeof candidate === "object" &&
-      !Array.isArray(candidate) &&
-      (candidate as Record<string, unknown>).botId === botId
-    ) {
-      return [];
-    }
-    return [candidate];
+    return candidate;
   });
   if (!matched) return undefined;
   return {
@@ -86,6 +78,34 @@ export function acknowledgeDependentAssignment(
     safeMetadata: {
       ...connection.safeMetadata,
       dependentAssignments: acknowledged,
+    },
+  };
+}
+
+export function releaseDependentAssignment(
+  connection: ConnectionView,
+  botId: string,
+  generation: string,
+): ConnectionView | undefined {
+  const dependencies = Array.isArray(
+    connection.safeMetadata.dependentAssignments,
+  )
+    ? connection.safeMetadata.dependentAssignments
+    : [];
+  const remaining = dependencies.filter(
+    (candidate) =>
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      (candidate as Record<string, unknown>).botId !== botId ||
+      (candidate as Record<string, unknown>).generation !== generation,
+  );
+  if (remaining.length === dependencies.length) return undefined;
+  return {
+    ...connection,
+    safeMetadata: {
+      ...connection.safeMetadata,
+      dependentAssignments: remaining,
     },
   };
 }

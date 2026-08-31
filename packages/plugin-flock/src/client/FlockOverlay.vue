@@ -68,101 +68,13 @@ onBeforeUnmount(() => restoreFocus?.focus());
       aria-labelledby="flock-title"
       @keydown="onDialogKeydown"
     >
-      <div class="flock-preview">
-        <SheepAvatar
-          :sheep="flock.draftSheep"
-          :label="
-            flock.draftName
-              ? `${flock.draftName} sheep preview`
-              : 'Sheep preview'
-          "
-          size="large"
-        />
-        <h2>Meet your sheep</h2>
-        <p>Randomly tailored. Entirely yours.</p>
-        <button type="button" class="flock-reroll" @click="flock.reroll">
-          ↻ Surprise me
-        </button>
-      </div>
-      <form
-        class="flock-form"
-        @submit.prevent="
-          flock.overlay === 'create' ? flock.create() : flock.saveSheep()
-        "
-      >
-        <span class="flock-eyebrow">{{
-          flock.overlay === "create" ? "Create a Bot" : "Tailor your Bot"
-        }}</span>
-        <h1 id="flock-title">
-          {{
-            flock.overlay === "create" ? "Add to your flock" : "Change the look"
-          }}
-        </h1>
+      <div v-if="flock.overlay === 'archive'" class="flock-form">
+        <span class="flock-eyebrow">Archive Bot</span>
+        <h1 id="flock-title">Archive this Bot?</h1>
         <p>
-          Keep this look or tailor each layer. Your choice is saved with the
-          Bot.
+          Archiving stops new work and hides the Bot from your active flock.
+          History, settings, and Assignments are preserved for restoration.
         </p>
-        <label v-if="flock.overlay === 'create'" class="flock-name"
-          >Bot name<input
-            v-model.trim="flock.draftName"
-            autofocus
-            maxlength="100"
-            required
-            autocomplete="off"
-        /></label>
-        <fieldset>
-          <legend>Sheep wardrobe</legend>
-          <div class="flock-select-grid">
-            <label
-              >Background<select v-model="flock.draftSheep.background">
-                <option
-                  v-for="item in sheepCatalog.backgrounds"
-                  :key="item.id"
-                  :value="item.id"
-                >
-                  {{ item.label }}
-                </option>
-              </select></label
-            >
-            <label
-              >Headwear<select v-model="flock.draftSheep.upper">
-                <option
-                  v-for="item in sheepCatalog.trees.upper"
-                  :key="item.id"
-                  :value="item.id"
-                >
-                  {{ item.label }}
-                </option>
-              </select></label
-            >
-            <label
-              >Face<select v-model="flock.draftSheep.middle">
-                <option
-                  v-for="item in sheepCatalog.trees.middle"
-                  :key="item.id"
-                  :value="item.id"
-                >
-                  {{ item.label }}
-                </option>
-              </select></label
-            >
-            <label
-              >Neckwear<select v-model="flock.draftSheep.lower">
-                <option
-                  v-for="item in sheepCatalog.trees.lower"
-                  :key="item.id"
-                  :value="item.id"
-                >
-                  {{ item.label }}
-                </option>
-              </select></label
-            >
-          </div>
-        </fieldset>
-        <div class="flock-note">
-          This identity is durable. Refreshing or switching devices won’t
-          re-roll it.
-        </div>
         <p
           v-if="flock.error"
           class="flock-error"
@@ -172,12 +84,126 @@ onBeforeUnmount(() => restoreFocus?.focus());
           {{ flock.error }}
         </p>
         <div class="flock-actions">
-          <button type="button" @click="flock.closeOverlay">Cancel</button
-          ><button class="primary" type="submit">
-            {{ flock.overlay === "create" ? "Create Bot" : "Save look" }}
+          <button type="button" @click="flock.closeOverlay">Cancel</button>
+          <button class="primary" type="button" @click="flock.archive">
+            Archive Bot
           </button>
         </div>
-      </form>
+      </div>
+      <template v-else>
+        <div class="flock-preview">
+          <SheepAvatar
+            :sheep="flock.draftSheep"
+            :label="
+              flock.draftName
+                ? `${flock.draftName} sheep preview`
+                : 'Sheep preview'
+            "
+            size="large"
+          />
+          <h2>Meet your sheep</h2>
+          <p>Randomly tailored. Entirely yours.</p>
+          <button type="button" class="flock-reroll" @click="flock.reroll">
+            ↻ Surprise me
+          </button>
+        </div>
+        <form
+          class="flock-form"
+          @submit.prevent="
+            flock.overlay === 'create' ? flock.create() : flock.saveSheep()
+          "
+        >
+          <span class="flock-eyebrow">{{
+            flock.overlay === "create" ? "Create a Bot" : "Tailor your Bot"
+          }}</span>
+          <h1 id="flock-title">
+            {{
+              flock.overlay === "create"
+                ? "Add to your flock"
+                : "Change the look"
+            }}
+          </h1>
+          <p>
+            Keep this look or tailor each layer. Your choice is saved with the
+            Bot.
+          </p>
+          <label v-if="flock.overlay === 'create'" class="flock-name"
+            >Bot name<input
+              v-model.trim="flock.draftName"
+              autofocus
+              maxlength="100"
+              required
+              autocomplete="off"
+          /></label>
+          <fieldset>
+            <legend>Sheep wardrobe</legend>
+            <div class="flock-select-grid">
+              <label
+                >Background<select v-model="flock.draftSheep.background">
+                  <option
+                    v-for="item in sheepCatalog.backgrounds"
+                    :key="item.id"
+                    :value="item.id"
+                  >
+                    {{ item.label }}
+                  </option>
+                </select></label
+              >
+              <label
+                >Headwear<select v-model="flock.draftSheep.upper">
+                  <option
+                    v-for="item in sheepCatalog.trees.upper"
+                    :key="item.id"
+                    :value="item.id"
+                  >
+                    {{ item.label }}
+                  </option>
+                </select></label
+              >
+              <label
+                >Face<select v-model="flock.draftSheep.middle">
+                  <option
+                    v-for="item in sheepCatalog.trees.middle"
+                    :key="item.id"
+                    :value="item.id"
+                  >
+                    {{ item.label }}
+                  </option>
+                </select></label
+              >
+              <label
+                >Neckwear<select v-model="flock.draftSheep.lower">
+                  <option
+                    v-for="item in sheepCatalog.trees.lower"
+                    :key="item.id"
+                    :value="item.id"
+                  >
+                    {{ item.label }}
+                  </option>
+                </select></label
+              >
+            </div>
+          </fieldset>
+          <div class="flock-note">
+            This identity is durable. Refreshing or switching devices won’t
+            re-roll it.
+          </div>
+          <p
+            v-if="flock.error"
+            class="flock-error"
+            role="alert"
+            aria-live="assertive"
+          >
+            {{ flock.error }}
+          </p>
+          <div class="flock-actions">
+            <button type="button" @click="flock.closeOverlay">Cancel</button
+            ><button class="primary" type="submit">
+              {{ flock.overlay === "create" ? "Create Bot" : "Save look" }}
+            </button>
+          </div>
+        </form>
+      </template>
     </section>
   </div>
 </template>

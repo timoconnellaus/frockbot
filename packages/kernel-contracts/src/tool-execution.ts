@@ -7,6 +7,10 @@ export interface ToolExecutionContext {
   agentId: string;
   sessionId: string;
   compositionGenerationId: string;
+  /** Stable durable occurrence identity for provider idempotency and recovery. */
+  effectId: string;
+  /** Exact durable call; reconciliation fails closed when it is absent. */
+  toolCall?: ToolCall;
   signal: AbortSignal;
 }
 
@@ -15,6 +19,10 @@ export interface ToolExecutionResult {
   isError: boolean;
 }
 
+export type ToolEffectReconciliation =
+  | { status: "recovered"; result: ToolExecutionResult }
+  | { status: "unavailable"; reason: string };
+
 export interface ToolDefinition extends ToolSchema {
   idempotent?: boolean;
   validate?(input: unknown): boolean;
@@ -22,6 +30,10 @@ export interface ToolDefinition extends ToolSchema {
     input: unknown,
     context: ToolExecutionContext,
   ): Promise<ToolExecutionResult>;
+  reconcile?(
+    input: unknown,
+    context: ToolExecutionContext,
+  ): Promise<ToolEffectReconciliation>;
 }
 
 export type ToolPreparation =
@@ -39,6 +51,14 @@ export interface ToolExecution {
     preparation: Extract<ToolPreparation, { kind: "ready" }>,
     context: ToolExecutionContext,
   ): Promise<ToolExecutionResult>;
+  /**
+   * Recovers the outcome of an already-admitted tool effect without starting a
+   * second one, so an interrupted Turn never duplicates a side effect.
+   */
+  reconcilePrepared(
+    preparation: Extract<ToolPreparation, { kind: "ready" }>,
+    context: ToolExecutionContext,
+  ): Promise<ToolEffectReconciliation>;
 }
 
 /** Contributing Packages register tool definitions through this surface. */

@@ -41,6 +41,13 @@ export interface AgentLoopConfig {
   composition: CompositionPinV1;
 }
 
+type EffectAdmittingAgentOptions = AgentOptions & {
+  admitEffect(effect: {
+    kind: "model" | "tool";
+    effectId: string;
+  }): Promise<boolean>;
+};
+
 declare module "cordis" {
   interface Context {
     agentLoop: AgentLoop;
@@ -67,6 +74,48 @@ class ModelEffectReconciliationRequiredError extends Error {
   }
 }
 
+class ToolEffectReconciliationRequiredError extends Error {
+  constructor(
+    readonly occurrenceId: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ToolEffectReconciliationRequiredError";
+  }
+}
+
+/** Durable Stop won the final effect-admission transaction. */
+class EffectAdmissionFencedError extends Error {
+  constructor(readonly effectId: string) {
+    super(`Effect "${effectId}" was fenced by durable Stop`);
+    this.name = "EffectAdmissionFencedError";
+  }
+}
+
+function hasUnsettledExternalEffect(events: readonly SessionEvent[]): boolean {
+  let unresolvedRequestId: string | undefined;
+  for (const event of events) {
+    if (event.type === "model/request") {
+      unresolvedRequestId = event.request.requestId;
+    } else if (
+      (event.type === "assistant/message" ||
+        event.type === "model/effect-not-started") &&
+      event.requestId === unresolvedRequestId
+    ) {
+      unresolvedRequestId = undefined;
+    }
+  }
+  if (unresolvedRequestId) return true;
+  try {
+    return [...validateToolOccurrenceJournal(events).values()].some(
+      (entry) => entry.intent && !entry.result,
+    );
+  } catch {
+    // Invalid effect history is never safe to close as cancelled.
+    return true;
+  }
+}
+
 class ModelOutcomeSettlementRequiredError extends Error {
   constructor(readonly cause: unknown) {
     super("Durable model outcome settlement is pending");
@@ -85,7 +134,7 @@ class LoopAgent implements Agent {
   readonly botId: string;
   readonly session: Session;
   #ctx: Context;
-  #options: AgentOptions;
+  #options: EffectAdmittingAgentOptions;
   #maxSteps: number;
   #composition: CompositionPinV1;
   #status: AgentStatus = "idle";
@@ -98,7 +147,7 @@ class LoopAgent implements Agent {
   constructor(
     ctx: Context,
     session: Session,
-    options: AgentOptions,
+    options: EffectAdmittingAgentOptions,
     maxSteps: number,
     composition: CompositionPinV1,
   ) {
@@ -336,6 +385,7 @@ class LoopAgent implements Agent {
           toolCalls: response.toolCalls,
         });
         await this.session.flush();
+        signal.throwIfAborted();
         await this.#notifyModelOutcome(response.request.requestId, "completed");
         if (response.toolCalls.length === 0) {
           this.session.append({
@@ -352,6 +402,7 @@ class LoopAgent implements Agent {
           toolCallOccurrences(openTurn, latestStep, response.toolCalls),
           signal,
         );
+        signal.throwIfAborted();
         this.session.append({
           type: "step/end",
           turn: openTurn,
@@ -378,29 +429,8 @@ class LoopAgent implements Agent {
           latestStep,
           latestAssistant.toolCalls,
         );
-        const journal = validateToolOccurrenceJournal(this.session.events);
-        for (const occurrence of occurrences) {
-          const entry = journal.get(occurrence.occurrenceId);
-          if (entry?.intent && !entry.result) {
-            this.session.append({
-              type: "tool/result",
-              turn: openTurn,
-              step: latestStep,
-              occurrenceId: occurrence.occurrenceId,
-              name: occurrence.call.name,
-              content: "Interrupted before a durable result was recorded.",
-              isError: true,
-              status: "interrupted",
-            });
-          }
-        }
-        await this.session.flush();
-        await this.#executeTools(
-          occurrences.filter(
-            (occurrence) => !journal.get(occurrence.occurrenceId)?.intent,
-          ),
-          signal,
-        );
+        await this.#executeTools(occurrences, signal);
+        signal.throwIfAborted();
         this.session.append({
           type: "step/end",
           turn: openTurn,
@@ -437,6 +467,7 @@ class LoopAgent implements Agent {
           toolCalls: response.toolCalls,
         });
         await this.session.flush();
+        signal.throwIfAborted();
         await this.#notifyModelOutcome(response.request.requestId, "completed");
         if (response.toolCalls.length === 0) {
           this.session.append({
@@ -453,6 +484,7 @@ class LoopAgent implements Agent {
           toolCallOccurrences(openTurn, step, response.toolCalls),
           signal,
         );
+        signal.throwIfAborted();
         this.session.append({
           type: "step/end",
           turn: openTurn,
@@ -463,14 +495,19 @@ class LoopAgent implements Agent {
       }
       throw new Error(`agent exceeded ${this.#maxSteps} steps`);
     } catch (error) {
-      if (signal.aborted) {
-        turnOutcome = "cancelled";
-      } else if (
+      if (
         error instanceof ModelEffectReconciliationRequiredError ||
-        error instanceof ModelOutcomeSettlementRequiredError
+        error instanceof ToolEffectReconciliationRequiredError ||
+        error instanceof ModelOutcomeSettlementRequiredError ||
+        (signal.aborted && hasUnsettledExternalEffect(this.session.events))
       ) {
         reconciliationRequired = true;
         this.#ctx.emit("agent/error", this, error);
+      } else if (
+        error instanceof EffectAdmissionFencedError ||
+        signal.aborted
+      ) {
+        turnOutcome = "cancelled";
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));
@@ -565,6 +602,7 @@ class LoopAgent implements Agent {
           toolCalls: response.toolCalls,
         });
         await this.session.flush();
+        signal.throwIfAborted();
         await this.#notifyModelOutcome(response.request.requestId, "completed");
 
         if (response.toolCalls.length === 0) {
@@ -583,6 +621,7 @@ class LoopAgent implements Agent {
           toolCallOccurrences(turn, step, response.toolCalls),
           signal,
         );
+        signal.throwIfAborted();
         this.session.append({
           type: "step/end",
           turn,
@@ -594,14 +633,19 @@ class LoopAgent implements Agent {
       }
       throw new Error(`agent exceeded ${this.#maxSteps} steps`);
     } catch (error) {
-      if (signal.aborted) {
-        turnOutcome = "cancelled";
-      } else if (
+      if (
         error instanceof ModelEffectReconciliationRequiredError ||
-        error instanceof ModelOutcomeSettlementRequiredError
+        error instanceof ToolEffectReconciliationRequiredError ||
+        error instanceof ModelOutcomeSettlementRequiredError ||
+        (signal.aborted && hasUnsettledExternalEffect(this.session.events))
       ) {
         reconciliationRequired = true;
         this.#ctx.emit("agent/error", this, error);
+      } else if (
+        error instanceof EffectAdmissionFencedError ||
+        signal.aborted
+      ) {
+        turnOutcome = "cancelled";
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));
@@ -683,11 +727,41 @@ class LoopAgent implements Agent {
       );
       this.session.append({ type: "model/request", turn, step, request });
       await this.session.flush();
+      if (
+        !(await this.#options.admitEffect({
+          kind: "model",
+          effectId: request.requestId,
+        }))
+      ) {
+        this.session.append({
+          type: "model/effect-not-started",
+          turn,
+          step,
+          requestId: request.requestId,
+          reason: "Durable Stop fenced provider execution",
+        });
+        await this.session.flush();
+        throw new EffectAdmissionFencedError(request.requestId);
+      }
 
       try {
         return await this.#consumeStream(request, turn, step, signal);
       } catch (error) {
-        if (signal.aborted) throw error;
+        if (signal.aborted) {
+          const reason = `Model response outcome is uncertain after cancellation: ${modelFailureMessage(error)}`;
+          this.session.append({
+            type: "model/reconciliation-required",
+            turn,
+            step,
+            requestId: request.requestId,
+            reason,
+          });
+          await this.session.flush();
+          throw new ModelEffectReconciliationRequiredError(
+            request.requestId,
+            reason,
+          );
+        }
         if (!(error instanceof LlmEffectNotStartedError)) {
           const reason = `Model response outcome is uncertain: ${modelFailureMessage(error)}`;
           this.session.append({
@@ -858,33 +932,104 @@ class LoopAgent implements Agent {
     for (const occurrence of occurrences) {
       signal.throwIfAborted();
       const { call, occurrenceId, turn, step } = occurrence;
+      const journal = validateToolOccurrenceJournal(this.session.events);
+      const existing = journal.get(occurrenceId);
+      if (existing?.result) continue;
       const context = {
         botId: this.botId,
         agentId: this.id,
         sessionId: this.session.id,
+        effectId: occurrenceId,
+        toolCall: call,
         compositionGenerationId: this.#composition.generationId,
         signal,
       };
       const preparation = await this.#ctx.tools.prepare(call, context);
       signal.throwIfAborted();
-      this.session.append({
-        type: "tool/call",
-        turn,
-        step,
-        occurrenceId,
-        name: call.name,
-        input: call.input,
-      });
-      await this.session.flush();
+      if (existing?.intent && preparation.kind !== "ready") {
+        throw new ToolEffectReconciliationRequiredError(
+          occurrenceId,
+          `Tool effect "${occurrenceId}" cannot be reconciled because its definition is unavailable`,
+        );
+      }
+      if (!existing?.intent) {
+        this.session.append({
+          type: "tool/call",
+          turn,
+          step,
+          occurrenceId,
+          name: call.name,
+          input: call.input,
+        });
+        await this.session.flush();
+        if (signal.aborted) {
+          this.session.append({
+            type: "tool/result",
+            turn,
+            step,
+            occurrenceId,
+            name: call.name,
+            content: "Cancelled before tool execution started.",
+            isError: true,
+            status: "interrupted",
+          });
+          await this.session.flush();
+          signal.throwIfAborted();
+        }
+      }
       let result: ToolExecutionResult;
-      if (preparation.kind === "denied") {
+      if (existing?.intent) {
+        if (preparation.kind !== "ready") {
+          throw new ToolEffectReconciliationRequiredError(
+            occurrenceId,
+            `Tool effect "${occurrenceId}" cannot be reconciled because its definition is unavailable`,
+          );
+        }
+        const reconciliation = await this.#ctx.tools.reconcilePrepared(
+          preparation,
+          context,
+        );
+        if (reconciliation.status === "unavailable") {
+          throw new ToolEffectReconciliationRequiredError(
+            occurrenceId,
+            reconciliation.reason,
+          );
+        }
+        result = reconciliation.result;
+      } else if (preparation.kind === "denied") {
         result = preparation.result;
         this.#ctx.emit("tools/result", call, result);
       } else {
-        signal.throwIfAborted();
+        if (
+          !(await this.#options.admitEffect({
+            kind: "tool",
+            effectId: occurrenceId,
+          }))
+        ) {
+          this.session.append({
+            type: "tool/result",
+            turn,
+            step,
+            occurrenceId,
+            name: call.name,
+            content: "Cancelled before tool execution started.",
+            isError: true,
+            status: "interrupted",
+          });
+          await this.session.flush();
+          throw new EffectAdmissionFencedError(occurrenceId);
+        }
         try {
           result = await this.#ctx.tools.executePrepared(preparation, context);
         } catch (error) {
+          if (signal.aborted || !preparation.idempotent) {
+            throw new ToolEffectReconciliationRequiredError(
+              occurrenceId,
+              signal.aborted
+                ? `Tool effect "${occurrenceId}" outcome is uncertain after cancellation`
+                : `Non-idempotent tool effect "${occurrenceId}" outcome is uncertain`,
+            );
+          }
           result = {
             content:
               error instanceof Error ? error.message : "Tool execution failed",
@@ -903,6 +1048,7 @@ class LoopAgent implements Agent {
         isError: result.isError,
         status: "completed",
       });
+      await this.session.flush();
     }
   }
 
@@ -978,7 +1124,7 @@ export class AgentLoop extends Service implements AgentFactory {
     const agent = new LoopAgent(
       this.ctx,
       session,
-      options,
+      options as EffectAdmittingAgentOptions,
       this.maxSteps,
       this.composition,
     );

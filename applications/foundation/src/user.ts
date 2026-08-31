@@ -7,6 +7,7 @@ import {
 import {
   createFlockUserBackendPlugin,
   type FlockUserBackendContribution,
+  type FlockUserBackendHost,
 } from "@frockbot/plugin-flock/user";
 import {
   createPackagePublisherUserPlugin,
@@ -64,7 +65,8 @@ export async function createFoundationUserBackendContributions(
   plan: ApplicationPlan,
   host: {
     storage: UserSettingsStorage &
-      CredentialStorage & {
+      CredentialStorage &
+      FlockUserBackendHost["storage"] & {
         getAlarm?(): Promise<number | null>;
         setAlarm(scheduledTime: number | Date): Promise<void>;
       };
@@ -74,6 +76,13 @@ export async function createFoundationUserBackendContributions(
      * Worker Loader, which the adapter owns and this application never names.
      */
     packagePublisher: PackagePublisherUserHost;
+    /**
+     * The Bot lifecycle seam. Archive and restore are Bot authority, so the
+     * User coordinator carries each command to the Bot Durable Object rather
+     * than mutating Bot state itself.
+     */
+    commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
+    readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
   },
 ): Promise<MountedFoundationUserBackend> {
   let settings: UserSettingsBackendContribution | undefined;
@@ -178,6 +187,8 @@ export async function createFoundationUserBackendContributions(
         createFlockUserBackendPlugin(
           {
             storage: host.storage,
+            commandBotLifecycle: host.commandBotLifecycle,
+            readBotLifecycle: host.readBotLifecycle,
             readUserSettings: (storage) => {
               if (!settings) {
                 throw new Error("User settings Contribution is unavailable");

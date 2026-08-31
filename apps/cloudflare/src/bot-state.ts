@@ -1,8 +1,20 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   compileFoundationApplication,
+  createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
+  createFoundationHostedRuntimePackages,
+  createFoundationRuntimeApplication,
 } from "@frockbot/application-foundation/runtime";
+import {
+  createFoundationResidentRuntime,
+  type FoundationResidentRuntime,
+} from "@frockbot/agent-runtime/runtime";
+import { Context } from "cordis";
+import {
+  computerHostEffectRequestWireV1,
+  decodeComputerHostEffectResponseV1,
+} from "@frockbot/computer-core/host-protocol";
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
@@ -17,21 +29,30 @@ import type {
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
 } from "@frockbot/plugin-shell/backend";
+import type {
+  BotResidentExecution,
+  BotResidentProjection,
+} from "@frockbot/plugin-shell/backend-execution";
+import { executeResidentBotTurn } from "@frockbot/plugin-shell/backend-runner";
 import { createShellBotBackendPlugin } from "@frockbot/plugin-shell/backend";
 import {
   createFlockBotBackendPlugin,
   type FlockBotBackendContribution,
 } from "@frockbot/plugin-flock/bot";
 import {
+  decodeBotLifecycleCommandV1,
   decodeBotRegistrationV1,
   decodeUpdateSheepCommandV1,
+  type BotLifecycleCommandV1,
   type BotRegistrationV1,
 } from "@frockbot/plugin-flock/shared";
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
+  decodeClientRunStopCommandV1,
   type ClientRunListQueryV1,
   type ClientRunLookupQueryV1,
+  type ClientRunStopCommandV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import {
   decodeIsolateAuthorityRequestV1,
@@ -165,6 +186,14 @@ export class BotState extends DurableObject<BotStateEnv> {
                   // hooks.
                   createAuthority: (options) =>
                     new BotDurableAuthority(options),
+                  // An archived Bot admits no configuration command; the Flock
+                  // Contribution owns that durable lifecycle state.
+                  assertLifecycleActive: (storage, botId) => {
+                    if (!flock) {
+                      throw new Error("Flock Bot Contribution is unavailable");
+                    }
+                    return flock.assertActive(storage, botId);
+                  },
                 },
                 {
                   mount(value) {
@@ -207,6 +236,11 @@ export class BotState extends DurableObject<BotStateEnv> {
                           );
                         }
                       });
+                  },
+                  archiveEligible: (storage) => {
+                    if (!shell)
+                      throw new Error("Shell Bot Contribution is unavailable");
+                    return shell.archiveEligible(storage);
                   },
                 },
                 {
@@ -267,7 +301,9 @@ export class BotState extends DurableObject<BotStateEnv> {
       getBotRegistration(input: unknown): Promise<BotRegistrationV1>;
     };
     return decodeBotRegistrationV1(
-      await rpc.getBotRegistration({ schemaVersion: 1, ...identity }),
+      structuredClone(
+        await rpc.getBotRegistration({ schemaVersion: 1, ...identity }),
+      ),
     );
   }
 
@@ -400,6 +436,29 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
+  async readLifecycle(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { flock, registration } = await this.materialized(identity);
+    return flock.readLifecycle(registration, identity.userId);
+  }
+
+  async executeLifecycle(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeBotLifecycleCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const command = request.command as BotLifecycleCommandV1;
+    if (command.botId !== identity.botId)
+      throw new Error("lifecycle command does not match Bot authority");
+    const { flock, registration } = await this.materialized(identity);
+    return flock.executeLifecycle(registration, identity.userId, command);
+  }
+
   /**
    * The Bot isolate asked for authority it does not hold. The answer is never
    * a grant: the Bot Durable Object records a durable pending decision and
@@ -489,6 +548,20 @@ export class BotState extends DurableObject<BotStateEnv> {
       botId: request.botId,
       ...request.command,
     });
+  }
+
+  async stopRun(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeClientRunStopCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.stopRun(identity, request.command as ClientRunStopCommandV1);
   }
 
   async reconcileRun(input: unknown) {

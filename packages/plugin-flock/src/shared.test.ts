@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeBotLifecycleCommandV1,
+  decodeBotLifecycleReceiptV1,
   decodeBotMembershipViewV1,
   decodeBotRegistrationV1,
   decodeCreateBotCommandV1,
@@ -30,6 +32,38 @@ describe("Flock v1 contracts", () => {
         sheep,
         extra: true,
       }),
+    ).toThrow("unknown or missing field");
+  });
+
+  test("strictly decodes archive and restore DTOs", () => {
+    const command = {
+      schemaVersion: 1 as const,
+      type: "bot/archive" as const,
+      commandId: "archive-1",
+      botId: "alpha",
+    };
+    expect(decodeBotLifecycleCommandV1(command)).toEqual(command);
+    expect(
+      decodeBotLifecycleReceiptV1({
+        schemaVersion: 1,
+        commandId: "archive-1",
+        botId: "alpha",
+        status: "applied",
+        lifecycle: {
+          schemaVersion: 1,
+          botId: "alpha",
+          status: "archived",
+          revision: 1,
+        },
+      }),
+    ).toMatchObject({ lifecycle: { status: "archived" } });
+    const hidden = { ...command };
+    Object.defineProperty(hidden, "hidden", { value: true });
+    expect(() => decodeBotLifecycleCommandV1(hidden)).toThrow(
+      "unknown or missing field",
+    );
+    expect(() =>
+      decodeBotLifecycleCommandV1({ ...command, [Symbol("extra")]: true }),
     ).toThrow("unknown or missing field");
   });
 

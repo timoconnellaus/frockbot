@@ -111,6 +111,28 @@ export interface MobileShareRequest {
   url?: string;
 }
 
+function exactObject(
+  input: unknown,
+  allowedKeys: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const keys = Reflect.ownKeys(input);
+  if (
+    keys.some(
+      (key) =>
+        typeof key !== "string" ||
+        !allowedKeys.includes(key) ||
+        !Object.prototype.propertyIsEnumerable.call(input, key),
+    )
+  ) {
+    throw new Error(`${label} has unknown fields`);
+  }
+  return input as Record<string, unknown>;
+}
+
 function optionalShareField(
   record: Record<string, unknown>,
   key: string,
@@ -123,10 +145,7 @@ function optionalShareField(
 }
 
 export function decodeMobileShareRequest(input: unknown): MobileShareRequest {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new Error("share request must be an object");
-  }
-  const record = input as Record<string, unknown>;
+  const record = exactObject(input, ["title", "text", "url"], "share request");
   const title = optionalShareField(record, "title");
   const text = optionalShareField(record, "text");
   const url = optionalShareField(record, "url");

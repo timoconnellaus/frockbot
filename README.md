@@ -39,9 +39,9 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-The left sidebar lists the authenticated User's Bots and switches the active workspace. **Add sheep** creates a Bot with a durable random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs available Packages and manages external account Connections when the compiled application includes a Connection Package. Selecting a connected model in Bot settings atomically commits that Bot's explicit durable model Capability Assignment and exact provider model. **Unbind model** removes the model authority and releases the Connection dependency so the account can disconnect it. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser, desktop, and mobile render the same hosted Bot, sheep, Connection, and model-selection workflows; native authorization handoff remains an optional enhancement for Packages that require it.
+The left sidebar lists the authenticated User's active Bots and switches the workspace. **Add sheep** creates a Bot with a durable random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. **Manage** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs available Packages and explicitly assigns, replaces, or unassigns their Capabilities for Bots; external account controls appear only when the compiled application includes a Connection Package. Selecting a connected model in Bot settings atomically commits that Bot's explicit durable model Capability Assignment and exact provider model. **Unbind model** removes the model authority and releases the Connection dependency so the User can disconnect it. User profile settings are under **Profile → Settings**, and the profile menu owns hosted sign-out; local development identities explicitly cannot sign out. Model selection remains Bot-specific and User defaults apply only when creating a Bot. During an active Turn, **Stop** records durable cancellation intent; closing or switching clients does not stop backend work. Browser, desktop, and mobile render the same hosted Bot, sheep, Connection, and model-selection workflows; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
 
-`@frockbot/plugin-provider-ollama-cloud` lets each account create multiple named Ollama Cloud Connections with its own write-only API key. The backend validates and encrypts each credential, discovers that Connection's model catalog, and exposes the normalized models in Bot settings. Every Bot binds explicitly to a Connection ID and provider model ID, and execution additionally requires that Bot's enabled Ollama model Capability Assignment. Rotation affects subsequent model effects while already-admitted effects retain their durable credential lease; disconnect blocks new leases without cancelling admitted Turns.
+`@frockbot/plugin-provider-ollama-cloud` lets each User create multiple named Ollama Cloud Connections with its own write-only API key. The backend validates and encrypts each credential, discovers that Connection's model catalog, and exposes the normalized models in Bot settings. Every Bot binds explicitly to a Connection ID and provider model ID, and execution additionally requires that Bot's enabled Ollama model Capability Assignment. Rotation affects subsequent model effects while already-admitted effects retain their durable credential lease; disconnect blocks new leases without cancelling admitted Turns.
 
 To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory. `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names for standalone development; the hosted backend supplies durable User and Bot identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
 
@@ -83,6 +83,7 @@ For the first publication, add a granular npm automation token with access to th
 After CI succeeds on a push to `main`, `ci.yml` deploys three Cloudflare Workers through the GitHub `production` environment:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
+- `apps/fly-host-prototype` deploys the internal shared Computer host with no public route;
 - `apps/cloudflare-bundler` is the binding-less Package bundler the app reaches through its `PACKAGE_BUNDLER` service binding; it deploys before the app because that binding must resolve;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
@@ -106,7 +107,7 @@ Configure these GitHub `production` environment values:
 | Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
 | Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
 | Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                  |
-| Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-account Connection credentials              |
+| Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-User Connection credentials                 |
 
 Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
 
@@ -140,7 +141,7 @@ FROCKBOT_SMOKE_SCREENSHOT="$PWD/artifacts/frockbot-chat.png" \
 ```text
 apps/
   desktop/          Electron hosted-window shell and optional platform adapters
-  mobile/           Capacitor hosted-WebUI auth and native-capability shell
+  mobile/           Direct-hosted Capacitor shell and optional native capabilities
   agent-runtime/    Transport-neutral backend Agent composition
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
   marketing/        Public frockbot.com site and static-assets Worker

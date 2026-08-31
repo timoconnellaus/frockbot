@@ -1,5 +1,5 @@
 {
-  "name": "@frockbot/fly-host-prototype",
+  "name": "@frockbot/computer-host",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -26,6 +26,8 @@
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
     "@fly/sprites": "0.1.0",
+    "@frockbot/computer-core": "workspace:*",
+    "@frockbot/plugin-fly-sprite": "workspace:*",
     "ws": "8.21.3"
   },
   "devDependencies": {

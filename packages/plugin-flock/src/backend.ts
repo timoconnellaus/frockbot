@@ -4,9 +4,13 @@ import {
   FlockConflictError,
   isFlockIdentifier,
   FlockDecodeError,
+  decodeBotLifecycleCommandV1,
   decodeCreateBotCommandV1,
   decodeUpdateSheepCommandV1,
   type BotDirectoryViewV1,
+  type BotLifecycleCommandV1,
+  type BotLifecycleDirectoryViewV1,
+  type BotLifecycleReceiptV1,
   type CreateBotCommandV1,
   type FlockReceiptV1,
   type SheepIdentityViewV1,
@@ -19,6 +23,11 @@ export interface FlockGatewayHost {
     userId: string,
     command: CreateBotCommandV1,
   ): Promise<FlockReceiptV1>;
+  listBotLifecycles(userId: string): Promise<BotLifecycleDirectoryViewV1>;
+  executeBotLifecycle(
+    userId: string,
+    command: BotLifecycleCommandV1,
+  ): Promise<BotLifecycleReceiptV1>;
   readSheep(userId: string, botId: string): Promise<SheepIdentityViewV1>;
   updateSheep(
     userId: string,
@@ -115,8 +124,23 @@ export function createFlockBackendContribution(
     async route(request, url, context) {
       if (!context.userId) return undefined;
       const sheep = url.pathname.match(/^\/api\/bots\/([^/]+)\/sheep$/);
-      if (url.pathname !== "/api/bots" && !sheep) return undefined;
+      const lifecycle = url.pathname.match(/^\/api\/bots\/([^/]+)\/lifecycle$/);
+      if (
+        url.pathname !== "/api/bots" &&
+        url.pathname !== "/api/bots/lifecycles" &&
+        !sheep &&
+        !lifecycle
+      )
+        return undefined;
       try {
+        if (url.pathname === "/api/bots/lifecycles") {
+          if (request.method !== "GET")
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          return Response.json(await host.listBotLifecycles(context.userId));
+        }
         if (url.pathname === "/api/bots") {
           if (request.method === "GET")
             return Response.json(await host.listBots(context.userId));
@@ -132,6 +156,26 @@ export function createFlockBackendContribution(
             ),
             { status: 201 },
           );
+        }
+        if (lifecycle) {
+          const botId = decodePathId(lifecycle[1]!);
+          if (request.method !== "POST")
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          const command = decodeBotLifecycleCommandV1(await request.json());
+          if (command.botId !== botId)
+            throw new FlockDecodeError(
+              "lifecycle command does not match request path",
+            );
+          const receipt = await host.executeBotLifecycle(
+            context.userId,
+            command,
+          );
+          return Response.json(receipt, {
+            status: receipt.status === "pending" ? 202 : 200,
+          });
         }
         const botId = decodePathId(sheep![1]!);
         if (request.method === "GET")

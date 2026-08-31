@@ -4,6 +4,7 @@ import type {
   BotNotificationPolicy,
   BotProfile,
   BotSettingsViewV1,
+  CapabilityAssignmentView,
   ModelAssignment,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -52,7 +53,8 @@ export interface PluginCatalogItem {
   version: string;
   capabilities: Array<{
     id: string;
-    kind: "tool" | "model" | "memory" | "notification";
+    kind: "model" | "tool" | "memory" | "notification" | "computer";
+    connectionTypes: string[];
   }>;
   connectionTypes: Array<{
     id: string;
@@ -83,6 +85,13 @@ export interface FrockBotWebData {
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;
+  assignCapability(
+    assignment: Omit<CapabilityAssignmentView, "state">,
+  ): Promise<void>;
+  replaceCapability(
+    assignment: Omit<CapabilityAssignmentView, "state">,
+  ): Promise<void>;
+  unassignCapability(assignmentId: string): Promise<void>;
   saveBotModel(model: ModelAssignment): Promise<void>;
   clearBotModel(): Promise<void>;
   loadUserSettings(): Promise<void>;
@@ -111,6 +120,9 @@ export interface FrockBotWebData {
   ): Promise<void>;
   sendPrompt(text: string): Promise<SendPromptResult>;
   resumeRun(runId: string): Promise<void>;
+  /** Sends the durable Stop command for the observed active run. */
+  stopRun(): Promise<void>;
+  /** Detaches the local observer only; admitted work stays durable. */
   abort(): Promise<void>;
 }
 
