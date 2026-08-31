@@ -87,9 +87,27 @@ export class McpProtocolError extends Error {
    */
   readonly status?: number;
 
-  constructor(message: string, status?: number) {
+  /**
+   * The `WWW-Authenticate` header the server answered a 401 with, verbatim.
+   *
+   * It is carried rather than parsed here because this client speaks MCP and
+   * not OAuth: `plugin-mcp/src/oauth.ts` reads the `resource_metadata`
+   * parameter out of it (RFC 9728 §5.1) to find where the server's protected
+   * resource metadata lives, and the classification of the failure as
+   * "this server wants authorization" is the same header seen from L4b.
+   */
+  readonly wwwAuthenticate?: string;
+
+  constructor(
+    message: string,
+    status?: number,
+    wwwAuthenticate?: string | null,
+  ) {
     super(message);
     if (status !== undefined) this.status = status;
+    if (wwwAuthenticate) {
+      this.wwwAuthenticate = wwwAuthenticate.slice(0, 2_048);
+    }
   }
 }
 
@@ -321,6 +339,7 @@ export class McpClient {
       throw new McpProtocolError(
         `MCP server answered ${response.status}${detail ? `: ${detail}` : ""}`,
         response.status,
+        response.headers.get("www-authenticate"),
       );
     }
     return response;
@@ -401,6 +420,7 @@ export class McpClient {
       throw new McpProtocolError(
         `MCP server answered ${response.status} opening its event stream`,
         response.status,
+        response.headers.get("www-authenticate"),
       );
     }
     const session = new SseSession(

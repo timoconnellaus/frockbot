@@ -44,6 +44,7 @@ export const MCP_PACKAGE_ID = "mcp";
 export const MCP_CAPABILITY_ID = "mcp-tools";
 export const MCP_CONNECTION_TYPE_ID = "mcp-remote";
 export const MCP_KEYED_CONNECTION_TYPE_ID = "mcp-remote-key";
+export const MCP_OAUTH_CONNECTION_TYPE_ID = "mcp-remote-oauth";
 
 /** The manifest's admission ceiling, restated where registration happens. */
 export const MCP_TOOL_TURN_TYPES: readonly TurnTypeV1[] = [
@@ -122,6 +123,45 @@ export function decodeMcpConnectionSettingsV1(
     throw new Error("MCP key header name is invalid");
   }
   return { url, transport, headerName };
+}
+
+export interface McpOAuthConnectionSettingsV1 {
+  /** The scopes to request; absent takes the server's advertised default. */
+  scope?: string;
+  /** A pre-registered *public* client id, for a server without RFC 7591. */
+  clientId?: string;
+}
+
+/**
+ * The two settings only the `mcp-remote-oauth` Connection Type declares.
+ *
+ * There is deliberately no `client-secret`. A confidential client's secret
+ * would have to live in `ConnectionView.settings`, which is a projection every
+ * client of this User reads; the driver refuses such a server durably instead.
+ */
+export function decodeMcpOAuthSettingsV1(
+  settings: Record<string, unknown> | undefined,
+): McpOAuthConnectionSettingsV1 {
+  const scope = settings?.scope;
+  if (
+    scope !== undefined &&
+    (typeof scope !== "string" || scope.length > 1_024)
+  ) {
+    throw new Error("MCP OAuth scope is invalid");
+  }
+  const clientId = settings?.["client-id"];
+  if (
+    clientId !== undefined &&
+    (typeof clientId !== "string" ||
+      clientId.length === 0 ||
+      clientId.length > 512)
+  ) {
+    throw new Error("MCP OAuth client-id is invalid");
+  }
+  return {
+    ...(typeof scope === "string" && scope.length > 0 ? { scope } : {}),
+    ...(typeof clientId === "string" ? { clientId } : {}),
+  };
 }
 
 /**
@@ -227,14 +267,25 @@ export async function createConfiguredMcpRuntimeContribution(
     }
     const settings = decodeMcpConnectionSettingsV1(connection.settings);
     const apiKey =
-      connection.connectionTypeId === MCP_KEYED_CONNECTION_TYPE_ID
+      connection.connectionTypeId === MCP_KEYED_CONNECTION_TYPE_ID ||
+      connection.connectionTypeId === MCP_OAUTH_CONNECTION_TYPE_ID
         ? await openAssignedCredential(config, connection)
         : undefined;
     client = new McpClient({
       url: settings.url,
       transport: settings.transport,
       fetch: fetchImpl,
-      ...(apiKey ? { apiKey, headerName: settings.headerName } : {}),
+      ...(apiKey
+        ? {
+            apiKey,
+            // An OAuth access token is a bearer token by definition; only a
+            // keyed server gets to name the header its key travels in.
+            headerName:
+              connection.connectionTypeId === MCP_OAUTH_CONNECTION_TYPE_ID
+                ? "Authorization"
+                : settings.headerName,
+          }
+        : {}),
       maxResponseBytes: MAX_MCP_RESPONSE_BYTES,
       maxTools: MAX_MCP_TOOLS_PER_SERVER,
     });
@@ -323,6 +374,10 @@ async function openAssignedCredential(
     config.randomId?.() ?? crypto.randomUUID()
   }`;
   const lease = await config.leaseCredential(effectId, connection.generation);
+  // The lease the User Durable Object issued names the credential generation
+  // it actually opened — which for a refreshed OAuth token is not the
+  // Connection's generation. The mount takes the lease's word for it, because
+  // the User Durable Object is the authority for which generation is current.
   try {
     if (
       lease.effectId !== effectId ||

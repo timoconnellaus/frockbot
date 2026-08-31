@@ -53,6 +53,12 @@ export default defineConfig({
         },
         bindings: {
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
+          // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
+          // state the gateway accepts and forge one it must refuse; strong
+          // enough to pass the same check production makes, because the
+          // Contribution refuses to serve its routes at all otherwise.
+          FROCKBOT_AUTHORIZATION_STATE_SECRET:
+            "workerd-mcp-oauth-state-secret-0123456789abcdef",
           // No Sprites credential reaches this Worker, in tests or in
           // production: the Computer host holds the only copy (ADR 0004).
           SPRITES_TOKEN: "",

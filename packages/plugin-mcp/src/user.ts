@@ -17,8 +17,11 @@ import {
   decodeConnectionCommandV1,
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
+  type ConnectionCompletionResult,
   type ConnectionSettingsV1,
   type CredentialLeaseV1,
+  type RevokeConnectionResult,
+  type StartConnectionResult,
 } from "@frockbot/connection-core";
 import type {
   CredentialStorage,
@@ -33,9 +36,35 @@ import {
   MAX_MCP_SERVERS_PER_USER_V1,
   MCP_CONNECTION_TYPE_ID,
   MCP_KEYED_CONNECTION_TYPE_ID,
+  MCP_OAUTH_CONNECTION_TYPE_ID,
   MCP_PACKAGE_ID,
   decodeMcpConnectionSettingsV1,
+  decodeMcpOAuthSettingsV1,
 } from "./agent.js";
+import {
+  McpAuthorizationError,
+  McpOAuthClient,
+  MCP_ACCESS_REFRESH_SKEW_MS_V1,
+  MCP_AUTHORIZATION_START_WINDOW_MS_V1,
+  MCP_AUTHORIZATION_TTL_MS_V1,
+  MAX_MCP_AUTHORIZATION_STARTS_V1,
+  mcpAuthorizeUrlV1,
+  mcpCanonicalResourceV1,
+  createPkcePairV1,
+  type McpOAuthTokenSetV1,
+} from "./oauth.js";
+import {
+  decodeMcpAuthorizationStartsV1,
+  decodeMcpOAuthPendingV1,
+  decodeMcpOAuthRecordV1,
+  mcpAuthorizationConnectionIdV1,
+  mcpOAuthPendingKeyV1,
+  mcpOAuthRecordKeyV1,
+  mcpRefreshCredentialIdV1,
+  MCP_OAUTH_STARTS_KEY,
+  type McpOAuthPendingV1,
+  type McpOAuthRecordV1,
+} from "./oauth-records.js";
 import {
   McpClient,
   MAX_MCP_RESPONSE_BYTES,
@@ -174,6 +203,51 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     throw new Error("Stored MCP Connection command is invalid");
   }
   return value as unknown as StoredCommand;
+}
+
+/**
+ * How a handshake opens this Connection's credential. `none` is a public
+ * server; `sealed` names the exact credential generation to open, which for an
+ * OAuth Connection is the access token's generation and not the Connection's.
+ */
+export type McpHandshakeCredentialV1 =
+  { kind: "none" } | { kind: "sealed"; generation: string };
+
+/** Whether a Connection Type of this Package carries a credential at all. */
+export function mcpConnectionCarriesCredentialV1(
+  connectionTypeId: string,
+): boolean {
+  return (
+    connectionTypeId === MCP_KEYED_CONNECTION_TYPE_ID ||
+    connectionTypeId === MCP_OAUTH_CONNECTION_TYPE_ID
+  );
+}
+
+/** What one authorization start asks of this object. */
+export interface McpAuthorizationStartInputV1 {
+  commandId: string;
+  /** Reconnecting an existing Connection; absent creates one. */
+  connectionId?: string;
+  label?: string;
+  settings?: Record<string, unknown>;
+  /** The absolute callback URL the gateway will be redirected back to. */
+  redirectUri: string;
+  /** The signed state the gateway minted. Opaque here. */
+  callbackState: string;
+  authorizationStateId: string;
+  authorizationStateExpiresAt: number;
+  returnTarget: "browser" | "desktop";
+  nativeReturnNonce?: string;
+}
+
+/** What the callback carries back, once its state has been verified. */
+export interface McpAuthorizationCompletionInputV1 {
+  authorizationStateId: string;
+  connectionId: string;
+  returnTarget: "browser" | "desktop";
+  nativeReturnNonce?: string;
+  code?: string;
+  error?: string;
 }
 
 export class McpUserBackendContribution {
@@ -375,7 +449,7 @@ export class McpUserBackendContribution {
           accountId,
           command.commandId,
           connection,
-          connection.connectionTypeId === MCP_KEYED_CONNECTION_TYPE_ID,
+          await this.handshakeCredential(connection),
           {
             serverEpoch: server.serverEpoch + 1,
             ...(server.instructions
@@ -522,7 +596,7 @@ export class McpUserBackendContribution {
       input.connectionId,
     );
     if (
-      connection.connectionTypeId !== MCP_KEYED_CONNECTION_TYPE_ID ||
+      !mcpConnectionCarriesCredentialV1(connection.connectionTypeId) ||
       connection.state !== "ready"
     ) {
       throw new Error("MCP Connection carries no credential");
@@ -536,8 +610,72 @@ export class McpUserBackendContribution {
       packageId: MCP_PACKAGE_ID,
       effectId: input.effectId,
       expiresAt: new Date(this.now() + TOOL_LEASE_MS).toISOString(),
-      expectedGeneration: input.connectionGeneration,
+      // The Connection generation and the credential generation are the same
+      // thing for a keyed server, and deliberately are not for an OAuth one: a
+      // refresh rotates the sealed generation without disturbing the
+      // Assignment resolution key a Turn is pinned to.
+      expectedGeneration: await this.currentCredentialGeneration(
+        input.accountId,
+        connection,
+      ),
     });
+  }
+
+  /**
+   * The credential generation a lease should open, refreshing it first when the
+   * access token is about to expire.
+   *
+   * This is where "refresh on lease open" lives, and it is here rather than in
+   * the mount because only this object can see the refresh token. A lease is
+   * five minutes long, so a token expiring inside the next minute would expire
+   * mid-mount; it is replaced before it is handed over. A failed refresh flips
+   * the durable record to `needs-auth` and refuses the lease — the Bot loses
+   * the tools, which is visible, rather than calling the server with a dead
+   * token, which is not.
+   */
+  private async currentCredentialGeneration(
+    accountId: string,
+    connection: ConnectionView,
+  ): Promise<string> {
+    const generation = connection.generation!;
+    if (connection.connectionTypeId !== MCP_OAUTH_CONNECTION_TYPE_ID) {
+      return generation;
+    }
+    const record = await this.readOAuthRecord(connection.connectionId);
+    if (!record) return generation;
+    const current = record.accessGeneration ?? generation;
+    if (
+      record.accessExpiresAt === undefined ||
+      record.accessExpiresAt - MCP_ACCESS_REFRESH_SKEW_MS_V1 > this.now()
+    ) {
+      return current;
+    }
+    try {
+      return await this.refreshAccessToken(
+        accountId,
+        connection.connectionId,
+        record,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "MCP token refresh failed";
+      const at = new Date(this.now()).toISOString();
+      const server = await this.readServer(connection.connectionId);
+      if (server) {
+        await this.writeServer({
+          ...server,
+          state: "needs-auth",
+          toolCount: 0,
+          lastHandshakeAt: at,
+          failure: {
+            code: "unauthorized",
+            message: message.slice(0, 2_000),
+            at,
+          },
+        }).catch(() => undefined);
+      }
+      throw new Error(`MCP access token could not be refreshed: ${message}`);
+    }
   }
 
   async settleToolCredential(input: {
@@ -551,6 +689,639 @@ export class McpUserBackendContribution {
       packageId: MCP_PACKAGE_ID,
       effectId: input.effectId,
     });
+  }
+
+  // ------------------------------------------------------------------
+  // The `mcp-oauth` grant driver.
+  //
+  // Every outbound OAuth request in FrockBot happens inside these methods,
+  // which is the point of putting them here rather than in the gateway
+  // Contribution: this object is the User's authority, it holds the keyring,
+  // and it is the only place a token, a refresh token, or a PKCE verifier ever
+  // exists. The gateway signs a state and forwards; it performs no OAuth call
+  // and stores nothing.
+  // ------------------------------------------------------------------
+
+  /**
+   * Mint one authorization. Only an authenticated User action reaches here —
+   * a Bot may record a pending decision, never a redirect.
+   *
+   * Order matters and is the durability argument: the quota is charged, the
+   * Connection exists in `authorizing`, and the pending record carrying the
+   * PKCE verifier is written, all *before* the URL is returned. A callback that
+   * arrives for an authorization this object never recorded finds nothing.
+   */
+  async startAuthorization(
+    accountId: string,
+    input: McpAuthorizationStartInputV1,
+  ): Promise<StartConnectionResult> {
+    await this.chargeAuthorizationStart();
+    const redirectUri = this.decodeRedirectUri(input.redirectUri);
+    const { connection, settings, oauthSettings } =
+      await this.prepareOAuthConnection(accountId, input);
+    const generation = connection.generation!;
+    try {
+      const client = this.oauthClient();
+      const resourceMetadata = await client.discoverProtectedResource({
+        serverUrl: settings.url,
+      });
+      const metadata = await client.discoverAuthorizationServer(
+        resourceMetadata.authorizationServers[0]!,
+      );
+      // DCR is the default the specification expects of an MCP client; the
+      // `client-id` setting is the fallback for a server that registers its
+      // clients out of band. A confidential client is refused inside
+      // `register`, with its own durable code.
+      const clientId = metadata.registrationEndpoint
+        ? (
+            await client.register({
+              registrationEndpoint: metadata.registrationEndpoint,
+              redirectUri,
+              ...(oauthSettings.scope ? { scope: oauthSettings.scope } : {}),
+            })
+          ).clientId
+        : oauthSettings.clientId;
+      if (!clientId) {
+        throw new McpAuthorizationError(
+          "The authorization server offers no dynamic client registration, and this Connection names no client-id.",
+          "authorization-discovery",
+        );
+      }
+      const scope =
+        oauthSettings.scope ?? resourceMetadata.scopesSupported?.join(" ");
+      const pkce = await createPkcePairV1();
+      const resource = mcpCanonicalResourceV1(settings.url);
+      const expiresAt = Math.min(
+        input.authorizationStateExpiresAt,
+        this.now() + MCP_AUTHORIZATION_TTL_MS_V1,
+      );
+      const pending: McpOAuthPendingV1 = {
+        schemaVersion: 1,
+        authorizationStateId: input.authorizationStateId,
+        connectionId: connection.connectionId,
+        codeVerifier: pkce.codeVerifier,
+        clientId,
+        tokenEndpoint: metadata.tokenEndpoint,
+        ...(metadata.revocationEndpoint
+          ? { revocationEndpoint: metadata.revocationEndpoint }
+          : {}),
+        authorizationEndpoint: metadata.authorizationEndpoint,
+        ...(metadata.registrationEndpoint
+          ? { registrationEndpoint: metadata.registrationEndpoint }
+          : {}),
+        issuer: metadata.issuer,
+        resource,
+        ...(scope ? { scope } : {}),
+        redirectUri,
+        generation,
+        returnTarget: input.returnTarget,
+        ...(input.nativeReturnNonce
+          ? { nativeReturnNonce: input.nativeReturnNonce }
+          : {}),
+        expiresAt,
+        createdAt: new Date(this.now()).toISOString(),
+      };
+      await this.host.storage.put(
+        mcpOAuthPendingKeyV1(pending.authorizationStateId),
+        decodeMcpOAuthPendingV1(pending),
+      );
+      return {
+        schemaVersion: 1,
+        status: "authorization-required",
+        connectionId: connection.connectionId,
+        redirectUrl: mcpAuthorizeUrlV1({
+          authorizationEndpoint: metadata.authorizationEndpoint,
+          clientId,
+          redirectUri,
+          state: input.callbackState,
+          codeChallenge: pkce.codeChallenge,
+          resource,
+          ...(scope ? { scope } : {}),
+        }),
+        expiresAt: new Date(expiresAt).toISOString(),
+        ...(input.nativeReturnNonce
+          ? { nativeReturnNonce: input.nativeReturnNonce }
+          : {}),
+      };
+    } catch (error) {
+      await this.failAuthorization(accountId, connection, error);
+      throw error;
+    }
+  }
+
+  /**
+   * The callback, once the gateway has verified its signed state.
+   *
+   * The `authorizationStateId` is consumed transactionally: the pending record
+   * is read and deleted in one transaction, so a replayed callback — the
+   * browser's back button, a retried redirect, an attacker with a copied URL —
+   * finds nothing and changes nothing. It is a no-op reporting the Connection's
+   * current state, never a second token exchange.
+   */
+  async completeAuthorization(
+    accountId: string,
+    input: McpAuthorizationCompletionInputV1,
+  ): Promise<ConnectionCompletionResult> {
+    const completion = (
+      status: "ready" | "pending" | "failed",
+    ): ConnectionCompletionResult => ({
+      returnTarget: input.returnTarget,
+      status,
+      ...(input.nativeReturnNonce
+        ? { nativeReturnNonce: input.nativeReturnNonce }
+        : {}),
+    });
+    const pending = await this.consumePendingAuthorization(
+      input.authorizationStateId,
+      input.connectionId,
+    );
+    if (!pending) {
+      const settled = await this.host.settings.getConnection(
+        accountId,
+        input.connectionId,
+      );
+      return completion(settled?.state === "ready" ? "ready" : "failed");
+    }
+    const connection = await this.requireConnection(
+      accountId,
+      pending.connectionId,
+    );
+    if (input.error || !input.code) {
+      await this.failAuthorization(
+        accountId,
+        connection,
+        new McpAuthorizationError(
+          `The authorization server refused: ${(input.error ?? "no authorization code was returned").slice(0, 200)}`,
+        ),
+      );
+      return completion("failed");
+    }
+    let tokens: McpOAuthTokenSetV1;
+    try {
+      tokens = await this.oauthClient().exchangeCode({
+        tokenEndpoint: pending.tokenEndpoint,
+        clientId: pending.clientId,
+        code: input.code,
+        codeVerifier: pending.codeVerifier,
+        redirectUri: pending.redirectUri,
+        resource: pending.resource,
+      });
+    } catch (error) {
+      await this.failAuthorization(accountId, connection, error);
+      return completion("failed");
+    }
+    await this.sealTokenSet(accountId, pending.connectionId, {
+      generation: pending.generation,
+      tokens,
+    });
+    await this.writeOAuthRecord({
+      schemaVersion: 1,
+      connectionId: pending.connectionId,
+      issuer: pending.issuer,
+      authorizationEndpoint: pending.authorizationEndpoint,
+      tokenEndpoint: pending.tokenEndpoint,
+      ...(pending.registrationEndpoint
+        ? { registrationEndpoint: pending.registrationEndpoint }
+        : {}),
+      ...(pending.revocationEndpoint
+        ? { revocationEndpoint: pending.revocationEndpoint }
+        : {}),
+      clientId: pending.clientId,
+      resource: pending.resource,
+      ...(pending.scope ? { scope: pending.scope } : {}),
+      redirectUri: pending.redirectUri,
+      accessGeneration: pending.generation,
+      ...(tokens.refreshToken ? { refreshGeneration: pending.generation } : {}),
+      ...(tokens.expiresAt === undefined
+        ? {}
+        : { accessExpiresAt: tokens.expiresAt }),
+      updatedAt: new Date(this.now()).toISOString(),
+    });
+    // The handshake is still the validation: a token the server will not accept
+    // leaves the Connection `failed` with the reason, exactly as a bad API key
+    // does. `ready` means `initialize` and `tools/list` both answered.
+    const receipt = await this.validateAndActivate(
+      accountId,
+      `mcp-oauth-complete:${pending.authorizationStateId}`,
+      connection,
+      { kind: "sealed", generation: pending.generation },
+    );
+    return completion(receipt.status === "applied" ? "ready" : "failed");
+  }
+
+  /**
+   * RFC 7009 revocation, then the local teardown.
+   *
+   * A server that advertises no revocation endpoint leaves the Connection
+   * `reconciliation-required`: FrockBot has forgotten the token and the server
+   * has not, and saying `revoked` would be a claim about someone else's state.
+   */
+  async revokeAuthorization(
+    accountId: string,
+    connectionId: string,
+  ): Promise<RevokeConnectionResult> {
+    const connection = await this.requireConnection(accountId, connectionId);
+    if (connection.connectionTypeId !== MCP_OAUTH_CONNECTION_TYPE_ID) {
+      throw new Error("MCP Connection carries no authorization");
+    }
+    const status = await this.revokeOAuthTokens(accountId, connectionId);
+    await this.host.settings.replaceConnection(
+      accountId,
+      connectionId,
+      connection.generation,
+      { ...connection, state: status, failure: undefined },
+    );
+    await this.removeServer(connectionId);
+    return {
+      schemaVersion: 1,
+      status: status === "revoked" ? "revoked" : "reconciliation-required",
+    };
+  }
+
+  /**
+   * Revoke what this object holds, and forget it either way.
+   *
+   * The order is deliberate: the tokens are revoked at the server *first*,
+   * because once the sealed generations are gone there is nothing left to
+   * revoke with. A refused revocation still tears down locally — a token
+   * FrockBot cannot use is not a token FrockBot should keep.
+   */
+  private async revokeOAuthTokens(
+    accountId: string,
+    connectionId: string,
+  ): Promise<"revoked" | "reconciliation-required"> {
+    const record = await this.readOAuthRecord(connectionId);
+    let revoked = false;
+    if (record?.revocationEndpoint) {
+      const client = this.oauthClient();
+      revoked = true;
+      const refreshToken = await this.readRefreshToken(accountId, record);
+      if (refreshToken) {
+        revoked =
+          (await client.revoke({
+            revocationEndpoint: record.revocationEndpoint,
+            token: refreshToken,
+            tokenTypeHint: "refresh_token",
+            clientId: record.clientId,
+          })) && revoked;
+      }
+    }
+    await this.host.credentials.disconnect(connectionId);
+    if (record?.refreshGeneration) {
+      await this.host.credentials
+        .discardPending(
+          mcpRefreshCredentialIdV1(connectionId),
+          record.refreshGeneration,
+        )
+        .catch(() => undefined);
+    }
+    await this.host.storage.delete(mcpOAuthRecordKeyV1(connectionId));
+    return revoked ? "revoked" : "reconciliation-required";
+  }
+
+  /**
+   * The refresh grant, run on the way out of the lease seam.
+   *
+   * Bounded — one attempt, no retry loop — and idempotent in effect: the DO
+   * serializes calls, so two mounts asking at once produce one refresh and two
+   * leases of the same generation. A failure is durable: the record flips to
+   * `needs-auth` and the lease is refused, so the Bot loses the tools rather
+   * than calling a server with a dead token.
+   */
+  private async refreshAccessToken(
+    accountId: string,
+    connectionId: string,
+    record: McpOAuthRecordV1,
+  ): Promise<string> {
+    const refreshToken = await this.readRefreshToken(accountId, record);
+    if (!refreshToken) {
+      throw new McpAuthorizationError(
+        "This MCP Connection holds no refresh token; it must be authorized again.",
+      );
+    }
+    const generation = this.randomId();
+    const tokens = await this.oauthClient().refresh({
+      tokenEndpoint: record.tokenEndpoint,
+      clientId: record.clientId,
+      refreshToken,
+      resource: record.resource,
+      ...(record.scope ? { scope: record.scope } : {}),
+    });
+    await this.sealTokenSet(accountId, connectionId, {
+      generation,
+      tokens,
+      // A server that rotates its refresh token returns a new one; one that
+      // does not expects the old one to keep working, so it is carried
+      // forward rather than dropped.
+      fallbackRefreshToken: refreshToken,
+    });
+    await this.host.credentials.activate({
+      accountId,
+      connectionId,
+      packageId: MCP_PACKAGE_ID,
+      generation,
+    });
+    if (record.refreshGeneration && record.refreshGeneration !== generation) {
+      await this.host.credentials
+        .discardPending(
+          mcpRefreshCredentialIdV1(connectionId),
+          record.refreshGeneration,
+        )
+        .catch(() => undefined);
+    }
+    await this.writeOAuthRecord({
+      ...record,
+      accessGeneration: generation,
+      refreshGeneration: generation,
+      ...(tokens.expiresAt === undefined
+        ? { accessExpiresAt: undefined }
+        : { accessExpiresAt: tokens.expiresAt }),
+      updatedAt: new Date(this.now()).toISOString(),
+    });
+    return generation;
+  }
+
+  /** Seal one token set: the access token leasable, the refresh token not. */
+  private async sealTokenSet(
+    accountId: string,
+    connectionId: string,
+    input: {
+      generation: string;
+      tokens: McpOAuthTokenSetV1;
+      fallbackRefreshToken?: string;
+    },
+  ): Promise<void> {
+    await this.host.credentials.stageApiKey({
+      accountId,
+      connectionId,
+      packageId: MCP_PACKAGE_ID,
+      generation: input.generation,
+      apiKey: input.tokens.accessToken,
+    });
+    const refreshToken =
+      input.tokens.refreshToken ?? input.fallbackRefreshToken;
+    if (!refreshToken) return;
+    // Staged and never activated. `plugin-credentials` leases the *active*
+    // generation of a Connection id and nothing else, so a generation that is
+    // never activated under an id that has no active generation cannot be
+    // leased at all — not merely "is not leased today".
+    await this.host.credentials.stageApiKey({
+      accountId,
+      connectionId: mcpRefreshCredentialIdV1(connectionId),
+      packageId: MCP_PACKAGE_ID,
+      generation: input.generation,
+      apiKey: refreshToken,
+    });
+  }
+
+  private async readRefreshToken(
+    accountId: string,
+    record: McpOAuthRecordV1,
+  ): Promise<string | undefined> {
+    if (!record.refreshGeneration) return undefined;
+    return this.host.credentials
+      .readStagedApiKey({
+        accountId,
+        connectionId: mcpRefreshCredentialIdV1(record.connectionId),
+        packageId: MCP_PACKAGE_ID,
+        generation: record.refreshGeneration,
+      })
+      .catch(() => undefined);
+  }
+
+  private oauthClient(): McpOAuthClient {
+    return new McpOAuthClient({
+      fetch: this.host.fetch ?? boundFetch,
+      now: this.now,
+    });
+  }
+
+  /**
+   * The redirect URI, checked for what it is rather than where it points. It
+   * is never fetched by this object — the authorization server sends the
+   * User's browser to it — so the outbound SSRF classifier is the wrong test;
+   * what matters is that it is an absolute URL with no fragment and no
+   * credentials, so it cannot be turned into an open redirect.
+   */
+  private decodeRedirectUri(value: string): string {
+    const url = URL.parse(value);
+    if (
+      !url ||
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.username ||
+      url.password ||
+      url.hash ||
+      value.length > 2_048
+    ) {
+      throw new McpAuthorizationError(
+        "MCP authorization callback URL is invalid",
+        "authorization-discovery",
+      );
+    }
+    return url.toString();
+  }
+
+  /** The per-User start quota, in a fixed window, charged before any work. */
+  private async chargeAuthorizationStart(): Promise<void> {
+    const now = this.now();
+    const refused = await this.host.storage.transaction(async (storage) => {
+      const stored = await storage.get<unknown>(MCP_OAUTH_STARTS_KEY);
+      const ledger =
+        stored === undefined
+          ? { schemaVersion: 1 as const, windowStartedAt: now, count: 0 }
+          : decodeMcpAuthorizationStartsV1(stored);
+      const fresh =
+        now - ledger.windowStartedAt >= MCP_AUTHORIZATION_START_WINDOW_MS_V1
+          ? { schemaVersion: 1 as const, windowStartedAt: now, count: 0 }
+          : ledger;
+      if (fresh.count >= MAX_MCP_AUTHORIZATION_STARTS_V1) return true;
+      await storage.put(MCP_OAUTH_STARTS_KEY, {
+        ...fresh,
+        count: fresh.count + 1,
+      });
+      return false;
+    });
+    if (refused) {
+      throw new McpAuthorizationError(
+        `A User may start at most ${MAX_MCP_AUTHORIZATION_STARTS_V1} MCP authorizations an hour.`,
+        // Reused deliberately: a quota refusal is a refusal, and the code is
+        // what a surface branches on.
+        "authorization-discovery",
+      );
+    }
+  }
+
+  /**
+   * The Connection an authorization will land on: a new one in `authorizing`,
+   * or the existing one moved back to `authorizing` on a fresh generation.
+   * Either way the Connection exists durably before the User's browser leaves.
+   */
+  private async prepareOAuthConnection(
+    accountId: string,
+    input: McpAuthorizationStartInputV1,
+  ): Promise<{
+    connection: ConnectionView;
+    settings: ReturnType<typeof decodeMcpConnectionSettingsV1>;
+    oauthSettings: { scope?: string; clientId?: string };
+  }> {
+    const generation = this.randomId();
+    if (input.connectionId) {
+      const current = await this.requireConnection(
+        accountId,
+        input.connectionId,
+      );
+      if (current.connectionTypeId !== MCP_OAUTH_CONNECTION_TYPE_ID) {
+        throw new Error("MCP Connection does not use OAuth");
+      }
+      if (current.state === "revoked" || current.state === "revoking") {
+        throw new Error("MCP Connection is revoked");
+      }
+      const connection = await this.host.settings.replaceConnection(
+        accountId,
+        current.connectionId,
+        current.generation,
+        {
+          ...current,
+          generation,
+          state: "authorizing",
+          failure: undefined,
+          ...(input.label ? { displayName: input.label } : {}),
+        },
+      );
+      return {
+        connection,
+        settings: decodeMcpConnectionSettingsV1(connection.settings),
+        oauthSettings: decodeMcpOAuthSettingsV1(connection.settings),
+      };
+    }
+    const servers = await this.readServerIndex();
+    if (servers.length >= MAX_MCP_SERVERS_PER_USER_V1) {
+      throw new Error(
+        `A User may hold at most ${MAX_MCP_SERVERS_PER_USER_V1} MCP servers`,
+      );
+    }
+    const settingsInput = input.settings ?? {};
+    const settings = decodeMcpConnectionSettingsV1(settingsInput);
+    const oauthSettings = decodeMcpOAuthSettingsV1(settingsInput);
+    const connection: ConnectionView = {
+      // The same derivation the gateway used when it signed the state, so the
+      // callback's Connection and this one are one Connection.
+      connectionId: mcpAuthorizationConnectionIdV1(input.commandId),
+      packageId: MCP_PACKAGE_ID,
+      connectionTypeId: MCP_OAUTH_CONNECTION_TYPE_ID,
+      displayName: input.label ?? "MCP server",
+      state: "authorizing",
+      generation,
+      providerType: "mcp",
+      settings: settingsInput as ConnectionSettingsV1,
+      safeMetadata: {},
+    };
+    await this.host.settings.createConnection(accountId, connection);
+    await this.writeServer({
+      schemaVersion: 1,
+      serverId: connection.connectionId,
+      label: connection.displayName,
+      url: settings.url.toString(),
+      transport: settings.transport,
+      serverEpoch: 1,
+      state: "connecting",
+      toolCount: 0,
+      toolsHash: "",
+      lastHandshakeAt: new Date(this.now()).toISOString(),
+    });
+    return { connection, settings, oauthSettings };
+  }
+
+  /** A failed authorization is durable on both records, never only in a log. */
+  private async failAuthorization(
+    accountId: string,
+    connection: ConnectionView,
+    error: unknown,
+  ): Promise<void> {
+    const message =
+      error instanceof Error ? error.message : "MCP authorization failed";
+    const code = mcpFailureCodeV1(error);
+    const at = new Date(this.now()).toISOString();
+    const existing = await this.readServer(connection.connectionId);
+    if (existing) {
+      await this.writeServer({
+        ...existing,
+        state: code === "unauthorized" ? "needs-auth" : "error",
+        toolCount: 0,
+        lastHandshakeAt: at,
+        failure: { code, message: message.slice(0, 2_000), at },
+      }).catch(() => undefined);
+    }
+    await this.host.settings
+      .replaceConnection(
+        accountId,
+        connection.connectionId,
+        connection.generation,
+        { ...connection, state: "failed", failure: message.slice(0, 2_000) },
+      )
+      .catch(() => undefined);
+  }
+
+  /**
+   * Take one pending authorization, exactly once.
+   *
+   * The delete is the claim, not the read: `delete` answers whether the key
+   * was there, so of two callbacks racing the same `authorizationStateId`
+   * precisely one is told `true` and proceeds. A read-then-delete pair would
+   * let both through, because every `await` in a Durable Object is a yield.
+   */
+  private async consumePendingAuthorization(
+    authorizationStateId: string,
+    connectionId: string,
+  ): Promise<McpOAuthPendingV1 | undefined> {
+    const key = mcpOAuthPendingKeyV1(authorizationStateId);
+    const stored = await this.host.storage.get<unknown>(key);
+    if (stored === undefined) return undefined;
+    if (!(await this.host.storage.delete(key))) return undefined;
+    const pending = decodeMcpOAuthPendingV1(stored);
+    // The signed state named a Connection; the record names one too. A
+    // callback whose state disagrees with the record it unlocks is refused
+    // rather than applied to whichever of the two is more convenient.
+    if (
+      pending.connectionId !== connectionId ||
+      pending.expiresAt <= this.now()
+    ) {
+      return undefined;
+    }
+    return pending;
+  }
+
+  private async readOAuthRecord(
+    connectionId: string,
+  ): Promise<McpOAuthRecordV1 | undefined> {
+    const stored = await this.host.storage.get<unknown>(
+      mcpOAuthRecordKeyV1(connectionId),
+    );
+    return stored === undefined ? undefined : decodeMcpOAuthRecordV1(stored);
+  }
+
+  private async writeOAuthRecord(record: McpOAuthRecordV1): Promise<void> {
+    await this.host.storage.put(
+      mcpOAuthRecordKeyV1(record.connectionId),
+      decodeMcpOAuthRecordV1(record),
+    );
+  }
+
+  /** Which credential generation a handshake for this Connection opens. */
+  private async handshakeCredential(
+    connection: ConnectionView,
+  ): Promise<McpHandshakeCredentialV1> {
+    if (!mcpConnectionCarriesCredentialV1(connection.connectionTypeId)) {
+      return { kind: "none" };
+    }
+    if (connection.connectionTypeId !== MCP_OAUTH_CONNECTION_TYPE_ID) {
+      return { kind: "sealed", generation: connection.generation! };
+    }
+    const record = await this.readOAuthRecord(connection.connectionId);
+    return {
+      kind: "sealed",
+      generation: record?.accessGeneration ?? connection.generation!,
+    };
   }
 
   private async apply(
@@ -609,12 +1380,30 @@ export class McpUserBackendContribution {
           accountId,
           command.connectionId,
         );
-        await this.host.credentials.disconnect(connection.connectionId);
+        // An OAuth Connection the User asked to revoke upstream is revoked at
+        // its authorization server before it is forgotten here (RFC 7009). A
+        // server that advertises no revocation endpoint, or refuses, leaves
+        // `reconciliation-required`: FrockBot has forgotten the token and the
+        // server has not, and `revoked` would be a claim about someone else's
+        // state. `revokeUpstream: false` is the User keeping the grant and
+        // dropping only FrockBot's copy, so it takes the ordinary path.
+        let state: "revoked" | "reconciliation-required" = "revoked";
+        if (
+          connection.connectionTypeId === MCP_OAUTH_CONNECTION_TYPE_ID &&
+          command.revokeUpstream
+        ) {
+          state = await this.revokeOAuthTokens(
+            accountId,
+            connection.connectionId,
+          );
+        } else {
+          await this.host.credentials.disconnect(connection.connectionId);
+        }
         await this.host.settings.replaceConnection(
           accountId,
           connection.connectionId,
           connection.generation,
-          { ...connection, state: "revoked", failure: undefined },
+          { ...connection, state, failure: undefined },
         );
         // GrokBot's `RemoveMcpAccount`: the server is gone, so its record is
         // gone with it. The Assignments that named it become unavailable
@@ -676,7 +1465,7 @@ export class McpUserBackendContribution {
       accountId,
       command.commandId,
       connection,
-      keyed,
+      keyed ? { kind: "sealed", generation } : { kind: "none" },
       options,
     );
   }
@@ -705,7 +1494,10 @@ export class McpUserBackendContribution {
       current.generation,
       { ...current, generation, state: "authorizing", failure: undefined },
     );
-    return this.validateAndActivate(accountId, commandId, next, true);
+    return this.validateAndActivate(accountId, commandId, next, {
+      kind: "sealed",
+      generation,
+    });
   }
 
   /**
@@ -722,7 +1514,7 @@ export class McpUserBackendContribution {
     accountId: string,
     commandId: string,
     connection: ConnectionView,
-    keyed: boolean,
+    credential: McpHandshakeCredentialV1,
     options: { serverEpoch?: number; instructions?: string } = {},
   ): Promise<ConnectionCommandReceiptV1> {
     const generation = connection.generation!;
@@ -748,9 +1540,14 @@ export class McpUserBackendContribution {
         toolsHash: existing?.toolsHash ?? "",
         lastHandshakeAt: new Date(this.now()).toISOString(),
       });
-      const apiKey = keyed
-        ? await this.openConnectionCredential(accountId, connection, generation)
-        : undefined;
+      const apiKey =
+        credential.kind === "sealed"
+          ? await this.openConnectionCredential(
+              accountId,
+              connection,
+              credential.generation,
+            )
+          : undefined;
       client = new McpClient({
         url: settings.url,
         transport: settings.transport,
@@ -761,12 +1558,12 @@ export class McpUserBackendContribution {
       });
       const handshake = await client.connect();
       const tools = await client.listTools();
-      if (keyed && connection.state === "authorizing") {
+      if (credential.kind === "sealed" && connection.state === "authorizing") {
         await this.host.credentials.activate({
           accountId,
           connectionId: connection.connectionId,
           packageId: MCP_PACKAGE_ID,
-          generation,
+          generation: credential.generation,
         });
       }
       const server = await this.writeServer({
@@ -855,6 +1652,12 @@ export class McpUserBackendContribution {
   private async openConnectionCredential(
     accountId: string,
     connection: ConnectionView,
+    /**
+     * The *credential* generation, which is not always the Connection's own.
+     * A refreshed OAuth access token rotates the sealed generation while the
+     * Connection generation stays put, so a Bot's pinned resolution key does
+     * not change under it mid-Turn.
+     */
     generation: string,
   ): Promise<string> {
     if (connection.state === "authorizing") {

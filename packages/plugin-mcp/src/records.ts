@@ -59,7 +59,14 @@ export type McpFailureCodeV1 =
   | "unsupported-transport"
   | "server-quota"
   | "tool-quota"
-  | "response-quota";
+  | "response-quota"
+  // The three the `mcp-oauth` grant driver adds. They are distinct from
+  // `unauthorized` on purpose: `unauthorized` is a credential the User can
+  // replace, and each of these is a different repair — re-run the connect
+  // card, use a different server, or wait.
+  | "authorization-discovery"
+  | "unsupported-client-authentication"
+  | "authorization-quota";
 
 const FAILURE_CODES = new Set<string>([
   "unreachable",
@@ -69,6 +76,9 @@ const FAILURE_CODES = new Set<string>([
   "server-quota",
   "tool-quota",
   "response-quota",
+  "authorization-discovery",
+  "unsupported-client-authentication",
+  "authorization-quota",
 ]);
 
 export interface McpServerFailureV1 {
@@ -660,6 +670,24 @@ export function mcpConnectionMetadataV1(
  * than left to whoever reads the message.
  */
 export function mcpFailureCodeV1(error: unknown): McpFailureCodeV1 {
+  // An authorization failure classifies itself: the driver already knows
+  // whether the server published no metadata, demanded a client secret, or
+  // simply refused the grant, and re-deriving that from a message would be a
+  // second, worse classifier.
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string" &&
+    FAILURE_CODES.has((error as { code: string }).code)
+  ) {
+    return (error as { code: McpFailureCodeV1 }).code;
+  }
+  if (
+    error instanceof Error &&
+    (error as { code?: unknown }).code === "authorization-failed"
+  ) {
+    return "unauthorized";
+  }
   const status = error instanceof McpProtocolError ? error.status : undefined;
   if (status === 401 || status === 403) return "unauthorized";
   const message = error instanceof Error ? error.message : "";

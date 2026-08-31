@@ -509,6 +509,30 @@ class MemoryConfiguration
     );
   }
 
+  startMcpAuthorization(): ReturnType<
+    UserConfigurationBinding["startMcpAuthorization"]
+  > {
+    return Promise.reject(
+      new Error("MCP authorization is not used in these tests"),
+    );
+  }
+
+  completeMcpAuthorization(): ReturnType<
+    UserConfigurationBinding["completeMcpAuthorization"]
+  > {
+    return Promise.reject(
+      new Error("MCP authorization is not used in these tests"),
+    );
+  }
+
+  revokeMcpAuthorization(): ReturnType<
+    UserConfigurationBinding["revokeMcpAuthorization"]
+  > {
+    return Promise.reject(
+      new Error("MCP authorization is not used in these tests"),
+    );
+  }
+
   lookupConnectionCommand(
     request: Parameters<UserConfigurationBinding["lookupConnectionCommand"]>[0],
   ): ReturnType<UserConfigurationBinding["lookupConnectionCommand"]> {
