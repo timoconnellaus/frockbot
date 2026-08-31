@@ -1,6 +1,7 @@
 import { desktopComputerRuntimePackages } from "../../../applications/foundation/src/desktop-runtime.js";
 
 // Desktop-only runtime authority is added outside the Worker-safe application.
+import { computerDirectoryForRootV1 } from "@frockbot/computer-core";
 import {
   EphemeralIndexMetaStore,
   type MemoryPluginConfig,
@@ -68,27 +69,32 @@ function desktopMemoryConfig(botId: string): MemoryPluginConfig {
     botId,
     inject: ["computers"],
     createDocuments: async (ctx) => {
-      const target = { userId, botId };
-      if (!ctx.computers.assignment(target)) {
-        ctx.computers.assign(target, providerId);
+      // One Computer per User (ADR 0012): assigned per User, opened by the Bot
+      // tenant that needs it.
+      const identity = { userId };
+      if (!ctx.computers.assignment(identity)) {
+        ctx.computers.assign(identity, providerId);
       }
-      const computer = await ctx.computers.open(target);
+      const computer = await ctx.computers.open(identity, { botId });
       if (!computer.workspace) {
         await computer.close();
         throw new Error("The selected Computer does not provide durable files");
       }
-      const [agent, global] = await Promise.all([
-        computer.workspace.openDirectory({
-          namespace: "memory/agent",
-          scope: "bot",
-          durability: "durable",
-        }),
-        computer.workspace.openDirectory({
-          namespace: "memory/global",
-          scope: "user",
-          durability: "durable",
-        }),
-      ]);
+      // The Memory Package is the single writer of Memory roots, so it writes
+      // through the Computer's named Memory seam, never the kernel-consumed
+      // file surface, which refuses every Memory root. Step 3 of
+      // `docs/plans/slice-2.md` replaces this seam with the R2 sync of ADR 0013.
+      const writer = { kind: "user", userId } as const;
+      const agent = computerDirectoryForRootV1(
+        computer.workspace.memoryWriter,
+        { kind: "bot-memory", userId, botId },
+        writer,
+      );
+      const global = computerDirectoryForRootV1(
+        computer.workspace.memoryWriter,
+        { kind: "user-memory", userId },
+        writer,
+      );
       return new EphemeralIndexMetaStore(
         new WorkspaceMemoryDocumentStore({ agent, global }, () =>
           computer.close(),

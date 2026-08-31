@@ -32,6 +32,25 @@ source-graph linters by `bun run typecheck` and `bun run lint:ui-styles`.
 | cancellation is explicit and durable                                                                          | `packages/kernel-agent-loop/src/index.test.ts`               | `cancels an active stream and closes its step and turn`, `settles remaining tool occurrences before closing a cancelled turn` — durable half only; see Open | Bun     |
 | duplicate delivery does not duplicate effects                                                                 | `apps/cloudflare/test/authoring.workerd.ts`                  | `a duplicate effect id after eviction does not bundle twice`                                                                                                | workerd |
 
+## Computer
+
+Rows for `docs/plans/slice-2.md` Step 1 — one Computer per User (ADR 0012) and
+the Workspace file surface the Computer provider implements.
+
+| Constitutional check                                                                           | File                                               | Test name                                                                        | Runner |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------- | ------ |
+| one Computer serves all of a User's Bots (assignment keyed per User)                           | `packages/computer-core/src/index.test.ts`         | `keys the Computer assignment per User, so a User's Bots share one Computer`     | Bun    |
+| — one provider Sprite per User, with one shared browser profile                                | `packages/plugin-fly-sprite/src/computer.test.ts`  | `puts two Bots of one User on one Sprite with one browser profile`               | Bun    |
+| — each Bot receives its own directories and desktop on it                                      | `packages/computer-core/src/index.test.ts`         | `keys the Computer assignment per User, so a User's Bots share one Computer`     | Bun    |
+| durable roots are declared by the Computer Package's Workspace layout, named by kind and owner | `packages/plugin-fly-sprite/src/workspace.test.ts` | `declares instruction, Memory, and Package roots with Memory read-only`          | Bun    |
+| — a root resolves to a mount path only inside the Computer Package                             | `packages/computer-core/src/index.test.ts`         | `resolves a declared root to its mount path and refuses an undeclared one`       | Bun    |
+| every write to a durable root records its writer                                               | `packages/plugin-fly-sprite/src/workspace.test.ts` | `records the writer of every durable-root write and answers with the generation` | Bun    |
+| a Bot's instruction root and Bot Memory root are writable only by that Bot or its User         | `packages/plugin-fly-sprite/src/workspace.test.ts` | `refuses a write to another Bot's instruction root and a first-party writer`     | Bun    |
+| a Workspace write into a Memory root is rejected — **runtime half**                            | `packages/plugin-fly-sprite/src/workspace.test.ts` | `refuses a write to either Memory root through the kernel-consumed surface`      | Bun    |
+| Bots of one User may read each other's Workspace files (separation is organizational)          | `packages/plugin-fly-sprite/src/workspace.test.ts` | `a Bot reads another Bot of the same User's Workspace file`                      | Bun    |
+| a losing conditional write is a conflict, never a silent overwrite                             | `packages/plugin-fly-sprite/src/workspace.test.ts` | `answers conflict when the expected generation is not the current one`           | Bun    |
+| Computer connections drop on every pause; a dropped connection is an outcome, not a failure    | `packages/plugin-fly-sprite/src/workspace.test.ts` | `answers unavailable rather than throwing when the Sprite is paused`             | Bun    |
+
 ## Open
 
 Rules in `AGENTS.md` § Architecture checks that no named test proves yet. They
@@ -57,11 +76,13 @@ step start awaiting its model request`) but never across a real workerd
 - **The Memory rules.** `packages/plugin-memory/src/agent.test.ts` proves the
   storage and recall behaviour, and the row above proves the _contract_ half of
   one of the three constitutional Memory checks: the kernel-consumed interface
-  for a Memory root has no write. The behavioural halves have no test yet:
-  Memory readable and writable with no Computer interface call; a Workspace
-  write into a Memory root rejected at runtime; conflicting Workspace and
-  object-storage writes to another durable root both surviving as generations
-  and surfaced. The durable-root sync named in ADR 0013 does not exist yet.
+  for a Memory root has no write. The runtime rejection now has a row under
+  **Computer** above. Two behavioural halves still have no test: Memory
+  readable and writable with no Computer interface call, and conflicting
+  Workspace and object-storage writes to another durable root both surviving
+  as generations and surfaced. The durable-root sync named in ADR 0013 does
+  not exist yet, so the Memory Package still writes Memory roots through the
+  Computer's named `memoryWriter` seam rather than object storage.
 - **Computer tools operate without a desktop client.** No check. The Computer
   Package's tests exercise provider routing, not the absence of a desktop
   shell.

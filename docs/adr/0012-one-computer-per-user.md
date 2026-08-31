@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # One Computer per User, shared by all Bots

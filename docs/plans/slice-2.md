@@ -2,7 +2,8 @@
 
 ## Status
 
-step 0 landed (the shared Workspace contract); steps 1–3 not started
+steps 0 and 1 landed (the shared Workspace contract; one Computer per
+User); steps 2–3 not started
 
 ## Resolved decisions
 
@@ -45,7 +46,7 @@ their decoders; `ComputerIdentityV1`, `ComputerTenantV1`, `WorkspaceLayoutV1`.
 
 ---
 
-## Step 1 — Computer per User
+## Step 1 — Computer per User (landed)
 
 **Goal.** One Computer is provisioned per User, with each Bot a tenant on it,
 per ADR 0012. Replaces the per-Bot Sprite and the separate User storage Sprite.
@@ -64,8 +65,8 @@ particular splitting `ComputerRegistry.assign`/`open` and
 retiring the deprecated `ComputerTarget` alias — plus
 `packages/plugin-computer/src/*` and `packages/plugin-shell/src/backend-computer.ts`.
 
-**Per-Bot assumptions to unpick** (found while landing Step 0; all are
-function-signature-level, so Step 0 left them alone):
+**Per-Bot assumptions unpicked** (all were function-signature-level, so Step 0
+left them alone; Step 1 removed all four):
 
 - `ComputerRegistry.assign/assignment/open` take a `ComputerTarget` and key the
   assignment map by `userId:botId`, so two Bots of one User get two
@@ -77,6 +78,26 @@ function-signature-level, so Step 0 left them alone):
 - `ComputerWorkspace.openDirectory({ namespace, scope, durability })` names a
   root by an untyped `namespace` string plus a `"bot" | "user"` scope, which is
   the pre-contract spelling of `WorkspaceRootV1`.
+
+**What each became.**
+
+- `ComputerRegistry.assign/assignment/open` take `ComputerIdentityV1` and, for
+  `open`, a `ComputerTenantV1`. The assignment map is keyed by User alone.
+- `ComputerProvider.open(identity, tenant, assignment, options)` — the provider
+  can tell "provision the Computer" from "attach this tenant".
+- `flySpriteNameForTarget` and `flySpriteNameForUserStorage` are gone, replaced
+  by `flySpriteNameForComputer(identity)`: one Sprite per User, no separate User
+  storage Sprite. The browser profile is the shared `/home/box/chrome-profile`.
+- `openDirectory` is deleted. `ComputerWorkspace` now _is_ `WorkspaceFilesV1`
+  plus its `WorkspaceLayoutV1`; `ComputerTarget` and `ComputerTargetV1` are
+  deleted with it.
+
+**Deliberately left for Step 3.** The Workspace presents Memory roots read-only
+through the kernel-consumed surface, but the ADR 0013 durable-root R2 sync does
+not exist, so the Memory Package still writes the Computer directly through one
+named seam, `ComputerWorkspace.memoryWriter`. It accepts Memory roots and
+nothing else; the kernel surface accepts everything else and no Memory root.
+Step 3 deletes it.
 
 **Tests that gate.** Two Bots of one User resolve to one Computer and one
 provider Sprite; each tenant sees its own directory and display; a Bot reads
