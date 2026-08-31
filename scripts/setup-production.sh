@@ -314,6 +314,18 @@ NODE
   set_required_production_secret CREDENTIAL_KEYRING "$CREDENTIAL_KEYRING"
   unset CREDENTIAL_KEYRING
 fi
+if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx COMPUTER_HOST_TOKEN; then
+  note "Preserving the existing COMPUTER_HOST_TOKEN so the deployed host keeps accepting the app Worker."
+else
+  say "Provision the shared secret the app Worker presents to the Computer host."
+  COMPUTER_HOST_TOKEN="$(openssl rand -hex 32)"
+  [[ -n "$COMPUTER_HOST_TOKEN" ]] || {
+    warn "Computer host token generation failed"
+    exit 1
+  }
+  set_required_production_secret COMPUTER_HOST_TOKEN "$COMPUTER_HOST_TOKEN"
+  unset COMPUTER_HOST_TOKEN
+fi
 unset PRODUCTION_SECRETS
 
 stage "GitHub: verify production configuration"

@@ -80,12 +80,14 @@ For the first publication, add a granular npm automation token with access to th
 
 ## Production deployment
 
-After CI succeeds on a push to `main`, `ci.yml` deploys three Cloudflare Workers through the GitHub `production` environment:
+After CI succeeds on a push to `main`, `ci.yml` deploys four Cloudflare Workers through the GitHub `production` environment:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
-- `apps/fly-host-prototype` deploys the internal shared Computer host with no public route;
 - `apps/cloudflare-bundler` is the binding-less Package bundler the app reaches through its `PACKAGE_BUNDLER` service binding; it deploys before the app because that binding must resolve;
+- `apps/computer-host` is the shared Computer host of [ADR 0004](docs/adr/0004-host-fly-computer-in-cloudflare-containers.md): an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app for the same reason the bundler does, and because a stale host would be serving a current app;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
+
+The Computer host runs Containers, which require the **Workers Paid plan**; its deploy step builds and pushes the container image, so the runner needs Docker (`ubuntu-latest` has it).
 
 The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
 
@@ -107,9 +109,12 @@ Configure these GitHub `production` environment values:
 | Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
 | Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
 | Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                  |
+| Secret   | `COMPUTER_HOST_TOKEN`       | Shared secret the app Worker presents to the Computer host; generate it       |
 | Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-User Connection credentials                 |
 
 Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
+
+`COMPUTER_HOST_TOKEN` is not obtained from anywhere — generate it, once, with `openssl rand -hex 32`, and add it as a GitHub `production` secret. It is checked inside the container as well as at the host Worker, because the service binding is not the only route to that port. Rotating it means redeploying both Workers together.
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
 
@@ -144,6 +149,7 @@ apps/
   mobile/           Direct-hosted Capacitor shell and optional native capabilities
   agent-runtime/    Transport-neutral backend Agent composition
   cloudflare/       User application loader, Dynamic Worker artifact, and bot state
+  computer-host/    Shared Computer host Worker and its Node container (ADR 0004)
   marketing/        Public frockbot.com site and static-assets Worker
   cordis-poc/       Executable pinned Cordis/Electron/WebUI foundation proof
 packages/
@@ -154,6 +160,8 @@ packages/
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Cordis-free reusable Vue primitives and surface registry
   computer-core/    Provider registry and capability interfaces for Computers
+  computer-host-protocol/  Versioned v1 DTOs and decoders for the Computer host seam
+  computer-host-runtime/   The Computer's on-Sprite layout, scripts, and Sprite naming
   configuration-core/ Versioned durable User/Bot settings contracts
   connection-core/  Provider-neutral Connection transport result contracts
   architecture-checks/ Automated checks for the constitutional rules

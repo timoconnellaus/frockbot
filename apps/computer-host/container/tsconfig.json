@@ -1,0 +1,16 @@
+{
+  // The container half: Node 24, the Sprites SDK, and the live test that
+  // drives the whole thing from outside.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "lib": ["ES2023", "DOM"],
+    "types": ["bun", "node"]
+  },
+  "include": ["./**/*.ts", "../live-test.ts"]
+}

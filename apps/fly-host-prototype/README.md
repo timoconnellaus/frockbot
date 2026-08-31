@@ -1,18 +1,17 @@
-# Shared Computer host
+# Shared Computer host — compatibility prototype (superseded)
 
-This Worker is the replaceable, non-authoritative production Computer host selected in [ADR 0004](../../docs/adr/0004-host-fly-computer-in-cloudflare-containers.md). Bot Durable Objects call it through an internal service binding with exact provider-neutral effect DTOs. A durable journal records each effect identity before dispatch and replays completed outcomes without duplicating uncertain work. The container alone loads the Sprites SDK and `SPRITES_TOKEN`.
+**Superseded by [`apps/computer-host`](../computer-host/README.md).** This
+directory is kept only as the record of the compatibility experiment that ADR
+0004 required, and it is no longer deployed: `apps/computer-host` now owns the
+`frockbot-computer-host` Worker script, its container, and its durable effect
+journal.
 
-## Checks
+What it proved, against a real disposable Sprite from inside a real Cloudflare
+Container: streaming command output, file persistence, cancellation, adapter
+reconstruction, and cleanup. What it did **not** prove, and what the production
+host had to solve, is how a command large enough to matter reaches the Sprite
+at all — the Sprites SDK puts a command's argv and environment into its request
+URL, and Fly answers a ~2.5 KB query with HTTP 431. The production host ships
+every script on the command's stdin instead. See ADR 0004's consequences.
 
-```sh
-bun run --filter @frockbot/computer-host typecheck
-bun run --filter @frockbot/computer-host test
-```
-
-The opt-in live smoke requires Docker and `SPRITES_TOKEN` in gitignored `apps/fly-host-prototype/.dev.vars`:
-
-```sh
-bun run --filter @frockbot/computer-host test:live
-```
-
-The smoke starts Wrangler locally, builds the Node container, sends a decoded `/v1/computer/smoke` DTO, and verifies streaming command output, file persistence, cancellation, reconstruction, and cleanup against a disposable `frockbot-test-*` Sprite.
+Nothing here is a production path. Read `apps/computer-host` instead.

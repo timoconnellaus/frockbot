@@ -1,0 +1,74 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "frockbot-computer-host",
+  "account_id": "374784ce2915a597adcecf9bcb2c5ee6",
+  "workers_dev": false,
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  // No routes, by design. The shared Computer host (ADR 0004) is reachable
+  // only through the app Worker's COMPUTER_HOST service binding, and the
+  // container re-checks a shared token on top of that.
+  "containers": [
+    {
+      "class_name": "ComputerHostContainer",
+      "image": "./Dockerfile",
+      // The image needs the two workspace packages the container imports, so
+      // the build context is the repository root; the root `.dockerignore`
+      // keeps everything else out of it.
+      "image_build_context": "../..",
+      "instance_type": "basic",
+      "max_instances": 3,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COMPUTER_HOST_CONTAINER",
+        "class_name": "ComputerHostContainer",
+      },
+      // The superseded single-effect seam addressed the same containers under
+      // this name. Kept so live ComputerEffectJournal objects keep resolving.
+      {
+        "name": "FLY_HOST",
+        "class_name": "ComputerHostContainer",
+      },
+      {
+        "name": "COMPUTER_EFFECTS",
+        "class_name": "ComputerEffectJournal",
+      },
+    ],
+  },
+  // v1 and v2 are the prototype's, already applied to this script. v3
+  // renames its container class rather than deleting it, so no durable
+  // object and no recorded effect outcome is dropped by the supersession.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["FlyHostContainer"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["ComputerEffectJournal"],
+    },
+    {
+      "tag": "v3",
+      "renamed_classes": [
+        {
+          "from": "FlyHostContainer",
+          "to": "ComputerHostContainer",
+        },
+      ],
+    },
+  ],
+  "vars": {
+    // Two warm shards. A User is routed by userId, so every Bot of one User
+    // reaches the one container that holds its Computer's locks.
+    "COMPUTER_HOST_SHARDS": "2",
+    // The superseded seam's own shard count, unchanged.
+    "FLY_HOST_SHARDS": "1",
+  },
+  "observability": {
+    "enabled": true,
+  },
+}
