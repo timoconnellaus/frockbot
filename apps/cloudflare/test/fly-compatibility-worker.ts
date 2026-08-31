@@ -1113,6 +1113,44 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
   }
 
   /**
+   * The Computer's self-check, driven through the provider-neutral interface.
+   *
+   * What only this layer can show is the exec travelling the real v1 protocol
+   * on a real service binding, and the report being decoded at the provider
+   * seam rather than handed back as a string for somebody else to parse.
+   */
+  async doctor(botId = "compatibility"): Promise<
+    | {
+        ok: true;
+        schemaVersion: number;
+        generation: number;
+        capturedAt: string;
+        summary: string;
+        checks: { name: string; status: string; detail: string }[];
+      }
+    | { ok: false; message: string }
+  > {
+    this.root ??= await this.createRoot("frockbot-workerd-compatibility");
+    const identity = { userId: "workerd" };
+    this.root.computers.assign(identity, "fly-sprite");
+    const computer = await this.root.computers.open(identity, { botId });
+    try {
+      const report = await computer.doctor!.run();
+      return { ok: true, ...report };
+    } catch (error) {
+      // Answered rather than thrown: an RPC rejection crossing the Durable
+      // Object boundary is observed twice by the runner, and the refusal is
+      // what this probe exists to report.
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      await computer.close();
+    }
+  }
+
+  /**
    * A background process, driven through the provider-neutral interface.
    *
    * The probe holds the record the Bot Durable Object would hold, so the
