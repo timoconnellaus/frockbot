@@ -129,6 +129,23 @@ const messages = computed(() =>
 );
 
 /*
+ * One anchor per Turn, on its first visible line, so a deep link resolves to
+ * exactly one element. A Turn shows as two lines — the prompt and the reply —
+ * and giving both the same id would put the same anchor in the document
+ * twice.
+ */
+const turnAnchors = computed(() => {
+  const anchors = new Map<string, string>();
+  const seen = new Set<string>();
+  for (const message of messages.value) {
+    if (seen.has(message.runId)) continue;
+    seen.add(message.runId);
+    anchors.set(message.id, `turn-${message.runId}`);
+  }
+  return anchors;
+});
+
+/*
  * The thread follows new content only while the reader is already at the
  * bottom. Someone reading back through history is never yanked forward; the
  * jump control tells them there is something newer.
@@ -355,6 +372,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             <strong>{{ botName }}</strong>
             <small>{{ state.modelLabel }}</small>
           </div>
+          <k-slot name="frockbot.header-actions" />
         </header>
 
         <section
@@ -379,6 +397,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           <article
             v-for="message in messages"
             v-else
+            :id="turnAnchors.get(message.id)"
             :key="message.id"
             class="message"
             :class="`message-${message.role}`"

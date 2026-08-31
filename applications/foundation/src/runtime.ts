@@ -120,6 +120,19 @@ import {
 } from "@frockbot/plugin-routines/agent";
 export type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
 import searchManifest from "@frockbot/plugin-search/manifest";
+// Gateway Search behavior is resolved as a lifecycle-owned Plugin.
+import {
+  createSearchBackendContribution,
+  type SearchGatewayHost,
+} from "@frockbot/plugin-search/backend";
+const createSearchGatewayPlugin = (
+  createSearchBackendContribution as typeof createSearchBackendContribution & {
+    plugin(
+      host: SearchGatewayHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
 import settingsManifest from "@frockbot/plugin-settings/manifest";
 // Provider-neutral Connection transport is owned by the Settings gateway Contribution.
 import {
@@ -322,6 +335,7 @@ export type FoundationGatewayHost = {
 } & FlockGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
+  SearchGatewayHost &
   PackagePublisherGatewayHost;
 
 export async function createFoundationBackendContributions(
@@ -377,6 +391,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-routines/backend"
         ) {
           plugin = createRoutinesGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-search/backend"
+        ) {
+          plugin = createSearchGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-package-publisher/backend"
