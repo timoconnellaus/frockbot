@@ -8,6 +8,8 @@ import {
   type NormalizedModelRequest,
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
+import type { CompositionGenerationV1 } from "@frockbot/kernel-composition/generation";
+import { DurableCompositionStore } from "./composition-store.js";
 import {
   botTurnCommandFingerprintV1,
   type BotNotificationIntent,
@@ -58,6 +60,8 @@ export interface BotTurnExecutionInput<Snapshot> {
   command: BotTurnCommand;
   previousEvents: readonly SessionEvent[];
   configurationSnapshot: Snapshot;
+  /** The Composition generation pinned to this Turn at admission. */
+  compositionGenerationId: string;
   persistSessionEvents(
     sessionId: string,
     events: readonly SessionEvent[],
@@ -76,6 +80,8 @@ export interface BotTurnExecutionInput<Snapshot> {
 export interface BotDurableAuthorityHooks<Snapshot> {
   /** Configuration snapshot a Turn is admitted under, resolved before admission. */
   resolveAdmissionSnapshot(command: OwnedBotTurnCommand): Promise<Snapshot>;
+  /** The first-party generation a Bot with no Composition records starts on. */
+  bootstrapComposition(): Promise<CompositionGenerationV1>;
   /** Durable snapshot read inside the admission transaction. */
   admittedSnapshot(
     transaction: DurableObjectTransaction,
@@ -110,12 +116,18 @@ export class BotDurableAuthority<Snapshot> {
   readonly ctx: DurableObjectState;
   private readonly codec: StoredRunCodecV1<Snapshot>;
   private readonly hooks: BotDurableAuthorityHooks<Snapshot>;
+  /** Durable Composition generations; every admitted Turn pins the current one. */
+  readonly composition: DurableCompositionStore;
   private executingRunId: string | undefined;
 
   constructor(options: BotDurableAuthorityOptions<Snapshot>) {
     this.ctx = options.state;
     this.codec = options.codec;
     this.hooks = options.hooks;
+    this.composition = new DurableCompositionStore({
+      state: options.state,
+      bootstrap: () => options.hooks.bootstrapComposition(),
+    });
   }
 
   async run(command: OwnedBotTurnCommand): Promise<BotTurnCompletion> {
@@ -128,6 +140,7 @@ export class BotDurableAuthority<Snapshot> {
       command,
       admission.previous,
       admission.settings,
+      admission.compositionGenerationId,
     );
   }
 
@@ -198,6 +211,7 @@ export class BotDurableAuthority<Snapshot> {
     command: OwnedBotTurnCommand,
     previous: SessionEvent[],
     settings: Snapshot,
+    compositionGenerationId: string,
   ): Promise<BotTurnCompletion> {
     this.executingRunId = command.runId;
     try {
@@ -218,6 +232,7 @@ export class BotDurableAuthority<Snapshot> {
         command,
         previousEvents: previous,
         configurationSnapshot: settings,
+        compositionGenerationId,
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(command.runId, events),
         resume: false,
@@ -281,6 +296,7 @@ export class BotDurableAuthority<Snapshot> {
         },
         previousEvents: latest,
         configurationSnapshot: settings,
+        compositionGenerationId: run.compositionGenerationId,
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(run.runId, events),
         resume: true,
@@ -559,9 +575,11 @@ export class BotDurableAuthority<Snapshot> {
     if (!existing) await this.ctx.storage.put(IDENTITY_KEY, identity);
   }
 
-  private async acceptRun(
-    command: OwnedBotTurnCommand,
-  ): Promise<{ previous: SessionEvent[]; settings: Snapshot }> {
+  private async acceptRun(command: OwnedBotTurnCommand): Promise<{
+    previous: SessionEvent[];
+    settings: Snapshot;
+    compositionGenerationId: string;
+  }> {
     const fenceKey = `${RUN_ADMISSION_FENCE_PREFIX}${command.runId}`;
     const fences = storedRunAdmissionFences(
       await this.ctx.storage.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
@@ -573,6 +591,8 @@ export class BotDurableAuthority<Snapshot> {
       throw new Error(`run "${command.runId}" admission was fenced`);
     }
     const settings = await this.hooks.resolveAdmissionSnapshot(command);
+    // Materialized before the transaction; the pin itself is read inside it.
+    await this.composition.materialize();
     const key = `${RUN_PREFIX}${command.runId}`;
     return this.ctx.storage.transaction(async (transaction) => {
       const existing = this.codec.optional(await transaction.get<unknown>(key));
@@ -612,6 +632,7 @@ export class BotDurableAuthority<Snapshot> {
         transaction,
         settings,
       );
+      const pin = await this.composition.pin(transaction);
       const admittedRun = this.codec.require({
         runId: command.runId,
         commandFingerprint: botTurnCommandFingerprintV1(command),
@@ -621,6 +642,7 @@ export class BotDurableAuthority<Snapshot> {
         events: [],
         status: "running",
         phase: "admitted",
+        compositionGenerationId: pin.generationId,
         configurationSnapshot: structuredClone(admittedSettings),
         previousEventCount: latestEvents.length,
       } satisfies StoredRunV1<Snapshot>);
@@ -634,7 +656,11 @@ export class BotDurableAuthority<Snapshot> {
         },
       });
       await this.refreshRecoveryAlarm(transaction);
-      return { previous: latestEvents, settings: admittedSettings };
+      return {
+        previous: latestEvents,
+        settings: admittedSettings,
+        compositionGenerationId: pin.generationId,
+      };
     });
   }
 
@@ -857,6 +883,7 @@ export class BotDurableAuthority<Snapshot> {
       },
       recovery.previous,
       recovery.settings,
+      recovery.run.compositionGenerationId,
     );
   }
 }

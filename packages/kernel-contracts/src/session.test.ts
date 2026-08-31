@@ -5,10 +5,11 @@ import {
   type SessionStoreConfig,
   validateToolOccurrenceJournal,
 } from "./session.js";
-import type {
-  NormalizedModelRequest,
-  SessionEvent,
-  SessionEventInput,
+import {
+  decodeSessionEvent,
+  type NormalizedModelRequest,
+  type SessionEvent,
+  type SessionEventInput,
 } from "./types.js";
 
 const roots: Context[] = [];
@@ -201,7 +202,7 @@ describe("SessionStore", () => {
     },
   );
 
-  test("records exact requests and derives model messages", async () => {
+  test("replays the exact request under its recorded Composition generation", async () => {
     const root = await createStore();
     const session = root.sessions.create("session-1");
     const request: NormalizedModelRequest = {
@@ -215,6 +216,12 @@ describe("SessionStore", () => {
 
     session.appendBatch([
       { type: "turn/start", turn: 1 },
+      {
+        type: "composition/pinned",
+        turn: 1,
+        generationId: "2026-08-31T00:00:00.000Z:0123456789abcdef",
+        artifactSetHash: "a".repeat(64),
+      },
       { type: "input/admitted", messageId: "message-1", turn: 1 },
       { type: "step/start", turn: 1, step: 1 },
       {
@@ -240,9 +247,26 @@ describe("SessionStore", () => {
     const recorded = session.events.find(
       (event) => event.type === "model/request",
     );
+    const pin = session.events.find(
+      (event) => event.type === "composition/pinned",
+    );
     expect(
       recorded?.type === "model/request" ? recorded.request : undefined,
     ).toEqual(request);
+    expect(
+      pin?.type === "composition/pinned"
+        ? {
+            generationId: pin.generationId,
+            artifactSetHash: pin.artifactSetHash,
+          }
+        : undefined,
+    ).toEqual({
+      generationId: "2026-08-31T00:00:00.000Z:0123456789abcdef",
+      artifactSetHash: "a".repeat(64),
+    });
+    expect(
+      session.events.map((event) => decodeSessionEvent(structuredClone(event))),
+    ).toEqual([...session.events]);
     expect(session.deriveMessages()).toEqual([
       { role: "user", content: "Hello" },
       { role: "assistant", content: "Hi", toolCalls: [] },
@@ -317,6 +341,12 @@ describe("SessionStore", () => {
     const session = root.sessions.create("session-2");
     session.appendBatch([
       { type: "turn/start", turn: 1 },
+      {
+        type: "composition/pinned",
+        turn: 1,
+        generationId: "2026-08-31T00:00:00.000Z:0123456789abcdef",
+        artifactSetHash: "a".repeat(64),
+      },
       { type: "input/admitted", messageId: "message-1", turn: 1 },
       { type: "step/start", turn: 1, step: 1 },
       {

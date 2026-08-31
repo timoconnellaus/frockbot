@@ -62,7 +62,7 @@ export interface CompileApplicationOptions {
   frockbotVersion: string;
 }
 
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (
     value === null ||
     typeof value === "string" ||
@@ -86,7 +86,7 @@ function canonicalJson(value: unknown): string {
     .join(",")}}`;
 }
 
-async function sha256(value: string): Promise<string> {
+export async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(value),

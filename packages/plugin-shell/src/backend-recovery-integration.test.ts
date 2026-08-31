@@ -384,6 +384,7 @@ describe("Bot recovery", () => {
         input: "hello",
         events: [],
         phase: "executing",
+        compositionGenerationId: "test-composition-generation",
         configurationSnapshot: initializeBotSettingsV1("primary"),
         previousEventCount: 0,
       },
@@ -443,6 +444,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -476,6 +478,7 @@ describe("Bot recovery", () => {
       status: "reconciliation-required",
       phase: "reconciliation-required",
       failure: "Provider confirmation required",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -568,6 +571,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: admittedSettings,
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -663,6 +667,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: settings,
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -735,6 +740,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -799,6 +805,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -892,6 +899,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -965,6 +973,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -1034,6 +1043,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -1060,6 +1070,7 @@ describe("Bot recovery", () => {
       events: [],
       status: "completed",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
       responseText: "Durable reply",
@@ -1146,6 +1157,7 @@ describe("Bot recovery", () => {
       events,
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -1191,6 +1203,7 @@ describe("Bot recovery", () => {
       events: [],
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -1383,6 +1396,7 @@ describe("Bot recovery", () => {
       events: [],
       status: "running",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
     } satisfies StoredRun;
@@ -1421,6 +1435,7 @@ describe("Bot recovery", () => {
       events: [],
       status: "completed",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
       responseText: "legacy",
@@ -1455,6 +1470,7 @@ describe("Bot recovery", () => {
         events: [],
         status: active ? "reconciliation-required" : "completed",
         phase: active ? "reconciliation-required" : "executing",
+        compositionGenerationId: "test-composition-generation",
         configurationSnapshot: initializeBotSettingsV1("primary"),
         previousEventCount: 0,
         ...(active

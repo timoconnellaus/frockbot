@@ -13,6 +13,11 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
+import {
+  bootstrapCompositionGeneration,
+  createShellCompositionHost,
+} from "@frockbot/plugin-shell/backend-composition";
+import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import {
   decodeClientRunLookupV1,
@@ -70,6 +75,10 @@ class MemoryBotState implements BotStateBinding {
       throw new Error("bot already has an active run");
     }
     const previousEvents = this.sessions.get(botId) ?? [];
+    const generation = await bootstrapCompositionGeneration(
+      await compileFoundationApplication(),
+      "2026-01-01T00:00:00.000Z",
+    );
     const run: StoredRun = {
       runId: command.runId,
       commandFingerprint: "internal-command-fingerprint",
@@ -79,6 +88,7 @@ class MemoryBotState implements BotStateBinding {
       events: [],
       status: "running",
       phase: "admitted",
+      compositionGenerationId: generation.generationId,
       configurationSnapshot: {
         schemaVersion: 1,
         botId,
@@ -92,10 +102,15 @@ class MemoryBotState implements BotStateBinding {
     runs.push(run);
     this.runs.set(botId, runs);
     try {
-      const result = await executeBotTurn({
+      const composition = await createShellCompositionHost({
         botId,
+        sessionId: command.sessionId,
+        sessionEvents: previousEvents,
+      }).mount(generation, new AbortController().signal);
+      const result = await executeBotTurn({
         command,
         previousEvents,
+        composition,
       });
       run.events = structuredClone(result.events);
       run.status = "completed";
@@ -1255,6 +1270,7 @@ describe("Cloudflare user application gateway", () => {
     for (const internalField of [
       "commandFingerprint",
       "sessionId",
+      "compositionGenerationId",
       "configurationSnapshot",
       "phase",
       "previousEventCount",

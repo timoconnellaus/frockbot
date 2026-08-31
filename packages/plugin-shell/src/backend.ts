@@ -45,6 +45,10 @@ import {
   settleAssignmentSaga,
   type StoredAssignmentSaga,
 } from "./backend-assignment.js";
+import {
+  bootstrapCompositionGeneration,
+  createShellCompositionHost,
+} from "./backend-composition.js";
 import { executeBotTurn } from "./backend-runner.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
@@ -222,6 +226,7 @@ export class ShellBotBackendContribution {
       hooks: {
         resolveAdmissionSnapshot: (command) =>
           this.resolveAdmissionSnapshot(command),
+        bootstrapComposition: () => this.bootstrapComposition(),
         admittedSnapshot: (transaction, resolved) =>
           this.admittedSnapshot(transaction, resolved),
         executeTurn: (input) => this.executeTurn(input),
@@ -1225,17 +1230,43 @@ export class ShellBotBackendContribution {
       settings.profile.label,
       settings.profile.description,
     ].filter((part): part is string => Boolean(part?.trim()));
-    return executeBotTurn({
+    // The pin, never the current generation: activation takes effect at the
+    // next admitted Turn, and an in-flight Turn completes on what it pinned.
+    const generation = await this.authority.composition.read(
+      input.compositionGenerationId,
+    );
+    if (!generation) {
+      throw new Error(
+        `run "${input.command.runId}" pins unknown Composition generation "${input.compositionGenerationId}"`,
+      );
+    }
+    const host = createShellCompositionHost({
       botId: input.identity.botId,
-      command: input.command,
-      previousEvents: input.previousEvents,
+      sessionId: input.command.sessionId,
+      sessionEvents: input.previousEvents,
       memory: memoryPluginConfig(this.env, input.identity),
       persistSessionEvents: input.persistSessionEvents,
       agentPackages: runtime.agentPackages,
       modelSelection: runtime.modelSelection,
       systemPromptSection: promptParts.join("\n\n"),
+    });
+    const controller = new AbortController();
+    const composition = await host.mount(generation, controller.signal);
+    await composition.verify(controller.signal);
+    return executeBotTurn({
+      command: input.command,
+      previousEvents: input.previousEvents,
+      composition,
       resume: input.resume,
     });
+  }
+
+  /** The first-party generation this Bot starts on, from the compiled application. */
+  private async bootstrapComposition() {
+    return bootstrapCompositionGeneration(
+      await this.compileApplication(),
+      new Date().toISOString(),
+    );
   }
 
   private async resolveAdmissionSnapshot(

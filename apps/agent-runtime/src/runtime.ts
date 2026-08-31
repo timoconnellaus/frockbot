@@ -23,6 +23,11 @@ import {
   type PackageSource,
 } from "@frockbot/plugin-catalog";
 import {
+  bootstrapGeneration,
+  type CompositionGenerationV1,
+} from "@frockbot/kernel-composition/generation";
+import type { CompositionPinV1 } from "@frockbot/kernel-contracts";
+import {
   createRuntimeContributionHost,
   runtimePackageCatalogConfig,
 } from "@frockbot/plugin-catalog/runtime";
@@ -81,6 +86,33 @@ export interface FoundationRuntimeOptions {
   persistSessionEvents?: PersistSessionEvents;
   systemPromptSection?: string;
   modelSelection?: RuntimeModelSelection;
+  /** The Composition generation this root is pinned to; defaults to bootstrap. */
+  composition?: CompositionPinV1;
+}
+
+/** The first-party generation a runtime with no durable Composition starts on. */
+export async function bootstrapRuntimeGeneration(
+  application: FoundationRuntimeApplication,
+): Promise<CompositionGenerationV1> {
+  return bootstrapGeneration(
+    application.plan.packages.map((pkg) => ({
+      packageId: pkg.id,
+      specifier: pkg.specifier,
+      version: pkg.version,
+      manifest: pkg.manifest,
+    })),
+    { createdAt: new Date(0).toISOString() },
+  );
+}
+
+async function bootstrapCompositionPin(
+  application: FoundationRuntimeApplication,
+): Promise<CompositionPinV1> {
+  const generation = await bootstrapRuntimeGeneration(application);
+  return {
+    generationId: generation.generationId,
+    artifactSetHash: generation.artifactSetHash,
+  };
 }
 
 export async function createFoundationRuntime(
@@ -166,7 +198,9 @@ export async function createFoundationRuntime(
     if (packageId === "memory" && !options.memory) continue;
     await root.packages.enable(packageId);
   }
-  await root.plugin(AgentLoop, { maxSteps: 8 });
+  const composition =
+    options.composition ?? (await bootstrapCompositionPin(application));
+  await root.plugin(AgentLoop, { maxSteps: 8, composition });
 
   const selection = options.modelSelection;
   if (selection) {

@@ -72,6 +72,7 @@ export interface StoredRun {
   responseText?: string;
   failure?: string;
   phase?: "admitted" | "executing" | "reconciliation-required";
+  compositionGenerationId?: string;
   configurationSnapshot?: BotSettingsViewV1;
   previousEventCount?: number;
 }

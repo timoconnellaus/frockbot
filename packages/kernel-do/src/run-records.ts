@@ -34,6 +34,8 @@ export interface StoredRunV1<Snapshot = unknown> {
   responseText?: string;
   failure?: string;
   phase: StoredRunPhase;
+  /** The Composition generation pinned in the same transaction that admitted the run. */
+  compositionGenerationId: string;
   configurationSnapshot: Snapshot;
   previousEventCount: number;
 }
@@ -58,6 +60,7 @@ const STORED_RUN_REQUIRED_KEYS = [
   "events",
   "status",
   "phase",
+  "compositionGenerationId",
   "configurationSnapshot",
   "previousEventCount",
 ] as const;
@@ -142,6 +145,9 @@ function requireStoredRunRecordV1<Snapshot>(
   if (!phase) {
     throw new Error(`run "${runId}" has no valid phase`);
   }
+  if (!boundedString(candidate.compositionGenerationId, 256)) {
+    throw new Error(`run "${runId}" has no valid Composition generation`);
+  }
   if (
     !Number.isSafeInteger(candidate.previousEventCount) ||
     (candidate.previousEventCount as number) < 0
@@ -190,6 +196,7 @@ function requireStoredRunRecordV1<Snapshot>(
     events,
     status,
     phase,
+    compositionGenerationId: candidate.compositionGenerationId,
     configurationSnapshot: candidate.configurationSnapshot as Snapshot,
     previousEventCount: candidate.previousEventCount as number,
     ...(candidate.responseText === undefined

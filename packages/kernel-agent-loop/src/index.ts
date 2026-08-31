@@ -8,6 +8,7 @@ import {
   type PreStepDecision,
 } from "./agent.js";
 import {
+  type CompositionPinV1,
   LlmEffectNotStartedError,
   type LlmStreamEvent,
   type NormalizedModelRequest,
@@ -23,9 +24,6 @@ import {
 } from "@frockbot/kernel-contracts";
 import { type Context, Service } from "cordis";
 
-/** Until Step 2 pins real Composition generations, every Turn runs on the bootstrap one. */
-const BOOTSTRAP_COMPOSITION_GENERATION_ID = "bootstrap";
-
 declare module "cordis" {
   interface Events {
     "agent/model-outcome-committed": (
@@ -38,6 +36,8 @@ declare module "cordis" {
 
 export interface AgentLoopConfig {
   maxSteps?: number;
+  /** The Composition generation this mounted root was pinned to at admission. */
+  composition: CompositionPinV1;
 }
 
 declare module "cordis" {
@@ -86,6 +86,7 @@ class LoopAgent implements Agent {
   #ctx: Context;
   #options: AgentOptions;
   #maxSteps: number;
+  #composition: CompositionPinV1;
   #status: AgentStatus = "idle";
   #inbox: AgentInput[] = [];
   #activity: Promise<void> = Promise.resolve();
@@ -98,8 +99,10 @@ class LoopAgent implements Agent {
     session: Session,
     options: AgentOptions,
     maxSteps: number,
+    composition: CompositionPinV1,
   ) {
     this.#ctx = ctx;
+    this.#composition = composition;
     this.session = session;
     this.botId = options.botId;
     const explicitAgentId = (
@@ -499,6 +502,12 @@ class LoopAgent implements Agent {
     const turn = this.session.nextTurn();
     this.session.appendBatch([
       { type: "turn/start", turn },
+      {
+        type: "composition/pinned",
+        turn,
+        generationId: this.#composition.generationId,
+        artifactSetHash: this.#composition.artifactSetHash,
+      },
       { type: "input/admitted", messageId: input.messageId, turn },
     ]);
     await this.session.flush();
@@ -836,8 +845,7 @@ class LoopAgent implements Agent {
         botId: this.botId,
         agentId: this.id,
         sessionId: this.session.id,
-        // Step 2 replaces this with the Composition generation pinned at admission.
-        compositionGenerationId: BOOTSTRAP_COMPOSITION_GENERATION_ID,
+        compositionGenerationId: this.#composition.generationId,
         signal,
       };
       const preparation = await this.#ctx.tools.prepare(call, context);
@@ -933,19 +941,30 @@ class LoopAgent implements Agent {
 export class AgentLoop extends Service implements AgentFactory {
   static inject = ["sessions", "systemPrompt", "llm", "tools", "agents"];
   private maxSteps: number;
+  private composition: CompositionPinV1;
   private handles = new Set<AgentHandle>();
 
-  constructor(ctx: Context, config: AgentLoopConfig = {}) {
+  constructor(ctx: Context, config: AgentLoopConfig) {
     super(ctx, "agentLoop");
+    this.composition = config.composition;
     this.maxSteps = config.maxSteps ?? 20;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps <= 0) {
       throw new Error("agent-loop maxSteps must be a positive integer");
+    }
+    if (!this.composition?.generationId || !this.composition.artifactSetHash) {
+      throw new Error("agent-loop requires a pinned Composition generation");
     }
   }
 
   async create(options: AgentOptions): Promise<AgentHandle> {
     const session = this.ctx.sessions.create(options.sessionId);
-    const agent = new LoopAgent(this.ctx, session, options, this.maxSteps);
+    const agent = new LoopAgent(
+      this.ctx,
+      session,
+      options,
+      this.maxSteps,
+      this.composition,
+    );
     const unregister = this.ctx.agents.register(agent);
     let disposed = false;
     let handle: AgentHandle;

@@ -104,12 +104,23 @@ export type StepOutcome =
 
 export type TurnOutcome = StepOutcome;
 
+/** The Composition generation an admitted Turn is pinned to. */
+export interface CompositionPinV1 {
+  generationId: string;
+  artifactSetHash: string;
+}
+
 export interface SessionEventMap {
   "session/created": { createdAt: string };
   "input/queued": { messageId: string; text: string };
   "input/admitted": { messageId: string; turn: number };
   "input/cancelled": { messageId: string; reason: "user" | "shutdown" };
   "turn/start": { turn: number };
+  "composition/pinned": {
+    turn: number;
+    generationId: string;
+    artifactSetHash: string;
+  };
   "step/start": { turn: number; step: number };
   "user/message": {
     turn: number;
@@ -387,6 +398,16 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
     case "turn/start":
       requireEventKeys(event, keys("turn"), "session event");
       turn();
+      break;
+    case "composition/pinned":
+      requireEventKeys(
+        event,
+        keys("turn", "generationId", "artifactSetHash"),
+        "session event",
+      );
+      turn();
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.artifactSetHash, "session event.artifactSetHash");
       break;
     case "step/start":
       requireEventKeys(event, keys("turn", "step"), "session event");

@@ -1,11 +1,5 @@
-import {
-  createFoundationRuntime,
-  type FoundationAgentPackage,
-  type RuntimeModelSelection,
-} from "@frockbot/agent-runtime/runtime";
-import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
-import type { PersistSessionEvents, SessionEvent } from "@frockbot/agent-core";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
+import type { SessionEvent } from "@frockbot/agent-core";
+import type { ShellMountedComposition } from "./backend-composition.js";
 import {
   BotTurnExecutionError,
   BotTurnReconciliationRequiredError,
@@ -36,42 +30,18 @@ function appendedSessionEvents(
 }
 
 export interface ExecuteBotTurnOptions {
-  botId: string;
   command: BotTurnCommand;
   previousEvents: readonly SessionEvent[];
-  memory?: MemoryPluginConfig;
-  persistSessionEvents?: PersistSessionEvents;
-  agentPackages?: readonly FoundationAgentPackage[];
-  modelSelection?: RuntimeModelSelection;
-  systemPromptSection?: string;
+  /** The mounted Composition for the generation this Turn was pinned to. */
+  composition: ShellMountedComposition;
   resume?: boolean;
 }
 
 export async function executeBotTurn(
   options: ExecuteBotTurnOptions,
 ): Promise<BotTurnCompletion> {
-  const {
-    botId,
-    command,
-    previousEvents,
-    memory,
-    persistSessionEvents,
-    agentPackages,
-    modelSelection,
-    systemPromptSection,
-    resume,
-  } = options;
-  const runtime = await createFoundationRuntime(undefined, {
-    agentId: botId,
-    sessionId: command.sessionId,
-    sessionEvents: previousEvents,
-    application: await createFoundationRuntimeApplication(),
-    memory,
-    persistSessionEvents,
-    agentPackages,
-    modelSelection,
-    systemPromptSection,
-  });
+  const { command, previousEvents, composition, resume } = options;
+  const runtime = composition.runtime;
 
   try {
     if (resume) runtime.agent.agent.resume();
@@ -143,6 +113,6 @@ export async function executeBotTurn(
       appendedSessionEvents(previousEvents, events),
     );
   } finally {
-    await runtime.dispose();
+    await composition.dispose();
   }
 }

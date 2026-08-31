@@ -11,10 +11,25 @@ export const ACTIVE_RUN_KEY = "active-run";
 export const LATEST_EVENTS_KEY = "latest-events";
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";
+export const COMPOSITION_CURRENT_KEY = "composition:current";
+export const COMPOSITION_GENERATION_PREFIX = "composition:generation:";
+export const COMPOSITION_INDEX_PREFIX = "composition:index:";
+export const COMPOSITION_LAST_KNOWN_GOOD_KEY = "composition:last-known-good";
 export const RECOVERY_ALARM_DELAY_MS = 60_000;
 
 export function runIndexKey(acceptedAt: string, runId: string): string {
   return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;
+}
+
+export function compositionGenerationKey(generationId: string): string {
+  return `${COMPOSITION_GENERATION_PREFIX}${generationId}`;
+}
+
+export function compositionIndexKey(
+  createdAt: string,
+  generationId: string,
+): string {
+  return `${COMPOSITION_INDEX_PREFIX}${createdAt}:${generationId}`;
 }
 
 export function storedRunAdmissionFences(input: unknown): string[] {

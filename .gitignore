@@ -9,3 +9,6 @@ apps/desktop/resources/cordis-agent/
 apps/desktop/release/
 artifacts/
 .pi/
+
+# Agent worktrees
+.claude/worktrees/

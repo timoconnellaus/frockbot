@@ -1,4 +1,5 @@
 export * from "./authority.js";
+export * from "./composition-store.js";
 export * from "./run-records.js";
 export * from "./run-recovery.js";
 export * from "./run-terminal.js";

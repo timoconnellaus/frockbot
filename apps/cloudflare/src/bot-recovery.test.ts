@@ -14,6 +14,7 @@ function run(events: SessionEvent[]): StoredRun {
     events,
     status: "running",
     phase: "executing",
+    compositionGenerationId: "test-composition-generation",
     configurationSnapshot: initializeBotSettingsV1("primary"),
     previousEventCount: 1,
   };

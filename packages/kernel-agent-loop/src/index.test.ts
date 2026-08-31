@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  decodeSessionEvent,
   LlmEffectNotStartedError,
   type LlmReconciliationOutcome,
   type LlmProvider,
@@ -26,6 +27,11 @@ function recovered(
     events,
   });
 }
+
+const TEST_COMPOSITION = {
+  generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
+  artifactSetHash: "a".repeat(64),
+};
 
 async function mountRuntime(
   provider: LlmProvider,
@@ -57,7 +63,10 @@ async function mountRuntime(
     toolPlugin.inject = ["tools"];
     await root.plugin(toolPlugin);
   }
-  await root.plugin(AgentLoop, { maxSteps: 4 });
+  await root.plugin(AgentLoop, {
+    maxSteps: 4,
+    composition: TEST_COMPOSITION,
+  });
   return root;
 }
 
@@ -123,6 +132,55 @@ describe("AgentLoop", () => {
 
     expect(committed).toHaveLength(1);
     expect(committed[0]?.durable).toBe(true);
+  });
+
+  test("pins the Composition generation at turn start", async () => {
+    const provider: LlmProvider = {
+      id: "pinned",
+      async *stream() {
+        yield { type: "text-delta", text: "done" };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const durableTypes: string[] = [];
+    const root = await mountRuntime(
+      provider,
+      undefined,
+      (_sessionId, events) => {
+        durableTypes.push(...events.map((event) => event.type));
+        return Promise.resolve();
+      },
+    );
+    const handle = await root.agents.create({
+      botId: "bot-pinned",
+      sessionId: "pinned-session",
+      provider: provider.id,
+      model: "test-model",
+    });
+
+    handle.agent.send("Run once");
+    await handle.agent.whenIdle();
+    handle.agent.send("Run again");
+    await handle.agent.whenIdle();
+
+    const pins = handle.agent.session.events.filter(
+      (event) => event.type === "composition/pinned",
+    );
+    expect(pins).toEqual([
+      expect.objectContaining({
+        type: "composition/pinned",
+        turn: 1,
+        generationId: TEST_COMPOSITION.generationId,
+        artifactSetHash: TEST_COMPOSITION.artifactSetHash,
+      }),
+      expect.objectContaining({ type: "composition/pinned", turn: 2 }),
+    ]);
+    const types = handle.agent.session.events.map((event) => event.type);
+    expect(types.indexOf("composition/pinned")).toBe(
+      types.indexOf("turn/start") + 1,
+    );
+    expect(durableTypes).toContain("composition/pinned");
+    expect(() => decodeSessionEvent(structuredClone(pins[0]))).not.toThrow();
   });
 
   test("keeps a durable settlement failure resumable", async () => {
@@ -884,7 +942,13 @@ describe("AgentLoop", () => {
     let turnStoppingSawCompletedJournal = false;
     let observedPromptSessionId: string | undefined;
     let observedToolIdentity:
-      { botId: string; agentId: string; sessionId: string } | undefined;
+      | {
+          botId: string;
+          agentId: string;
+          sessionId: string;
+          compositionGenerationId: string;
+        }
+      | undefined;
     let root: Context;
     const provider: LlmProvider = {
       id: "scripted",
@@ -951,6 +1015,7 @@ describe("AgentLoop", () => {
           botId: context.botId,
           agentId: identifiedContext.agentId,
           sessionId: context.sessionId,
+          compositionGenerationId: context.compositionGenerationId,
         };
         return {
           content: (input as { value: string }).value,
@@ -1000,6 +1065,7 @@ describe("AgentLoop", () => {
       botId: "general-bot",
       agentId: "general",
       sessionId: "owner:general:conversation-1",
+      compositionGenerationId: TEST_COMPOSITION.generationId,
     });
     expect(events.filter((event) => event.type === "step/start")).toHaveLength(
       2,

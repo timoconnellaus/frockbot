@@ -40,6 +40,7 @@ export default defineConfig({
         compatibilityFlags: ["nodejs_compat"],
         durableObjects: {
           BOT_STATES: "WorkerdBotState",
+          COMPOSITIONS: "CompositionProbe",
           FLY_COMPATIBILITY: "FlyCompatibilityProbe",
           USER_CONFIGURATIONS: "UserConfiguration",
         },
