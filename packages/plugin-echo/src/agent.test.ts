@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-  LlmRegistry,
   type LlmStreamEvent,
   type NormalizedModelRequest,
-  ToolRegistry,
-} from "@frockbot/agent-core";
+} from "@frockbot/kernel-contracts";
+import { LlmRegistry } from "@frockbot/plugin-models";
+import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
   createPluginHarness,
   verifyPluginPackage,
@@ -61,6 +61,7 @@ describe("echo plugin", () => {
     const preparation = await harness.root.tools.prepare(first.call, {
       botId: "echo-bot",
       agentId: "echo-agent",
+      compositionGenerationId: "bootstrap",
       sessionId: "session",
       effectId: "tool:1:1:0",
       signal: controller.signal,
@@ -70,6 +71,7 @@ describe("echo plugin", () => {
       await harness.root.tools.executePrepared(preparation, {
         botId: "echo-bot",
         agentId: "echo-agent",
+        compositionGenerationId: "bootstrap",
         sessionId: "session",
         effectId: "tool:1:1:0",
         signal: controller.signal,

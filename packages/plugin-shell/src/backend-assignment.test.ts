@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   nextAssignmentPhase,
   requireStoredAssignmentSaga,
+  settleAssignmentSaga,
+  type AssignmentSagaEffects,
   type StoredAssignmentSaga,
 } from "./backend-assignment.js";
 
@@ -40,6 +42,27 @@ function saga(
       commandId: "command-1",
       revision: 0,
       status: "pending",
+    },
+  };
+}
+
+function effects(log: string[], acknowledge = true): AssignmentSagaEffects {
+  return {
+    acknowledge: () => {
+      log.push("acknowledge");
+      return Promise.resolve(acknowledge);
+    },
+    compensate: () => {
+      log.push("compensate");
+      return Promise.resolve();
+    },
+    release: () => {
+      log.push("release");
+      return Promise.resolve(true);
+    },
+    rejectCommitted: () => {
+      log.push("reject-committed");
+      return Promise.resolve();
     },
   };
 }
@@ -109,5 +132,30 @@ describe("Assignment saga transitions", () => {
     expect(() => nextAssignmentPhase(saga("claiming"), "released")).toThrow(
       "cannot apply released while claiming",
     );
+  });
+
+  test("compensates a claiming saga and rejects an unacknowledged commit", async () => {
+    const compensated: string[] = [];
+    await expect(
+      settleAssignmentSaga(saga("claiming"), effects(compensated)),
+    ).resolves.toBe("compensated");
+    expect(compensated).toEqual(["compensate"]);
+
+    const acknowledged: string[] = [];
+    await expect(
+      settleAssignmentSaga(saga("acknowledging"), effects(acknowledged)),
+    ).resolves.toBe("acknowledged");
+    expect(acknowledged).toEqual(["acknowledge"]);
+
+    const log: string[] = [];
+    await expect(
+      settleAssignmentSaga(saga("acknowledging"), effects(log, false)),
+    ).resolves.toBe("rejected");
+    expect(log).toEqual([
+      "acknowledge",
+      "compensate",
+      "release",
+      "reject-committed",
+    ]);
   });
 });

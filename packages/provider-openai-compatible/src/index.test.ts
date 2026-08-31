@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { LlmRegistry, type NormalizedModelRequest } from "@frockbot/agent-core";
+import { type NormalizedModelRequest } from "@frockbot/kernel-contracts";
+import { LlmRegistry } from "@frockbot/plugin-models";
 import { Context } from "cordis";
 import { OpenAICompatibleProvider, requestToWire } from "./index.js";
 
@@ -124,6 +125,105 @@ describe("OpenAICompatibleProvider", () => {
     ]);
   });
 
+  test("rejects a truncated stream without a terminal marker", async () => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+            { status: 200 },
+          ),
+        ),
+    });
+    const events = [];
+    let failure: unknown;
+
+    try {
+      for await (const event of provider.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(events).toEqual([{ type: "text-delta", text: "partial" }]);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure instanceof Error ? failure.message : "").toBe(
+      "Model response stream ended before a terminal marker",
+    );
+  });
+
+  test.each([
+    "data: [DONE]\n\n",
+    'data: {"model":"test-model"}\n\ndata: [DONE]\n\n',
+  ])("rejects a terminal stream without a choice", async (body) => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+
+    let failure: unknown;
+    try {
+      for await (const _event of provider.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        throw new Error("unexpected stream event");
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure instanceof Error ? failure.message : "").toBe(
+      "Model response stream did not include a valid choice",
+    );
+  });
+
+  test("cancels an oversized unterminated stream", async () => {
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(`data: ${"x".repeat(1_048_577)}`),
+                );
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+    });
+
+    let failure: unknown;
+    try {
+      for await (const _event of provider.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        throw new Error("unexpected stream event");
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure instanceof Error ? failure.message : "").toBe(
+      "Model response stream exceeded its size limit",
+    );
+    expect(cancelled).toBe(true);
+  });
+
   test("reports retrieval unavailable without another provider request", async () => {
     let requests = 0;
     const provider = new OpenAICompatibleProvider({
@@ -151,7 +251,7 @@ describe("OpenAICompatibleProvider", () => {
     await root.fiber.dispose();
   });
 
-  test("surfaces bounded HTTP errors", async () => {
+  test("redacts provider response bodies from HTTP errors", async () => {
     const provider = new OpenAICompatibleProvider({
       baseUrl: "https://models.example/v1",
       fetch: () =>
@@ -169,8 +269,8 @@ describe("OpenAICompatibleProvider", () => {
     } catch (error) {
       failure = error;
     }
-    expect(failure instanceof Error ? failure.message : "").toContain(
-      "Model request failed (401): bad credentials",
+    expect(failure instanceof Error ? failure.message : "").toBe(
+      "Model request failed (401)",
     );
   });
 });

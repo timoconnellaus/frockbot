@@ -2,6 +2,7 @@
 
 import {
   decodeExternalAuthorizationUrl,
+  type AgentTransport,
   type ClientNotificationIntent,
   type ClientPlugin,
   type ClientRun,
@@ -9,12 +10,19 @@ import {
   type ClientTurnEvent,
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+// Connection mutations use the provider-neutral hosted command contract.
+import type {
+  ConnectionCommandReceiptV1,
+  ConnectionCommandV1,
+} from "@frockbot/connection-core";
+import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNotificationPolicy,
   BotProfile,
   BotSettingsViewV1,
   ConfigurationCommandV1,
+  ModelAssignment,
   OperationReceiptV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -29,6 +37,7 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
+import { modelRuntimeLabel } from "./model-presentation.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";
 
@@ -219,6 +228,8 @@ interface PendingConnectionOperation {
   createdAt: number;
   expiresAt?: number;
   nativeReturnNonce?: string;
+  packageId?: string;
+  connectionId?: string;
 }
 
 const CONNECTION_OPERATION_STORAGE_KEY =
@@ -245,13 +256,26 @@ function readConnectionOperations(): Record<
           return [];
         }
         const operation = candidate as Record<string, unknown>;
+        const allowed = new Set([
+          "commandId",
+          "createdAt",
+          "expiresAt",
+          "nativeReturnNonce",
+          "packageId",
+          "connectionId",
+        ]);
         if (
+          Object.keys(operation).some((field) => !allowed.has(field)) ||
           typeof operation.commandId !== "string" ||
           typeof operation.createdAt !== "number" ||
           (operation.expiresAt !== undefined &&
             typeof operation.expiresAt !== "number") ||
           (operation.nativeReturnNonce !== undefined &&
-            typeof operation.nativeReturnNonce !== "string")
+            typeof operation.nativeReturnNonce !== "string") ||
+          (operation.packageId !== undefined &&
+            typeof operation.packageId !== "string") ||
+          (operation.connectionId !== undefined &&
+            typeof operation.connectionId !== "string")
         ) {
           return [];
         }
@@ -266,6 +290,12 @@ function readConnectionOperations(): Record<
                 : {}),
               ...(typeof operation.nativeReturnNonce === "string"
                 ? { nativeReturnNonce: operation.nativeReturnNonce }
+                : {}),
+              ...(typeof operation.packageId === "string"
+                ? { packageId: operation.packageId }
+                : {}),
+              ...(typeof operation.connectionId === "string"
+                ? { connectionId: operation.connectionId }
                 : {}),
             },
           ],
@@ -301,10 +331,17 @@ async function reserveConnectionOperation(
   operations: Record<string, PendingConnectionOperation>,
   operationKey: string,
   create: () => PendingConnectionOperation,
+  settled?: (operation: PendingConnectionOperation) => Promise<boolean>,
 ): Promise<PendingConnectionOperation> {
-  const reserve = () => {
+  const reserve = async () => {
     synchronizeConnectionOperations(operations);
-    const operation = operations[operationKey] ?? create();
+    let operation: PendingConnectionOperation | undefined =
+      operations[operationKey];
+    if (operation && settled && (await settled(operation))) {
+      delete operations[operationKey];
+      operation = undefined;
+    }
+    operation ??= create();
     operations[operationKey] = operation;
     writeConnectionOperations(operations);
     return operation;
@@ -325,8 +362,11 @@ function retireSettledConnectionOperations(
   synchronizeConnectionOperations(operations);
   let changed = false;
   for (const [key, operation] of Object.entries(operations)) {
+    if (operation.connectionId !== undefined) continue;
     const connection = settings.connections.find(
-      (candidate) => candidate.connectionId === operation.commandId,
+      (candidate) =>
+        candidate.connectionId === operation.commandId ||
+        candidate.safeMetadata.creationCommandId === operation.commandId,
     );
     if (
       connection &&
@@ -336,6 +376,27 @@ function retireSettledConnectionOperations(
     ) {
       delete operations[key];
       changed = true;
+    }
+  }
+  if (changed) writeConnectionOperations(operations);
+}
+
+async function reconcileRetainedConnectionCommands(
+  operations: Record<string, PendingConnectionOperation>,
+  lookup: AgentTransport["lookupConnectionCommand"] | undefined,
+): Promise<void> {
+  if (!lookup) return;
+  synchronizeConnectionOperations(operations);
+  let changed = false;
+  for (const [key, operation] of Object.entries(operations)) {
+    if (!operation.packageId || !operation.connectionId) continue;
+    try {
+      const receipt = await lookup(operation.packageId, operation.commandId);
+      if (!receipt) continue;
+      delete operations[key];
+      changed = true;
+    } catch (error) {
+      void error;
     }
   }
   if (changed) writeConnectionOperations(operations);
@@ -354,63 +415,96 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function hasExactFields(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+): boolean {
+  return (
+    Object.keys(value).length === fields.length &&
+    fields.every((field) => Object.hasOwn(value, field))
+  );
+}
+
 export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   if (
     !isRecord(value) ||
+    !hasExactFields(value, [
+      "schemaVersion",
+      "deployment",
+      "applicationHash",
+      "packages",
+    ]) ||
     value.schemaVersion !== 1 ||
-    !Array.isArray(value.packages)
+    !isRecord(value.deployment) ||
+    !hasExactFields(value.deployment, ["userId", "applicationHash"]) ||
+    typeof value.deployment.userId !== "string" ||
+    value.deployment.userId.length === 0 ||
+    value.deployment.userId.length > 256 ||
+    typeof value.deployment.applicationHash !== "string" ||
+    value.deployment.applicationHash.length === 0 ||
+    value.deployment.applicationHash.length > 256 ||
+    typeof value.applicationHash !== "string" ||
+    value.applicationHash.length === 0 ||
+    value.applicationHash.length > 256 ||
+    value.deployment.applicationHash !== value.applicationHash ||
+    !Array.isArray(value.packages) ||
+    value.packages.length > 256
   ) {
     throw new Error("Application manifest is invalid");
   }
   return value.packages.flatMap((candidate) => {
-    if (!isRecord(candidate) || !isRecord(candidate.configuration)) return [];
-    const connectionTypes = candidate.configuration.connectionTypes;
-    const capabilities = candidate.configuration.capabilities;
-    if (!Array.isArray(connectionTypes) || !Array.isArray(capabilities)) {
-      throw new Error("Application configuration metadata is invalid");
-    }
-    if (connectionTypes.length === 0 && capabilities.length === 0) return [];
     if (
+      !isRecord(candidate) ||
+      !hasExactFields(candidate, [
+        "id",
+        "displayName",
+        "version",
+        "contributions",
+        "configuration",
+      ]) ||
       typeof candidate.id !== "string" ||
-      typeof candidate.version !== "string"
+      typeof candidate.displayName !== "string" ||
+      typeof candidate.version !== "string" ||
+      !Array.isArray(candidate.contributions) ||
+      candidate.contributions.length > 5 ||
+      new Set(candidate.contributions).size !==
+        candidate.contributions.length ||
+      !candidate.contributions.every(
+        (kind) =>
+          kind === "backend" ||
+          kind === "runtime" ||
+          kind === "client" ||
+          kind === "desktop" ||
+          kind === "mobile",
+      )
     ) {
       throw new Error("Application Package metadata is invalid");
     }
-    const decodedCapabilities = capabilities.map((capability) => {
-      if (
-        !isRecord(capability) ||
-        typeof capability.id !== "string" ||
-        (capability.kind !== "model" &&
-          capability.kind !== "tool" &&
-          capability.kind !== "memory" &&
-          capability.kind !== "notification" &&
-          capability.kind !== "computer") ||
-        !Array.isArray(capability.connectionTypes) ||
-        !capability.connectionTypes.every((item) => typeof item === "string")
-      ) {
-        throw new Error("Application Capability metadata is invalid");
-      }
-      return {
-        id: capability.id,
-        kind: capability.kind as PluginCatalogItem["capabilities"][number]["kind"],
-        connectionTypes: capability.connectionTypes as string[],
-      };
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 3,
+      id: candidate.id,
+      displayName: candidate.displayName,
+      version: candidate.version,
+      compatibility: { frockbot: "*" },
+      dependencies: {},
+      contributions: { runtime: { entry: "./manifest-validation.js" } },
+      permissions: [],
+      configuration: candidate.configuration,
     });
+    const connectionTypes = decoded.configuration?.connectionTypes ?? [];
+    const decodedCapabilities = (decoded.configuration?.capabilities ?? []).map(
+      (capability) => ({
+        id: capability.id,
+        kind: capability.kind,
+        connectionTypes: capability.connectionTypes,
+      }),
+    );
+    // A Package with neither a Connection Type nor a Capability contributes
+    // nothing the Plugins surface can install or assign.
+    if (connectionTypes.length === 0 && decodedCapabilities.length === 0) {
+      return [];
+    }
     const decodedConnections = connectionTypes.map((connection) => {
-      if (
-        !isRecord(connection) ||
-        !isRecord(connection.authorization) ||
-        typeof connection.id !== "string" ||
-        typeof connection.displayName !== "string" ||
-        typeof connection.allowMultiple !== "boolean" ||
-        (connection.authorization.kind !== "oauth2" &&
-          connection.authorization.kind !== "api-key" &&
-          connection.authorization.kind !== "custom") ||
-        !Array.isArray(connection.capabilities) ||
-        !connection.capabilities.every((item) => typeof item === "string")
-      ) {
-        throw new Error("Application Connection Type metadata is invalid");
-      }
       const authorizationKind: PluginCatalogItem["connectionTypes"][number]["authorizationKind"] =
         connection.authorization.kind;
       return {
@@ -418,7 +512,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         displayName: connection.displayName,
         allowMultiple: connection.allowMultiple,
         authorizationKind,
-        capabilities: connection.capabilities as string[],
+        capabilities: connection.capabilities,
       };
     });
     return [
@@ -442,12 +536,67 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   let admissionObserver: AbortController | undefined;
   let runObserver: AbortController | undefined;
   let selectionGeneration = 0;
+  let userSettingsGeneration = 0;
+  let pluginCatalogGeneration = 0;
+  const settingsLoadErrors = new Map<"bot" | "user" | "catalog", string>();
   const connectionOperations = readConnectionOperations();
   const stopCommands = new Map<string, string>();
   const authorizationOperations = new Map<
     string,
     { nativeReturnNonce?: string }
   >();
+
+  async function executeRetainedApiKeyCommand(
+    identity: readonly string[],
+    create: (commandId: string) => ConnectionCommandV1,
+    pending: Pick<
+      PendingConnectionOperation,
+      "packageId" | "connectionId"
+    > = {},
+  ): Promise<ConnectionCommandReceiptV1> {
+    if (!ctx.transport.executeConnection) {
+      throw new Error("Connections are unavailable");
+    }
+    const userId = await ctx.transport.readAuthenticatedUserId?.();
+    if (!userId) {
+      throw new Error("Authenticated User identity is unavailable");
+    }
+    const operationKey = JSON.stringify(["api-key", userId, ...identity]);
+    const operation = await reserveConnectionOperation(
+      connectionOperations,
+      operationKey,
+      () => ({
+        commandId: crypto.randomUUID(),
+        createdAt: Date.now(),
+        ...pending,
+      }),
+      pending.packageId &&
+        pending.connectionId &&
+        ctx.transport.lookupConnectionCommand
+        ? async (existing) =>
+            Boolean(
+              await ctx.transport.lookupConnectionCommand!(
+                pending.packageId!,
+                existing.commandId,
+              ),
+            )
+        : undefined,
+    );
+    try {
+      const result = await ctx.transport.executeConnection(
+        create(operation.commandId),
+      );
+      delete connectionOperations[operationKey];
+      writeConnectionOperations(connectionOperations);
+      return result;
+    } catch (error) {
+      if (isDefinitiveConnectionFailure(error)) {
+        delete connectionOperations[operationKey];
+        writeConnectionOperations(connectionOperations);
+      }
+      throw error;
+    }
+  }
 
   async function waitForRunLookup(
     delayMs: number,
@@ -656,9 +805,62 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     }
   }
 
+  function updateSettingsLoadError(
+    source: "bot" | "user" | "catalog",
+    message?: string,
+  ): void {
+    settingsLoadErrors.delete(source);
+    if (message) settingsLoadErrors.set(source, message);
+    web.value.settingsError = [...settingsLoadErrors.values()].at(-1);
+  }
+
+  function updateModelLabel(): void {
+    const model = web.value.botSettings?.model;
+    const connection = web.value.userSettings?.connections.find(
+      (candidate) => candidate.connectionId === model?.connectionId,
+    );
+    const packageInstalled = web.value.userSettings?.packages.some(
+      (pkg) =>
+        pkg.packageId === connection?.packageId && pkg.state === "installed",
+    );
+    const catalogPackage = web.value.pluginCatalog.find(
+      (pkg) => pkg.packageId === connection?.packageId,
+    );
+    const connectionType = catalogPackage?.connectionTypes.find(
+      (candidate) => candidate.id === connection?.connectionTypeId,
+    );
+    const modelCapabilities = new Set(
+      catalogPackage?.capabilities.flatMap((capability) =>
+        capability.kind === "model" &&
+        connectionType?.capabilities.includes(capability.id)
+          ? [capability.id]
+          : [],
+      ) ?? [],
+    );
+    const capabilityAssigned = web.value.botSettings?.assignments.some(
+      (assignment) =>
+        assignment.connectionId === model?.connectionId &&
+        assignment.packageId === connection?.packageId &&
+        assignment.state === "enabled" &&
+        modelCapabilities.has(assignment.capabilityId),
+    );
+    web.value.modelReady = Boolean(
+      model &&
+      connection?.state === "ready" &&
+      packageInstalled &&
+      capabilityAssigned,
+    );
+    web.value.modelLabel = modelRuntimeLabel({
+      packageDisplayName: catalogPackage?.displayName,
+      connectionDisplayName: connection?.displayName,
+      hasModel: Boolean(model),
+    });
+  }
+
   const web = ref<FrockBotWebData>({
     connection: "ready",
-    modelLabel: "Foundation · Dynamic Worker",
+    modelLabel: "Model not configured · Dynamic Worker",
+    modelReady: false,
     settingsAvailable: true,
     connectionsAvailable: ctx.transport.connectionsAvailable !== false,
     activeBotId: undefined,
@@ -673,6 +875,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.activeBotId = botId;
       web.value.composerContext = botId;
       web.value.botSettings = undefined;
+      web.value.modelReady = false;
       web.value.messages = [];
       web.value.activeRun = undefined;
       web.value.activeRunId = undefined;
@@ -685,7 +888,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
     async loadBotSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
-        web.value.settingsError = "Settings are unavailable";
+        updateSettingsLoadError("bot", "Settings are unavailable");
         return;
       }
       const botId = web.value.activeBotId;
@@ -703,7 +906,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )
           return;
         web.value.botSettings = settings;
-        web.value.settingsError = undefined;
+        updateModelLabel();
+        updateSettingsLoadError("bot");
         await deliverNotifications(botId, generation);
       } catch (error) {
         if (
@@ -711,8 +915,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId !== botId
         )
           return;
-        web.value.settingsError =
-          error instanceof Error ? error.message : "Could not load settings";
+        updateSettingsLoadError(
+          "bot",
+          error instanceof Error ? error.message : "Could not load settings",
+        );
       }
     },
     async saveBotProfile(profile: BotProfile): Promise<void> {
@@ -804,22 +1010,138 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         assignmentId,
       });
     },
-    async loadUserSettings(): Promise<void> {
-      if (!ctx.transport.readConfiguration) {
-        web.value.settingsError = "Settings are unavailable";
+    async saveBotModel(model: ModelAssignment): Promise<void> {
+      const current = web.value.botSettings;
+      const user = web.value.userSettings;
+      const botId = web.value.activeBotId;
+      if (!current || !user || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      const modelChanged =
+        current.model?.connectionId !== model.connectionId ||
+        current.model?.providerModelId !== model.providerModelId;
+      const connection = user.connections.find(
+        (candidate) => candidate.connectionId === model.connectionId,
+      );
+      if (!modelChanged && connection?.state !== "ready") return;
+      const pkg = web.value.pluginCatalog.find(
+        (candidate) => candidate.packageId === connection?.packageId,
+      );
+      const connectionType = pkg?.connectionTypes.find(
+        (candidate) => candidate.id === connection?.connectionTypeId,
+      );
+      const capability = pkg?.capabilities.find(
+        (candidate) =>
+          candidate.kind === "model" &&
+          connectionType?.capabilities.includes(candidate.id),
+      );
+      if (!connection || connection.state !== "ready" || !pkg || !capability) {
+        throw new Error("The selected Connection has no model capability");
+      }
+      const assigned = current.assignments.some(
+        (assignment) =>
+          assignment.state === "enabled" &&
+          assignment.packageId === pkg.packageId &&
+          assignment.capabilityId === capability.id &&
+          assignment.connectionId === connection.connectionId,
+      );
+      if (assigned && !modelChanged) return;
+      if (!assigned) {
+        // The binding commits inside the Assignment saga's commit phase, so
+        // the Connection claim and the Bot's model are one durable unit. An
+        // existing model Assignment on another Connection is replaced
+        // atomically rather than unassigned and assigned again.
+        const superseded = current.assignments.find(
+          (assignment) =>
+            assignment.packageId === pkg.packageId &&
+            assignment.capabilityId === capability.id,
+        );
+        await executeAssignmentOperation({
+          schemaVersion: 1,
+          type: superseded ? "bot/replace-capability" : "bot/assign-capability",
+          commandId: crypto.randomUUID(),
+          botId,
+          expectedRevision: current.revision,
+          assignment: {
+            assignmentId: superseded?.assignmentId ?? crypto.randomUUID(),
+            packageId: pkg.packageId,
+            capabilityId: capability.id,
+            connectionId: connection.connectionId,
+          },
+          model,
+        });
         return;
       }
+      const receipt = await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/select-model",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        model,
+      });
+      await web.value.loadBotSettings();
+      if (receipt.status === "rejected") {
+        throw new Error(receipt.failure);
+      }
+    },
+    async clearBotModel(): Promise<void> {
+      const current = web.value.botSettings;
+      const botId = web.value.activeBotId;
+      if (!current?.model || !botId || !ctx.transport.executeConfiguration) {
+        throw new Error("Settings are unavailable");
+      }
+      const assignment = current.assignments.find((candidate) => {
+        const capability = web.value.pluginCatalog
+          .find((pkg) => pkg.packageId === candidate.packageId)
+          ?.capabilities.find(
+            (declared) => declared.id === candidate.capabilityId,
+          );
+        return (
+          (candidate.state === "enabled" ||
+            candidate.state === "unavailable") &&
+          candidate.connectionId === current.model?.connectionId &&
+          capability?.kind === "model"
+        );
+      });
+      if (!assignment) throw new Error("Bot model assignment is unavailable");
+      const receipt = await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "bot/unbind-model",
+        commandId: crypto.randomUUID(),
+        botId,
+        expectedRevision: current.revision,
+        assignmentId: assignment.assignmentId,
+      });
+      await web.value.loadBotSettings();
+      if (receipt.status === "rejected") throw new Error(receipt.failure);
+    },
+    async loadUserSettings(): Promise<void> {
+      if (!ctx.transport.readConfiguration) {
+        updateSettingsLoadError("user", "Settings are unavailable");
+        return;
+      }
+      const generation = ++userSettingsGeneration;
       try {
         const settings = (await ctx.transport.readConfiguration({
           schemaVersion: 1,
           type: "user/get",
         })) as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, settings);
+        await reconcileRetainedConnectionCommands(
+          connectionOperations,
+          ctx.transport.lookupConnectionCommand,
+        );
+        if (generation !== userSettingsGeneration) return;
         web.value.userSettings = settings;
-        web.value.settingsError = undefined;
+        updateModelLabel();
+        updateSettingsLoadError("user");
       } catch (error) {
-        web.value.settingsError =
-          error instanceof Error ? error.message : "Could not load settings";
+        if (generation !== userSettingsGeneration) return;
+        updateSettingsLoadError(
+          "user",
+          error instanceof Error ? error.message : "Could not load settings",
+        );
       }
     },
     async saveUserProfile(profile: {
@@ -844,9 +1166,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         !ctx.transport.readApplicationManifest ||
         !ctx.transport.readConfiguration
       ) {
-        web.value.settingsError = "Plugins are unavailable";
+        updateSettingsLoadError("catalog", "Plugins are unavailable");
         return;
       }
+      const userGeneration = ++userSettingsGeneration;
+      const catalogGeneration = ++pluginCatalogGeneration;
       try {
         const [manifest, settings] = await Promise.all([
           ctx.transport.readApplicationManifest(),
@@ -855,14 +1179,31 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             type: "user/get",
           }),
         ]);
-        web.value.pluginCatalog = decodePluginCatalog(manifest);
+        const pluginCatalog = decodePluginCatalog(manifest);
         const userSettings = settings as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, userSettings);
-        web.value.userSettings = userSettings;
-        web.value.settingsError = undefined;
+        await reconcileRetainedConnectionCommands(
+          connectionOperations,
+          ctx.transport.lookupConnectionCommand,
+        );
+        let committed = false;
+        if (catalogGeneration === pluginCatalogGeneration) {
+          web.value.pluginCatalog = pluginCatalog;
+          updateSettingsLoadError("catalog");
+          committed = true;
+        }
+        if (userGeneration === userSettingsGeneration) {
+          web.value.userSettings = userSettings;
+          updateSettingsLoadError("user");
+          committed = true;
+        }
+        if (committed) updateModelLabel();
       } catch (error) {
-        web.value.settingsError =
-          error instanceof Error ? error.message : "Could not load Plugins";
+        if (catalogGeneration !== pluginCatalogGeneration) return;
+        updateSettingsLoadError(
+          "catalog",
+          error instanceof Error ? error.message : "Could not load Plugins",
+        );
       }
     },
     async installPackage(packageId: string, version: string): Promise<void> {
@@ -944,6 +1285,117 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       }
       await ctx.transport.revokeConnection(packageId, connectionId);
       await web.value.loadPluginCatalog();
+    },
+    async createApiKeyConnection(input): Promise<void> {
+      const result = await executeRetainedApiKeyCommand(
+        ["create", input.packageId, input.connectionTypeId, input.label],
+        (commandId) => ({
+          schemaVersion: 1,
+          type: "connection/create-api-key",
+          commandId,
+          ...input,
+        }),
+      );
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Connection validation failed");
+      }
+    },
+    async rotateApiKeyConnection(connectionId, apiKey): Promise<void> {
+      const connection = web.value.userSettings?.connections.find(
+        (candidate) => candidate.connectionId === connectionId,
+      );
+      if (!connection) {
+        throw new Error("Connection is unavailable");
+      }
+      const result = await executeRetainedApiKeyCommand(
+        ["rotate", connectionId],
+        (commandId) => ({
+          schemaVersion: 1,
+          type: "connection/rotate-api-key",
+          commandId,
+          connectionId,
+          apiKey,
+        }),
+        {
+          packageId: connection.packageId,
+          connectionId,
+        },
+      );
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Credential validation failed");
+      }
+    },
+    async updateConnectionLabel(connectionId, label): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const result = await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/update-label",
+        commandId: crypto.randomUUID(),
+        connectionId,
+        label,
+      });
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Connection label update failed");
+      }
+    },
+    async refreshConnectionModels(connectionId): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const result = await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId: crypto.randomUUID(),
+        connectionId,
+      });
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Model catalog refresh failed");
+      }
+    },
+    async setConnectionEnabled(connectionId, enabled): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const result = await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/set-enabled",
+        commandId: crypto.randomUUID(),
+        connectionId,
+        enabled,
+      });
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Connection state update failed");
+      }
+    },
+    async disconnectConnection(
+      connectionId,
+      revokeUpstream = false,
+    ): Promise<void> {
+      if (!ctx.transport.executeConnection) {
+        throw new Error("Connections are unavailable");
+      }
+      const result = await ctx.transport.executeConnection({
+        schemaVersion: 1,
+        type: "connection/disconnect",
+        commandId: crypto.randomUUID(),
+        connectionId,
+        revokeUpstream,
+      });
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error(
+          result.status === "reconciliation-required"
+            ? "Connection revocation requires reconciliation"
+            : "Connection revocation failed",
+        );
+      }
     },
     async openConnectionAuthorization(url: string): Promise<void> {
       const authorizationUrl = decodeExternalAuthorizationUrl(url);

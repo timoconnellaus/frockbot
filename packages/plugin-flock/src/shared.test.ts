@@ -69,6 +69,7 @@ describe("Flock v1 contracts", () => {
 
   test("round-trips configuration-valid provider model text", () => {
     const sheep = randomSheepRecipeV1(() => 0);
+    const providerModelId = "m".repeat(256);
     expect(
       decodeDirectoryViewV1({
         schemaVersion: 1,
@@ -81,13 +82,23 @@ describe("Flock v1 contracts", () => {
             initialName: "Alpha",
             initialModel: {
               connectionId: "connection-1",
-              providerModelId: "openai/gpt-4o:2024-08-06",
+              providerModelId,
+            },
+            initialModelBinding: {
+              assignment: {
+                assignmentId: "create-alpha",
+                packageId: "provider-ollama-cloud",
+                capabilityId: "ollama-cloud-models",
+                connectionId: "connection-1",
+                state: "enabled",
+              },
+              generation: "create-alpha",
             },
             sheep,
           },
         ],
       }).bots[0]?.initialModel?.providerModelId,
-    ).toBe("openai/gpt-4o:2024-08-06");
+    ).toBe(providerModelId);
     expect(() =>
       decodeCreateBotCommandV1({
         schemaVersion: 1,

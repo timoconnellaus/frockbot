@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Context } from "cordis";
-import {
-  createFoundationResidentRuntime,
-  type FoundationResidentRuntime,
-} from "@frockbot/agent-runtime/runtime";
-import type { SessionEvent } from "@frockbot/agent-core";
+import { type SessionEvent } from "@frockbot/kernel-contracts";
+import type { ConnectionCommandReceiptV1 } from "@frockbot/connection-core";
+import { createSettingsBackendContribution } from "@frockbot/plugin-settings/backend";
 import type {
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
@@ -17,6 +14,12 @@ import type {
 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { createFlockBackendContribution } from "@frockbot/plugin-flock/backend";
+import {
+  bootstrapCompositionGeneration,
+  createShellCompositionHost,
+} from "@frockbot/plugin-shell/backend-composition";
+import { executeBotTurn } from "@frockbot/plugin-shell/backend-runner";
+import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import {
   createClientRunStopReceiptV1,
@@ -57,29 +60,7 @@ class MemoryBotState implements BotStateBinding {
   private readonly runs = new Map<string, StoredRun[]>();
   private readonly sessions = new Map<string, SessionEvent[]>();
   private readonly admissionFences = new Set<string>();
-  private readonly residentRuntimes = new Map<
-    string,
-    Promise<FoundationResidentRuntime>
-  >();
   readonly notifications = new Map<string, BotNotificationIntent[]>();
-
-  private residentRuntime(botId: string): Promise<FoundationResidentRuntime> {
-    let runtime = this.residentRuntimes.get(botId);
-    if (!runtime) {
-      runtime = createFoundationResidentRuntime(new Context()).then(
-        async (created) => {
-          await created.project({
-            generation: 0,
-            agentPackages: [],
-            systemPromptSection: "You are Internal Bot configuration.",
-          });
-          return created;
-        },
-      );
-      this.residentRuntimes.set(botId, runtime);
-    }
-    return runtime;
-  }
 
   async run(botId: string, command: BotTurnCommand): Promise<BotTurnResult> {
     if (this.admissionFences.has(`${botId}:${command.runId}`)) {
@@ -101,6 +82,10 @@ class MemoryBotState implements BotStateBinding {
       throw new Error("bot already has an active run");
     }
     const previousEvents = this.sessions.get(botId) ?? [];
+    const generation = await bootstrapCompositionGeneration(
+      await compileFoundationApplication(),
+      "2026-01-01T00:00:00.000Z",
+    );
     const run: StoredRun = {
       runId: command.runId,
       commandFingerprint: "internal-command-fingerprint",
@@ -111,6 +96,7 @@ class MemoryBotState implements BotStateBinding {
       effectAdmissions: [],
       status: "running",
       phase: "admitted",
+      compositionGenerationId: generation.generationId,
       configurationSnapshot: {
         schemaVersion: 1,
         botId,
@@ -125,17 +111,17 @@ class MemoryBotState implements BotStateBinding {
     runs.push(run);
     this.runs.set(botId, runs);
     try {
-      const result = await executeResidentBotTurn(
-        await this.residentRuntime(botId),
-        {
-          botId,
-          command,
-          previousEvents,
-          persistSessionEvents: () => Promise.resolve(),
-          beforeStart: () => Promise.resolve(true),
-          admitEffect: () => Promise.resolve(true),
-        },
-      );
+      const composition = await createShellCompositionHost({
+        botId,
+        sessionId: command.sessionId,
+        sessionEvents: previousEvents,
+        admitEffect: () => Promise.resolve(true),
+      }).mount(generation, new AbortController().signal);
+      const result = await executeBotTurn({
+        command,
+        previousEvents,
+        composition,
+      });
       run.events = structuredClone(result.events);
       run.status = "completed";
       run.responseText = result.text;
@@ -271,6 +257,25 @@ class MemoryConfiguration
   private readonly bots = new Map<string, BotSettingsViewV1>();
   private readonly receipts = new Map<string, OperationReceiptV1>();
   private readonly lifecycles = new Map<string, "active" | "archived">();
+  private readonly connectionReceipts = new Map<
+    string,
+    ConnectionCommandReceiptV1
+  >();
+  private connectionReceiptOverride: unknown;
+  private configurationReadOverride: unknown;
+  private operationReceiptOverride: unknown;
+
+  setConnectionReceiptOverride(receipt: unknown): void {
+    this.connectionReceiptOverride = receipt;
+  }
+
+  setConfigurationReadOverride(configuration: unknown): void {
+    this.configurationReadOverride = configuration;
+  }
+
+  setOperationReceiptOverride(receipt: unknown): void {
+    this.operationReceiptOverride = receipt;
+  }
 
   private read(query: ConfigurationQueryV1): Promise<ConfigurationViewV1> {
     if (query.type === "user/get") return Promise.resolve(this.user);
@@ -319,16 +324,25 @@ class MemoryConfiguration
                         assignment.assignmentId !== command.assignmentId,
                     ),
                   }
-                : {
-                    assignments: [
-                      ...bot.assignments.filter(
-                        (assignment) =>
-                          assignment.assignmentId !==
-                          command.assignment.assignmentId,
+                : command.type === "bot/unbind-model"
+                  ? {
+                      model: undefined,
+                      assignments: bot.assignments.map((assignment) =>
+                        assignment.assignmentId === command.assignmentId
+                          ? { ...assignment, state: "unavailable" as const }
+                          : assignment,
                       ),
-                      { ...command.assignment, state: "enabled" as const },
-                    ],
-                  }),
+                    }
+                  : {
+                      assignments: [
+                        ...bot.assignments.filter(
+                          (assignment) =>
+                            assignment.assignmentId !==
+                            command.assignment.assignmentId,
+                        ),
+                        { ...command.assignment, state: "enabled" as const },
+                      ],
+                    }),
       });
     } else {
       const user = current as UserSettingsViewV1;
@@ -391,6 +405,11 @@ class MemoryConfiguration
       | Parameters<UserConfigurationBinding["readConfiguration"]>[0]
       | Parameters<BotConfigurationBinding["readConfiguration"]>[0],
   ): Promise<ConfigurationViewV1> {
+    if (this.configurationReadOverride !== undefined) {
+      return Promise.resolve(
+        this.configurationReadOverride as ConfigurationViewV1,
+      );
+    }
     return this.read(
       "botId" in request
         ? { schemaVersion: 1, type: "bot/get", botId: request.botId }
@@ -403,7 +422,60 @@ class MemoryConfiguration
       | Parameters<UserConfigurationBinding["executeConfiguration"]>[0]
       | Parameters<BotConfigurationBinding["executeConfiguration"]>[0],
   ): Promise<OperationReceiptV1> {
+    if (this.operationReceiptOverride !== undefined) {
+      return Promise.resolve(
+        this.operationReceiptOverride as OperationReceiptV1,
+      );
+    }
     return this.execute(request.command);
+  }
+
+  executeConnection(
+    request: Parameters<UserConfigurationBinding["executeConnection"]>[0],
+  ): ReturnType<UserConfigurationBinding["executeConnection"]> {
+    if (this.connectionReceiptOverride !== undefined) {
+      return Promise.resolve(this.connectionReceiptOverride) as ReturnType<
+        UserConfigurationBinding["executeConnection"]
+      >;
+    }
+    const connectionId =
+      "connectionId" in request.command
+        ? request.command.connectionId
+        : "connection-test";
+    const receipt = {
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      connectionId,
+      status: "applied" as const,
+    };
+    this.connectionReceipts.set(request.command.commandId, receipt);
+    return Promise.resolve(receipt);
+  }
+
+  lookupConnectionCommand(
+    request: Parameters<UserConfigurationBinding["lookupConnectionCommand"]>[0],
+  ): ReturnType<UserConfigurationBinding["lookupConnectionCommand"]> {
+    return Promise.resolve(this.connectionReceipts.get(request.commandId));
+  }
+
+  getConnection(
+    request: Parameters<UserConfigurationBinding["getConnection"]>[0],
+  ) {
+    return Promise.resolve(
+      this.user.connections.find(
+        (connection) => connection.connectionId === request.connectionId,
+      ),
+    );
+  }
+
+  leaseModelCredential(): ReturnType<
+    UserConfigurationBinding["leaseModelCredential"]
+  > {
+    return Promise.reject(new Error("Credential leases are not configured"));
+  }
+
+  settleModelCredential(): Promise<void> {
+    return Promise.resolve();
   }
 
   listBots() {
@@ -480,6 +552,24 @@ class MemoryConfiguration
       registered: true,
     });
   }
+  readPackageRevisions() {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      revision: 0,
+      revisions: [],
+    });
+  }
+  publishPackage(): Promise<never> {
+    return Promise.reject(
+      new Error("publication is not configured in this test"),
+    );
+  }
+  rollbackPackage(): Promise<never> {
+    return Promise.reject(new Error("rollback is not configured in this test"));
+  }
+  activeApplicationHash(): Promise<undefined> {
+    return Promise.resolve(undefined);
+  }
   readSheep(request: Parameters<BotConfigurationBinding["readSheep"]>[0]) {
     return Promise.resolve({
       schemaVersion: 1 as const,
@@ -496,7 +586,66 @@ class MemoryConfiguration
       revision: request.command.expectedRevision + 1,
     });
   }
+  private compositionGeneration(
+    botId: string,
+    generationId: string,
+    isCurrent: boolean,
+  ) {
+    return {
+      schemaVersion: 1 as const,
+      botId,
+      generationId,
+      createdAt: "2026-08-31T00:00:00.000Z",
+      status: (isCurrent ? "active" : "superseded") as "active" | "superseded",
+      origin: { kind: "bootstrap" as const },
+      isCurrent,
+      members: [],
+      failures: [],
+    };
+  }
+  listCompositionGenerations(
+    request: Parameters<
+      BotConfigurationBinding["listCompositionGenerations"]
+    >[0],
+  ) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      currentGenerationId: COMPOSITION_GENERATION_ID,
+      generations: [
+        this.compositionGeneration(
+          request.botId,
+          COMPOSITION_GENERATION_ID,
+          true,
+        ),
+      ],
+    });
+  }
+  getCompositionGeneration(
+    request: Parameters<BotConfigurationBinding["getCompositionGeneration"]>[0],
+  ) {
+    return Promise.resolve(
+      request.generationId === COMPOSITION_GENERATION_ID
+        ? this.compositionGeneration(request.botId, request.generationId, true)
+        : undefined,
+    );
+  }
+  revertComposition(
+    request: Parameters<BotConfigurationBinding["revertComposition"]>[0],
+  ) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      status: "applied" as const,
+      generationId: COMPOSITION_REVERTED_GENERATION_ID,
+      currentGenerationId: request.command.expectedGenerationId,
+    });
+  }
 }
+
+const COMPOSITION_GENERATION_ID = "2026-08-31T00:00:00.000Z:0123456789abcdef";
+const COMPOSITION_REVERTED_GENERATION_ID =
+  "2026-09-01T00:00:00.000Z:0123456789abcdef";
 
 class MemoryConnections implements ConnectionBinding {
   completed: Array<{ connectionId: string; connectedAccountId: string }> = [];
@@ -574,6 +723,7 @@ function createTestGateway(
     Promise.resolve("foundation-v1"),
   auth: GatewayAuth = unauthenticatedAuth,
   allowDevelopmentIdentity = true,
+  allowedClientOrigins?: string[],
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
@@ -635,6 +785,62 @@ function createTestGateway(
             command,
           }),
       }),
+      createSettingsBackendContribution({
+        executeConnection: (userId, command) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.executeConnection({
+            schemaVersion: 1,
+            userId,
+            command,
+          });
+        },
+        listCompositionGenerations: (userId, botId, query) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.listCompositionGenerations({
+            schemaVersion: 1,
+            userId,
+            botId,
+            query,
+          });
+        },
+        getCompositionGeneration: (userId, botId, generationId) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.getCompositionGeneration({
+            schemaVersion: 1,
+            userId,
+            botId,
+            generationId,
+          });
+        },
+        revertComposition: (userId, botId, command) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.revertComposition({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          });
+        },
+        lookupConnectionCommand: (userId, packageId, commandId) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.lookupConnectionCommand({
+            schemaVersion: 1,
+            userId,
+            packageId,
+            commandId,
+          });
+        },
+      }),
       {
         packageId: "composio",
         async route(request, url, context) {
@@ -676,6 +882,7 @@ function createTestGateway(
       },
     ],
     allowDevelopmentIdentity,
+    ...(allowedClientOrigins ? { allowedClientOrigins } : {}),
   });
   return {
     gateway,
@@ -787,6 +994,185 @@ describe("Cloudflare user application gateway", () => {
       "user:alice",
     ]);
     expect(loader.ids).toEqual([]);
+  });
+
+  test("rejects malformed configuration RPC results at the gateway seam", async () => {
+    {
+      const { gateway, configurations } = createTestGateway();
+      const configuration = new MemoryConfiguration();
+      configuration.setConfigurationReadOverride({
+        schemaVersion: 1,
+        revision: 0,
+        profile: { name: "Alice" },
+        packages: [],
+        connections: [],
+        secret: "must-not-cross-the-seam",
+      });
+      configurations.set("alice", configuration);
+      expect((await gateway(request("/api/settings", "alice"))).status).toBe(
+        400,
+      );
+    }
+    {
+      const { gateway, configurations } = createTestGateway();
+      const configuration = new MemoryConfiguration();
+      configuration.setConfigurationReadOverride({
+        schemaVersion: 1,
+        botId: "primary",
+        revision: 0,
+        profile: { name: "Bot" },
+        notifications: { enabled: false },
+        assignments: [],
+        secret: "must-not-cross-the-seam",
+      });
+      configurations.set("alice", configuration);
+      expect(
+        (await gateway(request("/api/bots/primary/settings", "alice"))).status,
+      ).toBe(400);
+    }
+    {
+      const { gateway, configurations } = createTestGateway();
+      const configuration = new MemoryConfiguration();
+      configuration.setOperationReceiptOverride({
+        schemaVersion: 1,
+        commandId: "profile-malformed",
+        revision: 1,
+        status: "applied",
+        secret: "must-not-cross-the-seam",
+      });
+      configurations.set("alice", configuration);
+      const response = await gateway(
+        request("/api/settings", "alice", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            type: "user/update-profile",
+            commandId: "profile-malformed",
+            expectedRevision: 0,
+            profile: { name: "Alice" },
+          }),
+        }),
+      );
+      expect(response.status).toBe(400);
+    }
+  });
+
+  test("admits API-key Connections only through the authenticated generic seam", async () => {
+    const { gateway } = createTestGateway();
+    const body = JSON.stringify({
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "ollama-connect-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "write-only-secret",
+    });
+
+    expect(
+      (
+        await gateway(
+          new Request("https://bot.frockbot.com/api/connections", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+          }),
+        )
+      ).status,
+    ).toBe(401);
+    const response = await gateway(
+      request("/api/connections", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      commandId: "ollama-connect-1",
+      connectionId: "connection-test",
+      status: "applied",
+    });
+    expect(
+      (
+        await gateway(
+          new Request(
+            "https://bot.frockbot.com/api/connection-commands?packageId=provider-ollama-cloud&commandId=ollama-connect-1",
+          ),
+        )
+      ).status,
+    ).toBe(401);
+    const lookup = await gateway(
+      request(
+        "/api/connection-commands?packageId=provider-ollama-cloud&commandId=ollama-connect-1",
+        "alice",
+      ),
+    );
+    expect((await lookup.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      commandId: "ollama-connect-1",
+      connectionId: "connection-test",
+      status: "applied",
+    });
+    expect(
+      (
+        await gateway(
+          request("/api/connections", "alice", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              schemaVersion: 1,
+              type: "connection/refresh-models",
+              commandId: "lost response",
+              connectionId: "connection-test",
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await gateway(
+          request(
+            "/api/connection-commands?packageId=provider-ollama-cloud&commandId=lost%20response",
+            "alice",
+          ),
+        )
+      ).status,
+    ).toBe(400);
+  });
+
+  test("rejects malformed Connection receipts from the User Durable Object", async () => {
+    const { gateway, configurations } = createTestGateway();
+    const configuration = new MemoryConfiguration();
+    configuration.setConnectionReceiptOverride({
+      schemaVersion: 1,
+      commandId: "ollama-connect-malformed",
+      connectionId: "connection-test",
+      status: "applied",
+      credential: "must-not-cross-the-seam",
+    });
+    configurations.set("alice", configuration);
+
+    const response = await gateway(
+      request("/api/connections", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/create-api-key",
+          commandId: "ollama-connect-malformed",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          label: "Work",
+          apiKey: "write-only-secret",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
   });
 
   test("rejects invalid encoded Bot settings paths before configuration lookup", async () => {
@@ -1032,9 +1418,9 @@ describe("Cloudflare user application gateway", () => {
     expect(wire).not.toContain("input/queued");
     expect(wire).not.toContain('"input"');
     expect(new Set(loader.ids)).toEqual(new Set(["alice:foundation-v1"]));
-    expect(loader.codes.every((code) => code.globalOutbound === null)).toBe(
-      true,
-    );
+    expect(
+      loader.codes.every((code) => code.globalOutbound === undefined),
+    ).toBe(true);
     expect(Object.keys(loader.codes[0]?.env ?? {}).sort()).toEqual([
       "BOT_STATE",
       "DEPLOYMENT",
@@ -1228,6 +1614,7 @@ describe("Cloudflare user application gateway", () => {
     for (const internalField of [
       "commandFingerprint",
       "sessionId",
+      "compositionGenerationId",
       "configurationSnapshot",
       "phase",
       "previousEventCount",
@@ -1444,5 +1831,233 @@ describe("Cloudflare user application gateway", () => {
       userId: "signed-in-user",
     });
     expect(loader.ids).toEqual([]);
+  });
+});
+
+const MOBILE_ORIGIN = "capacitor://localhost";
+
+const rejectingAuth: GatewayAuth = {
+  handler: () => Promise.reject(new Error("auth handler was invoked")),
+  getSession: () => Promise.reject(new Error("session was resolved")),
+};
+
+const bearerAuth: GatewayAuth = {
+  handler: () =>
+    Promise.resolve(
+      new Response("auth handler", {
+        headers: { "set-auth-token": "test-token" },
+      }),
+    ),
+  getSession: (headers) =>
+    Promise.resolve(
+      headers.get("authorization") === "Bearer test-token"
+        ? { user: { id: "mobile-user" } }
+        : null,
+    ),
+};
+
+function mobileRequest(path: string, init?: RequestInit): Request {
+  const headers = new Headers(init?.headers);
+  headers.set("origin", MOBILE_ORIGIN);
+  return new Request(`https://frockbot.test${path}`, { ...init, headers });
+}
+
+describe("Cross-origin access for mobile clients", () => {
+  test("answers preflight for allowed origins without touching auth", async () => {
+    const { gateway, loader } = createTestGateway(
+      undefined,
+      rejectingAuth,
+      false,
+      [MOBILE_ORIGIN],
+    );
+    const response = await gateway(
+      mobileRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
+    );
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      MOBILE_ORIGIN,
+    );
+    expect(response.headers.get("access-control-allow-methods")).toBe(
+      "GET, POST, OPTIONS",
+    );
+    expect(response.headers.get("access-control-allow-headers")).toBe(
+      "authorization, content-type",
+    );
+    expect(response.headers.get("access-control-max-age")).toBe("600");
+    expect(response.headers.get("vary")).toBe("origin");
+    expect(loader.ids).toEqual([]);
+  });
+
+  test("denies cross-origin sharing to origins outside the allow list", async () => {
+    const { gateway } = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      false,
+      [MOBILE_ORIGIN],
+    );
+    const preflight = await gateway(
+      new Request("https://frockbot.test/api/bots/primary/turns", {
+        method: "OPTIONS",
+        headers: { origin: "https://attacker.test" },
+      }),
+    );
+    expect(preflight.status).toBe(403);
+    expect(preflight.headers.get("access-control-allow-origin")).toBeNull();
+    expect(preflight.headers.get("vary")).toBeNull();
+  });
+
+  test("rejects credential mutations from an untrusted origin", async () => {
+    const { gateway } = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      true,
+      [MOBILE_ORIGIN],
+    );
+    const response = await gateway(
+      new Request("https://frockbot.test/api/connections", {
+        method: "POST",
+        headers: {
+          origin: "https://attacker.test",
+          cookie: "frockbot_dev_user=alice",
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/create-api-key",
+          commandId: "csrf-connection",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          label: "Injected",
+          apiKey: "stolen-context",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect((await response.json()) as unknown).toEqual({
+      error: "request origin is not allowed",
+    });
+
+    const sameOrigin = await gateway(
+      new Request("https://frockbot.test/api/connections", {
+        method: "POST",
+        headers: {
+          origin: "https://frockbot.test",
+          cookie: "frockbot_dev_user=alice",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "connection/create-api-key",
+          commandId: "same-origin-connection",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          label: "Allowed",
+          apiKey: "write-only-secret",
+        }),
+      }),
+    );
+    expect(sameOrigin.status).toBe(200);
+  });
+
+  test("shares authenticated bearer turns with the mobile origin", async () => {
+    const { gateway, loader } = createTestGateway(
+      undefined,
+      bearerAuth,
+      false,
+      [MOBILE_ORIGIN],
+    );
+    const response = await gateway(
+      mobileRequest("/api/bots/primary/turns", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          text: "/echo hello mobile",
+          commandId: "mobile-turn-1",
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ text: "Echo: hello mobile" });
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      MOBILE_ORIGIN,
+    );
+    expect(response.headers.get("access-control-expose-headers")).toBe(
+      "set-auth-token",
+    );
+    expect(response.headers.get("vary")).toBe("origin");
+    expect(loader.ids).toEqual(["mobile-user:foundation-v1"]);
+  });
+
+  test("shares rejections so the mobile client can read the status", async () => {
+    const { gateway } = createTestGateway(undefined, bearerAuth, false, [
+      MOBILE_ORIGIN,
+    ]);
+    const response = await gateway(mobileRequest("/api/bots/primary/turns"));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      MOBILE_ORIGIN,
+    );
+    expect(response.headers.get("vary")).toBe("origin");
+  });
+
+  test("exposes the sign-in token header from Better Auth routes", async () => {
+    const { gateway } = createTestGateway(undefined, bearerAuth, false, [
+      MOBILE_ORIGIN,
+    ]);
+    const response = await gateway(
+      mobileRequest("/api/auth/sign-in/social", { method: "POST" }),
+    );
+    expect(response.headers.get("set-auth-token")).toBe("test-token");
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      MOBILE_ORIGIN,
+    );
+    expect(response.headers.get("access-control-expose-headers")).toBe(
+      "set-auth-token",
+    );
+  });
+
+  test("leaves same-origin and asset requests unchanged", async () => {
+    const { gateway } = createTestGateway(undefined, bearerAuth, false, [
+      MOBILE_ORIGIN,
+    ]);
+    const page = await gateway(new Request("https://frockbot.test/"));
+    expect(page.status).toBe(200);
+    expect(page.headers.get("access-control-allow-origin")).toBeNull();
+    expect(page.headers.get("vary")).toBeNull();
+
+    const asset = await gateway(mobileRequest("/app.js"));
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("carries no cross-origin headers when none are configured", async () => {
+    const { gateway } = createTestGateway(undefined, bearerAuth, false);
+    const response = await gateway(
+      mobileRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("authenticates bearer sessions through the identity seam", async () => {
+    const { gateway, loader } = createTestGateway(undefined, bearerAuth, false);
+    const rejected = await gateway(
+      new Request("https://frockbot.test/api/bots/primary/turns"),
+    );
+    expect(rejected.status).toBe(401);
+    expect(loader.ids).toEqual([]);
+
+    const accepted = await gateway(
+      new Request("https://frockbot.test/api/bots/primary/turns", {
+        headers: { authorization: "Bearer test-token" },
+      }),
+    );
+    expect(accepted.status).toBe(200);
+    expect(loader.ids).toEqual(["mobile-user:foundation-v1"]);
   });
 });

@@ -1,14 +1,13 @@
+import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import type {
-  AgentEffectAdmission,
   PersistSessionEvents,
   SessionEvent,
-} from "@frockbot/agent-core";
+} from "@frockbot/kernel-contracts";
 import type {
   BotExecutionPlanV1,
   BotSettingsViewV1,
   ConnectionView,
 } from "@frockbot/configuration-core";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 
 export interface BotResidentProjection {
@@ -17,7 +16,6 @@ export interface BotResidentProjection {
   botId: string;
   settings: BotSettingsViewV1;
   executionPlan: BotExecutionPlanV1;
-  memory: MemoryPluginConfig;
   systemPromptSection: string;
   authorizeConnection(
     assignment: BotSettingsViewV1["assignments"][number],

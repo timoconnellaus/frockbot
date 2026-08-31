@@ -283,6 +283,24 @@ function botRoute(path: string, pattern: RegExp, runIdIndex?: number): boolean {
   return isRpcIdentifier(match?.[runIdIndex]);
 }
 
+function connectionCommandRoute(path: string): boolean {
+  const [pathname, query, extra] = path.split("?");
+  if (
+    pathname !== "/api/connection-commands" ||
+    !query ||
+    extra !== undefined ||
+    query.includes("#")
+  ) {
+    return false;
+  }
+  const parameters = new URLSearchParams(query);
+  return (
+    parameters.size === 2 &&
+    isPublicIdentifier(parameters.get("packageId")) &&
+    isPublicIdentifier(parameters.get("commandId"))
+  );
+}
+
 function pluginConnectionRoute(path: string, revoke: boolean): boolean {
   const match = (
     revoke
@@ -302,6 +320,14 @@ const API_ROUTES: Array<{
   {
     matches: exactRoute(/^\/api\/settings$/),
     methods: new Set(["GET", "POST"]),
+  },
+  {
+    matches: exactRoute(/^\/api\/package-revisions$/),
+    methods: new Set(["GET"]),
+  },
+  {
+    matches: exactRoute(/^\/api\/package-revisions\/rollback$/),
+    methods: new Set(["POST"]),
   },
   {
     matches: exactRoute(/^\/api\/bots$/),
@@ -328,6 +354,14 @@ const API_ROUTES: Array<{
         2,
       ),
     methods: new Set(["POST"]),
+  },
+  {
+    matches: exactRoute(/^\/api\/connections$/),
+    methods: new Set(["POST"]),
+  },
+  {
+    matches: connectionCommandRoute,
+    methods: new Set(["GET"]),
   },
   {
     matches: (path) => pluginConnectionRoute(path, false),

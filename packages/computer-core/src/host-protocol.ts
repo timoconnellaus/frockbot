@@ -4,7 +4,8 @@ import type {
   ComputerBrowserState,
   ComputerExecRequest,
   ComputerExecResult,
-  ComputerTarget,
+  ComputerIdentityV1,
+  ComputerTenantV1,
 } from "./core.js";
 
 export type ComputerHostOperationV1 =
@@ -14,7 +15,8 @@ export type ComputerHostOperationV1 =
 export interface ComputerHostEffectRequestV1 {
   schemaVersion: 1;
   effectId: string;
-  target: ComputerTarget;
+  identity: ComputerIdentityV1;
+  tenant: ComputerTenantV1;
   assignment: ComputerAssignment;
   operation: ComputerHostOperationV1;
 }
@@ -204,12 +206,20 @@ export function decodeComputerHostEffectRequestV1(
 ): ComputerHostEffectRequestV1 {
   const value = record(
     input,
-    ["schemaVersion", "effectId", "target", "assignment", "operation"],
+    [
+      "schemaVersion",
+      "effectId",
+      "identity",
+      "tenant",
+      "assignment",
+      "operation",
+    ],
     "Computer host request",
   );
   if (value.schemaVersion !== 1)
     throw new Error("Computer host version is invalid");
-  const target = record(value.target, ["userId", "botId"], "Computer target");
+  const identity = record(value.identity, ["userId"], "Computer identity");
+  const tenant = record(value.tenant, ["botId"], "Computer tenant");
   const assignment = record(
     value.assignment,
     ["providerId", "generation"],
@@ -299,9 +309,11 @@ export function decodeComputerHostEffectRequestV1(
   return {
     schemaVersion: 1,
     effectId: identifier(value.effectId, "Computer effect ID"),
-    target: {
-      userId: identifier(target.userId, "Computer user ID"),
-      botId: identifier(target.botId, "Computer Bot ID"),
+    identity: {
+      userId: identifier(identity.userId, "Computer user ID"),
+    },
+    tenant: {
+      botId: identifier(tenant.botId, "Computer Bot ID"),
     },
     assignment: {
       providerId: identifier(assignment.providerId, "Computer provider ID"),

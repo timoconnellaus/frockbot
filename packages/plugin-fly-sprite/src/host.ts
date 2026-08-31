@@ -6,7 +6,7 @@ import {
   type FlySpriteAgentComputer,
   FlySpriteComputer,
 } from "./computer.ts";
-import { flySpriteNameForTarget } from "./provider.ts";
+import { flySpriteNameForComputer } from "./provider.ts";
 
 export function configuredFlyBotId(
   environment: { FROCKBOT_BOT_ID?: string } = process.env as {
@@ -198,10 +198,8 @@ export const flySpriteHostPlugin: Plugin.Function =
     ? createFlySpriteHostPlugin(
         new FlySpriteComputer({
           respectHumanControl: true,
-          spriteName: flySpriteNameForTarget({
-            userId: defaultUserId,
-            botId: defaultBotId,
-          }),
+          // One Sprite per User (ADR 0012): the Bot is a tenant on it.
+          spriteName: flySpriteNameForComputer({ userId: defaultUserId }),
         }),
         {
           id: defaultBotId,

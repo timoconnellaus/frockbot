@@ -3,8 +3,9 @@ import {
   type ComputerAssignment,
   type ComputerHandle,
   type ComputerOperationOptions,
+  type ComputerIdentityV1,
   type ComputerProvider,
-  type ComputerTarget,
+  type ComputerTenantV1,
 } from "@frockbot/computer-core";
 import type {
   ComputerHostEffectRequestV1,
@@ -49,11 +50,14 @@ class SharedComputerProvider implements ComputerProvider {
   constructor(private readonly host: SharedComputerHostClient) {}
 
   open(
-    target: ComputerTarget,
+    identity: ComputerIdentityV1,
+    tenant: ComputerTenantV1,
     assignment: ComputerAssignment,
   ): Promise<ComputerHandle> {
     return Promise.resolve({
       assignment,
+      identity,
+      tenant,
       exec: {
         execute: async (request, options) => {
           const response = completed(
@@ -61,7 +65,8 @@ class SharedComputerProvider implements ComputerProvider {
               {
                 schemaVersion: 1,
                 effectId: effectId(options),
-                target,
+                identity,
+                tenant,
                 assignment,
                 operation: { type: "exec", request },
               },
@@ -84,7 +89,8 @@ class SharedComputerProvider implements ComputerProvider {
               {
                 schemaVersion: 1,
                 effectId: effectId(options),
-                target,
+                identity,
+                tenant,
                 assignment,
                 operation: { type: "browser", action },
               },

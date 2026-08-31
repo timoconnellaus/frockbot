@@ -10,7 +10,8 @@ import {
 const request: ComputerHostEffectRequestV1 = {
   schemaVersion: 1,
   effectId: "tool:1:1:0",
-  target: { userId: "user-1", botId: "bot-1" },
+  identity: { userId: "user-1" },
+  tenant: { botId: "bot-1" },
   assignment: { providerId: "shared-computer", generation: 1 },
   operation: {
     type: "exec",

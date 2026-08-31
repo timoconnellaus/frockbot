@@ -1,10 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "id": "memory",
   "displayName": "Memory",
   "version": "0.0.1",
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
   "contributions": {
-    "agent": "./agent"
+    "runtime": {
+      "entry": "./agent"
+    }
   },
   "permissions": ["memory:read", "memory:write"]
 }

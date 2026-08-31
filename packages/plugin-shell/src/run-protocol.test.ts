@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionEvent } from "@frockbot/agent-core";
+import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
 import {
@@ -68,7 +68,8 @@ function storedRun(
     events,
     effectAdmissions: [],
     status,
-    phase: status === "reconciliation-required" ? "reconciling" : "executing",
+    phase: status === "reconciliation-required" ? status : "executing",
+    compositionGenerationId: "test-composition-generation",
     configurationSnapshot: initializeBotSettingsV1("primary"),
     previousEventCount: 0,
     ...(status === "completed" ? { responseText: "done" } : {}),
@@ -91,6 +92,7 @@ describe("client run protocol v1", () => {
       "events",
       "status",
       "phase",
+      "compositionGenerationId",
       "configurationSnapshot",
       "previousEventCount",
     ] as const) {
@@ -560,7 +562,8 @@ describe("client run protocol v1", () => {
       effectAdmissions: [],
       status: "reconciliation-required",
       failure: "Provider confirmation required",
-      phase: "reconciling",
+      phase: "reconciliation-required",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 17,
     } satisfies StoredRun;
@@ -618,6 +621,7 @@ describe("client run protocol v1", () => {
       "tool-input-secret",
       "provider-private",
       "model-private",
+      "compositionGenerationId",
       "configurationSnapshot",
       "previousEventCount",
       "phase",
@@ -706,6 +710,7 @@ describe("client run protocol v1", () => {
       effectAdmissions: [],
       status: "failed",
       phase: "executing",
+      compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
       failure: "💥".repeat(2_000),

@@ -4,12 +4,12 @@
 
 The approved non-Codex vertical slice is implemented on this branch: durable User and Bot configuration, manifest v3 Packages, explicit Bot Capability Assignments, the hosted settings and Plugins surfaces, and the Composio Gmail Connection with durable authorization, revocation, reconciliation, and assigned Agent tools.
 
-The authoritative current system shape is in [`docs/architecture.md`](../architecture.md), ownership trade-offs are in [ADR 0003](../adr/0003-split-user-connections-from-bot-assignments.md), and domain terms are in [`CONTEXT.md`](../../CONTEXT.md). This plan does not duplicate those contracts.
+The authoritative current system shape is in [`docs/architecture.md`](../architecture.md), ownership trade-offs are in [ADR 0003](../adr/0003-split-account-connections-from-bot-assignments.md), and domain terms are in [`CONTEXT.md`](../../CONTEXT.md). This plan does not duplicate those contracts.
 
 ## Deferred work
 
-- Model-provider and Codex Connections are outside this change. Any later provider vertical slice must keep provider configuration in **Profile → Settings**, model selection in Bot settings, and User defaults limited to newly created Bots.
-- Mobile must keep **Plugins** hidden until a native OAuth/deep-link return adapter can complete the hosted Connection protocol.
+- Ollama Cloud model-provider Connections now use **Profile → Plugins** for account-scoped credentials and catalogs, Bot settings for exact Connection and model binding, and User defaults only for newly created Bots. Codex Connections remain outside this change.
+- Mobile exposes hosted API-key Connection workflows. OAuth-based Packages still require a native deep-link return adapter before their authorization controls can be enabled.
 - External Package discovery, signed distribution, sandboxed third-party settings views, and production secret-vault/KMS support for future write-only credentials remain separate vertical slices.
 
 ## Constraints for follow-up slices

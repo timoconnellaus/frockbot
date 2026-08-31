@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  type SessionEvent,
-  SessionStore,
-  ToolRegistry,
-} from "@frockbot/agent-core";
+import { type SessionEvent, SessionStore } from "@frockbot/kernel-contracts";
+import { ToolRegistry } from "@frockbot/plugin-tools";
 import { Context } from "cordis";
 import { createComposioRouterPlugin } from "./agent.js";
 import { ComposioClient } from "./composio-client.js";
@@ -60,6 +57,7 @@ describe("Composio router Plugin", () => {
     const context = {
       botId: "primary",
       agentId: "primary",
+      compositionGenerationId: "bootstrap",
       sessionId: "user-1:primary",
       effectId: "tool:1:1:0",
       signal: new AbortController().signal,
@@ -184,6 +182,7 @@ describe("Composio router Plugin", () => {
     const context = {
       botId: "primary",
       agentId: "primary",
+      compositionGenerationId: "bootstrap",
       sessionId: "resumed-session",
       effectId: "tool:1:1:1",
       signal: new AbortController().signal,

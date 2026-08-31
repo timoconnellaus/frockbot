@@ -1,9 +1,11 @@
 import {
   decodeConnectionDependencyRequirementV1,
+  decodeModelAssignmentV1,
   decodeOperationReceiptV1,
   isPublicIdentifier,
   type CapabilityAssignmentView,
   type ConnectionDependencyRequirementV1,
+  type ModelAssignment,
   type OperationReceiptV1,
 } from "@frockbot/configuration-core";
 
@@ -30,6 +32,14 @@ export interface StoredAssignmentSaga {
   targetRequirement?: ConnectionDependencyRequirementV1;
   previous?: CapabilityAssignmentView;
   previousGeneration?: string;
+  /**
+   * The Bot model this Assignment carries. It commits inside the saga's commit
+   * phase, so the Connection dependency claim and the model binding are one
+   * durable, idempotent unit rather than two commands that can disagree.
+   */
+  model?: ModelAssignment;
+  /** The Assignment's removal also unbinds the Bot's model. */
+  clearModel?: boolean;
   deadlineAt: number;
   acceptedReceipt: OperationReceiptV1;
   receipt?: OperationReceiptV1;
@@ -80,6 +90,8 @@ export function requireStoredAssignmentSaga(
     ],
     [
       "target",
+      "model",
+      "clearModel",
       "targetRequirement",
       "previous",
       "previousGeneration",
@@ -107,6 +119,7 @@ export function requireStoredAssignmentSaga(
     "claimDispatched",
     "acknowledgeDispatched",
     "releaseDispatched",
+    "clearModel",
   ] as const) {
     if (value[key] !== undefined && typeof value[key] !== "boolean") {
       throw new Error(`Stored Assignment saga ${key} is invalid`);
@@ -179,6 +192,11 @@ export function requireStoredAssignmentSaga(
             CapabilityAssignmentView,
             "state"
           >),
+    model:
+      value.model === undefined
+        ? undefined
+        : decodeModelAssignmentV1(value.model),
+    clearModel: value.clearModel as boolean | undefined,
     targetRequirement:
       value.targetRequirement === undefined
         ? undefined
@@ -226,4 +244,31 @@ export function nextAssignmentPhase(
   }
   if (saga.phase === "releasing" && event === "released") return undefined;
   throw new Error(`Assignment saga cannot apply ${event} while ${saga.phase}`);
+}
+
+export type AssignmentSagaSettlement =
+  "acknowledged" | "compensated" | "rejected";
+
+export interface AssignmentSagaEffects {
+  acknowledge(saga: StoredAssignmentSaga): Promise<boolean>;
+  compensate(saga: StoredAssignmentSaga): Promise<void>;
+  release(saga: StoredAssignmentSaga): Promise<boolean>;
+  rejectCommitted(saga: StoredAssignmentSaga): Promise<void>;
+}
+
+export async function settleAssignmentSaga(
+  saga: StoredAssignmentSaga,
+  effects: AssignmentSagaEffects,
+): Promise<AssignmentSagaSettlement> {
+  if (saga.phase === "claiming") {
+    await effects.compensate(saga);
+    return "compensated";
+  }
+  if (await effects.acknowledge(saga)) return "acknowledged";
+  await effects.compensate(saga);
+  if (!(await effects.release(saga))) {
+    throw new Error("Rejected Connection dependency was not released");
+  }
+  await effects.rejectCommitted(saga);
+  return "rejected";
 }

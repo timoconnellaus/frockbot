@@ -38,8 +38,8 @@ test("the native package declares only thin-shell dependencies", async () => {
   expect(Object.keys(manifest.dependencies).sort()).toEqual([
     "@capacitor/core",
     "@frockbot/configuration-core",
+    "@frockbot/kernel-composition",
     "@frockbot/mobile-core",
-    "@frockbot/plugin-catalog",
     "@frockbot/plugin-mobile-clipboard",
     "@frockbot/plugin-mobile-notifications",
     "cordis",

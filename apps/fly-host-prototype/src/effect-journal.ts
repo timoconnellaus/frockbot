@@ -78,7 +78,7 @@ export class ComputerEffectJournal {
     let response: ComputerHostEffectResponseV1;
     try {
       const container = this.env.FLY_HOST.getByName(
-        shardForBot(effect.target.botId, shardCount(this.env.FLY_HOST_SHARDS)),
+        shardForBot(effect.tenant.botId, shardCount(this.env.FLY_HOST_SHARDS)),
       );
       const result = await container.fetch(
         new Request("http://computer-host.internal/v1/effects", {

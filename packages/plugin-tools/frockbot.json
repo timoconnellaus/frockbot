@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "id": "tools",
+  "displayName": "Tools",
+  "version": "0.0.1",
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
+  "contributions": {
+    "runtime": {
+      "entry": "./agent"
+    }
+  },
+  "permissions": []
+}

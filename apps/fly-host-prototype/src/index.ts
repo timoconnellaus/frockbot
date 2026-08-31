@@ -63,8 +63,8 @@ export default {
       }
       const journal = env.COMPUTER_EFFECTS.getByName(
         JSON.stringify([
-          effect.target.userId,
-          effect.target.botId,
+          effect.identity.userId,
+          effect.tenant.botId,
           effect.effectId,
         ]),
       );

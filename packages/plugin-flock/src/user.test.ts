@@ -67,6 +67,14 @@ describe("Flock User contribution", () => {
     const contribution = createFlockUserBackendContribution({
       storage,
       readUserSettings: () => Promise.resolve(settings),
+      claimInitialModelBinding: (_storage, input) =>
+        Promise.resolve({
+          assignmentId: input.generation,
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: input.model.connectionId,
+          state: "enabled",
+        }),
       now: () => new Date("2026-08-29T00:00:00.000Z"),
       commandBotLifecycle: () => Promise.reject(new Error("not used")),
       readBotLifecycle: () => Promise.reject(new Error("not used")),
@@ -78,6 +86,16 @@ describe("Flock User contribution", () => {
       schemaVersion: 1,
       initialName: "Alpha",
       initialModel: settings.newBotModelTemplate,
+      initialModelBinding: {
+        assignment: {
+          assignmentId: "create-1",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "provider",
+          state: "enabled",
+        },
+        generation: "create-1",
+      },
       registeredAt: "2026-08-29T00:00:00.000Z",
     });
     settings.newBotModelTemplate.providerModelId = "changed";
@@ -95,6 +113,25 @@ describe("Flock User contribution", () => {
     ).rejects.toBeInstanceOf(FlockConflictError);
   });
 
+  test("rejects a default model without a claimable Connection binding", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      readUserSettings: () => Promise.resolve(settings),
+      claimInitialModelBinding: () => Promise.resolve(undefined),
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
+    });
+
+    await expect(
+      contribution.createBot("user-1", command()),
+    ).resolves.toMatchObject({
+      status: "rejected",
+      failure: "Default model Connection is unavailable",
+    });
+    expect((await contribution.listBots()).bots).toEqual([]);
+  });
+
   test("rejects malformed durable directories and receipts at the storage seam", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({
@@ -102,6 +139,7 @@ describe("Flock User contribution", () => {
       readUserSettings: () => Promise.resolve(settings),
       commandBotLifecycle: () => Promise.reject(new Error("not used")),
       readBotLifecycle: () => Promise.reject(new Error("not used")),
+      claimInitialModelBinding: () => Promise.resolve(undefined),
     });
     await storage.put("flock:directory:v1", {
       schemaVersion: 1,
@@ -129,6 +167,14 @@ describe("Flock User contribution", () => {
     const contribution = createFlockUserBackendContribution({
       storage,
       readUserSettings: () => Promise.resolve(settings),
+      claimInitialModelBinding: (_storage, input) =>
+        Promise.resolve({
+          assignmentId: input.generation,
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: input.model.connectionId,
+          state: "enabled" as const,
+        }),
       commandBotLifecycle: (_userId, lifecycleCommand) => {
         calls += 1;
         botStatus =
@@ -190,6 +236,14 @@ describe("Flock User contribution", () => {
     const contribution = createFlockUserBackendContribution({
       storage,
       readUserSettings: () => Promise.resolve(settings),
+      claimInitialModelBinding: (_storage, input) =>
+        Promise.resolve({
+          assignmentId: input.generation,
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: input.model.connectionId,
+          state: "enabled" as const,
+        }),
       commandBotLifecycle: () => Promise.reject(new Error("response lost")),
       readBotLifecycle: (_userId, botId) =>
         recovered
@@ -224,6 +278,14 @@ describe("Flock User contribution", () => {
     const reconstructed = createFlockUserBackendContribution({
       storage,
       readUserSettings: () => Promise.resolve(settings),
+      claimInitialModelBinding: (_storage, input) =>
+        Promise.resolve({
+          assignmentId: input.generation,
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: input.model.connectionId,
+          state: "enabled" as const,
+        }),
       commandBotLifecycle: () => Promise.reject(new Error("response lost")),
       readBotLifecycle: (_userId, botId) =>
         Promise.resolve({
@@ -257,6 +319,14 @@ describe("Flock User contribution", () => {
         createFlockUserBackendContribution({
           storage,
           readUserSettings: () => Promise.resolve(settings),
+          claimInitialModelBinding: (_storage, input) =>
+            Promise.resolve({
+              assignmentId: input.generation,
+              packageId: "provider-ollama-cloud",
+              capabilityId: "ollama-cloud-models",
+              connectionId: input.model.connectionId,
+              state: "enabled" as const,
+            }),
           commandBotLifecycle: () =>
             Promise.resolve({
               schemaVersion: 1,
@@ -306,6 +376,14 @@ describe("Flock User contribution", () => {
       readUserSettings: () => Promise.resolve(settings),
       commandBotLifecycle: () => Promise.reject(new Error("not used")),
       readBotLifecycle: () => Promise.reject(new Error("not used")),
+      claimInitialModelBinding: (_storage, input) =>
+        Promise.resolve({
+          assignmentId: input.generation,
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: input.model.connectionId,
+          state: "enabled",
+        }),
     });
     await contribution.createBot("user-1", command());
     expect(

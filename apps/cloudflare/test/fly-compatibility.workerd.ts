@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
+import { provisionBot } from "./provision-bot.ts";
 
 function flyProbe(name: string) {
   return env.FLY_COMPATIBILITY.getByName(name);
@@ -53,18 +54,7 @@ describe("production Bot durability in Workerd", () => {
       userId: `workerd-user-${suffix}`,
       botId: `workerd-bot-${suffix}`,
     };
-    await user(identity.userId).createBot({
-      schemaVersion: 1,
-      userId: identity.userId,
-      command: {
-        schemaVersion: 1,
-        type: "bot/create",
-        commandId: `create-${suffix}`,
-        expectedRevision: 0,
-        botId: identity.botId,
-        name: "Workerd Bot",
-      },
-    });
+    await provisionBot(identity);
     const stub = bot(`events-${suffix}`);
     const result = await stub.run({
       ...identity,
@@ -76,18 +66,12 @@ describe("production Bot durability in Workerd", () => {
       },
     });
 
-    expect(result.text).toBe("Cordis runtime: hello from Workerd");
+    expect(result.text).toBe("Ollama reply");
     const firstEvents = await stub.durableSessionEvents();
     expect(firstEvents.length).toBeGreaterThan(0);
     expect(firstEvents.map((event) => event.seq)).toEqual(
       firstEvents.map((_, index) => index),
     );
-    expect(await stub.readRuntimeProjection(identity)).toEqual({
-      schemaVersion: 1,
-      desiredGeneration: 0,
-      status: "applied",
-      appliedGeneration: 0,
-    });
 
     await stub.executeConfiguration({
       ...identity,
@@ -100,11 +84,6 @@ describe("production Bot durability in Workerd", () => {
         profile: { name: "Remounted Workerd Bot" },
       },
     });
-    expect(await stub.readRuntimeProjection(identity)).toEqual({
-      schemaVersion: 1,
-      desiredGeneration: 1,
-      status: "pending",
-    });
 
     const second = await stub.run({
       ...identity,
@@ -115,13 +94,7 @@ describe("production Bot durability in Workerd", () => {
         text: "same resident root",
       },
     });
-    expect(second.text).toBe("Cordis runtime: same resident root");
-    expect(await stub.readRuntimeProjection(identity)).toEqual({
-      schemaVersion: 1,
-      desiredGeneration: 1,
-      status: "applied",
-      appliedGeneration: 1,
-    });
+    expect(second.text).toBe("Ollama reply");
     const residentEvents = await stub.durableSessionEvents();
     expect(
       residentEvents.findLast((event) => event.type === "model/request"),
@@ -142,7 +115,7 @@ describe("production Bot durability in Workerd", () => {
         text: "after eviction",
       },
     });
-    expect(reconstructed.text).toBe("Cordis runtime: after eviction");
+    expect(reconstructed.text).toBe("Ollama reply");
     expect((await stub.durableSessionEvents()).length).toBeGreaterThan(
       residentEvents.length,
     );

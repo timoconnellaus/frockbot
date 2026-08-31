@@ -1,30 +1,74 @@
+import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import {
-  type AgentEffectAdmission,
   decodeSessionEvent,
   type PersistSessionEvents,
   type SessionEvent,
   validateToolOccurrenceJournal,
-} from "@frockbot/agent-core";
+  type BotCapabilitiesStub,
+  type IsolateModelInvocationV1,
+  type IsolatePendingDecisionV1,
+  type NormalizedModelRequest,
+  type PackageBundlerBinding,
+} from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
+import {
+  ACTIVE_RUN_KEY,
+  BotDurableAuthority,
+  IDENTITY_KEY,
+  LATEST_EVENTS_KEY,
+  NOTIFICATION_PREFIX,
+  RECOVERY_ALARM_DELAY_MS,
+  RUN_ADMISSION_FENCE_PREFIX,
+  RUN_INDEX_PREFIX,
+  RUN_PREFIX,
+  type BotIdentity,
+  type BotDurableAuthorityOptions,
+  type BotTurnExecutionInput,
+  type OwnedBotTurnCommand,
+} from "@frockbot/kernel-do";
+import type {
+  FoundationAgentPackage,
+  RuntimeModelSelection,
+} from "@frockbot/agent-runtime/runtime";
+import {
+  decodeCredentialLeaseV1,
+  type CredentialLeaseV1,
+} from "@frockbot/connection-core";
+import {
+  compileFoundationApplication,
+  createFoundationModelRuntimePackage,
+} from "@frockbot/application-foundation/runtime";
 import {
   capabilityAssignmentFailureV1,
   configurationCommandFingerprintV1,
   ConfigurationConflictError,
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
+  decodeCompositionCommandReceiptV1,
+  MAX_COMPOSITION_GENERATION_PAGE_V1,
+  type CompositionCommandReceiptV1,
+  type CompositionGenerationListViewV1,
+  type CompositionGenerationViewV1,
+  type RevertCompositionCommandV1,
   type ConnectionDependencyRequirementV1,
   type BotExecutionPlanV1,
   type BotSettingsViewV1,
+  type CapabilityAssignmentView,
+  type ModelAssignment,
   type ConnectionView,
   type ConfigurationCommandV1,
   type OperationReceiptV1,
+  type ResolvedModelBindingV1,
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
+  resolveBotModelBindingV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
-import type { BotResidentExecution } from "./backend-execution.js";
+import {
+  createFoundationAssignedRuntimePackages,
+  createFoundationHostedRuntimePackages,
+  type PackagePublisherAgentHost,
+} from "@frockbot/application-foundation/runtime";
 import {
   requireStoredAssignmentSaga,
   type StoredAssignmentSaga,
@@ -42,6 +86,50 @@ import {
   planBotRunRecovery,
   planStoppedRunRecovery,
 } from "./backend-recovery.js";
+import {
+  bootstrapCompositionGeneration,
+  createShellCompositionHost,
+  type ShellIsolateMountOptions,
+  type ShellMountedComposition,
+} from "./backend-composition.js";
+import {
+  activateCompositionV1,
+  type CompositionFailureV1,
+  type CompositionMountHost,
+  type CompositionQuarantineV1,
+} from "@frockbot/kernel-composition/activation";
+import {
+  createPackageAuthoringHost,
+  createR2AuthoringArtifactStore,
+} from "./backend-authoring.js";
+import { createBotComputerSyncHost } from "./backend-computer.js";
+import { createBotMemoryHost } from "./backend-memory.js";
+import { createBotSkillsHost } from "./backend-skills.js";
+import {
+  decodeAuthoringQuotaReceiptV1,
+  type AuthoringQuotaBinding,
+  type PackageAuthoringHost,
+} from "@frockbot/plugin-authoring";
+import {
+  BOT_ISOLATE_COMPATIBILITY_DATE,
+  createIsolateCapabilityHost,
+  createR2PackageArtifactStore,
+  isolateBindingDigestV1,
+  type BotCapabilitiesPropsV1,
+  type IsolateAssignmentV1,
+  type IsolateCapabilityHost,
+  type IsolateModelBindingV1,
+  type IsolateModelPath,
+  type IsolateModelRequestRecordV1,
+  type IsolatePendingAuthorityDecisionV1,
+} from "./backend-isolate.js";
+import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
+import type {
+  CompositionGenerationV1,
+  CompositionMemberV1,
+} from "@frockbot/kernel-composition/generation";
+import { projectCompositionGenerationV1 } from "./composition-views.js";
+import { executeBotTurn } from "./backend-runner.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
@@ -64,38 +152,31 @@ import {
   botStopCommandFingerprintV1,
   botTurnCommandFingerprintV1,
   requireStoredRunV1,
+  storedRunCodecV1,
   type BotNotificationIntent,
-  type BotTurnCommand,
   type BotTurnCompletion,
   type StoredRun,
   type StoredRunStatus,
 } from "./backend-contracts.js";
 
-const RUN_PREFIX = "run:";
-const RUN_INDEX_PREFIX = "run-index:";
-const RUN_ADMISSION_FENCE_PREFIX = "run-admission-fence:";
-const ACTIVE_RUN_KEY = "active-run";
-const LATEST_EVENTS_KEY = "latest-events";
-const IDENTITY_KEY = "identity";
-const BOT_CONFIGURATION_KEY = "bot-configuration";
-const RUNTIME_PROJECTION_KEY = "runtime-projection";
+/** The Bot Durable Object key holding this Bot's durable configuration. */
+export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const ASSIGNMENT_GENERATION_PREFIX = "assignment-generation:";
 const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
 const ASSIGNMENT_TOMBSTONE_PREFIX = "assignment-tombstone:";
 const ASSIGNMENT_SAGA_PREFIX = "assignment-saga:";
-const NOTIFICATION_PREFIX = "notification:";
 const STOP_RECEIPT_PREFIX = "stop-receipt:";
-const RECOVERY_ALARM_DELAY_MS = 60_000;
 const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
+/** Idempotency records for Composition commands this Package admits. */
+const COMPOSITION_COMMAND_PREFIX = "composition-command:";
 
-function runIndexKey(acceptedAt: string, runId: string): string {
-  return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;
+function assignmentGenerationKey(assignmentId: string): string {
+  return `${ASSIGNMENT_GENERATION_PREFIX}${assignmentId}`;
 }
 
-interface BotIdentity {
-  userId: string;
-  botId: string;
+function capabilityKey(packageId: string, capabilityId: string): string {
+  return `${packageId}:${capabilityId}`;
 }
 
 interface StoredConfigurationReceipt {
@@ -118,22 +199,6 @@ function isTerminalStoredRunStatus(status: StoredRunStatus): boolean {
   );
 }
 
-export interface StoredRuntimeProjection {
-  schemaVersion: 1;
-  desiredGeneration: number;
-  status: "pending" | "applied" | "failed";
-  appliedGeneration?: number;
-  failedGeneration?: number;
-  failure?: string;
-}
-
-class BotRuntimeProjectionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "BotRuntimeProjectionError";
-  }
-}
-
 interface AssignmentActivity {
   commandFingerprint: string;
   promise: Promise<OperationReceiptV1>;
@@ -152,120 +217,115 @@ function requireMatchingConfigurationReceipt(
   return stored.receipt;
 }
 
-export interface OwnedBotTurnCommand extends BotTurnCommand, BotIdentity {}
+export type { BotIdentity, OwnedBotTurnCommand };
 
 export interface BotStateEnv {
   MEMORY_FILES: R2Bucket;
+  /**
+   * The Bot Package Worker Loader (plan Step 4). Optional so a host without
+   * Bot-authored Packages — tests, the Electron shell — still compiles; a
+   * generation with an isolate member fails verification without it.
+   */
+  BOT_PACKAGES?: BotIsolateLoader;
+  /** Immutable, content-addressed Package artifacts, read hash-verified. */
+  APPLICATION_ARTIFACTS?: R2Bucket;
+  /**
+   * The Package bundler service (plan Step 3/D4). Optional so a host without
+   * Bot authoring still compiles; `package_author` then refuses visibly.
+   */
+  PACKAGE_BUNDLER?: PackageBundlerBinding;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
-  COMPUTER_HOST: Fetcher;
+  COMPUTER_HOST?: Fetcher;
+  SPRITES_TOKEN?: string;
+  CREDENTIAL_KEYRING?: string;
 }
+
+/** Constructs the kernel Bot Durable Object authority this Package runs under. */
+export type CreateBotDurableAuthority = <Snapshot>(
+  options: BotDurableAuthorityOptions<Snapshot>,
+) => BotDurableAuthority<Snapshot>;
 
 export interface ShellBotBackendHost {
   state: DurableObjectState;
   env: BotStateEnv;
-  execution: BotResidentExecution;
   compileApplication?: typeof compileFoundationApplication;
   assertLifecycleActive?(
     storage: DurableObjectTransaction,
     botId: string,
   ): Promise<void>;
+  outboundFetch?: typeof fetch;
+  /** Supplied by the Durable Object; defaults to the kernel implementation. */
+  createAuthority?: CreateBotDurableAuthority;
 }
 
 function optionalStoredRun(input: unknown): StoredRun | undefined {
   return input === undefined ? undefined : requireStoredRunV1(input);
 }
 
-function parseStoredJson<T>(body: string): Promise<T> {
-  try {
-    return Promise.resolve(JSON.parse(body) as T);
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
-
-function memoryPluginConfig(
-  env: BotStateEnv,
-  identity: BotIdentity,
-): MemoryPluginConfig {
-  return {
-    ownerId: identity.userId,
-    agentId: identity.botId,
-    bucket: {
-      get: async (key) => {
-        const object = await env.MEMORY_FILES.get(key);
-        if (!object) return null;
-        const body = await object.text();
-        return {
-          text: () => Promise.resolve(body),
-          json: <T>() => parseStoredJson<T>(body),
-        };
-      },
-      put: (key, value, options) =>
-        env.MEMORY_FILES.put(key, value, {
-          httpMetadata: options?.httpMetadata?.contentType
-            ? { contentType: options.httpMetadata.contentType }
-            : undefined,
-        }),
-      delete: (key) => env.MEMORY_FILES.delete(key),
-      list: async ({ prefix, cursor }) => {
-        const page = await env.MEMORY_FILES.list({ prefix, cursor });
-        return {
-          objects: page.objects.map((object) => ({ key: object.key })),
-          truncated: page.truncated,
-          cursor: page.truncated ? page.cursor : undefined,
-        };
-      },
-    },
-    vectorize: {
-      upsert: (vectors) => env.MEMORY_INDEX.upsert(vectors),
-      query: async (vector, options) => {
-        const result = await env.MEMORY_INDEX.query(vector, options);
-        return {
-          matches: result.matches.map((match) => ({
-            id: match.id,
-            score: match.score,
-            metadata: match.metadata,
-          })),
-        };
-      },
-      deleteByIds: (ids) => env.MEMORY_INDEX.deleteByIds(ids),
-    },
-    ai: {
-      run: (model, input) =>
-        env.AI.run(model as keyof AiModels, {
-          text: input.text,
-        }) as Promise<{ data: number[][] }>,
-    },
-  };
-}
-
 export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
   private readonly compileApplication: typeof compileFoundationApplication;
-  private readonly execution: BotResidentExecution;
   private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
-  private executingRunId: string | undefined;
   private readonly reconciliationActivities = new Map<
     string,
     Promise<ClientTurnV1>
   >();
+  private readonly outboundFetch?: typeof fetch;
   private readonly assignmentActivities = new Map<string, AssignmentActivity>();
+  /** The Turn currently executing on this object, for durable Stop. */
+  private activeTurn:
+    { runId: string; sessionId: string; cancel(): void } | undefined;
+  /**
+   * Admission, the event log, the cursor, idempotency, cancellation, and
+   * durable scheduling are kernel authority; this Package supplies only the
+   * configuration, Composition, and notification policy it needs.
+   */
+  private readonly authority: BotDurableAuthority<BotSettingsViewV1>;
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
     this.env = host.env;
     this.compileApplication =
       host.compileApplication ?? compileFoundationApplication;
-    this.execution = host.execution;
     this.lifecycleAdmission = host.assertLifecycleActive;
+    this.outboundFetch = host.outboundFetch;
+    const createAuthority: CreateBotDurableAuthority =
+      host.createAuthority ?? ((options) => new BotDurableAuthority(options));
+    this.authority = createAuthority<BotSettingsViewV1>({
+      state: host.state,
+      codec: storedRunCodecV1,
+      hooks: {
+        resolveAdmissionSnapshot: (command) =>
+          this.resolveAdmissionSnapshot(command),
+        bootstrapComposition: () => this.bootstrapComposition(),
+        admittedSnapshot: (transaction, resolved) =>
+          this.admittedSnapshot(transaction, resolved),
+        executeTurn: (input) => this.executeTurn(input),
+        notification: (snapshot, result) =>
+          this.createNotification(snapshot, result),
+        scheduledDeadlines: (transaction) =>
+          this.scheduledDeadlines(transaction),
+        scheduledWorkInFlight: () => this.assignmentActivities.size > 0,
+        deferScheduledWork: (transaction) =>
+          this.deferScheduledWork(transaction),
+        settleScheduledWork: () => this.settleScheduledWork(),
+      },
+    });
   }
 
   async materializeSettings(
     identity: BotIdentity,
-    initial: { name: string; model?: BotSettingsViewV1["model"] },
+    initial: {
+      name: string;
+      model?: BotSettingsViewV1["model"];
+      modelBinding?: {
+        assignment: BotSettingsViewV1["assignments"][number];
+        generation: string;
+      };
+    },
   ): Promise<BotSettingsViewV1> {
     return this.ctx.storage.transaction(async (transaction) => {
       const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
@@ -283,17 +343,21 @@ export class ShellBotBackendContribution {
       const settings = {
         ...this.initialBotSettings(identity.botId, initial.model),
         profile: { name: initial.name },
+        assignments: initial.modelBinding
+          ? [structuredClone(initial.modelBinding.assignment)]
+          : [],
       } satisfies BotSettingsViewV1;
       await transaction.put({
         [IDENTITY_KEY]: durableIdentity ?? identity,
         [BOT_CONFIGURATION_KEY]: settings,
-        [RUNTIME_PROJECTION_KEY]: {
-          schemaVersion: 1,
-          desiredGeneration: settings.revision,
-          status: "pending",
-        } satisfies StoredRuntimeProjection,
+        ...(initial.modelBinding
+          ? {
+              [assignmentGenerationKey(
+                initial.modelBinding.assignment.assignmentId,
+              )]: initial.modelBinding.generation,
+            }
+          : {}),
       });
-      await this.refreshRecoveryAlarm(transaction);
       return settings;
     });
   }
@@ -416,6 +480,194 @@ export class ShellBotBackendContribution {
     if (command.expectedRevision !== settings.revision) {
       throw new ConfigurationConflictError(settings.revision);
     }
+    let modelCapabilities = new Set<string>();
+    if (command.type === "bot/select-model") {
+      const [user, application] = await Promise.all([
+        this.userConfiguration(identity).readConfiguration({
+          schemaVersion: 1,
+          userId: identity.userId,
+        }),
+        this.compileApplication(),
+      ]);
+      modelCapabilities = new Set(
+        application.packages.flatMap((pkg) =>
+          (pkg.manifest.configuration?.capabilities ?? []).flatMap(
+            (capability) =>
+              capability.kind === "model"
+                ? [capabilityKey(pkg.id, capability.id)]
+                : [],
+          ),
+        ),
+      );
+      const binding = resolveBotModelBindingV1({
+        model: command.model,
+        assignments: settings.assignments,
+        user,
+        packages: application.packages.map((pkg) => ({
+          packageId: pkg.id,
+          version: pkg.version,
+          capabilities: pkg.manifest.configuration?.capabilities ?? [],
+          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+        })),
+      });
+      if (binding.state === "unavailable") {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          binding.failure ?? "Bot model binding is unavailable",
+        );
+      }
+    }
+    if (
+      command.type === "bot/assign-capability" ||
+      command.type === "bot/replace-capability"
+    ) {
+      const existingAssignment = settings.assignments.find(
+        (assignment) =>
+          assignment.assignmentId === command.assignment.assignmentId,
+      );
+      if (
+        existingAssignment &&
+        (existingAssignment.packageId !== command.assignment.packageId ||
+          existingAssignment.capabilityId !== command.assignment.capabilityId)
+      ) {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          "Assignment ID cannot change Package Capability authority",
+        );
+      }
+      const [user, application] = await Promise.all([
+        this.userConfiguration(identity).readConfiguration({
+          schemaVersion: 1,
+          userId: identity.userId,
+        }),
+        this.compileApplication(),
+      ]);
+      modelCapabilities = new Set(
+        application.packages.flatMap((pkg) =>
+          (pkg.manifest.configuration?.capabilities ?? []).flatMap(
+            (capability) =>
+              capability.kind === "model"
+                ? [capabilityKey(pkg.id, capability.id)]
+                : [],
+          ),
+        ),
+      );
+      const failure = capabilityAssignmentFailureV1({
+        assignment: command.assignment,
+        user,
+        packages: application.packages.map((pkg) => ({
+          packageId: pkg.id,
+          version: pkg.version,
+          capabilities: pkg.manifest.configuration?.capabilities ?? [],
+          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+        })),
+      });
+      if (failure) {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          failure,
+        );
+      }
+      if (command.model) {
+        if (command.model.connectionId !== command.assignment.connectionId) {
+          return this.rejectConfigurationCommand(
+            identity,
+            command,
+            commandFingerprint,
+            "Model binding must use the assigned Connection",
+          );
+        }
+        const binding = resolveBotModelBindingV1({
+          model: command.model,
+          assignments: [
+            ...settings.assignments,
+            { ...command.assignment, state: "enabled" },
+          ],
+          user,
+          packages: application.packages.map((pkg) => ({
+            packageId: pkg.id,
+            version: pkg.version,
+            capabilities: pkg.manifest.configuration?.capabilities ?? [],
+            connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+          })),
+        });
+        if (binding.state === "unavailable") {
+          return this.rejectConfigurationCommand(
+            identity,
+            command,
+            commandFingerprint,
+            binding.failure ?? "Bot model binding is unavailable",
+          );
+        }
+      }
+    }
+    if (
+      command.type === "bot/select-model" &&
+      settings.model?.connectionId &&
+      settings.model.connectionId !== command.model.connectionId
+    ) {
+      // Moving the model to another Connection changes Assignment authority,
+      // so it is a Replace, not a select. One durable shape, one saga.
+      return this.rejectConfigurationCommand(
+        identity,
+        command,
+        commandFingerprint,
+        "Selecting a model on another Connection requires Replace",
+      );
+    }
+    if (command.type === "bot/unbind-model") {
+      const assignment = settings.assignments.find(
+        (candidate) =>
+          candidate.assignmentId === command.assignmentId &&
+          (candidate.state === "enabled" ||
+            candidate.state === "unavailable") &&
+          candidate.connectionId === settings.model?.connectionId,
+      );
+      const application = await this.compileApplication();
+      const capability = application.packages
+        .find((pkg) => pkg.id === assignment?.packageId)
+        ?.manifest.configuration?.capabilities.find(
+          (candidate) => candidate.id === assignment?.capabilityId,
+        );
+      if (!assignment?.connectionId || capability?.kind !== "model") {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          "Bot model assignment is unavailable",
+        );
+      }
+      const generation = await this.ctx.storage.get<string>(
+        assignmentGenerationKey(assignment.assignmentId),
+      );
+      if (!generation) {
+        return this.rejectConfigurationCommand(
+          identity,
+          command,
+          commandFingerprint,
+          "Bot model assignment generation is unavailable",
+        );
+      }
+      // Unbinding the model is the Assignment's Unassign: one saga releases
+      // the Connection dependency and clears the Bot's model together.
+      return this.executeAssignmentCommand(
+        identity,
+        {
+          ...command,
+          type: "bot/unassign-capability",
+          assignmentId: assignment.assignmentId,
+        },
+        commandFingerprint,
+        { clearModel: true },
+      );
+    }
+
     if (
       command.type !== "bot/assign-capability" &&
       command.type !== "bot/replace-capability" &&
@@ -427,7 +679,51 @@ export class ShellBotBackendContribution {
         commandFingerprint,
       );
     }
-    return this.executeAssignmentCommand(identity, command, commandFingerprint);
+    return this.executeAssignmentCommand(
+      identity,
+      command,
+      commandFingerprint,
+      {
+        ...(command.type === "bot/unassign-capability"
+          ? {}
+          : { model: command.model }),
+      },
+    );
+  }
+
+  private async rejectConfigurationCommand(
+    identity: BotIdentity,
+    command: Extract<ConfigurationCommandV1, { botId: string }>,
+    commandFingerprint: string,
+    failure: string,
+  ): Promise<OperationReceiptV1> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
+      const existing =
+        await transaction.get<StoredConfigurationReceipt>(receiptKey);
+      if (existing) {
+        return requireMatchingConfigurationReceipt(
+          existing,
+          commandFingerprint,
+          command.commandId,
+        );
+      }
+      const current =
+        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
+        this.initialBotSettings(identity.botId);
+      if (command.expectedRevision !== current.revision) {
+        throw new ConfigurationConflictError(current.revision);
+      }
+      const receipt: OperationReceiptV1 = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: current.revision,
+        status: "rejected",
+        failure,
+      };
+      await transaction.put(receiptKey, { commandFingerprint, receipt });
+      return receipt;
+    });
   }
 
   private async applySimpleConfigurationCommand(
@@ -480,11 +776,6 @@ export class ShellBotBackendContribution {
       await transaction.put({
         [BOT_CONFIGURATION_KEY]: next,
         [receiptKey]: { commandFingerprint, receipt },
-        [RUNTIME_PROJECTION_KEY]: {
-          schemaVersion: 1,
-          desiredGeneration: revision,
-          status: "pending",
-        } satisfies StoredRuntimeProjection,
       });
       await this.refreshRecoveryAlarm(transaction);
       return receipt;
@@ -562,6 +853,7 @@ export class ShellBotBackendContribution {
       }
     >,
     commandFingerprint: string,
+    binding: { model?: ModelAssignment; clearModel?: boolean } = {},
   ): Promise<OperationReceiptV1> {
     try {
       await this.reconcileStoredAssignmentSaga(
@@ -696,6 +988,10 @@ export class ShellBotBackendContribution {
         targetRequirement,
         previous: previous ? structuredClone(previous) : undefined,
         previousGeneration,
+        // The Bot's model commits with the Assignment, in the saga's commit
+        // phase, so the dependency claim and the binding are one durable unit.
+        model: binding.model ? structuredClone(binding.model) : undefined,
+        clearModel: binding.clearModel,
         deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
         acceptedReceipt,
       };
@@ -921,21 +1217,25 @@ export class ShellBotBackendContribution {
           ...current,
           revision,
           assignments,
+          ...(saga.clearModel
+            ? { model: undefined }
+            : saga.model
+              ? { model: structuredClone(saga.model) }
+              : {}),
         } satisfies BotSettingsViewV1,
         [`${CONFIGURATION_RECEIPT_PREFIX}${saga.commandId}`]: {
           commandFingerprint: saga.commandFingerprint,
           receipt,
         } satisfies StoredConfigurationReceipt,
-        [RUNTIME_PROJECTION_KEY]: {
-          schemaVersion: 1,
-          desiredGeneration: revision,
-          status: "pending",
-        } satisfies StoredRuntimeProjection,
       });
       if (saga.target?.connectionId) {
         await transaction.put(
           `${ASSIGNMENT_GENERATION_PREFIX}${saga.assignmentId}`,
           saga.generation,
+        );
+      } else if (saga.operation === "unassigning") {
+        await transaction.delete(
+          `${ASSIGNMENT_GENERATION_PREFIX}${saga.assignmentId}`,
         );
       }
       return receipt;
@@ -1159,27 +1459,8 @@ export class ShellBotBackendContribution {
   private async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
-    const [activeRunId, sagas, projection] = await Promise.all([
-      transaction.get<string>(ACTIVE_RUN_KEY),
-      transaction.list<unknown>({
-        prefix: ASSIGNMENT_SAGA_PREFIX,
-      }),
-      transaction.get<StoredRuntimeProjection>(RUNTIME_PROJECTION_KEY),
-    ]);
-    const deadlines = [...sagas.values()].map(
-      (stored) => requireStoredAssignmentSaga(stored).deadlineAt,
-    );
-    if (
-      activeRunId ||
-      projection?.status === "pending" ||
-      projection?.status === "failed"
-    ) {
-      deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
-    }
-    if (deadlines.length === 0) await transaction.deleteAlarm();
-    else await transaction.setAlarm(Math.min(...deadlines));
+    await this.authority.refreshRecoveryAlarm(transaction);
   }
-
   async markConnectionUnavailable(
     identity: BotIdentity,
     connectionId: string,
@@ -1193,7 +1474,10 @@ export class ShellBotBackendContribution {
       const current =
         (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
         this.initialBotSettings(identity.botId);
-      let matchingAssignmentId: string | undefined;
+      // Every enabled Assignment on this Connection whose durable generation
+      // is the compensated one becomes unavailable. A compensation that names
+      // a generation no live Assignment holds is stale, not a silent no-op.
+      const matching: string[] = [];
       for (const assignment of current.assignments) {
         if (
           assignment.connectionId !== connectionId ||
@@ -1201,42 +1485,33 @@ export class ShellBotBackendContribution {
         ) {
           continue;
         }
-        const generation = await transaction.get<string>(
-          `${ASSIGNMENT_GENERATION_PREFIX}${assignment.assignmentId}`,
-        );
-        if (generation === compensation.expectedGeneration) {
-          matchingAssignmentId = assignment.assignmentId;
-          break;
+        if (
+          (await transaction.get<string>(
+            assignmentGenerationKey(assignment.assignmentId),
+          )) === compensation.expectedGeneration
+        ) {
+          matching.push(assignment.assignmentId);
         }
       }
       await transaction.put(
         `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionId}:${compensation.expectedGeneration}`,
         compensation.id,
       );
-      if (!matchingAssignmentId) {
+      if (matching.length === 0) {
         await transaction.put(receiptKey, "stale");
         return "stale";
       }
-      if (matchingAssignmentId) {
-        const revision = current.revision + 1;
-        await transaction.put({
-          [BOT_CONFIGURATION_KEY]: {
-            ...current,
-            revision,
-            assignments: current.assignments.map((assignment) =>
-              assignment.assignmentId === matchingAssignmentId
-                ? { ...assignment, state: "unavailable" }
-                : assignment,
-            ),
-          } satisfies BotSettingsViewV1,
-          [RUNTIME_PROJECTION_KEY]: {
-            schemaVersion: 1,
-            desiredGeneration: revision,
-            status: "pending",
-          } satisfies StoredRuntimeProjection,
-        });
-        await this.refreshRecoveryAlarm(transaction);
-      }
+      const unavailable = new Set(matching);
+      await transaction.put(BOT_CONFIGURATION_KEY, {
+        ...current,
+        revision: current.revision + 1,
+        assignments: current.assignments.map((assignment) =>
+          unavailable.has(assignment.assignmentId)
+            ? { ...assignment, state: "unavailable" as const }
+            : assignment,
+        ),
+      } satisfies BotSettingsViewV1);
+      await this.refreshRecoveryAlarm(transaction);
       await transaction.put(receiptKey, "applied");
       return "applied";
     });
@@ -1248,35 +1523,8 @@ export class ShellBotBackendContribution {
     return (await this.resolveExecutionContext(identity)).plan;
   }
 
-  async readRuntimeProjection(): Promise<StoredRuntimeProjection> {
-    const projection = await this.ctx.storage.get<StoredRuntimeProjection>(
-      RUNTIME_PROJECTION_KEY,
-    );
-    if (!projection) throw new Error("Bot runtime projection is unavailable");
-    return structuredClone(projection);
-  }
-
-  private async reconcileRuntimeProjection(
-    identity: BotIdentity,
-  ): Promise<void> {
-    if (await this.ctx.storage.get<string>(ACTIVE_RUN_KEY)) return;
-    const settings = await this.ensureBotSettings(identity);
-    await this.projectRuntime(identity, settings, true);
-  }
-
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
-    await this.assertMatchingRunCommand(command);
-    await this.recoverActiveRun();
-    const replay = await this.completedRunResult(command);
-    if (replay) return projectClientTurnV1(replay);
-    const admission = await this.acceptRun(command);
-    return projectClientTurnV1(
-      await this.executeAcceptedRun(
-        command,
-        admission.previous,
-        admission.settings,
-      ),
-    );
+    return projectClientTurnV1(await this.authority.run(command));
   }
 
   /**
@@ -1341,11 +1589,9 @@ export class ShellBotBackendContribution {
       return stopped;
     });
     // The Agent signal is advisory and always follows the durable intent.
-    await this.execution.cancel({
-      botId: identity.botId,
+    this.cancelActiveTurn({
       sessionId: admitted.sessionId,
       runId: command.runId,
-      reason: "user",
     });
     const current =
       optionalStoredRun(await this.ctx.storage.get<unknown>(key)) ?? admitted;
@@ -1369,296 +1615,794 @@ export class ShellBotBackendContribution {
     return operation;
   }
 
+  /**
+   * Retrieval is itself reconciliation: the kernel authority resumes the run
+   * on the Composition it was admitted under, so an uncertain effect is
+   * settled or stays explicitly unresolved rather than being started again.
+   */
   private async executeRunReconciliation(
     identity: BotIdentity,
     runId: string,
   ): Promise<ClientTurnV1> {
-    await this.assertIdentity(identity);
-    const key = `${RUN_PREFIX}${runId}`;
-    const recovery = await this.ctx.storage.transaction(async (transaction) => {
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
-      if (
-        !run ||
-        run.status !== "reconciliation-required" ||
-        activeRunId !== runId
-      ) {
-        throw new Error(`run "${runId}" does not require reconciliation`);
-      }
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      const settings = run.configurationSnapshot;
-      // Retrieval is itself reconciliation. Keep that durable state visible
-      // until the original effect is settled or remains explicitly unresolved.
-      await this.refreshRecoveryAlarm(transaction);
-      return { run, latest, settings };
-    });
     return projectClientTurnV1(
-      await this.executeResumedRun(
-        identity,
-        recovery.run,
-        recovery.latest,
-        recovery.settings,
+      await this.authority.reconcileRun(identity, runId),
+    );
+  }
+  private async executeTurn(
+    input: BotTurnExecutionInput<BotSettingsViewV1>,
+  ): Promise<BotTurnCompletion> {
+    const settings = input.configurationSnapshot;
+    const turn = {
+      runId: input.command.runId,
+      // One admitted Turn is one run; the Turn ordinal lives in the session log.
+      turnId: input.command.runId,
+      sessionId: input.command.sessionId,
+    };
+    const runtime = await this.agentRuntime(
+      input.identity,
+      settings,
+      input.admittedRequest,
+      turn,
+    );
+    const promptParts = [
+      `You are ${settings.profile.name}.`,
+      settings.profile.label,
+      settings.profile.description,
+    ].filter((part): part is string => Boolean(part?.trim()));
+    // The pin, never the current generation: activation takes effect at the
+    // next admitted Turn, and an in-flight Turn completes on what it pinned.
+    // The isolate bindings follow the generation actually being mounted, so a
+    // fail-closed fallback loads the last known good's members, not the
+    // pinned generation's.
+    const host: CompositionMountHost<ShellMountedComposition> = {
+      mount: async (mounting, signal) => {
+        const isolate = await this.isolateMountOptions(input.identity, {
+          runId: input.command.runId,
+          sessionId: input.command.sessionId,
+          generationId: mounting.generationId,
+          assignments: settings.assignments,
+        });
+        return createShellCompositionHost({
+          botId: input.identity.botId,
+          sessionId: input.command.sessionId,
+          sessionEvents: input.previousEvents,
+          persistSessionEvents: input.persistSessionEvents,
+          agentPackages: runtime.agentPackages,
+          modelSelection: runtime.modelSelection,
+          systemPromptSection: promptParts.join("\n\n"),
+          // Durable Stop fences every provider and tool effect immediately
+          // before it is used, in the Bot Durable Object's own transaction.
+          admitEffect: (effect) =>
+            this.admitRunEffect(
+              input.identity,
+              input.command.runId,
+              input.command.sessionId,
+              effect,
+            ),
+          ...(isolate ? { isolate } : {}),
+        }).mount(mounting, signal);
+      },
+    };
+    const controller = new AbortController();
+    // Composition fails closed: a generation that does not resolve, mount, or
+    // pass `health()` leaves the last known good resident, records a durable
+    // failure, raises a visible one, and the Turn is admitted anyway.
+    const activation = await activateCompositionV1({
+      generationId: input.compositionGenerationId,
+      store: {
+        read: (generationId) => this.authority.composition.read(generationId),
+        lastKnownGood: () => this.authority.composition.lastKnownGood(),
+        commit: (generationId) =>
+          this.authority.composition.commit(generationId),
+        fail: (generationId, options) =>
+          this.authority.composition.fail(generationId, options),
+      },
+      failures: this.authority.compositionFailures,
+      host,
+      signal: controller.signal,
+      onFailure: (failure, fallback) =>
+        this.recordCompositionFailureNotification(
+          settings,
+          input.command.runId,
+          failure,
+          fallback,
+        ),
+    });
+    if (activation.status === "failed-closed") {
+      // The durable record names what the Turn actually ran under.
+      await this.authority.repinRun(
+        input.command.runId,
+        activation.fallback.generationId,
+      );
+    }
+    // The exact resident Agent this Turn runs on, so a durable Stop reaches
+    // that run and never a different one.
+    const active = {
+      runId: input.command.runId,
+      sessionId: input.command.sessionId,
+      cancel: () => activation.mounted.runtime.agent.agent.cancel("user"),
+    };
+    this.activeTurn = active;
+    try {
+      return await executeBotTurn({
+        command: input.command,
+        previousEvents: input.previousEvents,
+        composition: activation.mounted,
+        resume: input.resume,
+      });
+    } finally {
+      if (this.activeTurn === active) this.activeTurn = undefined;
+    }
+  }
+
+  /**
+   * Cancels the Agent of one exact admitted run. A late Stop that names a run
+   * this object is not executing changes nothing.
+   */
+  private cancelActiveTurn(cancellation: {
+    sessionId: string;
+    runId: string;
+  }): boolean {
+    const active = this.activeTurn;
+    if (
+      !active ||
+      active.runId !== cancellation.runId ||
+      active.sessionId !== cancellation.sessionId
+    ) {
+      return false;
+    }
+    active.cancel();
+    return true;
+  }
+
+  /** The visible half of failing closed, on the Bot's existing channel. */
+  private async recordCompositionFailureNotification(
+    settings: BotSettingsViewV1,
+    runId: string,
+    failure: CompositionFailureV1,
+    fallback: CompositionGenerationV1,
+  ): Promise<void> {
+    await this.authority.recordNotification({
+      notificationId: `composition-failure:${failure.generationId}:${failure.attempt}`,
+      runId,
+      createdAt: failure.at,
+      title: `${settings.profile.name} kept its last working Packages`,
+      body: `Composition generation "${failure.generationId}" failed to activate at ${failure.phase} (attempt ${failure.attempt}); running "${fallback.generationId}" instead: ${failure.message}`.slice(
+        0,
+        240,
       ),
+    });
+  }
+
+  /**
+   * Everything a Bot isolate member needs. Returns `undefined` when this host
+   * has no Package loader, in which case an isolate member fails verification
+   * rather than silently running nowhere.
+   */
+  private async isolateMountOptions(
+    identity: BotIdentity,
+    turn: {
+      runId: string;
+      sessionId: string;
+      generationId: string;
+      assignments: readonly CapabilityAssignmentView[];
+    },
+  ): Promise<ShellIsolateMountOptions | undefined> {
+    const loader = this.env.BOT_PACKAGES;
+    const artifacts = this.env.APPLICATION_ARTIFACTS;
+    const exports = (
+      this.ctx as unknown as {
+        exports?: {
+          BotCapabilities?: (options: {
+            props: BotCapabilitiesPropsV1;
+          }) => BotCapabilitiesStub;
+        };
+      }
+    ).exports;
+    if (!loader || !artifacts || !exports?.BotCapabilities) return undefined;
+    const mintCapabilities = exports.BotCapabilities;
+    const assignments = await this.isolateAssignments(turn.assignments);
+    return {
+      userId: identity.userId,
+      runId: turn.runId,
+      // One admitted Turn is one run; the Turn ordinal lives in the session log.
+      turnId: turn.runId,
+      loader,
+      artifacts: createR2PackageArtifactStore(artifacts),
+      capabilitiesFor: (member) =>
+        mintCapabilities({
+          props: {
+            userId: identity.userId,
+            botId: identity.botId,
+            generationId: turn.generationId,
+            packageId: member.packageId,
+            assignments: structuredClone(assignments),
+          },
+        }),
+      bindingDigest: await isolateBindingDigestV1(
+        assignments,
+        turn.generationId,
+      ),
+      compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+    };
+  }
+
+  /**
+   * The Bot Durable Object side of `CAPABILITIES.requestAuthority`. Never a
+   * grant: it records a durable pending decision for the User.
+   */
+  async isolateRequestAuthority(input: {
+    botId: string;
+    packageId: string;
+    generationId: string;
+    request: unknown;
+  }): Promise<IsolatePendingDecisionV1> {
+    return await this.isolateCapabilities(input, []).requestAuthority(
+      input.request,
     );
   }
 
-  private async executeAcceptedRun(
-    command: OwnedBotTurnCommand,
-    previous: SessionEvent[],
-    settings: BotSettingsViewV1,
-  ): Promise<BotTurnCompletion> {
-    this.executingRunId = command.runId;
-    try {
-      await this.ctx.storage.transaction(async (transaction) => {
-        const key = `${RUN_PREFIX}${command.runId}`;
-        const run = optionalStoredRun(await transaction.get<unknown>(key));
-        if (!run || run.status !== "running") {
-          throw new Error(`run "${command.runId}" is not resumable`);
-        }
-        await transaction.put(key, {
-          ...run,
-          phase: "executing",
-        } satisfies StoredRun);
-        await this.refreshRecoveryAlarm(transaction);
-      });
-      await this.projectRuntime(command, settings, false);
-      const result = await this.execution.execute({
-        botId: command.botId,
-        command,
-        previousEvents: previous,
-        persistSessionEvents: async (_sessionId, events) => {
-          await this.persistRunEvents(command.runId, events);
-        },
-        beforeStart: () => this.activateAdmittedRun(command.runId, previous),
-        admitEffect: (effect) =>
-          this.admitRunEffect(
-            { userId: command.userId, botId: command.botId },
-            command.runId,
-            command.sessionId,
-            effect,
-          ),
-      });
-      const completed = settings.notifications.enabled
+  /**
+   * The Bot Durable Object side of `CAPABILITIES.invokeModel`. Refuses with a
+   * pending decision unless an enabled model Assignment matches; otherwise
+   * records the normalized request and streams through the provider path,
+   * which takes the credential lease on the way.
+   */
+  async isolateInvokeModel(
+    identity: BotIdentity,
+    input: {
+      packageId: string;
+      generationId: string;
+      request: NormalizedModelRequest;
+    },
+  ): Promise<IsolateModelInvocationV1> {
+    // The Bot Durable Object's own durable configuration is what decides
+    // whether the Assignment exists at all, and its durable model binding is
+    // what the Assignment authorizes. Nothing the Bot supplied is read.
+    const settings = await this.ctx.storage.get<BotSettingsViewV1>(
+      BOT_CONFIGURATION_KEY,
+    );
+    const projected = await this.isolateAssignments(
+      settings?.assignments ?? [],
+    );
+    const bound = await this.isolateModelBinding(identity, settings, projected);
+    const assignments = bound
+      ? projected.map((assignment) =>
+          assignment.assignmentId === bound.binding.assignmentId
+            ? {
+                ...assignment,
+                connectionId: bound.binding.connectionId,
+                providerModelId: bound.binding.providerModelId,
+              }
+            : assignment,
+        )
+      : projected;
+    const host = this.isolateCapabilities(
+      {
+        botId: identity.botId,
+        packageId: input.packageId,
+        generationId: input.generationId,
+      },
+      assignments,
+      bound
         ? {
-            ...result,
-            notification: this.createNotification(settings, result),
+            binding: bound.binding,
+            path: this.isolateModelPath(
+              identity,
+              bound.runtime,
+              input.generationId,
+            ),
           }
-        : result;
-      const settlement = await this.completeRun(
-        command.runId,
-        previous,
-        completed,
-      );
-      if (settlement === "cancelled") throw new Error("Bot turn was cancelled");
-      return completed;
-    } catch (error) {
-      if (error instanceof BotRuntimeProjectionError) throw error;
-      const message =
-        error instanceof Error ? error.message : "Bot turn failed";
-      const stoppedSettlement = await this.settleStoppedRunFailure(
-        command.runId,
-        message,
-      );
-      if (stoppedSettlement !== "not-stopped") throw new Error(message);
-      const durableRun = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
-      );
-      const events = eventsForFailedRun(durableRun, error);
-      const modelState = latestModelRequestJournalState(events);
-      if (
-        error instanceof BotTurnReconciliationRequiredError ||
-        modelState.status === "unresolved"
-      ) {
-        await this.requireRunReconciliation(
-          command.runId,
-          previous,
-          events,
-          modelState.status === "unresolved"
-            ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
-            : message,
-        );
-        throw new Error(message);
-      }
-      await this.failRun(command.runId, previous, events, message);
-      throw new Error(message);
-    } finally {
-      if (this.executingRunId === command.runId) {
-        this.executingRunId = undefined;
-      }
-    }
+        : undefined,
+    );
+    return await host.invokeModel(input.request);
   }
 
-  private async executeResumedRun(
+  /**
+   * The Bot's one durable model binding, projected onto the isolate view. It
+   * resolves the Bot's durable `model` through the User's Connection exactly
+   * as an admitted Turn does, so an isolate model request is authorized
+   * against the same Package, Connection, and provider model a Turn would use.
+   * An unresolvable binding is no binding: the request becomes a pending
+   * decision rather than an error thrown into Bot code.
+   */
+  private async isolateModelBinding(
     identity: BotIdentity,
-    run: StoredRun,
-    latest: SessionEvent[],
-    settings: BotSettingsViewV1,
-  ): Promise<BotTurnCompletion> {
-    this.executingRunId = run.runId;
-    requireStoredRunV1(run);
-    const previous = latest.slice(0, run.previousEventCount);
+    settings: BotSettingsViewV1 | undefined,
+    assignments: readonly IsolateAssignmentV1[],
+  ): Promise<
+    | {
+        binding: IsolateModelBindingV1;
+        runtime: {
+          agentPackages: FoundationAgentPackage[];
+          modelSelection: RuntimeModelSelection;
+        };
+      }
+    | undefined
+  > {
+    if (!settings?.model) return undefined;
+    let runtime: {
+      agentPackages: FoundationAgentPackage[];
+      modelSelection: RuntimeModelSelection;
+    };
     try {
-      await this.projectRuntime(identity, settings, false);
-      const result = await this.execution.execute({
-        botId: identity.botId,
-        command: {
-          runId: run.runId,
-          sessionId: run.sessionId,
-          acceptedAt: run.acceptedAt,
-          text: run.input,
-        },
-        previousEvents: latest,
-        persistSessionEvents: this.runPersistence(run, identity),
-        beforeStart: () => this.activateReconciliationRun(run.runId),
-        admitEffect: (effect) =>
-          this.admitRunEffect(identity, run.runId, run.sessionId, effect),
-        resume: true,
-      });
-      const durableRun = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
-      );
-      if (!durableRun) throw new Error(`run "${run.runId}" was not accepted`);
-      const fullResult = {
-        ...result,
-        events: durableRun.events,
-      } satisfies BotTurnCompletion;
-      if (durableRun.stopRequestedAt) {
-        // The reconciled outcome is journaled; a stopped run never completes.
-        await this.cancelRun(run.runId, previous, durableRun.events);
-        return { ...fullResult, text: "" };
-      }
-      const completed = settings.notifications.enabled
-        ? {
-            ...fullResult,
-            notification: this.createNotification(settings, fullResult),
-          }
-        : fullResult;
-      const settlement = await this.completeRun(run.runId, previous, completed);
-      if (settlement === "cancelled") throw new Error("Bot turn was cancelled");
-      return completed;
-    } catch (error) {
-      if (error instanceof BotRuntimeProjectionError) throw error;
-      const message =
-        error instanceof Error ? error.message : "Bot turn failed";
-      const stoppedSettlement = await this.settleStoppedRunFailure(
-        run.runId,
-        message,
-      );
-      if (stoppedSettlement !== "not-stopped") throw new Error(message);
-      const durableRun = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
-      );
-      const events = durableRun?.events ?? run.events;
-      const modelState = latestModelRequestJournalState(events);
-      if (
-        error instanceof BotTurnReconciliationRequiredError ||
-        modelState.status === "unresolved"
-      ) {
-        await this.requireRunReconciliation(
-          run.runId,
-          previous,
-          events,
-          modelState.status === "unresolved"
-            ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
-            : message,
-        );
-        throw new Error(message);
-      }
-      await this.failRun(run.runId, previous, events, message);
-      throw new Error(message);
-    } finally {
-      if (this.executingRunId === run.runId) this.executingRunId = undefined;
+      runtime = await this.agentRuntime(identity, settings);
+    } catch {
+      return undefined;
     }
+    const selection = runtime.modelSelection;
+    const connectionId = selection.connectionId;
+    if (!connectionId) return undefined;
+    const assignment = assignments.find(
+      (candidate) =>
+        candidate.kind === "model" && candidate.connectionId === connectionId,
+    );
+    if (!assignment) return undefined;
+    return {
+      runtime,
+      binding: {
+        assignmentId: assignment.assignmentId,
+        packageId: assignment.packageId,
+        capabilityId: assignment.capabilityId,
+        connectionId,
+        provider: selection.provider,
+        providerModelId: selection.model,
+        ...(selection.connectionGeneration
+          ? { connectionGeneration: selection.connectionGeneration }
+          : {}),
+        ...(selection.catalogGeneration
+          ? { catalogGeneration: selection.catalogGeneration }
+          : {}),
+      },
+    };
   }
 
-  private async projectRuntime(
-    identity: BotIdentity,
-    settings: BotSettingsViewV1,
-    commitDesired: boolean,
-  ): Promise<void> {
-    try {
-      const [user, application] = await Promise.all([
-        this.userConfiguration(identity).readConfiguration({
-          schemaVersion: 1,
-          userId: identity.userId,
-        }),
-        this.compileApplication(),
-      ]);
-      const executionPlan = resolveBotExecutionPlanV1({
-        bot: settings,
-        user,
-        packages: application.packages.map((pkg) => ({
-          packageId: pkg.id,
-          version: pkg.version,
-          capabilities: pkg.manifest.configuration?.capabilities ?? [],
-          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-        })),
-      });
-      const prompt = [
-        `You are ${settings.profile.name}.`,
-        settings.profile.label,
-        settings.profile.description,
-      ]
-        .filter((part): part is string => Boolean(part?.trim()))
-        .join("\n\n");
-      await this.execution.project({
-        generation: settings.revision,
-        userId: identity.userId,
-        botId: identity.botId,
-        settings,
-        executionPlan,
-        memory: memoryPluginConfig(this.env, identity),
-        systemPromptSection: prompt,
-        authorizeConnection: (assignment) =>
-          this.authorizeAssignedEffect(identity, assignment),
-      });
-    } catch (error) {
-      const failure = (
-        error instanceof Error ? error.message : "Runtime projection failed"
-      ).slice(0, 1_000);
-      await this.ctx.storage.transaction(async (transaction) => {
-        const current = await transaction.get<StoredRuntimeProjection>(
-          RUNTIME_PROJECTION_KEY,
-        );
-        if (
-          current &&
-          (!commitDesired || current.desiredGeneration === settings.revision)
-        ) {
-          await transaction.put(RUNTIME_PROJECTION_KEY, {
-            schemaVersion: 1,
-            desiredGeneration: current.desiredGeneration,
-            status: "failed",
-            failedGeneration: commitDesired ? undefined : settings.revision,
-            failure,
-          } satisfies StoredRuntimeProjection);
-        }
-        await this.refreshRecoveryAlarm(transaction);
-      });
-      throw commitDesired ? error : new BotRuntimeProjectionError(failure);
-    }
-    await this.ctx.storage.transaction(async (transaction) => {
-      const current = await transaction.get<StoredRuntimeProjection>(
-        RUNTIME_PROJECTION_KEY,
-      );
-      if (!current) return;
-      if (current.desiredGeneration === settings.revision) {
-        await transaction.put(RUNTIME_PROJECTION_KEY, {
-          schemaVersion: 1,
-          desiredGeneration: settings.revision,
-          status: "applied",
-          appliedGeneration: settings.revision,
-        } satisfies StoredRuntimeProjection);
-      } else if (!commitDesired) {
-        await transaction.put(RUNTIME_PROJECTION_KEY, {
-          schemaVersion: 1,
-          desiredGeneration: current.desiredGeneration,
-          status: "pending",
-        } satisfies StoredRuntimeProjection);
-      }
-      await this.refreshRecoveryAlarm(transaction);
+  private isolateCapabilities(
+    scope: {
+      botId: string;
+      packageId: string;
+      generationId: string;
+      request?: unknown;
+    },
+    assignments: readonly IsolateAssignmentV1[],
+    model?: { binding: IsolateModelBindingV1; path: IsolateModelPath },
+  ): IsolateCapabilityHost {
+    return createIsolateCapabilityHost({
+      storage: {
+        put: (key, value) => this.ctx.storage.put(key, value),
+        get: (key) => this.ctx.storage.get(key),
+        list: (options) => this.ctx.storage.list(options),
+      },
+      botId: scope.botId,
+      packageId: scope.packageId,
+      generationId: scope.generationId,
+      assignments,
+      ...(model ? { modelBinding: model.binding, modelPath: model.path } : {}),
     });
+  }
+
+  /** The Bot's enabled Assignments, projected onto the isolate capability DTO. */
+  private async isolateAssignments(
+    assignments: readonly CapabilityAssignmentView[],
+  ): Promise<IsolateAssignmentV1[]> {
+    const application = await this.compileApplication();
+    const projected: IsolateAssignmentV1[] = [];
+    for (const assignment of assignments) {
+      if (assignment.state !== "enabled") continue;
+      const capability = application.packages
+        .find((candidate) => candidate.id === assignment.packageId)
+        ?.manifest.configuration?.capabilities.find(
+          (candidate) => candidate.id === assignment.capabilityId,
+        );
+      if (!capability) continue;
+      projected.push({
+        assignmentId: assignment.assignmentId,
+        packageId: assignment.packageId,
+        capabilityId: assignment.capabilityId,
+        kind: capability.kind,
+        ...(assignment.connectionId
+          ? { connectionId: assignment.connectionId }
+          : {}),
+      });
+    }
+    return projected;
+  }
+
+  /**
+   * Streams through the pinned Composition's mounted `ctx.llm` — the same
+   * provider path a Turn uses, so whichever provider Plugin serves the request
+   * is the one that takes the credential lease. The runtime is the one the
+   * durable model binding resolved to, so the Package that streams is the
+   * Package the Assignment names.
+   */
+  private isolateModelPath(
+    identity: BotIdentity,
+    runtime: {
+      agentPackages: FoundationAgentPackage[];
+      modelSelection: RuntimeModelSelection;
+    },
+    generationId: string,
+  ): IsolateModelPath {
+    const contribution = this;
+    return {
+      async *stream(request, signal) {
+        const generation =
+          await contribution.authority.composition.read(generationId);
+        if (!generation) {
+          throw new Error(
+            `isolate model invocation pins unknown Composition generation "${generationId}"`,
+          );
+        }
+        const composition = await createShellCompositionHost({
+          botId: identity.botId,
+          sessionId: `isolate-model:${request.requestId}`,
+          sessionEvents: [],
+          agentPackages: runtime.agentPackages,
+          modelSelection: runtime.modelSelection,
+          // An isolate model invocation is not an admitted Turn, so there is
+          // no run to fence it against; it is admitted by its Assignment.
+          admitEffect: () => Promise.resolve(true),
+        }).mount(generation, signal);
+        try {
+          yield* composition.root.llm.stream(request, signal);
+        } finally {
+          await composition.dispose();
+        }
+      },
+    };
+  }
+
+  /** The first-party generation this Bot starts on, from the compiled application. */
+  private async bootstrapComposition() {
+    return bootstrapCompositionGeneration(
+      await this.compileApplication(),
+      new Date().toISOString(),
+    );
+  }
+
+  private async resolveAdmissionSnapshot(
+    command: OwnedBotTurnCommand,
+  ): Promise<BotSettingsViewV1> {
+    const context = await this.resolveExecutionContext(command);
+    return {
+      ...context.settings,
+      assignments: context.plan.assignments,
+    } satisfies BotSettingsViewV1;
+  }
+
+  private async admittedSnapshot(
+    transaction: DurableObjectTransaction,
+    resolved: BotSettingsViewV1,
+  ): Promise<BotSettingsViewV1> {
+    return (
+      (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
+      resolved
+    );
+  }
+
+  private async scheduledDeadlines(
+    transaction: DurableObjectTransaction,
+  ): Promise<number[]> {
+    const sagas = await transaction.list<unknown>({
+      prefix: ASSIGNMENT_SAGA_PREFIX,
+    });
+    return [...sagas.values()].map(
+      (stored) => requireStoredAssignmentSaga(stored).deadlineAt,
+    );
+  }
+
+  private async deferScheduledWork(
+    transaction: DurableObjectTransaction,
+  ): Promise<void> {
+    const sagas = await transaction.list<StoredAssignmentSaga>({
+      prefix: ASSIGNMENT_SAGA_PREFIX,
+    });
+    for (const [key, saga] of sagas) {
+      await transaction.put(key, {
+        ...saga,
+        deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
+      } satisfies StoredAssignmentSaga);
+    }
+  }
+
+  private async settleScheduledWork(): Promise<void> {
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: ASSIGNMENT_SAGA_PREFIX,
+    });
+    for (const value of stored.values()) {
+      const saga = requireStoredAssignmentSaga(value);
+      try {
+        await this.reconcileStoredAssignmentSaga(
+          { userId: saga.userId, botId: saga.botId },
+          saga.commandId,
+        );
+      } catch (error) {
+        console.error(
+          "Assignment saga remains durably scheduled after reconciliation failure",
+          error instanceof Error ? error.message : "unknown failure",
+        );
+      }
+    }
+  }
+  /**
+   * The narrow User Durable Object RPC the Bot uses to reserve one authored
+   * generation against the durable per-User quota (D7).
+   */
+  private authoringQuota(identity: BotIdentity): AuthoringQuotaBinding {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    // SAFETY: this namespace is bound to UserConfiguration; generated Worker
+    // types do not expose its RPC surface.
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      reserveAuthoringQuota(input: unknown): Promise<unknown>;
+    };
+    return {
+      reserve: async (request) =>
+        decodeAuthoringQuotaReceiptV1(await rpc.reserveAuthoringQuota(request)),
+    };
+  }
+
+  /** The authoring seam one admitted Turn runs under. */
+  private authoringHost(
+    identity: BotIdentity,
+    turn: { runId: string; turnId: string },
+  ): PackageAuthoringHost {
+    const artifacts = this.env.APPLICATION_ARTIFACTS;
+    return createPackageAuthoringHost({
+      storage: {
+        get: (key) => this.ctx.storage.get(key),
+        put: (entries) => this.ctx.storage.put(entries),
+      },
+      composition: this.authority.composition,
+      ...(this.env.PACKAGE_BUNDLER
+        ? { bundler: this.env.PACKAGE_BUNDLER }
+        : {}),
+      ...(artifacts
+        ? { artifacts: createR2AuthoringArtifactStore(artifacts) }
+        : {}),
+      quota: this.authoringQuota(identity),
+      userId: identity.userId,
+      botId: identity.botId,
+      runId: turn.runId,
+      turnId: turn.turnId,
+      compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+    });
+  }
+
+  private async agentRuntime(
+    identity: BotIdentity,
+    settings: BotSettingsViewV1,
+    admittedRequest?: NormalizedModelRequest,
+    turn?: { runId: string; turnId: string; sessionId: string },
+  ): Promise<{
+    agentPackages: FoundationAgentPackage[];
+    modelSelection: RuntimeModelSelection;
+  }> {
+    const userConfiguration = this.userConfiguration(identity);
+    const user = await userConfiguration.readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
+    const application = await this.compileApplication();
+    const packageDefinitions = application.packages.map((pkg) => ({
+      packageId: pkg.id,
+      version: pkg.version,
+      capabilities: pkg.manifest.configuration?.capabilities ?? [],
+      connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+    }));
+    const plan = admittedRequest
+      ? {
+          schemaVersion: 1 as const,
+          botId: settings.botId,
+          revision: settings.revision,
+          model: settings.model ? structuredClone(settings.model) : undefined,
+          assignments: structuredClone(settings.assignments),
+        }
+      : resolveBotExecutionPlanV1({
+          bot: settings,
+          user,
+          packages: packageDefinitions,
+        });
+    const readSecret = (name: string) => {
+      // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
+      const value = (this.env as unknown as Record<string, unknown>)[name];
+      return typeof value === "string" ? value : undefined;
+    };
+    const authorizeAssignedConnection = admittedRequest
+      ? (assignment: BotSettingsViewV1["assignments"][number]) =>
+          this.authorizeAdmittedAssignedEffect(identity, assignment)
+      : (assignment: BotSettingsViewV1["assignments"][number]) =>
+          this.authorizeAssignedEffect(identity, assignment);
+    const agentPackages: FoundationAgentPackage[] = [
+      ...createFoundationHostedRuntimePackages(application, {
+        userId: identity.userId,
+        readSecret,
+        // A Bot authors a Package only inside an admitted Turn, whose run and
+        // session the artifact provenance names.
+        ...(turn ? { authoring: this.authoringHost(identity, turn) } : {}),
+        ...(turn
+          ? { skills: createBotSkillsHost(identity, turn, this.env) }
+          : {}),
+        ...(turn
+          ? { memory: createBotMemoryHost(identity, turn, this.env) }
+          : {}),
+        // The durable-root sync runs only inside a Turn that uses the
+        // Computer. It attributes nothing: a file a shell wrote there reaches
+        // object storage with an unattributed writer.
+        ...(turn
+          ? {
+              computerSync: createBotComputerSyncHost(this.env),
+            }
+          : {}),
+        packagePublisher: {
+          read: () =>
+            this.userConfiguration(identity).readPackageRevisions(
+              identity.userId,
+            ),
+          publish: (command) =>
+            this.userConfiguration(identity).publishPackage(
+              identity.userId,
+              command,
+            ),
+          rollback: (command) =>
+            this.userConfiguration(identity).rollbackPackage(
+              identity.userId,
+              command,
+            ),
+        },
+      }),
+      ...(await createFoundationAssignedRuntimePackages(
+        application,
+        settings,
+        plan,
+        {
+          userId: identity.userId,
+          readSecret,
+          authorizeConnection: authorizeAssignedConnection,
+        },
+      )),
+    ];
+    if (!settings.model) {
+      throw new Error("Bot model Connection is not configured");
+    }
+
+    let binding: ResolvedModelBindingV1;
+    if (admittedRequest) {
+      const admittedBinding = admittedRequest.modelBinding;
+      const assignment = settings.assignments.find(
+        (candidate) =>
+          candidate.connectionId === admittedBinding?.connectionId &&
+          candidate.state === "enabled",
+      );
+      const pkg = application.packages.find(
+        (candidate) => candidate.id === assignment?.packageId,
+      );
+      const capability = pkg?.manifest.configuration?.capabilities.find(
+        (candidate) => candidate.id === assignment?.capabilityId,
+      );
+      const connectionTypeId = capability?.connectionTypes[0];
+      if (
+        !admittedBinding?.connectionGeneration ||
+        !assignment?.connectionId ||
+        !pkg ||
+        !connectionTypeId ||
+        settings.model.connectionId !== admittedBinding.connectionId ||
+        settings.model.providerModelId !== admittedRequest.model
+      ) {
+        throw new Error("Admitted model binding is unavailable");
+      }
+      binding = {
+        state: "ready",
+        assignment: structuredClone(settings.model),
+        packageId: pkg.id,
+        providerType: admittedRequest.provider,
+        connection: {
+          connectionId: admittedBinding.connectionId,
+          packageId: pkg.id,
+          connectionTypeId,
+          displayName: "Admitted model Connection",
+          state: "ready",
+          providerType: admittedRequest.provider,
+          generation: admittedBinding.connectionGeneration,
+          safeMetadata: {},
+        },
+      };
+    } else {
+      binding = resolveBotModelBindingV1({
+        model: settings.model,
+        assignments: settings.assignments,
+        user,
+        packages: packageDefinitions,
+      });
+    }
+    if (
+      binding.state === "unavailable" ||
+      !binding.connection ||
+      !binding.providerType ||
+      !binding.packageId
+    ) {
+      throw new Error(binding.failure ?? "Bot model Connection is unavailable");
+    }
+    const bindingPackageId = binding.packageId;
+    agentPackages.push(
+      createFoundationModelRuntimePackage(application, binding, {
+        accountId: identity.userId,
+        connectionId: binding.connection.connectionId,
+        leaseCredential: (
+          effectId,
+          expectedGeneration,
+        ): Promise<CredentialLeaseV1> => {
+          if (!expectedGeneration) {
+            throw new Error(
+              "Model request Connection generation is unavailable",
+            );
+          }
+          return userConfiguration.leaseModelCredential(
+            identity.userId,
+            binding.connection!.connectionId,
+            settings.model!.providerModelId,
+            effectId,
+            expectedGeneration,
+          );
+        },
+        settleCredential: (effectId) =>
+          userConfiguration.settleModelCredential(
+            identity.userId,
+            binding.connection!.connectionId,
+            bindingPackageId,
+            effectId,
+          ),
+        fetch: this.outboundFetch,
+      }),
+    );
+    return {
+      agentPackages,
+      modelSelection: {
+        provider: binding.providerType,
+        model: settings.model.providerModelId,
+        connectionId: binding.connection.connectionId,
+        ...(binding.connection.generation
+          ? { connectionGeneration: binding.connection.generation }
+          : {}),
+        ...((admittedRequest?.modelBinding?.catalogGeneration ??
+        binding.connection.modelCatalog?.generation)
+          ? {
+              catalogGeneration:
+                admittedRequest?.modelBinding?.catalogGeneration ??
+                binding.connection.modelCatalog!.generation,
+            }
+          : {}),
+      },
+    };
+  }
+
+  private async authorizeAdmittedAssignedEffect(
+    identity: BotIdentity,
+    assignment: BotSettingsViewV1["assignments"][number],
+  ): Promise<ConnectionView> {
+    const user = await this.userConfiguration(identity).readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
+    const application = await this.compileApplication();
+    const connection = user.connections.find(
+      (candidate) =>
+        candidate.connectionId === assignment.connectionId &&
+        candidate.packageId === assignment.packageId &&
+        candidate.state === "ready",
+    );
+    const pkg = application.packages.find(
+      (candidate) => candidate.id === assignment.packageId,
+    );
+    const capability = pkg?.manifest.configuration?.capabilities.find(
+      (candidate) =>
+        candidate.id === assignment.capabilityId &&
+        connection !== undefined &&
+        candidate.connectionTypes.includes(connection.connectionTypeId),
+    );
+    if (assignment.state !== "enabled" || !connection || !capability) {
+      throw new Error("Admitted assigned effect is unavailable");
+    }
+    return structuredClone(connection);
   }
 
   private async authorizeAssignedEffect(
@@ -1702,85 +2446,160 @@ export class ShellBotBackendContribution {
     return connection;
   }
 
-  private async completedRunResult(
-    command: OwnedBotTurnCommand,
-  ): Promise<BotTurnCompletion | undefined> {
-    const { runId } = command;
-    const run = optionalStoredRun(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
-    );
-    if (!run) return undefined;
-    if (run.commandFingerprint !== botTurnCommandFingerprintV1(command)) {
-      throw new Error(
-        `Turn idempotency key "${runId}" was reused for a different command`,
-      );
-    }
-    if (run.status !== "completed") {
-      throw new Error(
-        `run "${runId}" already exists with status ${run.status}`,
-      );
-    }
-    if (run.responseText === undefined) {
-      throw new Error(`run "${runId}" has no response text`);
-    }
-    const notification = await this.ctx.storage.get<BotNotificationIntent>(
-      `${NOTIFICATION_PREFIX}${runId}`,
-    );
-    return {
-      runId,
-      text: run.responseText,
-      events: structuredClone(run.events),
-      notification,
-    };
-  }
-
-  private async assertMatchingRunCommand(
-    command: OwnedBotTurnCommand,
-  ): Promise<void> {
-    const run = optionalStoredRun(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
-    );
-    if (
-      run &&
-      run.commandFingerprint !== botTurnCommandFingerprintV1(command)
-    ) {
-      throw new Error(
-        `Turn idempotency key "${command.runId}" was reused for a different command`,
-      );
-    }
-  }
-
   async readDurableIdentity(): Promise<BotIdentity | undefined> {
-    return this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    return this.authority.readDurableIdentity();
   }
 
   async validateIdentity(identity: BotIdentity): Promise<void> {
-    const existing = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    if (
-      existing &&
-      (existing.userId !== identity.userId || existing.botId !== identity.botId)
-    ) {
-      throw new Error("Bot authority does not match its durable identity");
-    }
+    return this.authority.validateIdentity(identity);
   }
 
   async listNotifications(): Promise<BotNotificationIntent[]> {
-    const entries = await this.ctx.storage.list<BotNotificationIntent>({
-      prefix: NOTIFICATION_PREFIX,
-    });
-    return [...entries.values()].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
-    );
+    return this.authority.listNotifications();
   }
 
   async acknowledgeNotification(notificationId: string): Promise<void> {
-    await this.ctx.storage.delete(`${NOTIFICATION_PREFIX}${notificationId}`);
+    return this.authority.acknowledgeNotification(notificationId);
+  }
+  /**
+   * The Bot's durable Composition generations, newest first. Bot-scoped: the
+   * caller proves directory membership before this runs.
+   */
+  async listCompositionGenerations(
+    identity: BotIdentity,
+    query: { limit: number; cursor?: string },
+  ): Promise<CompositionGenerationListViewV1> {
+    const current = await this.authority.composition.current();
+    const page = await this.authority.composition.list({
+      limit: Math.min(query.limit, MAX_COMPOSITION_GENERATION_PAGE_V1),
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+    });
+    return {
+      schemaVersion: 1,
+      botId: identity.botId,
+      currentGenerationId: current.generationId,
+      generations: await Promise.all(
+        page.generations.map(async (generation) =>
+          projectCompositionGenerationV1({
+            botId: identity.botId,
+            generation,
+            currentGenerationId: current.generationId,
+            failures: await this.authority.compositionFailures.list(
+              generation.generationId,
+            ),
+            ...(await this.compositionQuarantineView(generation.generationId)),
+          }),
+        ),
+      ),
+      ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
+    };
+  }
+
+  /** One generation, with the recorded source of each isolate member. */
+  async getCompositionGeneration(
+    identity: BotIdentity,
+    generationId: string,
+  ): Promise<CompositionGenerationViewV1 | undefined> {
+    const generation = await this.authority.composition.read(generationId);
+    if (!generation) return undefined;
+    const current = await this.authority.composition.current();
+    return projectCompositionGenerationV1({
+      botId: identity.botId,
+      generation,
+      currentGenerationId: current.generationId,
+      readMemberSource: (member) => this.readCompositionMemberSource(member),
+      failures: await this.authority.compositionFailures.list(generationId),
+      ...(await this.compositionQuarantineView(generationId)),
+    });
+  }
+
+  /** Spread into a projection: absent unless the generation is quarantined. */
+  private async compositionQuarantineView(
+    generationId: string,
+  ): Promise<{ quarantine?: CompositionQuarantineV1 }> {
+    const quarantine =
+      await this.authority.compositionFailures.quarantine(generationId);
+    return quarantine === undefined ? {} : { quarantine };
+  }
+
+  /**
+   * SEAM — plan Step 5 (authoring) owns `authorship:intent:<effectId>` and
+   * `artifact:<contentHash>`. Those records do not exist yet, so an isolate
+   * member has no recorded source to show and the view carries members only.
+   */
+  private readCompositionMemberSource(
+    _member: CompositionMemberV1,
+  ): Promise<string | undefined> {
+    return Promise.resolve(undefined);
+  }
+
+  /**
+   * Reverting is a recorded generation, not a mutation: it proposes a new
+   * pending generation carrying the target's members, which the next admitted
+   * Turn activates. The command is idempotent on its `commandId`, and its
+   * `expectedGenerationId` is the optimistic check that the User acted on the
+   * Composition they were looking at.
+   */
+  async revertComposition(
+    identity: BotIdentity,
+    command: RevertCompositionCommandV1,
+  ): Promise<CompositionCommandReceiptV1> {
+    if (command.botId !== identity.botId) {
+      throw new Error("Composition revert command does not match its Bot");
+    }
+    const receiptKey = `${COMPOSITION_COMMAND_PREFIX}${command.commandId}`;
+    const recorded =
+      await this.ctx.storage.get<CompositionCommandReceiptV1>(receiptKey);
+    if (recorded) return decodeCompositionCommandReceiptV1(recorded);
+    const current = await this.authority.composition.current();
+    const reject = async (
+      failure: string,
+    ): Promise<CompositionCommandReceiptV1> => {
+      const receipt = decodeCompositionCommandReceiptV1({
+        schemaVersion: 1,
+        commandId: command.commandId,
+        status: "rejected",
+        failure,
+        currentGenerationId: current.generationId,
+      });
+      await this.ctx.storage.put(receiptKey, receipt);
+      return receipt;
+    };
+    if (current.generationId !== command.expectedGenerationId) {
+      return reject(`composition generation is ${current.generationId}`);
+    }
+    let generationId: string;
+    try {
+      const reverted = await this.authority.composition.revert(
+        command.toGenerationId,
+        {
+          kind: "revert",
+          revertsTo: command.toGenerationId,
+          userId: identity.userId,
+        },
+      );
+      generationId = reverted.generationId;
+    } catch (error) {
+      return reject(
+        error instanceof Error ? error.message : "Composition revert failed",
+      );
+    }
+    const receipt = decodeCompositionCommandReceiptV1({
+      schemaVersion: 1,
+      commandId: command.commandId,
+      status: "applied",
+      generationId,
+      currentGenerationId: current.generationId,
+    });
+    await this.ctx.storage.put(receiptKey, receipt);
+    return receipt;
   }
 
   private createNotification(
     settings: BotSettingsViewV1,
     result: BotTurnCompletion,
-  ): BotNotificationIntent {
+  ): BotNotificationIntent | undefined {
+    if (!settings.notifications.enabled) return undefined;
     return {
       notificationId: result.runId,
       runId: result.runId,
@@ -1791,94 +2610,29 @@ export class ShellBotBackendContribution {
   }
 
   async alarm(): Promise<void> {
-    if (this.executingRunId || this.assignmentActivities.size > 0) {
-      await this.ctx.storage.transaction(async (transaction) => {
-        const sagas = await transaction.list<unknown>({
-          prefix: ASSIGNMENT_SAGA_PREFIX,
-        });
-        for (const [key, stored] of sagas) {
-          const saga = requireStoredAssignmentSaga(stored);
-          await transaction.put(key, {
-            ...saga,
-            deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
-          } satisfies StoredAssignmentSaga);
-        }
-        await this.refreshRecoveryAlarm(transaction);
-      });
-      return;
-    }
-    const sagas = await this.ctx.storage.list<unknown>({
-      prefix: ASSIGNMENT_SAGA_PREFIX,
-    });
-    for (const stored of sagas.values()) {
-      try {
-        const saga = requireStoredAssignmentSaga(stored);
-        await this.reconcileStoredAssignmentSaga(
-          { userId: saga.userId, botId: saga.botId },
-          saga.commandId,
-        );
-      } catch (error) {
-        console.error(
-          "Assignment saga remains durably scheduled after reconciliation failure",
-          error instanceof Error ? error.message : "unknown failure",
-        );
-      }
-    }
-    const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
-    if (activeRunId) {
-      const [storedRun, identity] = await Promise.all([
-        this.ctx.storage.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
-        this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
-      ]);
-      const run = optionalStoredRun(storedRun);
-      if (run?.status === "reconciliation-required" && identity) {
-        await this.reconcileRun(identity, activeRunId);
-        return;
-      }
-    }
-    await this.recoverActiveRun();
-    const [remainingActive, identity] = await Promise.all([
-      this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
-      this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
-    ]);
-    if (!remainingActive && identity) {
-      try {
-        await this.reconcileRuntimeProjection(identity);
-      } catch (error) {
-        console.error(
-          "Bot runtime projection remains durably scheduled after reconciliation failure",
-          error instanceof Error ? error.message : "unknown failure",
-        );
-      }
-    }
+    // One alarm: the kernel defers while work is in flight, settles the
+    // Package's Assignment sagas, and recovers the active run. A run left
+    // durably `reconciliation-required` stays scheduled and visible; only an
+    // explicit resume retrieves the original effect, so the alarm never
+    // terminalizes an uncertain outcome on its own.
+    await this.authority.alarm();
   }
-
   async listRuns(
     input: unknown = { schemaVersion: 1 },
   ): Promise<ClientRunListV1> {
     const query = decodeClientRunListQueryV1(input);
-    await this.recoverActiveRun();
+    await this.authority.recoverActiveRun();
     const activeRunId = query.before
       ? undefined
-      : await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
-    const indexEntries = await this.ctx.storage.list<string>({
-      prefix: RUN_INDEX_PREFIX,
-      reverse: true,
+      : await this.authority.readActiveRunId();
+    const candidates = await this.authority.listRunIndex({
       limit: CLIENT_RUN_PAGE_LIMIT + 1,
-      ...(query.before?.startsWith(RUN_INDEX_PREFIX)
-        ? { end: query.before }
-        : {}),
+      ...(query.before ? { before: query.before } : {}),
     });
-    const candidates = [...indexEntries].map(([cursor, runId]) => ({
-      cursor,
-      runId,
-    }));
 
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
-      const active = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
-      );
+      const active = await this.authority.readStoredRun(activeRunId);
       if (active)
         selected.set(active.runId, { run: projectClientRunV1(active) });
     }
@@ -1890,9 +2644,7 @@ export class ShellBotBackendContribution {
         selected.set(candidate.runId, { ...current, cursor: candidate.cursor });
         continue;
       }
-      const stored = optionalStoredRun(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${candidate.runId}`),
-      );
+      const stored = await this.authority.readStoredRun(candidate.runId);
       if (!stored) continue;
       const projected = projectClientRunV1(stored);
       const tentative = [
@@ -1944,16 +2696,9 @@ export class ShellBotBackendContribution {
     }
     return page;
   }
-
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
-    const run = optionalStoredRun(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${query.runId}`),
-    );
-    if (run && run.runId !== query.runId) {
-      throw new Error("stored run does not match its lookup key");
-    }
-    return projectClientRunLookupV1(run);
+    return projectClientRunLookupV1(await this.authority.readRun(query.runId));
   }
 
   async fenceRunAdmission(
@@ -1961,31 +2706,10 @@ export class ShellBotBackendContribution {
     input: unknown,
   ): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const durableIdentity = await transaction.get<BotIdentity>(IDENTITY_KEY);
-      if (
-        durableIdentity &&
-        (durableIdentity.userId !== identity.userId ||
-          durableIdentity.botId !== identity.botId)
-      ) {
-        throw new Error("Bot authority does not match its durable identity");
-      }
-      const run = optionalStoredRun(
-        await transaction.get<unknown>(`${RUN_PREFIX}${query.runId}`),
-      );
-      if (run && run.runId !== query.runId) {
-        throw new Error("stored run does not match its lookup key");
-      }
-      if (!run) {
-        await transaction.put({
-          [`${RUN_ADMISSION_FENCE_PREFIX}${query.runId}`]: true,
-          [IDENTITY_KEY]: durableIdentity ?? identity,
-        });
-      }
-      return projectClientRunLookupV1(run);
-    });
+    return projectClientRunLookupV1(
+      await this.authority.fenceRunAdmission(identity, query.runId),
+    );
   }
-
   private initialBotSettings(
     botId: string,
     model?: BotSettingsViewV1["model"],
@@ -1998,6 +2722,17 @@ export class ShellBotBackendContribution {
       schemaVersion: 1;
       userId: string;
     }): Promise<UserSettingsViewV1>;
+    readPackageRevisions(
+      userId: string,
+    ): ReturnType<PackagePublisherAgentHost["read"]>;
+    publishPackage(
+      userId: string,
+      command: Parameters<PackagePublisherAgentHost["publish"]>[0],
+    ): ReturnType<PackagePublisherAgentHost["publish"]>;
+    rollbackPackage(
+      userId: string,
+      command: Parameters<PackagePublisherAgentHost["rollback"]>[0],
+    ): ReturnType<PackagePublisherAgentHost["rollback"]>;
     getConnection(
       userId: string,
       connectionId: string,
@@ -2007,24 +2742,157 @@ export class ShellBotBackendContribution {
     ): Promise<
       import("@frockbot/connection-core").ConnectionDependencyResultV1
     >;
+    claimConnectionDependency(
+      userId: string,
+      connectionId: string,
+      botId: string,
+      generation: string,
+      requirement: ConnectionDependencyRequirementV1,
+    ): Promise<boolean>;
+    acknowledgeConnectionDependency(
+      userId: string,
+      connectionId: string,
+      botId: string,
+      generation: string,
+    ): Promise<boolean>;
+    releaseConnectionDependency(
+      userId: string,
+      connectionId: string,
+      botId: string,
+      generation: string,
+    ): Promise<boolean>;
+    compensateConnectionDependency(
+      userId: string,
+      connectionId: string,
+      botId: string,
+      generation: string,
+    ): Promise<boolean>;
+    leaseModelCredential(
+      userId: string,
+      connectionId: string,
+      providerModelId: string,
+      effectId: string,
+      connectionGeneration: string,
+    ): Promise<CredentialLeaseV1>;
+    settleModelCredential(
+      userId: string,
+      connectionId: string,
+      packageId: string,
+      effectId: string,
+    ): Promise<void>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+      readPackageRevisions(
+        input: unknown,
+      ): ReturnType<PackagePublisherAgentHost["read"]>;
+      publishPackage(
+        input: unknown,
+      ): ReturnType<PackagePublisherAgentHost["publish"]>;
+      rollbackPackage(
+        input: unknown,
+      ): ReturnType<PackagePublisherAgentHost["rollback"]>;
       getConnection(input: unknown): Promise<ConnectionView | undefined>;
       executeConnectionDependency(
         input: unknown,
       ): Promise<
         import("@frockbot/connection-core").ConnectionDependencyResultV1
       >;
+      claimConnectionDependency(input: unknown): Promise<boolean>;
+      acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
+      releaseConnectionDependency(input: unknown): Promise<boolean>;
+      compensateConnectionDependency(input: unknown): Promise<boolean>;
+      leaseModelCredential(input: unknown): Promise<unknown>;
+      settleModelCredential(input: unknown): Promise<void>;
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
+      readPackageRevisions: (userId) =>
+        rpc.readPackageRevisions({ schemaVersion: 1, userId }),
+      publishPackage: (userId, command) =>
+        rpc.publishPackage({ schemaVersion: 1, userId, command }),
+      rollbackPackage: (userId, command) =>
+        rpc.rollbackPackage({ schemaVersion: 1, userId, command }),
       getConnection: (userId, connectionId) =>
         rpc.getConnection({ schemaVersion: 1, userId, connectionId }),
       executeConnectionDependency: (input) =>
         rpc.executeConnectionDependency(input),
+      claimConnectionDependency: (
+        userId,
+        connectionId,
+        botId,
+        generation,
+        requirement,
+      ) =>
+        rpc.claimConnectionDependency({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          botId,
+          generation,
+          requirement,
+        }),
+      acknowledgeConnectionDependency: (
+        userId,
+        connectionId,
+        botId,
+        generation,
+      ) =>
+        rpc.acknowledgeConnectionDependency({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          botId,
+          generation,
+        }),
+      releaseConnectionDependency: (userId, connectionId, botId, generation) =>
+        rpc.releaseConnectionDependency({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          botId,
+          generation,
+        }),
+      compensateConnectionDependency: (
+        userId,
+        connectionId,
+        botId,
+        generation,
+      ) =>
+        rpc.compensateConnectionDependency({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          botId,
+          generation,
+        }),
+      leaseModelCredential: async (
+        userId,
+        connectionId,
+        providerModelId,
+        effectId,
+        connectionGeneration,
+      ) =>
+        decodeCredentialLeaseV1(
+          await rpc.leaseModelCredential({
+            schemaVersion: 1,
+            userId,
+            connectionId,
+            providerModelId,
+            effectId,
+            connectionGeneration,
+          }),
+        ),
+      settleModelCredential: (userId, connectionId, packageId, effectId) =>
+        rpc.settleModelCredential({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          packageId,
+          effectId,
+        }),
     };
   }
 
@@ -2076,14 +2944,7 @@ export class ShellBotBackendContribution {
           revision: current.revision + 1,
           assignments: plan.assignments,
         } satisfies BotSettingsViewV1;
-        await transaction.put({
-          [BOT_CONFIGURATION_KEY]: next,
-          [RUNTIME_PROJECTION_KEY]: {
-            schemaVersion: 1,
-            desiredGeneration: next.revision,
-            status: "pending",
-          } satisfies StoredRuntimeProjection,
-        });
+        await transaction.put(BOT_CONFIGURATION_KEY, next);
         await this.refreshRecoveryAlarm(transaction);
         return next;
       });
@@ -2100,18 +2961,14 @@ export class ShellBotBackendContribution {
     get<T>(key: string): Promise<T | undefined>;
     list<T>(options: { prefix: string }): Promise<Map<string, T>>;
   }): Promise<boolean> {
-    const [activeRunId, settings, runtimeProjection, sagas] = await Promise.all(
-      [
-        storage.get<string>(ACTIVE_RUN_KEY),
-        storage.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY),
-        storage.get<StoredRuntimeProjection>(RUNTIME_PROJECTION_KEY),
-        storage.list<unknown>({ prefix: ASSIGNMENT_SAGA_PREFIX }),
-      ],
-    );
+    const [activeRunId, settings, sagas] = await Promise.all([
+      storage.get<string>(ACTIVE_RUN_KEY),
+      storage.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY),
+      storage.list<unknown>({ prefix: ASSIGNMENT_SAGA_PREFIX }),
+    ]);
     return (
       activeRunId === undefined &&
       (settings?.assignmentOperations.length ?? 0) === 0 &&
-      runtimeProjection?.status !== "pending" &&
       sagas.size === 0
     );
   }
@@ -2132,151 +2989,6 @@ export class ShellBotBackendContribution {
       throw new Error("Bot authority does not match its durable identity");
     }
     if (!existing) await this.ctx.storage.put(IDENTITY_KEY, identity);
-  }
-
-  private async acceptRun(
-    command: OwnedBotTurnCommand,
-  ): Promise<{ previous: SessionEvent[]; settings: BotSettingsViewV1 }> {
-    const fenceKey = `${RUN_ADMISSION_FENCE_PREFIX}${command.runId}`;
-    if (await this.ctx.storage.get(fenceKey)) {
-      throw new Error(`run "${command.runId}" admission was fenced`);
-    }
-    const context = await this.resolveExecutionContext(command);
-    const settings = {
-      ...context.settings,
-      assignments: context.plan.assignments,
-    } satisfies BotSettingsViewV1;
-    await this.projectRuntime(command, settings, true);
-    const key = `${RUN_PREFIX}${command.runId}`;
-    return this.ctx.storage.transaction(async (transaction) => {
-      const existing = optionalStoredRun(await transaction.get<unknown>(key));
-      if (existing) {
-        if (
-          existing.commandFingerprint !== botTurnCommandFingerprintV1(command)
-        ) {
-          throw new Error(
-            `Turn idempotency key "${command.runId}" was reused for a different command`,
-          );
-        }
-        if (existing.status === "completed") {
-          throw new Error(`run "${command.runId}" already completed`);
-        }
-        throw new Error(`run "${command.runId}" already exists`);
-      }
-      if (await transaction.get(fenceKey)) {
-        throw new Error(`run "${command.runId}" admission was fenced`);
-      }
-      const identity = await transaction.get<BotIdentity>(IDENTITY_KEY);
-      if (
-        identity &&
-        (identity.userId !== command.userId || identity.botId !== command.botId)
-      ) {
-        throw new Error("Bot authority does not match its durable identity");
-      }
-      if (await transaction.get(ACTIVE_RUN_KEY)) {
-        throw new Error("bot already has an active run");
-      }
-      await this.lifecycleAdmission?.(transaction, command.botId);
-      const currentSettings = await transaction.get<BotSettingsViewV1>(
-        BOT_CONFIGURATION_KEY,
-      );
-      const projection = await transaction.get<StoredRuntimeProjection>(
-        RUNTIME_PROJECTION_KEY,
-      );
-      if (
-        currentSettings?.revision !== settings.revision ||
-        projection?.desiredGeneration !== settings.revision ||
-        projection.status !== "applied" ||
-        projection.appliedGeneration !== settings.revision
-      ) {
-        throw new Error("Bot runtime projection is not ready for admission");
-      }
-      const latestEvents = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      const admittedSettings =
-        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-        settings;
-      const admittedRun = requireStoredRunV1({
-        runId: command.runId,
-        commandFingerprint: botTurnCommandFingerprintV1(command),
-        sessionId: command.sessionId,
-        acceptedAt: command.acceptedAt,
-        input: command.text,
-        events: [],
-        effectAdmissions: [],
-        status: "running",
-        phase: "admitted",
-        configurationSnapshot: structuredClone(admittedSettings),
-        previousEventCount: latestEvents.length,
-      } satisfies StoredRun);
-      await transaction.put({
-        [key]: admittedRun,
-        [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
-        [ACTIVE_RUN_KEY]: command.runId,
-        [IDENTITY_KEY]: identity ?? {
-          userId: command.userId,
-          botId: command.botId,
-        },
-      });
-      await this.refreshRecoveryAlarm(transaction);
-      return { previous: latestEvents, settings: admittedSettings };
-    });
-  }
-
-  /**
-   * Fences initial Agent activation after the exact resident run is
-   * addressable. This closes the projection/activation window where Stop can
-   * be durable before an Agent exists to receive its advisory signal.
-   */
-  private async activateAdmittedRun(
-    runId: string,
-    previous: SessionEvent[],
-  ): Promise<boolean> {
-    return this.ctx.storage.transaction(async (transaction) => {
-      const key = `${RUN_PREFIX}${runId}`;
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
-      if (!run || activeRunId !== runId || run.status !== "running") {
-        return false;
-      }
-      if (!run.stopRequestedAt) {
-        await transaction.put(key, {
-          ...run,
-          phase: "executing",
-        } satisfies StoredRun);
-        return true;
-      }
-      await cancelStoredRun(
-        transaction,
-        {
-          run: key,
-          activeRun: ACTIVE_RUN_KEY,
-          latestEvents: LATEST_EVENTS_KEY,
-          notificationPrefix: NOTIFICATION_PREFIX,
-        },
-        runId,
-        previous,
-        run.events,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-      return false;
-    });
-  }
-
-  private async activateReconciliationRun(runId: string): Promise<boolean> {
-    return this.ctx.storage.transaction(async (transaction) => {
-      const [activeRunId, run] = await Promise.all([
-        transaction.get<string>(ACTIVE_RUN_KEY),
-        transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
-      ]);
-      const stored = optionalStoredRun(run);
-      return (
-        activeRunId === runId &&
-        stored?.status === "reconciliation-required" &&
-        stored.phase === "reconciling"
-      );
-    });
   }
 
   /**
@@ -2306,7 +3018,7 @@ export class ShellBotBackendContribution {
         !(
           (run.status === "running" && run.phase === "executing") ||
           (run.status === "reconciliation-required" &&
-            run.phase === "reconciling")
+            run.phase === "reconciliation-required")
         )
       ) {
         return false;
@@ -2354,373 +3066,6 @@ export class ShellBotBackendContribution {
       await transaction.put(`${RUN_PREFIX}${runId}`, structuredClone(next));
       return outcome === "admitted";
     });
-  }
-
-  /**
-   * Persists a run's journal. A run carrying Stop intent is cancelled as soon
-   * as its uncertain model effect is durably resolved, so reconciliation
-   * journals the original outcome and no further effect is started.
-   */
-  private runPersistence(
-    run: StoredRun,
-    identity: BotIdentity,
-  ): PersistSessionEvents {
-    if (!run.stopRequestedAt) {
-      return async (_sessionId, events) => {
-        await this.persistRunEvents(run.runId, events);
-      };
-    }
-    let signalled = false;
-    return async (_sessionId, events) => {
-      const journal = await this.persistRunEvents(run.runId, events);
-      if (
-        signalled ||
-        !journal ||
-        latestModelRequestJournalState(journal).status === "unresolved"
-      ) {
-        return;
-      }
-      signalled = true;
-      await this.execution.cancel({
-        botId: identity.botId,
-        sessionId: run.sessionId,
-        runId: run.runId,
-        reason: "user",
-      });
-    };
-  }
-
-  private async persistRunEvents(
-    runId: string,
-    events: readonly SessionEvent[],
-  ): Promise<SessionEvent[] | undefined> {
-    const durableEvents = events
-      .filter((event) => event.type !== "session/disposed")
-      .map(decodeSessionEvent);
-    if (durableEvents.length === 0) return undefined;
-    const key = `${RUN_PREFIX}${runId}`;
-    return this.ctx.storage.transaction(async (transaction) => {
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      if (!run) throw new Error(`run "${runId}" was not accepted`);
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      for (const [index, event] of durableEvents.entries()) {
-        if (event.seq !== latest.length + index) {
-          throw new Error(
-            "Bot session persistence received non-contiguous events",
-          );
-        }
-      }
-      const next = requireStoredRunV1({
-        ...run,
-        events: [...run.events, ...durableEvents],
-      } satisfies StoredRun);
-      await transaction.put({
-        [key]: structuredClone(next),
-        [LATEST_EVENTS_KEY]: structuredClone([...latest, ...durableEvents]),
-      });
-      return next.events;
-    });
-  }
-
-  private async completeRun(
-    runId: string,
-    previous: SessionEvent[],
-    result: BotTurnCompletion,
-  ): Promise<"completed" | "cancelled"> {
-    const key = `${RUN_PREFIX}${runId}`;
-    return this.ctx.storage.transaction(async (transaction) => {
-      const settlement = await completeStoredRun(
-        transaction,
-        {
-          run: key,
-          activeRun: ACTIVE_RUN_KEY,
-          latestEvents: LATEST_EVENTS_KEY,
-          notificationPrefix: NOTIFICATION_PREFIX,
-        },
-        runId,
-        previous,
-        result,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-      return settlement;
-    });
-  }
-
-  private async failRun(
-    runId: string,
-    previous: SessionEvent[],
-    events: SessionEvent[],
-    failure: string,
-  ): Promise<void> {
-    const key = `${RUN_PREFIX}${runId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
-      await failStoredRun(
-        transaction,
-        {
-          run: key,
-          activeRun: ACTIVE_RUN_KEY,
-          latestEvents: LATEST_EVENTS_KEY,
-          notificationPrefix: NOTIFICATION_PREFIX,
-        },
-        runId,
-        previous,
-        events,
-        failure,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  /**
-   * Settles a failed stopped run from one exact durable snapshot. This keeps
-   * pre-admission journal repair, terminal cancellation, and conservative
-   * reconciliation in the same transaction as the Stop classification.
-   */
-  private async settleStoppedRunFailure(
-    runId: string,
-    failure: string,
-  ): Promise<"not-stopped" | "cancelled" | "reconciliation-required"> {
-    const key = `${RUN_PREFIX}${runId}`;
-    return this.ctx.storage.transaction(async (transaction) => {
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      if (!run?.stopRequestedAt) return "not-stopped";
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      const stopRecovery = planStoppedRunRecovery(run, latest);
-      const keys = {
-        run: key,
-        activeRun: ACTIVE_RUN_KEY,
-        latestEvents: LATEST_EVENTS_KEY,
-        notificationPrefix: NOTIFICATION_PREFIX,
-      };
-      if (stopRecovery.kind === "cancel") {
-        await cancelStoredRun(
-          transaction,
-          keys,
-          runId,
-          latest.slice(0, run.previousEventCount),
-          stopRecovery.events,
-        );
-        await this.refreshRecoveryAlarm(transaction);
-        return "cancelled";
-      }
-      const modelState = latestModelRequestJournalState(run.events);
-      await requireStoredRunReconciliation(
-        transaction,
-        keys,
-        runId,
-        latest.slice(0, run.previousEventCount),
-        run.events,
-        modelState.status === "unresolved"
-          ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
-          : failure,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-      return "reconciliation-required";
-    });
-  }
-
-  private async cancelRun(
-    runId: string,
-    previous: SessionEvent[],
-    events: SessionEvent[],
-  ): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      await cancelStoredRun(
-        transaction,
-        {
-          run: `${RUN_PREFIX}${runId}`,
-          activeRun: ACTIVE_RUN_KEY,
-          latestEvents: LATEST_EVENTS_KEY,
-          notificationPrefix: NOTIFICATION_PREFIX,
-        },
-        runId,
-        previous,
-        events,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  private async requireRunReconciliation(
-    runId: string,
-    previous: SessionEvent[],
-    events: SessionEvent[],
-    failure: string,
-  ): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      await requireStoredRunReconciliation(
-        transaction,
-        {
-          run: `${RUN_PREFIX}${runId}`,
-          activeRun: ACTIVE_RUN_KEY,
-          latestEvents: LATEST_EVENTS_KEY,
-          notificationPrefix: NOTIFICATION_PREFIX,
-        },
-        runId,
-        previous,
-        events,
-        failure,
-      );
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  private async recoverActiveRun(): Promise<void> {
-    const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
-    if (!activeRunId || activeRunId === this.executingRunId) return;
-    const durableIdentity =
-      await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    const key = `${RUN_PREFIX}${activeRunId}`;
-    const recovery = await this.ctx.storage.transaction(async (transaction) => {
-      const current = await transaction.get<string>(ACTIVE_RUN_KEY);
-      if (!current || current === this.executingRunId) return undefined;
-      const run = optionalStoredRun(await transaction.get<unknown>(key));
-      if (run?.status === "reconciliation-required") {
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
-      if (!run || run.status !== "running") {
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
-      const plan = planBotRunRecovery(run, latest);
-      if (run.stopRequestedAt) {
-        const stopRecovery = planStoppedRunRecovery(run, latest);
-        if (stopRecovery.kind === "cancel") {
-          await cancelStoredRun(
-            transaction,
-            {
-              run: key,
-              activeRun: ACTIVE_RUN_KEY,
-              latestEvents: LATEST_EVENTS_KEY,
-              notificationPrefix: NOTIFICATION_PREFIX,
-            },
-            run.runId,
-            latest.slice(0, run.previousEventCount),
-            stopRecovery.events,
-          );
-          await this.refreshRecoveryAlarm(transaction);
-          return undefined;
-        }
-      }
-      if (plan.kind === "complete") {
-        const result = {
-          runId: run.runId,
-          text: plan.responseText,
-          events: run.events,
-        } satisfies BotTurnCompletion;
-        const completed = run.configurationSnapshot.notifications.enabled
-          ? {
-              ...result,
-              notification: this.createNotification(
-                run.configurationSnapshot,
-                result,
-              ),
-            }
-          : result;
-        await completeStoredRun(
-          transaction,
-          {
-            run: key,
-            activeRun: ACTIVE_RUN_KEY,
-            latestEvents: LATEST_EVENTS_KEY,
-            notificationPrefix: NOTIFICATION_PREFIX,
-          },
-          run.runId,
-          latest.slice(0, run.previousEventCount),
-          completed,
-        );
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
-      if (plan.kind === "fail") {
-        await failStoredRun(
-          transaction,
-          {
-            run: key,
-            activeRun: ACTIVE_RUN_KEY,
-            latestEvents: LATEST_EVENTS_KEY,
-            notificationPrefix: NOTIFICATION_PREFIX,
-          },
-          run.runId,
-          latest.slice(0, run.previousEventCount),
-          run.events,
-          plan.failure,
-        );
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
-      if (plan.kind === "restart") {
-        const settings = run.configurationSnapshot;
-        await transaction.put({
-          [key]: {
-            ...run,
-            events: [],
-            phase: "admitted",
-          } satisfies StoredRun,
-          [LATEST_EVENTS_KEY]: plan.previous,
-        });
-        await this.refreshRecoveryAlarm(transaction);
-        return {
-          kind: "restart" as const,
-          run,
-          previous: plan.previous,
-          settings,
-        };
-      }
-      if (plan.kind === "resume") {
-        const settings = run.configurationSnapshot;
-        await transaction.put(key, {
-          ...run,
-          phase: "executing",
-        } satisfies StoredRun);
-        await this.refreshRecoveryAlarm(transaction);
-        return { kind: "resume" as const, run, latest, settings };
-      }
-      await transaction.put({
-        [key]: {
-          ...run,
-          events: [...run.events, ...plan.repairs],
-          status: "reconciliation-required",
-          phase: "reconciling",
-          failure:
-            "Execution outcome requires reconciliation before it can resume",
-        } satisfies StoredRun,
-        [LATEST_EVENTS_KEY]: [...latest, ...plan.repairs],
-      });
-      await this.refreshRecoveryAlarm(transaction);
-      return undefined;
-    });
-    if (!recovery) return;
-    if (!durableIdentity) throw new Error("Bot identity is unavailable");
-    if (recovery.kind === "resume") {
-      await this.executeResumedRun(
-        durableIdentity,
-        recovery.run,
-        recovery.latest,
-        recovery.settings,
-      );
-      return;
-    }
-    await this.executeAcceptedRun(
-      {
-        userId: durableIdentity.userId,
-        botId: durableIdentity.botId,
-        runId: recovery.run.runId,
-        sessionId: recovery.run.sessionId,
-        acceptedAt: recovery.run.acceptedAt,
-        text: recovery.run.input,
-      },
-      recovery.previous,
-      recovery.settings,
-    );
   }
 }
 

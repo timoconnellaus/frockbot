@@ -5,6 +5,7 @@ import {
   createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
+  createFoundationModelRuntimePackage,
   createFoundationRuntimeApplication,
 } from "./runtime.js";
 import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
@@ -29,8 +30,10 @@ describe("foundation application", () => {
       "ui-theme",
       "auth",
       "shell",
+      "authoring",
       "clock",
       "computer",
+      "credentials",
       "desktop-clipboard",
       "desktop-directory-picker",
       "desktop-notifications",
@@ -41,19 +44,34 @@ describe("foundation application", () => {
       "memory",
       "mobile-clipboard",
       "mobile-notifications",
+      "package-publisher",
       "provider-foundation",
       "settings",
+      "provider-ollama-cloud",
+      "skills",
     ]);
     expect(first.contributions).toEqual({
-      backend: ["shell", "flock", "settings"],
+      backend: [
+        "shell",
+        "credentials",
+        "flock",
+        "package-publisher",
+        "settings",
+        "provider-ollama-cloud",
+      ],
       runtime: [
+        "authoring",
         "clock",
         "computer",
+        "credentials",
         "echo",
         "fly-sprite",
         "identity",
         "memory",
+        "package-publisher",
         "provider-foundation",
+        "provider-ollama-cloud",
+        "skills",
       ],
       client: [
         "ui-theme",
@@ -62,6 +80,7 @@ describe("foundation application", () => {
         "clock",
         "computer",
         "flock",
+        "package-publisher",
         "settings",
       ],
       desktop: [
@@ -81,19 +100,88 @@ describe("foundation application", () => {
     expect(
       first.packages.find((pkg) => pkg.id === "settings")?.manifest
         .contributions.backend,
-    ).toEqual([{ entry: "./user", host: "user" }]);
+    ).toEqual([
+      { entry: "./backend", host: "gateway" },
+      { entry: "./user", host: "user" },
+    ]);
     expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
+  });
+
+  test("mounts an assigned Ollama model through its Package runtime Contribution", async () => {
+    const plan = await compileFoundationApplication();
+    const runtimePackage = createFoundationModelRuntimePackage(
+      plan,
+      {
+        assignment: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        state: "ready",
+        packageId: "provider-ollama-cloud",
+        providerType: "ollama-cloud",
+        connection: {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          providerType: "ollama-cloud",
+          safeMetadata: {},
+        },
+      },
+      {
+        accountId: "account-1",
+        connectionId: "ollama-work",
+        leaseCredential: () => Promise.reject(new Error("not executed")),
+        settleCredential: () => Promise.resolve(),
+      },
+    );
+
+    expect(runtimePackage).toMatchObject({
+      specifier: "@frockbot/plugin-provider-ollama-cloud",
+      contributionSpecifier: "@frockbot/plugin-provider-ollama-cloud/runtime",
+    });
+    expect(() =>
+      createFoundationModelRuntimePackage(
+        plan,
+        {
+          assignment: {
+            connectionId: "ollama-work",
+            providerModelId: "glm-5.3-flash:cloud",
+          },
+          state: "ready",
+          packageId: "provider-ollama-cloud",
+          providerType: "foundation",
+          connection: {
+            connectionId: "ollama-work",
+            packageId: "provider-ollama-cloud",
+            connectionTypeId: "ollama-cloud-account",
+            displayName: "Work",
+            state: "ready",
+            providerType: "foundation",
+            safeMetadata: {},
+          },
+        },
+        {
+          accountId: "account-1",
+          connectionId: "ollama-work",
+          leaseCredential: () => Promise.reject(new Error("not executed")),
+          settleCredential: () => Promise.resolve(),
+        },
+      ),
+    ).toThrow('Bot model provider "foundation" is unavailable');
   });
 
   test("exposes only compiled runtime packages to the runtime host", async () => {
     const application = await createFoundationRuntimeApplication();
 
-    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(5);
+    // Memory is absent: like Skills, it mounts only for a Turn whose Memory
+    // roots the host can reach, so it is never a default runtime package.
+    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(4);
     expect(application.packages.map((pkg) => pkg.specifier)).toEqual([
       "@frockbot/plugin-clock",
       "@frockbot/plugin-echo",
       "@frockbot/plugin-identity",
-      "@frockbot/plugin-memory",
       "@frockbot/plugin-provider-foundation",
     ]);
   });
@@ -140,10 +228,25 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readSheep: () => Promise.reject(new Error("not used while composing")),
       updateSheep: () => Promise.reject(new Error("not used while composing")),
+      executeConnection: () =>
+        Promise.reject(new Error("not used while composing")),
+      lookupConnectionCommand: () =>
+        Promise.reject(new Error("not used while composing")),
+      listCompositionGenerations: () =>
+        Promise.reject(new Error("not used while composing")),
+      getCompositionGeneration: () =>
+        Promise.reject(new Error("not used while composing")),
+      revertComposition: () =>
+        Promise.reject(new Error("not used while composing")),
+      read: () =>
+        Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
+      rollback: () => Promise.reject(new Error("not used while composing")),
     });
     expect(
-      backend.contributions.map((contribution) => contribution.packageId),
-    ).toEqual(["flock"]);
+      backend.contributions
+        .map((contribution) => contribution.packageId)
+        .sort(),
+    ).toEqual(["flock", "package-publisher", "settings"]);
     interface TestContribution {
       specifier: string;
       executeConfiguration?(): void;
@@ -162,7 +265,20 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(2);
+    expect(userBackend.contributions).toHaveLength(5);
+    const userSpecifiers = userBackend.contributions.map(
+      (contribution) => contribution.specifier,
+    );
+    expect(
+      userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
+    ).toBeLessThan(
+      userSpecifiers.indexOf("@frockbot/plugin-provider-ollama-cloud/user"),
+    );
+    expect(
+      userSpecifiers.indexOf("@frockbot/plugin-credentials/user"),
+    ).toBeLessThan(
+      userSpecifiers.indexOf("@frockbot/plugin-provider-ollama-cloud/user"),
+    );
     expect(typeof botBackend.contributions[0]?.executeConfiguration).toBe(
       "function",
     );
@@ -177,14 +293,60 @@ describe("foundation application", () => {
     expect(backend.contributions).toHaveLength(0);
     expect(botBackend.contributions).toHaveLength(0);
     expect(userBackend.contributions).toHaveLength(0);
+    const requestedSecrets: string[] = [];
     expect(
       createFoundationHostedRuntimePackages(plan, {
         userId: "user-1",
+        readSecret: (name) => {
+          requestedSecrets.push(name);
+          return undefined;
+        },
         computerHost: {
           effect: () => Promise.reject(new Error("not invoked while mounting")),
         },
+        packagePublisher: {
+          read: () =>
+            Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
+          publish: () => Promise.reject(new Error("not used while composing")),
+          rollback: () => Promise.reject(new Error("not used while composing")),
+        },
       }).map((pkg) => pkg.specifier),
-    ).toEqual(["@frockbot/plugin-fly-sprite", "@frockbot/plugin-computer"]);
+    ).toEqual([
+      "@frockbot/plugin-credentials",
+      "@frockbot/plugin-package-publisher",
+      "@frockbot/plugin-fly-sprite",
+      "@frockbot/plugin-computer",
+    ]);
+    expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
+
+    // The Skills Package mounts only for a Turn whose instruction root the
+    // host can read, and then it leads the hosted runtime packages.
+    expect(
+      createFoundationHostedRuntimePackages(plan, {
+        userId: "user-1",
+        readSecret: () => undefined,
+        skills: {
+          owner: { userId: "user-1", botId: "bot-1" },
+          reads: {
+            read: () => Promise.resolve({ status: "not-found", reason: "n/a" }),
+            stat: () => Promise.resolve({ status: "not-found", reason: "n/a" }),
+            list: () => Promise.resolve({ status: "ok", entries: [] }),
+          },
+        },
+        packagePublisher: {
+          read: () =>
+            Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
+          publish: () => Promise.reject(new Error("not used while composing")),
+          rollback: () => Promise.reject(new Error("not used while composing")),
+        },
+      }).map((pkg) => pkg.specifier),
+    ).toEqual([
+      "@frockbot/plugin-skills",
+      "@frockbot/plugin-credentials",
+      "@frockbot/plugin-package-publisher",
+      "@frockbot/plugin-fly-sprite",
+      "@frockbot/plugin-computer",
+    ]);
 
     const assignment = {
       assignmentId: "unavailable-assignment",

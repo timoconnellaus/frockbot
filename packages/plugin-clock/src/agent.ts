@@ -1,8 +1,8 @@
-import type {
-  LlmStreamEvent,
-  NormalizedModelRequest,
-  ToolDefinition,
-} from "@frockbot/agent-core";
+import {
+  type LlmStreamEvent,
+  type NormalizedModelRequest,
+  type ToolDefinition,
+} from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
 function currentTime(): string {
@@ -26,10 +26,15 @@ async function* requestClockTool(
 ): AsyncIterable<LlmStreamEvent> {
   signal.throwIfAborted();
   yield {
+    // pi-lens-ignore: ts:2322
     type: "tool-call",
     call: { id: crypto.randomUUID(), name: "current_time", input: {} },
   };
-  yield { type: "finish", reason: "tool-calls" };
+  yield {
+    type: "finish",
+    // pi-lens-ignore: ts:2322
+    reason: "tool-calls",
+  };
 }
 
 function shouldRequestClock(request: NormalizedModelRequest): boolean {

@@ -4,17 +4,24 @@ import {
   type ApplicationDeclarationPlan,
   type ApplicationPlan,
   type ApplicationSource,
-} from "@frockbot/application-compiler";
+} from "@frockbot/kernel-composition/compiler";
 import type {
   ContributionResolver,
   PackageSource,
-} from "@frockbot/plugin-catalog";
+} from "@frockbot/kernel-composition";
+import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import type {
   BotExecutionPlanV1,
   BotSettingsViewV1,
   ConnectionView,
+  ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
 import authManifest from "@frockbot/plugin-auth/manifest";
+import authoringManifest from "@frockbot/plugin-authoring/manifest";
+import {
+  createAuthoringRuntimePlugin,
+  type PackageAuthoringHost,
+} from "@frockbot/plugin-authoring/agent";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
@@ -33,9 +40,10 @@ import computerManifest from "@frockbot/plugin-computer/manifest";
 import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
 import {
   createSharedComputerProviderPlugin,
-  SHARED_COMPUTER_PROVIDER_ID,
   type SharedComputerHostClient,
 } from "@frockbot/plugin-computer/shared-provider";
+import credentialsManifest from "@frockbot/plugin-credentials/manifest";
+import { createCredentialRuntimePlugin } from "@frockbot/plugin-credentials/user";
 // Desktop and mobile Package manifests remain part of the immutable plan.
 import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
 import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
@@ -44,6 +52,8 @@ import notificationsManifest from "@frockbot/plugin-desktop-notifications/manife
 // Runtime implementations are statically bound by the immutable application.
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
+import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
+import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
 // Flock contributes lifecycle routes and durable User/Bot state.
 import flockManifest from "@frockbot/plugin-flock/manifest";
 // Gateway Flock behavior is resolved as a lifecycle-owned Plugin.
@@ -66,14 +76,50 @@ import identityManifest from "@frockbot/plugin-identity/manifest";
 import memoryManifest from "@frockbot/plugin-memory/manifest";
 import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
 import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
+import packagePublisherManifest from "@frockbot/plugin-package-publisher/manifest";
+import {
+  createPackagePublisherAgentPlugin,
+  type PackagePublisherAgentHost,
+} from "@frockbot/plugin-package-publisher/agent";
+export type { PackagePublisherAgentHost } from "@frockbot/plugin-package-publisher/agent";
+import {
+  createPackagePublisherBackendContribution,
+  type PackagePublisherGatewayHost,
+} from "@frockbot/plugin-package-publisher/backend"; // built-in publication Contribution
+const createPackagePublisherGatewayPlugin =
+  createPackagePublisherBackendContribution.plugin;
 import foundationProviderManifest from "@frockbot/plugin-provider-foundation/manifest";
 import foundationProviderPlugin, {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
 } from "@frockbot/plugin-provider-foundation/runtime";
-import settingsManifest from "../../../packages/plugin-settings/src/manifest.js";
+import ollamaCloudManifest from "@frockbot/plugin-provider-ollama-cloud/manifest";
+import { createOllamaCloudRuntimePlugin } from "@frockbot/plugin-provider-ollama-cloud/runtime";
+import settingsManifest from "@frockbot/plugin-settings/manifest";
+// Provider-neutral Connection transport is owned by the Settings gateway Contribution.
+import {
+  createSettingsBackendContribution,
+  type SettingsGatewayHost,
+} from "@frockbot/plugin-settings/backend";
+const createSettingsGatewayPlugin = (
+  createSettingsBackendContribution as typeof createSettingsBackendContribution & {
+    plugin(
+      host: SettingsGatewayHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
+import {
+  createMemoryRuntimePlugin,
+  type MemoryRuntimeHostV1,
+} from "@frockbot/plugin-memory/agent";
 import shellManifest from "@frockbot/plugin-shell/manifest";
-import uiThemeManifest from "../../../packages/plugin-ui-theme/src/manifest.js";
+import skillsManifest from "@frockbot/plugin-skills/manifest";
+import {
+  createSkillsRuntimePlugin,
+  type SkillsRuntimeHostV1,
+} from "@frockbot/plugin-skills/agent";
+import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
@@ -81,20 +127,25 @@ export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-ui-theme", uiThemeManifest],
   ["@frockbot/plugin-auth", authManifest],
+  ["@frockbot/plugin-authoring", authoringManifest],
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
+  ["@frockbot/plugin-credentials", credentialsManifest],
+  ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
+  ["@frockbot/plugin-package-publisher", packagePublisherManifest],
   ["@frockbot/plugin-clock", clockManifest],
   ["@frockbot/plugin-computer", computerManifest],
   ["@frockbot/plugin-desktop-clipboard", clipboardManifest],
   ["@frockbot/plugin-desktop-directory-picker", directoryPickerManifest],
   ["@frockbot/plugin-desktop-notifications", notificationsManifest],
   ["@frockbot/plugin-shell", shellManifest],
+  ["@frockbot/plugin-skills", skillsManifest],
   ["@frockbot/plugin-settings", settingsManifest],
 ]);
 
@@ -116,6 +167,39 @@ const assignedRuntimeContributionFactories = new Map<
   string,
   AssignedRuntimeContributionFactory
 >();
+
+interface ModelRuntimeContributionConfig {
+  accountId: string;
+  connectionId: string;
+  leaseCredential(
+    effectId: string,
+    expectedGeneration?: string,
+  ): Promise<CredentialLeaseV1>;
+  settleCredential(effectId: string): Promise<void>;
+  fetch?: typeof fetch;
+}
+
+interface ModelRuntimeContributionFactory {
+  providerType: string;
+  create(config: ModelRuntimeContributionConfig): Plugin;
+}
+
+const modelRuntimeContributionFactories = new Map<
+  string,
+  ModelRuntimeContributionFactory
+>([
+  [
+    "@frockbot/plugin-provider-ollama-cloud/runtime",
+    {
+      providerType: "ollama-cloud",
+      create: (config) =>
+        createOllamaCloudRuntimePlugin({
+          ...config,
+          packageId: "provider-ollama-cloud",
+        } as Parameters<typeof createOllamaCloudRuntimePlugin>[0]),
+    },
+  ],
+]);
 
 const applicationSource: ApplicationSource = {
   schemaVersion: 1,
@@ -175,9 +259,15 @@ export interface MountedFoundationBackend<T> {
 }
 
 /** Mount every declared backend Contribution into one owned Cordis root. */
+export type FoundationGatewayHost = {
+  backendHost: "gateway";
+} & FlockGatewayHost &
+  SettingsGatewayHost &
+  PackagePublisherGatewayHost;
+
 export async function createFoundationBackendContributions(
   plan: ApplicationPlan,
-  host: { backendHost: "gateway" } & FlockGatewayHost,
+  host: FoundationGatewayHost,
 ): Promise<MountedFoundationBackend<BackendRouteContribution>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
@@ -186,9 +276,7 @@ export async function createFoundationBackendContributions<T>(
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
   plan: ApplicationPlan,
-  host:
-    | ({ backendHost: "gateway" } & FlockGatewayHost)
-    | FoundationBackendPluginHost<T>,
+  host: FoundationGatewayHost | FoundationBackendPluginHost<T>,
   residentRoot?: Context,
 ): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
   const ownsRoot = !residentRoot;
@@ -220,6 +308,16 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-flock/backend"
         ) {
           plugin = createFlockGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-settings/backend"
+        ) {
+          plugin = createSettingsGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-package-publisher/backend"
+        ) {
+          plugin = createPackagePublisherGatewayPlugin(host, lifecycle);
         } else if (host.backendHost === "gateway") {
           throw new Error(
             `unknown foundation backend contribution: ${specifier}`,
@@ -276,26 +374,116 @@ function runtimePackage(
   };
 }
 
+/**
+ * The Computer providers this application registers. The in-worker Fly Sprites
+ * provider is the default: it is the one that carries a Computer's per-User
+ * identity, its Workspace file surface, and the durable-root sync (ADR 0013).
+ * When the host also supplies the shared Computer host, its effect-journaling
+ * proxy is registered beside it so an identified effect can be replayed rather
+ * than repeated across Durable Object eviction.
+ */
+function computerProviderPlugin(host: {
+  readSecret(name: string): string | undefined;
+  computerSync?: ComputerSyncHostV1;
+  computerHost?: SharedComputerHostClient;
+}): Plugin.Function {
+  const fly = createFlySpriteProviderPlugin(undefined, {
+    token: host.readSecret("SPRITES_TOKEN"),
+    ...(host.computerSync ? { sync: host.computerSync } : {}),
+  });
+  const shared = host.computerHost
+    ? createSharedComputerProviderPlugin(host.computerHost)
+    : undefined;
+  if (!shared) return fly;
+  const plugin: Plugin.Function = (ctx) => {
+    ctx.plugin(fly);
+    ctx.plugin(shared);
+  };
+  plugin.inject = ["computers"];
+  return plugin;
+}
+
 export function createFoundationHostedRuntimePackages(
   plan: ApplicationPlan,
   host: {
     userId: string;
-    computerHost: SharedComputerHostClient;
+    readSecret(name: string): string | undefined;
+    /**
+     * The shared Computer host seam: a non-authoritative backend host that
+     * journals each identified Computer effect so a retried effect replays its
+     * recorded outcome instead of executing twice. Supplied, the
+     * `shared-computer` provider is registered beside the in-worker provider.
+     */
+    computerHost?: SharedComputerHostClient;
+    /**
+     * The Package authoring seam, supplied by the Bot Durable Object for one
+     * admitted Turn. Absent outside a Turn, and the Authoring Package is then
+     * not mounted at all: a Bot cannot author a Package except inside a Turn
+     * whose run and session its provenance can name.
+     */
+    authoring?: PackageAuthoringHost;
+    /**
+     * The Skills seam, supplied by the Bot Durable Object for one admitted
+     * Turn. Absent outside a Turn, and outside one whose Workspace reads are
+     * available, and the Skills Package is then not mounted: a Turn with no
+     * readable instruction root loads no instructions rather than guessing.
+     */
+    skills?: SkillsRuntimeHostV1;
+    /**
+     * The Memory seam, supplied by the Bot Durable Object for one admitted
+     * Turn. Absent outside a Turn, and outside one whose Memory roots are
+     * reachable, and the Memory Package is then not mounted: a Turn with no
+     * readable Memory root injects no Memory rather than guessing.
+     */
+    memory?: MemoryRuntimeHostV1;
+    /**
+     * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
+     * for one admitted Turn. Absent outside a Turn, and outside one whose
+     * durable roots are reachable in object storage — the Computer provider
+     * then offers no sync at all, and a Computer's durable roots live on the
+     * Computer alone rather than reconciling against a store no authority
+     * backs.
+     */
+    computerSync?: ComputerSyncHostV1;
+    packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
+    ...(host.skills
+      ? [runtimePackage(plan, "skills", createSkillsRuntimePlugin(host.skills))]
+      : []),
+    ...(host.memory
+      ? [runtimePackage(plan, "memory", createMemoryRuntimePlugin(host.memory))]
+      : []),
+    ...(host.authoring
+      ? [
+          runtimePackage(
+            plan,
+            "authoring",
+            createAuthoringRuntimePlugin(host.authoring),
+          ),
+        ]
+      : []),
     runtimePackage(
       plan,
-      "fly-sprite",
-      createSharedComputerProviderPlugin(host.computerHost),
+      "credentials",
+      createCredentialRuntimePlugin({ readSecret: host.readSecret }),
     ),
+    runtimePackage(
+      plan,
+      "package-publisher",
+      createPackagePublisherAgentPlugin(host.packagePublisher, {
+        userId: host.userId,
+        defaultProviderId: "fly-sprite",
+      }),
+    ),
+    runtimePackage(plan, "fly-sprite", computerProviderPlugin(host)),
     runtimePackage(
       plan,
       "computer",
       createComputerAgentPlugin({
         userId: host.userId,
-        defaultProviderId: SHARED_COMPUTER_PROVIDER_ID,
-        idempotentEffects: true,
+        defaultProviderId: "fly-sprite",
       }),
     ),
   ];
@@ -346,14 +534,62 @@ export async function createFoundationAssignedRuntimePackages(
   return result;
 }
 
+export function createFoundationModelRuntimePackage(
+  plan: ApplicationPlan,
+  binding: ResolvedModelBindingV1,
+  host: ModelRuntimeContributionConfig,
+): FoundationAssignedRuntimePackage {
+  if (
+    binding.state === "unavailable" ||
+    !binding.connection ||
+    !binding.packageId ||
+    !binding.providerType
+  ) {
+    throw new Error(binding.failure ?? "Bot model Connection is unavailable");
+  }
+  const pkg = plan.packages.find(
+    (candidate) => candidate.id === binding.packageId,
+  );
+  const runtime = pkg?.manifest.contributions.runtime;
+  if (!pkg || !runtime) {
+    throw new Error("Bot model Package runtime is unavailable");
+  }
+  const specifier = contributionSpecifier(pkg.specifier, runtime.entry);
+  const factory = modelRuntimeContributionFactories.get(specifier);
+  if (!factory || factory.providerType !== binding.providerType) {
+    throw new Error(
+      `Bot model provider "${binding.providerType}" is unavailable`,
+    );
+  }
+  return {
+    specifier: pkg.specifier,
+    contributionSpecifier: specifier,
+    manifest: pkg.manifest,
+    plugin: factory.create({
+      ...host,
+      connectionId: binding.connection.connectionId,
+    }),
+  };
+}
+
 export async function createFoundationRuntimeApplication(): Promise<FoundationRuntimeApplication> {
   const plan = await compileFoundationApplication();
   const runtimeIds = new Set(plan.contributions.runtime);
   // Computer providers require host authority and are added only by a capable runtime.
+  // Authoring mounts only for an admitted Turn, which supplies its host.
+  runtimeIds.delete("authoring");
+  // Skills mount only for a Turn whose instruction root the host can read.
+  runtimeIds.delete("skills");
+  // Memory mounts only for a Turn whose Memory roots the host can reach.
+  runtimeIds.delete("memory");
   runtimeIds.delete("computer");
+  runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");
-  // Composio mounts only after durable Connections resolve its backend config.
+  // Package publication is mounted with the current User's durable host.
+  runtimeIds.delete("package-publisher");
+  // Assigned provider Packages mount only after durable Connections resolve.
   runtimeIds.delete("composio");
+  runtimeIds.delete("provider-ollama-cloud");
   return {
     plan,
     packages: plan.packages

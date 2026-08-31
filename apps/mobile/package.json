@@ -17,8 +17,8 @@
   "dependencies": {
     "@capacitor/core": "8.5.0",
     "@frockbot/configuration-core": "workspace:*",
+    "@frockbot/kernel-composition": "workspace:*",
     "@frockbot/mobile-core": "workspace:*",
-    "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-mobile-clipboard": "workspace:*",
     "@frockbot/plugin-mobile-notifications": "workspace:*",
     "cordis": "4.0.0-rc.8"

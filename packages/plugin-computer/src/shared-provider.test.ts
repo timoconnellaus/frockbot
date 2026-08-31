@@ -32,9 +32,10 @@ describe("shared Computer provider", () => {
         },
       }),
     );
-    const target = { userId: "user-1", botId: "bot-1" };
-    root.computers.assign(target, SHARED_COMPUTER_PROVIDER_ID);
-    const computer = await root.computers.open(target);
+    const identity = { userId: "user-1" };
+    const tenant = { botId: "bot-1" };
+    root.computers.assign(identity, SHARED_COMPUTER_PROVIDER_ID);
+    const computer = await root.computers.open(identity, tenant);
     const result = await computer.exec?.execute(
       { executable: "/bin/true" },
       { effectId: "tool:1:1:0" },
@@ -45,7 +46,8 @@ describe("shared Computer provider", () => {
       {
         schemaVersion: 1,
         effectId: "tool:1:1:0",
-        target,
+        identity,
+        tenant,
         operation: { type: "exec", request: { executable: "/bin/true" } },
       },
     ]);

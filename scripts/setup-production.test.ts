@@ -21,7 +21,11 @@ afterEach(async () => {
   );
 });
 
-async function runProductionSetup(stdin: string): Promise<{
+async function runProductionSetup(
+  stdin: string,
+  secretListMode:
+    "missing" | "existing" | "failure" | "set-failure" = "missing",
+): Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -39,7 +43,17 @@ async function runProductionSetup(stdin: string): Promise<{
 set -euo pipefail
 printf '%s\n' "$*" >> "$GH_LOG"
 if [[ "$1 $2" == "auth status" ]]; then exit 0; fi
+if [[ "$1 $2" == "secret list" ]]; then
+  case "$GH_SECRET_LIST_MODE" in
+    existing) printf 'CREDENTIAL_KEYRING\tUpdated\n' ;;
+    failure) exit 42 ;;
+  esac
+  exit 0
+fi
 if [[ "$1 $2" == "secret set" ]]; then
+  if [[ "$GH_SECRET_LIST_MODE" == "set-failure" && "$3" == "CREDENTIAL_KEYRING" ]]; then
+    exit 43
+  fi
   value="$(cat)"
   printf 'secret-value:%s:%s\n' "$3" "$value" >> "$GH_LOG"
 fi
@@ -56,6 +70,7 @@ fi
         ...process.env,
         ENV_FILE: join(directory, ".env"),
         GH_LOG: ghLog,
+        GH_SECRET_LIST_MODE: secretListMode,
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       },
       stdin: "pipe",
@@ -86,17 +101,54 @@ describe("production setup", () => {
       "Checking environment secrets in timoconnellaus/frockbot…",
     );
     expect(stdout).toContain(
-      "Stage 4/4 · GitHub: verify production configuration",
+      "Stage 5/5 · GitHub: verify production configuration",
     );
     expect(calls).toContain(
       "secret set SPRITES_TOKEN --repo timoconnellaus/frockbot --env production",
     );
     expect(calls).toContain("secret-value:SPRITES_TOKEN:sprites-production");
+    expect(calls).toContain(
+      "secret set CREDENTIAL_KEYRING --repo timoconnellaus/frockbot --env production",
+    );
+    expect(
+      calls.some((call) => call.startsWith("secret-value:CREDENTIAL_KEYRING:")),
+    ).toBe(true);
     expect(calls.join("\n")).not.toContain("COMPOSIO");
     expect(calls.join("\n")).not.toContain(
       "FROCKBOT_AUTHORIZATION_STATE_SECRET",
     );
     expect(stdout).not.toContain("Composio");
+  });
+
+  test("aborts when the production keyring cannot be inspected", async () => {
+    const { exitCode, calls } = await runProductionSetup(
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\nsprites-production\n\n",
+      "failure",
+    );
+
+    expect(exitCode).not.toBe(0);
+    expect(calls).not.toContain(
+      "secret set CREDENTIAL_KEYRING --repo timoconnellaus/frockbot --env production",
+    );
+    expect(
+      calls.some((call) => call.startsWith("secret-value:CREDENTIAL_KEYRING:")),
+    ).toBe(false);
+  });
+
+  test("aborts when the generated production keyring cannot be stored", async () => {
+    const { exitCode, stdout, calls } = await runProductionSetup(
+      "\ncloudflare-token\n\ngoogle-client\ngoogle-secret\nsprites-production\n\n",
+      "set-failure",
+    );
+
+    expect(exitCode).not.toBe(0);
+    expect(stdout).toContain(
+      "could not set required production secret CREDENTIAL_KEYRING",
+    );
+    expect(calls).toContain(
+      "secret set CREDENTIAL_KEYRING --repo timoconnellaus/frockbot --env production",
+    );
+    expect(stdout).not.toContain("Setup complete");
   });
 
   test("deploys without Composio configuration and forwards active secrets", async () => {
@@ -132,7 +184,13 @@ describe("production setup", () => {
     expect(computerHost?.env?.SPRITES_TOKEN).toBe(
       "${{ secrets.SPRITES_TOKEN }}",
     );
-    expect(deploy?.env).not.toHaveProperty("SPRITES_TOKEN");
+    expect(deploy?.env?.SPRITES_TOKEN).toBe("${{ secrets.SPRITES_TOKEN }}");
+    expect(validation?.env?.CREDENTIAL_KEYRING).toBe(
+      "${{ secrets.CREDENTIAL_KEYRING }}",
+    );
+    expect(deploy?.env?.CREDENTIAL_KEYRING).toBe(
+      "${{ secrets.CREDENTIAL_KEYRING }}",
+    );
 
     const productionEnvironment = {
       ...process.env,
@@ -145,6 +203,8 @@ describe("production setup", () => {
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       SPRITES_TOKEN: "sprites-production",
+      CREDENTIAL_KEYRING:
+        '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
     };
     const validConfiguration = Bun.spawnSync(
       ["bash", "-c", validation?.run ?? ""],
@@ -164,6 +224,26 @@ describe("production setup", () => {
     expect(missingSprites.stderr.toString()).toContain(
       "Missing production configuration: SPRITES_TOKEN",
     );
+
+    for (const invalidKeyring of [
+      "not-json",
+      '{"schemaVersion":1,"currentKeyId":"missing","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
+      '{"schemaVersion":1,"currentKeyId":"toString","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
+      '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"c2hvcnQ"}}',
+    ]) {
+      const invalidConfiguration = Bun.spawnSync(
+        ["bash", "-c", validation?.run ?? ""],
+        {
+          env: {
+            ...productionEnvironment,
+            CREDENTIAL_KEYRING: invalidKeyring,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(invalidConfiguration.exitCode).not.toBe(0);
+    }
 
     const directory = await temporaryDirectory("frockbot-workflow-");
     const runner = join(directory, "runner");
@@ -222,7 +302,10 @@ exit 1
           ];
         }),
     );
-    expect(forwarded).not.toHaveProperty("SPRITES_TOKEN");
+    expect(forwarded.SPRITES_TOKEN).toBe("sprites-production");
+    expect(forwarded.CREDENTIAL_KEYRING).toBe(
+      productionEnvironment.CREDENTIAL_KEYRING,
+    );
     expect(forwarded).not.toHaveProperty("COMPOSIO_API_KEY");
     expect(forwarded).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
     expect(forwarded).not.toHaveProperty("FROCKBOT_AUTHORIZATION_STATE_SECRET");

@@ -232,7 +232,7 @@ async function executeEffect(request: Request): Promise<Response> {
   let response: ComputerHostEffectResponseV1;
   const provider = new FlySpriteComputerProvider(undefined, token);
   try {
-    const computer = await provider.open(effect.target, {
+    const computer = await provider.open(effect.identity, effect.tenant, {
       providerId: "fly-sprite",
       generation: effect.assignment.generation,
     });

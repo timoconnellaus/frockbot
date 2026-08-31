@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./backend": "./src/backend.ts",
     "./client": "./src/client/index.ts",
     "./user": "./src/user.ts",
     "./manifest": "./src/manifest.ts",
@@ -24,6 +25,7 @@
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
+    "@frockbot/connection-core": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"

@@ -10,7 +10,10 @@
     "ui-theme": ">=0.0.1"
   },
   "contributions": {
-    "backend": [{ "entry": "./user", "host": "user" }],
+    "backend": [
+      { "entry": "./backend", "host": "gateway" },
+      { "entry": "./user", "host": "user" }
+    ],
     "client": {
       "entry": "./client",
       "mounts": [

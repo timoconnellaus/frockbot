@@ -1,15 +1,27 @@
-import type { SessionEvent } from "@frockbot/agent-core";
+import {
+  type BotIsolateEntrypoint,
+  type BotIsolateEnv,
+  type SessionEvent,
+} from "@frockbot/kernel-contracts";
 import type {
   BotConfigurationExecuteRpcV1,
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
+  CompositionCommandReceiptV1,
+  CompositionGenerationListViewV1,
+  CompositionGenerationViewV1,
+  ConnectionView,
+  RevertCompositionCommandV1,
   OperationReceiptV1,
   UserConfigurationExecuteRpcV1,
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type {
+  ConnectionCommandReceiptV1,
+  ConnectionCommandV1,
   ConnectionCompletionResult,
+  CredentialLeaseV1,
   RevokeConnectionResult,
   StartConnectionResult,
 } from "@frockbot/connection-core";
@@ -27,6 +39,12 @@ import type {
   SheepIdentityViewV1,
   UpdateSheepCommandV1,
 } from "@frockbot/plugin-flock/shared";
+import type {
+  PackagePublicationReceiptV1,
+  PackageRevisionHistoryV1,
+  PublishPackageCommandV1,
+  RollbackPackageCommandV1,
+} from "@frockbot/plugin-package-publisher/shared";
 import type {
   ClientRunLookupQueryV1,
   ClientRunLookupV1,
@@ -73,6 +91,7 @@ export interface StoredRun {
   responseText?: string;
   failure?: string;
   phase?: "admitted" | "executing" | "reconciliation-required";
+  compositionGenerationId?: string;
   configurationSnapshot?: BotSettingsViewV1;
   previousEventCount?: number;
 }
@@ -186,12 +205,18 @@ export interface UserApplicationEnv {
   DEPLOYMENT: UserApplicationIdentity;
 }
 
-export interface WorkerCode {
+/**
+ * The loader-side `WorkerCode`. `env` is generic because two kinds of isolate
+ * are loaded from this Worker: a user application (`UserApplicationEnv`) and a
+ * Bot Package (`BotIsolateEnv`, from `@frockbot/kernel-contracts`), which sees
+ * only `IDENTITY` and the loopback `CAPABILITIES` service binding.
+ */
+export interface WorkerCode<Env = UserApplicationEnv> {
   compatibilityDate: string;
   mainModule: string;
   modules: Record<string, string | { js: string }>;
-  globalOutbound: null;
-  env: UserApplicationEnv;
+  globalOutbound?: null;
+  env: Env;
   limits?: {
     cpuMs?: number;
     subRequests?: number;
@@ -202,16 +227,85 @@ export interface WorkerEntrypointStub {
   fetch(request: Request): Promise<Response>;
 }
 
-export interface LoadedWorker {
-  getEntrypoint(name?: string | null): WorkerEntrypointStub;
+export interface LoadedWorker<Entrypoint = WorkerEntrypointStub> {
+  getEntrypoint(name?: string | null): Entrypoint;
 }
 
-export interface WorkerLoader {
-  get(id: string, callback: () => Promise<WorkerCode>): LoadedWorker;
+export interface WorkerLoader<
+  Env = UserApplicationEnv,
+  Entrypoint = WorkerEntrypointStub,
+> {
+  get(
+    id: string,
+    callback: () => Promise<WorkerCode<Env>>,
+  ): LoadedWorker<Entrypoint>;
 }
+
+/** The `BOT_PACKAGES` loader: Bot Package isolates, never user applications. */
+export type BotPackageLoader = WorkerLoader<
+  BotIsolateEnv,
+  BotIsolateEntrypoint
+>;
 
 export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;
+}
+
+/**
+ * Bot-authored Package artifacts (`docs/plans/kernel-and-isolate.md` Step 3).
+ * Content-addressed and immutable, stored at `packages/<contentHash>.mjs` in the
+ * same `APPLICATION_ARTIFACTS` bucket. Unlike `ApplicationArtifactStore.load`,
+ * the reader verifies the hash before the bytes are used.
+ */
+export interface PackageArtifactStore {
+  putPackageArtifact(contentHash: string, module: string): Promise<void>;
+  headPackageArtifact(
+    contentHash: string,
+  ): Promise<{ contentHash: string; size: number } | undefined>;
+  loadPackageArtifact(contentHash: string): Promise<string>;
+}
+
+/**
+ * The `PACKAGE_BUNDLER` service binding (`apps/cloudflare-bundler`). Defined
+ * here until `@frockbot/kernel-composition` owns `ArtifactRefV1` (Step 2); the
+ * shapes are the plan's verbatim v1 DTOs and must stay in step with
+ * `apps/cloudflare-bundler/src/contracts.ts`.
+ */
+export interface ArtifactRefV1 {
+  contentHash: string;
+  size: number;
+  mediaType: "application/javascript";
+  bundlerVersion: string;
+}
+
+export interface BundleRequestV1 {
+  schemaVersion: 1;
+  effectId: string;
+  target: "bot-isolate";
+  compatibilityDate: string;
+  entry: "package.ts";
+  sources: { path: string; text: string }[];
+}
+
+export type BundleResultV1 =
+  | {
+      schemaVersion: 1;
+      effectId: string;
+      status: "bundled";
+      artifact: ArtifactRefV1;
+      module: string;
+      diagnostics: string[];
+    }
+  | {
+      schemaVersion: 1;
+      effectId: string;
+      status: "failed";
+      failure: string;
+      diagnostics: string[];
+    };
+
+export interface BundlerBinding {
+  bundle(request: BundleRequestV1): Promise<BundleResultV1>;
 }
 
 export interface AuthSession {
@@ -278,6 +372,55 @@ export interface UserConfigurationBinding {
   executeConfiguration(
     request: UserConfigurationExecuteRpcV1,
   ): Promise<OperationReceiptV1>;
+  executeConnection(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: ConnectionCommandV1;
+  }): Promise<ConnectionCommandReceiptV1>;
+  lookupConnectionCommand(request: {
+    schemaVersion: 1;
+    userId: string;
+    packageId: string;
+    commandId: string;
+  }): Promise<ConnectionCommandReceiptV1 | undefined>;
+  getConnection(request: {
+    schemaVersion: 1;
+    userId: string;
+    connectionId: string;
+  }): Promise<ConnectionView | undefined>;
+  leaseModelCredential(request: {
+    schemaVersion: 1;
+    userId: string;
+    connectionId: string;
+    providerModelId: string;
+    effectId: string;
+    connectionGeneration: string;
+  }): Promise<CredentialLeaseV1>;
+  settleModelCredential(request: {
+    schemaVersion: 1;
+    userId: string;
+    connectionId: string;
+    packageId: string;
+    effectId: string;
+  }): Promise<void>;
+  readPackageRevisions(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<PackageRevisionHistoryV1>;
+  publishPackage(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: PublishPackageCommandV1;
+  }): Promise<PackagePublicationReceiptV1>;
+  rollbackPackage(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: RollbackPackageCommandV1;
+  }): Promise<PackagePublicationReceiptV1>;
+  activeApplicationHash(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<string | undefined>;
 }
 
 export interface BotConfigurationBinding {
@@ -298,6 +441,24 @@ export interface BotConfigurationBinding {
   executeConfiguration(
     request: BotConfigurationExecuteRpcV1,
   ): Promise<OperationReceiptV1>;
+  listCompositionGenerations(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    query: { limit: number; cursor?: string };
+  }): Promise<CompositionGenerationListViewV1>;
+  getCompositionGeneration(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    generationId: string;
+  }): Promise<CompositionGenerationViewV1 | undefined>;
+  revertComposition(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: RevertCompositionCommandV1;
+  }): Promise<CompositionCommandReceiptV1>;
 }
 
 export interface GatewayDependencies {
@@ -309,6 +470,8 @@ export interface GatewayDependencies {
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   backendContributions?: readonly BackendRouteContribution[];
+  /** Webview origins allowed to call `/api/*` cross-origin. */
+  allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;
 }

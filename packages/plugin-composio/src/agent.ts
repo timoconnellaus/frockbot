@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@frockbot/agent-core";
+import { type ToolDefinition } from "@frockbot/kernel-contracts";
 import type { Context, Plugin } from "cordis";
 import { ComposioClient } from "./composio-client.js";
 

@@ -18,7 +18,12 @@ import {
 import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
+  decodeCompositionGenerationIdV1,
+  decodeRevertCompositionCommandV1,
+  MAX_COMPOSITION_GENERATION_PAGE_V1,
+  type RevertCompositionCommandV1,
 } from "@frockbot/configuration-core";
+import { BotDurableAuthority } from "@frockbot/kernel-do";
 import type {
   BotStateEnv,
   OwnedBotTurnCommand,
@@ -50,15 +55,44 @@ import {
   type ClientRunStopCommandV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import {
+  decodeIsolateAuthorityRequestV1,
+  decodeNormalizedModelRequestV1,
+} from "@frockbot/kernel-contracts";
+import type {
+  NormalizedModelRequest,
+  WorkspaceFilesV1,
+  WorkspaceGenerationsV1,
+  WorkspaceSyncEffectsV1,
+} from "@frockbot/kernel-contracts";
+import { createDurableWorkspaceFilesV1 } from "./workspace.js";
+import {
+  DurableWorkspaceGenerations,
+  DurableWorkspaceSyncEffects,
+} from "@frockbot/kernel-do";
+import type { MemoryProjectsV1 } from "@frockbot/plugin-memory/agent";
+import {
+  createRoutedWorkspaceGenerationsV1,
+  createUserMemoryProjectsV1,
+  createUserWorkspaceGenerationsV1,
+  type UserMemoryRpc,
+} from "./memory.js";
+import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
   rpcBotId,
   rpcDecoded,
   rpcIdentifier,
+  rpcInteger,
   rpcObject,
+  rpcString,
 } from "./durable-rpc.js";
 
 export type { BotStateEnv, OwnedBotTurnCommand };
+
+export interface BotStateDependencies {
+  compileApplication?: typeof compileFoundationApplication;
+  outboundFetch?: typeof fetch;
+}
 
 function decodeBotIdentityRpcV1(input: unknown): {
   userId: string;
@@ -75,9 +109,35 @@ function decodeBotIdentityRpcV1(input: unknown): {
 }
 
 export class BotState extends DurableObject<BotStateEnv> {
-  private residentRuntime: Promise<FoundationResidentRuntime> | undefined;
-  private residentGeneration: number | undefined;
-
+  private readonly compileApplication: typeof compileFoundationApplication;
+  private readonly outboundFetch?: typeof fetch;
+  /**
+   * The environment the Shell Package runs under: the Durable Object's
+   * bindings plus the Workspace file surface built over them. `WORKSPACE_FILES`
+   * is not a Worker binding — it is `WorkspaceFilesV1` over the durable-root
+   * object store, with its generations recorded in this object — so it is
+   * constructed here and never reaches the deployed bindings map.
+   */
+  protected readonly backendEnv: BotStateEnv & {
+    WORKSPACE_FILES?: WorkspaceFilesV1;
+    MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
+    MEMORY_PROJECTS?: MemoryProjectsV1;
+    WORKSPACE_SYNC_FILES?: WorkspaceFilesV1;
+    WORKSPACE_SYNC_EFFECTS?: WorkspaceSyncEffectsV1;
+    WORKSPACE_SYNC_GENERATIONS?: WorkspaceGenerationsV1;
+  };
+  /** The identity the Workspace and Memory surfaces above were built for. */
+  private surfacesFor: string | undefined;
+  /**
+   * This object's generation ledger — one instance, for every root it owns.
+   *
+   * "The Bot's Durable Object is the authority for everything Bot-scoped", and
+   * an authority that exists twice is not one: each instance caches the
+   * minting cursor while resident, so two of them can mint the same id for two
+   * different files.
+   */
+  protected readonly workspaceGenerations: DurableWorkspaceGenerations =
+    new DurableWorkspaceGenerations({ state: this.ctx });
   private mounted:
     | Promise<{
         shell: ShellBotBackendContribution;
@@ -86,200 +146,149 @@ export class BotState extends DurableObject<BotStateEnv> {
       }>
     | undefined;
 
+  constructor(
+    ctx: DurableObjectState,
+    env: BotStateEnv,
+    dependencies: BotStateDependencies = {},
+  ) {
+    super(ctx, env);
+    this.compileApplication =
+      dependencies.compileApplication ?? compileFoundationApplication;
+    this.outboundFetch = dependencies.outboundFetch;
+    // The surfaces are built per identity in `bindSurfaces`, not here: they
+    // carry the `owner` guard, and a Durable Object learns which User it
+    // serves from the RPC that addresses it, never from its constructor.
+    this.backendEnv = { ...env };
+  }
+
   private contributions(): Promise<{
     shell: ShellBotBackendContribution;
     flock: FlockBotBackendContribution;
     dispose(): Promise<void>;
   }> {
     if (!this.mounted) {
-      const creating = compileFoundationApplication().then(async (plan) => {
-        const root = new Context();
-        const readSecret = (name: string) => {
-          // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
-          const value = (this.env as unknown as Record<string, unknown>)[name];
-          return typeof value === "string" ? value : undefined;
-        };
-        const runtimeFor = (projection: BotResidentProjection) => {
-          if (!this.residentRuntime) {
-            const creating = Promise.all([
-              createFoundationRuntimeApplication(),
-              Promise.resolve(
-                createFoundationHostedRuntimePackages(plan, {
-                  userId: projection.userId,
-                  computerHost: {
-                    effect: async (request, options) => {
-                      const response = await this.env.COMPUTER_HOST.fetch(
-                        "https://computer-host.internal/v1/effects",
-                        {
-                          method: "POST",
-                          headers: { "content-type": "application/json" },
-                          body: JSON.stringify(
-                            computerHostEffectRequestWireV1(request),
-                          ),
-                          signal: options?.signal,
-                        },
-                      );
-                      const result = decodeComputerHostEffectResponseV1(
-                        await response.json(),
-                      );
-                      if (result.effectId !== request.effectId) {
-                        throw new Error(
-                          "Computer host response identity does not match",
-                        );
-                      }
-                      return result;
-                    },
-                  },
-                }),
-              ),
-            ])
-              .then(([application, stableAgentPackages]) =>
-                createFoundationResidentRuntime(root, {
-                  application,
-                  memory: projection.memory,
-                  stableAgentPackages,
-                }),
-              )
-              .catch((error) => {
-                if (this.residentRuntime === creating) {
-                  this.residentRuntime = undefined;
-                }
-                throw error;
-              });
-            this.residentRuntime = creating;
-          }
-          return this.residentRuntime;
-        };
-        const execution: BotResidentExecution = {
-          project: async (projection) => {
-            const runtime = await runtimeFor(projection);
-            const assigned = await createFoundationAssignedRuntimePackages(
-              plan,
-              projection.settings,
-              projection.executionPlan,
-              {
-                userId: projection.userId,
-                readSecret,
-                authorizeConnection: projection.authorizeConnection,
-              },
-            );
-            await runtime.project({
-              generation: projection.generation,
-              agentPackages: assigned,
-              systemPromptSection: projection.systemPromptSection,
-            });
-            this.residentGeneration = projection.generation;
-          },
-          execute: async (input) => {
-            const runtime = await this.residentRuntime;
-            if (!runtime) {
-              throw new Error("resident Bot runtime projection is unavailable");
-            }
-            return executeResidentBotTurn(runtime, input);
-          },
-          cancel: async (cancellation) => {
-            const runtime = await this.residentRuntime?.catch(() => undefined);
-            return (
-              runtime?.cancel({
-                sessionId: cancellation.sessionId,
-                runId: cancellation.runId,
-                reason: cancellation.reason,
-              }) ?? false
-            );
-          },
-          generation: () => this.residentGeneration,
-        };
+      this.mounted = this.compileApplication().then(async (plan) => {
         let shell: ShellBotBackendContribution | undefined;
         let flock: FlockBotBackendContribution | undefined;
         const mounted = await createFoundationBackendContributions<
           ShellBotBackendContribution | FlockBotBackendContribution
-        >(
-          plan,
-          {
-            backendHost: "bot",
-            resolve: (specifier, lifecycle) => {
-              if (specifier === "@frockbot/plugin-shell/backend") {
-                return createShellBotBackendPlugin(
-                  {
-                    state: this.ctx,
-                    env: this.env,
-                    execution,
-                    assertLifecycleActive: (storage, botId) => {
-                      if (!flock)
-                        throw new Error(
-                          "Flock Bot Contribution is unavailable",
-                        );
-                      return flock.assertActive(storage, botId);
-                    },
+        >(plan, {
+          backendHost: "bot",
+          resolve: (specifier, lifecycle) => {
+            if (specifier === "@frockbot/plugin-shell/backend") {
+              return createShellBotBackendPlugin(
+                {
+                  state: this.ctx,
+                  env: this.backendEnv,
+                  outboundFetch: this.outboundFetch,
+                  // The Durable Object owns the kernel authority; the Shell
+                  // Package supplies only its configuration and Composition
+                  // hooks.
+                  createAuthority: (options) =>
+                    new BotDurableAuthority(options),
+                  // An archived Bot admits no configuration command; the Flock
+                  // Contribution owns that durable lifecycle state.
+                  assertLifecycleActive: (storage, botId) => {
+                    if (!flock) {
+                      throw new Error("Flock Bot Contribution is unavailable");
+                    }
+                    return flock.assertActive(storage, botId);
                   },
-                  {
-                    mount(value) {
-                      shell = value;
-                      return lifecycle.mount(value);
-                    },
+                },
+                {
+                  mount(value) {
+                    shell = value;
+                    return lifecycle.mount(value);
                   },
-                );
-              }
-              if (specifier === "@frockbot/plugin-flock/bot") {
-                return createFlockBotBackendPlugin(
-                  {
-                    storage: this.ctx.storage,
-                    materializeSettings: (registration, userId) => {
-                      if (!shell)
-                        throw new Error(
-                          "Shell Bot Contribution is unavailable",
-                        );
-                      return shell
-                        .materializeSettings(
-                          { userId, botId: registration.botId },
-                          {
-                            name: registration.initialName,
-                            model: registration.initialModel,
-                          },
-                        )
-                        .then(() => undefined);
-                    },
-                    archiveEligible: (storage) => {
-                      if (!shell)
-                        throw new Error(
-                          "Shell Bot Contribution is unavailable",
-                        );
-                      return shell.archiveEligible(storage);
-                    },
+                },
+              );
+            }
+            if (specifier === "@frockbot/plugin-flock/bot") {
+              return createFlockBotBackendPlugin(
+                {
+                  storage: this.ctx.storage,
+                  materializeSettings: (registration, userId) => {
+                    if (!shell)
+                      throw new Error("Shell Bot Contribution is unavailable");
+                    return shell
+                      .materializeSettings(
+                        { userId, botId: registration.botId },
+                        {
+                          name: registration.initialName,
+                          model: registration.initialModel,
+                          modelBinding: registration.initialModelBinding,
+                        },
+                      )
+                      .then(async (settings) => {
+                        if (
+                          registration.initialModel &&
+                          registration.initialModelBinding &&
+                          settings.assignments.some(
+                            (assignment) =>
+                              assignment.assignmentId ===
+                              registration.initialModelBinding?.assignment
+                                .assignmentId,
+                          )
+                        ) {
+                          await this.acknowledgeInitialModelBinding(
+                            userId,
+                            registration,
+                          );
+                        }
+                      });
                   },
-                  {
-                    mount(value) {
-                      flock = value;
-                      return lifecycle.mount(value);
-                    },
+                  archiveEligible: (storage) => {
+                    if (!shell)
+                      throw new Error("Shell Bot Contribution is unavailable");
+                    return shell.archiveEligible(storage);
                   },
-                );
-              }
-              throw new Error(`Unsupported Bot Contribution: ${specifier}`);
-            },
+                },
+                {
+                  mount(value) {
+                    flock = value;
+                    return lifecycle.mount(value);
+                  },
+                },
+              );
+            }
+            throw new Error(`Unsupported Bot Contribution: ${specifier}`);
           },
-          root,
-        );
+        });
         if (!shell || !flock || mounted.contributions.length !== 2) {
           await mounted.dispose();
           throw new Error(
             "Foundation requires Shell and Flock Bot backend Contributions",
           );
         }
-        return {
-          shell,
-          flock,
-          async dispose() {
-            await Promise.allSettled([mounted.dispose(), root.fiber.dispose()]);
-          },
-        };
-      });
-      this.mounted = creating;
-      void creating.catch(() => {
-        if (this.mounted === creating) this.mounted = undefined;
+        return { shell, flock, dispose: mounted.dispose };
       });
     }
     return this.mounted;
+  }
+
+  private async acknowledgeInitialModelBinding(
+    userId: string,
+    registration: BotRegistrationV1,
+  ): Promise<void> {
+    const binding = registration.initialModelBinding;
+    const model = registration.initialModel;
+    if (!binding || !model) return;
+    const id = this.env.USER_CONFIGURATIONS.idFromName(userId);
+    // SAFETY: USER_CONFIGURATIONS binds UserConfiguration; workers-types cannot infer its generated dependency RPC surface.
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
+    };
+    if (
+      !(await rpc.acknowledgeConnectionDependency({
+        schemaVersion: 1,
+        userId,
+        connectionId: model.connectionId,
+        botId: registration.botId,
+        generation: binding.generation,
+      }))
+    ) {
+      throw new Error("Initial model dependency was not acknowledged");
+    }
   }
 
   private async registration(identity: {
@@ -298,7 +307,83 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
+  /** The User Durable Object, as this object's Memory authority. */
+  private userMemoryRpc(userId: string): UserMemoryRpc {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(userId);
+    // SAFETY: USER_CONFIGURATIONS binds UserConfiguration; workers-types cannot
+    // infer its generated Memory RPC surface.
+    return this.env.USER_CONFIGURATIONS.get(id) as unknown as UserMemoryRpc;
+  }
+
+  /**
+   * Builds the Workspace and Memory file surfaces for one identity.
+   *
+   * Three surfaces, deliberately, because the store refuses to be two things
+   * at once: `WORKSPACE_FILES` is the kernel surface and refuses every Memory
+   * root; `MEMORY_WORKSPACE_FILES` is the Memory Package's and serves Memory
+   * roots and nothing else; `WORKSPACE_SYNC_FILES` is the durable-root sync's,
+   * the only surface that reads every root and the only one that accepts an
+   * `unattributed` writer — a shell wrote the file and nothing recorded who.
+   * The Memory surface routes a shared root's generations to the User Durable
+   * Object, because "The User's Durable Object is the authority for ... the
+   * generation records of User and Project Memory roots", while the Bot's own
+   * Memory root stays in this object.
+   *
+   * The sync's effect records stay here too: a push records its intent in the
+   * Bot's Durable Object before it runs (§ Computer and Workspace), so an
+   * interrupted push is read back rather than repeated.
+   */
+  protected bindSurfaces(identity: { userId: string; botId: string }): void {
+    const key = `${identity.userId}\u0000${identity.botId}`;
+    if (this.surfacesFor === key) return;
+    const owner = { userId: identity.userId };
+    // One ledger per Durable Object, shared by every surface it builds. A
+    // ledger caches its minting cursor while resident, so two instances on one
+    // object can read one cursor and mint one generation id twice — two files
+    // claiming one generation, which is the single thing the id exists to
+    // prevent. The routed ledger is one instance too: the same Bot half serves
+    // the Memory and sync surfaces, and only a shared Memory root is routed to
+    // the User object.
+    const bot = this.workspaceGenerations;
+    const workspace = createDurableWorkspaceFilesV1(this.env, {
+      owner,
+      generations: bot,
+    });
+    const rpc = this.userMemoryRpc(identity.userId);
+    const routed = createRoutedWorkspaceGenerationsV1({
+      bot,
+      user: createUserWorkspaceGenerationsV1(rpc, identity.userId),
+    });
+    const memory = createDurableWorkspaceFilesV1(this.env, {
+      owner,
+      surface: "memory",
+      generations: routed,
+    });
+    const sync = createDurableWorkspaceFilesV1(this.env, {
+      owner,
+      surface: "sync",
+      generations: routed,
+    });
+    if (workspace) this.backendEnv.WORKSPACE_FILES = workspace;
+    if (sync) {
+      this.backendEnv.WORKSPACE_SYNC_FILES = sync;
+      this.backendEnv.WORKSPACE_SYNC_EFFECTS = new DurableWorkspaceSyncEffects({
+        state: this.ctx,
+      });
+      this.backendEnv.WORKSPACE_SYNC_GENERATIONS = routed;
+    }
+    if (memory) {
+      this.backendEnv.MEMORY_WORKSPACE_FILES = memory;
+      this.backendEnv.MEMORY_PROJECTS = createUserMemoryProjectsV1(
+        rpc,
+        identity,
+      );
+    }
+    this.surfacesFor = key;
+  }
+
   private async materialized(identity: { userId: string; botId: string }) {
+    this.bindSurfaces(identity);
     const contributions = await this.contributions();
     const registration = await this.registration(identity);
     await contributions.flock.materialize(registration, identity.userId);
@@ -374,6 +459,56 @@ export class BotState extends DurableObject<BotStateEnv> {
     return flock.executeLifecycle(registration, identity.userId, command);
   }
 
+  /**
+   * The Bot isolate asked for authority it does not hold. The answer is never
+   * a grant: the Bot Durable Object records a durable pending decision and
+   * returns its id (plan Step 4, "Self-modification never widens authority").
+   */
+  async isolateRequestAuthority(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      packageId: rpcIdentifier,
+      generationId: rpcIdentifier,
+      request: rpcDecoded(decodeIsolateAuthorityRequestV1),
+    });
+    // The isolate capability path needs the Bot's own authority, not its Flock
+    // projection, so it does not materialize the Sheep record.
+    const shell = await this.contribution();
+    return shell.isolateRequestAuthority({
+      botId: request.botId as string,
+      packageId: request.packageId as string,
+      generationId: request.generationId as string,
+      request: request.request,
+    });
+  }
+
+  /**
+   * D6: model invocation as an Assignment-derived binding. Without a matching
+   * enabled model Assignment the answer is a pending decision; with one, the
+   * request is recorded and the credential lease taken through the existing
+   * provider path before any event is streamed back.
+   */
+  async isolateInvokeModel(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      packageId: rpcIdentifier,
+      generationId: rpcIdentifier,
+      request: rpcDecoded(decodeNormalizedModelRequestV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const shell = await this.contribution();
+    return shell.isolateInvokeModel(identity, {
+      packageId: request.packageId as string,
+      generationId: request.generationId as string,
+      request: request.request as NormalizedModelRequest,
+    });
+  }
+
   async markConnectionUnavailable(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
@@ -400,13 +535,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     return shell.resolveConfiguration(identity);
-  }
-
-  async readRuntimeProjection(input: unknown) {
-    const identity = decodeBotIdentityRpcV1(input);
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    return shell.readRuntimeProjection();
   }
 
   async run(input: unknown) {
@@ -470,6 +598,78 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.acknowledgeNotification(request.notificationId as string);
+  }
+
+  /**
+   * The Bot's durable Composition generations, newest first. Bot-scoped, so it
+   * proves directory membership the same way the other Bot RPCs do.
+   */
+  async listCompositionGenerations(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      query: rpcObject(
+        {
+          limit: rpcInteger({
+            minimum: 1,
+            maximum: MAX_COMPOSITION_GENERATION_PAGE_V1,
+          }),
+        },
+        { cursor: rpcString(512) },
+      ),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.listCompositionGenerations(
+      identity,
+      request.query as { limit: number; cursor?: string },
+    );
+  }
+
+  /**
+   * One generation, including the recorded source of each isolate member once
+   * authoring records exist (plan Step 5); the member list until then.
+   */
+  async getCompositionGeneration(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      generationId: rpcDecoded(decodeCompositionGenerationIdV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.getCompositionGeneration(
+      identity,
+      request.generationId as string,
+    );
+  }
+
+  /** Reverting records a new pending generation; it never mutates a record. */
+  async revertComposition(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeRevertCompositionCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const command = request.command as RevertCompositionCommandV1;
+    if (command.botId !== identity.botId) {
+      throw new Error("Composition revert command does not match its Bot");
+    }
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.revertComposition(identity, command);
   }
 
   async listRuns(input: unknown) {
