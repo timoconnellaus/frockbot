@@ -43,9 +43,45 @@
 
   /* Shared typography, geometry, elevation, and motion aliases. */
   --frock-font-display: "Archivo Black", Manrope, sans-serif;
-  --frock-font-body: 14px;
-  --frock-font-label: 12px;
-  --frock-font-title: 20px;
+  --frock-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /*
+   * Type scale. Feature styles must size text with these aliases only;
+   * `scripts/check-ui-styles.ts` rejects literal font sizes. The steps match
+   * the desktop chat apps FrockBot sits beside: 13px is the working size,
+   * 15px carries titles and primary rows, 11px is reserved for eyebrows.
+   */
+  --frock-text-xs: 11px;
+  --frock-text-sm: 12px;
+  --frock-text-base: 13px;
+  --frock-text-md: 14px;
+  --frock-text-lg: 15px;
+  --frock-text-xl: 17px;
+  --frock-text-2xl: 20px;
+  --frock-text-display: 24px;
+  --frock-leading-tight: 1.2;
+  --frock-leading-snug: 1.35;
+  --frock-leading-normal: 1.5;
+  --frock-tracking-eyebrow: 0.08em;
+  --frock-tracking-display: -0.02em;
+
+  /* Legacy aliases kept for older styles; prefer the scale above. */
+  --frock-font-body: var(--frock-text-md);
+  --frock-font-label: var(--frock-text-sm);
+  --frock-font-title: var(--frock-text-2xl);
+
+  /* Application geometry shared by the shell and the plugins it hosts. */
+  --frock-sidebar-width: 280px;
+  --frock-panel-width: 320px;
+  --frock-titlebar-height: 52px;
+  --frock-control-sm: 28px;
+  --frock-control-md: 32px;
+  --frock-control-lg: 36px;
+  --frock-avatar-sm: 28px;
+  --frock-avatar-md: 38px;
+  --frock-icon-sm: 14px;
+  --frock-icon-md: 16px;
+  --frock-icon-lg: 18px;
   --frock-radius-control: 10px;
   --frock-radius-card: 14px;
   --frock-radius-panel: 20px;
@@ -57,8 +93,13 @@
   --frock-shadow-control: 0 8px 28px rgb(38 21 28 / 14%);
   --frock-shadow-composer: 0 12px 32px rgb(51 25 35 / 10%);
   --frock-shadow-right-panel: -16px 0 36px rgb(38 21 28 / 14%);
-  --frock-motion-fast: 140ms ease;
-  --frock-motion-panel: 180ms ease;
+  --frock-motion-fast: 140ms cubic-bezier(0.2, 0, 0, 1);
+  --frock-motion-panel: 220ms cubic-bezier(0.2, 0, 0, 1);
+  --frock-motion-enter: 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  --frock-fill-hover: rgb(30 29 39 / 5%);
+  --frock-fill-pressed: rgb(30 29 39 / 9%);
+  --frock-skeleton: rgb(30 29 39 / 7%);
+  --frock-skeleton-shine: rgb(255 255 255 / 60%);
   --frock-layer-menu: 30;
   --frock-layer-panel: 40;
   --frock-layer-surface: 100;
@@ -182,4 +223,57 @@ select:focus-visible,
 summary:focus-visible {
   outline: 3px solid var(--frock-focus-ring);
   outline-offset: 2px;
+}
+
+/* Shared motion primitives. Feature styles reference these by name. */
+@keyframes frock-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes frock-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes frock-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes frock-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --frock-motion-fast: 0ms linear;
+    --frock-motion-panel: 0ms linear;
+    --frock-motion-enter: 0ms linear;
+  }
 }

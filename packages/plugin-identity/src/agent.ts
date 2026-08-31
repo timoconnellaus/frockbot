@@ -1,4 +1,4 @@
-import type { PromptSection } from "@frockbot/agent-core";
+import { type PromptSection } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
 // This contribution is runtime-neutral and can mount in Node or Workers.

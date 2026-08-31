@@ -75,11 +75,41 @@ export const rpcBotId: RpcValueDecoder = (value, label) => {
   }
 };
 
+export function rpcInteger(bounds: {
+  minimum: number;
+  maximum: number;
+}): RpcValueDecoder {
+  return (value, label) => {
+    if (
+      !Number.isSafeInteger(value) ||
+      (value as number) < bounds.minimum ||
+      (value as number) > bounds.maximum
+    ) {
+      throw new Error(`${label} must be a bounded integer`);
+    }
+    return value;
+  };
+}
+
 export function rpcEnum<const T extends readonly string[]>(
   values: T,
 ): RpcValueDecoder {
   return (value, label) => {
     if (typeof value !== "string" || !values.includes(value)) {
+      throw new Error(`${label} is invalid`);
+    }
+    return value;
+  };
+}
+
+export function rpcPattern(pattern: RegExp, maximum = 256): RpcValueDecoder {
+  return (value, label) => {
+    if (
+      typeof value !== "string" ||
+      value.length === 0 ||
+      value.length > maximum ||
+      !pattern.test(value)
+    ) {
       throw new Error(`${label} is invalid`);
     }
     return value;
@@ -153,6 +183,19 @@ function cloneJson(value: unknown, label: string, depth: number): RpcJsonValue {
 
 export const rpcJsonRecord: RpcValueDecoder = (value, label) =>
   cloneJson(record(value, label), label, 0);
+
+/**
+ * Carries an inbound value through the envelope decoder unchanged, for a
+ * caller that decodes it against a richer contract of its own — a Workspace
+ * root, a generation record — immediately afterwards. It is never a way to
+ * skip decoding: the value is still refused before it reaches durable state.
+ */
+export const rpcDecodedValue: RpcValueDecoder = (value, label) => {
+  if (!value || typeof value !== "object") {
+    throw new Error(`${label} must be an object`);
+  }
+  return value;
+};
 
 export function rpcDecoded(
   decoder: (input: unknown) => unknown,

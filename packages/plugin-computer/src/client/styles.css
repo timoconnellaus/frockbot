@@ -17,7 +17,7 @@
 
 .computer-heading strong {
   color: var(--frock-text);
-  font-size: 13px;
+  font-size: var(--frock-text-base);
   font-weight: 580;
 }
 
@@ -26,7 +26,7 @@
   max-width: 165px;
   margin-top: 2px;
   color: var(--frock-text-muted);
-  font-size: 10px;
+  font-size: var(--frock-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -38,7 +38,7 @@
   border-radius: 999px;
   color: var(--frock-text-muted);
   background: var(--frock-surface-subtle);
-  font-size: 9px;
+  font-size: var(--frock-text-xs);
   line-height: 1;
   text-transform: capitalize;
 }
@@ -136,13 +136,13 @@
   border-radius: 8px;
   color: var(--frock-computer-accent-text);
   background: var(--frock-computer-surface);
-  font-size: 13px;
+  font-size: var(--frock-text-base);
 }
 
 .computer-placeholder strong,
 .control-shield strong {
   color: var(--frock-text);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
   font-weight: 550;
 }
 
@@ -151,7 +151,7 @@
   max-width: 210px;
   margin: 5px 0 10px;
   color: var(--frock-text-muted);
-  font-size: 10px;
+  font-size: var(--frock-text-xs);
   line-height: 1.4;
 }
 
@@ -163,7 +163,7 @@
   border-radius: 6px;
   color: var(--frock-text);
   background: var(--frock-surface);
-  font-size: 10px;
+  font-size: var(--frock-text-xs);
   cursor: pointer;
 }
 
@@ -207,7 +207,7 @@
   flex: 1;
   margin: 0;
   color: var(--frock-text-muted);
-  font-size: 9px;
+  font-size: var(--frock-text-xs);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -252,7 +252,7 @@
 
 .computer-overlay-identity strong {
   color: var(--frock-viewer-text-strong);
-  font-size: 14px;
+  font-size: var(--frock-text-md);
   font-weight: 600;
 }
 
@@ -261,7 +261,7 @@
   max-width: 420px;
   margin-top: 2px;
   color: var(--frock-viewer-text-muted);
-  font-size: 10px;
+  font-size: var(--frock-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -295,7 +295,7 @@
   color: var(--frock-viewer-text);
   background: var(--frock-viewer-surface);
   box-shadow: var(--frock-viewer-shadow-control);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
   font-weight: 550;
 }
 
@@ -320,7 +320,7 @@
   border-radius: 8px;
   color: var(--frock-viewer-close);
   background: transparent;
-  font-size: 24px;
+  font-size: var(--frock-text-display);
   font-weight: 200;
   line-height: 1;
 }
@@ -350,26 +350,26 @@
 
 .computer-screen-expanded .computer-placeholder strong,
 .computer-screen-expanded .control-shield strong {
-  font-size: 15px;
+  font-size: var(--frock-text-lg);
 }
 
 .computer-screen-expanded .computer-placeholder p,
 .computer-screen-expanded .control-shield p {
   max-width: 360px;
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .computer-screen-expanded .computer-mark {
   width: 42px;
   height: 42px;
   border-radius: 11px;
-  font-size: 18px;
+  font-size: var(--frock-text-xl);
 }
 
 .computer-screen-expanded .computer-placeholder button,
 .computer-screen-expanded .control-shield button {
   padding: 8px 14px;
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .computer-overlay .computer-status {

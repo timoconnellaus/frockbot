@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { UiIconButton } from "@frockbot/client-ui";
 import { inject, ref } from "vue";
 import { clockWebDataKey, type ClockWebData } from "../shared.ts";
 
@@ -20,8 +21,15 @@ async function refresh(): Promise<void> {
 <template>
   <section class="clock-card">
     <div class="clock-heading">
-      <strong>Clock plugin</strong>
-      <button :disabled="refreshing" @click="refresh">↻</button>
+      <strong>Clock</strong>
+      <UiIconButton
+        icon="refresh"
+        label="Refresh time"
+        size="sm"
+        :class="{ 'clock-refreshing': refreshing }"
+        :disabled="refreshing"
+        @click="refresh"
+      />
     </div>
     <time>{{ clock.lastTime }}</time>
     <small>{{ clock.timezone }}</small>

@@ -1,0 +1,61 @@
+/**
+ * The shared icon set. Glyphs are 24-unit stroke paths so every icon shares
+ * the same optical weight and sits centred inside a control; plugins must not
+ * fall back to Unicode symbols, whose ink offsets differ per font.
+ */
+export type UiIconName =
+  | "arrow-up"
+  | "check"
+  | "chevrons-left"
+  | "chevrons-right"
+  | "close"
+  | "gear"
+  | "history"
+  | "mic"
+  | "plugins"
+  | "plus"
+  | "refresh"
+  | "search"
+  | "sparkle"
+  | "stop"
+  | "user";
+
+export const uiIconPaths: Record<UiIconName, string[]> = {
+  "arrow-up": ["m5 12 7-7 7 7", "M12 19V5"],
+  check: ["M20 6 9 17l-5-5"],
+  "chevrons-left": ["m11 17-5-5 5-5", "m18 17-5-5 5-5"],
+  "chevrons-right": ["m6 17 5-5-5-5", "m13 17 5-5-5-5"],
+  close: ["M18 6 6 18", "m6 6 12 12"],
+  gear: [
+    "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+    "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  ],
+  history: [
+    "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8",
+    "M3 3v5h5",
+    "M12 7v5l4 2",
+  ],
+  mic: [
+    "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z",
+    "M19 10v2a7 7 0 0 1-14 0v-2",
+    "M12 19v3",
+  ],
+  plugins: [
+    "M4 4h6v6H4z",
+    "M14 4h6v6h-6z",
+    "M4 14h6v6H4z",
+    "M17 14v6",
+    "M14 17h6",
+  ],
+  plus: ["M5 12h14", "M12 5v14"],
+  refresh: [
+    "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",
+    "M21 3v5h-5",
+    "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",
+    "M8 16H3v5",
+  ],
+  search: ["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z", "m21 21-4.3-4.3"],
+  sparkle: ["M12 3l1.9 5.6 5.6 1.9-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z"],
+  stop: ["M6 6h12v12H6z"],
+  user: ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M20 21a8 8 0 0 0-16 0"],
+};

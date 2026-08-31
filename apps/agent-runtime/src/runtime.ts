@@ -5,31 +5,34 @@ import {
   FOUNDATION_PROVIDER,
 } from "@frockbot/application-foundation/runtime";
 import {
-  AgentRegistry,
-  type AgentHandle,
-  type AgentOptions,
-  LlmRegistry,
+  type CompositionPinV1,
   type PersistSessionEvents,
   type SessionEvent,
   SessionStore,
-  SystemPromptRegistry,
-  ToolRegistry,
-} from "@frockbot/agent-core";
-import { AgentLoop } from "@frockbot/agent-loop";
+} from "@frockbot/kernel-contracts";
+import {
+  type AgentHandle,
+  type AgentOptions,
+  AgentRegistry,
+} from "@frockbot/kernel-agent-loop/agent";
+import { LlmRegistry } from "@frockbot/plugin-models";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
+import { ToolRegistry } from "@frockbot/plugin-tools";
+import { AgentLoop } from "@frockbot/kernel-agent-loop";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import {
   type ContributionResolver,
   PackageCatalog,
   type PackageSource,
-} from "@frockbot/plugin-catalog";
+} from "@frockbot/kernel-composition";
+import {
+  bootstrapGeneration,
+  type CompositionGenerationV1,
+} from "@frockbot/kernel-composition/generation";
 import {
   createRuntimeContributionHost,
   runtimePackageCatalogConfig,
-} from "@frockbot/plugin-catalog/runtime";
-import {
-  createMemoryPlugin,
-  type MemoryPluginConfig,
-} from "@frockbot/plugin-memory";
+} from "@frockbot/kernel-composition/runtime";
 import {
   createOpenAICompatiblePlugin,
   type FetchLike,
@@ -61,6 +64,14 @@ export interface FoundationAgentPackage {
   plugin: Plugin;
 }
 
+export interface RuntimeModelSelection {
+  provider: string;
+  model: string;
+  connectionId?: string;
+  connectionGeneration?: string;
+  catalogGeneration?: string;
+}
+
 export interface FoundationRuntimeOptions {
   botId?: string;
   agentId?: string;
@@ -69,9 +80,36 @@ export interface FoundationRuntimeOptions {
   application?: FoundationRuntimeApplication;
   resolveContribution?: ContributionResolver;
   agentPackages?: readonly FoundationAgentPackage[];
-  memory?: MemoryPluginConfig;
   persistSessionEvents?: PersistSessionEvents;
   systemPromptSection?: string;
+  modelSelection?: RuntimeModelSelection;
+  /** The Composition generation this root is pinned to; defaults to bootstrap. */
+  composition?: CompositionPinV1;
+}
+
+/** The first-party generation a runtime with no durable Composition starts on. */
+export async function bootstrapRuntimeGeneration(
+  application: FoundationRuntimeApplication,
+): Promise<CompositionGenerationV1> {
+  return bootstrapGeneration(
+    application.plan.packages.map((pkg) => ({
+      packageId: pkg.id,
+      specifier: pkg.specifier,
+      version: pkg.version,
+      manifest: pkg.manifest,
+    })),
+    { createdAt: new Date(0).toISOString() },
+  );
+}
+
+async function bootstrapCompositionPin(
+  application: FoundationRuntimeApplication,
+): Promise<CompositionPinV1> {
+  const generation = await bootstrapRuntimeGeneration(application);
+  return {
+    generationId: generation.generationId,
+    artifactSetHash: generation.artifactSetHash,
+  };
 }
 
 export async function createFoundationRuntime(
@@ -119,9 +157,6 @@ export async function createFoundationRuntime(
   }
 
   const resolveContribution: ContributionResolver = (specifier) => {
-    if (specifier === "@frockbot/plugin-memory/agent" && options.memory) {
-      return Promise.resolve({ default: createMemoryPlugin(options.memory) });
-    }
     const additional = options.agentPackages?.find(
       (pkg) => pkg.contributionSpecifier === specifier,
     );
@@ -154,17 +189,36 @@ export async function createFoundationRuntime(
   });
   // Provider contributions must mount before consumers that open their capabilities.
   for (const packageId of [...additionalIds, ...packageIds]) {
-    if (packageId === "memory" && !options.memory) continue;
     await root.packages.enable(packageId);
   }
-  await root.plugin(AgentLoop, { maxSteps: 8 });
+  const composition =
+    options.composition ?? (await bootstrapCompositionPin(application));
+  await root.plugin(AgentLoop, { maxSteps: 8, composition });
 
+  const selection = options.modelSelection;
+  if (selection) {
+    provider = selection.provider;
+    model = selection.model;
+  }
   const agentOptions: AgentOptions = {
     botId: options.botId?.trim() || options.agentId?.trim() || sessionId,
     agentId: options.agentId,
     sessionId,
     provider,
     model,
+    ...(selection?.connectionId
+      ? {
+          modelBinding: {
+            connectionId: selection.connectionId,
+            ...(selection.connectionGeneration
+              ? { connectionGeneration: selection.connectionGeneration }
+              : {}),
+            ...(selection.catalogGeneration
+              ? { catalogGeneration: selection.catalogGeneration }
+              : {}),
+          },
+        }
+      : {}),
   };
   const agent = await root.agents.create(agentOptions);
   return {

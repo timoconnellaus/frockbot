@@ -25,16 +25,17 @@
   },
   "dependencies": {
     "@frockbot/client-core": "workspace:*",
+    "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"
   },
   "devDependencies": {
-    "@types/bun": "1.4.0",
     "@frockbot/plugin-testkit": "workspace:*",
+    "@types/bun": "1.4.0",
     "@vitejs/plugin-vue": "6.0.8",
+    "css-tree": "2.3.1",
     "typescript": "5.9.3",
     "vite": "8.2.2",
     "vue-tsc": "3.3.10"

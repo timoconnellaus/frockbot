@@ -1,4 +1,4 @@
-import type { SessionEvent } from "@frockbot/agent-core";
+import { type SessionEvent } from "@frockbot/kernel-contracts";
 
 function sameEvent(
   left: SessionEvent,

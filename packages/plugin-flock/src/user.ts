@@ -1,4 +1,8 @@
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
+import type {
+  CapabilityAssignmentView,
+  ModelAssignment,
+  UserSettingsViewV1,
+} from "@frockbot/configuration-core";
 import type { Plugin } from "cordis";
 import {
   BotNotFoundError,
@@ -33,6 +37,15 @@ export interface FlockUserBackendHost {
     storage: FlockUserTransaction,
     userId: string,
   ): Promise<UserSettingsViewV1>;
+  claimInitialModelBinding(
+    storage: FlockUserTransaction,
+    input: {
+      userId: string;
+      botId: string;
+      generation: string;
+      model: ModelAssignment;
+    },
+  ): Promise<CapabilityAssignmentView | undefined>;
   now?: () => Date;
   random?: () => number;
 }
@@ -108,13 +121,39 @@ export class FlockUserBackendContribution {
           failure: "Bot directory limit reached",
         };
       } else {
+        const initialModel = defaults.newBotModelTemplate
+          ? structuredClone(defaults.newBotModelTemplate)
+          : undefined;
+        const initialModelAssignment = initialModel
+          ? await this.host.claimInitialModelBinding(storage, {
+              userId,
+              botId: command.botId,
+              generation: command.commandId,
+              model: initialModel,
+            })
+          : undefined;
+        if (initialModel && !initialModelAssignment) {
+          receipt = {
+            schemaVersion: 1,
+            commandId: command.commandId,
+            status: "rejected",
+            revision: current.revision,
+            failure: "Default model Connection is unavailable",
+          };
+          await storage.put(receiptKey, { fingerprint, receipt });
+          return structuredClone(receipt);
+        }
         const registration: BotRegistrationV1 = {
           schemaVersion: 1,
           botId: command.botId,
           registeredAt: (this.host.now?.() ?? new Date()).toISOString(),
           initialName: command.name,
-          initialModel: defaults.newBotModelTemplate
-            ? structuredClone(defaults.newBotModelTemplate)
+          initialModel,
+          initialModelBinding: initialModelAssignment
+            ? {
+                assignment: initialModelAssignment,
+                generation: command.commandId,
+              }
             : undefined,
           sheep: structuredClone(
             command.sheep ?? randomSheepRecipeV1(this.host.random),

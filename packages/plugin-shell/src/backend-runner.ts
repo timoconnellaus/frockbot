@@ -1,11 +1,17 @@
+import { type SessionEvent } from "@frockbot/kernel-contracts";
+import type { ShellMountedComposition } from "./backend-composition.js";
 import {
-  createFoundationRuntime,
-  type FoundationAgentPackage,
-} from "@frockbot/agent-runtime/runtime";
-import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
-import type { PersistSessionEvents, SessionEvent } from "@frockbot/agent-core";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
+  BotTurnExecutionError,
+  BotTurnReconciliationRequiredError,
+  BotTurnRecoveryRequiredError,
+} from "@frockbot/kernel-do";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
+
+export {
+  BotTurnExecutionError,
+  BotTurnReconciliationRequiredError,
+  BotTurnRecoveryRequiredError,
+};
 
 function appendedSessionEvents(
   previous: readonly SessionEvent[],
@@ -23,60 +29,19 @@ function appendedSessionEvents(
   return structuredClone(candidate.slice(previous.length));
 }
 
-export class BotTurnExecutionError extends Error {
-  constructor(
-    message: string,
-    readonly events: SessionEvent[],
-  ) {
-    super(message);
-    this.name = "BotTurnExecutionError";
-  }
-}
-
-export class BotTurnReconciliationRequiredError extends Error {
-  constructor(
-    message: string,
-    readonly events: SessionEvent[],
-  ) {
-    super(message);
-    this.name = "BotTurnReconciliationRequiredError";
-  }
-}
-
 export interface ExecuteBotTurnOptions {
-  botId: string;
   command: BotTurnCommand;
   previousEvents: readonly SessionEvent[];
-  memory?: MemoryPluginConfig;
-  persistSessionEvents?: PersistSessionEvents;
-  agentPackages?: readonly FoundationAgentPackage[];
-  systemPromptSection?: string;
+  /** The mounted Composition for the generation this Turn was pinned to. */
+  composition: ShellMountedComposition;
   resume?: boolean;
 }
 
 export async function executeBotTurn(
   options: ExecuteBotTurnOptions,
 ): Promise<BotTurnCompletion> {
-  const {
-    botId,
-    command,
-    previousEvents,
-    memory,
-    persistSessionEvents,
-    agentPackages,
-    systemPromptSection,
-    resume,
-  } = options;
-  const runtime = await createFoundationRuntime(undefined, {
-    agentId: botId,
-    sessionId: command.sessionId,
-    sessionEvents: previousEvents,
-    application: await createFoundationRuntimeApplication(),
-    memory,
-    persistSessionEvents,
-    agentPackages,
-    systemPromptSection,
-  });
+  const { command, previousEvents, composition, resume } = options;
+  const runtime = composition.runtime;
 
   try {
     if (resume) runtime.agent.agent.resume();
@@ -101,6 +66,22 @@ export async function executeBotTurn(
           appendedSessionEvents(previousEvents, events),
         );
       }
+      const latestRequest = events.findLast(
+        (event) => event.type === "model/request" && event.turn === currentTurn,
+      );
+      const hasDurableOutcome =
+        latestRequest?.type === "model/request" &&
+        events.some(
+          (event) =>
+            (event.type === "assistant/message" ||
+              event.type === "model/effect-not-started") &&
+            event.requestId === latestRequest.request.requestId,
+        );
+      if (hasDurableOutcome) {
+        throw new BotTurnRecoveryRequiredError(
+          appendedSessionEvents(previousEvents, events),
+        );
+      }
       throw new BotTurnExecutionError(
         "Bot turn did not reach a durable terminal state",
         appendedSessionEvents(previousEvents, events),
@@ -121,7 +102,8 @@ export async function executeBotTurn(
   } catch (error) {
     if (
       error instanceof BotTurnExecutionError ||
-      error instanceof BotTurnReconciliationRequiredError
+      error instanceof BotTurnReconciliationRequiredError ||
+      error instanceof BotTurnRecoveryRequiredError
     ) {
       throw error;
     }
@@ -131,6 +113,6 @@ export async function executeBotTurn(
       appendedSessionEvents(previousEvents, events),
     );
   } finally {
-    await runtime.dispose();
+    await composition.dispose();
   }
 }

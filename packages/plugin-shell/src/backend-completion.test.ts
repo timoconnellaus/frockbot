@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionEvent } from "@frockbot/agent-core";
+import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import {
   botTurnCommandFingerprintV1,
@@ -46,6 +46,7 @@ function storedRun(): StoredRun {
     events: [ended],
     status: "running",
     phase: "executing",
+    compositionGenerationId: "test-composition-generation",
     configurationSnapshot: initializeBotSettingsV1("primary"),
     previousEventCount: 0,
   };
@@ -162,6 +163,32 @@ describe("Bot run terminal persistence", () => {
 
     expect(storage.values.get(keys.run)).toMatchObject({ status: "failed" });
     expect(storage.values.has("notification:run-1")).toBe(false);
+  });
+
+  test("terminalizes an explicitly abandoned reconciliation", async () => {
+    const storage = new MemoryRunStorage();
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      status: "reconciliation-required",
+      phase: "reconciliation-required",
+      failure: "provider outcome is uncertain",
+    } satisfies StoredRun);
+
+    await failStoredRun(
+      storage,
+      keys,
+      "run-1",
+      [],
+      [ended],
+      "reconciliation abandoned",
+    );
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "failed",
+      phase: "executing",
+      failure: "reconciliation abandoned",
+    });
+    expect(storage.values.has(keys.activeRun)).toBe(false);
   });
 
   test("preserves committed success after an uncertain response", async () => {

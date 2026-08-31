@@ -22,14 +22,19 @@
       "grants": []
     },
     {
+      "specifier": "@frockbot/plugin-authoring",
+      "version": "0.0.1",
+      "grants": ["packages:author"]
+    },
+    {
+      "specifier": "@frockbot/plugin-skills",
+      "version": "0.0.1",
+      "grants": ["skills:author"]
+    },
+    {
       "specifier": "@frockbot/plugin-echo",
       "version": "0.0.1",
       "grants": []
-    },
-    {
-      "specifier": "@frockbot/plugin-composio",
-      "version": "0.0.1",
-      "grants": ["connections:manage", "tools:execute"]
     },
     {
       "specifier": "@frockbot/plugin-shell",
@@ -40,6 +45,21 @@
       "specifier": "@frockbot/plugin-settings",
       "version": "0.0.1",
       "grants": []
+    },
+    {
+      "specifier": "@frockbot/plugin-credentials",
+      "version": "0.0.1",
+      "grants": ["credentials:manage"]
+    },
+    {
+      "specifier": "@frockbot/plugin-provider-ollama-cloud",
+      "version": "0.0.1",
+      "grants": ["connections:manage", "models:invoke", "network:ollama-cloud"]
+    },
+    {
+      "specifier": "@frockbot/plugin-package-publisher",
+      "version": "0.0.1",
+      "grants": ["package:publish"]
     },
     {
       "specifier": "@frockbot/plugin-flock",

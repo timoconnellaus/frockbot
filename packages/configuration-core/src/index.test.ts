@@ -5,6 +5,10 @@ import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
   decodeBotIdV1,
+  decodeCompositionCommandReceiptV1,
+  decodeCompositionGenerationListViewV1,
+  decodeCompositionGenerationViewV1,
+  decodeRevertCompositionCommandV1,
   decodeConnectionDependencyRequirementV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
@@ -16,6 +20,7 @@ import {
   decodeUserSettingsViewV1,
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
+  resolveBotModelBindingV1,
 } from "./index.js";
 import {
   isApplicationDeploymentHash,
@@ -90,6 +95,57 @@ describe("configuration DTO seam", () => {
         description: "Keeps the household organized.",
       },
     });
+  });
+
+  test("accepts provider model IDs through the catalog limit", () => {
+    const providerModelId = "m".repeat(256);
+
+    expect(
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        type: "bot/select-model",
+        commandId: "command-model",
+        botId: "primary",
+        expectedRevision: 3,
+        model: { connectionId: "connection-1", providerModelId },
+      }),
+    ).toMatchObject({ model: { providerModelId } });
+  });
+
+  test("decodes atomic model binding and explicit unbinding commands", () => {
+    expect(
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        type: "bot/assign-capability",
+        commandId: "bind-model",
+        botId: "primary",
+        expectedRevision: 2,
+        assignment: {
+          assignmentId: "ollama-model",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "ollama-work",
+        },
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+      }),
+    ).toMatchObject({
+      type: "bot/assign-capability",
+      assignment: { connectionId: "ollama-work" },
+      model: { providerModelId: "glm-5.3-flash:cloud" },
+    });
+    expect(
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        type: "bot/unbind-model",
+        commandId: "unbind-model",
+        botId: "primary",
+        expectedRevision: 3,
+        assignmentId: "ollama-model",
+      }),
+    ).toMatchObject({ type: "bot/unbind-model", assignmentId: "ollama-model" });
   });
 
   test("rejects unversioned, malformed, and unknown commands", () => {
@@ -409,6 +465,22 @@ describe("configuration DTO seam", () => {
         ],
       }),
     ).toThrow(ConfigurationDecodeError);
+    expect(() =>
+      decodeUserSettingsViewV1({
+        schemaVersion: 1,
+        revision: 0,
+        profile: { name: "User" },
+        packages: [],
+        connections: Array.from({ length: 101 }, (_, index) => ({
+          connectionId: `connection-${index}`,
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: `Connection ${index}`,
+          state: "ready",
+          safeMetadata: {},
+        })),
+      }),
+    ).toThrow(ConfigurationDecodeError);
     for (const value of [
       {
         schemaVersion: 1,
@@ -495,6 +567,129 @@ describe("Bot execution-plan authority", () => {
     },
   ];
 
+  test("resolves a Bot model through its explicit ready Connection", () => {
+    const user = {
+      schemaVersion: 1 as const,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed" as const,
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready" as const,
+          providerType: "ollama-cloud",
+          modelCatalog: {
+            schemaVersion: 1 as const,
+            generation: "catalog-1",
+            state: "fresh" as const,
+            models: [
+              {
+                providerModelId: "glm-5.3-flash:cloud",
+                displayName: "GLM 5.3 Flash",
+                capabilities: {
+                  tools: true,
+                  vision: false,
+                  reasoning: true,
+                },
+                source: "discovered" as const,
+              },
+            ],
+          },
+          safeMetadata: {},
+        },
+      ],
+    };
+    const modelPackages = [
+      {
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        capabilities: [
+          {
+            id: "ollama-cloud-models",
+            kind: "model" as const,
+            connectionTypes: ["ollama-cloud-account"],
+          },
+        ],
+        connectionTypes: [
+          {
+            id: "ollama-cloud-account",
+            capabilities: ["ollama-cloud-models"],
+          },
+        ],
+      },
+    ];
+    const assignments = [
+      {
+        assignmentId: "ollama-model",
+        packageId: "provider-ollama-cloud",
+        capabilityId: "ollama-cloud-models",
+        connectionId: "ollama-work",
+        state: "enabled" as const,
+      },
+    ];
+
+    expect(
+      resolveBotModelBindingV1({
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        assignments,
+        user,
+        packages: modelPackages,
+      }),
+    ).toMatchObject({
+      state: "ready",
+      providerType: "ollama-cloud",
+      packageId: "provider-ollama-cloud",
+    });
+    expect(
+      resolveBotModelBindingV1({
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        assignments,
+        user,
+        packages: modelPackages.map((pkg) => ({ ...pkg, version: "0.0.2" })),
+      }).state,
+    ).toBe("unavailable");
+    expect(
+      resolveBotModelBindingV1({
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "new-model:cloud",
+        },
+        assignments,
+        user,
+        packages: modelPackages,
+      }).state,
+    ).toBe("requires-resolution");
+    expect(
+      resolveBotModelBindingV1({
+        model: {
+          connectionId: "ollama-work",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+        assignments: [],
+        user,
+        packages: modelPackages,
+      }),
+    ).toMatchObject({
+      state: "unavailable",
+      failure: "Bot is not assigned the Connection model capability",
+    });
+  });
+
   test("requires an enabled installation, declared capability, and ready typed Connection", () => {
     const user = {
       schemaVersion: 1 as const,
@@ -567,5 +762,169 @@ describe("Bot execution-plan authority", () => {
         packages,
       }).assignments[0]?.state,
     ).toBe("unavailable");
+  });
+});
+
+const BOOTSTRAP_GENERATION = "2026-08-31T00:00:00.000Z:0123456789abcdef";
+const AUTHORED_GENERATION = "2026-09-01T00:00:00.000Z:fedcba9876543210";
+
+const authoredGenerationView = {
+  schemaVersion: 1,
+  botId: "alpha",
+  generationId: AUTHORED_GENERATION,
+  createdAt: "2026-09-01T00:00:00.000Z",
+  status: "active",
+  isCurrent: true,
+  failures: [],
+  parentGenerationId: BOOTSTRAP_GENERATION,
+  origin: {
+    kind: "bot-authored",
+    runId: "run-1",
+    sessionId: "alice:alpha",
+    turnId: "turn-1",
+  },
+  members: [
+    {
+      packageId: "shell",
+      version: "0.0.1",
+      provenance: { kind: "first-party" },
+    },
+    {
+      packageId: "greeter",
+      version: "0.0.1",
+      contentHash: "b".repeat(64),
+      source: "export default {}",
+      provenance: {
+        kind: "bot",
+        botId: "alpha",
+        sessionId: "alice:alpha",
+        turnId: "turn-1",
+        runId: "run-1",
+        authoredAt: "2026-09-01T00:00:00.000Z",
+      },
+    },
+  ],
+};
+
+describe("Composition generation views", () => {
+  test("decodes a generation with Bot provenance and artifact identity", () => {
+    const view = decodeCompositionGenerationViewV1(authoredGenerationView);
+    expect(view.members[1]?.contentHash).toBe("b".repeat(64));
+    expect(view.members[1]?.provenance).toEqual({
+      kind: "bot",
+      botId: "alpha",
+      sessionId: "alice:alpha",
+      turnId: "turn-1",
+      runId: "run-1",
+      authoredAt: "2026-09-01T00:00:00.000Z",
+    });
+    expect(view.isCurrent).toBe(true);
+    expect(view.parentGenerationId).toBe(BOOTSTRAP_GENERATION);
+  });
+
+  test("refuses fields the redacted view does not declare", () => {
+    for (const invalid of [
+      { ...authoredGenerationView, artifactSetHash: "a".repeat(64) },
+      { ...authoredGenerationView, status: "unknown" },
+      { ...authoredGenerationView, isCurrent: "yes" },
+      {
+        ...authoredGenerationView,
+        members: [
+          {
+            packageId: "greeter",
+            version: "0.0.1",
+            provenance: { kind: "first-party" },
+            bytes: "AAAA",
+          },
+        ],
+      },
+      {
+        ...authoredGenerationView,
+        members: [
+          {
+            packageId: "greeter",
+            version: "0.0.1",
+            provenance: { kind: "first-party" },
+            contentHash: "not-a-hash",
+          },
+        ],
+      },
+      {
+        ...authoredGenerationView,
+        members: [
+          authoredGenerationView.members[0],
+          authoredGenerationView.members[0],
+        ],
+      },
+    ]) {
+      expect(() => decodeCompositionGenerationViewV1(invalid)).toThrow(
+        ConfigurationDecodeError,
+      );
+    }
+  });
+
+  test("decodes a list and refuses a generation belonging to another Bot", () => {
+    const list = decodeCompositionGenerationListViewV1({
+      schemaVersion: 1,
+      botId: "alpha",
+      currentGenerationId: AUTHORED_GENERATION,
+      generations: [authoredGenerationView],
+      cursor: "composition:index:x",
+    });
+    expect(list.generations).toHaveLength(1);
+    expect(list.cursor).toBe("composition:index:x");
+    expect(() =>
+      decodeCompositionGenerationListViewV1({
+        schemaVersion: 1,
+        botId: "beta",
+        currentGenerationId: AUTHORED_GENERATION,
+        generations: [authoredGenerationView],
+      }),
+    ).toThrow(ConfigurationDecodeError);
+  });
+
+  test("decodes revert commands and their receipts", () => {
+    const command = {
+      schemaVersion: 1,
+      type: "composition/revert",
+      commandId: "composition-revert-1",
+      botId: "alpha",
+      toGenerationId: BOOTSTRAP_GENERATION,
+      expectedGenerationId: AUTHORED_GENERATION,
+    } as const;
+    expect(decodeRevertCompositionCommandV1(command)).toEqual(command);
+    expect(() =>
+      decodeRevertCompositionCommandV1({
+        ...command,
+        expectedGenerationId: BOOTSTRAP_GENERATION,
+      }),
+    ).toThrow(ConfigurationDecodeError);
+
+    expect(
+      decodeCompositionCommandReceiptV1({
+        schemaVersion: 1,
+        commandId: "composition-revert-1",
+        status: "applied",
+        generationId: "2026-09-02T00:00:00.000Z:0123456789abcdef",
+        currentGenerationId: AUTHORED_GENERATION,
+      }).status,
+    ).toBe("applied");
+    expect(
+      decodeCompositionCommandReceiptV1({
+        schemaVersion: 1,
+        commandId: "composition-revert-1",
+        status: "rejected",
+        failure: "composition generation is newer",
+        currentGenerationId: AUTHORED_GENERATION,
+      }).status,
+    ).toBe("rejected");
+    expect(() =>
+      decodeCompositionCommandReceiptV1({
+        schemaVersion: 1,
+        commandId: "composition-revert-1",
+        status: "applied",
+        currentGenerationId: AUTHORED_GENERATION,
+      }),
+    ).toThrow(ConfigurationDecodeError);
   });
 });

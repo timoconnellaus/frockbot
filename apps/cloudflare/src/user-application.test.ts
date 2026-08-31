@@ -397,3 +397,35 @@ describe("user application Bot seam", () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+describe("run list failures", () => {
+  test("a stored run the codec refuses is a JSON failure with its reason, not a crash", async () => {
+    const botState: BotStateBinding = {
+      run: () => Promise.reject(new Error("unexpected")),
+      listRuns: () =>
+        Promise.reject(
+          new Error('run "run-1" has no valid Composition generation'),
+        ),
+      lookupRun: () => Promise.reject(new Error("unexpected")),
+      fenceRunAdmission: () => Promise.reject(new Error("unexpected")),
+      listNotifications: () => Promise.resolve([]),
+      acknowledgeNotification: () => Promise.resolve(),
+      reconcileRun: () => Promise.reject(new Error("unexpected")),
+    };
+    const env: UserApplicationEnv = {
+      BOT_STATE: rpcBindingFor(botState),
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/turns"),
+      env,
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect((await response.json()) as { error: string }).toEqual({
+      error: 'run "run-1" has no valid Composition generation',
+    });
+  });
+});

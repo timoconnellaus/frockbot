@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { UiButton } from "@frockbot/client-ui";
+import { UiButton, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onMounted, ref } from "vue";
 
@@ -7,6 +7,14 @@ const providedWeb = inject(frockBotWebDataKey);
 if (!providedWeb) throw new Error("shell client data was not provided");
 const web = providedWeb;
 const search = ref("");
+const apiKeyPackageId = ref<string>();
+const apiKeyConnectionTypeId = ref<string>();
+const apiKeyLabel = ref("");
+const apiKey = ref("");
+const rotatingConnectionId = ref<string>();
+const rotationKey = ref("");
+const labelingConnectionId = ref<string>();
+const connectionLabel = ref("");
 const filteredCatalog = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
   if (!query) return web.value.pluginCatalog;
@@ -52,6 +60,48 @@ async function install(packageId: string, version: string): Promise<void> {
   }
 }
 
+function beginApiKeyConnection(
+  packageId: string,
+  connectionTypeId: string,
+  displayName: string,
+): void {
+  apiKeyPackageId.value = packageId;
+  apiKeyConnectionTypeId.value = connectionTypeId;
+  apiKeyLabel.value = displayName;
+  apiKey.value = "";
+}
+
+async function connectApiKey(): Promise<void> {
+  if (!apiKeyPackageId.value || !apiKeyConnectionTypeId.value) return;
+  try {
+    await web.value.createApiKeyConnection({
+      packageId: apiKeyPackageId.value,
+      connectionTypeId: apiKeyConnectionTypeId.value,
+      label: apiKeyLabel.value,
+      apiKey: apiKey.value,
+    });
+    apiKey.value = "";
+    apiKeyPackageId.value = undefined;
+    apiKeyConnectionTypeId.value = undefined;
+  } catch (error) {
+    apiKey.value = "";
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not create Connection";
+  }
+}
+
+async function rotateApiKey(connectionId: string): Promise<void> {
+  try {
+    await web.value.rotateApiKeyConnection(connectionId, rotationKey.value);
+    rotationKey.value = "";
+    rotatingConnectionId.value = undefined;
+  } catch (error) {
+    rotationKey.value = "";
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not rotate credential";
+  }
+}
+
 async function connect(
   packageId: string,
   connectionTypeId: string,
@@ -79,12 +129,53 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
       error instanceof Error ? error.message : "Could not revoke Connection";
   }
 }
+
+async function saveLabel(connectionId: string): Promise<void> {
+  try {
+    await web.value.updateConnectionLabel(connectionId, connectionLabel.value);
+    labelingConnectionId.value = undefined;
+    connectionLabel.value = "";
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not rename Connection";
+  }
+}
+
+async function refreshModels(connectionId: string): Promise<void> {
+  try {
+    await web.value.refreshConnectionModels(connectionId);
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not refresh models";
+  }
+}
+
+async function setEnabled(
+  connectionId: string,
+  enabled: boolean,
+): Promise<void> {
+  try {
+    await web.value.setConnectionEnabled(connectionId, enabled);
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not update Connection";
+  }
+}
+
+async function disconnect(connectionId: string): Promise<void> {
+  try {
+    await web.value.disconnectConnection(connectionId);
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not disconnect";
+  }
+}
 </script>
 
 <template>
   <div class="plugins-surface">
     <label class="plugin-search">
-      <span aria-hidden="true">⌕</span>
+      <UiIcon name="search" />
       <input
         v-model="search"
         placeholder="Search Plugins"
@@ -126,7 +217,15 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
         </span>
         <UiButton
           v-else-if="isPackageInstalled(item.packageId)"
-          @click="connect(item.packageId, item.connectionTypes[0]?.id ?? '')"
+          @click="
+            item.connectionTypes[0]?.authorizationKind === 'api-key'
+              ? beginApiKeyConnection(
+                  item.packageId,
+                  item.connectionTypes[0]?.id ?? '',
+                  item.displayName,
+                )
+              : connect(item.packageId, item.connectionTypes[0]?.id ?? '')
+          "
         >
           Connect
         </UiButton>
@@ -137,6 +236,26 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
         >
           Add
         </UiButton>
+        <form
+          v-if="apiKeyPackageId === item.packageId"
+          class="api-key-form"
+          @submit.prevent="connectApiKey"
+        >
+          <label>
+            <span>Connection label</span>
+            <input v-model="apiKeyLabel" maxlength="120" required />
+          </label>
+          <label>
+            <span>API key</span>
+            <input
+              v-model="apiKey"
+              type="password"
+              autocomplete="new-password"
+              required
+            />
+          </label>
+          <UiButton type="submit" variant="primary">Connect account</UiButton>
+        </form>
       </article>
     </div>
 
@@ -150,19 +269,107 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
         :key="connection.connectionId"
         class="connected-account"
       >
-        <div>
+        <div class="connection-status">
           <strong>{{ connection.displayName }}</strong>
-          <small>{{ connection.state }}</small>
+          <small>Connection: {{ connection.state }}</small>
+          <small v-if="connection.modelCatalog">
+            Models: {{ connection.modelCatalog.state }}
+          </small>
+          <p v-if="connection.failure" class="connection-failure" role="alert">
+            {{ connection.failure }}
+          </p>
+          <p
+            v-if="connection.modelCatalog?.failure"
+            class="connection-failure"
+            role="alert"
+          >
+            {{ connection.modelCatalog.failure }}
+          </p>
         </div>
-        <UiButton
-          v-if="
-            connection.state !== 'revoked' && connection.state !== 'revoking'
-          "
-          variant="danger"
-          @click="revoke(connection.packageId, connection.connectionId)"
+        <div class="connection-actions">
+          <UiButton
+            @click="
+              labelingConnectionId = connection.connectionId;
+              connectionLabel = connection.displayName;
+            "
+          >
+            Rename
+          </UiButton>
+          <template v-if="connection.authorization?.kind === 'api-key'">
+            <UiButton
+              v-if="connection.modelCatalog && connection.state === 'ready'"
+              @click="refreshModels(connection.connectionId)"
+            >
+              Refresh models
+            </UiButton>
+            <UiButton
+              v-if="connection.state === 'ready'"
+              @click="setEnabled(connection.connectionId, false)"
+            >
+              Disable
+            </UiButton>
+            <UiButton
+              v-if="connection.state === 'disabled'"
+              @click="setEnabled(connection.connectionId, true)"
+            >
+              Enable
+            </UiButton>
+            <UiButton
+              v-if="
+                connection.state === 'ready' || connection.state === 'disabled'
+              "
+              @click="rotatingConnectionId = connection.connectionId"
+            >
+              Rotate key
+            </UiButton>
+            <UiButton
+              v-if="
+                connection.state !== 'revoked' &&
+                connection.state !== 'revoking'
+              "
+              variant="danger"
+              @click="disconnect(connection.connectionId)"
+            >
+              Disconnect
+            </UiButton>
+          </template>
+          <UiButton
+            v-else-if="
+              connection.state !== 'revoked' && connection.state !== 'revoking'
+            "
+            variant="danger"
+            @click="revoke(connection.packageId, connection.connectionId)"
+          >
+            Revoke
+          </UiButton>
+        </div>
+        <form
+          v-if="labelingConnectionId === connection.connectionId"
+          class="rotation-form"
+          @submit.prevent="saveLabel(connection.connectionId)"
         >
-          Revoke
-        </UiButton>
+          <input
+            v-model="connectionLabel"
+            maxlength="120"
+            aria-label="Connection label"
+            required
+          />
+          <UiButton type="submit">Save label</UiButton>
+        </form>
+        <form
+          v-if="rotatingConnectionId === connection.connectionId"
+          class="rotation-form"
+          @submit.prevent="rotateApiKey(connection.connectionId)"
+        >
+          <input
+            v-model="rotationKey"
+            type="password"
+            autocomplete="new-password"
+            aria-label="New API key"
+            required
+          />
+          <UiButton type="submit">Save new key</UiButton>
+        </form>
       </article>
     </section>
 
@@ -195,9 +402,9 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
   background: var(--frock-surface-raised);
 }
 
-.plugin-search span {
-  color: var(--frock-action-primary);
-  font-size: 18px;
+.plugin-search:focus-within {
+  border-color: var(--frock-border-focus);
+  box-shadow: 0 0 0 3px var(--frock-focus-ring);
 }
 
 .plugin-search input {
@@ -210,8 +417,9 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
 
 .plugin-intro,
 .plugin-empty {
+  margin: 14px 0 0;
   color: var(--frock-text-muted);
-  font-size: 13px;
+  font-size: var(--frock-text-base);
 }
 
 .plugin-grid {
@@ -231,6 +439,19 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
   border-radius: var(--frock-radius-card);
   background: var(--frock-surface-raised);
   box-shadow: var(--frock-shadow-card);
+  transition:
+    transform var(--frock-motion-fast),
+    box-shadow var(--frock-motion-fast);
+}
+
+.plugin-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--frock-shadow-control);
+}
+
+.plugin-card-copy strong {
+  font-size: var(--frock-text-md);
+  font-weight: 600;
 }
 
 .plugin-logo {
@@ -248,6 +469,35 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
   min-width: 0;
 }
 
+.api-key-form {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--frock-border);
+}
+
+.api-key-form label,
+.rotation-form {
+  display: grid;
+  gap: 6px;
+}
+
+.api-key-form span {
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+
+.api-key-form input,
+.rotation-form input {
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--frock-border);
+  border-radius: 9px;
+  background: var(--frock-surface-raised);
+  color: var(--frock-text);
+}
+
 .plugin-card-copy strong,
 .plugin-card-copy small {
   display: block;
@@ -259,12 +509,12 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
 .plugin-card-copy small {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .plugin-connected {
   color: var(--frock-success);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
   font-weight: 700;
 }
 
@@ -274,17 +524,29 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
 
 .connected-accounts h3 {
   font-family: var(--frock-font-display);
-  font-size: 15px;
+  font-size: var(--frock-text-lg);
 }
 
 .connected-account {
-  display: flex;
+  display: grid;
   min-height: 58px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   padding: 11px 0;
   border-top: 1px solid var(--frock-border);
+}
+
+.connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rotation-form {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .connected-account strong,
@@ -295,12 +557,18 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
 .connected-account small {
   margin-top: 3px;
   color: var(--frock-text-muted);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
   text-transform: capitalize;
+}
+
+.connection-failure {
+  margin: 6px 0 0;
+  color: var(--frock-danger-text);
+  font-size: var(--frock-text-sm);
 }
 
 .settings-error {
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 </style>

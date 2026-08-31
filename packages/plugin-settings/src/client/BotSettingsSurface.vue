@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
-import { UiButton, UiField } from "@frockbot/client-ui";
+import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
-import { inject, onMounted, ref } from "vue";
+import { computed, inject, onMounted, ref } from "vue";
+import {
+  isModelConnectionEligible,
+  resolveBotSettingsModel,
+} from "./bot-settings.js";
+import CompositionSection from "./CompositionSection.vue";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
 const providedWeb = inject(frockBotWebDataKey);
@@ -16,8 +21,30 @@ const label = ref("");
 const description = ref("");
 const notifications = ref(false);
 const saving = ref(false);
+const selectedModel = ref("");
+const useExactModel = ref(false);
+const exactConnectionId = ref("");
+const exactProviderModelId = ref("");
+const readyConnections = computed(() =>
+  (web.value.userSettings?.connections ?? []).filter((connection) =>
+    isModelConnectionEligible({
+      connection,
+      packages: web.value.userSettings?.packages ?? [],
+      catalog: web.value.pluginCatalog,
+    }),
+  ),
+);
+const modelOptions = computed(() =>
+  readyConnections.value.flatMap((connection) =>
+    (connection.modelCatalog?.models ?? []).map((model) => ({
+      value: JSON.stringify([connection.connectionId, model.providerModelId]),
+      label: `${model.displayName} — ${connection.displayName}`,
+    })),
+  ),
+);
 
 onMounted(async () => {
+  await web.value.loadPluginCatalog();
   await web.value.loadBotSettings();
   const settings = web.value.botSettings;
   if (!settings) return;
@@ -25,16 +52,55 @@ onMounted(async () => {
   label.value = settings.profile.label ?? "";
   description.value = settings.profile.description ?? "";
   notifications.value = settings.notifications.enabled;
+  selectedModel.value = settings.model
+    ? JSON.stringify([
+        settings.model.connectionId,
+        settings.model.providerModelId,
+      ])
+    : "";
+  exactConnectionId.value =
+    settings.model?.connectionId ??
+    readyConnections.value[0]?.connectionId ??
+    "";
+  exactProviderModelId.value = settings.model?.providerModelId ?? "";
+  useExactModel.value = Boolean(
+    settings.model &&
+    !modelOptions.value.some((model) => model.value === selectedModel.value),
+  );
 });
+
+async function clearModel(): Promise<void> {
+  saving.value = true;
+  try {
+    await web.value.clearBotModel();
+    selectedModel.value = "";
+    exactProviderModelId.value = "";
+    useExactModel.value = false;
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not unbind model";
+  } finally {
+    saving.value = false;
+  }
+}
 
 async function save(): Promise<void> {
   saving.value = true;
   try {
+    const current = web.value.botSettings?.model;
+    const selected = resolveBotSettingsModel({
+      current,
+      useExactModel: useExactModel.value,
+      selectedModel: selectedModel.value,
+      exactConnectionId: exactConnectionId.value,
+      exactProviderModelId: exactProviderModelId.value,
+    });
     await web.value.saveBotProfile({
       name: name.value,
       label: label.value || undefined,
       description: description.value || undefined,
     });
+    if (selected) await web.value.saveBotModel(selected);
     await web.value.saveBotNotifications({ enabled: notifications.value });
     surfaces?.close();
   } catch (error) {
@@ -49,7 +115,9 @@ async function save(): Promise<void> {
 <template>
   <form class="settings-form" @submit.prevent="save">
     <div class="settings-intro">
-      <span class="settings-avatar" aria-hidden="true">⌁</span>
+      <span class="settings-avatar" aria-hidden="true"
+        ><UiIcon name="sparkle" size="lg"
+      /></span>
       <div>
         <strong>Shape this Bot</strong>
         <p>Identity and notifications belong to the selected Bot.</p>
@@ -68,6 +136,46 @@ async function save(): Promise<void> {
     <UiField label="Description">
       <textarea v-model="description" maxlength="10000" rows="7" />
     </UiField>
+    <label class="exact-model-setting">
+      <span>
+        <strong>Use exact model ID</strong>
+        <small>Choose a model not listed in the advisory catalog.</small>
+      </span>
+      <input v-model="useExactModel" type="checkbox" />
+    </label>
+    <template v-if="useExactModel">
+      <UiField label="Connection">
+        <select v-model="exactConnectionId">
+          <option disabled value="">Select a Connection</option>
+          <option
+            v-for="connection in readyConnections"
+            :key="connection.connectionId"
+            :value="connection.connectionId"
+          >
+            {{ connection.displayName }}
+          </option>
+        </select>
+      </UiField>
+      <UiField label="Exact provider model ID">
+        <input
+          v-model="exactProviderModelId"
+          maxlength="256"
+          placeholder="model-name:cloud"
+        />
+      </UiField>
+    </template>
+    <UiField v-else label="Model">
+      <select v-model="selectedModel">
+        <option disabled value="">Select a connected model</option>
+        <option
+          v-for="model in modelOptions"
+          :key="model.value"
+          :value="model.value"
+        >
+          {{ model.label }}
+        </option>
+      </select>
+    </UiField>
     <label class="notification-setting">
       <span>
         <strong>Notifications</strong>
@@ -79,10 +187,19 @@ async function save(): Promise<void> {
       {{ web.settingsError }}
     </p>
     <div class="settings-actions">
+      <UiButton
+        v-if="web.botSettings?.model"
+        type="button"
+        :disabled="saving"
+        @click="clearModel"
+      >
+        Unbind model
+      </UiButton>
       <UiButton type="submit" variant="primary" :disabled="saving">
         {{ saving ? "Saving…" : "Save settings" }}
       </UiButton>
     </div>
+    <CompositionSection />
   </form>
 </template>
 
@@ -113,7 +230,6 @@ async function save(): Promise<void> {
   border-radius: 16px;
   color: var(--frock-action-secondary-text);
   background: var(--frock-surface-accent);
-  font-size: 23px;
 }
 
 .settings-intro strong,
@@ -122,13 +238,19 @@ async function save(): Promise<void> {
   margin: 0;
 }
 
+.settings-intro strong {
+  font-size: var(--frock-text-lg);
+  font-weight: 600;
+}
+
 .settings-intro p {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: var(--frock-text-base);
+  line-height: var(--frock-leading-normal);
 }
 
+.exact-model-setting,
 .notification-setting {
   display: flex;
   align-items: center;
@@ -140,17 +262,26 @@ async function save(): Promise<void> {
   background: var(--frock-surface-subtle);
 }
 
+.exact-model-setting strong,
+.exact-model-setting small,
 .notification-setting strong,
 .notification-setting small {
   display: block;
 }
 
+.notification-setting strong {
+  font-size: var(--frock-text-md);
+  font-weight: 600;
+}
+
+.exact-model-setting small,
 .notification-setting small {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
 }
 
+.exact-model-setting input,
 .notification-setting input {
   width: 19px;
   height: 19px;
@@ -160,7 +291,7 @@ async function save(): Promise<void> {
 .settings-error {
   margin: 0;
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .settings-actions {

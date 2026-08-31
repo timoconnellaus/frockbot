@@ -34,14 +34,14 @@
   border-radius: 18px;
   color: var(--frock-action-primary-hover);
   background: var(--frock-surface-accent);
-  font-size: 26px;
+  font-size: var(--frock-text-display);
   font-weight: 700;
 }
 
 .auth-eyebrow {
   margin: 0 0 9px;
   color: var(--frock-action-primary-hover);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
   font-weight: 800;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -51,7 +51,7 @@
   margin: 0;
   color: var(--frock-text);
   font-family: "Archivo Black", Manrope, sans-serif;
-  font-size: 30px;
+  font-size: var(--frock-text-display);
   font-weight: 400;
   letter-spacing: -0.05em;
 }
@@ -59,7 +59,7 @@
 .auth-copy {
   margin: 13px 0 30px;
   color: var(--frock-text-muted);
-  font-size: 14px;
+  font-size: var(--frock-text-md);
   line-height: 1.6;
 }
 
@@ -138,7 +138,7 @@
   color: var(--frock-provider-google);
   background: var(--frock-surface);
   font-family: Arial, sans-serif;
-  font-size: 14px;
+  font-size: var(--frock-text-md);
   font-weight: 700;
 }
 
@@ -146,7 +146,7 @@
 .auth-hint,
 .auth-error {
   color: var(--frock-text-muted);
-  font-size: 13px;
+  font-size: var(--frock-text-base);
   line-height: 1.5;
 }
 

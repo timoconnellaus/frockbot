@@ -1,9 +1,9 @@
-import type {
-  LlmMessage,
-  LlmProvider,
-  LlmStreamEvent,
-  NormalizedModelRequest,
-} from "@frockbot/agent-core";
+import {
+  type LlmMessage,
+  type LlmProvider,
+  type LlmStreamEvent,
+  type NormalizedModelRequest,
+} from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
 export type JsonValue =
@@ -13,6 +13,13 @@ export type FetchLike = (
   input: string | URL | Request,
   init?: RequestInit,
 ) => Promise<Response>;
+
+export class OpenAICompatibleHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Model request failed (${status})`);
+    this.name = "OpenAICompatibleHttpError";
+  }
+}
 
 export interface OpenAICompatibleConfig {
   baseUrl: string;
@@ -83,18 +90,39 @@ export function requestToWire(
   };
 }
 
+const MAX_SSE_EVENT_CHARACTERS = 1_048_576;
+const MAX_SSE_RESPONSE_BYTES = 16_777_216;
+
+async function rejectOversizedSse(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<never> {
+  await reader.cancel().catch(() => undefined);
+  throw new Error("Model response stream exceeded its size limit");
+}
+
 async function* readSseData(
   body: ReadableStream<Uint8Array>,
 ): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let responseBytes = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
+      responseBytes += value?.byteLength ?? 0;
+      if (responseBytes > MAX_SSE_RESPONSE_BYTES) {
+        await rejectOversizedSse(reader);
+      }
       buffer += decoder.decode(value, { stream: !done });
       const blocks = buffer.split(/\r?\n\r?\n/);
       buffer = blocks.pop() ?? "";
+      if (
+        buffer.length > MAX_SSE_EVENT_CHARACTERS ||
+        blocks.some((block) => block.length > MAX_SSE_EVENT_CHARACTERS)
+      ) {
+        await rejectOversizedSse(reader);
+      }
       for (const block of blocks) {
         const data = block
           .split(/\r?\n/)
@@ -166,7 +194,12 @@ export class OpenAICompatibleProvider implements LlmProvider {
     request: NormalizedModelRequest,
     signal: AbortSignal,
   ): AsyncIterable<LlmStreamEvent> {
-    const fetcher = this.config.fetch ?? fetch;
+    // Workerd rejects a detached global `fetch` ("Illegal invocation"), so the
+    // default fetcher forwards through a closure rather than aliasing it.
+    const fetcher =
+      this.config.fetch ??
+      ((input: RequestInfo | URL, init?: RequestInit) =>
+        globalThis.fetch(input, init));
     const headers: Record<string, string> = {
       "content-type": "application/json",
       ...this.config.headers,
@@ -180,29 +213,45 @@ export class OpenAICompatibleProvider implements LlmProvider {
       signal,
     });
     if (!response.ok) {
-      const body = (await response.text()).slice(0, 2_000);
-      throw new Error(`Model request failed (${response.status}): ${body}`);
+      await response.body?.cancel();
+      throw new OpenAICompatibleHttpError(response.status);
     }
     if (!response.body)
       throw new Error("Model response did not include a stream");
 
     const tools = new Map<number, ToolAccumulator>();
     let finishReason: string | undefined;
+    let terminal = false;
+    let sawChoice = false;
     for await (const data of readSseData(response.body)) {
       signal.throwIfAborted();
-      if (data === "[DONE]") break;
+      if (data === "[DONE]") {
+        terminal = true;
+        break;
+      }
       const payload = asRecord(
         parseJson(data, "Model returned an invalid stream event"),
       );
       const choices = payload?.choices;
       const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
       const delta = asRecord(choice?.delta);
+      if (choice && (delta || typeof choice.finish_reason === "string")) {
+        sawChoice = true;
+      }
       if (typeof delta?.content === "string" && delta.content) {
         yield { type: "text-delta", text: delta.content };
       }
       applyToolDeltas(delta?.tool_calls, tools);
-      if (typeof choice?.finish_reason === "string")
+      if (typeof choice?.finish_reason === "string") {
         finishReason = choice.finish_reason;
+        terminal = true;
+      }
+    }
+    if (!terminal) {
+      throw new Error("Model response stream ended before a terminal marker");
+    }
+    if (!sawChoice) {
+      throw new Error("Model response stream did not include a valid choice");
     }
 
     for (const tool of [...tools.values()].sort(

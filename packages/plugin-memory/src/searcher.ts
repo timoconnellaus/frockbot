@@ -1,27 +1,33 @@
-import { hashMemoryContent } from "./chunker.js";
-import type { MemoryDocumentStore } from "./storage.js";
+// Searching Memory over the derived index.
+//
+// The index is derived and rebuildable, so it is never authoritative about a
+// fact: a hit names a document and a line range, and the caller reads the
+// bytes back out of the Workspace before showing them. That is the same rule
+// the rest of the Package follows — the files are the Memory, everything else
+// is a way of finding a part of them.
+//
+// Precedence here is the Memory precedence: own (`bot`) before `project`
+// before `user`, "the most specific wins", applied after scoring so a strong
+// shared hit still ranks above a weak own one within the same document.
+import type { MemoryScopeNameV1 } from "@frockbot/kernel-contracts";
+import {
+  memoryVectorNamespaceV1,
+  type MemoryIndexChunkV1,
+  type MemoryIndexV1,
+} from "./indexer.js";
 import type {
   EmbedMemory,
-  MemoryScope,
   MemorySearchResult,
-  MemoryTier,
   MemoryVectorIndex,
-  MemoryVectorMatch,
 } from "./types.js";
 
 const SNIPPET_MAX_CHARS = 700;
-const KEYWORD_CONTEXT_LINES = 5;
 
-function extractLines(
-  text: string,
-  startLine: number,
-  endLine: number,
-): string {
-  const lines = text.split("\n");
-  return lines
-    .slice(Math.max(0, startLine - 1), Math.min(lines.length, endLine))
-    .join("\n");
-}
+const SCOPE_ORDER: Record<MemoryScopeNameV1, number> = {
+  bot: 0,
+  project: 1,
+  user: 2,
+};
 
 function truncate(text: string): string {
   if (text.length <= SNIPPET_MAX_CHARS) return text;
@@ -30,237 +36,124 @@ function truncate(text: string): string {
   return `${boundary > 0 ? slice.slice(0, boundary) : slice}…`;
 }
 
-function matchMetadata(match: MemoryVectorMatch): {
-  path: string;
-  startLine: number;
-  endLine: number;
-  documentHash: string;
-} | null {
-  const path = match.metadata?.path;
-  const startLine = match.metadata?.startLine;
-  const endLine = match.metadata?.endLine;
-  const documentHash = match.metadata?.documentHash;
-  return typeof path === "string" &&
-    typeof startLine === "number" &&
-    typeof endLine === "number" &&
-    typeof documentHash === "string"
-    ? { path, startLine, endLine, documentHash }
-    : null;
+function resultOf(
+  chunk: MemoryIndexChunkV1,
+  score?: number,
+): MemorySearchResult {
+  return {
+    scope: chunk.scope,
+    projectId: chunk.projectId,
+    path: chunk.path,
+    startLine: chunk.startLine,
+    endLine: chunk.endLine,
+    snippet: truncate(chunk.content),
+    ...(score === undefined ? {} : { score }),
+  };
 }
 
-async function vectorSearch(
-  scope: MemoryScope,
-  queryVector: number[],
-  maxResults: number,
-  vectorize: MemoryVectorIndex,
-  storage: MemoryDocumentStore,
-): Promise<MemorySearchResult[]> {
-  const response = await vectorize.query(queryVector, {
-    topK: Math.min(maxResults * 3, 20),
-    namespace: scope.vectorNamespace,
-    returnMetadata: "all",
-  });
-  const bestByPath = new Map<string, MemoryVectorMatch>();
-  for (const match of response.matches) {
-    const metadata = matchMetadata(match);
-    if (!metadata) continue;
-    const current = bestByPath.get(metadata.path);
-    if (!current || (match.score ?? 0) > (current.score ?? 0)) {
-      bestByPath.set(metadata.path, match);
-    }
-  }
-  const matches = [...bestByPath.values()]
-    .sort((left, right) => (right.score ?? 0) - (left.score ?? 0))
-    .slice(0, maxResults);
-  const hydrated = await Promise.all(
-    matches.map(async (match): Promise<MemorySearchResult | null> => {
-      const metadata = matchMetadata(match);
-      if (!metadata) return null;
-      const content = await storage.readContent(scope, metadata.path);
-      if (
-        content === null ||
-        (await hashMemoryContent(content)) !== metadata.documentHash
-      ) {
-        return null;
-      }
-      return {
-        path: metadata.path,
-        tier: scope.tier,
-        startLine: metadata.startLine,
-        endLine: metadata.endLine,
-        snippet: truncate(
-          extractLines(content, metadata.startLine, metadata.endLine),
-        ),
-        score: match.score,
-      };
-    }),
-  );
-  return hydrated.filter(
-    (result): result is MemorySearchResult => result !== null,
-  );
+function lexicalScore(content: string, terms: string[]): number {
+  const haystack = content.toLowerCase();
+  let hits = 0;
+  for (const term of terms) if (haystack.includes(term)) hits += 1;
+  return terms.length === 0 ? 0 : hits / terms.length;
 }
 
-async function keywordSearch(
-  scope: MemoryScope,
-  query: string,
-  maxResults: number,
-  storage: MemoryDocumentStore,
-): Promise<MemorySearchResult[]> {
-  const needle = query.toLowerCase();
-  const results: MemorySearchResult[] = [];
-  for (const path of await storage.listPaths(scope)) {
-    if (results.length >= maxResults) break;
-    const content = await storage.readContent(scope, path);
-    if (content === null) continue;
-    const lines = content.split("\n");
-    const visited: Array<[number, number]> = [];
-    for (let index = 0; index < lines.length; index += 1) {
-      if (!(lines[index] ?? "").toLowerCase().includes(needle)) continue;
-      const start = Math.max(0, index - KEYWORD_CONTEXT_LINES);
-      const end = Math.min(lines.length - 1, index + KEYWORD_CONTEXT_LINES);
-      if (visited.some(([from, to]) => start <= to && end >= from)) continue;
-      visited.push([start, end]);
-      results.push({
-        path,
-        tier: scope.tier,
-        startLine: start + 1,
-        endLine: end + 1,
-        snippet: truncate(lines.slice(start, end + 1).join("\n")),
-      });
-      if (results.length >= maxResults) break;
-    }
-  }
-  return results;
-}
-
-export interface SearchMemoryOptions {
-  scopes: MemoryScope[];
+export interface SearchMemoryOptionsV1 {
+  index: MemoryIndexV1;
   query: string;
   maxResults: number;
-  embed: EmbedMemory;
-  vectorize: MemoryVectorIndex;
-  storage: MemoryDocumentStore;
+  scope?: MemoryScopeNameV1;
+  embed?: EmbedMemory;
+  vectorize?: MemoryVectorIndex;
 }
 
-function preferAgentOnPathClashes(
-  results: MemorySearchResult[],
-): MemorySearchResult[] {
-  const byPath = new Map<string, MemorySearchResult>();
-  for (const result of results) {
-    const current = byPath.get(result.path);
-    if (!current || (current.tier === "global" && result.tier === "agent")) {
-      byPath.set(result.path, result);
-      continue;
-    }
-    if (
-      current.tier === result.tier &&
-      (result.score ?? -Infinity) > (current.score ?? -Infinity)
-    ) {
-      byPath.set(result.path, result);
-    }
-  }
-  return [...byPath.values()];
-}
-
-async function replaceGlobalClashesWithAgentCopies(
-  results: MemorySearchResult[],
-  scopes: MemoryScope[],
-  storage: MemoryDocumentStore,
+/**
+ * Vector search when an embedder and a vector index are configured, lexical
+ * search otherwise, and lexical search as the fallback when the embedder
+ * fails. A Memory search must not fail a Turn because a model binding is
+ * briefly unavailable.
+ */
+export async function searchMemoryV1(
+  options: SearchMemoryOptionsV1,
 ): Promise<MemorySearchResult[]> {
-  const agentScope = scopes.find((scope) => scope.tier === "agent");
-  if (!agentScope) return results;
-  return Promise.all(
-    results.map(async (result): Promise<MemorySearchResult> => {
-      if (result.tier !== "global") return result;
-      const content = await storage.readContent(agentScope, result.path);
-      if (content === null) return result;
-      return {
-        path: result.path,
-        tier: "agent",
-        startLine: 1,
-        endLine: content.split("\n").length,
-        snippet: truncate(content),
-      };
-    }),
-  );
-}
-
-export async function searchMemory(
-  options: SearchMemoryOptions,
-): Promise<MemorySearchResult[]> {
-  const { scopes, maxResults, embed, vectorize, storage } = options;
   const query = options.query.trim();
   if (!query) return [];
-  let queryVector: number[] | undefined;
-  try {
-    queryVector = (await embed([query]))[0];
-  } catch (error) {
-    console.error(
-      "[memory] query embedding failed; using keyword search",
-      error,
-    );
-  }
+  const candidates = options.index.chunks.filter(
+    (chunk) => options.scope === undefined || chunk.scope === options.scope,
+  );
+  if (candidates.length === 0) return [];
 
-  const perTierLimit = Math.max(1, maxResults);
-  const collected: MemorySearchResult[] = [];
-  for (const scope of scopes) {
-    let vectorResults: MemorySearchResult[] = [];
-    if (queryVector) {
-      try {
-        vectorResults = await vectorSearch(
-          scope,
-          queryVector,
-          perTierLimit,
-          vectorize,
-          storage,
+  const scored = new Map<MemoryIndexChunkV1, number>();
+  if (options.embed && options.vectorize) {
+    try {
+      const [vector] = await options.embed([query]);
+      if (vector) {
+        const namespaces = new Set(candidates.map(memoryVectorNamespaceV1));
+        const byHash = new Map(
+          candidates.map((chunk) => [chunk.hash, chunk] as const),
         );
-      } catch (error) {
-        console.error(
-          `[memory] ${scope.tier} vector search failed; using canonical R2 search`,
-          error,
-        );
+        for (const namespace of namespaces) {
+          const response = await options.vectorize.query(vector, {
+            topK: Math.min(options.maxResults * 3, 20),
+            namespace,
+            returnMetadata: "all",
+          });
+          for (const match of response.matches) {
+            const hash = match.metadata?.hash;
+            const chunk =
+              typeof hash === "string" ? byHash.get(hash) : undefined;
+            if (!chunk) continue;
+            scored.set(
+              chunk,
+              Math.max(scored.get(chunk) ?? 0, match.score ?? 0),
+            );
+          }
+        }
       }
+    } catch (error) {
+      console.error(
+        "[memory] vector search failed; using lexical search",
+        error,
+      );
     }
-    const keywordResults = await keywordSearch(
-      scope,
-      query,
-      perTierLimit,
-      storage,
-    );
-    collected.push(...vectorResults, ...keywordResults);
   }
 
-  const selected = preferAgentOnPathClashes(collected)
-    .sort((left, right) => {
-      if (left.score === undefined && right.score !== undefined) return 1;
-      if (left.score !== undefined && right.score === undefined) return -1;
-      if (left.score !== undefined && right.score !== undefined) {
-        const scoreDifference = right.score - left.score;
-        if (scoreDifference !== 0) return scoreDifference;
-      }
-      if (left.tier !== right.tier) return left.tier === "agent" ? -1 : 1;
-      return left.path.localeCompare(right.path);
+  if (scored.size === 0) {
+    const terms = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term.length > 1);
+    for (const chunk of candidates) {
+      const score = lexicalScore(chunk.content, terms);
+      if (score > 0) scored.set(chunk, score);
+    }
+  }
+
+  return [...scored.entries()]
+    .sort(([leftChunk, leftScore], [rightChunk, rightScore]) => {
+      if (rightScore !== leftScore) return rightScore - leftScore;
+      const order =
+        SCOPE_ORDER[leftChunk.scope] - SCOPE_ORDER[rightChunk.scope];
+      if (order !== 0) return order;
+      return leftChunk.path.localeCompare(rightChunk.path);
     })
-    .slice(0, maxResults);
-  return replaceGlobalClashesWithAgentCopies(selected, scopes, storage);
+    .slice(0, options.maxResults)
+    .map(([chunk, score]) => resultOf(chunk, score));
 }
 
-export function formatMemoryResults(results: MemorySearchResult[]): string {
+/** The compact rendering a tool result carries. */
+export function formatMemoryResultsV1(results: MemorySearchResult[]): string {
   if (results.length === 0) return "No memory matches.";
   return results
     .map((result, index) => {
+      const where = result.projectId
+        ? `${result.scope}/${result.projectId}`
+        : result.scope;
       const score =
         result.score === undefined
           ? ""
           : ` (score: ${result.score.toFixed(3)})`;
-      return `[${index + 1}] ${result.tier}:${result.path}:${result.startLine}-${result.endLine}${score}\n${result.snippet}`;
+      return `[${index + 1}] ${where}:${result.path}:${result.startLine}-${result.endLine}${score}\n${result.snippet}`;
     })
     .join("\n\n---\n\n");
-}
-
-export function scopesForTier(
-  scopes: Record<MemoryTier, MemoryScope>,
-  tier?: MemoryTier,
-): MemoryScope[] {
-  return tier ? [scopes[tier]] : [scopes.agent, scopes.global];
 }

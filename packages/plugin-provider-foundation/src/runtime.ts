@@ -1,4 +1,7 @@
-import type { LlmProvider, LlmStreamEvent } from "@frockbot/agent-core";
+import {
+  type LlmProvider,
+  type LlmStreamEvent,
+} from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
 export const FOUNDATION_PROVIDER = "foundation";
