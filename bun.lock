@@ -112,7 +112,6 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "^1.1.1",
         "@cloudflare/workers-types": "latest",
-        "@fly/sprites": "0.1.0",
         "@frockbot/computer-host-protocol": "workspace:*",
         "@frockbot/plugin-fly-sprite": "workspace:*",
         "@types/bun": "1.4.0",
@@ -614,7 +613,6 @@
       "version": "0.0.1",
       "dependencies": {
         "@cordisjs/plugin-webui": "0.8.2",
-        "@fly/sprites": "0.1.0",
         "@frockbot/computer-core": "workspace:*",
         "@frockbot/computer-host-protocol": "workspace:*",
         "@frockbot/computer-host-runtime": "workspace:*",

@@ -141,6 +141,7 @@ Add automated checks for constitutional rules whenever they can be enforced mech
 - browser and native shells use the same backend execution path;
 - two provider Packages satisfy the model interface with no kernel diff;
 - the kernel imports no Package;
+- the Fly Sprites SDK is loaded only by the Computer host, never by a Worker or a Package;
 - a Turn that does not use the Computer makes no Computer interface call;
 - Memory is readable and writable with no Computer interface call, a Workspace write into a Memory root is rejected, and conflicting Workspace and object-storage writes to any other durable root both survive as generations and are surfaced;
 - a non-first-party Package loads with `globalOutbound` disabled, its bindings derive only from Assignments, and an authority-widening request produces a pending decision record rather than a grant;

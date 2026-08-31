@@ -25,7 +25,6 @@
   },
   "dependencies": {
     "@cordisjs/plugin-webui": "0.8.2",
-    "@fly/sprites": "0.1.0",
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/computer-host-protocol": "workspace:*",
     "@frockbot/computer-host-runtime": "workspace:*",
