@@ -13,8 +13,27 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
+  BIN_ROOT,
   BOTS_ROOT,
+  boxDoctorScript,
+  CHROME_LAUNCHER,
+  chromeLauncherScript,
+  CHROMIUM_PATH,
+  COMPUTER_GUI_SHELL_COMMANDS,
+  COMPUTER_REFRESH_FILES,
+  COMPUTER_REFRESH_FINGERPRINT,
   COMPUTER_RUNTIME_FILES,
+  computerGuiRefusalV1,
+  SHIMS_ROOT,
+  DOCTOR_LOG,
+  DOCTOR_MARKER,
+  DOCTOR_SCRIPT,
+  guiShimScript,
+  REFERENCE_DOCS,
+  REFERENCE_DOCS_VERSION,
+  REFERENCE_ROOT,
+  SCRATCH_ROOT,
+  shellGuiCommandV1,
   computerSpriteNameSourceV1,
   computerSpriteNameV1,
   CONTROL_SCRIPT,
@@ -124,6 +143,20 @@ describe("runtime files", () => {
     expect(installs).toHaveLength(COMPUTER_RUNTIME_FILES.length);
   });
 
+  test("every declared file is also made executable where it lands", () => {
+    // Found live: the shims moved to their own directory and the `chmod` that
+    // follows them kept the old path, so provisioning failed at phase 3 with
+    // "cannot access /home/box/bin/xdotool". An install and a mode are one
+    // fact about a file, and this is what keeps them from drifting apart.
+    const modes = provisionScript
+      .split("\n")
+      .filter((line) => line.startsWith("chmod "))
+      .join(" ");
+    for (const file of COMPUTER_RUNTIME_FILES) {
+      expect(modes, file.path).toContain(` ${file.path}`);
+    }
+  });
+
   test("the control and ensure scripts are installed where the provider calls them", () => {
     const paths = COMPUTER_RUNTIME_FILES.map((file) => file.path);
     expect(paths).toContain(CONTROL_SCRIPT);
@@ -192,13 +225,30 @@ describe("provisioning script", () => {
     expect(preamble).toBeLessThan(firstNode);
   });
 
-  test("guards every phase with its own resume marker", () => {
+  test("guards every resumable phase with its own marker", () => {
     // A half-provisioned Computer is completed, never started over: the phase
     // a container restart interrupted is the phase the next run begins at.
-    for (const phase of PROVISION_PHASES) {
+    for (const phase of PROVISION_PHASES.filter((entry) => !entry.always)) {
       expect(provisionScript).toContain(`[ ! -f "$MARKERS/${phase.name}" ]`);
       expect(provisionScript).toContain(`touch "$MARKERS/${phase.name}"`);
     }
+  });
+
+  test("the reference phase is version-guarded rather than marker-guarded", () => {
+    // A marker would make the reference set writable exactly once in a
+    // Computer's life, which is the defect this version exists to fix.
+    const reference = PROVISION_PHASES.find(
+      (phase) => phase.name === "reference",
+    );
+    expect(reference?.always).toBe(true);
+    expect(provisionScript).not.toContain('[ ! -f "$MARKERS/reference" ]');
+    expect(provisionScript).toContain(`${REFERENCE_ROOT}/.version 2>/dev/null`);
+    expect(provisionScript).toContain(REFERENCE_DOCS_VERSION);
+  });
+
+  test("creates the shared scratch, which no durable root covers", () => {
+    expect(provisionScript).toContain(`chmod 0775 ${SCRATCH_ROOT}`);
+    expect(provisionScript).toContain(`chown box:box ${SCRATCH_ROOT}`);
   });
 
   test("records the phase it is in before it begins it", () => {
@@ -296,9 +346,14 @@ describe("installed shell scripts", () => {
     // because the provisioning document is what creates it.
     expect(provisionScript).toContain(`${HOME_ROOT}/chrome-profile `);
     expect(provisionScript).not.toContain("chrome-profiles");
+    // The flag set moved into the launcher (parity row 33); the desktop
+    // starter calls it and holds no flags of its own.
+    expect(installedScript(provisionScript, CHROME_LAUNCHER)).toContain(
+      `--user-data-dir=${HOME_ROOT}/chrome-profile`,
+    );
     expect(
       installedScript(provisionScript, `${RUNTIME_ROOT}/start-desktop.sh`),
-    ).toContain(`--user-data-dir="${HOME_ROOT}/chrome-profile"`);
+    ).toContain(`${CHROME_LAUNCHER} "$KEY"`);
   });
 
   test("every script the provisioning document installs is valid bash", async () => {
@@ -590,5 +645,254 @@ describe("the background-process logger", () => {
     expect(installedScript(provisionScript, BOUNDED_LOG_SCRIPT)).toContain(
       `HEAD_BYTES=${"${2:-"}${BOUNDED_LOG_HEAD_BYTES}}`,
     );
+  });
+});
+
+// Parity row 33: "a launcher that enforces correct browser flags; GUI never
+// driven from the shell". Two layers, both policy and neither a boundary —
+// which is exactly why the refusal has to say what to use instead.
+describe("the GUI is never driven from the shell", () => {
+  test("names the command a shell string would actually run", () => {
+    for (const command of [
+      "chromium --headless",
+      "xdotool key Return",
+      "cd /tmp && scrot out.png",
+      "true; sudo x11vnc -display :1",
+      "DISPLAY=:1 import -window root shot.png",
+      "/usr/bin/chromium about:blank",
+      "ls | wmctrl -l",
+      "Xvfb :3",
+    ]) {
+      expect(shellGuiCommandV1(command), command).toBeDefined();
+    }
+  });
+
+  test("leaves a command that merely mentions one alone", () => {
+    for (const command of [
+      "echo 'chromium is not installed'",
+      "grep -r import ./src",
+      "python3 -c 'import os'",
+      "cat /home/box/chromium.log",
+      "ls /home/box/bin/xdotool",
+      "printf '%s' scrotum",
+    ]) {
+      expect(shellGuiCommandV1(command), command).toBeUndefined();
+    }
+  });
+
+  test("both layers print the same sentence, naming the sanctioned surface", () => {
+    const refusal = computerGuiRefusalV1("xdotool");
+    expect(refusal).toContain("computer_browser");
+    expect(refusal).toContain("computer_screenshot");
+    expect(refusal).toContain(CHROME_LAUNCHER);
+    expect(guiShimScript("xdotool")).toContain(shellQuote(refusal));
+    expect(guiShimScript("xdotool")).toContain("exit 64");
+  });
+
+  test("a shim steps aside for the Computer's own sanctioned scripts", async () => {
+    // The shims sit on the tenant's PATH, and the desktop starter and the
+    // screenshot exec run the very binaries they cover. Without this the
+    // policy would break the Computer rather than the shell habit.
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-shim-"));
+    try {
+      const binDirectory = join(directory, "bin");
+      const realDirectory = join(directory, "real");
+      await mkdir(binDirectory, { recursive: true });
+      await mkdir(realDirectory, { recursive: true });
+      const shimPath = join(binDirectory, "xdotool");
+      await writeFile(
+        shimPath,
+        guiShimScript("xdotool").replaceAll(SHIMS_ROOT, binDirectory),
+      );
+      await writeFile(
+        join(realDirectory, "xdotool"),
+        ["#!/usr/bin/env bash", "echo real-xdotool", ""].join("\n"),
+      );
+      await chmod(shimPath, 0o755);
+      await chmod(join(realDirectory, "xdotool"), 0o755);
+      // The shim dir leads, as it does on a tenant's PATH; the system
+      // directories follow so `bash` itself is still findable.
+      const path = `${binDirectory}:${realDirectory}:/usr/bin:/bin`;
+
+      const refused = Bun.spawn([shimPath], {
+        env: { PATH: path },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [refusedCode, refusedError] = await Promise.all([
+        refused.exited,
+        new Response(refused.stderr).text(),
+      ]);
+      expect(refusedCode).toBe(64);
+      expect(refusedError).toContain("never driven from the shell");
+
+      const allowed = Bun.spawn([shimPath], {
+        env: { PATH: path, FROCKBOT_SANCTIONED_SURFACE: "1" },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [allowedCode, allowedOut] = await Promise.all([
+        allowed.exited,
+        new Response(allowed.stdout).text(),
+      ]);
+      expect(allowedCode).toBe(0);
+      expect(allowedOut.trim()).toBe("real-xdotool");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+// Parity row 27: "a self-check the Bot runs and reads a log from".
+describe("box-doctor", () => {
+  test("prints GrokBot's log lines and one machine-readable report", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-doctor-"));
+    try {
+      const logPath = join(directory, "box-doctor.log");
+      const scriptPath = join(directory, "box-doctor.sh");
+      await writeFile(
+        scriptPath,
+        installedScript(provisionScript, DOCTOR_SCRIPT).replaceAll(
+          DOCTOR_LOG,
+          logPath,
+        ),
+      );
+      await chmod(scriptPath, 0o755);
+
+      const child = Bun.spawn([scriptPath, "doctor-bot", "7"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [exitCode, stdout] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+      ]);
+
+      // A Computer with failing checks is still a Computer that answered:
+      // the report is the outcome, and a non-zero exit would make an
+      // unhealthy box indistinguishable from an unreachable one.
+      expect(exitCode).toBe(0);
+      const line = stdout
+        .split("\n")
+        .find((candidate) => candidate.startsWith(DOCTOR_MARKER));
+      expect(line).toBeDefined();
+      const report = JSON.parse(line!.slice(DOCTOR_MARKER.length)) as {
+        schemaVersion: number;
+        generation: number;
+        capturedAt: string;
+        checks: { name: string; status: string; detail: string }[];
+        summary: string;
+      };
+      expect(report.schemaVersion).toBe(1);
+      expect(report.generation).toBe(7);
+      expect(report.capturedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(report.summary).toMatch(/^\d+ checks, \d+ passed, \d+ failed$/);
+      // Every check the plan names, on a box that has none of them: what is
+      // asserted is that each one is *reported*, not that it passes.
+      expect(report.checks.map((check) => check.name)).toEqual([
+        "disk-root",
+        "disk-home",
+        "scratch",
+        "desktop-gateway",
+        "sync-watcher",
+        "tenant-display",
+        "browser",
+        "browser-profile",
+        "sync-signal",
+        "reference-docs",
+        "launcher",
+        "clock",
+        "dns",
+        "sprite-hold",
+      ]);
+      for (const check of report.checks) {
+        expect(["pass", "fail"]).toContain(check.status);
+        expect(check.detail.length).toBeGreaterThan(0);
+      }
+
+      const log = await readFile(logPath, "utf8");
+      for (const check of report.checks) {
+        expect(log).toContain(
+          `[box-doctor] ${check.status === "pass" ? "PASS" : "FAIL"} ${check.name}: ${check.detail}`,
+        );
+      }
+      expect(log).toContain(`[box-doctor] SUMMARY ${report.summary}`);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("reports the scratch, the launcher, and the reference version it expects", () => {
+    expect(boxDoctorScript).toContain(SCRATCH_ROOT);
+    expect(boxDoctorScript).toContain(CHROME_LAUNCHER);
+    // The browser is Playwright's own build behind a stable symlink, and the
+    // Sprite hold is the thing that must *not* still be held once
+    // provisioning is done.
+    expect(boxDoctorScript).toContain(CHROMIUM_PATH);
+    expect(boxDoctorScript).toContain(SPRITE_API_SOCKET);
+    expect(boxDoctorScript).toContain(PROVISION_TASK);
+    expect(boxDoctorScript).toContain(REFERENCE_DOCS_VERSION);
+    for (const command of COMPUTER_GUI_SHELL_COMMANDS) {
+      expect(boxDoctorScript).toContain(`${SHIMS_ROOT}/${command}`);
+    }
+  });
+});
+
+describe("the shipped reference set", () => {
+  test("covers the four documents a Bot debugs its Computer with", () => {
+    expect(REFERENCE_DOCS.map((document) => document.name)).toEqual([
+      "README.md",
+      "layout.md",
+      "browser.md",
+      "debugging-the-box.md",
+    ]);
+  });
+
+  test("says once, in layout.md, that the shared scratch is not durable", () => {
+    const layout = REFERENCE_DOCS.find(
+      (document) => document.name === "layout.md",
+    );
+    expect(layout?.content).toContain(SCRATCH_ROOT);
+    expect(layout?.content).toContain("not** a durable root");
+  });
+});
+
+describe("refreshing an adopted Computer", () => {
+  test("carries the files a running Computer can safely gain", () => {
+    const paths = COMPUTER_REFRESH_FILES.map((file) => file.path);
+    expect(paths).toContain(DOCTOR_SCRIPT);
+    expect(paths).toContain(CHROME_LAUNCHER);
+    expect(paths).toContain(`${REFERENCE_ROOT}/.version`);
+    for (const command of COMPUTER_GUI_SHELL_COMMANDS) {
+      expect(paths).toContain(`${SHIMS_ROOT}/${command}`);
+    }
+    for (const document of REFERENCE_DOCS) {
+      expect(paths).toContain(`${REFERENCE_ROOT}/${document.name}`);
+    }
+  });
+
+  test("carries no file a running process may be reading", () => {
+    // `start-desktop.sh` and `control.sh` may be open in a live process, and
+    // the filesystem API writes in place. Those change with a reprovisioning.
+    const paths = COMPUTER_REFRESH_FILES.map((file) => file.path);
+    expect(paths).not.toContain(CONTROL_SCRIPT);
+    expect(paths).not.toContain(ENSURE_AGENT_SCRIPT);
+    expect(paths).not.toContain(`${RUNTIME_ROOT}/start-desktop.sh`);
+  });
+
+  test("every refreshed file is one the provisioning script also installs", () => {
+    const provisioned = new Set(
+      COMPUTER_RUNTIME_FILES.map((file) => file.path),
+    );
+    for (const file of COMPUTER_REFRESH_FILES) {
+      if (file.path.startsWith(REFERENCE_ROOT)) continue;
+      expect(provisioned.has(file.path), file.path).toBe(true);
+      expect(provisionScript).toContain(installFile(file.path, file.content));
+    }
+  });
+
+  test("the fingerprint moves when any refreshed byte does", () => {
+    expect(COMPUTER_REFRESH_FINGERPRINT).toMatch(/^[0-9a-f]{8}$/);
+    expect(chromeLauncherScript).toContain(CHROME_LAUNCHER.split("/").at(-1)!);
   });
 });

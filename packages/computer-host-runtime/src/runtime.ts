@@ -30,6 +30,40 @@ export const DATA_ROOT = `${HOME_ROOT}/agent-data`;
 export const RUNTIME_ROOT = `${HOME_ROOT}/.frockbot`;
 export const BOTS_ROOT = `${RUNTIME_ROOT}/bots`;
 export const WORKSPACES_ROOT = "/workspaces";
+/**
+ * The shared scratch every Bot of one User can reach, and the one directory on
+ * the Computer that is deliberately **not** durable.
+ *
+ * GrokBot's fourteen agents share `/workspace` and make it their default cwd.
+ * FrockBot keeps the per-Bot workspace private (`/workspaces/<botKey>`) and
+ * adds this beside it, because a hand-off between two of a User's Bots needs
+ * somewhere to put a file that is not either Bot's private directory.
+ *
+ * It is absent from the Computer provider's Workspace layout on purpose. "The
+ * Workspace is durable User and Bot state ... everything else on the Computer
+ * may be lost": nothing here reaches object storage, so it survives a
+ * hibernation and a cold start on the Sprite's own disk and is lost on an
+ * image rebuild, a Computer reset, or a host migration. Said once here, once
+ * in `layout.md`, once in the `computer_exec` description, and reported by
+ * box-doctor as the first thing to prune under disk pressure.
+ */
+export const SCRATCH_ROOT = "/workspace";
+/** The environment variable a tenant finds the shared scratch under. */
+export const SCRATCH_ENV = "FROCKBOT_SCRATCH";
+/** Where the launcher and the sanctioned-surface shims are installed. */
+export const BIN_ROOT = `${HOME_ROOT}/bin`;
+/**
+ * Where the sanctioned-surface shims live.
+ *
+ * A directory of their own rather than `bin`, because `bin` holds real
+ * binaries — the browser launcher, and the browser itself — and a refusal
+ * named `chromium` sitting where the browser is expected would be a Computer
+ * that cannot start its own desktop. This directory leads a tenant's `PATH`;
+ * `bin` follows it.
+ */
+export const SHIMS_ROOT = `${RUNTIME_ROOT}/shims`;
+/** The shipped reference documents a Bot reads to debug its own Computer. */
+export const REFERENCE_ROOT = `${HOME_ROOT}/reference`;
 export const CONTROL_SCRIPT = `${RUNTIME_ROOT}/control.sh`;
 export const BOUNDED_LOG_SCRIPT = `${RUNTIME_ROOT}/bounded-log.sh`;
 /** Bytes kept from the head of a background process's log. */
@@ -129,6 +163,141 @@ export const NO_SLOTS_EXIT = 75;
 /** The same refusal, on stdout, for a transport that swallows the exit code. */
 export const NO_SLOTS_MARKER = "__FROCKBOT_NO_SLOTS__";
 
+/**
+ * The one variable that separates a sanctioned GUI call from a shell-driven
+ * one.
+ *
+ * The shims below refuse unless it is set, and the Computer's own scripts —
+ * the desktop starter, the launcher, the screenshot exec — set it. It is
+ * emphatically not a security control: a Bot's shell can export it in one
+ * word, and the Computer is the User's trust boundary anyway. It exists so
+ * the sanctioned path stays open while the accidental one closes with an
+ * explanation.
+ */
+export const SANCTIONED_SURFACE_ENV = "FROCKBOT_SANCTIONED_SURFACE";
+
+/**
+ * The commands a Bot never runs itself, because a sanctioned tool does the
+ * same job better.
+ *
+ * GrokBot's box ships `box-chrome` and has no `xdotool` at all: "the GUI is
+ * never driven from the shell". FrockBot states the same policy in two
+ * layers — a refusal at the `computer_exec` seam and a PATH shim on the
+ * Computer — and calls it policy rather than a boundary in both places.
+ */
+export const COMPUTER_GUI_SHELL_COMMANDS = [
+  "chromium",
+  "chromium-browser",
+  "chrome",
+  "google-chrome",
+  "xdotool",
+  "wmctrl",
+  "xdpyinfo",
+  "scrot",
+  "import",
+  "x11vnc",
+  "Xvfb",
+] as const;
+
+/** The refusal both layers print, naming the surface that does the job. */
+export function computerGuiRefusalV1(command: string): string {
+  return [
+    `"${command}" is not run directly on this Computer: its GUI is never driven from the shell.`,
+    "Use computer_browser to drive the browser, computer_screenshot to see the screen,",
+    `and ${CHROME_LAUNCHER} to launch a browser with the Computer's own flags.`,
+  ].join(" ");
+}
+
+/**
+ * The command a shell string invokes, when that command is one of the GUI
+ * commands above.
+ *
+ * A regex over a shell string, and honestly labelled as one: it reads command
+ * positions — the start of the string, and whatever follows `;`, `&&`, `||`,
+ * `|`, a newline, or a subshell — past any leading environment assignments,
+ * `sudo`, or `env`. It is defeatable by anyone who wants to defeat it, which
+ * is why the policy is stated in the refusal rather than relied upon.
+ */
+export function shellGuiCommandV1(command: string): string | undefined {
+  const names = COMPUTER_GUI_SHELL_COMMANDS.join("|");
+  const pattern = new RegExp(
+    String.raw`(?:^|[;&|(\n]|\$\()\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;|&]*\s+)*(?:sudo\s+|env\s+)?(?:[^\s;|&'"]*/)?(${names})(?=$|[\s;|&)'"])`,
+  );
+  const match = pattern.exec(command);
+  return match?.[1];
+}
+
+/** The browser flags the Computer runs chromium under, in one place. */
+export const CHROMIUM_FLAGS: readonly string[] = [
+  "--no-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-gpu",
+  `--user-data-dir=${HOME_ROOT}/chrome-profile`,
+  "--remote-debugging-address=127.0.0.1",
+  "--start-maximized",
+];
+
+export const CHROME_LAUNCHER = `${BIN_ROOT}/frockbot-chrome`;
+
+/**
+ * The single place the Computer's chromium flags live (parity row 33).
+ *
+ * It takes a Bot key, reads that tenant's slot, and derives the display and
+ * the CDP port from it — the same arithmetic the desktop starter does, done
+ * once. `start-desktop.sh` calls it, and so may a human debugging the box;
+ * nothing else needs to know the flag set exists.
+ */
+export const chromeLauncherScript = `#!/usr/bin/env bash
+set -eu
+KEY="\${1:-\${FROCKBOT_BOT_KEY:-}}"
+if [ -z "$KEY" ]; then
+  echo "frockbot-chrome needs a Bot key: frockbot-chrome <botKey> [chromium args…]" >&2
+  exit 64
+fi
+shift || true
+SLOT=$(cat ${BOTS_ROOT}/"$KEY"/slot 2>/dev/null || echo "")
+if [ -z "$SLOT" ]; then
+  echo "Bot \\"$KEY\\" has no desktop slot on this Computer" >&2
+  exit 69
+fi
+export DISPLAY=":$((100 + SLOT))"
+export ${SANCTIONED_SURFACE_ENV}=1
+if [ ! -x ${CHROMIUM_PATH} ]; then
+  echo "no browser is installed at ${CHROMIUM_PATH}; the Computer installs one when it is provisioned" >&2
+  exit 69
+fi
+# By absolute path, not by name: the browser is Playwright's own build behind a
+# stable symlink, and reaching it through PATH would go past the shim that
+# covers the name chromium.
+exec ${CHROMIUM_PATH} ${CHROMIUM_FLAGS.join(" ")} --remote-debugging-port="$((9222 + SLOT))" "$@"
+`;
+
+/**
+ * One PATH shim: the same refusal the tool seam gives, on the Computer.
+ *
+ * With the sanctioned variable set it steps out of the way — it drops its own
+ * directory from `PATH` and execs the real binary — so the Computer's own
+ * scripts keep working while a shell that reached for `xdotool` by hand is
+ * told what to use instead. Exit 64 is `EX_USAGE`: the command was wrong, not
+ * the Computer.
+ */
+export function guiShimScript(command: string): string {
+  return `#!/usr/bin/env bash
+if [ "\${${SANCTIONED_SURFACE_ENV}:-}" = 1 ]; then
+  NEXT=""
+  IFS=: read -ra PARTS <<< "$PATH"
+  for PART in "\${PARTS[@]}"; do
+    [ "$PART" = ${SHIMS_ROOT} ] && continue
+    NEXT="\${NEXT:+$NEXT:}$PART"
+  done
+  export PATH="$NEXT"
+  exec ${command} "$@"
+fi
+echo ${shellQuote(computerGuiRefusalV1(command))} >&2
+exit 64
+`;
+}
+
 export const startDesktopScript = `#!/usr/bin/env bash
 set -eu
 KEY="$1"
@@ -137,8 +306,10 @@ BOT="$ROOT/bots/$KEY"
 SLOT=$(cat "$BOT/slot")
 DISPLAY_NUMBER=$((100 + SLOT))
 VNC_PORT=$((5900 + SLOT))
-CDP_PORT=$((9222 + SLOT))
 export DISPLAY=:$DISPLAY_NUMBER
+# The desktop stack *is* the sanctioned surface, so the shims step aside for
+# it. Everything a Bot's own shell runs arrives without this set.
+export ${SANCTIONED_SURFACE_ENV}=1
 cleanup() {
   jobs -pr | xargs -r kill >/dev/null 2>&1 || true
 }
@@ -147,7 +318,7 @@ rm -f "/tmp/.X$DISPLAY_NUMBER-lock" "/tmp/.X11-unix/X$DISPLAY_NUMBER"
 Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp &
 for _ in $(seq 1 100); do xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break; sleep 0.1; done
 fluxbox >"$BOT/fluxbox.log" 2>&1 &
-${CHROMIUM_PATH} --no-sandbox --disable-dev-shm-usage --disable-gpu --user-data-dir="${HOME_ROOT}/chrome-profile" --remote-debugging-address=127.0.0.1 --remote-debugging-port="$CDP_PORT" --start-maximized about:blank >"$BOT/chromium.log" 2>&1 &
+${CHROME_LAUNCHER} "$KEY" about:blank >"$BOT/chromium.log" 2>&1 &
 x11vnc -display "$DISPLAY" -forever -shared -rfbport "$VNC_PORT" -passwd "$(cat "$BOT/vnc-password")" >"$BOT/x11vnc.log" 2>&1 &
 VNC_PID=$!
 wait "$VNC_PID"
@@ -383,10 +554,224 @@ while true; do
 done
 `;
 
+/** The port the noVNC gateway serves on, and the port box-doctor probes. */
+export const DESKTOP_GATEWAY_PORT = 6080;
+
 export const gatewayScript = `#!/usr/bin/env bash
 set -eu
-exec websockify --web=/usr/share/novnc --token-plugin TokenFile --token-source=${RUNTIME_ROOT}/tokens 6080
+exec websockify --web=/usr/share/novnc --token-plugin TokenFile --token-source=${RUNTIME_ROOT}/tokens ${DESKTOP_GATEWAY_PORT}
 `;
+
+/** Where box-doctor is installed, and the log a human reads it back from. */
+export const DOCTOR_SCRIPT = `${RUNTIME_ROOT}/box-doctor.sh`;
+/** GrokBot's path, kept: `/tmp/box-doctor.log` (`grokbot-computer.md:396`). */
+export const DOCTOR_LOG = "/tmp/box-doctor.log";
+/** Prefixes the one line of the run that is the machine-readable report. */
+export const DOCTOR_MARKER = "__FROCKBOT_DOCTOR__";
+/** The report schema box-doctor prints. Bumped, never migrated. */
+export const DOCTOR_REPORT_SCHEMA_VERSION = 1;
+/** Log lines kept in `/tmp/box-doctor.log` before the oldest are dropped. */
+export const DOCTOR_LOG_MAX_LINES = 500;
+/**
+ * The earliest wall clock a healthy Computer can report: 2026-09-01.
+ *
+ * A container whose clock has reset reads as some point in 1970, and every
+ * lease, every generation timestamp, and every `capturedAt` on it is then
+ * wrong in a way nothing downstream can detect. There is nothing on the box to
+ * check a clock against, so the check is a floor rather than a comparison.
+ */
+export const CLOCK_FLOOR_EPOCH = 1_756_684_800;
+
+/**
+ * The version of the shipped reference set (parity row 27).
+ *
+ * It exists because provisioning short-circuits: a Computer that has been
+ * provisioned is adopted, and the provisioning document never runs on it
+ * again, so a here-doc README written at provisioning time could never be
+ * corrected. The version is compared on every adoption instead, and the whole
+ * set is rewritten when it moves. Bump it whenever a document below changes.
+ */
+export const REFERENCE_DOCS_VERSION = "2026-09-01.1";
+
+/**
+ * What a Bot reads to debug its own Computer.
+ *
+ * GrokBot ships `reference/{debugging-the-box.md, app-ui.md}` for exactly this
+ * (`grokbot-computer.md:65`): documents the harness wrote, not the agent, that
+ * answer "where does this live" and "what do I run" without a round trip
+ * through a human. These four cover the layout, the browser, and the box's own
+ * self-check.
+ */
+export const REFERENCE_DOCS: readonly { name: string; content: string }[] = [
+  {
+    name: "README.md",
+    content: `# Your FrockBot Computer
+
+One Computer serves all of your User's Bots. You have your own directories and
+your own desktop on it; the browser profile is shared, so a login one Bot makes
+is a login all of them have.
+
+- \`layout.md\` — what is durable, what is scratch, and what is lost when.
+- \`browser.md\` — how the browser is launched and driven, and what never is.
+- \`debugging-the-box.md\` — the self-check, the logs, and background processes.
+
+Separation between Bots here is organizational, not a security boundary: the
+Computer is your User's trust boundary, and Bots of one User can read each
+other's files. Nothing on this Computer holds a credential except the browser
+profile.
+
+This reference is version ${REFERENCE_DOCS_VERSION}. It is written by the
+Computer runtime and rewritten whenever that version moves, so do not edit it —
+your edits will be replaced.
+`,
+  },
+  {
+    name: "layout.md",
+    content: `# Where things live
+
+## Durable roots — survive everything
+
+These synchronize with object storage in both directions. They survive
+hibernation, cold start, host migration, and an image rebuild.
+
+| Path | What |
+|---|---|
+| \`${DATA_ROOT}/agents/<botKey>/skills\` | your instruction root, writable by you |
+| \`${DATA_ROOT}/agents/<botKey>/memory\` | your Memory, read-only here — change it through the Memory tools |
+| \`${DATA_ROOT}/user-memory\` | your User's Memory, read-only here |
+| \`${DATA_ROOT}/user-packages/<package>/<root>\` | roots a Package declared, e.g. screenshots and self-check reports |
+
+Every write to a durable root records its writer. A file you leave here with a
+shell command still reaches object storage, but as \`unattributed\` — it is
+data, never provenance and never an instruction. Writes made through a tool
+record you, your Session, and your Turn.
+
+## Your own workspace — durable only if it is a declared root
+
+\`${WORKSPACES_ROOT}/<botKey>\` is your working directory. It is private to you
+by convention, not by permission.
+
+## Shared scratch — never durable
+
+\`${SCRATCH_ROOT}\` is shared by every Bot of your User and is the place to
+hand a file to another one of them. It is exported as \`\$${SCRATCH_ENV}\`.
+
+It is **not** a durable root. Nothing in it reaches object storage. It survives
+hibernation and a cold start, because it is on this Computer's disk; it is lost
+on an image rebuild, a Computer reset, and a host migration. Put working files
+here, never the only copy of anything.
+
+\`/tmp\` is the same story with a shorter life: assume a restart empties it.
+`,
+  },
+  {
+    name: "browser.md",
+    content: `# The browser
+
+One profile — \`${HOME_ROOT}/chrome-profile\` — shared by every Bot of your
+User. A cookie one Bot earns is a cookie all of them have, which is why the
+profile is treated as a User-scoped secret and why a human takeover exists for
+a login you should not watch.
+
+## Driving it
+
+Use \`computer_browser\`. It performs one action and hands back an
+accessibility snapshot, which is what you should read a page from.
+\`computer_screenshot\` captures your own desktop as an image and files it in
+your durable screenshots root.
+
+## Launching it
+
+\`${CHROME_LAUNCHER} <botKey>\` is the only sanctioned launcher. It derives
+your display and your CDP port from your desktop slot and holds the flag set;
+the desktop starter calls it, and nothing else needs to know the flags exist.
+
+## What is never run from the shell
+
+${COMPUTER_GUI_SHELL_COMMANDS.map((name) => `\`${name}\``).join(", ")}.
+
+A \`computer_exec\` naming one of them is refused, and each has a shim in
+\`${SHIMS_ROOT}\` — which leads your \`PATH\` — that prints the same refusal
+and exits 64. Neither is a
+security boundary — a shell can defeat both in one line, and this Computer is
+your User's trust boundary anyway. They exist so the sanctioned path is the
+easy one: a GUI driven from a shell leaves no record of who did what, and the
+tools do.
+`,
+  },
+  {
+    name: "debugging-the-box.md",
+    content: `# Debugging this Computer
+
+## The self-check
+
+\`computer_doctor\` runs \`${DOCTOR_SCRIPT}\` and hands back a report: disk on
+\`/\` and \`${HOME_ROOT}\`, the size of \`${SCRATCH_ROOT}\`, the viewer
+gateway, the durable-root watcher, your display and CDP port, the browser and
+its profile, the sync signal and any conflicting generations, this reference
+set's version, the launcher and its shims, the clock, DNS, and whether a
+provisioning hold is still keeping this Computer awake.
+
+Every run also appends to \`${DOCTOR_LOG}\`:
+
+    [box-doctor] PASS <name>: <detail>
+    [box-doctor] FAIL <name>: <detail>
+    [box-doctor] SUMMARY <n> checks, <n> passed, <n> failed
+
+The log keeps the last ${DOCTOR_LOG_MAX_LINES} lines, so it is a history of the
+Computer rather than of one run.
+
+## When a check fails
+
+- **disk** — prune \`${SCRATCH_ROOT}\` first: nothing in it is durable.
+- **sync-signal with conflicts** — a write landed on a generation its writer
+  had not seen. The conflicting generation is preserved, never merged; say so
+  rather than resolving it silently.
+- **tenant-display** — your desktop is gone. Ask for it again; slots are
+  allocated on demand and a Computer with all hundred in use will say so.
+- **reference-docs** — this set is stale and refreshes when the Computer is
+  next opened. Nothing you can do on the box fixes it.
+- **browser** — the browser build is missing. It is installed by provisioning,
+  not by a package manager, so there is nothing to apt-get; say so.
+- **sprite-hold** — a provisioning hold is still registered, so this Computer
+  cannot pause and is being paid for while idle. Worth reporting.
+
+## Background work
+
+\`computer_exec{background:true}\` returns a \`processId\` and keeps running
+after your Turn ends. Check it with \`computer_process_check\`, read it with
+\`computer_process_logs\`, end it with \`computer_process_stop\`. Do not poll
+it in a loop.
+
+Nothing keeps this Computer awake for a background process. If it hibernates
+first, the process is gone and its outcome is reported as \`unknown\` — never
+as running. Its log keeps its first and last 128 KiB; the middle of a long run
+is dropped.
+
+## Logs on the box
+
+\`${DOCTOR_LOG}\`, and per-Bot under \`${BOTS_ROOT}/<botKey>\`:
+\`chromium.log\`, \`fluxbox.log\`, \`x11vnc.log\`, and \`processes/<id>/log.*\`.
+Provisioning's own log is \`${RUNTIME_ROOT}/provision/provision.log\`.
+`,
+  },
+];
+
+/**
+ * Rewrites the shipped reference set when its version has moved.
+ *
+ * Guarded by the version file and by nothing else, so it is safe to run on
+ * every adoption: an up-to-date Computer costs one `cat`. The write is a
+ * rename, so a Bot reading a document never sees half of one.
+ */
+export const referenceInstallScript = `mkdir -p ${REFERENCE_ROOT}
+if [ "$(cat ${REFERENCE_ROOT}/.version 2>/dev/null || true)" != ${shellQuote(REFERENCE_DOCS_VERSION)} ]; then
+${REFERENCE_DOCS.map(
+  (document) =>
+    `  ${installFileAtomic(`${REFERENCE_ROOT}/${document.name}`, document.content)}`,
+).join("\n")}
+  printf '%s\\n' ${shellQuote(REFERENCE_DOCS_VERSION)} > ${REFERENCE_ROOT}/.version
+fi`;
 
 export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -398,6 +783,18 @@ export function base64(value: string): string {
 
 export function installFile(path: string, content: string): string {
   return `printf %s ${shellQuote(base64(content))} | base64 -d > ${path}`;
+}
+
+/**
+ * The same install, through a rename.
+ *
+ * `>` truncates in place, which is fine during provisioning — nothing is
+ * reading these files yet — and wrong on a live Computer, where a script being
+ * refreshed may be the script a running process is reading. A rename swaps the
+ * name and leaves the old inode to whoever holds it.
+ */
+export function installFileAtomic(path: string, content: string): string {
+  return `${installFile(`${path}.tmp`, content)} && mv ${path}.tmp ${path}`;
 }
 
 /**
@@ -484,6 +881,175 @@ export const provisionPathPreamble = `if [ -r /etc/profile.d/languages_paths ]; 
 fi`;
 
 /**
+ * The Computer's self-check (parity row 27).
+ *
+ * GrokBot runs `box-doctor` at startup and on demand and leaves
+ * `[box-doctor] PASS|FAIL <name>: <detail>` lines plus a `SUMMARY` in
+ * `/tmp/box-doctor.log`; both are kept here, because the log is what a human
+ * reads over a Computer's life and the JSON is what a tool returns for one
+ * run. It is a provisioned script rather than a host `service`: a service
+ * answers `running|unavailable` and is reattached after a pause, and neither
+ * is what a report is.
+ *
+ * It is read-only by construction — every check reads, none repairs — which is
+ * why `computer_doctor` is exempt from recording durable intent.
+ *
+ * Arguments: the tenant's Bot key, and the Computer's provisioning generation
+ * as the host last reported it. Both are optional; a report with generation 0
+ * is a report nobody told which Computer it was on.
+ */
+export const boxDoctorScript = `#!/usr/bin/env bash
+set -u
+KEY="\${1:-\${FROCKBOT_BOT_KEY:-}}"
+GENERATION="\${2:-0}"
+case "$GENERATION" in (''|*[!0-9]*) GENERATION=0;; esac
+LOG=${DOCTOR_LOG}
+NOW=$(date -u +%s)
+CAPTURED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+CHECKS=""
+PASSED=0
+FAILED=0
+touch "$LOG" 2>/dev/null || true
+# The log outlives every run on it, so it is trimmed at the start of one
+# rather than left to grow for the life of the Computer.
+if [ -s "$LOG" ]; then
+  KEPT=$(tail -n ${DOCTOR_LOG_MAX_LINES} "$LOG" 2>/dev/null || true)
+  printf '%s\\n' "$KEPT" > "$LOG" 2>/dev/null || true
+fi
+record() {
+  NAME="$1"
+  STATUS="$2"
+  DETAIL=$(printf '%s' "$3" | tr -d '"\\\\' | tr '\\n\\t' '  ')
+  if [ "$STATUS" = pass ]; then
+    PASSED=$((PASSED + 1))
+    LABEL=PASS
+  else
+    FAILED=$((FAILED + 1))
+    LABEL=FAIL
+  fi
+  printf '[box-doctor] %s %s: %s\\n' "$LABEL" "$NAME" "$DETAIL" >> "$LOG" 2>/dev/null || true
+  CHECKS="\${CHECKS:+$CHECKS,}$(printf '{"name":"%s","status":"%s","detail":"%s"}' "$NAME" "$STATUS" "$DETAIL")"
+}
+disk() {
+  LINE=$(df -P "$2" 2>/dev/null | tail -n 1 | tr -s ' ')
+  if [ -z "$LINE" ]; then
+    record "$1" fail "no filesystem is mounted at $2"
+    return
+  fi
+  USED=$(printf '%s' "$LINE" | cut -d' ' -f5 | tr -d '%')
+  FREE=$(printf '%s' "$LINE" | cut -d' ' -f4)
+  case "$USED" in (''|*[!0-9]*) record "$1" fail "df reported \\"$LINE\\" for $2"; return;; esac
+  if [ "$USED" -ge 95 ]; then
+    record "$1" fail "$2 is $USED% full, $FREE KiB free"
+  else
+    record "$1" pass "$2 is $USED% full, $FREE KiB free"
+  fi
+}
+disk disk-root /
+disk disk-home ${HOME_ROOT}
+# The shared scratch, and the first thing to prune when a disk check fails:
+# nothing in it is durable, so nothing in it is lost that was not already
+# expendable.
+if [ ! -d ${SCRATCH_ROOT} ]; then
+  record scratch fail "${SCRATCH_ROOT} is missing; the shared scratch is created at provisioning"
+elif [ ! -w ${SCRATCH_ROOT} ]; then
+  record scratch fail "${SCRATCH_ROOT} is not writable by $(id -un)"
+else
+  record scratch pass "${SCRATCH_ROOT} holds $(du -sxm ${SCRATCH_ROOT} 2>/dev/null | cut -f1) MiB of shared scratch, none of it durable"
+fi
+if (exec 3<>/dev/tcp/127.0.0.1/${DESKTOP_GATEWAY_PORT}) 2>/dev/null; then
+  record desktop-gateway pass "the viewer gateway is listening on ${DESKTOP_GATEWAY_PORT}"
+else
+  record desktop-gateway fail "nothing is listening on ${DESKTOP_GATEWAY_PORT}; no desktop can be viewed"
+fi
+STAMP=${RUNTIME_ROOT}/sync/.stamp
+if pgrep -f watch-workspace.sh >/dev/null 2>&1; then
+  if [ -f "$STAMP" ]; then
+    record sync-watcher pass "the durable-root watcher is running; its stamp is $((NOW - $(stat -c %Y "$STAMP"))) s old"
+  else
+    record sync-watcher fail "the durable-root watcher is running but has written no stamp at $STAMP"
+  fi
+else
+  record sync-watcher fail "no durable-root watcher is running; on-Computer writes will not signal a sync"
+fi
+SLOT=""
+if [ -n "$KEY" ] && [ -s ${BOTS_ROOT}/"$KEY"/slot ]; then SLOT=$(cat ${BOTS_ROOT}/"$KEY"/slot); fi
+if [ -z "$KEY" ]; then
+  record tenant-display pass "no Bot key was named, so no desktop was checked"
+elif [ -z "$SLOT" ]; then
+  record tenant-display pass "Bot \\"$KEY\\" holds no desktop slot; its exec and file surfaces need no screen"
+elif (exec 3<>/dev/tcp/127.0.0.1/$((9222 + SLOT))) 2>/dev/null; then
+  record tenant-display pass "Bot \\"$KEY\\" is on display :$((100 + SLOT)) with CDP on $((9222 + SLOT))"
+elif [ ! -e "/tmp/.X$((100 + SLOT))-lock" ]; then
+  # A slot is reserved at attach; the desktop starts when somebody asks to see
+  # it. An exec-only tenant never holds an X lock, so this is a healthy state
+  # and not a missing screen.
+  record tenant-display pass "Bot \\"$KEY\\" holds slot $SLOT with no desktop running, which its exec and file surfaces do not need"
+else
+  record tenant-display fail "Bot \\"$KEY\\" has an X server on display :$((100 + SLOT)) but nothing answers CDP on $((9222 + SLOT)); its desktop is only half up"
+fi
+if [ -x ${CHROMIUM_PATH} ]; then
+  record browser pass "the browser is installed at ${CHROMIUM_PATH} ($(readlink -f ${CHROMIUM_PATH} 2>/dev/null || echo unresolved))"
+else
+  record browser fail "no browser at ${CHROMIUM_PATH}; provisioning installs one, and no desktop can start without it"
+fi
+PROFILE=${HOME_ROOT}/chrome-profile
+if [ -d "$PROFILE" ] && [ -w "$PROFILE" ]; then
+  record browser-profile pass "the shared browser profile at $PROFILE is writable"
+else
+  record browser-profile fail "the shared browser profile at $PROFILE is missing or not writable"
+fi
+SIGNAL=${RUNTIME_ROOT}/sync/signal
+CONFLICTS=$(find ${DATA_ROOT} -path '*/.frockbot-sync/conflicts/*' -type f 2>/dev/null | wc -l | tr -d ' ')
+if [ ! -f "$SIGNAL" ]; then
+  record sync-signal fail "no change signal at $SIGNAL; $CONFLICTS conflicting generation(s) held"
+elif [ "$CONFLICTS" -gt 0 ]; then
+  record sync-signal fail "$CONFLICTS conflicting generation(s) are held under .frockbot-sync/conflicts and need a human"
+else
+  record sync-signal pass "signal $(cat "$SIGNAL" 2>/dev/null), last moved $((NOW - $(stat -c %Y "$SIGNAL"))) s ago, no conflicts"
+fi
+INSTALLED=$(cat ${REFERENCE_ROOT}/.version 2>/dev/null || echo none)
+if [ "$INSTALLED" = "${REFERENCE_DOCS_VERSION}" ]; then
+  record reference-docs pass "${REFERENCE_ROOT} holds version ${REFERENCE_DOCS_VERSION}"
+else
+  record reference-docs fail "${REFERENCE_ROOT} holds version $INSTALLED, not ${REFERENCE_DOCS_VERSION}; it refreshes when the Computer is next opened"
+fi
+MISSING=""
+for TOOL in ${CHROME_LAUNCHER} ${COMPUTER_GUI_SHELL_COMMANDS.map((name) => `${SHIMS_ROOT}/${name}`).join(" ")}; do
+  [ -x "$TOOL" ] || MISSING="\${MISSING:+$MISSING }$TOOL"
+done
+if [ -z "$MISSING" ]; then
+  record launcher pass "the launcher is installed in ${BIN_ROOT} and ${COMPUTER_GUI_SHELL_COMMANDS.length} shims in ${SHIMS_ROOT}"
+else
+  record launcher fail "not executable: $MISSING"
+fi
+if [ "$NOW" -ge ${CLOCK_FLOOR_EPOCH} ]; then
+  record clock pass "the clock reads $CAPTURED_AT"
+else
+  record clock fail "the clock reads $CAPTURED_AT, before this Computer runtime was written"
+fi
+if getent hosts api.fly.io >/dev/null 2>&1; then
+  record dns pass "api.fly.io resolves"
+else
+  record dns fail "api.fly.io does not resolve; nothing on this Computer can reach the network by name"
+fi
+# The provisioner holds this Sprite awake with a Tasks-API task, because the
+# platform is otherwise free to pause a VM under a detached \`apt-get\`. The
+# hold is released on the provisioner's EXIT; one still registered afterwards
+# is a Sprite that cannot pause and is billed awake for nothing.
+if [ ! -S ${SPRITE_API_SOCKET} ]; then
+  record sprite-hold pass "this Computer exposes no Sprite task API, so it holds nothing awake"
+elif curl -sS --max-time 5 --unix-socket ${SPRITE_API_SOCKET} http://sprite/v1/tasks 2>/dev/null | grep -q ${PROVISION_TASK}; then
+  record sprite-hold fail "the ${PROVISION_TASK} hold is still registered; this Sprite cannot pause"
+else
+  record sprite-hold pass "no provisioning hold is registered; this Computer is free to pause"
+fi
+SUMMARY="$((PASSED + FAILED)) checks, $PASSED passed, $FAILED failed"
+printf '[box-doctor] SUMMARY %s\\n' "$SUMMARY" >> "$LOG" 2>/dev/null || true
+printf '${DOCTOR_MARKER}{"schemaVersion":${DOCTOR_REPORT_SCHEMA_VERSION},"generation":%s,"capturedAt":"%s","checks":[%s],"summary":"%s"}\\n' "$GENERATION" "$CAPTURED_AT" "$CHECKS" "$SUMMARY"
+`;
+
+/**
  * The phases of provisioning a Computer, in order.
  *
  * They are declared rather than inlined because they are three things at
@@ -495,14 +1061,26 @@ export const PROVISION_PHASES: readonly {
   name: string;
   label: string;
   body: string;
+  /**
+   * Runs every time, marker or no marker.
+   *
+   * For a phase that is idempotent *and* carries its own reason to run again —
+   * the versioned reference set. A phase without this is done once and skipped
+   * for ever, which is what makes a half-provisioned Computer resumable.
+   */
+  always?: boolean;
 }[] = [
   {
     name: "layout",
     label: "preparing the Computer layout",
-    body: `mkdir -p ${RUNTIME_ROOT} ${RUNTIME_ROOT}/sync ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT}
+    body: `mkdir -p ${RUNTIME_ROOT} ${RUNTIME_ROOT}/sync ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${BIN_ROOT} ${SHIMS_ROOT} ${REFERENCE_ROOT} ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT} ${SCRATCH_ROOT}
 touch ${RUNTIME_ROOT}/tokens
 chmod 700 ${RUNTIME_ROOT}
-chmod 600 ${RUNTIME_ROOT}/tokens`,
+chmod 600 ${RUNTIME_ROOT}/tokens
+# The shared scratch: group-writable and owned by the Computer's user, because
+# every Bot of this User writes here and none of it is durable.
+chmod 0775 ${SCRATCH_ROOT}
+chown box:box ${SCRATCH_ROOT} 2>/dev/null || true`,
   },
   {
     name: "packages",
@@ -529,7 +1107,15 @@ ${installFile(BOUNDED_LOG_SCRIPT, boundedLogScript)}
 ${installFile(`${RUNTIME_ROOT}/browser.mjs`, browserHelper)}
 ${installFile(`${RUNTIME_ROOT}/start-gateway.sh`, gatewayScript)}
 ${installFile(`${RUNTIME_ROOT}/watch-workspace.sh`, syncWatchScript)}
-chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${BOUNDED_LOG_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh`,
+${installFile(DOCTOR_SCRIPT, boxDoctorScript)}
+${installFile(CHROME_LAUNCHER, chromeLauncherScript)}
+${COMPUTER_GUI_SHELL_COMMANDS.map((name) =>
+  installFile(`${SHIMS_ROOT}/${name}`, guiShimScript(name)),
+).join("\n")}
+chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${BOUNDED_LOG_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh
+chmod 755 ${DOCTOR_SCRIPT} ${CHROME_LAUNCHER} ${COMPUTER_GUI_SHELL_COMMANDS.map(
+      (name) => `${SHIMS_ROOT}/${name}`,
+    ).join(" ")}`,
   },
   {
     name: "browser",
@@ -562,14 +1148,11 @@ fi`,
   {
     name: "reference",
     label: "writing the Computer reference",
-    body: `cat > ${HOME_ROOT}/reference/README.md <<'FROCKBOT_REFERENCE_EOF'
-# FrockBot computer
-
-/home/box/agent-data is durable application data. /workspaces contains Bot-private workspaces.
-One Computer serves all of a User's Bots. Each Bot has its own directories
-and desktop; the browser profile at /home/box/chrome-profile is shared by all of them.
-Automations are stored but are not executed unless an automation runtime is installed.
-FROCKBOT_REFERENCE_EOF`,
+    // Version-guarded rather than marker-guarded: a marker would make this
+    // phase run exactly once in a Computer's life, and the whole point of a
+    // versioned reference set is that a later build can correct it.
+    always: true,
+    body: referenceInstallScript,
   },
 ];
 
@@ -645,10 +1228,14 @@ ${PROVISION_PHASES.map(
 NAME=${phase.name}
 LABEL=${shellQuote(phase.label)}
 state running
-if [ ! -f "$MARKERS/${phase.name}" ]; then
+${
+  phase.always
+    ? phase.body
+    : `if [ ! -f "$MARKERS/${phase.name}" ]; then
 ${phase.body}
   touch "$MARKERS/${phase.name}"
-fi`,
+fi`
+}`,
 ).join("\n")}
 INDEX=${PROVISION_PHASES.length}
 NAME=ready
@@ -762,7 +1349,102 @@ export const COMPUTER_RUNTIME_FILES: readonly {
     content: syncWatchScript,
     mode: 0o700,
   },
+  // Read by a Bot's own shell as well as by the provider, so 755 rather than
+  // 700: the runtime root is 700 and the tenant runs as the same user, but
+  // these are the two files a human debugging the box reaches for.
+  { path: DOCTOR_SCRIPT, content: boxDoctorScript, mode: 0o755 },
+  { path: CHROME_LAUNCHER, content: chromeLauncherScript, mode: 0o755 },
+  ...COMPUTER_GUI_SHELL_COMMANDS.map((name) => ({
+    path: `${SHIMS_ROOT}/${name}`,
+    content: guiShimScript(name),
+    mode: 0o755,
+  })),
 ];
+
+/**
+ * The directories an adopted Computer may be missing.
+ *
+ * They are created with the filesystem API, which takes no mode, so a Computer
+ * that gains its shared scratch this way gets the API's default ownership
+ * rather than the `0775 box` a fresh provisioning gives it. That is an
+ * observable failure state rather than a hidden one: box-doctor's `scratch`
+ * check reports a scratch its tenant cannot write, and a reprovisioning fixes
+ * it.
+ */
+export const COMPUTER_REFRESH_DIRECTORIES: readonly string[] = [
+  BIN_ROOT,
+  SHIMS_ROOT,
+  REFERENCE_ROOT,
+  SCRATCH_ROOT,
+];
+
+/**
+ * Everything a Computer provisioned by an earlier build is missing, and that
+ * can be installed onto a *running* Computer without disturbing it.
+ *
+ * Adoption is the short-circuit that makes a container restart a non-event: a
+ * Sprite with a state file is adopted and its provisioning document never runs
+ * on it again. Without this list, a Computer provisioned last week would never
+ * gain this week's self-check, launcher, shims, or reference documents.
+ *
+ * It is deliberately **not** every runtime file. `start-desktop.sh`,
+ * `control.sh`, and the rest may be open in a running process, and the
+ * filesystem API writes in place — rewriting a script bash is part-way through
+ * reading is how a Computer breaks in a way nobody can reproduce. Those
+ * change with a reprovisioning, as they always have. Everything here is a file
+ * no running process holds.
+ */
+export const COMPUTER_REFRESH_FILES: readonly {
+  path: string;
+  content: string;
+  mode: number;
+}[] = [
+  { path: DOCTOR_SCRIPT, content: boxDoctorScript, mode: 0o755 },
+  { path: CHROME_LAUNCHER, content: chromeLauncherScript, mode: 0o755 },
+  ...COMPUTER_GUI_SHELL_COMMANDS.map((name) => ({
+    path: `${SHIMS_ROOT}/${name}`,
+    content: guiShimScript(name),
+    mode: 0o755,
+  })),
+  ...REFERENCE_DOCS.map((document) => ({
+    path: `${REFERENCE_ROOT}/${document.name}`,
+    content: document.content,
+    mode: 0o644,
+  })),
+  {
+    path: `${REFERENCE_ROOT}/.version`,
+    content: `${REFERENCE_DOCS_VERSION}\n`,
+    mode: 0o644,
+  },
+];
+
+/** Where a Computer records which refresh it last took. */
+export const COMPUTER_REFRESH_STAMP = `${RUNTIME_ROOT}/refresh.version`;
+
+/**
+ * A fingerprint of everything above, so the refresh is a single file read on a
+ * Computer that is already current.
+ *
+ * FNV-1a, and a cache key rather than a security primitive: the only question
+ * it answers is "are the bytes on that Computer the bytes this build ships",
+ * and a caller that guesses wrong reinstalls files it did not need to.
+ * Derived rather than declared, so a runtime file cannot be changed without
+ * the Computers already out there noticing.
+ */
+export const COMPUTER_REFRESH_FINGERPRINT = fnv1aHexV1(
+  COMPUTER_REFRESH_FILES.map(
+    (file) => `${file.path}:${file.mode}:${file.content}`,
+  ).join("\u0000"),
+);
+
+function fnv1aHexV1(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
 
 /** The Sprite name pattern a Computer may take: 3-63 lowercase DNS characters. */
 export const COMPUTER_SPRITE_NAME = /^[a-z][a-z0-9-]{2,62}$/;

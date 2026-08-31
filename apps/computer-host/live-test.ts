@@ -35,10 +35,18 @@ import {
   type ComputerHostOperationV1,
 } from "@frockbot/computer-host-protocol";
 import {
+  COMPUTER_REFRESH_FINGERPRINT,
+  COMPUTER_REFRESH_STAMP,
   computerSpriteNameSourceV1,
   computerSpriteNameV1,
+  DOCTOR_LOG,
+  DOCTOR_MARKER,
+  DOCTOR_SCRIPT,
   PROVISION_PHASES,
+  REFERENCE_DOCS_VERSION,
+  REFERENCE_ROOT,
   RUNTIME_ROOT,
+  SCRATCH_ROOT,
 } from "@frockbot/computer-host-runtime";
 
 Object.defineProperty(globalThis, "WebSocket", { value: WebSocket });
@@ -486,6 +494,104 @@ try {
     "bytes round-trip through the filesystem API",
   );
 
+  // --- the Computer's own self-check --------------------------------------
+  // Before the screenshot section below, deliberately: that section starts an
+  // Xvfb of its own on :100 with no browser behind it, and a bare display is
+  // this test's artifact rather than a state a Computer reaches on its own.
+  //
+  // Everything about `computer_doctor` above this line is proven against a
+  // fake or against the script run on a developer's laptop. What only a
+  // freshly provisioned Sprite can answer is whether the checks pass *there*:
+  // whether provisioning really created `/workspace`, installed the launcher
+  // and its shims, wrote the reference set, and left a viewer gateway
+  // listening. A failing check here is a real defect in the provisioning
+  // document, which is why the PASS set is asserted and not merely the shape.
+  const doctored = decodeComputerHostExecResultV1(
+    await expectOk(
+      await call(COMPUTER_HOST_ROUTES.exec, {
+        kind: "exec",
+        // The tenant this Computer allocated a directory to, taken from the
+        // host's own answer rather than re-derived here.
+        script: `${DOCTOR_SCRIPT} ${opened.directory.split("/").at(-1)} 1`,
+        timeoutMs: 120_000,
+        maxOutputBytes: 64 * 1_024,
+        stream: false,
+      }),
+      "exec box-doctor",
+    ),
+  );
+  const doctorOutput = Buffer.from(doctored.stdoutBase64, "base64").toString();
+  const doctorLine = doctorOutput
+    .split("\n")
+    .find((candidate) => candidate.startsWith(DOCTOR_MARKER));
+  check(
+    doctorLine !== undefined,
+    `box-doctor printed a report — ${doctorOutput.slice(0, 200).replace(/\n/g, " | ")}`,
+  );
+  const doctorReport = JSON.parse(doctorLine!.slice(DOCTOR_MARKER.length)) as {
+    schemaVersion: number;
+    generation: number;
+    checks: { name: string; status: string; detail: string }[];
+    summary: string;
+  };
+  check(
+    doctorReport.schemaVersion === 1 && doctorReport.checks.length >= 10,
+    `its report carries ${doctorReport.checks.length} checks: ${doctorReport.summary}`,
+  );
+  const doctorFailures = doctorReport.checks.filter(
+    (entry) => entry.status === "fail",
+  );
+  check(
+    doctorFailures.length === 0,
+    doctorFailures.length === 0
+      ? `every check passes on a freshly provisioned Computer: ${doctorReport.summary}`
+      : `checks failed: ${doctorFailures
+          .map((entry) => `${entry.name} (${entry.detail})`)
+          .join("; ")}`,
+  );
+  // The log a human reads, in GrokBot's own format and at GrokBot's own path.
+  const doctorLog = Buffer.from(
+    decodeComputerHostFileReadResultV1(
+      await expectOk(
+        await call(COMPUTER_HOST_ROUTES["file/read"], {
+          kind: "file/read",
+          path: DOCTOR_LOG,
+        }),
+        "file/read box-doctor.log",
+      ),
+    ).bytesBase64,
+    "base64",
+  ).toString();
+  check(
+    doctorLog.includes("[box-doctor] PASS ") &&
+      doctorLog.includes(`[box-doctor] SUMMARY ${doctorReport.summary}`),
+    `${DOCTOR_LOG} holds the run's PASS lines and its SUMMARY`,
+  );
+  // The shared scratch, which no durable root covers and which the layout
+  // phase creates: a Bot that cannot write here has no way to hand a file to
+  // another of its User's Bots.
+  const scratch = decodeComputerHostExecResultV1(
+    await expectOk(
+      await call(COMPUTER_HOST_ROUTES.exec, {
+        kind: "exec",
+        script: [
+          `printf 'writable=%s\\n' "$(touch ${SCRATCH_ROOT}/live-${runId} && echo 1 || echo 0)"`,
+          `rm -f ${SCRATCH_ROOT}/live-${runId}`,
+        ].join("\n"),
+        timeoutMs: 30_000,
+        maxOutputBytes: 4_096,
+        stream: false,
+      }),
+      "exec scratch",
+    ),
+  );
+  check(
+    Buffer.from(scratch.stdoutBase64, "base64")
+      .toString()
+      .includes("writable=1"),
+    `${SCRATCH_ROOT} is shared scratch this Computer's tenants can write`,
+  );
+
   // --- a real screenshot on a real Xvfb ------------------------------------
   // Everything else about `computer_screenshot` is proven against a fake. Two
   // things only a Sprite can answer: whether provisioning's apt list really
@@ -608,6 +714,28 @@ try {
   // The container is restarted, so its in-memory record of this Computer is
   // gone. A fresh SpritesClient inside it must re-derive everything from the
   // Sprite: same Sprite, same generation, same file, no reprovisioning.
+  // The reference set is versioned precisely because provisioning
+  // short-circuits: a Sprite with a state file is adopted and its provisioning
+  // document never runs again. Deleting the version stamps here is what makes
+  // the next `open` an honest test of the refresh — if it did not run, the
+  // documents would still be missing after the restart below.
+  await expectOk(
+    await call(COMPUTER_HOST_ROUTES["file/delete"], {
+      kind: "file/delete",
+      path: `${REFERENCE_ROOT}/.version`,
+      recursive: false,
+    }),
+    "file/delete reference version",
+  );
+  await expectOk(
+    await call(COMPUTER_HOST_ROUTES["file/delete"], {
+      kind: "file/delete",
+      path: COMPUTER_REFRESH_STAMP,
+      recursive: false,
+    }),
+    "file/delete refresh stamp",
+  );
+
   process.stdout.write("Restarting the container to prove reconstruction\n");
   await run(["docker", "restart", containerName], { quiet: true });
   await waitForHealth();
@@ -639,6 +767,45 @@ try {
     ),
     "the tenant is answered with its own durable directory",
   );
+  // The adopt path's refresh: an already-provisioned Computer gains this
+  // build's reference set without being reprovisioned.
+  const refreshedVersion = Buffer.from(
+    decodeComputerHostFileReadResultV1(
+      await expectOk(
+        await call(COMPUTER_HOST_ROUTES["file/read"], {
+          kind: "file/read",
+          path: `${REFERENCE_ROOT}/.version`,
+        }),
+        "file/read reference version",
+      ),
+    ).bytesBase64,
+    "base64",
+  )
+    .toString()
+    .trim();
+  check(
+    refreshedVersion === REFERENCE_DOCS_VERSION,
+    `an adopted Computer refreshed its reference set to ${refreshedVersion}`,
+  );
+  const refreshedStamp = Buffer.from(
+    decodeComputerHostFileReadResultV1(
+      await expectOk(
+        await call(COMPUTER_HOST_ROUTES["file/read"], {
+          kind: "file/read",
+          path: COMPUTER_REFRESH_STAMP,
+        }),
+        "file/read refresh stamp",
+      ),
+    ).bytesBase64,
+    "base64",
+  )
+    .toString()
+    .trim();
+  check(
+    refreshedStamp === COMPUTER_REFRESH_FINGERPRINT,
+    "and recorded this build's fingerprint, so the next open costs one read",
+  );
+
   const afterRestart = decodeComputerHostFileReadResultV1(
     await expectOk(
       await call(COMPUTER_HOST_ROUTES["file/read"], {

@@ -38,6 +38,18 @@ export class FakeWorkspace implements ComputerWorkspace {
     { bytes: Uint8Array; generation: WorkspaceGenerationV1 }
   >();
   readonly deleted: string[] = [];
+  /**
+   * Every write, in order, with the root it named.
+   *
+   * The file map is keyed by path alone, so it cannot answer *which durable
+   * root* a Package wrote to — and that is the question a test about writer
+   * attribution has to ask.
+   */
+  readonly writes: {
+    path: WorkspacePathV1;
+    bytes: Uint8Array;
+    writer: WorkspaceWriterV1;
+  }[] = [];
   private sequence = 0;
 
   private key(path: WorkspacePathV1): string {
@@ -84,6 +96,7 @@ export class FakeWorkspace implements ComputerWorkspace {
     writer: WorkspaceWriterV1;
   }) {
     this.sequence += 1;
+    this.writes.push(request);
     const generation: WorkspaceGenerationV1 = {
       schemaVersion: 1,
       generationId: `gen-${this.sequence}`,

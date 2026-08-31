@@ -42,6 +42,7 @@ class FlySpriteHostController {
       connect: () => this.connect(),
       takeControl: () => this.takeOver(),
       releaseControl: () => this.release(),
+      runDoctor: () => this.runDoctor(),
       retry: () => this.connect(),
     };
     this.data = data;
@@ -125,6 +126,41 @@ class FlySpriteHostController {
     }
   }
 
+  /**
+   * Runs the Computer's self-check and publishes the report.
+   *
+   * A failed run is reported as a failed run rather than as a Computer in an
+   * error phase: the self-check not answering is a fact about the self-check,
+   * and the desktop beside it may be perfectly fine.
+   */
+  private async runDoctor(): Promise<void> {
+    if (!this.configured) return;
+    try {
+      const report = await this.computer.doctor(new AbortController().signal);
+      this.mutate({
+        doctor: {
+          capturedAt: report.capturedAt,
+          summary: report.summary,
+          checks: report.checks,
+        },
+      });
+    } catch (error) {
+      this.mutate({
+        doctor: {
+          capturedAt: new Date().toISOString(),
+          summary: "the self-check could not be run",
+          checks: [
+            {
+              name: "self-check",
+              status: "fail",
+              detail: error instanceof Error ? error.message : String(error),
+            },
+          ],
+        },
+      });
+    }
+  }
+
   private current(): ComputerState {
     return this.data;
   }
@@ -156,7 +192,10 @@ class FlySpriteHostController {
 
   private mutate(
     patch: Partial<
-      Pick<ComputerState, "phase" | "message" | "viewerUrl" | "takingControl">
+      Pick<
+        ComputerState,
+        "phase" | "message" | "viewerUrl" | "takingControl" | "doctor"
+      >
     >,
   ): void {
     Object.assign(this.data, patch);

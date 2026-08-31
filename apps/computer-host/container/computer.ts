@@ -36,6 +36,10 @@ import {
   PROVISION_PHASES,
   PROVISION_RUNNER_PREFIX,
   PROVISION_STARTING_PHASE,
+  COMPUTER_REFRESH_DIRECTORIES,
+  COMPUTER_REFRESH_FILES,
+  COMPUTER_REFRESH_FINGERPRINT,
+  COMPUTER_REFRESH_STAMP,
   provisionLaunchScript,
   provisionLogTailScript,
   provisionPollScript,
@@ -802,7 +806,10 @@ export class ComputerHost {
     const spriteName = this.spriteNameFor(userId);
     const sprite = await this.findOrCreate(spriteName);
     const adopted = await this.readState(sprite);
-    if (adopted) return { spriteName, generation: adopted.generation };
+    if (adopted) {
+      await this.refresh(sprite);
+      return { spriteName, generation: adopted.generation };
+    }
 
     const provisioning = await this.driveProvisioning(sprite);
     await withTimeout(
@@ -839,6 +846,52 @@ export class ComputerHost {
         { mode: 0o600 },
       );
     return { spriteName, generation, provisioning };
+  }
+
+  /**
+   * Gives an adopted Computer the files this build ships that it lacks.
+   *
+   * Adoption is what makes a container restart a non-event — a Sprite with a
+   * state file is adopted and never provisioned again — and it is therefore
+   * also why a Computer provisioned last week would never gain this week's
+   * self-check, browser launcher, shims, or reference documents.
+   *
+   * Through the filesystem API and never a shell: this is exactly the use
+   * `COMPUTER_RUNTIME_FILES` was declared for, it costs the Computer no
+   * process, and a host-internal exec would spend a User's own concurrency
+   * budget on work the User did not ask for. A Computer already carrying this
+   * build's fingerprint pays one file read.
+   *
+   * Best effort. A Computer that cannot be refreshed is still a Computer the
+   * caller asked to open, and the self-check reports what is missing.
+   */
+  private async refresh(sprite: SpriteHandle): Promise<void> {
+    const files = sprite.filesystem("/");
+    try {
+      const stamp = await files.readFile(COMPUTER_REFRESH_STAMP, null);
+      if (stamp.toString("utf8").trim() === COMPUTER_REFRESH_FINGERPRINT) {
+        return;
+      }
+    } catch {
+      // No stamp means a Computer that has never been refreshed.
+    }
+    try {
+      for (const directory of COMPUTER_REFRESH_DIRECTORIES) {
+        await files.mkdir(directory, { recursive: true });
+      }
+      for (const file of COMPUTER_REFRESH_FILES) {
+        await files.writeFile(file.path, file.content, { mode: file.mode });
+      }
+      // Written last, so an interrupted refresh is retried rather than
+      // recorded as done.
+      await files.writeFile(
+        COMPUTER_REFRESH_STAMP,
+        `${COMPUTER_REFRESH_FINGERPRINT}\n`,
+        { mode: 0o600 },
+      );
+    } catch {
+      // Reported by the self-check, not by refusing to open a Computer.
+    }
   }
 
   /**

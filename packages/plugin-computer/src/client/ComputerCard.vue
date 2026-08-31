@@ -10,6 +10,13 @@ const state = computed(() => computer.value);
 const hasViewer = computed(() => Boolean(state.value.viewerUrl));
 const isHuman = computed(() => state.value.takingControl);
 const screenshots = computed(() => state.value.screenshots ?? []);
+const doctor = computed(() => state.value.doctor);
+const canRunDoctor = computed(
+  () => typeof state.value.runDoctor === "function",
+);
+const doctorFailures = computed(
+  () => doctor.value?.checks.filter((check) => check.status === "fail") ?? [],
+);
 const statusLabel = computed(() => {
   if (isHuman.value) return "Your control";
   if (state.value.phase === "ready") return "Agent control";
@@ -131,6 +138,50 @@ onBeforeUnmount(() =>
           <small>{{ shot.capturedAt }}</small>
         </li>
       </ul>
+    </section>
+
+    <!--
+      The self-check, as a human reads it. Every check is listed with its own
+      detail rather than only the failures, because "disk is 91% full" is
+      worth seeing before it becomes a failure — and a run where nothing
+      failed says so in words, so a wall of ticks is not the only answer. A
+      Computer nobody has asked yet says that instead of showing an empty list.
+    -->
+    <section v-if="canRunDoctor || doctor" class="computer-doctor">
+      <header>
+        <h3>Self-check</h3>
+        <button
+          v-if="canRunDoctor"
+          :disabled="busy"
+          @click="invoke(() => state.runDoctor!())"
+        >
+          Run self-check
+        </button>
+      </header>
+      <p v-if="!doctor" class="computer-doctor-empty">
+        This computer has not been checked yet.
+      </p>
+      <template v-else>
+        <p class="computer-doctor-summary">
+          {{ doctor.summary }} · {{ doctor.capturedAt }}
+        </p>
+        <ul>
+          <li
+            v-for="check in doctor.checks"
+            :key="check.name"
+            :class="`doctor-${check.status}`"
+          >
+            <span class="doctor-mark" aria-hidden="true">{{
+              check.status === "pass" ? "✓" : "✗"
+            }}</span>
+            <strong>{{ check.name }}</strong>
+            <small>{{ check.detail }}</small>
+          </li>
+        </ul>
+        <p v-if="doctorFailures.length === 0" class="computer-doctor-empty">
+          Everything this computer knows how to check is healthy.
+        </p>
+      </template>
     </section>
 
     <footer class="computer-footer">
