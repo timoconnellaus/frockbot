@@ -5,6 +5,16 @@ import {
   type CredentialUserBackendContribution,
 } from "@frockbot/plugin-credentials/user";
 import {
+  createBotTemplateUserBackendPlugin,
+  type BotTemplateUserBackendContribution,
+  type TemplateBlobStoreV1,
+  type TemplateBotReaderV1,
+} from "@frockbot/plugin-bot-template/user";
+export type {
+  TemplateBlobStoreV1,
+  TemplateBotReaderV1,
+} from "@frockbot/plugin-bot-template/user";
+import {
   createFlockUserBackendPlugin,
   type FlockUserBackendContribution,
   type FlockUserBackendHost,
@@ -83,6 +93,8 @@ export interface MountedFoundationUserBackend {
   credentials: CredentialUserBackendContribution;
   connections: ReadonlyMap<string, FoundationConnectionUserBackendContribution>;
   flock: FlockUserBackendContribution;
+  /** The Bot Template share ledger, and the staging command that writes it. */
+  botTemplate: BotTemplateUserBackendContribution;
   publisher: PackagePublisherUserContribution;
   /**
    * The MCP Contribution, exposed by name as well as by Connection ownership:
@@ -129,6 +141,18 @@ export async function createFoundationUserBackendContributions(
      */
     catalog?: UserPackageCatalogHost;
     /**
+     * The Bot Template seams the adapter owns: the Bot Durable Object reads one
+     * export needs, and the immutable blob store the recipe is published into.
+     */
+    botTemplate: {
+      bots: TemplateBotReaderV1;
+      blobs: TemplateBlobStoreV1;
+      readCatalogDisplayName?(
+        generation: string,
+        catalogId: string,
+      ): Promise<string | undefined>;
+    };
+    /**
      * The transcript-index seams the adapter owns: this object's own SQL
      * storage, and one page of a Bot's projected rows read from that Bot's
      * Durable Object. The index never invents a row; a rebuild reads them from
@@ -146,6 +170,7 @@ export async function createFoundationUserBackendContributions(
   let ollama: OllamaCloudUserBackendContribution | undefined;
   let mcp: McpUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
+  let botTemplate: BotTemplateUserBackendContribution | undefined;
   let publisher: PackagePublisherUserContribution | undefined;
   let search: SearchUserBackendContribution | undefined;
   const connections = new Map<
@@ -161,6 +186,7 @@ export async function createFoundationUserBackendContributions(
         | OllamaCloudUserBackendContribution
         | McpUserBackendContribution
         | FlockUserBackendContribution
+        | BotTemplateUserBackendContribution
         | PackagePublisherUserContribution
         | SearchUserBackendContribution
       >,
@@ -253,6 +279,34 @@ export async function createFoundationUserBackendContributions(
                 unregister();
                 dispose();
               };
+            },
+          },
+        );
+      },
+    ],
+    [
+      "@frockbot/plugin-bot-template/user",
+      (lifecycle) => {
+        if (!settings) {
+          throw new Error("Bot templates require the Settings Contribution");
+        }
+        return createBotTemplateUserBackendPlugin(
+          {
+            storage: host.storage,
+            settings,
+            bots: host.botTemplate.bots,
+            blobs: host.botTemplate.blobs,
+            ...(host.botTemplate.readCatalogDisplayName
+              ? {
+                  readCatalogDisplayName:
+                    host.botTemplate.readCatalogDisplayName,
+                }
+              : {}),
+          },
+          {
+            mount(value: BotTemplateUserBackendContribution) {
+              botTemplate = value;
+              return lifecycle.mount(value);
             },
           },
         );
@@ -393,6 +447,7 @@ export async function createFoundationUserBackendContributions(
     | OllamaCloudUserBackendContribution
     | McpUserBackendContribution
     | FlockUserBackendContribution
+    | BotTemplateUserBackendContribution
     | PackagePublisherUserContribution
     | SearchUserBackendContribution
   >(plan, {
@@ -411,12 +466,13 @@ export async function createFoundationUserBackendContributions(
     !ollama ||
     !mcp ||
     !flock ||
+    !botTemplate ||
     !publisher ||
     !search
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Search, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Bot Templates, Search, and Package Publisher User Contributions",
     );
   }
   return {
@@ -425,6 +481,7 @@ export async function createFoundationUserBackendContributions(
     connections,
     mcp,
     flock,
+    botTemplate,
     publisher,
     search,
     dispose: mounted.dispose,

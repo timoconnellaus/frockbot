@@ -10,20 +10,33 @@ import {
   decodeConnectionCommandV1,
 } from "@frockbot/connection-core";
 import {
+  decodeBotSettingsViewV1,
   decodeConnectionDependencyRequirementV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
   type ConnectionDependencyRequirementV1,
 } from "@frockbot/configuration-core";
+import { MAX_TEMPLATE_BYTES_V1 } from "@frockbot/template-core";
+import { decodeRoutineListViewV1 } from "@frockbot/plugin-routines/shared";
 import {
   decodeConnectionDependencyCommandV1,
   type ConnectionDependencyResultV1,
 } from "@frockbot/connection-core";
 import {
+  decodeTemplateCommandV1,
+  type TemplateCommandV1,
+} from "@frockbot/plugin-bot-template/shared";
+import type {
+  TemplateBlobStoreV1,
+  TemplateBotReaderV1,
+} from "@frockbot/plugin-bot-template/user";
+import {
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleViewV1,
   decodeCreateBotCommandV1,
+  decodeSheepIdentityViewV1,
+  BotNotFoundError,
 } from "@frockbot/plugin-flock/shared";
 import {
   AUTHORING_QUOTA_CONFIG_KEY,
@@ -123,6 +136,27 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           ...(this.env.PACKAGE_CATALOG
             ? { catalog: new R2PackageCatalog(this.env.PACKAGE_CATALOG) }
             : {}),
+          // The Bot Template seams. The blob store is the same bucket the
+          // Catalog's own immutable generations live in, written through the
+          // same collision-checking rule; the Bot reader is three read-only
+          // RPCs to the Bot Durable Object that already owns that state.
+          botTemplate: {
+            bots: this.templateBotReader(),
+            blobs: this.templateBlobStore(),
+            ...(this.env.PACKAGE_CATALOG
+              ? {
+                  readCatalogDisplayName: async (
+                    generation: string,
+                    catalogId: string,
+                  ) =>
+                    (
+                      await new R2PackageCatalog(
+                        this.env.PACKAGE_CATALOG!,
+                      ).readEntry(generation, catalogId)
+                    )?.displayName,
+                }
+              : {}),
+          },
           // The transcript index (parity register row 52). It lives on this
           // object's own SQL storage because "The User's Durable Object is the
           // authority for everything User-scoped", and it is a *projection*:
@@ -1178,6 +1212,188 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     });
     await this.assertFlockIdentity(request.userId as string);
     return (await this.searchContribution()).purge(request.botId as string);
+  }
+
+  /**
+   * The Bot reads one export needs. Every one is read-only and Bot-scoped, and
+   * every one goes to the Bot Durable Object that is the authority for it: the
+   * User Durable Object never reads a Bot's instruction root itself.
+   */
+  private templateBotReader(): TemplateBotReaderV1 {
+    const botState = (userId: string, botId: string) => {
+      const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+      // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+      return this.env.BOT_STATES.get(id) as unknown as {
+        readConfiguration(input: unknown): Promise<unknown>;
+        readSheep(input: unknown): Promise<unknown>;
+        listOwnSkillDocuments(input: unknown): Promise<unknown>;
+        listRoutines(input: unknown): Promise<unknown>;
+      };
+    };
+    return {
+      readSettings: async (userId, botId) =>
+        decodeBotSettingsViewV1(
+          rpcJsonSnapshotV1(
+            await botState(userId, botId).readConfiguration({
+              schemaVersion: 1,
+              userId,
+              botId,
+            }),
+          ),
+        ),
+      readSheep: async (userId, botId) =>
+        decodeSheepIdentityViewV1(
+          rpcJsonSnapshotV1(
+            await botState(userId, botId).readSheep({
+              schemaVersion: 1,
+              userId,
+              botId,
+            }),
+          ),
+        ).sheep,
+      readSkills: async (userId, botId) => {
+        const documents = rpcJsonSnapshotV1(
+          await botState(userId, botId).listOwnSkillDocuments({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        );
+        if (!Array.isArray(documents)) return [];
+        // `loadSkillCatalogV1` already walked only this Bot's own instruction
+        // root and refused every candidate the authority predicate refuses, so
+        // each of these is a `bot` Skill this Bot or its User wrote. The scrub
+        // is told so explicitly and decides the matter again on its own side.
+        return documents.map((document) => {
+          const value = document as Record<string, unknown>;
+          return {
+            source: "bot" as const,
+            slug: typeof value.slug === "string" ? value.slug : undefined,
+            name: typeof value.name === "string" ? value.name : "Skill",
+            ...(typeof value.description === "string"
+              ? { description: value.description }
+              : {}),
+            ...(typeof value.body === "string" ? { body: value.body } : {}),
+            writer: { kind: "bot" as const },
+          };
+        });
+      },
+      readRoutines: async (userId, botId) =>
+        decodeRoutineListViewV1(
+          rpcJsonSnapshotV1(
+            await botState(userId, botId).listRoutines({
+              schemaVersion: 1,
+              userId,
+              botId,
+            }),
+          ),
+        ).routines.map((routine) => ({
+          routineId: routine.routineId,
+          name: routine.name,
+          prompt: routine.prompt,
+          ...(routine.schedule === undefined
+            ? {}
+            : { schedule: routine.schedule }),
+          ...(routine.trigger === undefined
+            ? {}
+            : { trigger: { kind: "webhook" as const } }),
+          timezone: routine.timezone,
+        })),
+    };
+  }
+
+  /**
+   * The immutable template blob store, over the Catalog bucket.
+   *
+   * The collision check is the whole write rule, and it is the one
+   * `apps/cloudflare/src/package-publication.ts` already applies to a published
+   * application artifact: identical bytes at an existing key are a no-op, and
+   * different bytes are a collision rather than an overwrite.
+   */
+  private templateBlobStore(): TemplateBlobStoreV1 {
+    const bucket = this.env.PACKAGE_CATALOG;
+    return {
+      putImmutable: async (key, document) => {
+        if (!bucket) {
+          throw new Error("the template store is not configured");
+        }
+        const existing = await bucket.get(key);
+        if (existing) {
+          if ((await existing.text()) !== document) {
+            throw new Error(`immutable artifact collision at ${key}`);
+          }
+          return;
+        }
+        await bucket.put(key, document, {
+          httpMetadata: { contentType: "application/json; charset=utf-8" },
+        });
+      },
+      read: async (key) => {
+        if (!bucket) return undefined;
+        const object = await bucket.get(key);
+        if (!object) return undefined;
+        if (object.size > MAX_TEMPLATE_BYTES_V1) {
+          throw new Error(`template object "${key}" is too large`);
+        }
+        return object.text();
+      },
+    };
+  }
+
+  private async botTemplateContribution(): Promise<
+    MountedFoundationUserBackend["botTemplate"]
+  > {
+    return (await this.contributions()).botTemplate;
+  }
+
+  async listTemplateShares(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.botTemplateContribution()).listShares(
+      request.userId as string,
+    );
+  }
+
+  async executeTemplateCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeTemplateCommandV1),
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    const command = request.command as TemplateCommandV1;
+    if (command.type === "template/stage") {
+      // A template is packed from a Bot this User owns, and the Flock is the
+      // authority for which those are. Without this, a staging command could
+      // name any Bot id and the User Durable Object would carry it.
+      if (!(await (await this.flockContribution()).hasBot(command.botId))) {
+        throw new BotNotFoundError(command.botId);
+      }
+    }
+    return (await this.botTemplateContribution()).execute(userId, command);
+  }
+
+  /**
+   * One published share, for the unauthenticated gateway route.
+   *
+   * No identity is asserted, and none can be: the caller has proved nothing.
+   * The share record decides, and it answers only for `link` and `public`.
+   */
+  async resolveTemplateShare(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      shareId: rpcString(200),
+    });
+    const found = await (
+      await this.botTemplateContribution()
+    ).resolvePublicShare(request.shareId as string);
+    return found === undefined
+      ? undefined
+      : {
+          schemaVersion: 1 as const,
+          hash: found.share.hash,
+          visibility: found.share.visibility,
+          document: found.document,
+        };
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {

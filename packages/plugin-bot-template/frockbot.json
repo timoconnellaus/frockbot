@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 4,
+  "id": "bot-template",
+  "displayName": "Bot templates",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "settings": ">=0.0.1",
+    "shell": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
+  },
+  "contributions": {
+    "backend": [
+      { "entry": "./backend", "host": "gateway" },
+      { "entry": "./user", "host": "user" }
+    ],
+    "runtime": { "entry": "./agent" },
+    "client": {
+      "entry": "./client",
+      "mounts": [{ "slot": "frockbot.bot-settings-sections", "order": 20 }],
+      "outlets": []
+    }
+  },
+  "permissions": ["bot:self-manage"],
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [],
+    "capabilities": [
+      {
+        "id": "bot-template-export",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": { "turnTypes": ["chat"] }
+      }
+    ]
+  }
+}

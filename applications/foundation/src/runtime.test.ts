@@ -34,6 +34,8 @@ describe("foundation application", () => {
       "auth",
       "shell",
       "authoring",
+      "settings",
+      "bot-template",
       "clock",
       "computer",
       "credentials",
@@ -45,7 +47,6 @@ describe("foundation application", () => {
       "fly-sprite",
       "identity",
       "image",
-      "settings",
       "mcp",
       "memory",
       "mobile-clipboard",
@@ -61,9 +62,10 @@ describe("foundation application", () => {
     expect(first.contributions).toEqual({
       backend: [
         "shell",
+        "settings",
+        "bot-template",
         "credentials",
         "flock",
-        "settings",
         "mcp",
         "package-publisher",
         "provider-ollama-cloud",
@@ -73,6 +75,7 @@ describe("foundation application", () => {
       runtime: [
         "shell",
         "authoring",
+        "bot-template",
         "clock",
         "computer",
         "credentials",
@@ -94,10 +97,11 @@ describe("foundation application", () => {
         "ui-theme",
         "auth",
         "shell",
+        "settings",
+        "bot-template",
         "clock",
         "computer",
         "flock",
-        "settings",
         "package-publisher",
         "routines",
         "search",
@@ -286,6 +290,11 @@ describe("foundation application", () => {
       backendHost: "gateway",
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
+      listTemplateShares: () =>
+        Promise.resolve({ schemaVersion: 1 as const, shares: [] }),
+      executeTemplateCommand: () =>
+        Promise.reject(new Error("not used while composing")),
+      readPublishedTemplate: () => Promise.resolve(undefined),
       createBot: () =>
         Promise.resolve({
           schemaVersion: 1,
@@ -359,6 +368,7 @@ describe("foundation application", () => {
         .map((contribution) => contribution.packageId)
         .sort(),
     ).toEqual([
+      "bot-template",
       "flock",
       "mcp",
       "package-publisher",
@@ -384,7 +394,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(7);
+    expect(userBackend.contributions).toHaveLength(8);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

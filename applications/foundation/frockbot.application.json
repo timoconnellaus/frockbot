@@ -82,6 +82,11 @@
       "grants": ["bot:self-manage"]
     },
     {
+      "specifier": "@frockbot/plugin-bot-template",
+      "version": "0.0.1",
+      "grants": ["bot:self-manage"]
+    },
+    {
       "specifier": "@frockbot/plugin-search",
       "version": "0.0.1",
       "grants": []
