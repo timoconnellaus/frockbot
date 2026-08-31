@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { WorkspaceRootV1 } from "@frockbot/kernel-contracts";
+import type {
+  WorkspaceReadsV1,
+  WorkspaceRootV1,
+} from "@frockbot/kernel-contracts";
 import {
   botInstructionRootV1,
+  countSkillDocumentsV1,
   loadSkillCatalogV1,
   renderSkillCatalogPromptV1,
   SKILL_MAX_CATALOG_ENTRIES,
@@ -267,5 +271,94 @@ describe("the Skills loader", () => {
     expect(
       renderSkillCatalogPromptV1({ owner: OWNER, skills: [], refusals: [] }),
     ).toBe("");
+  });
+});
+
+describe("counting a root against the Skill quota", () => {
+  test("counts Skills, not the files that sit beside them", async () => {
+    const workspace = new FakeWorkspace();
+    for (let index = 0; index < 250; index += 1) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `notes/note-${String(index).padStart(3, "0")}.md`,
+        text: "Not a Skill.",
+        writer: BOT_WRITER,
+      });
+    }
+    for (let index = 0; index < 5; index += 1) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `skills/s${index}/SKILL.md`,
+        text: skillMarkdown(`s${index}`, "Use this when counting.", "Body."),
+        writer: BOT_WRITER,
+      });
+    }
+
+    const counted = await countSkillDocumentsV1(workspace, OWN_ROOT);
+
+    expect(counted).toEqual({ status: "ok", count: 5 });
+    // Walked with the store's own cursor: one listing, three pages of 100.
+    expect(
+      workspace.calls.filter((call) => call.startsWith("list:")),
+    ).toHaveLength(3);
+  });
+
+  test("the walk is bounded by Skills, so a huge root is still countable", async () => {
+    // A root with far more files than the page bound can walk, holding more
+    // Skills than the quota allows. The quota's question is already answered
+    // once the count passes the cap, so the walk stops rather than reporting
+    // a root it could not finish as uncountable.
+    const endless: WorkspaceReadsV1 = {
+      read: () =>
+        Promise.resolve({ status: "not-found", reason: "unused in this test" }),
+      stat: () =>
+        Promise.resolve({ status: "not-found", reason: "unused in this test" }),
+      list: (request) => {
+        const page = Number(request.cursor ?? "0");
+        return Promise.resolve({
+          status: "ok",
+          entries: [
+            {
+              path: { root: OWN_ROOT, path: `skills/s${page}/SKILL.md` },
+              generation: {
+                schemaVersion: 1 as const,
+                generationId: `${String(page).padStart(9, "0")}`,
+                contentHash: "0".repeat(64),
+                size: 1,
+                writer: BOT_WRITER,
+                writtenAt: new Date(0).toISOString(),
+              },
+            },
+            ...Array.from({ length: 99 }, (_, index) => ({
+              path: {
+                root: OWN_ROOT,
+                path: `notes/${page}-${index}.md`,
+              },
+              generation: {
+                schemaVersion: 1 as const,
+                generationId: `${String(page).padStart(9, "0")}-${index}`,
+                contentHash: "0".repeat(64),
+                size: 1,
+                writer: BOT_WRITER,
+                writtenAt: new Date(0).toISOString(),
+              },
+            })),
+          ],
+          cursor: String(page + 1),
+        });
+      },
+    };
+
+    const counted = await countSkillDocumentsV1(endless, OWN_ROOT, {
+      stopAfter: 200,
+    });
+
+    expect(counted.status).toBe("ok");
+    if (counted.status !== "ok") return;
+    expect(counted.count).toBeGreaterThan(200);
+    // Without a cap the same root is uncountable, which is the honest answer.
+    expect(await countSkillDocumentsV1(endless, OWN_ROOT)).toMatchObject({
+      status: "unavailable",
+    });
   });
 });

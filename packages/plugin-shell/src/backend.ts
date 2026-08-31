@@ -1774,7 +1774,7 @@ export class ShellBotBackendContribution {
         // object storage with an unattributed writer.
         ...(turn
           ? {
-              computerSync: createBotComputerSyncHost(identity, turn, this.env),
+              computerSync: createBotComputerSyncHost(this.env),
             }
           : {}),
       }),

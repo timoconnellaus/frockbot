@@ -14,7 +14,7 @@ import {
   type InMemoryObjectBucketV1,
   type InMemoryWorkspaceGenerationsV1,
 } from "./testing.js";
-import { createObjectWorkspaceFilesV1 } from "./store.js";
+import { createObjectWorkspaceFilesV1, gcTombstoneMarkersV1 } from "./store.js";
 import { workspaceConflictKeyV1, workspaceObjectKeyV1 } from "./keys.js";
 
 const USER = "user-1";
@@ -289,7 +289,14 @@ describe("a delete leaves a durable tombstone", () => {
     });
 
     expect(removed.status).toBe("ok");
-    expect(bucket.keys()).toEqual([]);
+    // The marker stands in the file's place; it is an absence everywhere the
+    // interface reads, and only `gcTombstoneMarkersV1` removes it.
+    expect(bucket.keys()).toEqual([
+      workspaceObjectKeyV1(INSTRUCTIONS, "notes.md"),
+    ]);
+    expect(
+      await files.read({ root: INSTRUCTIONS, path: "notes.md" }),
+    ).toMatchObject({ status: "not-found" });
     const tombstone = await generations.current(INSTRUCTIONS, "notes.md");
     expect(tombstone?.deleted).toBe(true);
     expect(tombstone?.generation.writer).toEqual(user);
@@ -814,7 +821,7 @@ describe("a delete is fenced, never a read-then-unconditional-delete", () => {
     expect(generations.tombstones()).toEqual([]);
   });
 
-  test("a tombstone marker left unswept reads as absence and does not block a create", async () => {
+  test("the tombstone marker reads as absence and does not block a create", async () => {
     const { files, bucket } = harness();
     const written = await files.write({
       path: { root: INSTRUCTIONS, path: "notes.md" },
@@ -824,15 +831,11 @@ describe("a delete is fenced, never a read-then-unconditional-delete", () => {
     });
     if (written.status !== "ok") return;
 
-    // The sweep never runs — the connection dropped after the fence.
-    const remove = bucket.delete;
-    bucket.delete = () => Promise.resolve();
     const removed = await files.delete({
       path: { root: INSTRUCTIONS, path: "notes.md" },
       writer: user,
       expectedGenerationId: written.generation.generationId,
     });
-    bucket.delete = remove;
     expect(removed.status).toBe("ok");
 
     // The marker is still in the bucket, and it is an absence everywhere.
@@ -865,5 +868,117 @@ describe("a delete is fenced, never a read-then-unconditional-delete", () => {
       expectedGenerationId: null,
     });
     expect(again.status).toBe("ok");
+  });
+});
+
+describe("the tombstone marker is collected out of band, never swept", () => {
+  test("a create conditioned on the marker between the fence and the tombstone survives", async () => {
+    const { files, bucket, generations } = harness();
+    const path = { root: INSTRUCTIONS, path: "notes.md" };
+    const written = await files.write({
+      path,
+      bytes: bytes("first"),
+      writer: user,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error("write failed");
+
+    // The race the sweep used to lose: a create reads the marker the fence
+    // just wrote, conditions on its ETag, and wins — after the fence, before
+    // the delete finishes. An unconditional sweep would erase those bytes.
+    const record = generations.tombstone;
+    let racing: Awaited<ReturnType<WorkspaceFilesV1["write"]>> | undefined;
+    generations.tombstone = async (entry) => {
+      await record(entry);
+      racing ??= await files.write({
+        path,
+        bytes: bytes("recreated"),
+        writer: user,
+        expectedGenerationId: null,
+      });
+    };
+    const removed = await files.delete({
+      path,
+      writer: user,
+      expectedGenerationId: written.generation.generationId,
+    });
+    generations.tombstone = record;
+
+    expect(removed.status).toBe("ok");
+    expect(racing?.status).toBe("ok");
+    const read = await files.read(path);
+    expect(read.status).toBe("ok");
+    if (read.status !== "ok") return;
+    expect(text(read.file.bytes)).toBe("recreated");
+    expect(bucket.keys()).toEqual([
+      workspaceObjectKeyV1(INSTRUCTIONS, "notes.md"),
+    ]);
+  });
+
+  test("the collector removes only old markers, and never a file", async () => {
+    const { files, bucket } = harness();
+    const kept = await files.write({
+      path: { root: INSTRUCTIONS, path: "kept.md" },
+      bytes: bytes("kept"),
+      writer: user,
+      expectedGenerationId: null,
+    });
+    if (kept.status !== "ok") throw new Error("write failed");
+
+    const stale = await files.write({
+      path: { root: INSTRUCTIONS, path: "stale.md" },
+      bytes: bytes("stale"),
+      writer: user,
+      expectedGenerationId: null,
+    });
+    if (stale.status !== "ok") throw new Error("write failed");
+    await files.delete({
+      path: { root: INSTRUCTIONS, path: "stale.md" },
+      writer: user,
+      expectedGenerationId: stale.generation.generationId,
+    });
+
+    const recent = await files.write({
+      path: { root: INSTRUCTIONS, path: "recent.md" },
+      bytes: bytes("recent"),
+      writer: user,
+      expectedGenerationId: null,
+    });
+    if (recent.status !== "ok") throw new Error("write failed");
+    await files.delete({
+      path: { root: INSTRUCTIONS, path: "recent.md" },
+      writer: user,
+      expectedGenerationId: recent.generation.generationId,
+    });
+
+    const recentKey = workspaceObjectKeyV1(INSTRUCTIONS, "recent.md");
+    const marker = await bucket.head(recentKey);
+    if (!marker) throw new Error("the recent marker is missing");
+
+    const report = await gcTombstoneMarkersV1({
+      bucket,
+      olderThan: marker.uploaded,
+    });
+
+    expect(report.collected).toBe(1);
+    expect(report.skipped).toBe(1);
+    expect(bucket.keys()).toEqual([
+      workspaceObjectKeyV1(INSTRUCTIONS, "kept.md"),
+      recentKey,
+    ]);
+    // The file is still exactly the file, untouched by the collector.
+    const read = await files.read({ root: INSTRUCTIONS, path: "kept.md" });
+    expect(read.status).toBe("ok");
+    if (read.status !== "ok") return;
+    expect(text(read.file.bytes)).toBe("kept");
+    // And the collected path is creatable again by asserting absence.
+    expect(
+      await files.write({
+        path: { root: INSTRUCTIONS, path: "stale.md" },
+        bytes: bytes("again"),
+        writer: user,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "ok" });
   });
 });

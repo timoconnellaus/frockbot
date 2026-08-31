@@ -358,7 +358,11 @@ export function createSkillWriteTool(
       }
       // The count is paged to completion, and a listing that cannot be read is
       // a refusal rather than a zero: a quota that falls open is not a quota.
-      const counted = await countSkillDocumentsV1(host.files, path.root);
+      const counted = await countSkillDocumentsV1(host.files, path.root, {
+        // The quota only asks whether the root already holds more than it
+        // allows, so the count is bounded by Skills rather than by files.
+        stopAfter: quota.maxSkillsPerBot,
+      });
       if (counted.status !== "ok") {
         return writeRefusal(
           `${counted.reason}, so the per-Bot Skill quota cannot be enforced`,

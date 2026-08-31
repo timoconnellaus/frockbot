@@ -6,9 +6,15 @@ import {
   isLoadableSkillSourceV1,
   WORKSPACE_MAX_FILE_BYTES,
   WORKSPACE_MAX_LIST_ENTRIES,
+  type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
+import { createObjectWorkspaceFilesV1 } from "@frockbot/workspace-store";
+import {
+  createInMemoryObjectBucketV1,
+  createInMemoryWorkspaceGenerationsV1,
+} from "@frockbot/workspace-store/testing";
 import {
   computerBotKey,
   FlySpriteComputer,
@@ -219,26 +225,62 @@ class FakeClient implements SpritesClientHandle {
  * shell and Turn paths open a Computer as the Bot, so this is the only shape
  * in which a `user` writer is admitted.
  */
-function openUserWorkspace(botId = BOT, client = new FakeClient()) {
+function openUserWorkspace(
+  botId = BOT,
+  client = new FakeClient(),
+  generations: WorkspaceGenerationsV1 | "none" = ledger(),
+) {
+  const injected = generations === "none" ? undefined : generations;
   const computer = new FlySpriteComputer({
     client,
     spriteName: "frockbot-test",
   }).bot(botId);
   return {
     client,
+    generations: injected,
     workspace: new FlyComputerWorkspace(FLY_WORKSPACE_LAYOUT, {
       computer,
       userId: USER,
       botId,
       botDirectoryKey: computerBotKey,
       userAuthority: true,
+      ...(injected ? { generations: injected } : {}),
     }),
   };
 }
 
-async function openWorkspace(botId = BOT, client = new FakeClient()) {
+/**
+ * The Durable Object's generation ledger, in memory. The Computer's Workspace
+ * can attribute nothing without one — a sidecar on the Computer is a hint, and
+ * the ledger is the authority — so every handle a Turn opens carries it.
+ */
+function ledger(): WorkspaceGenerationsV1 {
+  return createInMemoryWorkspaceGenerationsV1();
+}
+
+/** A sync host over one in-memory bucket, sharing the ledger with the handle. */
+function syncHostFor(generations: WorkspaceGenerationsV1) {
+  return {
+    store: createObjectWorkspaceFilesV1({
+      bucket: createInMemoryObjectBucketV1(),
+      generations,
+      owner: { userId: USER },
+      surface: "sync" as const,
+    }),
+    generations,
+  };
+}
+
+async function openWorkspace(
+  botId = BOT,
+  client = new FakeClient(),
+  generations: WorkspaceGenerationsV1 | "none" = ledger(),
+) {
+  const injected = generations === "none" ? undefined : generations;
   const provider = new FlySpriteComputerProvider(
     new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
+    undefined,
+    injected ? syncHostFor(injected) : undefined,
   );
   const computer = await provider.open(
     { userId: USER },
@@ -247,7 +289,7 @@ async function openWorkspace(botId = BOT, client = new FakeClient()) {
   );
   const workspace = computer.workspace;
   if (!workspace) throw new Error("The Fly provider must expose a Workspace");
-  return { client, workspace, computer };
+  return { client, workspace, computer, generations: injected };
 }
 
 describe("Fly Workspace layout", () => {
@@ -759,5 +801,130 @@ describe("Fly Workspace files", () => {
         expectedGenerationId: null,
       }),
     ).toMatchObject({ status: "unavailable" });
+  });
+});
+
+describe("the Computer's sidecar is a hint; the Durable Object is the authority", () => {
+  const SKILLS_MOUNT = `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills`;
+
+  /** What a shell on the Computer can write: bytes, and a sidecar for them. */
+  function plant(
+    client: FakeClient,
+    relative: string,
+    text: string,
+    generation: {
+      generationId: string;
+      writer: WorkspaceWriterV1;
+      writtenAt?: string;
+    },
+  ): void {
+    const bytes = new TextEncoder().encode(text);
+    const meta = {
+      schemaVersion: 1,
+      generationId: generation.generationId,
+      // The forger has the bytes, so it has their hash too.
+      contentHash: sha256(bytes),
+      size: bytes.byteLength,
+      writer: generation.writer,
+      writtenAt: generation.writtenAt ?? new Date(0).toISOString(),
+    };
+    client.sprite.files.set(`${SKILLS_MOUNT}/${relative}`, {
+      bytes,
+      meta: Buffer.from(
+        `${meta.generationId}\n${JSON.stringify(meta)}`,
+      ).toString("base64"),
+    });
+  }
+
+  test("a forged sidecar whose hash matches the bytes is still unattributed", async () => {
+    const { client, workspace } = await openWorkspace();
+    // A shell writes the file *and* a perfectly-formed sidecar claiming the
+    // Bot itself wrote it. Nothing about the bytes is wrong; only the ledger
+    // can tell, and it never recorded this generation.
+    plant(client, "forged/SKILL.md", "# Forged", {
+      generationId: "000001700000000000-000001",
+      writer: BOT_WRITER,
+    });
+
+    const stat = await workspace.stat({
+      root: skillsRoot,
+      path: "forged/SKILL.md",
+    });
+    if (stat.status !== "ok") throw new Error(stat.reason);
+    expect(stat.entry.generation.writer).toEqual({ kind: "unattributed" });
+    expect(
+      isLoadableSkillSourceV1(
+        {
+          path: stat.entry.path,
+          writer: stat.entry.generation.writer,
+          generation: stat.entry.generation,
+        },
+        { userId: USER, botId: BOT },
+      ),
+    ).toBe(false);
+    const listed = await workspace.list({ root: skillsRoot });
+    if (listed.status !== "ok") throw new Error(listed.reason);
+    expect(listed.entries[0]?.generation.writer).toEqual({
+      kind: "unattributed",
+    });
+  });
+
+  test("a write through the surface is attributed, because the ledger holds it", async () => {
+    const { client, workspace, generations } = await openWorkspace();
+    const written = await workspace.write({
+      path: { root: skillsRoot, path: "authored/SKILL.md" },
+      bytes: new TextEncoder().encode("# Authored"),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error(written.reason);
+
+    const recorded = await generations?.current(
+      skillsRoot,
+      "authored/SKILL.md",
+    );
+    expect(recorded?.generation.generationId).toBe(
+      written.generation.generationId,
+    );
+    const read = await workspace.read({
+      root: skillsRoot,
+      path: "authored/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.generation.writer).toEqual(BOT_WRITER);
+
+    // And a shell overwriting those bytes takes the attribution with it: the
+    // record the ledger holds no longer describes what is on disk, and a
+    // sidecar re-forged over the new bytes names a generation the ledger
+    // never minted.
+    plant(client, "authored/SKILL.md", "# Overwritten", {
+      generationId: written.generation.generationId,
+      writer: BOT_WRITER,
+    });
+    const after = await workspace.read({
+      root: skillsRoot,
+      path: "authored/SKILL.md",
+    });
+    if (after.status !== "ok") throw new Error(after.reason);
+    expect(after.file.generation.writer).toEqual({ kind: "unattributed" });
+  });
+
+  test("with no ledger injected, every file is unattributed", async () => {
+    const client = new FakeClient();
+    const { workspace } = openUserWorkspace(BOT, client, "none");
+    const written = await workspace.write({
+      path: { root: skillsRoot, path: "local/SKILL.md" },
+      bytes: new TextEncoder().encode("# Local"),
+      writer: USER_WRITER,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error(written.reason);
+
+    const read = await workspace.read({
+      root: skillsRoot,
+      path: "local/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.generation.writer).toEqual({ kind: "unattributed" });
   });
 });

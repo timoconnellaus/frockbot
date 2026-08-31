@@ -14,7 +14,6 @@
 // The R2 types stop here: "Electron, Cloudflare, provider SDK, and Computer
 // implementation types remain inside their adapters", so `@frockbot/workspace-
 // store` sees only the structural `ObjectBucketV1` this file supplies.
-import { DurableWorkspaceGenerations } from "@frockbot/kernel-do";
 import type {
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
@@ -103,9 +102,16 @@ export interface WorkspaceStoreEnv {
  * visibly, rather than reading instructions from a store it invented.
  */
 export function createDurableWorkspaceFilesV1(
-  state: DurableObjectState,
   env: WorkspaceStoreEnv,
   options: {
+    /**
+     * The generation ledger these roots record in. Required, and passed in
+     * rather than constructed here: a ledger caches the minting cursor while
+     * it is resident, so two instances on one Durable Object can read one
+     * cursor and mint one id twice. The object that owns the roots holds
+     * exactly one.
+     */
+    generations: WorkspaceGenerationsV1;
     surface?: WorkspaceStoreSurfaceV1;
     /**
      * The User whose durable roots this store serves. Passed as soon as the
@@ -114,20 +120,13 @@ export function createDurableWorkspaceFilesV1(
      * store rather than reaching object storage.
      */
     owner?: { userId: string };
-    /**
-     * The generation ledger, when it is not simply this object's own. Shared
-     * Memory roots record in the User Durable Object (`AGENTS.md`
-     * § Authorities), so the Memory surface is built with a routed ledger.
-     */
-    generations?: WorkspaceGenerationsV1;
-  } = {},
+  },
 ): WorkspaceFilesV1 | undefined {
   const bucket = env.MEMORY_FILES;
   if (!bucket) return undefined;
   return createObjectWorkspaceFilesV1({
     bucket: createR2ObjectBucketV1(bucket),
-    generations:
-      options.generations ?? new DurableWorkspaceGenerations({ state }),
+    generations: options.generations,
     ...(options.owner ? { owner: options.owner } : {}),
     ...(options.surface ? { surface: options.surface } : {}),
   });

@@ -2,7 +2,8 @@
 //
 // Two things live here, and both exist because of one sentence in `AGENTS.md`
 // § Authorities: "The User's Durable Object is the authority for everything
-// User-scoped: ... and the generation records of User Memory roots."
+// User-scoped: ... and the generation records of User and Project Memory
+// roots."
 //
 //  1. `createRoutedWorkspaceGenerationsV1` sends a *shared* Memory root's
 //     generations — `user-memory` and `project-memory` — to the User Durable

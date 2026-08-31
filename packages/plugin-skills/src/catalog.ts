@@ -143,15 +143,31 @@ export type SkillCountOutcomeV1 =
   { status: "ok"; count: number } | { status: "unavailable"; reason: string };
 
 /**
- * Counts the `SKILL.md` files under a root, paging the listing to completion.
+ * Counts the `SKILL.md` files under a root, walking the listing with the
+ * store's own cursor.
  *
- * The quota is checked against what the root already holds, so an incomplete
- * count is not a smaller count — it is no count at all.
+ * Only an entry whose last segment is `SKILL.md`, inside a directory, counts —
+ * `isSkillDocumentPathV1` decides it. An instruction root is an ordinary durable
+ * root — a Bot's notes, an installer's leavings, and a Skill's own supporting
+ * files all live there — so counting *files* would refuse a Skill on a quota
+ * about Skills, and would make the page bound a bound on files rather than on
+ * what the quota measures.
+ *
+ * `stopAfter` is what keeps the bound on Skills. The only question the quota
+ * asks is whether the root already holds more than it allows, so once the
+ * count passes that number the answer cannot change, and the walk stops
+ * wherever it is. A root with more files than the page bound can walk is then
+ * still countable whenever its *Skills* exceed the cap; only a root that is
+ * both enormous and under its Skill cap is `unavailable`, and that is the
+ * honest answer, because the quota is checked against what the root already
+ * holds and an incomplete count is not a smaller count.
  */
 export async function countSkillDocumentsV1(
   reads: WorkspaceReadsV1,
   root: WorkspaceInstructionRootV1,
+  options: { stopAfter?: number } = {},
 ): Promise<SkillCountOutcomeV1> {
+  const stopAfter = options.stopAfter;
   let count = 0;
   let cursor: string | undefined;
   for (let page = 0; page < SKILL_MAX_COUNT_LIST_PAGES; page += 1) {
@@ -168,6 +184,9 @@ export async function countSkillDocumentsV1(
       isSkillDocumentPathV1(entry.path.path),
     ).length;
     if (!outcome.cursor) return { status: "ok", count };
+    if (stopAfter !== undefined && count > stopAfter) {
+      return { status: "ok", count };
+    }
     cursor = outcome.cursor;
   }
   return {

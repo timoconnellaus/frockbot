@@ -8,14 +8,15 @@
 //
 // Two constitutional rules are enforced here rather than described:
 //
-//  - "every write to a durable root records its writer" — a write stores a
-//    generation sidecar next to the file holding the minted generation id, the
-//    sha-256 content address, the size, the writer, and the timestamp. A read
-//    or a list answers with that recorded generation. A file with no sidecar
-//    went around this surface — a shell command on the Computer wrote it — so
-//    nothing recorded its writer and it is answered as `unattributed`, which
-//    is data and never an instruction. A write may not *claim* that writer:
-//    `unattributed` is refused on `write` and `delete`.
+//  - "every write to a durable root records its writer" — a write mints a
+//    generation from the owning Durable Object's ledger, records it there, and
+//    stores a sidecar beside the file naming it. A read or a list answers with
+//    an attributed writer only when the ledger still holds that generation for
+//    those exact bytes: the Workspace holds files, never authority, so the
+//    sidecar is a hint and the Durable Object decides. A file a shell wrote —
+//    with or without a sidecar it forged — is answered as `unattributed`,
+//    which is data and never an instruction. A write may not *claim* that
+//    writer: `unattributed` is refused on `write` and `delete`.
 //  - "a Bot's instruction root and Bot Memory root are writable only by that
 //    Bot or its User" — a write whose writer is neither is `refused`, as is
 //    every write to a Memory root through the kernel-consumed surface, because
@@ -46,6 +47,7 @@ import {
   type WorkspaceFailureV1,
   type WorkspaceFilesV1,
   type WorkspaceGenerationV1,
+  type WorkspaceGenerationsV1,
   type WorkspaceListOutcomeV1,
   type WorkspaceListRequestV1,
   type WorkspacePathV1,
@@ -141,6 +143,19 @@ export interface FlyWorkspaceFilesOptions {
    * every other root. Nothing accepts both.
    */
   surface: "kernel" | "memory";
+  /**
+   * The generation ledger of the Durable Object that owns these roots.
+   *
+   * It is what makes an attributed answer possible at all. "The Workspace and
+   * its object-storage twin ... hold files, never authority": the sidecar
+   * beside a file on the Computer is a hint, and a shell can write both the
+   * file and a perfectly-formed sidecar for it, so a writer is believed only
+   * when the ledger records the same generation for the same bytes. Where no
+   * ledger is injected — Electron, local development, a Computer opened
+   * outside an admitted Turn — every file is `unattributed`, which is the
+   * truth: nothing durable recorded who wrote it.
+   */
+  generations?: WorkspaceGenerationsV1;
 }
 
 /** `WorkspaceFilesV1` backed by one Fly Sprite's durable filesystem. */
@@ -280,29 +295,55 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
   }
 
   /**
-   * Recovers a generation for a file. A file the sidecar records answers with
-   * exactly what was recorded. A file written by ordinary shell work on the
-   * Computer — `computer_exec`, an installer, the Bot's own editor — went
-   * around the Workspace file surface, so nothing recorded who wrote it. It is
-   * attributed to `{ kind: "unattributed" }`, which is the truth: not the
-   * User, not a Bot, nobody recorded. Attributing it to the User would be a
-   * claim the Computer cannot support, and the User is a writer whose Skills
-   * *are* loadable, so any Bot with a shell could have written itself an
-   * instruction. Unattributed files stay visible and readable, and are never
-   * loaded as instructions.
+   * Recovers a generation for a file.
    *
-   * A sidecar is believed only while it still describes the bytes on disk.
-   * The sidecar is an ordinary file in an ordinary directory, so a shell can
-   * overwrite the file it describes — or plant a sidecar beside bytes it never
-   * saw — and the recorded `contentHash` is the one thing such a write cannot
-   * forge without also producing the bytes. A sidecar whose `contentHash` is
-   * not the sha-256 of the file is therefore stale or invented, and the file
-   * is `unattributed`: the previous writer's authority does not survive an
-   * overwrite that went around this surface.
+   * The sidecar beside the file is a *hint*, never the authority. It is an
+   * ordinary file in an ordinary directory on a host the constitution calls
+   * non-authoritative, so a shell can write bytes and a perfectly-formed
+   * sidecar for them in the same command — including the sha-256 of the bytes
+   * it just wrote, and a `writer` naming any Bot it likes. Believing a
+   * self-consistent sidecar would hand any process with a shell a loadable
+   * Skill under the Bot's own authority, which is the one thing "Only Skills
+   * under the Bot's own instruction root, written under the Bot's own
+   * authority or its User's, are loaded as instructions" exists to prevent.
+   *
+   * So the Durable Object decides. A writer is answered only when the ledger
+   * holds a record for this path naming the same `generationId` *and* the same
+   * `contentHash` as the bytes on disk: the sidecar then merely says which
+   * record to look for, and the ledger — which no shell can reach — says
+   * whether it is real. Anything else is `{ kind: "unattributed" }`, which is
+   * the truth: not the User, not a Bot, nobody recorded. Unattributed files
+   * stay visible and readable, and are never loaded as instructions.
+   *
+   * With no ledger injected there is no authority to ask, so every file is
+   * `unattributed`. That is the honest answer on a Computer opened outside an
+   * admitted Turn, and it fails closed rather than open.
    */
-  private generationOf(raw: RawFile): WorkspaceGenerationV1 {
-    const recorded = this.decodeMeta(raw.meta);
-    if (recorded && recorded.contentHash === raw.contentHash) return recorded;
+  private async generationOf(
+    root: WorkspaceRootV1,
+    relative: string,
+    raw: RawFile,
+  ): Promise<WorkspaceGenerationV1> {
+    const hinted = this.decodeMeta(raw.meta);
+    const ledger = this.options.generations;
+    if (hinted && ledger && hinted.contentHash === raw.contentHash) {
+      let recorded;
+      try {
+        recorded = await ledger.current(root, relative);
+      } catch {
+        // The Durable Object is briefly unreachable. Nothing here may stand in
+        // for it, so the file is data until it answers again.
+        recorded = undefined;
+      }
+      if (
+        recorded &&
+        !recorded.deleted &&
+        recorded.generation.generationId === hinted.generationId &&
+        recorded.generation.contentHash === raw.contentHash
+      ) {
+        return recorded.generation;
+      }
+    }
     return {
       schemaVersion: 1,
       generationId: `${raw.modifiedSeconds.toString().padStart(15, "0")}-shell`,
@@ -386,7 +427,7 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       size: Number(size.trim()),
       modifiedSeconds: Number(modified.trim()),
     };
-    const generation = this.generationOf(raw);
+    const generation = await this.generationOf(path.root, relative, raw);
     return {
       generation,
       ...(withBytes
@@ -483,7 +524,7 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       }
       entries.push({
         path,
-        generation: this.generationOf({
+        generation: await this.generationOf(request.root, path.path, {
           meta,
           contentHash,
           size: Number(size),
@@ -513,9 +554,22 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       );
     }
     const writtenAt = new Date();
+    // The ledger mints when there is one, so the id this write records is the
+    // Durable Object's own and a later read can find it there.
+    let generationId: string;
+    try {
+      generationId = this.options.generations
+        ? await this.options.generations.mint(writtenAt, request.path.root)
+        : mintGenerationId(writtenAt);
+    } catch (error) {
+      return failure(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     const generation: WorkspaceGenerationV1 = {
       schemaVersion: 1,
-      generationId: mintGenerationId(writtenAt),
+      generationId,
       contentHash: digest(request.bytes),
       size: request.bytes.byteLength,
       writer: request.writer,
@@ -557,6 +611,24 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
     if (!output.includes("__WRITTEN__")) {
       return failure("unavailable", "Invalid Fly Workspace write response");
     }
+    // The bytes are on the Computer; the authority over who wrote them is the
+    // record. Without it the file reads back `unattributed`, so a failure to
+    // record is a failure of the write, not a detail.
+    if (this.options.generations) {
+      try {
+        await this.options.generations.record({
+          schemaVersion: 1,
+          root: request.path.root,
+          path: relative,
+          generation,
+        });
+      } catch (error) {
+        return failure(
+          "unavailable",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
     return { status: "ok", generation };
   }
 
@@ -568,9 +640,20 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
     const relative = this.path(request.path);
     if (typeof relative !== "string") return relative;
     const writtenAt = new Date();
+    let removalId: string;
+    try {
+      removalId = this.options.generations
+        ? await this.options.generations.mint(writtenAt, request.path.root)
+        : mintGenerationId(writtenAt);
+    } catch (error) {
+      return failure(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     const tombstone: WorkspaceGenerationV1 = {
       schemaVersion: 1,
-      generationId: mintGenerationId(writtenAt),
+      generationId: removalId,
       contentHash: EMPTY_SHA256,
       size: 0,
       writer: request.writer,
@@ -617,6 +700,25 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
         "conflict",
         `Workspace file changed since the writer last saw it: ${relative}`,
       );
+    }
+    // A removal is a recorded generation like any other: the Computer forgets
+    // the file, and the ledger is then the only durable evidence of who
+    // removed it.
+    if (this.options.generations) {
+      try {
+        await this.options.generations.tombstone({
+          schemaVersion: 1,
+          root: request.path.root,
+          path: relative,
+          generation: tombstone,
+          deleted: true,
+        });
+      } catch (error) {
+        return failure(
+          "unavailable",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
     return { status: "ok", generation: tombstone };
   }

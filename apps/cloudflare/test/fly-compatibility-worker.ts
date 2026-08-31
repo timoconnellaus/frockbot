@@ -281,13 +281,17 @@ export class WorkerdBotState extends BotState {
    * this object's own generation ledger.
    */
   private workspace(owner: { userId: string }): WorkspaceFilesV1 {
-    const files = createDurableWorkspaceFilesV1(this.ctx, this.env, { owner });
+    const files = createDurableWorkspaceFilesV1(this.env, {
+      owner,
+      generations: this.generations(),
+    });
     if (!files) throw new Error("no Workspace bucket is bound");
     return files;
   }
 
+  /** The one ledger this object owns; never a second instance. */
   private generations(): DurableWorkspaceGenerations {
-    return new DurableWorkspaceGenerations({ state: this.ctx });
+    return this.workspaceGenerations;
   }
 
   async writeWorkspaceFile(
@@ -473,6 +477,49 @@ export class WorkerdBotState extends BotState {
     );
   }
 
+  /**
+   * One write through each surface this object binds, started together.
+   *
+   * The two surfaces are built separately — the kernel one over this object's
+   * ledger, the Memory one over the routed ledger whose Bot half is the same
+   * object — so this is the shape that used to mint one id twice: two ledger
+   * instances, each caching its own copy of the minting cursor, both reading
+   * it before either wrote it back.
+   */
+  async mintThroughBothSurfaces(input: {
+    userId: string;
+    botId: string;
+    instructions: WorkspaceRootV1;
+    memory: WorkspaceRootV1;
+    writer: WorkspaceWriterV1;
+  }): Promise<{ kernel?: string; memory?: string }> {
+    this.bindSurfaces({ userId: input.userId, botId: input.botId });
+    const memory = this.backendEnv.MEMORY_WORKSPACE_FILES;
+    if (!memory) throw new Error("no Memory Workspace surface is bound");
+    const [first, second] = await Promise.all([
+      this.workspace({ userId: input.userId }).write({
+        path: { root: input.instructions, path: "notes.md" },
+        bytes: new TextEncoder().encode("kernel"),
+        writer: input.writer,
+        expectedGenerationId: null,
+      }),
+      memory.write({
+        path: { root: input.memory, path: "profile.md" },
+        bytes: new TextEncoder().encode("memory"),
+        writer: input.writer,
+        expectedGenerationId: null,
+      }),
+    ]);
+    return {
+      ...(first.status === "ok"
+        ? { kernel: first.generation.generationId }
+        : {}),
+      ...(second.status === "ok"
+        ? { memory: second.generation.generationId }
+        : {}),
+    };
+  }
+
   /** The same surface, reading back what real R2 holds. */
   async memoryReadWorkspaceFile(input: {
     userId: string;
@@ -524,15 +571,7 @@ export class WorkerdBotState extends BotState {
   }> {
     const identity = { userId: input.userId, botId: input.botId };
     this.bindSurfaces(identity);
-    const host = createBotComputerSyncHost(
-      identity,
-      {
-        runId: "sync-probe-run",
-        turnId: "sync-probe-turn",
-        sessionId: `${input.userId}:${input.botId}`,
-      },
-      this.backendEnv,
-    );
+    const host = createBotComputerSyncHost(this.backendEnv);
     if (!host) throw new Error("no Workspace sync surface is bound");
     const store: WorkspaceFilesV1 = {
       read: (path) => host.store.read(path),

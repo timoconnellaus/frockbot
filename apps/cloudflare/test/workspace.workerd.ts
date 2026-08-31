@@ -312,4 +312,31 @@ describe("the object-storage Workspace store in Workerd", () => {
 
     expect(refused.status).toBe("refused");
   });
+  // AGENTS.md § Authorities: the Bot's Durable Object is *the* authority for
+  // everything Bot-scoped. An authority instantiated twice is not one — each
+  // copy caches the minting cursor while resident — so two surfaces of one
+  // object minting at the same moment must still produce two generations.
+  test("two surfaces on one Bot object never mint the same generation", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = identityFor(suffix);
+    // A fresh object: nothing is cached, which is exactly when two ledgers
+    // would each read the same stored cursor before either wrote it back.
+    const stub = bot(`mint-${suffix}`);
+
+    const minted = await stub.mintThroughBothSurfaces({
+      userId: identity.userId,
+      botId: identity.botId,
+      instructions: instructionRoot(identity),
+      memory: {
+        kind: "bot-memory",
+        userId: identity.userId,
+        botId: identity.botId,
+      },
+      writer: botWriter(identity),
+    });
+
+    expect(minted.kernel).toBeTruthy();
+    expect(minted.memory).toBeTruthy();
+    expect(minted.kernel).not.toBe(minted.memory);
+  });
 });

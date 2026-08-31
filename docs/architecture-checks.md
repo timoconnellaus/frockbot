@@ -200,7 +200,7 @@ a test that failed before the fix.
 | — a `record` that fails after its `put` is repaired on the next read rather than wedging the file forever           | `packages/workspace-store/src/store.test.ts`           | same test (the ledger is asserted repaired between the read and the write)                    | Bun     |
 | — an object mirrored with its generation in metadata alone is overwritable through the same derivation              | `packages/workspace-store/src/store.test.ts`           | `an object mirrored with its generation in metadata and no record is overwritable too`        | Bun     |
 | a write racing a delete is preserved, never destroyed: the delete fences with a conditional overwrite               | `packages/workspace-store/src/store.test.ts`           | `a write landing between the head and the fence wins, and the deletion is preserved`          | Bun     |
-| — an unswept tombstone marker is an absence on read, stat, list and delete, and never blocks the next create        | `packages/workspace-store/src/store.test.ts`           | `a tombstone marker left unswept reads as absence and does not block a create`                | Bun     |
+| — the tombstone marker is an absence on read, stat, list and delete, and never blocks the next create               | `packages/workspace-store/src/store.test.ts`           | `the tombstone marker reads as absence and does not block a create`                           | Bun     |
 | two concurrent cold mints never hand two files one generation id                                                    | `packages/kernel-do/src/workspace-generations.test.ts` | `are distinct when two cold mints run concurrently`                                           | Bun     |
 | a durable-root path may not shadow the object-storage conflict key scheme or the sync's own directories             | `packages/kernel-contracts/src/workspace.test.ts`      | `rejects the segments the object-storage key scheme and the sync reserve`                     | Bun     |
 | the User Durable Object asserts the User it _is_, rather than comparing an RPC with itself                          | `apps/cloudflare/test/memory.workerd.ts`               | `a User Durable Object refuses an RPC naming another User's root`                             | workerd |
@@ -249,8 +249,8 @@ step start awaiting its model request`) but never across a real workerd
   to the User Durable Object the way authoring's does. Second, Workspace disk
   is still not measurable as a per-User quota.
 - **Where the generation ledger lives — closed.** `AGENTS.md` § Authorities
-  gives the User's Durable Object "the generation records of User Memory
-  roots". `apps/cloudflare/src/memory.ts` now routes a shared Memory root's
+  gives the User's Durable Object "the generation records of User and Project
+  Memory roots". `apps/cloudflare/src/memory.ts` now routes a shared Memory root's
   mint, record, tombstone and conflict calls to the User object over RPC, and
   the workerd row above proves the record lands there and not in the writing
   Bot's object. `WorkspaceGenerationsV1.mint` gained a `root` parameter so the
@@ -260,3 +260,27 @@ step start awaiting its model request`) but never across a real workerd
   contract** (`scripts/check-kernel-imports.ts`) remain standalone linters as
   well as tests, because `bun run typecheck` must fail on them before any test
   runs.
+
+## Review fixes — second pass
+
+Rows added by the second review pass, over the Computer's Workspace surface,
+the durable-root store's delete, the Memory tier read, the Skill quota count,
+and the generation ledger's instance count. Each began as a finding with a test
+that failed before the fix.
+
+| Constitutional check                                                                                                 | File                                               | Test name                                                                         | Runner  |
+| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------- | ------- |
+| the Workspace holds files, never authority: a forged sidecar on the Computer buys no writer, however well formed     | `packages/plugin-fly-sprite/src/workspace.test.ts` | `a forged sidecar whose hash matches the bytes is still unattributed`             | Bun     |
+| — a write through the Workspace file surface is attributed, because the Durable Object's ledger holds its generation | `packages/plugin-fly-sprite/src/workspace.test.ts` | `a write through the surface is attributed, because the ledger holds it`          | Bun     |
+| — with no ledger to ask, every file on the Computer is `unattributed`                                                | `packages/plugin-fly-sprite/src/workspace.test.ts` | `with no ledger injected, every file is unattributed`                             | Bun     |
+| a delete never destroys a create that won its precondition: the marker stays, and only the collector removes it      | `packages/workspace-store/src/store.test.ts`       | `a create conditioned on the marker between the fence and the tombstone survives` | Bun     |
+| — the collector removes only markers older than its declared threshold, and never a file                             | `packages/workspace-store/src/store.test.ts`       | `the collector removes only old markers, and never a file`                        | Bun     |
+| a forget refuses when its tier read was cut short, rather than reporting a fact it could not have removed            | `packages/plugin-memory/src/store.test.ts`         | `a forget refuses rather than reporting a fact it could not have removed`         | Bun     |
+| — a tier past the read bound keeps its newest files, because injection is about recent facts                         | `packages/plugin-memory/src/store.test.ts`         | `keeps the newest files, because injection is about recent facts`                 | Bun     |
+| — every omission survives one read, so an incomplete injection is visible in full                                    | `packages/plugin-memory/src/store.test.ts`         | `keeps every omission when two bounds bite at once`                               | Bun     |
+| the Skill quota counts Skills, and its walk is bounded by Skills rather than by the files beside them                | `packages/plugin-skills/src/catalog.test.ts`       | `counts Skills, not the files that sit beside them`                               | Bun     |
+| — a root larger than the page bound is still countable once its Skills pass the cap                                  | `packages/plugin-skills/src/catalog.test.ts`       | `the walk is bounded by Skills, so a huge root is still countable`                | Bun     |
+| a Bot's desktop slot is reclaimed only from a tenant the provider's own registry shows idle                          | `packages/plugin-fly-sprite/src/computer.test.ts`  | `reclaims an idle tenant's display and never a live one`                          | Bun     |
+| — at capacity the new tenant is refused with a declared outcome, never given a display another Bot is using          | `packages/plugin-fly-sprite/src/computer.test.ts`  | `refuses the new tenant when every display is live, rather than sharing one`      | Bun     |
+| — an idle tenant under human takeover keeps its display                                                              | `packages/plugin-fly-sprite/src/computer.test.ts`  | `an idle tenant under human control keeps its display`                            | Bun     |
+| one Durable Object is one authority: two surfaces of one Bot object never mint the same generation                   | `apps/cloudflare/test/workspace.workerd.ts`        | `two surfaces on one Bot object never mint the same generation`                   | workerd |

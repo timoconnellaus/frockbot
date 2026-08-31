@@ -37,8 +37,10 @@
 // evicted — which is the same hole `unattributed` closes for arriving files.
 // The delete is itself conditional, because object storage offers no
 // conditional delete: it overwrites the file with an empty tombstone marker
-// under `If-Match` and sweeps that marker afterwards, so a write racing a
-// delete is preserved rather than destroyed. `delete` below has the detail.
+// under `If-Match`, and the marker *stays* as the object, so a write racing a
+// delete is preserved rather than destroyed. `delete` below has the detail,
+// and `gcTombstoneMarkersV1` collects markers old enough that no create can
+// still be conditioned on one.
 import {
   WORKSPACE_MAX_FILE_BYTES,
   WORKSPACE_MAX_LIST_ENTRIES,
@@ -75,6 +77,7 @@ import {
   workspaceObjectKeyV1,
   workspaceObjectPrefixV1,
   workspaceRelativeFromKeyV1,
+  WORKSPACE_OBJECT_PREFIX,
 } from "./keys.js";
 
 /** The sha-256 of no bytes; a deletion tombstone's content address. */
@@ -83,12 +86,13 @@ export const WORKSPACE_EMPTY_SHA256 =
 /** Where a generation rides beside its bytes in the object store. */
 export const WORKSPACE_GENERATION_METADATA_KEY = "frockbot-generation";
 /**
- * Marks the empty object a delete writes over the file before sweeping it.
+ * Marks the empty object a delete leaves in the file's place.
  *
  * R2 has no conditional delete, so a delete fences with a conditional
  * *overwrite* — see `delete` below. `read`, `stat`, and `list` treat a marker
- * as absence, so a sweep that never ran leaves the file deleted rather than
- * resurrected as an empty one.
+ * as absence, so the file reads as deleted rather than as an empty one, and
+ * the next create replaces the marker under `If-Match` on the marker's own
+ * ETag.
  */
 export const WORKSPACE_TOMBSTONE_METADATA_KEY = "frockbot-tombstone";
 /** Beyond this the generation is recorded durably but not mirrored on the object. */
@@ -684,12 +688,15 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
    * it arrives after, and then its own `If-Match` on the file's old ETag fails
    * and it is preserved instead.
    *
-   * The marker is then swept with an unconditional delete, because object
-   * storage should not accumulate empty objects and the durable evidence of
-   * the removal is the ledger tombstone, not the marker. A sweep that never
-   * runs is harmless: `read`, `stat`, and `list` treat a marker as absence,
-   * and the next write conditions on the marker's ETag rather than on
-   * `If-None-Match`.
+   * The marker is *not* swept. An unconditional `delete` after the fence would
+   * reopen the race from the other side: a create that read the marker and
+   * conditioned on its ETag would land between the fence and the sweep, and
+   * the sweep would erase bytes that had already won their precondition —
+   * last-writer-wins, from the deleter this time. So the marker stays as the
+   * object: `read`, `stat`, and `list` treat it as absence, the next create
+   * replaces it under `If-Match` on the marker's ETag, and
+   * `gcTombstoneMarkersV1` collects markers only once they are old enough that
+   * no create can still be racing one.
    */
   async delete(
     request: WorkspaceDeleteRequestV1,
@@ -767,17 +774,19 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
       );
     }
     try {
-      // Recorded before the marker is swept: object storage forgets the key,
-      // so the tombstone is the only durable evidence that the file was
-      // removed, by whom, and when.
+      // The ledger tombstone is the durable evidence that the file was
+      // removed, by whom, and when: the marker is an absence in object
+      // storage, and object storage forgets a key entirely once the marker is
+      // collected. Its ETag is recorded too, so the record still describes
+      // exactly the object that stands in the file's place.
       await this.generations.tombstone({
         schemaVersion: 1,
         root,
         path: relative,
         generation: tombstone,
+        etag: fenced.etag,
         deleted: true,
       });
-      await this.bucket.delete(key);
       return { status: "ok", generation: tombstone };
     } catch (error) {
       return failure(
@@ -797,4 +806,105 @@ export function createObjectWorkspaceFilesV1(
   options: ObjectWorkspaceFilesOptionsV1,
 ): WorkspaceFilesV1 {
   return new ObjectWorkspaceFiles(options);
+}
+
+export interface GcTombstoneMarkersOptionsV1 {
+  bucket: ObjectBucketV1;
+  /**
+   * Markers uploaded at or after this instant are left alone. It is the
+   * declared age at which a marker is assumed to be racing nobody — longer
+   * than any single create can take between reading a marker and writing over
+   * it.
+   */
+  olderThan: Date;
+  /** Object keys to sweep. Defaults to every durable root. */
+  prefix?: string;
+  /** Most objects examined in one run. */
+  limit?: number;
+}
+
+/** What one collection run looked at, and what it removed. */
+export interface GcTombstoneMarkersReportV1 {
+  scanned: number;
+  collected: number;
+  /** Markers left alone: too young, or no longer a marker when re-read. */
+  skipped: number;
+  /** True when the scan bound stopped the run before the listing ended. */
+  truncated: boolean;
+}
+
+/** Most objects one collection run examines when the caller names no bound. */
+const DEFAULT_GC_SCAN_LIMIT = 1000;
+const GC_PAGE_LIMIT = 200;
+
+/**
+ * Collects tombstone markers old enough that no create can still be racing
+ * one.
+ *
+ * A delete leaves its marker in place (see `delete`), because sweeping it
+ * would erase a create that had already won its `If-Match` against the
+ * marker's ETag. Markers are therefore collected out of band, and only under
+ * two conditions checked immediately before the removal: `head` still answers
+ * with the tombstone metadata — so an object that has since become a real file
+ * is never touched — and its `uploaded` is older than the declared threshold.
+ *
+ * The residual: object storage has no conditional delete, so a create that
+ * lands in the round trip between that `head` and the `delete` is still lost.
+ * `olderThan` is what shrinks it to nothing in practice — a create racing a
+ * marker that has stood untouched for the threshold is not a race anyone is
+ * running — and either way a create that arrives *after* the collection is at
+ * worst refused, its `If-Match` on the now-absent marker failing, which the
+ * store preserves as a conflicting generation rather than dropping.
+ *
+ * It is not a `WorkspaceFilesV1` operation and mints no generation: the
+ * removal it performs is of an absence, and the deletion's own generation was
+ * recorded in the Durable Object when the marker was written.
+ */
+export async function gcTombstoneMarkersV1(
+  options: GcTombstoneMarkersOptionsV1,
+): Promise<GcTombstoneMarkersReportV1> {
+  const bucket = options.bucket;
+  const threshold = options.olderThan.getTime();
+  const scanLimit = Math.max(1, options.limit ?? DEFAULT_GC_SCAN_LIMIT);
+  const report: GcTombstoneMarkersReportV1 = {
+    scanned: 0,
+    collected: 0,
+    skipped: 0,
+    truncated: false,
+  };
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await bucket.list({
+      prefix: options.prefix ?? `${WORKSPACE_OBJECT_PREFIX}/`,
+      limit: Math.min(GC_PAGE_LIMIT, scanLimit - report.scanned),
+      ...(cursor ? { cursor } : {}),
+    });
+    for (const object of page.objects) {
+      report.scanned += 1;
+      // Only a marker is a candidate; a file, and a preserved losing write,
+      // are data this must never touch.
+      if (!isTombstoneMarkerV1(object)) continue;
+      if (object.uploaded.getTime() >= threshold) {
+        report.skipped += 1;
+        continue;
+      }
+      const current = await bucket.head(object.key);
+      if (
+        !current ||
+        !isTombstoneMarkerV1(current) ||
+        current.uploaded.getTime() >= threshold
+      ) {
+        report.skipped += 1;
+        continue;
+      }
+      await bucket.delete(object.key);
+      report.collected += 1;
+    }
+    if (!page.truncated || !page.cursor) return report;
+    if (report.scanned >= scanLimit) {
+      report.truncated = true;
+      return report;
+    }
+    cursor = page.cursor;
+  }
 }

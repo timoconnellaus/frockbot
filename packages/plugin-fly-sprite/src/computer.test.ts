@@ -1,7 +1,16 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { verifyPluginPackage } from "@frockbot/plugin-testkit";
@@ -11,6 +20,7 @@ import {
   computerBotKey,
   FlySpriteComputer,
   flySpriteNameForBot,
+  SLOT_IDLE_SECONDS,
   type SpriteHandle,
   type SpriteServiceStream,
   type SpritesClientHandle,
@@ -645,5 +655,166 @@ describe("Fly Sprite computer", () => {
       name: "@frockbot/plugin-fly-sprite",
       contributionKinds: ["runtime", "desktop"],
     });
+  });
+});
+
+describe("desktop slots are reclaimed from idle tenants only", () => {
+  /**
+   * Installs the ensure script into a temp tree, with `flock` and GNU `stat`
+   * stubbed the way the control-script test does: the script is production's,
+   * only its roots and its two coreutils are local.
+   */
+  async function installEnsureScript(): Promise<{
+    directory: string;
+    runtimeRoot: string;
+    run: (key: string) => Promise<{ exitCode: number; stdout: string }>;
+  }> {
+    const client = new FakeClient();
+    await new FlySpriteComputer({ client, spriteName: "frockbot-test" })
+      .bot("general")
+      .ensure();
+    const provision = client.sprite.commands[0]?.args.at(-1) ?? "";
+    const installed = installedScript(
+      provision,
+      "/home/box/.frockbot/ensure-agent.sh",
+    );
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-slots-"));
+    const runtimeRoot = join(directory, "runtime");
+    const scriptPath = join(directory, "ensure-agent.sh");
+    await writeFile(
+      scriptPath,
+      installed
+        .replaceAll("/home/box/.frockbot", runtimeRoot)
+        .replaceAll("/home/box", join(directory, "home"))
+        .replaceAll("/workspaces", join(directory, "workspaces")),
+    );
+    await writeFile(
+      join(directory, "flock"),
+      ["#!/usr/bin/env bash", "exit 0", ""].join("\n"),
+    );
+    await writeFile(
+      join(directory, "stat"),
+      [
+        "#!/usr/bin/env python3",
+        "import os, sys",
+        "print(int(os.stat(sys.argv[-1]).st_mtime))",
+        "",
+      ].join("\n"),
+    );
+    await Promise.all([
+      chmod(scriptPath, 0o700),
+      chmod(join(directory, "flock"), 0o700),
+      chmod(join(directory, "stat"), 0o700),
+    ]);
+    return {
+      directory,
+      runtimeRoot,
+      run: async (key: string) => {
+        const child = Bun.spawn(
+          [scriptPath, key, Buffer.from("{}").toString("base64")],
+          {
+            env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+        const [exitCode, stdout] = await Promise.all([
+          child.exited,
+          new Response(child.stdout).text(),
+        ]);
+        return { exitCode, stdout };
+      },
+    };
+  }
+
+  /** A tenant holding one slot, last seen `idleSeconds` ago. */
+  async function seedTenant(
+    runtimeRoot: string,
+    slot: number,
+    idleSeconds: number,
+    lease?: number,
+  ): Promise<string> {
+    const key = `tenant-${String(slot).padStart(3, "0")}`;
+    const bot = join(runtimeRoot, "bots", key);
+    await mkdir(bot, { recursive: true });
+    await writeFile(join(bot, "slot"), `${slot}\n`);
+    await writeFile(join(bot, "last-seen"), "");
+    const seenAt = new Date(Date.now() - idleSeconds * 1000);
+    await utimes(join(bot, "last-seen"), seenAt, seenAt);
+    await utimes(join(bot, "slot"), seenAt, seenAt);
+    if (lease !== undefined) {
+      await writeFile(join(bot, "human-control"), "viewer-1\n");
+      const leasedAt = new Date(Date.now() - lease * 1000);
+      await utimes(join(bot, "human-control"), leasedAt, leasedAt);
+    }
+    return key;
+  }
+
+  test("reclaims an idle tenant's display and never a live one", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        // Slot 7's tenant went quiet long ago; every other tenant is one this
+        // provider ran something for moments ago.
+        await seedTenant(
+          runtimeRoot,
+          slot,
+          slot === 7 ? SLOT_IDLE_SECONDS + 600 : 5,
+        );
+      }
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(0);
+      expect(
+        (
+          await readFile(join(runtimeRoot, "bots/newcomer/slot"), "utf8")
+        ).trim(),
+      ).toBe("7");
+      // The idle tenant lost its slot; the live ones kept theirs.
+      expect(existsSync(join(runtimeRoot, "bots/tenant-007/slot"))).toBe(false);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-008/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses the new tenant when every display is live, rather than sharing one", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        await seedTenant(runtimeRoot, slot, 5);
+      }
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(75);
+      expect(ensured.stdout).toContain("__FROCKBOT_NO_SLOTS__");
+      expect(existsSync(join(runtimeRoot, "bots/newcomer/slot"))).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("an idle tenant under human control keeps its display", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        // The only idle tenant is the one a human is watching right now.
+        await seedTenant(
+          runtimeRoot,
+          slot,
+          slot === 3 ? SLOT_IDLE_SECONDS + 600 : 5,
+          slot === 3 ? 5 : undefined,
+        );
+      }
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(75);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

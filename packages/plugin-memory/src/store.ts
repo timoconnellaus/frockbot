@@ -189,10 +189,17 @@ export class MemoryStore {
       }
       cursor = outcome.cursor;
     }
+    // Every omission this read makes is kept, not the last one: two bounds can
+    // both bite, and a caller that refuses on an incomplete read needs to be
+    // told everything that was left out rather than whichever omission was
+    // written most recently.
+    const omissions: string[] = [];
     if (cursor !== undefined) {
       // The listing was still going when the page bound ran out. Some shards
       // were never seen, so this read is not the whole tier and must say so.
-      result.omitted = `the tier did not finish listing within ${MEMORY_MAX_LIST_PAGES} pages, so some shards were not read`;
+      omissions.push(
+        `the tier did not finish listing within ${MEMORY_MAX_LIST_PAGES} pages, so some shards were not read`,
+      );
     }
 
     const profile: SourcedMemoryFactV1[] = [];
@@ -206,11 +213,33 @@ export class MemoryStore {
       .sort((left, right) =>
         left.entry.path.path.localeCompare(right.entry.path.path),
       );
-    const files = classifiedFiles.slice(0, MEMORY_MAX_FILES_PER_TIER);
+    // The bound keeps the *newest* files, by recorded generation: what Memory
+    // is for is injecting recent facts, so a tier past the bound loses its
+    // oldest months rather than its newest. `writtenAt` orders them and the
+    // generation id breaks a tie, because both are recorded by the write that
+    // produced the file. The kept files are then restored to path order, which
+    // is the order the merge below relies on.
+    const newest = [...classifiedFiles]
+      .sort((left, right) => {
+        const a = left.entry.generation;
+        const b = right.entry.generation;
+        return (
+          a.writtenAt.localeCompare(b.writtenAt) ||
+          a.generationId.localeCompare(b.generationId)
+        );
+      })
+      .slice(-MEMORY_MAX_FILES_PER_TIER);
+    const kept = new Set(newest.map(({ entry }) => entry.path.path));
+    const files = classifiedFiles.filter(({ entry }) =>
+      kept.has(entry.path.path),
+    );
     if (classifiedFiles.length > files.length) {
       const dropped = classifiedFiles.length - files.length;
-      result.omitted = `${dropped} Memory file(s) beyond the ${MEMORY_MAX_FILES_PER_TIER}-file read bound were not read`;
+      omissions.push(
+        `${dropped} Memory file(s) beyond the ${MEMORY_MAX_FILES_PER_TIER}-file read bound were not read; the newest ${MEMORY_MAX_FILES_PER_TIER} were kept`,
+      );
     }
+    if (omissions.length > 0) result.omitted = omissions.join("; ");
 
     for (const { entry, classified } of files) {
       if (entry.generation.size > MEMORY_MAX_FILE_BYTES) {
@@ -320,6 +349,16 @@ export class MemoryStore {
     const tier = await this.read(request.root);
     if (tier.unavailable) {
       return { status: "unavailable", reason: tier.unavailable };
+    }
+    if (tier.omitted) {
+      // A forget decided on part of a tier is a lie: the fact may sit in a
+      // file the read bound cut, and answering "ok" would leave it on disk,
+      // injected on the next Turn, with the User told it was forgotten. An
+      // incomplete read is therefore an incomplete answer.
+      return {
+        status: "unavailable",
+        reason: `the tier could not be read in full, so a forget cannot be complete: ${tier.omitted}`,
+      };
     }
 
     const mine = [...tier.profile, ...tier.recent].filter(

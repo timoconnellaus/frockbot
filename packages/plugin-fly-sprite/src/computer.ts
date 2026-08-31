@@ -23,6 +23,24 @@ const MAX_OUTPUT = 30_000;
 const MAX_STORAGE_OUTPUT = 500_000;
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 const LEASE_MAX_AGE_SECONDS = 90;
+/**
+ * How long a tenant's slot is held after the provider last opened or ran
+ * anything for it.
+ *
+ * A slot is a display number — an Xvfb, VNC, and CDP port triple — and there
+ * are a hundred of them, so they are allocated on demand and reclaimed rather
+ * than owned for ever. What makes a tenant live is this provider having opened
+ * or executed for it recently, or a human holding its takeover lease; nothing
+ * on the Computer is evidence, because the desktop script deletes its own X
+ * lock when it restarts and an exec-only tenant never holds one at all. The
+ * threshold is declared here so a reclaim is a stated policy rather than a
+ * guess about who is still using a screen.
+ */
+export const SLOT_IDLE_SECONDS = 900;
+/** Exit code the ensure script uses when every slot belongs to a live tenant. */
+const NO_SLOTS_EXIT = 75;
+/** The same refusal, on stdout, for a transport that swallows the exit code. */
+const NO_SLOTS_MARKER = "__FROCKBOT_NO_SLOTS__";
 
 export interface ComputerBotIdentity {
   id: string;
@@ -80,14 +98,13 @@ mv "$PROFILE_TMP" "$AGENT_DATA/profile.json"
 exec 9>"$ROOT/registry.lock"
 flock -x 9
 if [ ! -s "$BOT/slot" ]; then
+  # Every slot in use, read once. The registry lock is held, so the answer
+  # cannot change under this scan, and one read beats one per slot per tenant
+  # when a Computer is close to full.
+  USED=" $(cat "$ROOT"/bots/*/slot 2>/dev/null | tr '\n' ' ') "
   SLOT=0
   while [ "$SLOT" -lt 100 ]; do
-    USED=false
-    for FILE in "$ROOT"/bots/*/slot; do
-      [ -e "$FILE" ] || continue
-      if [ "$(cat "$FILE")" = "$SLOT" ]; then USED=true; break; fi
-    done
-    [ "$USED" = false ] && break
+    case "$USED" in (*" $SLOT "*) ;; (*) break ;; esac
     SLOT=$((SLOT + 1))
   done
   if [ "$SLOT" -ge 100 ]; then
@@ -95,19 +112,40 @@ if [ ! -s "$BOT/slot" ]; then
     # CDP port triple a tenant's desktop uses while it has one. A tenant that
     # never comes back would otherwise hold one for ever, and the hundred and
     # first Bot of a User could never open a desktop, so the allocation is
-    # bounded rather than permanent: reclaim the least recently ensured slot
-    # whose X display is not locked, and let its tenant allocate again on its
-    # next use. Its viewer token goes with it, or that token would address
-    # another Bot's screen.
+    # bounded rather than permanent.
+    #
+    # Liveness is decided by the provider's own registry, never by the
+    # Computer's state: "last-seen" is written by the backend every time it
+    # opens or runs anything for a tenant, and "human-control" is the takeover
+    # lease. An X lock proves nothing — the desktop script deletes its own on
+    # restart, and a tenant that only ever execs never holds one — so a slot is
+    # reclaimed only when its tenant has been idle past the declared threshold
+    # AND no viewer lease is fresh. Its viewer token goes with the slot, or
+    # that token would address another Bot's screen. When every slot belongs to
+    # a live tenant the new tenant is refused: sharing a display would put two
+    # Bots on one screen, which is worse than an unavailable desktop.
+    NOW=$(date +%s)
     VICTIM=""
     for FILE in $(ls -1tr "$ROOT"/bots/*/slot 2>/dev/null); do
-      CANDIDATE=$(cat "$FILE")
-      [ -e "/tmp/.X$((100 + CANDIDATE))-lock" ] && continue
+      CANDIDATE_BOT=$(dirname "$FILE")
+      SEEN=0
+      if [ -f "$CANDIDATE_BOT/last-seen" ]; then SEEN=$(stat -c %Y "$CANDIDATE_BOT/last-seen"); fi
+      if [ $((NOW - SEEN)) -le ${SLOT_IDLE_SECONDS} ]; then continue; fi
+      if [ -f "$CANDIDATE_BOT/human-control" ]; then
+        LEASED=$(stat -c %Y "$CANDIDATE_BOT/human-control")
+        if [ $((NOW - LEASED)) -le ${LEASE_MAX_AGE_SECONDS} ]; then continue; fi
+      fi
       VICTIM="$FILE"
-      SLOT="$CANDIDATE"
+      SLOT=$(cat "$FILE")
       break
     done
-    [ -n "$VICTIM" ] || { echo "no desktop slots available" >&2; exit 75; }
+    if [ -z "$VICTIM" ]; then
+      # Said on both channels: the exit code is for a caller that gets one, and
+      # the marker is for a transport that hands back output instead.
+      echo ${NO_SLOTS_MARKER}
+      echo "no desktop slots available" >&2
+      exit ${NO_SLOTS_EXIT}
+    fi
     VICTIM_BOT=$(dirname "$VICTIM")
     if [ -s "$VICTIM_BOT/viewer-token" ]; then
       VICTIM_TOKEN=$(cat "$VICTIM_BOT/viewer-token")
@@ -121,8 +159,9 @@ if [ ! -s "$BOT/slot" ]; then
   printf '%s\n' "$SLOT" > "$BOT/slot"
 fi
 # Marks this tenant as the most recent holder of its slot, which is the order
-# the reclaim above walks.
-touch "$BOT/slot"
+# the reclaim above walks, and records that the provider has just opened it —
+# the registry entry the reclaim reads to decide whether a tenant is live.
+touch "$BOT/slot" "$BOT/last-seen"
 SLOT=$(cat "$BOT/slot")
 printf '%s\n' "$((9222 + SLOT))" > "$BOT/cdp-port"
 if [ ! -s "$BOT/vnc-password" ]; then
@@ -780,11 +819,36 @@ export class FlySpriteComputer {
     const sprite = await this.runtime(signal);
     if (this.respectHumanControl)
       await this.assertAgentControl(sprite, layout, signal);
-    await sprite.execFileHTTP(
-      ENSURE_AGENT_SCRIPT,
-      [layout.key, base64(layout.profileJson)],
-      { signal, timeout: 60_000, maxBuffer: MAX_OUTPUT * 2 },
-    );
+    // Every display belonging to a tenant this provider still has open is a
+    // declared outcome, not a crash: the alternative would be two Bots sharing
+    // one screen, and Bots are separated on a Computer exactly so that does
+    // not happen silently.
+    const refused = (cause: unknown) =>
+      new ComputerError(
+        "capability-unavailable",
+        `Every desktop on this Computer is in use; Bot "${layout.identity.id}" has no display until one is idle`,
+        true,
+        { cause },
+      );
+    let ensured: SpriteExecResult;
+    try {
+      ensured = await sprite.execFileHTTP(
+        ENSURE_AGENT_SCRIPT,
+        [layout.key, base64(layout.profileJson)],
+        { signal, timeout: 60_000, maxBuffer: MAX_OUTPUT * 2 },
+      );
+    } catch (error) {
+      if (
+        errorText(error).includes(NO_SLOTS_MARKER) ||
+        errorText(error).includes("no desktop slots available")
+      ) {
+        throw refused(error);
+      }
+      throw error;
+    }
+    if (outputText(ensured.stdout).includes(NO_SLOTS_MARKER)) {
+      throw refused(undefined);
+    }
     if (this.respectHumanControl) {
       await this.assertAgentControl(sprite, layout, signal);
     }
@@ -904,8 +968,20 @@ export class FlySpriteComputer {
     );
   }
 
+  /**
+   * Prefixes every command this provider runs for a tenant: the human-control
+   * assertion, and the registry's `last-seen` stamp.
+   *
+   * The stamp is what keeps an exec-only tenant's desktop slot: it never opens
+   * a viewer and never holds an X lock, so without it the slot reclaim would
+   * be free to hand its display to another Bot mid-run.
+   */
   private agentControlGuard(layout: AgentLayout): string {
-    return `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`;
+    const bot = shellQuote(`${BOTS_ROOT}/${layout.key}`);
+    return [
+      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`,
+      `mkdir -p ${bot} && touch ${bot}/last-seen`,
+    ].join("\n");
   }
 
   private async findOrCreate(): Promise<SpriteHandle> {

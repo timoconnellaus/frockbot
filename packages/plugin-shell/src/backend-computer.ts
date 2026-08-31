@@ -34,19 +34,6 @@ import type {
 } from "@frockbot/kernel-contracts";
 import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
 
-/** The Bot and User whose durable roots a Turn's sync may reconcile. */
-export interface BotComputerSyncIdentity {
-  userId: string;
-  botId: string;
-}
-
-/** The run, Turn, and Session a Computer-side write is attributed to. */
-export interface BotComputerSyncTurn {
-  runId: string;
-  turnId: string;
-  sessionId: string;
-}
-
 /**
  * The narrow slice of the Durable Object environment this module reads. Named
  * as its own type so each binding's absence is a typed state, not a cast.
@@ -63,10 +50,13 @@ export interface BotComputerSyncEnv {
 /**
  * The Computer sync seam one admitted Turn runs under, or `undefined` when the
  * object-storage side is unavailable.
+ *
+ * It takes no identity and no Turn, and that is the point: see ATTRIBUTION
+ * above. What a sync finds on the Computer is attributed to nobody, so knowing
+ * which Bot, Session, and Turn asked for the sync would only be an invitation
+ * to record a writer this seam cannot support.
  */
 export function createBotComputerSyncHost(
-  _identity: BotComputerSyncIdentity,
-  _turn: BotComputerSyncTurn,
   env: object,
 ): ComputerSyncHostV1 | undefined {
   // SAFETY: these surfaces are constructed onto the Durable Object environment

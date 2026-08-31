@@ -262,6 +262,10 @@ function handle(
       userId: identity.userId,
       botId: tenant.botId,
       botDirectoryKey: computerBotKey,
+      // The Durable Object's generation ledger, when the host supplied one.
+      // Without it the Computer's Workspace can attribute nothing, because a
+      // sidecar on the Computer is a hint and never an authority.
+      ...(syncHost?.generations ? { generations: syncHost.generations } : {}),
     }),
     exec: {
       execute: async (request, options) => {

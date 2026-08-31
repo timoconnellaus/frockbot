@@ -46,14 +46,45 @@ class MemoryStorage {
   }
 }
 
+/**
+ * The identity a User Durable Object is addressed by. Production binds the
+ * object's own namespace and the object proves it is the User an RPC names by
+ * deriving that id and comparing it with its own, so a test that leaves the
+ * binding out is testing an object that cannot know who it is.
+ */
+function identity(userId: string): {
+  ctx: (storage: unknown) => DurableObjectState;
+  env: { USER_CONFIGURATIONS: DurableObjectNamespace };
+} {
+  const idFor = (name: string) =>
+    ({
+      name,
+      equals: (other: { name?: string }) => other?.name === name,
+      toString: () => name,
+    }) as unknown as DurableObjectId;
+  return {
+    ctx: (storage: unknown) =>
+      ({ storage, id: idFor(userId) }) as unknown as DurableObjectState,
+    env: {
+      USER_CONFIGURATIONS: {
+        idFromName: idFor,
+      } as unknown as DurableObjectNamespace,
+    },
+  };
+}
+
 const credentialKeyring =
   '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}';
 
 describe("UserConfiguration Connection routing", () => {
   test("mounts declared User Contributions through the application registry", async () => {
+    const bound = identity("user-1");
     const configuration = new UserConfiguration(
-      { storage: new MemoryStorage() } as unknown as DurableObjectState,
-      { CREDENTIAL_KEYRING: credentialKeyring },
+      bound.ctx(new MemoryStorage()),
+      {
+        ...bound.env,
+        CREDENTIAL_KEYRING: credentialKeyring,
+      },
     );
 
     await expect(
@@ -84,10 +115,8 @@ describe("UserConfiguration Connection routing", () => {
         });
       },
     };
-    const configuration = new UserConfiguration(
-      { storage: {} } as DurableObjectState,
-      {},
-    );
+    const bound = identity("user-1");
+    const configuration = new UserConfiguration(bound.ctx({}), bound.env);
     Reflect.set(
       configuration,
       "mounted",

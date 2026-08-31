@@ -63,7 +63,7 @@ interface UserConfigurationEnv {
    * through `idFromName(userId)`, so the namespace is how the object checks
    * that the `userId` an RPC carries is the one it *is*.
    */
-  USER_CONFIGURATIONS?: DurableObjectNamespace;
+  USER_CONFIGURATIONS: DurableObjectNamespace;
 }
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
@@ -88,17 +88,28 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    * request agrees with itself; both come from the caller. A User Durable
    * Object is addressed by `idFromName(userId)`, so its identity is the name
    * it was constructed for: the id derived from the claimed `userId` must be
-   * this object's own id. That identity is pinned in durable storage the first
-   * time it is asserted — provisioning is the first RPC a new User object ever
-   * receives — so the check survives eviction and holds even where the
-   * namespace binding is not reachable.
+   * this object's own id. That identity is also pinned in durable storage the
+   * first time it is asserted — provisioning is the first RPC a new User
+   * object ever receives — so the check survives eviction.
+   *
+   * A missing namespace binding is a refusal, not a fallback. Without it the
+   * only remaining check is the pin, and the pin trusts whoever called first:
+   * an object that has never been addressed would take its identity from the
+   * caller and then defend it for ever. The binding is present in production
+   * and every test binds it, so its absence is a broken deployment rather than
+   * a state to serve requests in.
    */
   private identity: string | undefined;
 
   private async assertUserIdentity(userId: string): Promise<string> {
     if (this.identity === userId) return userId;
     const namespace = this.env.USER_CONFIGURATIONS;
-    if (namespace && !namespace.idFromName(userId).equals(this.ctx.id)) {
+    if (!namespace) {
+      throw new Error(
+        "the User Durable Object namespace is unbound, so this object cannot prove which User it is",
+      );
+    }
+    if (!namespace.idFromName(userId).equals(this.ctx.id)) {
       throw new Error(
         "this User Durable Object is the authority for a different User",
       );
@@ -354,10 +365,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   // Shared Memory roots.
   //
   // "The User's Durable Object is the authority for everything User-scoped:
-  // ... and the generation records of User Memory roots." The Bot's Durable
-  // Object does the writing — it is the Memory Package's host — but a shared
-  // root's generations are recorded here, so two Bots writing one root record
-  // into one ledger and their ids order against each other.
+  // ... and the generation records of User and Project Memory roots." The
+  // Bot's Durable Object does the writing — it is the Memory Package's host —
+  // but a shared root's generations are recorded here, so two Bots writing one
+  // root record into one ledger and their ids order against each other.
   //
   // Every one of these refuses a root that is not a shared Memory root of
   // *this* User. The Bot object is a caller like any other; authority follows

@@ -107,6 +107,16 @@ export class BotState extends DurableObject<BotStateEnv> {
   };
   /** The identity the Workspace and Memory surfaces above were built for. */
   private surfacesFor: string | undefined;
+  /**
+   * This object's generation ledger — one instance, for every root it owns.
+   *
+   * "The Bot's Durable Object is the authority for everything Bot-scoped", and
+   * an authority that exists twice is not one: each instance caches the
+   * minting cursor while resident, so two of them can mint the same id for two
+   * different files.
+   */
+  protected readonly workspaceGenerations: DurableWorkspaceGenerations =
+    new DurableWorkspaceGenerations({ state: this.ctx });
   private mounted:
     | Promise<{
         shell: ShellBotBackendContribution;
@@ -280,8 +290,8 @@ export class BotState extends DurableObject<BotStateEnv> {
    * `unattributed` writer — a shell wrote the file and nothing recorded who.
    * The Memory surface routes a shared root's generations to the User Durable
    * Object, because "The User's Durable Object is the authority for ... the
-   * generation records of User Memory roots", while the Bot's own Memory root
-   * stays in this object.
+   * generation records of User and Project Memory roots", while the Bot's own
+   * Memory root stays in this object.
    *
    * The sync's effect records stay here too: a push records its intent in the
    * Bot's Durable Object before it runs (§ Computer and Workspace), so an
@@ -291,25 +301,32 @@ export class BotState extends DurableObject<BotStateEnv> {
     const key = `${identity.userId}\u0000${identity.botId}`;
     if (this.surfacesFor === key) return;
     const owner = { userId: identity.userId };
-    const workspace = createDurableWorkspaceFilesV1(this.ctx, this.env, {
+    // One ledger per Durable Object, shared by every surface it builds. A
+    // ledger caches its minting cursor while resident, so two instances on one
+    // object can read one cursor and mint one generation id twice — two files
+    // claiming one generation, which is the single thing the id exists to
+    // prevent. The routed ledger is one instance too: the same Bot half serves
+    // the Memory and sync surfaces, and only a shared Memory root is routed to
+    // the User object.
+    const bot = this.workspaceGenerations;
+    const workspace = createDurableWorkspaceFilesV1(this.env, {
       owner,
+      generations: bot,
     });
     const rpc = this.userMemoryRpc(identity.userId);
-    const memory = createDurableWorkspaceFilesV1(this.ctx, this.env, {
+    const routed = createRoutedWorkspaceGenerationsV1({
+      bot,
+      user: createUserWorkspaceGenerationsV1(rpc, identity.userId),
+    });
+    const memory = createDurableWorkspaceFilesV1(this.env, {
       owner,
       surface: "memory",
-      generations: createRoutedWorkspaceGenerationsV1({
-        bot: new DurableWorkspaceGenerations({ state: this.ctx }),
-        user: createUserWorkspaceGenerationsV1(rpc, identity.userId),
-      }),
+      generations: routed,
     });
-    const sync = createDurableWorkspaceFilesV1(this.ctx, this.env, {
+    const sync = createDurableWorkspaceFilesV1(this.env, {
       owner,
       surface: "sync",
-      generations: createRoutedWorkspaceGenerationsV1({
-        bot: new DurableWorkspaceGenerations({ state: this.ctx }),
-        user: createUserWorkspaceGenerationsV1(rpc, identity.userId),
-      }),
+      generations: routed,
     });
     if (workspace) this.backendEnv.WORKSPACE_FILES = workspace;
     if (sync) {
@@ -317,8 +334,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       this.backendEnv.WORKSPACE_SYNC_EFFECTS = new DurableWorkspaceSyncEffects({
         state: this.ctx,
       });
-      this.backendEnv.WORKSPACE_SYNC_GENERATIONS =
-        new DurableWorkspaceGenerations({ state: this.ctx });
+      this.backendEnv.WORKSPACE_SYNC_GENERATIONS = bot;
     }
     if (memory) {
       this.backendEnv.MEMORY_WORKSPACE_FILES = memory;
