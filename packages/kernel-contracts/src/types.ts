@@ -195,6 +195,41 @@ export interface SessionEventMap {
     contentHash: string;
     generationId: string;
   };
+  /**
+   * The Skills this Turn loaded as instructions, and the candidates it
+   * refused. Constitution, Memory: "the session event log records exactly what
+   * was injected, so an injection gap is visible in durable state rather than
+   * silently changing the Bot's behavior." A Skill is an instruction, so its
+   * injection is recorded on the Turn that used it, with the exact generation
+   * — "the exact Skill generation each Turn used is reconstructable".
+   */
+  "skill/injected": {
+    turn: number;
+    skills: Array<{
+      path: string;
+      name: string;
+      generationId: string;
+      contentHash: string;
+    }>;
+    refusals: Array<{ path: string; reason: string }>;
+  };
+  /** The Bot recorded the intent to write a Skill, before the write ran. */
+  "skill/write-intent": {
+    turn: number;
+    step: number;
+    effectId: string;
+    path: string;
+    contentHash: string;
+  };
+  /** The generation the Skill write produced. */
+  "skill/written": {
+    turn: number;
+    step: number;
+    effectId: string;
+    path: string;
+    generationId: string;
+    contentHash: string;
+  };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   "turn/end": { turn: number; outcome: TurnOutcome };
   "session/disposed": { disposedAt: string };
@@ -577,6 +612,63 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.version, "session event.version");
       eventString(event.contentHash, "session event.contentHash");
       eventString(event.generationId, "session event.generationId");
+      break;
+    case "skill/injected": {
+      requireEventKeys(
+        event,
+        keys("turn", "skills", "refusals"),
+        "session event",
+      );
+      turn();
+      if (!Array.isArray(event.skills) || !Array.isArray(event.refusals)) {
+        throw new Error("session event skills and refusals must be arrays");
+      }
+      event.skills.forEach((skill, index) => {
+        const label = `session event.skills[${index}]`;
+        const entry = eventRecord(skill, label);
+        requireEventKeys(
+          entry,
+          ["path", "name", "generationId", "contentHash"],
+          label,
+        );
+        eventString(entry.path, `${label}.path`);
+        eventString(entry.name, `${label}.name`);
+        eventString(entry.generationId, `${label}.generationId`);
+        eventString(entry.contentHash, `${label}.contentHash`);
+      });
+      event.refusals.forEach((refusal, index) => {
+        const label = `session event.refusals[${index}]`;
+        const entry = eventRecord(refusal, label);
+        requireEventKeys(entry, ["path", "reason"], label);
+        eventString(entry.path, `${label}.path`);
+        eventString(entry.reason, `${label}.reason`);
+      });
+      break;
+    }
+    case "skill/write-intent":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "effectId", "path", "contentHash"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.path, "session event.path");
+      eventString(event.contentHash, "session event.contentHash");
+      break;
+    case "skill/written":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "effectId", "path", "generationId", "contentHash"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.path, "session event.path");
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.contentHash, "session event.contentHash");
       break;
     case "step/end":
       requireEventKeys(event, keys("turn", "step", "outcome"), "session event");

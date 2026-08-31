@@ -41,6 +41,7 @@
     "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
+    "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-ui-theme": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },

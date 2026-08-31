@@ -2,7 +2,8 @@
 
 ## Status
 
-step 0 landed (the shared Workspace contract); steps 1–3 not started
+step 0 landed (the shared Workspace contract); **step 2 landed** (the Skills
+loader); steps 1 and 3 not started
 
 ## Resolved decisions
 
@@ -112,6 +113,62 @@ Bot, or by another User is not; a file under a Memory or Package-declared root
 is never loaded even when its name looks like a Skill; the session event log
 records the Skill generation the Turn used; an edit is visible on the next
 admitted Turn and not before.
+
+### Landed
+
+`packages/plugin-skills` is a first-party Package with one runtime
+Contribution. What it does:
+
+- **Format.** GrokBot's `SKILL.md` (`docs/research/grokbot-computer.md` §2.8):
+  a `---` frontmatter fence carrying `name` and `description`, then a Markdown
+  body. `packages/plugin-skills/src/skill-md.ts` reads a deliberately minimal
+  frontmatter grammar — flat `key: value` lines, optionally quoted, no nesting
+  — and refuses anything else rather than partially parsing untrusted content
+  into a system prompt. Unknown keys (`license`, `metadata`, …) are read and
+  ignored, so a pi or Claude Skill directory is portable in either direction.
+  Bounds: 64 KiB per file, 64-character `name`, 1024-character `description`,
+  200 Skills per catalog.
+- **Loading.** `loadSkillCatalogV1` enumerates the Bot's `bot-instructions`
+  root through the injected `WorkspaceReadsV1`, treats any `*/SKILL.md` as a
+  candidate, and filters with `isLoadableSkillSourceV1`. The writer of record
+  is the one the _generation_ carries, never one a caller supplies. A refusal
+  is a declared variant on the catalog, never a throw.
+- **Prompt shape.** Progressive disclosure, as GrokBot and pi do it: the
+  catalog goes into the system prompt each Turn as `<agent_skills>` with each
+  Skill's path and description; bodies never do. `skill_load` discloses one
+  body on demand, and only for a Skill _this Turn_ actually loaded.
+- **Self-modification.** `skill_write` renders a `SKILL.md` into
+  `skills/<slug>/SKILL.md` under the Bot's own instruction root through
+  `WorkspaceFilesV1`, with `{ kind: "bot", botId, sessionId, turnId, runId }`
+  provenance, recording `skill/write-intent` before the write and
+  `skill/written` after it.
+- **Durable visibility.** Three new session events —`skill/injected`,
+  `skill/write-intent`, `skill/written` — with decoders in
+  `packages/kernel-contracts/src/types.ts`. `skill/injected` names every loaded
+  Skill with its `generationId` and `contentHash`, and every refusal with its
+  reason, once per Turn at its first step.
+- **Hibernation seam.** The loader reaches the Workspace only through
+  `WorkspaceReadsV1`/`WorkspaceFilesV1`; it holds no Computer type and makes no
+  Computer call. `packages/plugin-shell/src/backend-skills.ts` is the Durable
+  Object's half: it builds the host from a `WORKSPACE_FILES` binding and
+  returns `undefined` when that binding is absent, so the Package is simply not
+  mounted rather than reading instructions from a second store it invented.
+  **That binding does not exist yet** — Step 1 owns the Workspace file surface
+  and Step 3 owns the durable-root sync that backs it from object storage — so
+  no production Turn loads a Skill until one of them lands.
+
+**Quota, decided.** `plugin-authoring`'s `AuthoringQuotaConfigV1` does not fit:
+its limits are artifact source size, retained _Composition_ generations, and a
+daily authored-generation rate reserved in the User Durable Object against an
+authoring `effectId`. A Skill produces no artifact and no Composition
+generation, and reserving a daily unit for editing a Markdown file would lock a
+Bot out of its own instruction root for the rest of the day. What bounds a
+Skill is Workspace disk, so `packages/plugin-skills/src/quota.ts` declares two
+limits — 200 Skills per Bot, 64 KiB per Skill — checked against what the root
+already holds, which makes a resumed Turn that rewrites the same Skill free.
+They live in the Package rather than in durable per-User configuration until
+the durable-root sync exists to make Workspace disk measurable; that gap is
+recorded in the **Open** list of `docs/architecture-checks.md`.
 
 ---
 
