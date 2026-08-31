@@ -29,7 +29,9 @@
 //    decided by `writerOwnsMemoryPathV1` and nowhere else.
 //  - "a Bot's instruction root and Bot Memory root are writable only by that
 //    Bot or its User" — a first-party Package is neither, exactly as the Fly
-//    implementation has it.
+//    implementation has it. The User-global instruction root (ADR 0016) is
+//    writable by that User or any of their Bots, and by nothing else; this is
+//    its only writer, because the Computer presents it read-only.
 //
 // A delete leaves a durable tombstone. Object storage forgets a deleted key
 // entirely, so without one, "this file is gone, deliberately, and here is who
@@ -44,6 +46,7 @@
 import {
   WORKSPACE_MAX_FILE_BYTES,
   WORKSPACE_MAX_LIST_ENTRIES,
+  isWorkspaceComputerReadOnlyRootV1,
   isWorkspaceMemoryRootV1,
   normalizeWorkspaceRelativePathV1,
   workspaceWriterMayWriteV1,
@@ -195,7 +198,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     const mirroring =
       this.surface === "sync" &&
       writer.kind === "unattributed" &&
-      !isWorkspaceMemoryRootV1(root);
+      !isWorkspaceComputerReadOnlyRootV1(root);
     if (!workspaceWriterMayWriteV1(writer) && !mirroring) {
       return failure(
         "refused",
@@ -224,6 +227,22 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         return failure(
           "refused",
           `Only Bot "${root.botId}" or its User may write this root`,
+        );
+      }
+    }
+    if (root.kind === "user-instructions") {
+      // The User-global instruction root is shared by every Bot this User
+      // owns (ADR 0016), so any `bot` writer is admitted — `this.admit` above
+      // has already confined the store to one User's roots, and a Bot writes
+      // through the Durable Object that holds its own identity, so a recorded
+      // `bot` generation here is a Bot of this User. A `first-party` writer is
+      // not; nor is the sync, which never pushes into this root at all.
+      const byBot = writer.kind === "bot";
+      const byUser = writer.kind === "user" && writer.userId === root.userId;
+      if (!byBot && !byUser) {
+        return failure(
+          "refused",
+          `Only User "${root.userId}" or one of their Bots may write this root`,
         );
       }
     }

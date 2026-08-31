@@ -42,6 +42,10 @@ const botMemoryRoot: WorkspaceRootV1 = {
   botId: BOT,
 };
 const userMemoryRoot: WorkspaceRootV1 = { kind: "user-memory", userId: USER };
+const userSkillsRoot: WorkspaceRootV1 = {
+  kind: "user-instructions",
+  userId: USER,
+};
 
 const BOT_WRITER: WorkspaceWriterV1 = {
   kind: "bot",
@@ -257,6 +261,7 @@ function attach(sprite: FakeSyncSprite): FlySpriteComputer {
 
 const MOUNTS = {
   skills: `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills`,
+  userSkills: "/home/box/agent-data/workflows",
   botMemory: `/home/box/agent-data/agents/${computerBotKey(BOT)}/memory`,
   userMemory: "/home/box/agent-data/user-memory",
 };
@@ -390,7 +395,9 @@ describe("the durable-root sync, store to Computer", () => {
     const report = await sync();
 
     expect(report.failures).toEqual([]);
-    expect(roots).toHaveLength(3);
+    // The Bot's instruction root and Bot Memory root, the User-global
+    // instruction root, and User Memory.
+    expect(roots).toHaveLength(4);
     expect(sprite.text(`${MOUNTS.skills}/deploy/SKILL.md`)).toBe("# deploy");
     expect(sprite.text(`${MOUNTS.botMemory}/profile.md`)).toBe("likes tea");
     expect(sprite.text(`${MOUNTS.userMemory}/by-agent/${BOT}/profile.md`)).toBe(
@@ -707,6 +714,43 @@ describe("the durable-root sync, Memory roots", () => {
     expect(refused.status).toBe("refused");
   });
 
+  // ADR 0016 extends exactly this rule to the User-global instruction root:
+  // the Skills Package is its single writer, so the Computer presents it
+  // read-only and the sync only materializes it.
+  test("a User-global Skill changed on the Computer is never pushed and is restored", async () => {
+    const { sprite, store, sync } = harness();
+    const generation = await writeToStore(
+      store,
+      userSkillsRoot,
+      "standup/SKILL.md",
+      "# standup",
+      USER_WRITER,
+    );
+    await sync();
+    expect(sprite.text(`${MOUNTS.userSkills}/standup/SKILL.md`)).toBe(
+      "# standup",
+    );
+
+    sprite.shellWrite(MOUNTS.userSkills, "standup/SKILL.md", "# tampered");
+    const report = await sync();
+
+    const userSkills = report.roots.find(
+      (entry) => entry.root.kind === "user-instructions",
+    );
+    expect(userSkills?.pushed).toEqual([]);
+    expect(userSkills?.restored).toEqual(["standup/SKILL.md"]);
+    expect(sprite.text(`${MOUNTS.userSkills}/standup/SKILL.md`)).toBe(
+      "# standup",
+    );
+    const read = await store.read({
+      root: userSkillsRoot,
+      path: "standup/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(decoder.decode(read.file.bytes)).toBe("# standup");
+    expect(read.file.generation.generationId).toBe(generation.generationId);
+  });
+
   test("a Memory file removed on the Computer is restored, never deleted in the store", async () => {
     const { sprite, memory, sync } = harness();
     await writeToStore(
@@ -824,6 +868,7 @@ describe("the durable-root sync, pauses", () => {
     sprite.paused = true;
     const paused = await sync();
     expect(paused.failures.map((entry) => entry.status)).toEqual([
+      "unavailable",
       "unavailable",
       "unavailable",
       "unavailable",

@@ -20,7 +20,10 @@
 //  - "a Bot's instruction root and Bot Memory root are writable only by that
 //    Bot or its User" — a write whose writer is neither is `refused`, as is
 //    every write to a Memory root through the kernel-consumed surface, because
-//    "The Memory Package is the single writer of Memory roots". The writer a
+//    "The Memory Package is the single writer of Memory roots", and every
+//    write to the User-global instruction root on any surface, because the
+//    Skills Package is its single writer and the Computer sees it read-only
+//    (ADR 0016). The writer a
 //    request names is a claim, and the handle's tenant decides it: a `bot`
 //    writer must be the Bot the handle was opened for, and a `user` writer is
 //    admitted only from a handle opened under User authority.
@@ -250,6 +253,17 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       return failure(
         "refused",
         "The Workspace presents Memory roots read-only; the Memory Package is their only writer",
+      );
+    }
+    // The User-global instruction root is written through object storage
+    // only, whatever surface asks here: the Computer presents it read-only,
+    // so this implementation has no write path to it at all (ADR 0016). It is
+    // refused on every surface rather than on the kernel one, because the
+    // point of a single writer is that the Computer is never the writer.
+    if (root.kind === "user-instructions") {
+      return failure(
+        "refused",
+        "The Computer presents the User-global instruction root read-only; the Skills Package is its only writer",
       );
     }
     if (root.kind === "bot-instructions" || root.kind === "bot-memory") {

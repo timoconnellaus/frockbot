@@ -44,7 +44,10 @@ const encoder = new TextEncoder();
  * Package is the single writer of Memory roots ... the Workspace presents
  * Memory roots read-only through the durable-root sync" (ADR 0013). That sync
  * is `./sync.ts`: it materializes Memory roots at these mount paths from
- * object storage and never pushes a change back out of them.
+ * object storage and never pushes a change back out of them. The User-global
+ * instruction root is read-only for the same reason and by the same mechanism
+ * (ADR 0016): the Skills Package is its single writer, so a shared root needs
+ * no conflict machinery and no Turn has to wake a Computer to read a Skill.
  *
  * `package-declared` roots are User-scoped, because Package availability is
  * User-level and `WorkspaceRootV1` names a Package root by User and Package.
@@ -58,6 +61,17 @@ export const FLY_WORKSPACE_LAYOUT: WorkspaceLayoutV1 = {
       scope: "bot",
       mountPath: "/home/box/agent-data/agents/{bot}/skills",
       access: "read-write",
+    },
+    {
+      // GrokBot's `agent-data/workflows/<slug>/SKILL.md`: the User's own
+      // Skills, global across all of their assistants. Read-only on the
+      // Computer — the Skills Package writes it through object storage and
+      // the sync only materializes it (ADR 0016, extending ADR 0013's Memory
+      // exception).
+      kind: "user-instructions",
+      scope: "user",
+      mountPath: "/home/box/agent-data/workflows",
+      access: "read-only",
     },
     {
       kind: "bot-memory",

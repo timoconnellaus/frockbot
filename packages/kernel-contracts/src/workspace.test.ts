@@ -10,6 +10,8 @@ import {
   decodeWorkspaceConflictV1,
   decodeWorkspaceGenerationRecordV1,
   isLoadableSkillSourceV1,
+  isWorkspaceComputerReadOnlyRootV1,
+  isWorkspaceInstructionRootV1,
   isWorkspaceMemoryRootV1,
   isWorkspaceSharedMemoryRootV1,
   memoryShardOwnerV1,
@@ -52,6 +54,10 @@ function generation(
 
 function instructionRoot(): WorkspaceRootV1 {
   return { kind: "bot-instructions", userId: "user-1", botId: "bot-1" };
+}
+
+function userInstructionRoot(userId = "user-1"): WorkspaceRootV1 {
+  return { kind: "user-instructions", userId };
 }
 
 function skillSource(
@@ -110,6 +116,8 @@ describe("durable roots", () => {
         botId: "bot-1",
       }),
       workspaceRootKeyV1({ kind: "user-memory", userId: "user-1" }),
+      workspaceRootKeyV1(userInstructionRoot()),
+      workspaceRootKeyV1(userInstructionRoot("user-2")),
       workspaceRootKeyV1({
         kind: "user-memory",
         userId: "user-1:bot-1",
@@ -125,6 +133,59 @@ describe("durable roots", () => {
     expect(workspaceRootKeyV1(instructionRoot())).toBe(
       workspaceRootKeyV1(instructionRoot()),
     );
+  });
+
+  test("the User-global instruction root round-trips through its key and its decoder", () => {
+    // ADR 0016 names the root `users/<id>/skills/`, and the object store keys
+    // every file under `workspace/<root key>/`, so the key is that location.
+    expect(workspaceRootKeyV1(userInstructionRoot())).toBe(
+      "users/user-1/skills",
+    );
+    expect(workspaceRootKeyV1(userInstructionRoot("owner/one"))).toBe(
+      "users/owner%2Fone/skills",
+    );
+    const decoded = decodeWorkspaceRootV1({
+      kind: "user-instructions",
+      userId: "user-1",
+    });
+    expect(decoded).toEqual(userInstructionRoot());
+    expect(workspaceRootKeyV1(decoded)).toBe(
+      workspaceRootKeyV1(userInstructionRoot()),
+    );
+    // A Bot id would name a root this kind does not have.
+    expect(() =>
+      decodeWorkspaceRootV1({
+        kind: "user-instructions",
+        userId: "user-1",
+        botId: "bot-1",
+      }),
+    ).toThrow();
+  });
+
+  test("both instruction roots are instruction roots; only the User-global one is read-only on the Computer", () => {
+    expect(isWorkspaceInstructionRootV1(instructionRoot())).toBe(true);
+    expect(isWorkspaceInstructionRootV1(userInstructionRoot())).toBe(true);
+    expect(
+      isWorkspaceInstructionRootV1({
+        kind: "user-memory",
+        userId: "user-1",
+      }),
+    ).toBe(false);
+    // ADR 0013 for Memory, ADR 0016 for the User-global instruction root: both
+    // have a single writer over object storage, so the Computer presents them
+    // read-only and the sync never pushes out of them.
+    expect(isWorkspaceComputerReadOnlyRootV1(userInstructionRoot())).toBe(true);
+    expect(
+      isWorkspaceComputerReadOnlyRootV1({
+        kind: "user-memory",
+        userId: "user-1",
+      }),
+    ).toBe(true);
+    expect(isWorkspaceComputerReadOnlyRootV1(instructionRoot())).toBe(false);
+    // The kernel-consumed surface still writes it: read-only is a statement
+    // about the Computer, not about the Skills Package.
+    expect(workspaceRootAcceptsKernelWriteV1(userInstructionRoot())).toBe(true);
+    expect(isWorkspaceMemoryRootV1(userInstructionRoot())).toBe(false);
   });
 });
 
@@ -499,6 +560,56 @@ describe("Skill sources", () => {
         owner,
       ),
     ).toBe(false);
+  });
+
+  test("a Skill in the User-global root written by any of the User's Bots is loadable", () => {
+    // The whole point of the shared tier: Bot A authors, Bot B follows. ADR
+    // 0016 — authority does not widen, because a Bot writing there writes
+    // under authority it already holds.
+    expect(
+      isLoadableSkillSourceV1(
+        skillSource(userInstructionRoot(), { ...bot, botId: "bot-2" }),
+        owner,
+      ),
+    ).toBe(true);
+    expect(
+      isLoadableSkillSourceV1(skillSource(userInstructionRoot(), bot), owner),
+    ).toBe(true);
+    expect(
+      isLoadableSkillSourceV1(
+        skillSource(userInstructionRoot(), {
+          kind: "user",
+          userId: "user-1",
+        }),
+        owner,
+      ),
+    ).toBe(true);
+  });
+
+  test("another User's global root, and an unattributed or first-party writer in this User's, are refused", () => {
+    expect(
+      isLoadableSkillSourceV1(
+        skillSource(userInstructionRoot("user-2"), bot),
+        owner,
+      ),
+    ).toBe(false);
+    expect(
+      isLoadableSkillSourceV1(
+        skillSource(userInstructionRoot(), { kind: "user", userId: "user-2" }),
+        owner,
+      ),
+    ).toBe(false);
+    for (const writer of [
+      { kind: "unattributed" },
+      { kind: "first-party", packageId: "skills" },
+    ] satisfies WorkspaceWriterV1[]) {
+      expect(
+        isLoadableSkillSourceV1(
+          skillSource(userInstructionRoot(), writer),
+          owner,
+        ),
+      ).toBe(false);
+    }
   });
 
   test("a decoded Skill source keeps its recorded writer", () => {

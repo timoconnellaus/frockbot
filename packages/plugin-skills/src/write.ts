@@ -1,4 +1,4 @@
-// Writing one Skill document into a Bot's own instruction root.
+// Writing one Skill document into one of a Bot's instruction roots.
 //
 // Two callers reach this, and they differ in exactly one thing: who the write
 // is attributed to. `skill_write` writes as the Bot, inside an admitted Turn
@@ -6,12 +6,14 @@
 // as the importing *User*, because a template is prose their User chose to
 // materialize and no Turn of the new Bot has run yet.
 //
-// "The kernel treats every Workspace file as data. Only Skills under the Bot's
-// own instruction root, written under the Bot's own authority or its User's,
-// are loaded as instructions." Both writers this module admits are on the right
-// side of that sentence, and `isLoadableSkillSourceV1` is still the one place
-// it is decided — this module cannot widen it, because the root it writes to is
-// derived from the owner rather than passed in.
+// "The kernel treats every Workspace file as data. Only Skills under a Bot's
+// instruction roots — its own and its User's — written under the Bot's own
+// authority or its User's, are loaded as instructions." Both writers this
+// module admits are on the right side of that sentence, and
+// `isLoadableSkillSourceV1` is still the one place it is decided — this module
+// cannot widen it, because both roots it can write are derived from the owner
+// rather than passed in, so there is no argument with which to name another
+// User's root or another Bot's.
 import type {
   WorkspaceFilesV1,
   WorkspaceWriteRequestV1,
@@ -19,13 +21,16 @@ import type {
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,
+  userInstructionRootV1,
   type SkillOwnerV1,
 } from "./catalog.js";
 import { renderSkillDocumentV1, skillDocumentPathV1 } from "./skill-md.js";
 import {
   checkSkillQuotaV1,
+  skillCountLimitV1,
   SKILL_QUOTA_DEFAULTS_V1,
   type SkillQuotaConfigV1,
+  type SkillQuotaScopeV1,
 } from "./quota.js";
 
 /** Who a Skill write is attributed to. Only these two are loadable. */
@@ -68,7 +73,7 @@ export async function sha256HexV1(text: string): Promise<string> {
 }
 
 /**
- * Renders and writes one Skill, enforcing the per-Bot quota on the way.
+ * Renders and writes one Skill, enforcing that root's quota on the way.
  *
  * A refusal is a value, never a throw: a quota breach, an unreadable root, or a
  * losing optimistic write are all outcomes a caller must record and report, and
@@ -81,6 +86,14 @@ export async function writeSkillDocumentV1(
   writer: SkillDocumentWriterV1,
   draft: SkillDocumentDraftV1,
   options: {
+    /**
+     * Which instruction root the Skill lands in: the Bot's own by default, or
+     * the User-global root every Bot of that User shares (ADR 0016). The
+     * writer is unchanged either way — a Bot writing the shared root still
+     * records itself, which is what lets a reading Bot be told whose Skill it
+     * is following.
+     */
+    scope?: SkillQuotaScopeV1;
     quota?: SkillQuotaConfigV1;
     /**
      * Recorded intent, after the quota admits the write and strictly before it
@@ -93,8 +106,13 @@ export async function writeSkillDocumentV1(
   } = {},
 ): Promise<SkillWriteOutcomeV1> {
   const quota = options.quota ?? SKILL_QUOTA_DEFAULTS_V1;
+  const scope = options.scope ?? "bot";
+  const root =
+    scope === "user"
+      ? userInstructionRootV1(owner)
+      : botInstructionRootV1(owner);
   const relativePath = skillDocumentPathV1(draft.slug);
-  const path = { root: botInstructionRootV1(owner), path: relativePath };
+  const path = { root, path: relativePath };
   const text = renderSkillDocumentV1({
     name: draft.name,
     description: draft.description,
@@ -112,12 +130,14 @@ export async function writeSkillDocumentV1(
   // The count is paged to completion, and a listing that cannot be read is a
   // refusal rather than a zero: a quota that falls open is not a quota.
   const counted = await countSkillDocumentsV1(files, path.root, {
-    stopAfter: quota.maxSkillsPerBot,
+    stopAfter: skillCountLimitV1(scope, quota),
   });
   if (counted.status !== "ok") {
     return {
       status: "refused",
-      reason: `${counted.reason}, so the per-Bot Skill quota cannot be enforced`,
+      reason: `${counted.reason}, so the per-${
+        scope === "user" ? "User" : "Bot"
+      } Skill quota cannot be enforced`,
     };
   }
   const verdict = checkSkillQuotaV1(
@@ -125,6 +145,7 @@ export async function writeSkillDocumentV1(
       bytes: bytes.byteLength,
       existingSkills: counted.count,
       replaces: existing.status === "ok",
+      scope,
     },
     quota,
   );

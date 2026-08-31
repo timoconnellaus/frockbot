@@ -89,7 +89,7 @@ import {
 } from "@frockbot/computer-core";
 import {
   decodeWorkspaceGenerationV1,
-  isWorkspaceMemoryRootV1,
+  isWorkspaceComputerReadOnlyRootV1,
   normalizeWorkspaceRelativePathV1,
   workspaceRootKeyV1,
   type WorkspaceFailureV1,
@@ -381,9 +381,13 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     const settled = new Set<string>();
     const conflicted = new Set<string>();
     const held = new Set<string>();
-    const memory = isWorkspaceMemoryRootV1(root);
+    // Memory roots and the User-global instruction root are presented
+    // read-only on the Computer: object storage is their single writer, so
+    // this sync materializes them and never pushes out of them (ADR 0013,
+    // ADR 0016).
+    const readOnlyOnComputer = isWorkspaceComputerReadOnlyRootV1(root);
 
-    if (!memory) {
+    if (!readOnlyOnComputer) {
       // Push first: a Computer-side write must reach the store's conditional
       // write before the pull could overwrite it.
       for (const entry of scanned.scan.entries) {
@@ -397,8 +401,9 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
         await this.pushRemoval(root, removal, stored, report);
       }
     } else {
-      // A Memory root is written only by the Memory Package, through object
-      // storage. A removal recorded here is a Computer-side edit of a
+      // A Memory root is written only by the Memory Package, and the
+      // User-global instruction root only by the Skills Package, both through
+      // object storage. A removal recorded here is a Computer-side edit of a
       // read-only presentation: it is never pushed, and the pull below
       // restores the file.
       for (const removal of scanned.scan.removed) {
@@ -424,7 +429,8 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
         report.failures.push({ ...materialized, root, path });
         continue;
       }
-      if (entry && (memory || conflicted.has(path))) report.restored.push(path);
+      if (entry && (readOnlyOnComputer || conflicted.has(path)))
+        report.restored.push(path);
       else report.pulled.push(path);
     }
 
@@ -1194,6 +1200,9 @@ export function declaredWorkspaceRootsV1(
     if (declares("bot-memory")) {
       roots.push({ kind: "bot-memory", userId: owner.userId, botId });
     }
+  }
+  if (declares("user-instructions")) {
+    roots.push({ kind: "user-instructions", userId: owner.userId });
   }
   if (declares("user-memory")) {
     roots.push({ kind: "user-memory", userId: owner.userId });

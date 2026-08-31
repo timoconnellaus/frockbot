@@ -677,7 +677,12 @@ export class WorkerdBotState extends BotState {
     botId: string;
   }): Promise<{
     compositionGenerationId: string;
-    skills: Array<{ ref?: string; path: string; generationId: string }>;
+    skills: Array<{
+      ref?: string;
+      path: string;
+      generationId: string;
+      by?: string;
+    }>;
     refusals: Array<{ path: string; reason: string }>;
   }> {
     this.bindSurfaces(identity);
@@ -727,6 +732,9 @@ export class WorkerdBotState extends BotState {
           : {}),
         path: skill.path,
         generationId: skill.generationId,
+        // The shared-tier attribution: which Bot or User wrote a Skill this
+        // Bot did not author.
+        ...(skill.by ? { by: skill.by } : {}),
       })),
       refusals: catalog.refusals.map((refusal) => ({
         path: refusal.path,
