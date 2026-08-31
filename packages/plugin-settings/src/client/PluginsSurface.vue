@@ -18,6 +18,19 @@ const apiKeyPackageId = ref<string>();
 const apiKeyConnectionTypeId = ref<string>();
 const apiKeyLabel = ref("");
 const apiKey = ref("");
+/**
+ * The MCP server form. A remote MCP server is a Connection like any other, but
+ * it needs its URL and transport as well as an optional key, so the generic
+ * API-key form cannot carry it. Both commands it can send are the ordinary
+ * Connection commands: `connection/create-api-key` when a key is given, and
+ * `connection/create` when the server is public.
+ */
+const MCP_PACKAGE_ID = "mcp";
+const mcpFormOpen = ref(false);
+const mcpLabel = ref("");
+const mcpUrl = ref("");
+const mcpTransport = ref<"streamable-http" | "sse">("streamable-http");
+const mcpApiKey = ref("");
 const rotatingConnectionId = ref<string>();
 const rotationKey = ref("");
 const labelingConnectionId = ref<string>();
@@ -196,8 +209,56 @@ function beginApiKeyConnection(
   apiKey.value = "";
 }
 
+function beginMcpConnection(): void {
+  mcpFormOpen.value = true;
+  mcpLabel.value = "";
+  mcpUrl.value = "";
+  mcpTransport.value = "streamable-http";
+  mcpApiKey.value = "";
+}
+
+function cancelMcpConnection(): void {
+  mcpFormOpen.value = false;
+  mcpApiKey.value = "";
+}
+
+async function addMcpServer(): Promise<void> {
+  const settings = {
+    url: mcpUrl.value.trim(),
+    transport: mcpTransport.value,
+  };
+  try {
+    if (mcpApiKey.value) {
+      await web.value.createApiKeyConnection({
+        packageId: MCP_PACKAGE_ID,
+        connectionTypeId: "mcp-remote-key",
+        label: mcpLabel.value,
+        apiKey: mcpApiKey.value,
+        settings,
+      });
+    } else {
+      await web.value.createConnection({
+        packageId: MCP_PACKAGE_ID,
+        connectionTypeId: "mcp-remote",
+        label: mcpLabel.value,
+        settings,
+      });
+    }
+    cancelMcpConnection();
+    expandedPackageId.value = undefined;
+  } catch (error) {
+    mcpApiKey.value = "";
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not add the MCP server";
+  }
+}
+
 /** Start whichever authorization the card's Connection type declares. */
 function beginConnect(item: PluginCatalogItem): void {
+  if (item.packageId === MCP_PACKAGE_ID) {
+    beginMcpConnection();
+    return;
+  }
   const connectionType = primaryConnectionType(item);
   if (!connectionType) return;
   if (connectionType.authorizationKind === "api-key") {
@@ -535,6 +596,47 @@ async function disconnect(connectionId: string): Promise<void> {
             </div>
           </div>
         </div>
+
+        <form
+          v-if="mcpFormOpen && item.packageId === MCP_PACKAGE_ID"
+          class="api-key-form"
+          @submit.prevent="addMcpServer"
+        >
+          <label>
+            <span>Server name</span>
+            <input v-model="mcpLabel" maxlength="120" required />
+          </label>
+          <label>
+            <span>Server URL</span>
+            <input
+              v-model="mcpUrl"
+              type="url"
+              inputmode="url"
+              placeholder="https://example.com/mcp"
+              maxlength="2048"
+              required
+            />
+          </label>
+          <label>
+            <span>Transport</span>
+            <select v-model="mcpTransport">
+              <option value="streamable-http">Streamable HTTP</option>
+              <option value="sse">Server-sent events</option>
+            </select>
+          </label>
+          <label>
+            <span>API key (optional)</span>
+            <input
+              v-model="mcpApiKey"
+              type="password"
+              autocomplete="new-password"
+            />
+          </label>
+          <div class="api-key-actions">
+            <UiButton @click="cancelMcpConnection">Cancel</UiButton>
+            <UiButton type="submit" variant="primary">Add server</UiButton>
+          </div>
+        </form>
 
         <form
           v-if="apiKeyPackageId === item.packageId"
