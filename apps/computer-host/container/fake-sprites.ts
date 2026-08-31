@@ -42,6 +42,11 @@ export interface ScriptedCommand {
   killedExitCode?: number;
   /** Fail the spawn itself. */
   error?: string;
+  /**
+   * Emit the failure more than once, the way the SDK does when a WebSocket
+   * never opens: once from the socket's handler, once as it closes.
+   */
+  errorEmissions?: number;
 }
 
 export interface RecordedCommand {
@@ -73,8 +78,11 @@ class FakeCommand extends EventEmitter implements SpriteCommandHandle {
       queueMicrotask(() => this.run());
     });
     queueMicrotask(() => {
-      if (script.error) this.emit("error", new Error(script.error));
-      else this.emit("spawn");
+      if (script.error) {
+        for (let index = 0; index < (script.errorEmissions ?? 1); index += 1) {
+          this.emit("error", new Error(script.error));
+        }
+      } else this.emit("spawn");
     });
   }
 
@@ -227,6 +235,14 @@ export class FakeSpritesClient implements SpritesClientHandle {
   readonly sprites = new Map<string, FakeSprite>();
   readonly created: string[] = [];
   readonly deleted: string[] = [];
+  /**
+   * Seeds a Sprite the host creates for itself.
+   *
+   * Provisioning creates its own Sprite, so a test that wants to script what
+   * that Sprite answers has no handle on it until after the call it is
+   * scripting. This is that handle.
+   */
+  onCreate?: (sprite: FakeSprite) => void;
 
   constructor(existing: string[] = []) {
     for (const name of existing) this.sprites.set(name, new FakeSprite(name));
@@ -242,6 +258,7 @@ export class FakeSpritesClient implements SpritesClientHandle {
     this.created.push(name);
     const sprite = new FakeSprite(name);
     this.sprites.set(name, sprite);
+    this.onCreate?.(sprite);
     return sprite;
   }
 

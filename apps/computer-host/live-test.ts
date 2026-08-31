@@ -35,13 +35,11 @@ import {
   type ComputerHostOperationV1,
 } from "@frockbot/computer-host-protocol";
 import {
-  COMPUTER_RUNTIME_FILES,
   computerSpriteNameSourceV1,
   computerSpriteNameV1,
-  ENSURE_AGENT_SCRIPT,
+  PROVISION_PHASES,
   RUNTIME_ROOT,
 } from "@frockbot/computer-host-runtime";
-import { COMPUTER_HOST_STATE_PATH } from "./container/computer.ts";
 
 Object.defineProperty(globalThis, "WebSocket", { value: WebSocket });
 
@@ -97,6 +95,7 @@ async function run(
     new Response(child.stderr).text(),
   ]);
   const code = await child.exited;
+  if (command[1] === "logs") return `${stdout}${stderr}`;
   if (code !== 0) {
     throw new Error(
       `${command[0]} ${command[1]} failed (${code}): ${stderr.slice(-2_000)}`,
@@ -163,6 +162,46 @@ async function waitForHealth(deadlineMs = 120_000): Promise<void> {
   throw new Error("Timed out waiting for the Computer host container");
 }
 
+let coldAttempts = 0;
+
+/**
+ * Opens a cold Computer, reconnecting if the connection is cut under us.
+ *
+ * Bun's `fetch` gives up on a request after five minutes, and installing a
+ * desktop stack can take longer than that — which makes this the live
+ * rehearsal of a rule rather than a workaround for a test runner:
+ * "Connections to the Computer are expected to drop on every pause; every
+ * Computer client reconnects and resumes rather than treating a dropped
+ * connection as failure." The install is detached and its phase markers are on
+ * the Sprite, so the next `open` joins the run in progress instead of
+ * starting a second one. Nothing is provisioned twice, however many times the
+ * client has to come back.
+ */
+async function openCold(): Promise<
+  ReturnType<typeof decodeComputerHostOpenResultV1>
+> {
+  const deadline = Date.now() + 20 * 60_000;
+  for (;;) {
+    coldAttempts += 1;
+    try {
+      return decodeComputerHostOpenResultV1(
+        await expectOk(
+          await call(COMPUTER_HOST_ROUTES.open, { kind: "open" }),
+          "open on a cold Computer",
+        ),
+      );
+    } catch (error) {
+      const dropped =
+        error instanceof Error &&
+        (error.name === "TimeoutError" || error.name === "AbortError");
+      if (!dropped || Date.now() >= deadline) throw error;
+      process.stdout.write(
+        "  the client's connection dropped mid-install; reconnecting\n",
+      );
+    }
+  }
+}
+
 async function readFrames(
   response: Response,
 ): Promise<ComputerHostExecFrameV1[]> {
@@ -198,6 +237,8 @@ function check(condition: boolean, message: string): void {
 const token = await spritesToken();
 const client = new SpritesClient(token);
 let started = false;
+let failure: unknown;
+let containerLog: ReturnType<typeof Bun.spawn> | undefined;
 
 try {
   process.stdout.write(`Building the Computer host image (${imageTag})\n`);
@@ -212,30 +253,9 @@ try {
     ".",
   ]);
 
-  // Create and seed the Sprite before the container ever sees it. Seeding the
-  // host-state file is what makes the container adopt this Sprite instead of
-  // spending ten minutes apt-installing a desktop, and it is itself the first
-  // half of the filesystem round-trip.
-  process.stdout.write(`Creating the disposable Sprite ${spriteName}\n`);
-  const sprite = await client.createSprite(spriteName);
-  const files = sprite.filesystem("/");
-  await files.mkdir(RUNTIME_ROOT, { recursive: true });
-  await files.writeFile(
-    COMPUTER_HOST_STATE_PATH,
-    `${JSON.stringify({ version: 1, generation: 1 })}\n`,
-    { mode: 0o600 },
-  );
-  // The tenant-attachment half of the runtime, without the ten-minute apt
-  // install the full provisioning script performs. `open` then exercises the
-  // real ensure script — slot allocation under `flock`, the viewer token, the
-  // per-Bot directories — which is the part a Computer's correctness rests on.
-  const ensure = COMPUTER_RUNTIME_FILES.find(
-    (file) => file.path === ENSURE_AGENT_SCRIPT,
-  );
-  if (!ensure)
-    throw new Error("the Computer runtime declares no ensure script");
-  await files.writeFile(ensure.path, ensure.content, { mode: ensure.mode });
-
+  // Nothing is seeded. The Sprite does not exist yet, so the container has to
+  // create it and run the whole provisioning document — `apt-get` and all —
+  // which is the exact path that used to die after 45 seconds of silence.
   process.stdout.write("Starting the container\n");
   await run(
     [
@@ -264,7 +284,62 @@ try {
     },
   );
   started = true;
+  // Follow the container's log for the life of the run. A container that dies
+  // cannot be asked what happened, and a cold provisioning run is exactly when
+  // it matters.
+  containerLog = Bun.spawn(["docker", "logs", "--follow", containerName], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   await waitForHealth();
+
+  // --- a cold Computer opens ----------------------------------------------
+  // The defect this test exists to close: `@fly/sprites@0.1.0` gives up on a
+  // WebSocket 45 s after the last inbound message and never pings, so the
+  // single long exec that installed the desktop stack could not survive its
+  // own success. Provisioning now runs detached and is polled, so this call
+  // takes as long as `apt-get` takes and no connection has to live that long.
+  process.stdout.write(
+    `Opening a cold Computer (${spriteName}) — this provisions from scratch\n`,
+  );
+  const coldStarted = Date.now();
+  const opened = await openCold();
+  const coldSeconds = Math.round((Date.now() - coldStarted) / 1000);
+  process.stdout.write(
+    `  cold open took ${coldSeconds}s over ${coldAttempts} connection(s)\n`,
+  );
+  check(opened.spriteName === spriteName, "it provisioned this User's Sprite");
+  check(
+    opened.provisioning?.status === "complete",
+    "it reports provisioning complete rather than silence",
+  );
+  check(
+    opened.provisioning?.total === PROVISION_PHASES.length,
+    `it reports all ${PROVISION_PHASES.length} provisioning phases`,
+  );
+  check(
+    opened.provisioning !== undefined,
+    "and it names the phases it went through rather than nothing at all",
+  );
+  check(
+    opened.display === ":100",
+    "the ensure script allocated the tenant a display slot",
+  );
+  check(opened.generation === 1, "the Computer records its first generation");
+
+  // Idempotence: the second open adopts what the first provisioned. Anything
+  // else would mean a Bot's second turn reinstalled its own desktop.
+  const adoptedStarted = Date.now();
+  const adopted = decodeComputerHostOpenResultV1(
+    await expectOk(
+      await call(COMPUTER_HOST_ROUTES.open, { kind: "open" }),
+      "second open",
+    ),
+  );
+  check(
+    adopted.provisioning === undefined,
+    `a second open adopts the Computer and provisions nothing (${Date.now() - adoptedStarted}ms)`,
+  );
 
   // --- the 431 regression -------------------------------------------------
   // The script that failed on argv was ~1.9 KB and encoded to ~2.7 KB. This
@@ -402,7 +477,11 @@ try {
   );
   check(
     reopened.display === ":100",
-    "the ensure script allocated the tenant a display slot on the shared Computer",
+    "the tenant keeps the display slot it was allocated before the restart",
+  );
+  check(
+    reopened.provisioning === undefined,
+    "a restarted container provisions nothing it has already provisioned",
   );
   check(
     reopened.directory.endsWith(
@@ -435,12 +514,35 @@ try {
     "the container refuses a request with no host token",
   );
 
-  process.stdout.write("\nComputer host live test passed\n");
+  process.stdout.write(
+    `\nComputer host live test passed (cold open: ${coldSeconds}s over ${coldAttempts} connection(s))\n`,
+  );
+} catch (error) {
+  // Printed here rather than left to the runner: a failure five minutes into
+  // a cold provisioning run is worth exactly one legible paragraph.
+  process.stderr.write(
+    `\nComputer host live test FAILED: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}\n`,
+  );
+  if (error instanceof Error && error.stack) {
+    process.stderr.write(`${error.stack}\n`);
+  }
+  failure = error;
 } finally {
   if (started) {
     await run(["docker", "rm", "--force", containerName], {
       quiet: true,
     }).catch(() => undefined);
+  }
+  if (containerLog) {
+    // Read after the container is gone, which is what ends `--follow`. A
+    // container that died cannot be asked what happened, so the log is
+    // collected for the life of the run rather than fetched afterwards.
+    const [out, err] = await Promise.all([
+      new Response(containerLog.stdout as ReadableStream).text(),
+      new Response(containerLog.stderr as ReadableStream).text(),
+    ]);
+    const logs = `${out}${err}`.trim();
+    if (failure && logs) process.stderr.write(`\ncontainer log:\n${logs}\n`);
   }
   await run(["docker", "image", "rm", "--force", imageTag], {
     quiet: true,
@@ -471,3 +573,5 @@ try {
     );
   }
 }
+
+if (failure) throw failure;

@@ -43,6 +43,16 @@ const host = new ComputerHost({
   client: new SpritesClient(spritesToken) as unknown as SpritesClientHandle,
   baseSpriteName,
   digest: (value) => createHash("sha256").update(value).digest("hex"),
+  // Provisioning a cold Computer takes minutes and `open` answers once, at
+  // the end. The container says where it has got to while it is getting there.
+  onProvisionProgress: (spriteName, progress) => {
+    process.stdout.write(
+      `provisioning ${spriteName}: ${progress.label} (${progress.index}/${progress.total}) ${progress.status}${progress.resumed ? " [resumed]" : ""}\n`,
+    );
+  },
+  onProvisionRetry: (spriteName, reason) => {
+    process.stdout.write(`provisioning ${spriteName}: ${reason}\n`);
+  },
 });
 
 /**

@@ -279,34 +279,231 @@ export function installFile(path: string, content: string): string {
   return `printf %s ${shellQuote(base64(content))} | base64 -d > ${path}`;
 }
 
-export const provisionScript = `set -eu
-mkdir -p ${RUNTIME_ROOT} ${RUNTIME_ROOT}/sync ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT}
-if ! command -v Xvfb >/dev/null || ! command -v chromium >/dev/null || ! command -v websockify >/dev/null; then
-  if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
-  $SUDO apt-get update >/tmp/frockbot-provision.log 2>&1
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y chromium xvfb fluxbox x11vnc novnc websockify x11-utils ca-certificates util-linux >>/tmp/frockbot-provision.log 2>&1
-fi
+/**
+ * Where the detached provisioner keeps everything about one provisioning run.
+ *
+ * A Computer is provisioned by a process that outlives the connection that
+ * started it (ADR 0004): `@fly/sprites@0.1.0` declares a WebSocket dead after
+ * `WS_PONG_WAIT` (45 s) without an inbound message and never sends a ping of
+ * its own, so no exec may be quiet for that long. `apt-get` is quiet for
+ * minutes. The provisioner therefore runs under `setsid nohup` behind a
+ * `flock`, and the host learns about it from these files through short exec
+ * calls that answer immediately.
+ */
+export const PROVISION_ROOT = `${RUNTIME_ROOT}/provision`;
+/** The provisioning document itself, installed by the launcher. */
+export const PROVISION_SCRIPT = `${PROVISION_ROOT}/provision.sh`;
+/** One JSON line: which phase the provisioner is on, and how it is going. */
+export const PROVISION_STATE = `${PROVISION_ROOT}/state.json`;
+/** Everything the provisioner and its `apt-get` wrote, for a failure report. */
+export const PROVISION_LOG = `${PROVISION_ROOT}/provision.log`;
+/** Held for the life of a run, so "is it still going?" is not a pid guess. */
+export const PROVISION_LOCK = `${PROVISION_ROOT}/provision.lock`;
+/**
+ * One file per completed phase.
+ *
+ * This is the marker that makes a half-provisioned Computer resumable: a run
+ * that starts again skips every phase whose marker is already there, so a
+ * container restart or a dropped connection costs the remaining phases and
+ * never the whole install.
+ */
+export const PROVISION_MARKERS = `${PROVISION_ROOT}/phases`;
+
+/** Prefix the report tail uses to say whether a provisioner is still alive. */
+export const PROVISION_RUNNER_PREFIX = "frockbot-provision-runner:";
+
+/**
+ * The phases of provisioning a Computer, in order.
+ *
+ * They are declared rather than inlined because they are three things at
+ * once: the body of the provisioning script, the resume markers that let a
+ * half-provisioned Computer be completed, and the progress a client reports
+ * ("installing the desktop packages (2/5)") while a cold Computer opens.
+ */
+export const PROVISION_PHASES: readonly {
+  name: string;
+  label: string;
+  body: string;
+}[] = [
+  {
+    name: "layout",
+    label: "preparing the Computer layout",
+    body: `mkdir -p ${RUNTIME_ROOT} ${RUNTIME_ROOT}/sync ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT}
 touch ${RUNTIME_ROOT}/tokens
 chmod 700 ${RUNTIME_ROOT}
-chmod 600 ${RUNTIME_ROOT}/tokens
-${installFile(`${RUNTIME_ROOT}/start-desktop.sh`, startDesktopScript)}
+chmod 600 ${RUNTIME_ROOT}/tokens`,
+  },
+  {
+    name: "packages",
+    label: "installing the desktop packages",
+    body: `if ! command -v Xvfb >/dev/null || ! command -v chromium >/dev/null || ! command -v websockify >/dev/null; then
+  if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
+  $SUDO apt-get update
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y chromium xvfb fluxbox x11vnc novnc websockify x11-utils ca-certificates util-linux
+fi`,
+  },
+  {
+    name: "runtime",
+    label: "installing the Computer runtime",
+    body: `${installFile(`${RUNTIME_ROOT}/start-desktop.sh`, startDesktopScript)}
 ${installFile(ENSURE_AGENT_SCRIPT, ensureAgentScript)}
 ${installFile(CONTROL_SCRIPT, controlScript)}
 ${installFile(`${RUNTIME_ROOT}/browser.mjs`, browserHelper)}
 ${installFile(`${RUNTIME_ROOT}/start-gateway.sh`, gatewayScript)}
 ${installFile(`${RUNTIME_ROOT}/watch-workspace.sh`, syncWatchScript)}
-chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh
-if [ ! -d ${RUNTIME_ROOT}/node_modules/playwright-core ]; then
-  npm install --prefix ${RUNTIME_ROOT} --no-audit --no-fund playwright-core@1.55.0 >>/tmp/frockbot-provision.log 2>&1
-fi
-cat > ${HOME_ROOT}/reference/README.md <<'EOF'
+chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh`,
+  },
+  {
+    name: "browser",
+    label: "installing the browser driver",
+    body: `if [ ! -d ${RUNTIME_ROOT}/node_modules/playwright-core ]; then
+  npm install --prefix ${RUNTIME_ROOT} --no-audit --no-fund playwright-core@1.55.0
+fi`,
+  },
+  {
+    name: "reference",
+    label: "writing the Computer reference",
+    body: `cat > ${HOME_ROOT}/reference/README.md <<'FROCKBOT_REFERENCE_EOF'
 # FrockBot computer
 
 /home/box/agent-data is durable application data. /workspaces contains Bot-private workspaces.
 One Computer serves all of a User's Bots. Each Bot has its own directories
 and desktop; the browser profile at /home/box/chrome-profile is shared by all of them.
 Automations are stored but are not executed unless an automation runtime is installed.
-EOF
+FROCKBOT_REFERENCE_EOF`,
+  },
+];
+
+/** The phase a run reports before it has entered the first real one. */
+export const PROVISION_STARTING_PHASE = {
+  name: "starting",
+  label: "starting the Computer provisioner",
+} as const;
+
+function provisionStateLine(
+  index: number,
+  name: string,
+  label: string,
+  status: string,
+): string {
+  return JSON.stringify({
+    version: 1,
+    index,
+    total: PROVISION_PHASES.length,
+    phase: name,
+    label,
+    status,
+  });
+}
+
+/**
+ * The provisioning document, run detached and resumable.
+ *
+ * Every phase is guarded by its marker, so running this again on a
+ * half-provisioned Computer completes it rather than starting over, and every
+ * phase records where it has got to before it begins. `set -E` is what makes
+ * the `ERR` trap fire from inside a function or a subshell, so a failure is
+ * recorded rather than merely exiting.
+ */
+export const provisionScript = `#!/usr/bin/env bash
+set -eEu
+MARKERS=${PROVISION_MARKERS}
+STATE=${PROVISION_STATE}
+mkdir -p "$MARKERS"
+INDEX=0
+NAME=${PROVISION_STARTING_PHASE.name}
+LABEL='${PROVISION_STARTING_PHASE.label}'
+state() {
+  TMP=$(mktemp "$STATE.XXXXXX")
+  printf '{"version":1,"index":%s,"total":${PROVISION_PHASES.length},"phase":"%s","label":"%s","status":"%s"}\\n' "$INDEX" "$NAME" "$LABEL" "$1" > "$TMP"
+  mv "$TMP" "$STATE"
+}
+trap 'state failed' ERR
+${PROVISION_PHASES.map(
+  (phase, position) => `INDEX=${position + 1}
+NAME=${phase.name}
+LABEL=${shellQuote(phase.label)}
+state running
+if [ ! -f "$MARKERS/${phase.name}" ]; then
+${phase.body}
+  touch "$MARKERS/${phase.name}"
+fi`,
+).join("\n")}
+INDEX=${PROVISION_PHASES.length}
+NAME=ready
+LABEL='the Computer is ready'
+state complete
+`;
+
+/**
+ * How long a provisioner waits for the run lock before giving up.
+ *
+ * It waits rather than refusing because the lock is probed, and a probe holds
+ * it for microseconds. A provisioner that used `flock -n` would lose that race
+ * every so often and die without a word — measured, and the reason this is a
+ * wait and not a `-n`.
+ */
+const PROVISION_LOCK_WAIT_SECONDS = 30;
+
+/**
+ * Installs the provisioning document and starts it detached, then reports.
+ *
+ * The document travels on this command's **stdin** and is installed with a
+ * rename, so a provisioner that is already running keeps reading the inode it
+ * opened and a second launcher cannot corrupt it. The launch itself is
+ * guarded twice: `setsid nohup` so the run survives this exec session ending,
+ * and `flock -n` so two launchers cannot produce two `apt-get` runs on one
+ * Computer.
+ */
+export const provisionLaunchScript = `set -eu
+mkdir -p ${PROVISION_ROOT} ${PROVISION_MARKERS}
+touch ${PROVISION_LOCK}
+# Probed once, before anything is started. A second probe after the launch
+# would contend with the provisioner it had just started.
+RUNNER=running
+if flock -n ${PROVISION_LOCK} true 2>/dev/null; then RUNNER=stopped; fi
+if [ "$RUNNER" = stopped ]; then
+  ${installFile(`${PROVISION_SCRIPT}.tmp`, provisionScript)}
+  chmod 700 ${PROVISION_SCRIPT}.tmp
+  mv ${PROVISION_SCRIPT}.tmp ${PROVISION_SCRIPT}
+  if ! grep -q '"status":"complete"' ${PROVISION_STATE} 2>/dev/null; then
+    # Only when there is nothing to keep. A relaunch resumes an install that
+    # already reached a phase, and reporting it as "starting" again would make
+    # a resume look like a restart to whoever is watching.
+    [ -s ${PROVISION_STATE} ] || printf '%s\\n' ${shellQuote(
+      provisionStateLine(
+        0,
+        PROVISION_STARTING_PHASE.name,
+        PROVISION_STARTING_PHASE.label,
+        "running",
+      ),
+    )} > ${PROVISION_STATE}
+    setsid nohup flock -w ${PROVISION_LOCK_WAIT_SECONDS} ${PROVISION_LOCK} bash ${PROVISION_SCRIPT} >>${PROVISION_LOG} 2>&1 </dev/null &
+    RUNNER=running
+  fi
+fi
+printf '${PROVISION_RUNNER_PREFIX}%s\\n' "$RUNNER"
+cat ${PROVISION_STATE} 2>/dev/null || true
+`;
+
+/**
+ * One poll: it starts nothing and answers immediately.
+ *
+ * This is the command that replaces the minutes-long silent exec. It is what
+ * keeps every connection to the Sprite far inside the SDK's 45-second window.
+ */
+export const provisionPollScript = `set -eu
+touch ${PROVISION_LOCK} 2>/dev/null || true
+if flock -n ${PROVISION_LOCK} true 2>/dev/null; then
+  printf '${PROVISION_RUNNER_PREFIX}stopped\\n'
+else
+  printf '${PROVISION_RUNNER_PREFIX}running\\n'
+fi
+cat ${PROVISION_STATE} 2>/dev/null || true
+`;
+
+/** The tail of the provisioner's own log, for a failure report. */
+export const provisionLogTailScript = `tail -c 2000 ${PROVISION_LOG} 2>/dev/null || true
 `;
 
 /**

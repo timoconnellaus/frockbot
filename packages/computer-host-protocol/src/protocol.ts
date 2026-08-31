@@ -226,6 +226,31 @@ export function computerHostOperationKindV1(
 
 // --- responses -------------------------------------------------------------
 
+/**
+ * How far provisioning a cold Computer got, and how it ended.
+ *
+ * Provisioning a Computer installs a desktop stack and is quiet for minutes
+ * (ADR 0004), so the phase is on the wire: a client that would otherwise show
+ * nothing at all can say "installing the desktop packages (2/5)", and a
+ * failure names the phase it failed in rather than the whole install.
+ */
+export interface ComputerHostProvisioningV1 {
+  /** Machine name of the phase reached: a declared phase, or `ready`. */
+  phase: string;
+  /** The same phase in words, for a client to show. */
+  label: string;
+  /** 1-based position of `phase`, or 0 before the first one begins. */
+  index: number;
+  /** How many phases a full provisioning run has. */
+  total: number;
+  status: "complete" | "running" | "failed";
+  /**
+   * True when this run completed a Computer that was already part-provisioned
+   * — a marker file said so, and the finished phases were not run again.
+   */
+  resumed: boolean;
+}
+
 export interface ComputerHostOpenResultV1 {
   version: typeof COMPUTER_HOST_PROTOCOL_VERSION;
   effectId: string;
@@ -236,6 +261,11 @@ export interface ComputerHostOpenResultV1 {
   display?: string;
   /** The Computer's provisioning generation, bumped on every reprovision. */
   generation: number;
+  /**
+   * Present when this `open` provisioned or resumed the Computer. Absent when
+   * it adopted one that was already provisioned, which is the common case.
+   */
+  provisioning?: ComputerHostProvisioningV1;
 }
 
 export interface ComputerHostExecResultV1 {
@@ -863,7 +893,7 @@ export function decodeComputerHostOpenResultV1(
   const label = "Computer host open result";
   const value = resultEnvelope(
     input,
-    ["spriteName", "directory", "display", "generation"],
+    ["spriteName", "directory", "display", "generation", "provisioning"],
     label,
   );
   return {
@@ -884,6 +914,42 @@ export function decodeComputerHostOpenResultV1(
       Number.MAX_SAFE_INTEGER,
       `${label} generation`,
     ),
+    ...(value.provisioning === undefined
+      ? {}
+      : {
+          provisioning: decodeComputerHostProvisioningV1(
+            value.provisioning,
+            label,
+          ),
+        }),
+  };
+}
+
+const PROVISIONING_STATUSES = new Set(["complete", "running", "failed"]);
+
+function decodeComputerHostProvisioningV1(
+  input: unknown,
+  label: string,
+): ComputerHostProvisioningV1 {
+  const value = object(input, `${label} provisioning`);
+  exactly(
+    value,
+    ["phase", "label", "index", "total", "status", "resumed"],
+    `${label} provisioning`,
+  );
+  if (!PROVISIONING_STATUSES.has(value.status as string)) {
+    fail(`${label} provisioning status is not a provisioning status`);
+  }
+  if (typeof value.resumed !== "boolean") {
+    fail(`${label} provisioning resumed must be a boolean`);
+  }
+  return {
+    phase: identifier(value.phase, `${label} provisioning phase`),
+    label: boundedString(value.label, 200, `${label} provisioning label`),
+    index: boundedInteger(value.index, 0, 1_000, `${label} provisioning index`),
+    total: boundedInteger(value.total, 1, 1_000, `${label} provisioning total`),
+    status: value.status as ComputerHostProvisioningV1["status"],
+    resumed: value.resumed,
   };
 }
 
