@@ -60,6 +60,18 @@ function ollamaCloudStub(request: Request): Response {
   if (url.pathname === "/api/show") {
     return Response.json({ capabilities: ["tools"], model_info: {} });
   }
+  // `POST /api/chat` is the only endpoint that authenticates a key (see
+  // docs/research/ollama-cloud-auth.md), so Connection validation probes it.
+  if (url.pathname === "/api/chat") {
+    return Response.json({
+      model: "glm-5.3-flash:cloud",
+      message: { role: "assistant", content: "H" },
+      done: true,
+      done_reason: "length",
+      prompt_eval_count: 68,
+      eval_count: 1,
+    });
+  }
   if (url.pathname === "/v1/chat/completions") {
     return new Response(
       'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
