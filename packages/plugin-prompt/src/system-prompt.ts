@@ -1,36 +1,15 @@
 import { type Context, Service } from "cordis";
+import type {
+  PromptAssembly,
+  PromptAssemblyContext,
+  PromptAssemblyService,
+  PromptSection,
+} from "@frockbot/kernel-contracts";
 
-export interface PromptAssemblyContext {
-  sessionId: string;
-  provider: string;
-  model: string;
-}
-
-export interface PromptSection {
-  id: string;
-  order?: number;
-  render(context: PromptAssemblyContext): string | Promise<string>;
-}
-
-export interface PromptAssembly {
-  text: string;
-  sections: Array<{ id: string; text: string }>;
-}
-
-declare module "cordis" {
-  interface Context {
-    systemPrompt: SystemPromptRegistry;
-  }
-
-  interface Events {
-    "system-prompt/assemble": (
-      context: PromptAssemblyContext,
-      next: () => Promise<PromptAssembly>,
-    ) => Promise<PromptAssembly>;
-  }
-}
-
-export class SystemPromptRegistry extends Service {
+export class SystemPromptRegistry
+  extends Service
+  implements PromptAssemblyService
+{
   private sections = new Map<string, PromptSection>();
 
   constructor(ctx: Context) {

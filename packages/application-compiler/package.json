@@ -8,12 +8,10 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "test": "bun test src",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/plugin-catalog": "workspace:*",
-    "semver": "7.8.5"
+    "@frockbot/kernel-composition": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

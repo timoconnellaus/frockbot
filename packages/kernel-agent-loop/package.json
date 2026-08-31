@@ -1,20 +1,24 @@
 {
-  "name": "@frockbot/plugin-catalog",
+  "name": "@frockbot/kernel-agent-loop",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./runtime": "./src/runtime.ts"
+    "./agent": "./src/agent.ts"
   },
   "scripts": {
+    "test": "bun test src",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/kernel-composition": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
+    "@frockbot/plugin-models": "workspace:*",
+    "@frockbot/plugin-prompt": "workspace:*",
+    "@frockbot/plugin-tools": "workspace:*",
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",
     "typescript": "^7.0.2"
@@ -25,6 +29,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
-    "directory": "packages/plugin-catalog"
+    "directory": "packages/kernel-agent-loop"
   }
 }

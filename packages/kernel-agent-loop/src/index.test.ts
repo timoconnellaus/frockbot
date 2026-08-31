@@ -1,19 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
-  AgentRegistry,
-  type AgentOptions,
   LlmEffectNotStartedError,
   type LlmReconciliationOutcome,
-  LlmRegistry,
   type LlmProvider,
   type LlmStreamEvent,
   type PersistSessionEvents,
   type SessionEvent,
   SessionStore,
-  SystemPromptRegistry,
-  ToolRegistry,
   type ToolDefinition,
-} from "@frockbot/agent-core";
+} from "@frockbot/kernel-contracts";
+import { LlmRegistry } from "@frockbot/plugin-models";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
+import { ToolRegistry } from "@frockbot/plugin-tools";
+import { AgentRegistry, type AgentOptions } from "./agent.js";
 import { Context, type Plugin } from "cordis";
 import { AgentLoop } from "./index.js";
 

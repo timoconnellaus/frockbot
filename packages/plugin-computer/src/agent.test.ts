@@ -20,6 +20,7 @@ async function execute(
   const context = {
     botId: "bot-1",
     agentId: "run-9",
+    compositionGenerationId: "bootstrap",
     sessionId: "session-1",
     signal: new AbortController().signal,
   };

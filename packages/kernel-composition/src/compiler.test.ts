@@ -4,7 +4,7 @@ import {
   compileApplicationPlan,
   type ApplicationPackageResolver,
   type ApplicationSource,
-} from "./index.js";
+} from "./compiler.js";
 
 function runtimeManifest(
   id: string,

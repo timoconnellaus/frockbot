@@ -1,59 +1,14 @@
 import { type Context, Service } from "cordis";
-import type { LlmStreamEvent, NormalizedModelRequest } from "./types.js";
+import {
+  LlmEffectNotStartedError,
+  type LlmProvider,
+  type LlmReconciliationOutcome,
+  type LlmStreamEvent,
+  type ModelInvocation,
+  type NormalizedModelRequest,
+} from "@frockbot/kernel-contracts";
 
-export interface DurableModelEffect {
-  providerEffectId: string;
-  request: NormalizedModelRequest;
-}
-
-export class LlmEffectNotStartedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "LlmEffectNotStartedError";
-  }
-}
-
-export type LlmReconciliationOutcome =
-  | {
-      status: "recovered";
-      events: readonly LlmStreamEvent[];
-    }
-  | {
-      status: "unavailable";
-      reason: string;
-    };
-
-export interface LlmReconciliationCapability {
-  retrieve(
-    effect: DurableModelEffect,
-    signal: AbortSignal,
-  ): Promise<LlmReconciliationOutcome>;
-}
-
-export interface LlmProvider {
-  id: string;
-  stream(
-    request: NormalizedModelRequest,
-    signal: AbortSignal,
-  ): AsyncIterable<LlmStreamEvent>;
-  reconciliation?: LlmReconciliationCapability;
-}
-
-declare module "cordis" {
-  interface Context {
-    llm: LlmRegistry;
-  }
-
-  interface Events {
-    "llm/stream": (
-      request: NormalizedModelRequest,
-      signal: AbortSignal,
-      next: () => AsyncIterable<LlmStreamEvent>,
-    ) => AsyncIterable<LlmStreamEvent>;
-  }
-}
-
-export class LlmRegistry extends Service {
+export class LlmRegistry extends Service implements ModelInvocation {
   private providers = new Map<string, LlmProvider>();
 
   constructor(ctx: Context) {

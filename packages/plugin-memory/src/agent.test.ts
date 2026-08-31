@@ -163,6 +163,7 @@ async function executeTool(
   const context = {
     botId: "alpha",
     agentId: "alpha",
+    compositionGenerationId: "bootstrap",
     sessionId: "owner:alpha",
     signal: new AbortController().signal,
   };

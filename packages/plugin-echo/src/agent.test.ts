@@ -61,6 +61,7 @@ describe("echo plugin", () => {
     const preparation = await harness.root.tools.prepare(first.call, {
       botId: "echo-bot",
       agentId: "echo-agent",
+      compositionGenerationId: "bootstrap",
       sessionId: "session",
       signal: controller.signal,
     });
@@ -69,6 +70,7 @@ describe("echo plugin", () => {
       await harness.root.tools.executePrepared(preparation, {
         botId: "echo-bot",
         agentId: "echo-agent",
+        compositionGenerationId: "bootstrap",
         sessionId: "session",
         signal: controller.signal,
       }),

@@ -105,6 +105,8 @@ Cordis services expose context-specific proxy objects that inherit from the prov
 
 ### Backend Agent runtime
 
+The kernel is `@frockbot/kernel-contracts` (session events plus the declared `ToolExecution`, `ModelInvocation`, and prompt-assembly interfaces), `@frockbot/kernel-agent-loop` (the loop and the Agent registry), and `@frockbot/kernel-composition` (Package manifests, activation, and application compilation). It imports no Package. The registries below are Packages that implement those interfaces: `@frockbot/plugin-tools`, `@frockbot/plugin-models`, and `@frockbot/plugin-prompt`. `@frockbot/agent-core`, `@frockbot/agent-loop`, `@frockbot/plugin-catalog`, and `@frockbot/application-compiler` remain re-export shims over them.
+
 **Session store** owns append-only session events, atomic event batches, interrupted-work reconciliation, and model-history derivation. It persists the exact normalized request sent to each model after all prompt, schema, provider, and request middleware has run. The Bot Durable Object supplies durable persistence through the same narrow interface.
 
 **System-prompt registry** accepts scoped prompt sections, variables, and tool-schema presentation. It assembles a prompt for one proposed step.
@@ -289,11 +291,16 @@ apps/
   mobile/                  Hosted mobile shell and platform adapters
   agent-runtime/           Transport-neutral backend Agent composition
 packages/
-  agent-core/              Session, LLM, prompt, tool, and Agent contracts
-  agent-loop/              Concrete durable loop provider
+  kernel-contracts/        Session, model, prompt, and tool execution contracts
+  kernel-agent-loop/       Concrete durable loop provider and Agent registry
+  kernel-composition/      Package manifest, activation coordinator, and compiler
+  plugin-tools/            Tool registry Package
+  plugin-models/           Model provider registry Package
+  plugin-prompt/           System-prompt registry Package
+  agent-core/              Re-export barrel over the kernel and registry Packages
   configuration-core/      Versioned settings and Connection projections
   connection-core/         Credential, catalog, and Connection command DTOs
-  plugin-catalog/          Package manifest and activation coordinator
+  plugin-catalog/          Re-export shim over kernel-composition
   plugin-credentials/      Encrypted account credential records and leases
   plugin-shell/            Hosted Vue shell and backend shell Contributions
   plugin-*/                First-party feature and provider Packages

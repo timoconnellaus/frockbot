@@ -1,58 +1,15 @@
 import { type Context, Service } from "cordis";
-import type { ToolCall, ToolSchema } from "./types.js";
+import type {
+  ToolCall,
+  ToolDefinition,
+  ToolExecution,
+  ToolExecutionContext,
+  ToolExecutionResult,
+  ToolPreparation,
+  ToolSchema,
+} from "@frockbot/kernel-contracts";
 
-export interface ToolExecutionContext {
-  botId: string;
-  agentId: string;
-  sessionId: string;
-  signal: AbortSignal;
-}
-
-export interface ToolExecutionResult {
-  content: string;
-  isError: boolean;
-}
-
-export interface ToolDefinition extends ToolSchema {
-  idempotent?: boolean;
-  validate?(input: unknown): boolean;
-  execute(
-    input: unknown,
-    context: ToolExecutionContext,
-  ): Promise<ToolExecutionResult>;
-}
-
-export type ToolPreparation =
-  | { kind: "ready"; call: ToolCall; idempotent: boolean }
-  | { kind: "denied"; call: ToolCall; result: ToolExecutionResult };
-
-declare module "cordis" {
-  interface Context {
-    tools: ToolRegistry;
-  }
-
-  interface Events {
-    "tools/pre-execute": (
-      call: ToolCall,
-      context: ToolExecutionContext,
-      next: () => Promise<ToolPreparation>,
-    ) => Promise<ToolPreparation>;
-    "tools/execute": (
-      call: ToolCall,
-      context: ToolExecutionContext,
-      next: () => Promise<ToolExecutionResult>,
-    ) => Promise<ToolExecutionResult>;
-    "tools/post-execute": (
-      call: ToolCall,
-      result: ToolExecutionResult,
-      context: ToolExecutionContext,
-      next: () => Promise<ToolExecutionResult>,
-    ) => Promise<ToolExecutionResult>;
-    "tools/result": (call: ToolCall, result: ToolExecutionResult) => void;
-  }
-}
-
-export class ToolRegistry extends Service {
+export class ToolRegistry extends Service implements ToolExecution {
   private definitions = new Map<string, ToolDefinition>();
 
   constructor(ctx: Context) {

@@ -60,6 +60,7 @@ describe("Composio router Plugin", () => {
     const context = {
       botId: "primary",
       agentId: "primary",
+      compositionGenerationId: "bootstrap",
       sessionId: "user-1:primary",
       signal: new AbortController().signal,
     };
@@ -183,6 +184,7 @@ describe("Composio router Plugin", () => {
     const context = {
       botId: "primary",
       agentId: "primary",
+      compositionGenerationId: "bootstrap",
       sessionId: "resumed-session",
       signal: new AbortController().signal,
     };
