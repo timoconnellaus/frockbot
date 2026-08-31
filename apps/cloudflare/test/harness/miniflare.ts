@@ -175,8 +175,97 @@ function toolCallStream(
   );
 }
 
+/** The one host the MCP stub answers, and the key it accepts. */
+export const MCP_ORIGIN = "https://mcp.example.test";
+export const MCP_ENDPOINT = `${MCP_ORIGIN}/mcp`;
+export const MCP_GOOD_API_KEY = "workerd-mcp-key";
+
+/**
+ * A remote MCP server, stubbed at the same outbound seam as Ollama Cloud.
+ * `plugin-mcp` reaches it with the Package's own `fetch`, so nothing is
+ * injected past a Package boundary to make this work: the endpoint is
+ * impersonated at the edge of the deployment exactly as a real one would sit.
+ *
+ * It speaks the streamable-HTTP transport, answering each POST inline as
+ * `application/json`, which is what the specification allows for a server that
+ * needs no server-initiated stream.
+ */
+export async function mcpServerStub(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  if (url.pathname !== "/mcp") {
+    return new Response("unexpected MCP request", { status: 404 });
+  }
+  // `/mcp` is the keyed endpoint: a request without the exact bearer token is
+  // refused, so a test can prove a bad key leaves the Connection failed.
+  const authorization = request.headers.get("authorization");
+  if (
+    authorization !== null &&
+    authorization !== `Bearer ${MCP_GOOD_API_KEY}`
+  ) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return new Response("invalid JSON-RPC body", { status: 400 });
+  }
+  if (body.id === undefined) return new Response("", { status: 202 });
+  const reply = (result: unknown): Response =>
+    Response.json({ jsonrpc: "2.0", id: body.id, result });
+  if (body.method === "initialize") {
+    return reply({
+      protocolVersion: "2025-06-18",
+      capabilities: { tools: {} },
+      serverInfo: { name: "Example MCP", version: "1.0.0" },
+    });
+  }
+  if (body.method === "tools/list") {
+    return reply({
+      tools: [
+        {
+          name: "echo",
+          description: "Echo a message back.",
+          inputSchema: {
+            type: "object",
+            properties: { message: { type: "string" } },
+            required: ["message"],
+          },
+        },
+      ],
+    });
+  }
+  if (body.method === "tools/call") {
+    const params = (body.params ?? {}) as {
+      name?: unknown;
+      arguments?: unknown;
+    };
+    if (params.name !== "echo") {
+      return reply({
+        isError: true,
+        content: [
+          { type: "text", text: `unknown tool: ${String(params.name)}` },
+        ],
+      });
+    }
+    return reply({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ echoed: params.arguments ?? {} }),
+        },
+      ],
+    });
+  }
+  return reply({});
+}
+
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
+  if (url.origin === MCP_ORIGIN) return mcpServerStub(request);
   if (url.origin !== "https://ollama.com") {
     return new Response("outbound request is not allowed in tests", {
       status: 403,

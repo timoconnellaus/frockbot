@@ -38,6 +38,16 @@ const MAX_TOOL_DESCRIPTION_LENGTH = 4_096;
 
 export type McpTransportV1 = "streamable-http" | "sse";
 
+/**
+ * The outbound seam, narrowed to what this client calls. Narrower than
+ * `typeof fetch` on purpose: the global cannot be passed by reference inside a
+ * Durable Object, so what is handed in here is always a small wrapper.
+ */
+export type McpFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
 export interface McpToolDeclarationV1 {
   name: string;
   description?: string;
@@ -59,7 +69,7 @@ export interface McpToolResultV1 {
 export interface McpClientConfig {
   url: URL;
   transport: McpTransportV1;
-  fetch: typeof fetch;
+  fetch: McpFetch;
   /** The credential, already opened from its lease. Never stored. */
   apiKey?: string;
   /** The header the key travels in. `Authorization` means `Bearer <key>`. */

@@ -20,10 +20,18 @@ import {
   McpClient,
   MAX_MCP_RESPONSE_BYTES,
   MAX_MCP_TOOLS_PER_SERVER,
+  type McpFetch,
   type McpToolDeclarationV1,
   type McpTransportV1,
 } from "./mcp-client.js";
 import { decodeOutboundMcpUrlV1 } from "./ssrf.js";
+
+/**
+ * The global `fetch`, bound. A bare reference to it throws "Illegal
+ * invocation" inside a Durable Object, where the built-in checks its
+ * receiver.
+ */
+const boundFetch: McpFetch = (input, init) => fetch(input, init);
 
 export const MCP_PACKAGE_ID = "mcp";
 export const MCP_CAPABILITY_ID = "mcp-tools";
@@ -120,7 +128,7 @@ export interface McpRuntimeContributionConfig {
   readSecret(name: string): string | undefined;
   authorizeConnection(): Promise<ConnectionView>;
   /** The Package's own outbound seam. */
-  fetch?: typeof fetch;
+  fetch?: McpFetch;
   /** The credential lease for a keyed server, from the User's authority. */
   leaseCredential?(
     effectId: string,
@@ -159,7 +167,7 @@ export async function createConfiguredMcpRuntimeContribution(
     );
     return undefined;
   }
-  const fetchImpl = config.fetch ?? fetch;
+  const fetchImpl = config.fetch ?? boundFetch;
   let client: McpClient | undefined;
   try {
     const connection = await config.authorizeConnection();

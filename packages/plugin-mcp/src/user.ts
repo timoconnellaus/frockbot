@@ -35,7 +35,14 @@ import {
   MCP_PACKAGE_ID,
   decodeMcpConnectionSettingsV1,
 } from "./agent.js";
-import { McpClient } from "./mcp-client.js";
+import { McpClient, type McpFetch } from "./mcp-client.js";
+
+/**
+ * The global `fetch`, bound. A bare reference to it throws "Illegal
+ * invocation" inside a Durable Object, where the built-in checks its
+ * receiver.
+ */
+const boundFetch: McpFetch = (input, init) => fetch(input, init);
 
 const COMMAND_PREFIX = "mcp-connection-command:";
 const MAX_STORED_COMMANDS = 256;
@@ -56,7 +63,7 @@ export interface McpUserBackendHost {
   settings: UserSettingsBackendContribution;
   credentials: CredentialUserBackendContribution;
   /** The Package's own outbound seam; the deployment's `fetch` by default. */
-  fetch?: typeof fetch;
+  fetch?: McpFetch;
   now?: () => number;
   randomId?: () => string;
 }
@@ -380,7 +387,7 @@ export class McpUserBackendContribution {
       client = new McpClient({
         url: settings.url,
         transport: settings.transport,
-        fetch: this.host.fetch ?? fetch,
+        fetch: this.host.fetch ?? boundFetch,
         ...(apiKey ? { apiKey, headerName: settings.headerName } : {}),
       });
       const handshake = await client.connect();

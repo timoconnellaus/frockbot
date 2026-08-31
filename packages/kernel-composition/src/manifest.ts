@@ -937,14 +937,12 @@ function settingDefinitions(
   scope: "package" | "connection",
 ): PackageSettingDefinition[] {
   return definitionArray(owner, "settings").map((setting) => {
+    // `scopes` is optional on a Connection Type's settings and fixed when it
+    // is present: the decoded form carries `["connection"]`, so a manifest
+    // that round-trips through this decoder decodes again unchanged.
     exactFields(
       setting,
-      [
-        "id",
-        "schemaVersion",
-        "schema",
-        ...(scope === "package" ? ["scopes"] : []),
-      ],
+      ["id", "schemaVersion", "schema", "scopes"],
       "manifest setting definition",
     );
     const schemaVersion = setting.schemaVersion;
@@ -954,6 +952,17 @@ function settingDefinitions(
       );
     }
     if (scope === "connection") {
+      const declared = setting.scopes;
+      if (
+        declared !== undefined &&
+        (!Array.isArray(declared) ||
+          declared.length !== 1 ||
+          declared[0] !== "connection")
+      ) {
+        throw new Error(
+          'manifest Connection Type setting scopes must be ["connection"]',
+        );
+      }
       return {
         id: definitionId(setting),
         schemaVersion: schemaVersion as number,
