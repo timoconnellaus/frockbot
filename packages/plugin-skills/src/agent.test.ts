@@ -213,6 +213,101 @@ describe("the skill_write tool", () => {
     await dispose();
   });
 
+  test("counts every page of the root, so the 201st Skill is refused", async () => {
+    const workspace = new FakeWorkspace();
+    // The store's default page is 100, so 200 Skills span more than one page.
+    // A single unpaged count would see 100 and admit the 201st forever.
+    workspace.listPageSize = 100;
+    for (let index = 0; index < 200; index += 1) {
+      const slug = `held-${String(index).padStart(3, "0")}`;
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `skills/${slug}/SKILL.md`,
+        text: skillMarkdown(slug, "Use this when counting.", "Body."),
+        writer: BOT_WRITER,
+      });
+    }
+    const { sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      { owner: OWNER, reads: workspace, files: workspace },
+      WRITER,
+      sessions,
+    );
+
+    const result = await tool.execute(
+      {
+        name: "two hundred and one",
+        description: "Use this when exceeding.",
+        body: "Body.",
+      },
+      CONTEXT,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("this Bot holds 200 Skills");
+    expect(
+      workspace.calls.some((call) =>
+        call.startsWith("write:skills/two-hundred-and-one/"),
+      ),
+    ).toBe(false);
+    await dispose();
+  });
+
+  test("refuses the write when the instruction root cannot be listed", async () => {
+    const workspace = new FakeWorkspace();
+    workspace.listFailure = {
+      status: "unavailable",
+      reason: "the bucket is unreachable",
+    };
+    const { session, sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      { owner: OWNER, reads: workspace, files: workspace },
+      WRITER,
+      sessions,
+    );
+
+    const result = await tool.execute(
+      { name: "unbounded", description: "Use this when blind.", body: "Body." },
+      CONTEXT,
+    );
+
+    // An unreadable listing makes the quota unknowable, so the write is
+    // refused visibly rather than proceeding against a count of zero.
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("quota cannot be enforced");
+    expect(workspace.calls.some((call) => call.startsWith("write:"))).toBe(
+      false,
+    );
+    expect(
+      session.events.some((event) => event.type === "skill/write-intent"),
+    ).toBe(false);
+    await dispose();
+  });
+
+  test("refuses a name carrying control characters, before any write", async () => {
+    const workspace = new FakeWorkspace();
+    const { sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      { owner: OWNER, reads: workspace, files: workspace },
+      WRITER,
+      sessions,
+    );
+
+    const result = await tool.execute(
+      {
+        name: "broken\nname: injected",
+        description: "Use this when breaking the frontmatter.",
+        body: "Body.",
+      },
+      CONTEXT,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("newlines or control characters");
+    expect(workspace.calls).toEqual([]);
+    await dispose();
+  });
+
   test("refuses input it cannot decode without touching the Workspace", async () => {
     const workspace = new FakeWorkspace();
     const { sessions, dispose } = await openSession();

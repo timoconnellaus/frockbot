@@ -50,6 +50,8 @@ export class FakeWorkspace implements WorkspaceFilesV1 {
   #sequence = 0;
   /** Set to make `list` answer a failure, to exercise the unreadable path. */
   listFailure?: { status: "unavailable" | "refused"; reason: string };
+  /** Entries per `list` page, so a caller's paging can be exercised. */
+  listPageSize = 100;
 
   static async seeded(seeds: FakeWorkspaceSeedV1[]): Promise<FakeWorkspace> {
     const workspace = new FakeWorkspace();
@@ -97,10 +99,19 @@ export class FakeWorkspace implements WorkspaceFilesV1 {
     this.calls.push(`list:${workspaceRootKeyV1(request.root)}`);
     if (this.listFailure) return Promise.resolve({ ...this.listFailure });
     const key = workspaceRootKeyV1(request.root);
-    const entries = [...this.#files.values()]
+    const all = [...this.#files.values()]
       .filter((stored) => workspaceRootKeyV1(stored.entry.path.root) === key)
-      .map((stored) => stored.entry);
-    return Promise.resolve({ status: "ok", entries });
+      .map((stored) => stored.entry)
+      .sort((left, right) => left.path.path.localeCompare(right.path.path));
+    const start = request.cursor ? Number(request.cursor) : 0;
+    const size = request.limit ?? this.listPageSize;
+    const entries = all.slice(start, start + size);
+    const next = start + entries.length;
+    return Promise.resolve({
+      status: "ok",
+      entries,
+      ...(next < all.length ? { cursor: String(next) } : {}),
+    });
   }
 
   async write(

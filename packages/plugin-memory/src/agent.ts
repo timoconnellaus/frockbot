@@ -428,6 +428,39 @@ function refusal(reason: string): ToolExecutionResult {
 }
 
 /**
+ * Refuses a `project`-scope change to a Project this Bot has not joined.
+ *
+ * "only the Projects a Bot has joined are injected into its prompts", and a
+ * Bot that may not read a Project's Memory may not write it either. Membership
+ * is durable User-scoped state, so the answer comes from the Project authority
+ * through the existing seam, never from anything this Package holds. A
+ * membership that cannot be read is a refusal, not an assumption: an
+ * unreachable authority must not become an open door.
+ */
+async function refuseUnjoinedProjectV1(
+  host: MemoryRuntimeHostV1,
+  scope: MemoryScopeNameV1,
+  projectId: string | undefined,
+): Promise<string | undefined> {
+  if (scope !== "project" || projectId === undefined) return undefined;
+  if (!host.projects) {
+    return `Project membership is unavailable, so writing Project "${projectId}" memory cannot be authorised`;
+  }
+  let joined: MemoryProjectV1[];
+  try {
+    joined = await host.projects.joined();
+  } catch (error) {
+    return `Project membership could not be read: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
+  if (joined.some((project) => project.projectId === projectId)) {
+    return undefined;
+  }
+  return `you have not joined Project "${projectId}"; join it before changing its memory`;
+}
+
+/**
  * The provenance one Memory write records. A Bot writes its own shard as
  * itself; the Project descriptor is a User-scoped file the Bot writes with its
  * User's authority, which is the only writer `writerOwnsMemoryPathV1` allows
@@ -488,6 +521,12 @@ export function createMemoryWriteTool(
           `memory_write was refused: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
+      const unjoined = await refuseUnjoinedProjectV1(
+        host,
+        decoded.scope,
+        decoded.project,
+      );
+      if (unjoined) return refusal(`memory_write was refused: ${unjoined}`);
       const text =
         decoded.tier === "note" ? `[note] ${decoded.fact}` : decoded.fact;
       const contentHash = await sha256HexV1(text);
@@ -584,6 +623,12 @@ export function createMemoryForgetTool(
           `memory_forget was refused: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
+      const unjoined = await refuseUnjoinedProjectV1(
+        host,
+        decoded.scope,
+        decoded.project,
+      );
+      if (unjoined) return refusal(`memory_forget was refused: ${unjoined}`);
       const contentHash = await sha256HexV1(decoded.fact);
       const effectId = `memory:forget:${decoded.scope}:${decoded.project ?? ""}:${contentHash}`;
       const position = openMemoryTurnPositionV1(session);
@@ -605,24 +650,46 @@ export function createMemoryForgetTool(
         fact: decoded.fact,
         writer: botWriterV1(host.owner, host.writer),
       });
+      // A forget can span more than one of this Bot's files. Whatever it
+      // rewrote is durable whether or not the whole call succeeded, so the
+      // event log records each rewritten file before the outcome is reported;
+      // otherwise the log would claim nothing changed while the files disagree.
+      const changed =
+        outcome.written && outcome.written.length > 0
+          ? outcome.written
+          : outcome.status === "ok"
+            ? [
+                {
+                  path: outcome.path,
+                  generationId: outcome.generationId,
+                  contentHash,
+                },
+              ]
+            : [];
+      for (const file of changed) {
+        session.append({
+          type: "memory/written",
+          ...position,
+          effectId,
+          action: "forget",
+          scope: decoded.scope,
+          projectId: decoded.project ?? "",
+          tier: "log",
+          path: file.path,
+          generationId: file.generationId || "unchanged",
+          contentHash,
+        });
+      }
+      if (changed.length > 0) await session.flush();
       if (outcome.status !== "ok") {
         return refusal(
-          `memory_forget was ${outcome.status}: ${outcome.reason}`,
+          changed.length > 0
+            ? `memory_forget was ${outcome.status} after changing ${changed.length} file(s) (${changed
+                .map((file) => file.path)
+                .join(", ")}): ${outcome.reason}`
+            : `memory_forget was ${outcome.status}: ${outcome.reason}`,
         );
       }
-      session.append({
-        type: "memory/written",
-        ...position,
-        effectId,
-        action: "forget",
-        scope: decoded.scope,
-        projectId: decoded.project ?? "",
-        tier: "log",
-        path: outcome.path,
-        generationId: outcome.generationId || "unchanged",
-        contentHash,
-      });
-      await session.flush();
       await projection.reindex();
       return {
         content: outcome.retracted
@@ -645,6 +712,58 @@ const MEMORY_SEARCH_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+interface MemorySearchInputV1 {
+  query: string;
+  scope?: MemoryScopeNameV1;
+  maxResults?: number;
+}
+
+/**
+ * Decodes `memory_search` input at the seam, exactly as the write tools do.
+ *
+ * "every inbound value is decoded at its seam" — a tool argument arrives from
+ * a model, so it is inbound, and being read-only buys it no exemption: an
+ * unknown key or an out-of-range `maxResults` is a refusal, never a value the
+ * searcher is handed unchecked.
+ */
+function decodeMemorySearchInputV1(input: unknown): MemorySearchInputV1 {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("input must be an object");
+  }
+  const value = input as Record<string, unknown>;
+  const allowed = ["query", "scope", "maxResults"];
+  if (!Object.keys(value).every((key) => allowed.includes(key))) {
+    throw new Error("input has unknown fields");
+  }
+  const query = value.query;
+  if (
+    typeof query !== "string" ||
+    query.trim().length === 0 ||
+    query.length > 500
+  ) {
+    throw new Error("query must be a bounded non-empty string");
+  }
+  const decoded: MemorySearchInputV1 = { query: query.trim() };
+  if (value.scope !== undefined) {
+    if (!SCOPE_ENUM.includes(value.scope as MemoryScopeNameV1)) {
+      throw new Error("scope is invalid");
+    }
+    decoded.scope = value.scope as MemoryScopeNameV1;
+  }
+  if (value.maxResults !== undefined) {
+    const maxResults = value.maxResults;
+    if (
+      !Number.isSafeInteger(maxResults) ||
+      (maxResults as number) < 1 ||
+      (maxResults as number) > 20
+    ) {
+      throw new Error("maxResults must be an integer between 1 and 20");
+    }
+    decoded.maxResults = maxResults as number;
+  }
+  return decoded;
+}
+
 export function createMemorySearchTool(
   host: MemoryRuntimeHostV1,
   projection: MemoryProjection,
@@ -655,17 +774,23 @@ export function createMemorySearchTool(
       "Search your memory files for anything the injected block did not carry. Your prompt holds only the most recent capped selection; the rest is on disk.",
     inputSchema: MEMORY_SEARCH_SCHEMA as unknown as Record<string, unknown>,
     idempotent: true,
-    validate: (input) =>
-      !!input &&
-      typeof input === "object" &&
-      typeof (input as { query?: unknown }).query === "string" &&
-      (input as { query: string }).query.trim().length > 0,
+    validate: (input) => {
+      try {
+        decodeMemorySearchInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     execute: async (input: unknown) => {
-      const value = input as {
-        query: string;
-        scope?: MemoryScopeNameV1;
-        maxResults?: number;
-      };
+      let value: MemorySearchInputV1;
+      try {
+        value = decodeMemorySearchInputV1(input);
+      } catch (error) {
+        return refusal(
+          `memory_search was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       const embed = memoryEmbedderV1(host);
       const results = await searchMemoryV1({
         index: projection.index(),
@@ -822,7 +947,11 @@ export function createProjectTools(
           text: renderProjectDocumentV1(project),
           writer: { kind: "user", userId: host.owner.userId },
         });
-        if (written.status !== "ok" && written.status !== "conflict") {
+        if (written.status !== "ok") {
+          // A conflict is not a success. Another writer holds a generation this
+          // call never saw, so the descriptor on disk is not the one this Bot
+          // asked for; membership is left unchanged and nothing is recorded as
+          // changed, rather than logging a Project change that did not happen.
           return refusal(`${name} was ${written.status}: ${written.reason}`);
         }
       }

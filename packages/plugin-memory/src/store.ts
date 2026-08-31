@@ -76,6 +76,17 @@ export interface MemoryTierReadV1 {
   logTotal: number;
   /** Set when the tier could not be read in full; rendered as an omission. */
   unavailable?: string;
+  /**
+   * Set when the read completed but a declared bound cut it short, so some
+   * Memory on disk never reached this result.
+   *
+   * Distinct from `unavailable`: the tier *was* read, and the facts here are
+   * sound, so a write or a forget against it is still meaningful. What is not
+   * sound is treating this read as the whole tier — "an injection gap is
+   * visible in durable state rather than silently changing the Bot's
+   * behavior", so the renderer turns this into an omission on the tier's scope.
+   */
+  omitted?: string;
 }
 
 export type MemoryWriteOutcomeV1 =
@@ -90,6 +101,27 @@ export type MemoryWriteOutcomeV1 =
   | { status: "refused"; reason: string }
   | { status: "conflict"; reason: string }
   | { status: "unavailable"; reason: string };
+
+/** One file a multi-file change actually rewrote, and the generation it made. */
+export interface MemoryFileChangeV1 {
+  path: string;
+  generationId: string;
+  contentHash: string;
+}
+
+/**
+ * A forget, which may touch more than one file.
+ *
+ * `written` names every file this call actually rewrote, and it is present on
+ * a failure too: a forget that mutates the first of two files and then fails
+ * on the second has changed durable state, and "Failures are observable
+ * through durable state" means the caller has to be able to record what did
+ * change rather than reporting a clean failure the files contradict.
+ */
+export type MemoryForgetOutcomeV1 = MemoryWriteOutcomeV1 & {
+  retracted?: boolean;
+  written?: MemoryFileChangeV1[];
+};
 
 export interface MemoryStoreOptionsV1 {
   files: WorkspaceFilesV1;
@@ -151,13 +183,21 @@ export class MemoryStore {
         return result;
       }
       entries.push(...outcome.entries);
-      if (!outcome.cursor) break;
+      if (!outcome.cursor) {
+        cursor = undefined;
+        break;
+      }
       cursor = outcome.cursor;
+    }
+    if (cursor !== undefined) {
+      // The listing was still going when the page bound ran out. Some shards
+      // were never seen, so this read is not the whole tier and must say so.
+      result.omitted = `the tier did not finish listing within ${MEMORY_MAX_LIST_PAGES} pages, so some shards were not read`;
     }
 
     const profile: SourcedMemoryFactV1[] = [];
     const log: SourcedMemoryFactV1[] = [];
-    const files = entries
+    const classifiedFiles = entries
       .flatMap((entry) => {
         const classified = memoryFileKindV1(root, entry.path.path);
         return classified ? [{ entry, classified }] : [];
@@ -165,8 +205,12 @@ export class MemoryStore {
       // Newest month last, so a merge that ties on day still has an order.
       .sort((left, right) =>
         left.entry.path.path.localeCompare(right.entry.path.path),
-      )
-      .slice(0, MEMORY_MAX_FILES_PER_TIER);
+      );
+    const files = classifiedFiles.slice(0, MEMORY_MAX_FILES_PER_TIER);
+    if (classifiedFiles.length > files.length) {
+      const dropped = classifiedFiles.length - files.length;
+      result.omitted = `${dropped} Memory file(s) beyond the ${MEMORY_MAX_FILES_PER_TIER}-file read bound were not read`;
+    }
 
     for (const { entry, classified } of files) {
       if (entry.generation.size > MEMORY_MAX_FILE_BYTES) {
@@ -268,7 +312,7 @@ export class MemoryStore {
     fact: string;
     writer: WorkspaceWriterV1;
     at?: Date;
-  }): Promise<MemoryWriteOutcomeV1 & { retracted?: boolean }> {
+  }): Promise<MemoryForgetOutcomeV1> {
     const text = request.fact.trim();
     if (!text) return { status: "refused", reason: "a fact text is required" };
     const at = request.at ?? this.#clock();
@@ -286,21 +330,31 @@ export class MemoryStore {
       // The Bot owns every file the fact sits in, so removing the line is both
       // permitted and the honest record: nothing else recorded it.
       let last: MemoryWriteOutcomeV1 | undefined;
+      // Each rewritten file is recorded as it lands, so a failure part-way
+      // through still answers with the generations that already exist on disk.
+      const written: MemoryFileChangeV1[] = [];
       for (const source of tier.sources) {
         if (source.botId !== this.owner.botId) continue;
         const path: WorkspacePathV1 = { root: request.root, path: source.path };
         const refusal = this.refuseForeignShard(path, request.writer);
-        if (refusal) return refusal;
+        if (refusal) return { ...refusal, written };
         const outcome = await this.rewrite(path, request.writer, (facts) => {
           const kept = facts.filter(
             (fact) => memoryFactKeyV1(fact.text) !== key,
           );
           return kept.length === facts.length ? "unchanged" : kept;
         });
-        if (outcome.status !== "ok") return outcome;
-        if (!outcome.duplicate) last = outcome;
+        if (outcome.status !== "ok") return { ...outcome, written };
+        if (!outcome.duplicate) {
+          last = outcome;
+          written.push({
+            path: outcome.path,
+            generationId: outcome.generationId,
+            contentHash: outcome.contentHash,
+          });
+        }
       }
-      if (last) return last;
+      if (last) return { ...last, written };
     }
 
     const elsewhere = [...tier.profile, ...tier.recent].some(

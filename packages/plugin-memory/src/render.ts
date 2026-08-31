@@ -241,6 +241,9 @@ export function renderMemoryInjectionV1(
   if (input.user.unavailable) {
     omissions.push({ scope: "user", reason: input.user.unavailable });
   }
+  if (input.user.omitted) {
+    omissions.push({ scope: "user", reason: input.user.omitted });
+  }
   const userDropped = userProfile.dropped + userRecent.dropped;
   if (userDropped > 0) {
     omissions.push({
@@ -308,6 +311,12 @@ export function renderMemoryInjectionV1(
         reason: `${entry.project.projectId}: ${entry.tier.unavailable}`,
       });
     }
+    if (entry.tier.omitted) {
+      omissions.push({
+        scope: "project",
+        reason: `${entry.project.projectId}: ${entry.tier.omitted}`,
+      });
+    }
     const dropped = profileTaken.dropped + recentTaken.dropped;
     if (dropped > 0) {
       omissions.push({
@@ -362,6 +371,9 @@ export function renderMemoryInjectionV1(
   );
   if (input.own.unavailable) {
     omissions.push({ scope: "bot", reason: input.own.unavailable });
+  }
+  if (input.own.omitted) {
+    omissions.push({ scope: "bot", reason: input.own.omitted });
   }
   const ownDropped = ownProfile.dropped + ownRecent.dropped;
   if (ownDropped > 0) {

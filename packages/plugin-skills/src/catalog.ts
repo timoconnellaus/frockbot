@@ -43,6 +43,16 @@ export interface SkillOwnerV1 {
 
 /** Most `list` pages walked before enumeration stops. */
 export const SKILL_MAX_LIST_PAGES = 8;
+/**
+ * Most `list` pages walked while counting a root for the quota.
+ *
+ * Counting is not loading: the catalog stops at `SKILL_MAX_CATALOG_ENTRIES` and
+ * a truncated catalog is a recorded refusal, but a truncated *count* would make
+ * the quota unenforceable, so this bound is generous enough to cover the
+ * largest configurable `maxSkillsPerBot` at any plausible page size, and being
+ * hit is itself an unavailable answer rather than a smaller number.
+ */
+export const SKILL_MAX_COUNT_LIST_PAGES = 256;
 /** Most Skills carried in one catalog. Beyond this, the rest are refused. */
 export const SKILL_MAX_CATALOG_ENTRIES = 200;
 
@@ -120,6 +130,50 @@ function describeRoot(source: SkillSourceV1): string {
   }
   if (root.kind === "bot-memory") return `Bot "${root.botId}"'s Memory root`;
   return `Bot "${root.botId}"'s instruction root`;
+}
+
+/**
+ * How many Skills a root already holds, or why that is not knowable.
+ *
+ * There is no "probably fine" answer here. A quota that falls back to zero on
+ * an unreadable listing is a quota that can never refuse, so the failure is a
+ * declared variant the caller must handle.
+ */
+export type SkillCountOutcomeV1 =
+  { status: "ok"; count: number } | { status: "unavailable"; reason: string };
+
+/**
+ * Counts the `SKILL.md` files under a root, paging the listing to completion.
+ *
+ * The quota is checked against what the root already holds, so an incomplete
+ * count is not a smaller count — it is no count at all.
+ */
+export async function countSkillDocumentsV1(
+  reads: WorkspaceReadsV1,
+  root: WorkspaceInstructionRootV1,
+): Promise<SkillCountOutcomeV1> {
+  let count = 0;
+  let cursor: string | undefined;
+  for (let page = 0; page < SKILL_MAX_COUNT_LIST_PAGES; page += 1) {
+    const outcome = await reads.list(
+      cursor === undefined ? { root } : { root, cursor },
+    );
+    if (outcome.status !== "ok") {
+      return {
+        status: "unavailable",
+        reason: `the instruction root could not be listed: ${outcome.reason}`,
+      };
+    }
+    count += outcome.entries.filter((entry) =>
+      isSkillDocumentPathV1(entry.path.path),
+    ).length;
+    if (!outcome.cursor) return { status: "ok", count };
+    cursor = outcome.cursor;
+  }
+  return {
+    status: "unavailable",
+    reason: `the instruction root did not finish listing within ${SKILL_MAX_COUNT_LIST_PAGES} pages`,
+  };
 }
 
 /**
