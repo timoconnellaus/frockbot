@@ -70,7 +70,9 @@ import type {
 } from "@frockbot/kernel-contracts";
 import {
   decodeRoutineCommandV1,
+  decodeRoutineInboxCommandV1,
   type RoutineCommandV1,
+  type RoutineInboxCommandV1,
 } from "@frockbot/plugin-routines/shared";
 import {
   decodeRoutineHookDeliveryV1,
@@ -809,6 +811,64 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.listRoutineRuns(identity, request.routineId as string);
+  }
+
+  /**
+   * One automation run, read-only. It is not in the visible transcript and
+   * never will be; the Routine's run log is the only door to it.
+   */
+  async readRoutineRun(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      routineId: rpcIdentifier,
+      runId: rpcIdentifier,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.readRoutineRun(
+      identity,
+      request.routineId as string,
+      request.runId as string,
+    );
+  }
+
+  /** The completion inbox: what the Bot's firings left for its User. */
+  async listRoutineInbox(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.listRoutineInbox(identity);
+  }
+
+  /** Acknowledging inbox entries; an explicit command, never a read. */
+  async executeRoutineInboxCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeRoutineInboxCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.executeRoutineInboxCommand(
+      identity,
+      request.command as RoutineInboxCommandV1,
+    );
   }
 
   /**

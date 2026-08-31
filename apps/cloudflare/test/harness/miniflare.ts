@@ -137,10 +137,12 @@ function scriptedToolCalls(
     .reverse()
     .find((message) => message.role === "user");
   const content = typeof user?.content === "string" ? user.content : "";
-  if (!content.startsWith(TOOL_CALL_TRIGGER)) return [];
+  // Trigger lines are found wherever they sit in the message, because a Turn
+  // the product itself composes — a Routine cue, or a chat Turn carrying a
+  // drained hand-off — wraps the text a test wrote in framing of its own.
   const calls: Array<{ name: string; arguments: string }> = [];
   for (const line of content.split("\n")) {
-    if (!line.startsWith(TOOL_CALL_TRIGGER)) return [];
+    if (!line.startsWith(TOOL_CALL_TRIGGER)) continue;
     const request = line.slice(TOOL_CALL_TRIGGER.length);
     const separator = request.indexOf(":");
     if (separator < 1) return [];

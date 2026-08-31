@@ -1,6 +1,8 @@
 import type { InjectionKey, Ref } from "vue";
 import type {
   RoutineHookMintV1,
+  RoutineInboxEntryViewV1,
+  RoutineRunDetailViewV1,
   RoutineRunEntryViewV1,
   RoutineTriggerV1,
   RoutineViewV1,
@@ -22,11 +24,24 @@ export interface RoutinesClientState {
   routines: RoutineViewV1[];
   /** Run logs by Routine, loaded on demand when a log is opened. */
   runs: Record<string, RoutineRunEntryViewV1[]>;
+  /**
+   * One automation run's events, by run id, loaded when the reader opens it.
+   * An automation Turn is not in the transcript, so this is the only read of
+   * one and it is read-only.
+   */
+  runDetails: Record<string, RoutineRunDetailViewV1>;
+  /** The completion inbox, newest first, and what the header badge shows. */
+  inbox: RoutineInboxEntryViewV1[];
+  unacknowledged: number;
   loaded: boolean;
   busy: boolean;
   error?: string;
   load(botId: string): Promise<void>;
   loadRuns(botId: string, routineId: string): Promise<void>;
+  loadRun(botId: string, routineId: string, runId: string): Promise<void>;
+  loadInbox(botId: string): Promise<void>;
+  /** Acknowledge entries; an empty list acknowledges all of them. */
+  acknowledgeInbox(botId: string, entryIds: string[]): Promise<void>;
   save(botId: string, submission: RoutineFormSubmissionV1): Promise<void>;
   setEnabled(botId: string, routineId: string, enabled: boolean): Promise<void>;
   remove(botId: string, routineId: string): Promise<void>;

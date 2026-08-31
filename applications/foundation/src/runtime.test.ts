@@ -347,6 +347,12 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       listRoutineRuns: () =>
         Promise.reject(new Error("not used while composing")),
+      readRoutineRun: () =>
+        Promise.reject(new Error("not used while composing")),
+      listRoutineInbox: () =>
+        Promise.reject(new Error("not used while composing")),
+      executeRoutineInboxCommand: () =>
+        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions

@@ -34,6 +34,20 @@ import {
 } from "@frockbot/plugin-routines/hook";
 import { routineHookPathV1 } from "@frockbot/plugin-routines/shared";
 import type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
+import { routineHandoffTextV1 } from "@frockbot/plugin-routines/inbox";
+import {
+  routineTerminalRecordsV1,
+  type RoutineTerminalRecordsV1,
+} from "@frockbot/plugin-routines/inbox-store";
+import { decodeRoutineRecordV1 } from "@frockbot/plugin-routines/records";
+import { routineKeyV1 } from "@frockbot/plugin-routines/storage-keys";
+import {
+  ROUTINE_RUN_EVENT_MAX,
+  type RoutineInboxEntryViewV1,
+  type RoutineRunDetailViewV1,
+} from "@frockbot/plugin-routines/shared";
+import type { RoutineInboxEntryV1 } from "@frockbot/plugin-routines/inbox";
+import type { SessionEvent } from "@frockbot/kernel-contracts";
 
 /** The Bot and User whose Routines a caller may reach. */
 export interface BotRoutinesIdentity {
@@ -168,9 +182,14 @@ export function routineFireOutcomeV1(
     };
   }
   if (run.status === "completed") {
+    // A Turn that ended by handing off writes no assistant message, so its
+    // response text is empty; the log records the outcome and leaves the
+    // summary off rather than carrying an empty one.
     return {
       status: "ok",
-      ...(run.responseText === undefined ? {} : { summary: run.responseText }),
+      ...(run.responseText === undefined || run.responseText.trim().length === 0
+        ? {}
+        : { summary: run.responseText }),
     };
   }
   return {
@@ -198,5 +217,154 @@ export function createBotRoutinesHost(
     },
     list: () => store.list(identity.botId),
     execute: (command, writer) => store.execute(command, writer),
+  };
+}
+
+/**
+ * The Routine a settled run belongs to, or `undefined` when it is an ordinary
+ * conversational Turn. Read off the durable admission record, so it survives an
+ * eviction and a trimmed run log alike.
+ */
+export function settledRoutineOriginV1(run: {
+  admission?: {
+    turnType?: string;
+    origin?: { kind: string; routineId: string };
+  };
+}): { routineId: string } | undefined {
+  if (run.admission?.turnType !== "automation") return undefined;
+  const origin = run.admission.origin;
+  if (!origin || origin.kind !== "routine") return undefined;
+  return { routineId: origin.routineId };
+}
+
+/**
+ * The records one settled automation Turn contributes to the transaction that
+ * settles it: its completion-inbox entry, and — only when the Turn called
+ * `wake_parent` — the pending input the Bot's next conversational Turn is owed.
+ *
+ * A failed or cancelled firing reaches none of this: `completeStoredRun` is the
+ * only caller, so a firing that did not complete leaves a `failed` run-log
+ * entry and no inbox entry, which is the row's "durable, visible failure".
+ */
+export async function routineTerminalRecordsForRunV1(input: {
+  run: {
+    runId: string;
+    events: readonly { type: string }[];
+    responseText?: string;
+    admission?: {
+      turnType?: string;
+      origin?: { kind: string; routineId: string };
+    };
+  };
+  read<T>(key: string): Promise<T | undefined>;
+  now: string;
+}): Promise<RoutineTerminalRecordsV1 | undefined> {
+  const origin = settledRoutineOriginV1(input.run);
+  if (!origin) return undefined;
+  const stored = await input.read<unknown>(routineKeyV1(origin.routineId));
+  const name =
+    stored === undefined
+      ? origin.routineId
+      : decodeRoutineRecordV1(stored).name;
+  const handoff = routineHandoffTextV1(input.run.events);
+  return routineTerminalRecordsV1({
+    runId: input.run.runId,
+    routineId: origin.routineId,
+    routineName: name,
+    now: input.now,
+    read: input.read,
+    ...(handoff === undefined ? {} : { handoff }),
+    ...(input.run.responseText === undefined
+      ? {}
+      : { responseText: input.run.responseText }),
+  });
+}
+
+/** One inbox entry, as the hosted client is told it. Never the wake id. */
+export function routineInboxEntryViewV1(
+  entry: RoutineInboxEntryV1,
+): RoutineInboxEntryViewV1 {
+  return {
+    schemaVersion: 1,
+    entryId: entry.entryId,
+    runId: entry.runId,
+    routineId: entry.routineId,
+    text: entry.text,
+    attribution: entry.attribution,
+    createdAt: entry.createdAt,
+    acknowledged: entry.acknowledged,
+    ...(entry.acknowledgedAt === undefined
+      ? {}
+      : { acknowledgedAt: entry.acknowledgedAt }),
+  };
+}
+
+/** What one event of an automation run says, in one line, for the run log. */
+function routineRunEventSummaryV1(event: SessionEvent): string | undefined {
+  switch (event.type) {
+    case "turn/start":
+      return "The firing's Turn started.";
+    case "user/message":
+      return `Cue: ${event.text}`;
+    case "assistant/message":
+      return event.toolCalls.length === 0
+        ? `Assistant: ${event.text}`
+        : `Assistant called ${event.toolCalls.map((call) => call.name).join(", ")}.`;
+    case "tool/result":
+      return `${event.name} ${event.isError ? "failed" : "returned"}: ${event.content}`;
+    case "wake/parent":
+      return `Handed off to the conversation: ${event.message}`;
+    case "turn/end":
+      return `The firing's Turn ended: ${event.outcome}${
+        event.reason === undefined ? "" : ` (${event.reason})`
+      }`;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * One automation run, read-only.
+ *
+ * It carries no model request and no tool input: the run log answers "what did
+ * this firing do", and the durable log stays the place a full reconstruction
+ * comes from.
+ */
+export function routineRunDetailViewV1(
+  botId: string,
+  routineId: string,
+  run: {
+    runId: string;
+    status: string;
+    acceptedAt: string;
+    input: string;
+    events: readonly SessionEvent[];
+    responseText?: string;
+    failure?: string;
+  },
+): RoutineRunDetailViewV1 {
+  const events: RoutineRunDetailViewV1["events"] = [];
+  for (const event of run.events) {
+    const summary = routineRunEventSummaryV1(event);
+    if (summary === undefined) continue;
+    events.push({
+      type: event.type,
+      at: event.timestamp,
+      summary: summary.slice(0, 2_000),
+    });
+  }
+  const outcome = run.failure ?? run.responseText;
+  return {
+    schemaVersion: 1,
+    botId,
+    routineId,
+    runId: run.runId,
+    status: run.status,
+    admittedAt: run.acceptedAt,
+    input: run.input.slice(0, 16_000),
+    events: events.slice(-ROUTINE_RUN_EVENT_MAX),
+    ...(outcome === undefined || outcome.length === 0
+      ? {}
+      : { outcome: outcome.slice(0, 4_000) }),
   };
 }

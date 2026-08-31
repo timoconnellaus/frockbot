@@ -21,6 +21,21 @@ const botId = computed(() => web.value.activeBotId);
 const formOpen = ref(false);
 const openLog = ref<string>();
 const copied = ref(false);
+const openRun = ref<string>();
+
+// An automation Turn never appears in the transcript, so opening a run here is
+// the only way to read one, and it is read-only in both directions: the view
+// carries what happened and no way to act on it.
+function toggleRun(routineId: string, runId: string): void {
+  if (openRun.value === runId) {
+    openRun.value = undefined;
+    return;
+  }
+  openRun.value = runId;
+  if (botId.value && !routines.value.runDetails[runId]) {
+    void routines.value.loadRun(botId.value, routineId, runId);
+  }
+}
 const form = reactive({
   routineId: undefined as string | undefined,
   name: "",
@@ -281,9 +296,28 @@ async function toggleLog(routineId: string): Promise<void> {
             v-for="entry in routines.runs[routine.routineId]"
             :key="entry.entryId"
           >
-            <span>{{ entry.startedAt }}</span>
-            <span>{{ entry.trigger }}</span>
-            <span>{{ entry.status }}</span>
+            <button
+              type="button"
+              class="routine-card__run"
+              :aria-expanded="openRun === entry.runId"
+              @click="toggleRun(routine.routineId, entry.runId)"
+            >
+              <span>{{ entry.startedAt }}</span>
+              <span>{{ entry.trigger }}</span>
+              <span>{{ entry.status }}</span>
+            </button>
+            <ol
+              v-if="openRun === entry.runId && routines.runDetails[entry.runId]"
+              class="routine-card__events"
+            >
+              <li
+                v-for="(event, index) in routines.runDetails[entry.runId]!
+                  .events"
+                :key="`${entry.runId}:${index}`"
+              >
+                {{ event.summary }}
+              </li>
+            </ol>
           </li>
         </ul>
       </div>
@@ -503,10 +537,33 @@ async function toggleLog(routineId: string): Promise<void> {
 
 .routine-card__log li {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
+}
+
+.routine-card__run {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.routine-card__events {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 6px 0 6px 16px;
+  color: var(--frock-text-subtle);
+  font-size: var(--frock-text-xs);
 }
 
 .routine-form__timing {

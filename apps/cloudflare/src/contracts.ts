@@ -47,7 +47,11 @@ import type {
 import type {
   RoutineCommandReceiptV1,
   RoutineCommandV1,
+  RoutineInboxCommandV1,
+  RoutineInboxReceiptV1,
+  RoutineInboxViewV1,
   RoutineListViewV1,
+  RoutineRunDetailViewV1,
   RoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
 import type {
@@ -541,6 +545,24 @@ export interface BotConfigurationBinding {
     botId: string;
     routineId: string;
   }): Promise<RoutineRunListViewV1>;
+  readRoutineRun(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    routineId: string;
+    runId: string;
+  }): Promise<RoutineRunDetailViewV1>;
+  listRoutineInbox(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<RoutineInboxViewV1>;
+  executeRoutineInboxCommand(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: RoutineInboxCommandV1;
+  }): Promise<RoutineInboxReceiptV1>;
 }
 
 export interface GatewayDependencies {

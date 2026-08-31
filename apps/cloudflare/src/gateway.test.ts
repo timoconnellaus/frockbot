@@ -55,6 +55,7 @@ import type {
   WorkerLoader,
 } from "./contracts.js";
 import { RoutineStore } from "@frockbot/plugin-routines/store";
+import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import { createMemoryRoutineStorageV1 } from "@frockbot/plugin-routines/testing";
 import { executeResidentBotTurn } from "./bot-runner.js";
 import { applicationDeploymentId, createGateway } from "./gateway.js";
@@ -722,6 +723,65 @@ class MemoryConfiguration
     request: Parameters<BotConfigurationBinding["deliverRoutineHook"]>[0],
   ): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
     return this.routineStore(request.botId).deliverHook(request.delivery);
+  }
+
+  private readonly routineInboxes = new Map<string, RoutineInboxStore>();
+
+  private routineInbox(botId: string): RoutineInboxStore {
+    const existing = this.routineInboxes.get(botId);
+    if (existing) return existing;
+    const created = new RoutineInboxStore(createMemoryRoutineStorageV1());
+    this.routineInboxes.set(botId, created);
+    return created;
+  }
+
+  private async routineInboxView(botId: string) {
+    const entries = await this.routineInbox(botId).list();
+    return {
+      schemaVersion: 1 as const,
+      botId,
+      entries: entries.map((entry) => ({
+        schemaVersion: 1 as const,
+        entryId: entry.entryId,
+        runId: entry.runId,
+        routineId: entry.routineId,
+        text: entry.text,
+        attribution: entry.attribution,
+        createdAt: entry.createdAt,
+        acknowledged: entry.acknowledged,
+      })),
+      unacknowledged: entries.filter((entry) => !entry.acknowledged).length,
+    };
+  }
+
+  listRoutineInbox(
+    request: Parameters<BotConfigurationBinding["listRoutineInbox"]>[0],
+  ) {
+    return this.routineInboxView(request.botId);
+  }
+
+  async executeRoutineInboxCommand(
+    request: Parameters<
+      BotConfigurationBinding["executeRoutineInboxCommand"]
+    >[0],
+  ) {
+    await this.routineInbox(request.botId).acknowledge(
+      request.command.entryIds,
+    );
+    return {
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      status: "applied" as const,
+      inbox: await this.routineInboxView(request.botId),
+    };
+  }
+
+  readRoutineRun(
+    request: Parameters<BotConfigurationBinding["readRoutineRun"]>[0],
+  ) {
+    const error = new Error(`run "${request.runId}" is unknown`);
+    error.name = "RoutineNotFoundError";
+    return Promise.reject(error);
   }
 }
 

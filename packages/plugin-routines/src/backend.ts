@@ -30,12 +30,20 @@ import {
 import {
   decodeRoutineCommandV1,
   decodeRoutineCommandReceiptV1,
+  decodeRoutineInboxCommandV1,
+  decodeRoutineInboxReceiptV1,
+  decodeRoutineInboxViewV1,
   decodeRoutineListViewV1,
+  decodeRoutineRunDetailViewV1,
   decodeRoutineRunListViewV1,
   RoutineDecodeError,
   type RoutineCommandReceiptV1,
   type RoutineCommandV1,
+  type RoutineInboxCommandV1,
+  type RoutineInboxReceiptV1,
+  type RoutineInboxViewV1,
   type RoutineListViewV1,
+  type RoutineRunDetailViewV1,
   type RoutineRunListViewV1,
 } from "./shared.js";
 
@@ -74,6 +82,23 @@ export interface RoutinesGatewayHost {
     botId: string,
     routineId: string,
   ): Promise<RoutineRunListViewV1>;
+  /**
+   * One automation run, read-only. An automation Turn is absent from the
+   * visible transcript by construction, so the run log is the only door to it
+   * and this is that door's read.
+   */
+  readRoutineRun(
+    userId: string,
+    botId: string,
+    routineId: string,
+    runId: string,
+  ): Promise<RoutineRunDetailViewV1>;
+  listRoutineInbox(userId: string, botId: string): Promise<RoutineInboxViewV1>;
+  executeRoutineInboxCommand(
+    userId: string,
+    botId: string,
+    command: RoutineInboxCommandV1,
+  ): Promise<RoutineInboxReceiptV1>;
 }
 
 export interface RoutinesBackendRouteContribution {
@@ -91,8 +116,10 @@ export interface RoutinesBackendRouteContribution {
 }
 
 const ROUTINES = /^\/api\/bots\/([^/]+)\/routines$/;
+const ROUTINE_INBOX = /^\/api\/bots\/([^/]+)\/routines\/inbox$/;
 const ROUTINE_RUNS = /^\/api\/bots\/([^/]+)\/routines\/([^/]+)\/runs$/;
 const ROUTINE_HOOK = /^\/api\/bots\/([^/]+)\/routines\/([^/]+)\/hook$/;
+const ROUTINE_RUN = /^\/api\/bots\/([^/]+)\/routines\/([^/]+)\/runs\/([^/]+)$/;
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
@@ -238,13 +265,58 @@ export function createRoutinesBackendContribution(
     async route(request, url, context) {
       if (!context.userId) return undefined;
       const list = ROUTINES.exec(url.pathname);
+      const inbox = ROUTINE_INBOX.exec(url.pathname);
       const runs = ROUTINE_RUNS.exec(url.pathname);
-      if (!list && !runs) return undefined;
+      const run = ROUTINE_RUN.exec(url.pathname);
+      if (!list && !inbox && !runs && !run) return undefined;
       if ([...url.searchParams.keys()].length > 0) {
         return jsonError(400, "Routine routes take no query parameters");
       }
       try {
-        const botId = pathSegment((list ?? runs)![1]!);
+        const botId = pathSegment((list ?? inbox ?? runs ?? run)![1]!);
+        if (run) {
+          if (request.method !== "GET") {
+            return jsonError(405, "method not allowed");
+          }
+          return Response.json(
+            decodeRoutineRunDetailViewV1(
+              await host.readRoutineRun(
+                context.userId,
+                botId,
+                pathSegment(run[2]!),
+                pathSegment(run[3]!),
+              ),
+            ),
+          );
+        }
+        if (inbox) {
+          if (request.method === "GET") {
+            return Response.json(
+              decodeRoutineInboxViewV1(
+                await host.listRoutineInbox(context.userId, botId),
+              ),
+            );
+          }
+          if (request.method !== "POST") {
+            return jsonError(405, "method not allowed");
+          }
+          const command = decodeRoutineInboxCommandV1(await request.json());
+          if (command.botId !== botId) {
+            return jsonError(
+              400,
+              "Routine command does not match the request path",
+            );
+          }
+          return Response.json(
+            decodeRoutineInboxReceiptV1(
+              await host.executeRoutineInboxCommand(
+                context.userId,
+                botId,
+                command,
+              ),
+            ),
+          );
+        }
         if (runs) {
           if (request.method !== "GET") {
             return jsonError(405, "method not allowed");

@@ -136,12 +136,15 @@ describe("turn admission through the gateway and the Bot", () => {
       isError: true,
       content: "Tool is not available on a automation turn: send_to_user",
     });
+    // The automation Turn is not in the visible transcript at all — that is
+    // the transcript seam — and the Turn's own events carry no send.
     const runs = await listRuns(userId, botId);
     expect(
-      runs
-        .find((run) => run.runId === "admission-automation-1")
-        ?.events.some((event) => event.type === "send/to-user"),
-    ).toBe(false);
+      runs.find((run) => run.runId === "admission-automation-1"),
+    ).toBeUndefined();
+    expect(turn.events.some((event) => event.type === "send/to-user")).toBe(
+      false,
+    );
   });
 
   it("carries a widget send into the run projection and ends the Turn on it", async () => {
