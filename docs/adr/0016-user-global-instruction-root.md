@@ -1,11 +1,10 @@
 ---
 status: accepted
-date: 2026-09-01
 ---
 
 # Add a User-global instruction root shared by a User's Bots
 
-FrockBot will give each User one `user-instructions` root at `users/<id>/skills/`, shared by every Bot that User owns, alongside each Bot's own instruction root. A Bot loads Skills from both roots. Every write to the root records its writer, as every durable-root write does. The root is written only by the Skills Package writing object storage directly, and the Computer sees it read-only — the same hibernation exception ADR 0013 grants Memory, for the same reason: a Turn that needs a Skill must not have to wake the Computer, and a single writer has no conflicts to resolve. The loadable-skill predicate accepts the owning User and that User's Bots as writers, and refuses `first-party`, `unattributed`, and any writer belonging to another User.
+Accepted by the owner on 2026-09-01. FrockBot will give each User one `user-instructions` root at `users/<id>/skills/`, shared by every Bot that User owns, alongside each Bot's own instruction root. A Bot loads Skills from both roots. Every write to the root records its writer, as every durable-root write does. The root is written only by the Skills Package writing object storage directly, and the Computer sees it read-only — the same hibernation exception ADR 0013 grants Memory, for the same reason: a Turn that needs a Skill must not have to wake the Computer, and a single writer has no conflicts to resolve. The loadable-skill predicate accepts the owning User and that User's Bots as writers, and refuses `first-party`, `unattributed`, and any writer belonging to another User.
 
 ## Considered options
 

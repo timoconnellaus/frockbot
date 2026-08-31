@@ -1,11 +1,10 @@
 ---
 status: accepted
-date: 2026-09-01
 ---
 
 # Run concurrent child Turns in Subagent Durable Objects
 
-FrockBot will run a Bot's conversational Turns in that Bot's Durable Object, and each concurrent child Turn in a Subagent Durable Object of the same Bot. A Subagent Durable Object is the same `BotState` class addressed at `idFromName("<userId>:<botId>#task:<taskId>")`. It holds no authority: the Bot Durable Object admits the child Turn, pins the Composition generation it runs on, and records its lifecycle and terminal result. The Subagent Durable Object executes exactly one admitted `subagent` Turn per task, on the generation the parent pinned, and owns only its own Session events.
+Accepted by the owner on 2026-09-01. FrockBot will run a Bot's conversational Turns in that Bot's Durable Object, and each concurrent child Turn in a Subagent Durable Object of the same Bot. A Subagent Durable Object is the same `BotState` class addressed at `idFromName("<userId>:<botId>#task:<taskId>")`. It holds no authority: the Bot Durable Object admits the child Turn, pins the Composition generation it runs on, and records its lifecycle and terminal result. The Subagent Durable Object executes exactly one admitted `subagent` Turn per task, on the generation the parent pinned, and owns only its own Session events.
 
 ## Considered options
 
