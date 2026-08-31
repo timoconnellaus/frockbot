@@ -27,6 +27,7 @@ import {
 } from "@frockbot/kernel-contracts";
 import {
   memoryDayV1,
+  memoryFactBodyV1,
   memoryFactKeyV1,
   memoryRetractionTextV1,
   parseMemoryFileV1,
@@ -328,13 +329,27 @@ export class MemoryStore {
   }
 
   /**
-   * Forgets one fact by its exact recorded text.
+   * Forgets one fact by its recorded text, ignoring any marker on it.
    *
    * In this Bot's own shard the line is removed. In a shared tier a fact
    * another Bot recorded is *not* edited — "Never edit another assistant's
    * shard" — so the forget is recorded as a retraction in this Bot's own log,
    * and newest-wins does the rest. That is the same correction mechanism
    * GrokBot documents for shared facts, applied to removal.
+   *
+   * MARKERS. The match is on the marker-stripped body, so `forget("x")`
+   * removes `x`, `[note] x` and `[episode] x` alike, and a caller who does
+   * pass `[note] x` still matches because the input is stripped too. GrokBot's
+   * rule is "forget matches the exact recorded text" (§2.2), and a literal
+   * reading of it would make a User unable to forget a note whose `[note] `
+   * prefix they were never shown — the marker is a tier the *host* wrote, not
+   * a word the User said. The asymmetry with `write`, which still dedupes on
+   * the full text, is deliberate and in the safe direction: writing twice
+   * keeps both records, forgetting once removes both.
+   *
+   * A shared fact is retracted once per *recorded* text, because a retraction
+   * suppresses the exact text it names: forgetting `x` when another Bot holds
+   * `[note] x` writes `[forgotten] [note] x`.
    */
   async forget(request: {
     root: WorkspaceMemoryRootV1;
@@ -345,7 +360,9 @@ export class MemoryStore {
     const text = request.fact.trim();
     if (!text) return { status: "refused", reason: "a fact text is required" };
     const at = request.at ?? this.#clock();
-    const key = memoryFactKeyV1(text);
+    const key = memoryFactKeyV1(memoryFactBodyV1(text));
+    const matches = (candidate: string): boolean =>
+      memoryFactKeyV1(memoryFactBodyV1(candidate)) === key;
     const tier = await this.read(request.root);
     if (tier.unavailable) {
       return { status: "unavailable", reason: tier.unavailable };
@@ -362,8 +379,7 @@ export class MemoryStore {
     }
 
     const mine = [...tier.profile, ...tier.recent].filter(
-      (fact) =>
-        fact.botId === this.owner.botId && memoryFactKeyV1(fact.text) === key,
+      (fact) => fact.botId === this.owner.botId && matches(fact.text),
     );
     if (mine.length > 0) {
       // The Bot owns every file the fact sits in, so removing the line is both
@@ -378,9 +394,7 @@ export class MemoryStore {
         const refusal = this.refuseForeignShard(path, request.writer);
         if (refusal) return { ...refusal, written };
         const outcome = await this.rewrite(path, request.writer, (facts) => {
-          const kept = facts.filter(
-            (fact) => memoryFactKeyV1(fact.text) !== key,
-          );
+          const kept = facts.filter((fact) => !matches(fact.text));
           return kept.length === facts.length ? "unchanged" : kept;
         });
         if (outcome.status !== "ok") return { ...outcome, written };
@@ -396,26 +410,47 @@ export class MemoryStore {
       if (last) return { ...last, written };
     }
 
-    const elsewhere = [...tier.profile, ...tier.recent].some(
-      (fact) =>
-        fact.botId !== this.owner.botId && memoryFactKeyV1(fact.text) === key,
-    );
-    if (!elsewhere) {
+    const elsewhere = [
+      ...new Set(
+        [...tier.profile, ...tier.recent]
+          .filter((fact) => fact.botId !== this.owner.botId)
+          .filter((fact) => matches(fact.text))
+          .map((fact) => fact.text),
+      ),
+    ];
+    if (elsewhere.length === 0) {
       return {
         status: "refused",
         reason: `no fact matching "${text}" is recorded in this tier`,
       };
     }
-    const retraction = await this.write({
-      root: request.root,
-      tier: "log",
-      fact: memoryRetractionTextV1(text),
-      writer: request.writer,
-      at,
-    });
-    return retraction.status === "ok"
-      ? { ...retraction, retracted: true }
-      : retraction;
+    const written: MemoryFileChangeV1[] = [];
+    let last: MemoryWriteOutcomeV1 | undefined;
+    for (const recorded of elsewhere) {
+      const retraction = await this.write({
+        root: request.root,
+        tier: "log",
+        fact: memoryRetractionTextV1(recorded),
+        writer: request.writer,
+        at,
+      });
+      if (retraction.status !== "ok") return { ...retraction, written };
+      last = retraction;
+      if (!retraction.duplicate) {
+        written.push({
+          path: retraction.path,
+          generationId: retraction.generationId,
+          contentHash: retraction.contentHash,
+        });
+      }
+    }
+    if (!last) {
+      return {
+        status: "refused",
+        reason: `no fact matching "${text}" is recorded in this tier`,
+      };
+    }
+    return { ...last, retracted: true, written };
   }
 
   /**

@@ -225,6 +225,86 @@ describe("forgetting", () => {
     expect((await two.store.read(root)).profile).toEqual([]);
   });
 
+  test("removes every marker variant of a fact, given the body or the marker", async () => {
+    const { store } = storeFor("bot-1");
+    const root = botMemoryRootV1(OWNER);
+    const writer = writerFor("bot-1");
+    // A note and a durable log fact making the same claim are two records:
+    // dedupe is on the full text, so the second write is not a duplicate.
+    await store.write({ root, tier: "log", fact: "we ship on Friday", writer });
+    const second = await store.write({
+      root,
+      tier: "note",
+      fact: "[note] we ship on Friday",
+      writer,
+    });
+    expect(second).toMatchObject({ status: "ok", duplicate: false });
+    expect((await store.read(root)).recent.map((f) => f.text).sort()).toEqual([
+      "[note] we ship on Friday",
+      "we ship on Friday",
+    ]);
+
+    // Forgetting the body removes both — a User can forget a note whose
+    // `[note] ` prefix they were never shown.
+    const forgotten = await store.forget({
+      root,
+      fact: "we ship on Friday",
+      writer,
+    });
+    expect(forgotten.status).toBe("ok");
+    expect((await store.read(root)).recent).toEqual([]);
+  });
+
+  test("a forget that does pass the marker matches too", async () => {
+    const { store } = storeFor("bot-1");
+    const root = botMemoryRootV1(OWNER);
+    const writer = writerFor("bot-1");
+    await store.write({
+      root,
+      tier: "note",
+      fact: "[note] we ship on Friday",
+      writer,
+    });
+    const forgotten = await store.forget({
+      root,
+      fact: "[note] we ship on Friday",
+      writer,
+    });
+    expect(forgotten.status).toBe("ok");
+    expect((await store.read(root)).recent).toEqual([]);
+  });
+
+  test("retracts another Bot's note by its body, naming the recorded text", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const root = userMemoryRootV1(OWNER);
+    const two = storeFor("bot-2", files);
+    await two.store.write({
+      root,
+      tier: "note",
+      fact: "[note] Tim teaches on Tuesdays.",
+      writer: writerFor("bot-2"),
+    });
+    const one = storeFor("bot-1", files);
+
+    const forgotten = await one.store.forget({
+      root,
+      fact: "Tim teaches on Tuesdays.",
+      writer: writerFor("bot-1"),
+    });
+    expect(forgotten).toMatchObject({ status: "ok", retracted: true });
+
+    // The retraction names the *recorded* text, marker and all, because that
+    // is the text newest-wins resolves against.
+    const mine = await files.read({
+      root,
+      path: "by-agent/bot-1/log/2026-08.md",
+    });
+    expect(
+      mine.status === "ok" ? new TextDecoder().decode(mine.file.bytes) : "",
+    ).toContain("[forgotten] [note] Tim teaches on Tuesdays.");
+    expect((await one.store.read(root)).recent).toEqual([]);
+  });
+
   test("refuses a forget of a fact nobody recorded", async () => {
     const { store } = storeFor("bot-1");
     const outcome = await store.forget({

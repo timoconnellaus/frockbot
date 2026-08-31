@@ -22,6 +22,7 @@
 import type { MemoryScopeNameV1 } from "@frockbot/kernel-contracts";
 import {
   memoryFactKeyV1,
+  parseMemoryMarkerV1,
   renderInjectedFactLineV1,
   type SourcedMemoryFactV1,
 } from "./facts.js";
@@ -64,6 +65,25 @@ export const MEMORY_PROJECT_CAPS_V1: MemoryRenderCapsV1 = {
   factClamp: 500,
 };
 
+/**
+ * How many days a `[note] ` (or `[episode] `) fact keeps being injected.
+ *
+ * OURS, NOT GROKBOT'S. The register records only that the note tier "fades
+ * fast" (§2.2); no TTL, no observed expiry, no host source anywhere in the
+ * research. A fortnight is long enough that a note survives a week's gap in
+ * conversation and short enough to mean "fast", and it is one constant, here,
+ * beside the caps — not an env var and not a User setting, because a per-User
+ * knob would have to be recorded on every Turn for the model request to stay
+ * reconstructable.
+ *
+ * The fade is READ-TIME AND PURE. A faded note is still on disk, still
+ * greppable by the Bot, still returned by `memory_search`, still forgettable —
+ * it has stopped being *injected*, which is the strongest claim "fades fast"
+ * supports without deleting a User's data. There is no sweep, no alarm, and no
+ * write, so there is nothing to reconcile after an eviction.
+ */
+export const MEMORY_NOTE_TTL_DAYS = 14;
+
 /** `MEMORY_PROJECT_INJECTED_CAP`: at most three joined Projects are injected. */
 export const MEMORY_PROJECT_INJECTED_CAP = 3;
 
@@ -88,6 +108,16 @@ export interface MemoryInjectionInputV1 {
   /** Every joined Project, including the ones the cap left out. */
   joined: MemoryProjectV1[];
   own: MemoryTierReadV1;
+  /**
+   * `YYYY-MM-DD`: the oldest day a marked fact is still injected on.
+   *
+   * Required, and passed in rather than read from a clock here, because "the
+   * durable session event log reconstructs … every exact normalized model
+   * request". A filter on "today" computed inside this function would make the
+   * render unreproducible; a filter on a day the caller records in
+   * `memory/injected` replays identically a year later.
+   */
+  noteCutoff: string;
 }
 
 /** One fact that reached the prompt, as `memory/injected` records it. */
@@ -98,6 +128,20 @@ export interface InjectedMemoryFactV1 {
   via: string;
   learnedAt: string;
   text: string;
+}
+
+/**
+ * Facts one scope faded out of this injection, as `memory/injected` records it.
+ *
+ * Kept apart from `omissions` deliberately: an omission means a cap or a
+ * failure cut a tier short and is a gap to repair, so a reader may alarm on
+ * it; a fade is the note tier working as designed. Folding the two together
+ * would make every Turn carrying an old note look degraded.
+ */
+export interface MemoryFadedV1 {
+  scope: MemoryScopeNameV1;
+  projectId: string;
+  count: number;
 }
 
 /** A tier a cap or a failure cut short, as `memory/injected` records it. */
@@ -111,6 +155,8 @@ export interface MemoryInjectionV1 {
   text: string;
   facts: InjectedMemoryFactV1[];
   omissions: MemoryOmissionV1[];
+  /** Marked facts dropped by the fade, per scope. Never an omission. */
+  faded: MemoryFadedV1[];
 }
 
 const USER_PARAGRAPH =
@@ -166,6 +212,24 @@ function injected(
   }));
 }
 
+/**
+ * Drops the marked facts that have faded, before any cap is applied.
+ *
+ * Before, not after, so a faded note never occupies a slot a live fact could
+ * have used — the whole point of a tier that fades is that it stops competing
+ * for the budget.
+ */
+function live(
+  facts: SourcedMemoryFactV1[],
+  cutoff: string,
+): { kept: SourcedMemoryFactV1[]; faded: number } {
+  const kept = facts.filter((fact) => {
+    const { marker } = parseMemoryMarkerV1(fact.text);
+    return !marker || fact.date >= cutoff;
+  });
+  return { kept, faded: facts.length - kept.length };
+}
+
 function without(
   facts: SourcedMemoryFactV1[],
   seen: Set<string>,
@@ -195,13 +259,36 @@ export function renderMemoryInjectionV1(
   // then the Projects, and only the remainder reaches the User block. The
   // ordering of the *paragraphs* is the opposite — user, project, own — which
   // is GrokBot's injected order exactly.
+  //
+  // The fade runs first of all, so precedence, caps and budgets all see only
+  // the surviving set.
+  const faded: MemoryFadedV1[] = [];
+  const fade = (
+    tier: MemoryTierReadV1,
+    scope: MemoryScopeNameV1,
+    projectId: string,
+  ) => {
+    const profile = live(tier.profile, input.noteCutoff);
+    const recent = live(tier.recent, input.noteCutoff);
+    const count = profile.faded + recent.faded;
+    if (count > 0) faded.push({ scope, projectId, count });
+    return {
+      profile: profile.kept,
+      recent: recent.kept,
+      recentFaded: recent.faded,
+    };
+  };
+  const ownLive = fade(input.own, "bot", "");
+  const userLive = fade(input.user, "user", "");
+
   const claimed = new Set<string>();
-  remember([...input.own.profile, ...input.own.recent], claimed);
+  remember([...ownLive.profile, ...ownLive.recent], claimed);
 
   const shown = input.projects.slice(0, MEMORY_PROJECT_INJECTED_CAP);
   const projectFacts = shown.map((entry) => {
-    const profile = without(entry.tier.profile, claimed);
-    const recent = without(entry.tier.recent, claimed);
+    const tier = fade(entry.tier, "project", entry.project.projectId);
+    const profile = without(tier.profile, claimed);
+    const recent = without(tier.recent, claimed);
     return { entry, profile, recent };
   });
   for (const entry of projectFacts) {
@@ -210,14 +297,14 @@ export function renderMemoryInjectionV1(
 
   // User memory.
   const userProfile = take(
-    without(input.user.profile, claimed),
+    without(userLive.profile, claimed),
     MEMORY_USER_CAPS_V1.profileLimit,
     MEMORY_USER_CAPS_V1.profileBudget,
     MEMORY_USER_CAPS_V1.factClamp,
     true,
   );
   const userRecent = take(
-    without(input.user.recent, claimed),
+    without(userLive.recent, claimed),
     MEMORY_USER_CAPS_V1.recentLimit,
     MEMORY_USER_CAPS_V1.recentBudget,
     MEMORY_USER_CAPS_V1.factClamp,
@@ -336,14 +423,14 @@ export function renderMemoryInjectionV1(
 
   // Own memory, last and most specific.
   const ownProfile = take(
-    input.own.profile,
+    ownLive.profile,
     MEMORY_OWN_CAPS_V1.profileLimit,
     MEMORY_OWN_CAPS_V1.profileBudget,
     MEMORY_OWN_CAPS_V1.factClamp,
     false,
   );
   const ownRecent = take(
-    input.own.recent,
+    ownLive.recent,
     MEMORY_OWN_CAPS_V1.recentLimit,
     MEMORY_OWN_CAPS_V1.recentBudget,
     MEMORY_OWN_CAPS_V1.factClamp,
@@ -359,9 +446,13 @@ export function renderMemoryInjectionV1(
   if (ownProfile.lines.length === 0 && ownRecent.lines.length === 0) {
     ownLines.push("No facts recorded yet.");
   }
-  if (ownRecent.dropped > 0) {
+  // Faded notes count here: the line points at what is really on disk, and a
+  // faded note is still on disk for the Bot to grep. It is *not* an omission
+  // below, because nothing was cut short.
+  const ownMore = ownRecent.dropped + ownLive.recentFaded;
+  if (ownMore > 0) {
     ownLines.push(
-      `(${ownRecent.dropped} more log facts on disk — grep the log/ folder for them.)`,
+      `(${ownMore} more log facts on disk — grep the log/ folder for them.)`,
     );
   }
   blocks.push(ownLines.join("\n"));
@@ -383,5 +474,5 @@ export function renderMemoryInjectionV1(
     });
   }
 
-  return { text: blocks.join("\n\n"), facts, omissions };
+  return { text: blocks.join("\n\n"), facts, omissions, faded };
 }
