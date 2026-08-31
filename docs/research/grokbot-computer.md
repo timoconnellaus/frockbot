@@ -492,13 +492,23 @@ trust domain — agent separation is organisational, not enforced.
 
 ## Divergences from FrockBot's Fly Sprite design
 
-The parity register below carries the capability comparison; three code-level divergences are worth naming.
-`plugin-fly-sprite/src/computer.ts` hardcodes `HOME_ROOT = "/home/box"` and `DATA_ROOT = ${HOME_ROOT}/agent-data` — GrokBot's
-paths, not Fly's, whose home is `/home/sprite`; this document is what that code was copying. Two divergences recorded here are
-now closed: the Package allocates one Sprite per **User** (ADR 0012), and every Bot on it shares one
-`/home/box/chrome-profile`. GrokBot's desktop still adds `plank`, `picom`, a WebAuthn proxy
-host, `sand-egress-tunnel`, `sand-ua-governor.mjs` and `sand-fingerprint-profiles.mjs`; FrockBot has no counterpart to any of
-those.
+The parity register below carries the capability comparison; the code-level divergences are worth naming separately.
+
+**The paths are GrokBot's, not Fly's.** `HOME_ROOT = "/home/box"` and `DATA_ROOT = ${HOME_ROOT}/agent-data` are still
+hardcoded, and this document is what that code was copying — Fly's own home is `/home/sprite`. Since ADR 0004 they are
+declared once in `packages/computer-host-runtime/src/runtime.ts` rather than in `plugin-fly-sprite/src/computer.ts`, because
+the on-Sprite layout is shared by the provider and the Computer host; the divergence is unchanged, only its address is.
+
+**The browser is not the distribution's.** GrokBot runs the box's own Chromium; FrockBot downloads Playwright's build and
+`start-desktop.sh` runs it through the stable symlink `/home/box/bin/chromium`, because Ubuntu's `chromium` is a snap
+transitional package that drags in `snapd` and `systemd` (ADR 0004, "A custom image and a shared snapshot were both checked
+first").
+
+**Two divergences recorded here are closed:** the Package allocates one Sprite per **User** (ADR 0012), and every Bot on it
+shares one `/home/box/chrome-profile`.
+
+**And one whole layer has no counterpart.** GrokBot's desktop adds `plank`, `picom`, a WebAuthn proxy host,
+`sand-egress-tunnel`, `sand-ua-governor.mjs` and `sand-fingerprint-profiles.mjs`; FrockBot has none of them, which is row 34.
 
 ## Parity register
 
@@ -513,9 +523,9 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 4   | Per-Bot settings: `hidden_from_sidebar` (still reachable by palette), `notify_on_updates`                                        | `update_state settings set` → `settings.json`                                                                                                                   | §2.18            | `plugin-settings`                                                                                                                 | landed      |
 | 5   | Per-Bot avatar set from a file on disk or cleared; self-rename announced, provenance recorded                                    | `update_state avatar`; `profile.json.namedBy`                                                                                                                   | §2.2, §2.18      | `plugin-flock`                                                                                                                    | partial     |
 | 6   | Export/import a Bot as a shareable template: scrubbed prose, visibility scope, review card                                       | `export-bot-template` + `create_bot_share_json`; `import-bot-template`                                                                                          | §2.11, §2A       | `plugin-bot-template`                                                                                                             | landed      |
-| 7   | **Memory** — profile tier: enduring facts, one per line, injected every turn                                                     | `agents/<id>/memory/profile.md`                                                                                                                                 | §5, §2.2         | `plugin-memory`                                                                                                                   | partial     |
+| 7   | **Memory** — profile tier: enduring facts, one per line, injected every turn                                                     | `agents/<id>/memory/profile.md`                                                                                                                                 | §5, §2.2         | `plugin-memory`                                                                                                                   | landed      |
 | 8   | Log tier: dated monthly file, `- (YYYY-MM-DD) <fact>`, read on demand rather than injected                                       | `memory/log/YYYY-MM.md`                                                                                                                                         | §2.2, §2.3       | `plugin-memory`                                                                                                                   | landed      |
-| 9   | Note tier that "fades fast" and is excluded from exports; fact dedupe on write; `forget` by exact text                           | `tier: note`; `update_state memory write`/`forget`                                                                                                              | §2.2, §2.11      | `plugin-memory`                                                                                                                   | landed      |
+| 9   | Note tier that "fades fast" and is excluded from exports; fact dedupe on write; `forget` by exact text                           | `tier: note`; `update_state memory write`/`forget`                                                                                                              | §2.2, §2.11      | `plugin-memory`                                                                                                                   | partial     |
 | 10  | Three write scopes chosen per fact: agent, user, project                                                                         | `scope: agent\|user\|project`                                                                                                                                   | §2.2             | `plugin-memory`                                                                                                                   | landed      |
 | 11  | User memory sharded per writing Bot so every file has one writer; shards readable by all, writable by their owner only           | `user-memory/by-agent/<uuid>/{profile.md,log/}`; _"Never edit another assistant's shard"_                                                                       | §2.3, §4.1a      | `plugin-memory`                                                                                                                   | landed      |
 | 11b | Correcting another Bot's shared fact = writing the correction into your own shard; newest wins, nothing edited in place          | injected user-memory instruction                                                                                                                                | §4.1a            | `plugin-memory`                                                                                                                   | landed      |
@@ -537,17 +547,17 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 22  | Catalog of path + description injected each turn; bodies read on demand; `/` or `@` invocation                                   | the `<agent_skills>` block                                                                                                                                      | §2.8             | `plugin-skills` + WebUI                                                                                                           | landed      |
 | 23  | **Computer** — one persistent Linux computer per user shared by all Bots, per-Bot durable roots, shared scratch                  | one container, 14 agents; `agent-data/agents/<uuid>/` vs `/workspace`                                                                                           | §B8, §A1         | `plugin-computer` + provider                                                                                                      | partial     |
 | 24  | Desktops allocated on demand, not one per Bot: own display, VNC/noVNC route, owner token, exec port                              | 7 live displays for 14 agents; `sand-window-router.mjs` `14000 + display`, `:1` primary                                                                         | §C12, §3.8       | `plugin-fly-sprite`                                                                                                               | partial     |
-| 25  | Screenshot of the Bot's own desktop; human takeover for a login or captcha                                                       | native `Screenshot`; `request_box_help`                                                                                                                         | §16, §2A         | `computer_screenshot`; `plugin-fly-sprite` lease                                                                                  | done        |
+| 25  | Screenshot of the Bot's own desktop; human takeover for a login or captcha                                                       | native `Screenshot`; `request_box_help`                                                                                                                         | §16, §2A         | `computer_screenshot`; `plugin-fly-sprite` lease                                                                                  | landed      |
 | 26  | "Update Computer" (fresh instance, keep files+logins, lose packages) and "Reset" (snapshot restore)                              | settings `update-computer` two-click confirm; `reset-computer`                                                                                                  | §2A, §9          | `plugin-computer`                                                                                                                 | not started |
 | 26b | **Durability** — snapshot-out-only sync of the per-Bot state DBs on a debounce + tick, control files excluded                    | `box-store-sync`: 120 s tick, 5 s DB debounce, 15 min Chrome, `AGENT_STORE_DB_BASENAMES`, `box-store-sync.lock`                                                 | §3.3             | `plugin-computer`                                                                                                                 | partial     |
 | 27  | A self-check the Bot runs and reads a log from, plus in-box reference docs it reads to debug itself and the UI                   | `box-doctor` + `/tmp/box-doctor.log`; `reference/*.md`                                                                                                          | §2A              | `plugin-computer`                                                                                                                 | partial     |
 | 28  | Two interchangeable computer runtimes behind one tool surface                                                                    | local Docker (dev) vs brokered anyrun pod (default)                                                                                                             | §2A              | Computer interface                                                                                                                | partial     |
-| 29  | Long-running commands run in background and outlive the turn                                                                     | background `Shell`, "don't poll"                                                                                                                                | §2.17            | `computer_exec{background}`                                                                                                       | done        |
+| 29  | Long-running commands run in background and outlive the turn                                                                     | background `Shell`, "don't poll"                                                                                                                                | §2.17            | `computer_exec{background}`                                                                                                       | landed      |
 | 30  | Every shell command audited with turn id and target; memory writes and routine edits are **not** audited                         | `audit.jsonl` `type=shell_command` only, `target: box\|user_machine`                                                                                            | §2.5, §3.4       | `plugin-audit`                                                                                                                    | landed      |
 | 30b | A separate host-bound audit outbox covering shell, browser navigation and MCP tool calls                                         | `agents/audit-outbox.json` `action.kind`: `shellCommand` 934 / `browserNavigation` 98 / `mcpToolCall` 4                                                         | §3.4             | `plugin-audit`                                                                                                                    | landed      |
 | 31  | **Browser** — one profile shared by all of a user's Bots                                                                         | `/home/box/chrome-profile`                                                                                                                                      | §B6              | `plugin-fly-sprite`                                                                                                               | landed      |
 | 32  | Cookies and logins survive computer replacement; seeding, periodic capture, cross-window mirroring, import                       | `sand-cookie-persist.mjs` (5 s → `chrome-cookie-seed.json`), `sand-session-sync.mjs` (1.5 s CDP), `chrome-cookie-import`                                        | §A3, §2A, §3.3   | `plugin-computer`                                                                                                                 | not started |
-| 33  | A launcher that enforces correct browser flags; GUI never driven from the shell                                                  | `box-chrome`; no `xdotool`/CDP from `Shell`                                                                                                                     | §B9, §2A         | `plugin-fly-sprite`                                                                                                               | not started |
+| 33  | A launcher that enforces correct browser flags; GUI never driven from the shell                                                  | `box-chrome`; no `xdotool`/CDP from `Shell`                                                                                                                     | §B9, §2A         | `plugin-fly-sprite`                                                                                                               | partial     |
 | 34  | Egress routed through the desktop; UA/fingerprint governance; WebAuthn proxying                                                  | settings `egress`, `sand-{ua-governor,fingerprint-profiles,webauthn-proxy-host}`                                                                                | §A3              | none proposed                                                                                                                     | not started |
 | 35  | **Channels** — Bot-to-Bot group chats, 1–6 members, in the sidebar, posted into by id                                            | `CreateChannel`/`UpdateChannel`; `SendToAgent`                                                                                                                  | §2.14            | new `plugin-channels`                                                                                                             | not started |
 | 36  | External channel connectors (Telegram etc.) connected and disconnected per Bot                                                   | info-pane Channels; `update_state channel disconnect{platform}`                                                                                                 | §2.14, §2A       | per-platform Package                                                                                                              | not started |
@@ -570,7 +580,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 53  | Approval cards for the Bot's own risky actions (Auto-review)                                                                     | harness "when your own action needs approval"                                                                                                                   | §2.17            | `plugin-settings` + WebUI                                                                                                         | not started |
 | 54  | **Learn from demonstration** — a screen recording becomes a user-global skill, then the video is deleted                         | `learn-from-demonstration`: teach queue → `session.json` → `watchVideo` → `update_state skill write`                                                            | §3.9             | `plugin-skills` + capture UI                                                                                                      | not started |
 | 55  | Guided connector install: catalog → setup fields → confirm widget → host-authored connect card → raw-MCP fallback                | `add-connector`: `SearchPlugins`/`GetPlugin`/`InstallPlugin{values}`/`AddMcpServer`/`SetMcpInstructions`                                                        | §3.10            | `catalog-core` + `plugin-settings` + `plugin-mcp` (setup fields → install values → host-authored connect card; no confirm widget) | partial     |
-| 56  | Per-Bot unread and notification state, so a silent completion still surfaces to the user                                         | `kv.unreadState` (`lastActivityAt`/`lastViewedAt`/`unreadCount`/`isManuallyUnread`); `notifyOnAgentUpdates`                                                     | §3.2             | `plugin-shell` + `plugin-flock` + WebUI                                                                                           | partial     |
+| 56  | Per-Bot unread and notification state, so a silent completion still surfaces to the user                                         | `kv.unreadState` (`lastActivityAt`/`lastViewedAt`/`unreadCount`/`isManuallyUnread`); `notifyOnAgentUpdates`                                                     | §3.2             | `plugin-shell` + `plugin-flock` + WebUI                                                                                           | landed      |
 | 57  | The tool catalog is trimmed per turn type; user-facing tools exist only on chat turns, work tools on both                        | `buildTurnTools` + `isParentMediatedAutomationSubagent`/`isSubagentRunner`; per-tool `gates.*` feature flags                                                    | §3.11, §4.2      | kernel Turn admission                                                                                                             | partial     |
 | 57b | One user-facing send tool carrying typed payloads (text, attachment, widget, secret request, agent card), with a legacy alias    | `SendToUser`; `SendMessage` = `SAND_LEGACY_SEND_MESSAGE_TOOL_NAME` alias                                                                                        | §4.2             | `plugin-shell` + kernel Turn admission                                                                                            | partial     |
 | 57c | A question widget is a send payload, not a tool, and sending one ends the turn                                                   | `{type:"widget",widget:{prompt,helpText?,options[1-6],allowCustom?,dismissOnMoveOn?}}`                                                                          | §4.2             | `plugin-shell` + kernel Turn                                                                                                      | partial     |
@@ -649,11 +659,40 @@ the rows whose status the code moved:
   is deliberately out of scope for the self-management slice, whose tools
   function while the Computer is hibernated.
 
-- **9** — the note tier is accepted and stored (`[note] ` prefix into the
-  monthly log, `plugin-memory/src/agent.ts`), and dedupe-on-write and
-  forget-by-exact-text are landed and tested, but nothing _fades_: there is no
-  expiry, decay or preferential eviction for `[note]` on the read or render
-  path, and there is no Bot export (row 6) for the exclusion rule to apply to.
+- **6** — landed, with the departures recorded in ADR 0015 rather than here.
+  `BotTemplateV1` matches GrokBot's share document section for section except
+  that **`memory[]` does not exist**: a template crosses to a stranger and
+  there is no scrub that makes a User's remembered facts safe, so
+  `decodeBotTemplateV1` refuses a document carrying `memory` and the export
+  path never reads a Memory root. A marketplace `pluginId` becomes
+  `packageId` + `catalogId` + `version` resolved against the importing User's
+  own pinned Catalog generation, and visibility is a User click on a revocable
+  share record rather than a tool argument, because publication beyond the
+  authoring User is a User act. Export is `bot_export_template` staging at
+  `visibility: "private"` and reporting an `agent-card`; import is a review
+  card the User confirms before anything is written
+  (`plugin-bot-template/src/{scrub,import}.ts`, `BotTemplateImportSection.vue`).
+- **7** — landed. `profile.md` per shard (`plugin-memory/src/roots.ts`) is
+  read and rendered on every Turn by `renderMemoryPromptV1`
+  (`plugin-memory/src/render.ts`) under GrokBot's own caps — own 200/30,
+  user 50/15, project 25/10 — in GrokBot's injection order (user → project →
+  own) with its precedence running the other way, and exactly what was injected
+  is recorded as `memory/injected` (row 14). The one departure is deliberate and
+  is row 13c: FrockBot renders fresh every Turn rather than reusing a block
+  frozen per compaction epoch, which is why this row and 13c disagree on
+  purpose. There is nothing outstanding, so the earlier unexplained `partial`
+  was the register lagging its own code.
+- **9** — **`partial`.** The note tier is accepted and stored (`[note] `
+  prefix into the monthly log, `plugin-memory/src/agent.ts`), dedupe-on-write
+  and forget-by-exact-text are landed and tested, and the export half of the
+  row is now satisfied from the other direction: a Bot template carries no
+  Memory at all (ADR 0015, `plugin-bot-template/src/scrub.ts` adds `memory` to
+  the omissions unconditionally and never reads a Memory root), so a note
+  cannot leak into an export because nothing can. What is still missing is the
+  fade itself: there is no expiry, decay or preferential eviction for `[note]`
+  anywhere on the read or render path, so a note is an ordinary log line with a
+  prefix. The table said `landed` while this bullet said otherwise; the bullet
+  was right.
 - **13d** — the two formats are distinct and round-trip
   (`renderMemoryFactLineV1` vs `renderInjectedFactLineV1` in
   `plugin-memory/src/facts.ts`), but `[episode]` is documented only: nothing
@@ -682,8 +721,12 @@ the rows whose status the code moved:
   rotatable, revocable, and never readable twice.
 - **17** — `manual` and `webhook` are landed; `manual` as `routine/run` and the
   tool's `run_now` action, `webhook` as the delivery door. Both enqueue a
-  durable firing that the alarm drains, and the run log records which. No
-  integration trigger (slack, github, …) and no `group` exists.
+  durable firing that the alarm drains, and the run log records which.
+  `"integration"` is a declared member of `ROUTINE_TRIGGER_KINDS`
+  (`plugin-routines/src/records.ts`) and nothing produces one: no connector
+  raises a firing, no provider (slack, github, origin, teams, linear, sentry,
+  pagerduty) is named anywhere in the Package, and `group` does not exist. The
+  enum slot is room left for the row, not the row.
 - **18** — landed, including the "fresh subagent" half. A firing is an admitted
   Turn of the same Bot with `turnType: "automation"` and a recorded `origin`,
   run from inside the Bot Durable Object; same-Routine firings are strictly
@@ -761,10 +804,26 @@ the rows whose status the code moved:
   no Sprites SDK. What keeps the row `partial` is unchanged — no shared
   scratch, and rows 26 and 27 below.
 - **24, 25** — a desktop slot, its viewer session, and the human-takeover lease
-  are all reachable from a Bot Durable Object now (`/v1/computer/viewer`,
+  are all reachable from a Bot Durable Object (`/v1/computer/viewer`,
   `/v1/computer/control`), which they were not while the provider needed the
-  Sprites SDK. The rows stay `partial` for the surfaces above them: there is no
-  screenshot tool and no WebUI takeover flow on the hosted client (row 57d).
+  Sprites SDK. **Row 25 is now `landed`**: `computer_screenshot`
+  (`plugin-computer/src/agent.ts`) captures the Bot's own desktop through one
+  guarded `exec` and writes the PNG back through `ComputerWorkspace.write`, and
+  the hosted client has the human-takeover flow the earlier text said it
+  lacked — `ComputerCard.vue` renders the noVNC viewer, **Take control**,
+  **Release control** and a full-window overlay, and the same card is a section
+  of the per-Bot info pane (row 51). What is still absent is the _Bot-initiated_
+  ask, `request_box_help`, and that is row 57d rather than this row.
+
+  **Row 24 stays `partial`.** The allocator, the per-tenant display, the
+  `websockify` token route and the idle-reclaim rule are all there
+  (`apps/computer-host/container/computer.ts`,
+  `plugin-fly-sprite/src/computer.ts`), and an exec-only tenant holds its slot
+  through a `tenantStamp` refreshed on every guarded command. Nothing has been
+  measured against a live Sprite under contention, and there is no
+  per-Bot exec port of GrokBot's kind — the host is one port and the tenant is
+  a field in the request.
+
 - **28** — the interchangeable seam exists and has two implementations in
   tests, but only one is a Computer: `packages/computer-host-protocol` is the
   one contract, the container is the one runtime behind it, and
@@ -779,8 +838,29 @@ the rows whose status the code moved:
   excludes the control directories, which is the row's exclusion clause. There
   is no state-DB snapshot and no basename list.
 - **27** — one in-box reference file is written
-  (`/home/box/reference/README.md`, `plugin-fly-sprite/src/computer.ts`), but
-  there is no self-check the Bot runs and no log it is pointed at.
+  (`/home/box/reference/README.md`, written by the provisioning document in
+  `packages/computer-host-runtime/src/runtime.ts`, which is where the on-Sprite
+  layout moved after ADR 0004), but there is no self-check the Bot runs and no
+  log it is pointed at: nothing in the tree answers to `box-doctor` or any
+  other name for one.
+- **29** — landed. `computer_exec` grew a background mode that starts a command
+  under the tenant's own runtime root and returns without waiting, plus the
+  read-back and stop calls that make it usable
+  (`plugin-fly-sprite/src/computer.ts`, "starts a command that outlives its
+  Turn"). GrokBot's "don't poll" guidance is prompt policy on both sides.
+- **33** — **`partial`, upgraded from `not started` after reading the code.**
+  A flag-enforcing launcher does exist: `start-desktop.sh`
+  (`packages/computer-host-runtime/src/runtime.ts`) is the only thing that
+  starts a browser, it starts exactly one, and it fixes the flags —
+  `--user-data-dir` at the shared `/home/box/chrome-profile`, the remote
+  debugging address pinned to loopback and its port to the tenant's. It runs
+  Playwright's own Chromium build through the stable symlink
+  `/home/box/bin/chromium` rather than the distribution's, which is a
+  divergence in the binary but the same idea as `box-chrome`. Two halves are
+  missing: the launcher is not exposed to the Bot under a name it can invoke,
+  and **"GUI never driven from the shell" is not enforced** — `computer_exec`
+  can reach `DISPLAY` and CDP like any other command, so the rule is a
+  convention rather than a control.
 
 - **41** — the Catalog half is landed and the MCP half is not. A remote,
   versioned Catalog exists (`packages/catalog-core`, the `PACKAGE_CATALOG`
@@ -833,13 +913,18 @@ the rows whose status the code moved:
 blocking dependency is named, and the gap is a durable, visible refusal rather
 than a silent absence. Row 44 is the only one.
 
-- **47** — two of the three tools exist. `web_search` is a Connection-backed
+- **47** — landed; all three tools exist. `web_search` is a Connection-backed
   Capability of `plugin-provider-ollama-cloud` (`src/web-search.ts`,
   `POST {apiBaseUrl}/api/web_search`, the same key and the same resolved
-  endpoint root as chat) and `web_fetch` is the new `plugin-web` Package
+  endpoint root as chat) and `web_fetch` is the `plugin-web` Package
   (`src/agent.ts`, `src/ssrf.ts`). Both are work tools on all four turn types,
   both declare `idempotent: true`, and both emit stable JSON into `tool/result`
-  rather than prose. **`GenerateImage` is not built.**
+  rather than prose. `generate_image` is the `plugin-image` Package: it renders
+  on the Workers AI binding through `plugin-shell/src/backend-image.ts`
+  (`@cf/black-forest-labs/flux-1-schnell` by default, the model readable from
+  the Package settings store) and, like `computer_screenshot`, writes its bytes
+  into a Package-declared Workspace root and answers with a reference rather
+  than with base64 in the session log.
 
   **No schema parity is claimed, and none is possible.** Row 47 cites §17,
   which is not in this document: no input schema, bound, or error shape was
@@ -858,6 +943,28 @@ than a silent absence. Row 44 is the only one.
   resolve-then-connect hook, so host classification is exact for IP literals
   and known-internal name shapes and **best-effort against DNS rebinding**.
 
+- **52** — the transcript half is landed and the media half cannot be. A
+  User's Durable Object holds a rebuildable index over every one of their Bots'
+  transcripts (`packages/plugin-search`), reached through a route and a search
+  overlay, and the row's own parenthesis is matched: the agent gets no tool over
+  it. `SearchRowKindV1` declares `"media"` beside `user`, `assistant` and
+  `tool` and **nothing writes it**, deliberately — FrockBot has no attachment
+  concept for a User to have sent, so the schema carries the slot rather than
+  changing when one arrives. `computer_screenshot` and `generate_image`
+  attachments are Workspace files referenced from a tool result, not indexed
+  media, so the row stays `partial` until there is media to find.
+- **56** — landed. `UnreadStateV1` under `shell:unread`
+  (`plugin-shell/src/unread.ts`) is GrokBot's `kv.unreadState` kept as a pair of
+  admission-index cursors rather than a counter, with the count derived on read
+  and capped at "99+"; activity advances in the transaction that settles a chat
+  Turn, so recovery cannot double-count. Reading is the authenticated
+  `bot/mark-read`/`bot/mark-unread` command and never a side effect of a list.
+  The sidebar's two bounded fan-outs (`GET /api/bots/unread`,
+  `GET /api/bots/notifications`) surface a completion on a Bot nobody is looking
+  at, and `notifications.enabled` — GrokBot's `notify_on_updates` — gates the
+  intent only, so a muted Bot still goes bold. One shape difference, from row 4:
+  a Bot hidden from the sidebar has no row to carry a badge, so its unread rolls
+  into one aggregate on the "Show N hidden" entry.
 - **51** — the pane exists and assembles three of the four halves. Identity
   (avatar, name, title, label, description, `namedBy` provenance), Members, the
   Computer preview through `frockbot.computer`, a Routines glance through the
