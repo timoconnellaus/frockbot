@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+import { UiIconButton } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { inject } from "vue";
 
@@ -10,35 +11,11 @@ if (!surfaces || !web)
 </script>
 
 <template>
-  <button
+  <UiIconButton
     v-if="web.settingsAvailable && web.activeBotId"
     class="bot-settings-trigger"
-    type="button"
-    title="Bot settings"
-    aria-label="Bot settings"
+    icon="gear"
+    label="Bot settings"
     @click="surfaces.open('bot-settings')"
-  >
-    ⚙
-  </button>
+  />
 </template>
-
-<style scoped>
-.bot-settings-trigger {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--frock-border);
-  border-radius: 50%;
-  color: var(--frock-text-muted);
-  background: var(--frock-surface);
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-
-.bot-settings-trigger:hover {
-  color: var(--frock-action-primary-hover);
-  border-color: var(--frock-border-focus);
-}
-</style>

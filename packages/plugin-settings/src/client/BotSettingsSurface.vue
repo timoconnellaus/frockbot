@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
-import { UiButton, UiField } from "@frockbot/client-ui";
+import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { inject, onMounted, ref } from "vue";
 
@@ -49,7 +49,9 @@ async function save(): Promise<void> {
 <template>
   <form class="settings-form" @submit.prevent="save">
     <div class="settings-intro">
-      <span class="settings-avatar" aria-hidden="true">⌁</span>
+      <span class="settings-avatar" aria-hidden="true"
+        ><UiIcon name="sparkle" size="lg"
+      /></span>
       <div>
         <strong>Shape this Bot</strong>
         <p>Identity and notifications belong to the selected Bot.</p>
@@ -113,7 +115,6 @@ async function save(): Promise<void> {
   border-radius: 16px;
   color: var(--frock-action-secondary-text);
   background: var(--frock-surface-accent);
-  font-size: 23px;
 }
 
 .settings-intro strong,
@@ -122,11 +123,16 @@ async function save(): Promise<void> {
   margin: 0;
 }
 
+.settings-intro strong {
+  font-size: var(--frock-text-lg);
+  font-weight: 600;
+}
+
 .settings-intro p {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: var(--frock-text-base);
+  line-height: var(--frock-leading-normal);
 }
 
 .notification-setting {
@@ -145,10 +151,15 @@ async function save(): Promise<void> {
   display: block;
 }
 
+.notification-setting strong {
+  font-size: var(--frock-text-md);
+  font-weight: 600;
+}
+
 .notification-setting small {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
 }
 
 .notification-setting input {
@@ -160,7 +171,7 @@ async function save(): Promise<void> {
 .settings-error {
   margin: 0;
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .settings-actions {

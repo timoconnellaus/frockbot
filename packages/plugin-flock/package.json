@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@frockbot/client-core": "workspace:*",
+    "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",

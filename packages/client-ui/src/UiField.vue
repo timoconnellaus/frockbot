@@ -20,7 +20,7 @@ defineProps<{
   flex-direction: column;
   gap: 7px;
   color: var(--frock-text-muted);
-  font-size: var(--frock-font-label);
+  font-size: var(--frock-text-sm);
   font-weight: 700;
 }
 
@@ -39,7 +39,10 @@ defineProps<{
   padding: 10px 12px;
   color: var(--frock-text);
   background: var(--frock-surface-raised);
-  font-size: var(--frock-font-body);
+  font-size: var(--frock-text-md);
+  transition:
+    border-color var(--frock-motion-fast),
+    box-shadow var(--frock-motion-fast);
 }
 
 .ui-field :deep(input:focus),
@@ -51,6 +54,6 @@ defineProps<{
 
 .ui-field :deep(textarea) {
   resize: vertical;
-  line-height: 1.5;
+  line-height: var(--frock-leading-normal);
 }
 </style>

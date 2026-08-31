@@ -61,6 +61,22 @@ function containsLiteralColor(declaration: Declaration): boolean {
   return found;
 }
 
+const fontSizeProperties = new Set(["font", "font-size"]);
+
+/**
+ * Feature styles size text through the theme's type scale so every plugin
+ * shares one hierarchy. Any absolute or font-relative length written directly
+ * into `font-size` (or the `font` shorthand) bypasses that scale.
+ */
+function containsLiteralFontSize(declaration: Declaration): boolean {
+  if (!fontSizeProperties.has(declaration.property.toLowerCase())) return false;
+  let found = false;
+  walk(declaration.value, (node) => {
+    if (node.type === "Dimension") found = true;
+  });
+  return found;
+}
+
 function collectCustomProperties(ast: CssNode): void {
   walk(ast, (node) => {
     if (node.type === "Declaration" && node.property.startsWith("--")) {
@@ -132,6 +148,13 @@ function checkCss(path: string, ast: CssNode, lineOffset = 0): void {
     }
 
     if (node.property.startsWith("--")) return;
+
+    if (containsLiteralFontSize(node)) {
+      failures.push(
+        `${location(path, lineOffset, node)} literal font size in ${node.property}; use a --frock-text-* alias`,
+      );
+    }
+
     const { resolved, unresolved } = resolveVariables(generate(node.value));
     for (const name of unresolved.filter((value) =>
       value.startsWith("--frock-"),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
-import { UiSidebarOverlay } from "@frockbot/client-ui";
+import { UiIcon, UiIconButton, UiSidebarOverlay } from "@frockbot/client-ui";
 import { computed, inject, ref, watch } from "vue";
 import {
   frockBotWebDataKey,
@@ -23,10 +23,17 @@ const composerContext = computed(
 const draftStore = new ComposerDraftStore();
 const draft = ref(draftStore.draftFor(composerContext.value));
 const rightPanelOpen = ref(true);
+// The macOS desktop shell hides its title bar, so the window's traffic lights
+// sit inside the sidebar's top row and the wordmark has to clear them.
+const macDesktop =
+  typeof navigator !== "undefined" &&
+  /Electron/u.test(navigator.userAgent) &&
+  /Mac/u.test(navigator.platform);
 const botName = computed(
   () => state.value.botSettings?.profile.name ?? "Barebones",
 );
 const isRunning = computed(() => Boolean(state.value.activeRunId));
+const isConnecting = computed(() => state.value.connection !== "ready");
 const canSend = computed(
   () =>
     state.value.connection === "ready" &&
@@ -79,9 +86,14 @@ function handleComposerKeydown(event: KeyboardEvent): void {
 
 <template>
   <div class="frockbot-root">
-    <div class="app-shell" :class="{ 'panel-open': rightPanelOpen }">
+    <div
+      class="app-shell"
+      :class="{ 'panel-open': rightPanelOpen, 'mac-desktop': macDesktop }"
+    >
       <aside class="sidebar">
-        <div class="window-controls" aria-hidden="true" />
+        <div class="brand" aria-hidden="true">
+          <span class="brand-mark">FrockBot</span>
+        </div>
         <div class="bot-list">
           <k-slot name="frockbot.sidebar-bots" />
         </div>
@@ -94,25 +106,18 @@ function handleComposerKeydown(event: KeyboardEvent): void {
 
       <main class="workspace">
         <header class="topbar">
-          <span class="book-icon"><k-slot name="frockbot.bot-identity" /></span>
+          <span class="bot-identity"
+            ><k-slot name="frockbot.bot-identity"
+          /></span>
           <div class="workspace-title">
             <strong>{{ botName }}</strong>
             <small>{{ state.modelLabel }}</small>
           </div>
-          <k-slot name="frockbot.bot-actions" />
-          <button
-            class="panel-toggle"
-            :title="rightPanelOpen ? 'Hide side panel' : 'Show side panel'"
-            :aria-label="rightPanelOpen ? 'Hide side panel' : 'Show side panel'"
-            @click="rightPanelOpen = !rightPanelOpen"
-          >
-            {{ rightPanelOpen ? "»" : "«" }}
-          </button>
         </header>
 
         <section class="thread" aria-live="polite">
           <div v-if="state.messages.length === 0" class="empty-thread">
-            <div class="empty-mark">⌁</div>
+            <div class="empty-mark"><UiIcon name="sparkle" size="lg" /></div>
             <h1>{{ botName }} is ready.</h1>
             <p>Start with a conversation. Cordis plugins can add the rest.</p>
           </div>
@@ -148,56 +153,73 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           </article>
         </section>
 
-        <div
-          v-if="state.error || state.activeRun"
-          class="error-banner"
-          :role="state.error && !state.activeRun ? 'alert' : 'status'"
-        >
-          <span>{{ state.activeRun?.message ?? state.error }}</span>
-          <button
-            v-if="state.activeRun?.canResume"
-            type="button"
-            @click="web.resumeRun(state.activeRun.runId)"
+        <Transition name="banner">
+          <div
+            v-if="state.error || state.activeRun"
+            class="error-banner"
+            :role="state.error && !state.activeRun ? 'alert' : 'status'"
           >
-            Resume Turn
-          </button>
-        </div>
+            <span>{{ state.activeRun?.message ?? state.error }}</span>
+            <button
+              v-if="state.activeRun?.canResume"
+              type="button"
+              @click="web.resumeRun(state.activeRun.runId)"
+            >
+              Resume Turn
+            </button>
+          </div>
+        </Transition>
 
-        <form class="composer" @submit.prevent="sendMessage">
+        <form
+          class="composer"
+          :class="{ 'composer-busy': isRunning }"
+          @submit.prevent="sendMessage"
+        >
           <textarea
             v-model="draft"
-            :placeholder="
-              state.connection === 'ready'
-                ? `Message ${botName}`
-                : 'Waiting for Cordis…'
-            "
-            :disabled="state.connection !== 'ready' || isRunning"
+            :placeholder="isConnecting ? 'Connecting…' : `Message ${botName}`"
+            :disabled="isConnecting || isRunning"
             rows="1"
             @keydown="handleComposerKeydown"
           />
-          <button
+          <UiIconButton
             v-if="isRunning"
-            type="button"
             class="stop-button"
+            icon="stop"
+            label="Stop generating"
+            variant="primary"
             @click="web.abort()"
-          >
-            Stop
-          </button>
-          <button
+          />
+          <UiIconButton
             v-else
-            class="send-button"
             type="submit"
+            icon="arrow-up"
+            label="Send message"
+            variant="primary"
             :disabled="!canSend"
-            aria-label="Send message"
-          >
-            ↑
-          </button>
+          />
         </form>
       </main>
 
-      <aside v-if="rightPanelOpen" class="right-panel">
-        <k-slot name="frockbot.right-panel" />
+      <aside
+        class="right-panel"
+        :aria-hidden="!rightPanelOpen"
+        :inert="!rightPanelOpen"
+      >
+        <div class="right-panel-content">
+          <k-slot name="frockbot.right-panel" />
+        </div>
       </aside>
+
+      <div class="window-actions">
+        <k-slot name="frockbot.bot-actions" />
+        <UiIconButton
+          class="panel-toggle"
+          :icon="rightPanelOpen ? 'chevrons-right' : 'chevrons-left'"
+          :label="rightPanelOpen ? 'Hide side panel' : 'Show side panel'"
+          @click="rightPanelOpen = !rightPanelOpen"
+        />
+      </div>
     </div>
 
     <k-slot name="frockbot.overlays" />
