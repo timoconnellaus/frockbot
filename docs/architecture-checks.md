@@ -349,3 +349,49 @@ Not covered here, and why:
 - **S9 client HTTP error decoding.** `apiRequest` runs in a browser. This layer
   proves the bodies it receives are always JSON; proving what the browser does
   with them needs the Playwright layer.
+
+## Browser end to end
+
+`bun run --filter @frockbot/cloudflare test:e2e` runs
+`apps/cloudflare/e2e/playwright.config.ts`: a real Chromium against
+`wrangler dev` serving `src/index.ts` and the artifact `artifact:build` just
+produced. It closes the one gap the integration layer names above — S9, what a
+browser does with what the gateway answers — and it is the only layer in which
+the shipped Vue client executes at all.
+
+`e2e/harness.ts` is the `webServer`. It performs the steps `dev-electron.ts`
+already scripts for local development (build the artifact, `wrangler r2 object
+put --local`, `wrangler dev`), publishes and seeds one Package Catalog
+generation the way the production deploy does, starts a fake Ollama HTTP server
+on a loopback port, and tears the whole tree down afterwards; every run uses a fresh
+`--persist-to` directory, so no Durable Object, R2 object or D1 row survives
+into the next. Authentication is the development identity (`?as_user=`), and
+each spec takes a fresh random User, so the layer needs no secret.
+
+The provider is reached through the Package's own `api-base-url` Connection
+setting rather than through a test-only branch: `wrangler dev` has no
+`outboundService`, and pointing a Connection at a local Ollama is a shipped
+feature.
+
+Every spec additionally fails on **any** console error, any uncaught page
+error, any failed request and any response of 500 or worse. Incident 1's only
+visible symptom in the browser was a console `Unexpected token '<'`.
+
+| Seam                                                             | Incident it guards                                                             | File                                        | What it proves                                                                                                      |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| S1 + S2 + S3 gateway auth → Worker Loader → User Durable Object  | 1 — the built artifact had never been booted in a browser by any test          | `apps/cloudflare/e2e/first-run.e2e.ts`      | A new User loads `/`, the client mounts, the first-run dialog creates a Bot and it appears in the directory         |
+| S4 browser → connections route; S7 → the provider                | 4 — "Failed to fetch" on Connect                                               | `apps/cloudflare/e2e/connect-ollama.e2e.ts` | Install, Connect with a good key, the Connection reaches `ready` and its models reach the model choosers            |
+| S7 the key is validated by inference, not by a catalog read      | 5 — a garbage key reached `ready`                                              | `apps/cloudflare/e2e/connect-ollama.e2e.ts` | A key the endpoint refuses for inference never reaches `ready` and renders the provider's reason                    |
+| S5 + S9 Turn submission, polling and history                     | 1 — a non-JSON body from the turns route killed the client                     | `apps/cloudflare/e2e/chat.e2e.ts`           | A Markdown message settles into a rendered assistant reply, and a reload replays it from `GET /api/bots/:bot/turns` |
+| S5 + S7 a provider failure reaching the conversation             | 5 — a Connection that stops working after it is `ready`                        | `apps/cloudflare/e2e/chat.e2e.ts`           | Revoking the key mid-session ends the Turn as `model-error` with the reason on screen, not as a spinner             |
+| S6 `/app-manifest` producer → the client's plugin-catalog decode | 2 and 3 — the decoder refused the producer's manifest and the panel banner lit | `apps/cloudflare/e2e/bot-settings.e2e.ts`   | The gear opens Bot settings with the Capability Assignment catalog decoded and no error banner anywhere             |
+
+Not covered here, and why:
+
+- **Real Google authentication.** The gateway's development identity replaces
+  it; the better-auth handler is exercised as a route, not as a sign-in.
+- **The real Ollama Cloud.** The endpoint is the harness's fake server, which
+  reproduces the authentication asymmetry measured in
+  `docs/research/ollama-cloud-auth.md`. The Package's own tests assert the
+  request shapes.
+- **S8 Bot Durable Object → Computer/Sprite**, as above.

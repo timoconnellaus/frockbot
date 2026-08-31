@@ -13,7 +13,10 @@ import {
 } from "@frockbot/connection-core";
 import { OpenAICompatibleHttpError } from "@frockbot/provider-openai-compatible";
 import { Context, Service } from "cordis";
-import { createOllamaCloudRuntimePlugin } from "./runtime.js";
+import {
+  createOllamaCloudRuntimePlugin,
+  ollamaChatBaseUrl,
+} from "./runtime.js";
 
 function serializedKeyring(): string {
   const bytes = Uint8Array.from({ length: 32 }, (_, index) => index + 11);
@@ -246,6 +249,76 @@ describe("Ollama Cloud runtime Contribution", () => {
       await root.fiber.dispose();
     },
   );
+
+  test("sends the chat completion to the Connection's endpoint", async () => {
+    const keyringText = serializedKeyring();
+    const envelope = await sealCredentialV1({
+      keyring: parseCredentialKeyringV1(keyringText),
+      context: {
+        accountId: "account-1",
+        connectionId: "connection-1",
+        packageId: "provider-ollama-cloud",
+        credentialGeneration: "generation-1",
+      },
+      plaintext: "account-secret",
+    });
+
+    // Unset endpoint keeps the Package default; a Connection setting moves it.
+    for (const [apiBaseUrl, expected] of [
+      [undefined, "https://ollama.com/v1/chat/completions"],
+      ["http://127.0.0.1:11434", "http://127.0.0.1:11434/v1/chat/completions"],
+    ] as const) {
+      const urls: string[] = [];
+      const root = new Context();
+      await root.plugin(LlmRegistry);
+      await mountCredentialRuntime(root, keyringText);
+      await root.plugin(
+        createOllamaCloudRuntimePlugin({
+          accountId: "account-1",
+          connectionId: "connection-1",
+          packageId: "provider-ollama-cloud",
+          now: () => Date.parse("2026-08-30T00:00:00.000Z"),
+          chatBaseUrl: ollamaChatBaseUrl(apiBaseUrl),
+          leaseCredential: (effectId) =>
+            Promise.resolve({
+              schemaVersion: 1,
+              leaseId: "lease-1",
+              effectId,
+              connectionId: "connection-1",
+              credentialGeneration: "generation-1",
+              expiresAt: "2026-08-30T01:00:00.000Z",
+              envelope,
+            }),
+          settleCredential: () => Promise.resolve(),
+          fetch: (input) => {
+            urls.push(String(input));
+            return Promise.resolve(
+              new Response(
+                'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+                  "data: [DONE]\n\n",
+                {
+                  status: 200,
+                  headers: { "content-type": "text/event-stream" },
+                },
+              ),
+            );
+          },
+        }),
+      );
+
+      const signal = new AbortController().signal;
+      for await (const event of root.llm.stream(request, signal)) void event;
+      expect(urls).toEqual([expected]);
+    }
+
+    // An unusable endpoint never reaches a request: it is refused at the seam.
+    expect(() => ollamaChatBaseUrl("/v1")).toThrow(
+      "is not an absolute http or https URL",
+    );
+    expect(() => ollamaChatBaseUrl("localhost:11434")).toThrow(
+      "must use http or https",
+    );
+  });
 
   test("rejects a request bound to another Connection before leasing", async () => {
     let leaseCount = 0;

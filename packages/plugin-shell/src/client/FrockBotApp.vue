@@ -520,6 +520,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             <textarea
               ref="composerInput"
               v-model="draft"
+              aria-label="Message"
               :placeholder="
                 isConnecting
                   ? 'Connecting…'

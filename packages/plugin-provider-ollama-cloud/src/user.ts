@@ -1,4 +1,5 @@
 import {
+  MAX_CONNECTION_SETTINGS_V1,
   decodeConnectionCommandReceiptV1,
   decodeConnectionCommandV1,
   decodeConnectionModelCatalogV1,
@@ -6,6 +7,7 @@ import {
   type ConnectionCommandV1,
   type ConnectionModelCatalogV1,
   type ConnectionModelV1,
+  type ConnectionSettingsV1,
   type CredentialLeaseV1,
 } from "@frockbot/connection-core";
 import type { ConnectionView } from "@frockbot/configuration-core";
@@ -20,7 +22,11 @@ import type {
   UserSettingsTransaction,
 } from "@frockbot/plugin-settings/user";
 import type { Plugin } from "cordis";
-import { OllamaCloudClient } from "./client.js";
+import {
+  decodeOllamaApiBaseUrl,
+  OllamaCloudClient,
+  type OllamaCloudClientConfig,
+} from "./client.js";
 import { OLLAMA_CLOUD_PROVIDER } from "./runtime.js";
 
 const PACKAGE_ID = "provider-ollama-cloud";
@@ -60,6 +66,7 @@ interface StoredCommand {
    */
   operation: Exclude<ConnectionCommandV1["type"], "connection/create">;
   label?: string;
+  settings?: Record<string, string>;
   enabled?: boolean;
   revokeUpstream?: boolean;
   receipt?: ConnectionCommandReceiptV1;
@@ -146,6 +153,75 @@ function probeModelId(models: readonly ConnectionModelV1[]): string {
   return chosen.providerModelId;
 }
 
+// The only setting this Package's Connection Type declares (manifest v4). The
+// Connection settings bag carries it under the same id, which the shared
+// decoder requires to be lower-case kebab.
+const API_BASE_URL_SETTING = "api-base-url";
+
+/** The per-value bound the shared Connection settings decoder enforces. */
+const MAX_CONNECTION_SETTING_VALUE = 2_048;
+
+/**
+ * Decode the Connection settings a `connection/create-api-key` command carried.
+ *
+ * An unknown key or an unusable endpoint is a User-visible refusal, not a
+ * silently ignored field.
+ */
+function decodeOllamaConnectionSettings(
+  input: ConnectionSettingsV1 | undefined,
+): Record<string, string> {
+  if (input === undefined) return {};
+  const entries = Object.entries(input);
+  if (entries.length > MAX_CONNECTION_SETTINGS_V1) {
+    throw new Error("Ollama Cloud Connection settings are too many");
+  }
+  const accepted: Record<string, string> = {};
+  for (const [key, value] of entries) {
+    if (key !== API_BASE_URL_SETTING) {
+      throw new Error(
+        `Ollama Cloud Connection setting "${key}" is not supported`,
+      );
+    }
+    accepted[key] = decodeOllamaApiBaseUrl(value);
+  }
+  return accepted;
+}
+
+function decodeStoredConnectionSettings(
+  input: unknown,
+): Record<string, string> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("Stored Ollama Connection settings are invalid");
+  }
+  const entries = Object.entries(input as Record<string, unknown>);
+  if (entries.length > MAX_CONNECTION_SETTINGS_V1) {
+    throw new Error("Stored Ollama Connection settings are invalid");
+  }
+  const raw: Record<string, string> = {};
+  for (const [key, value] of entries) {
+    raw[key] = storedText(
+      value,
+      `settings.${key}`,
+      MAX_CONNECTION_SETTING_VALUE,
+    );
+  }
+  try {
+    return decodeOllamaConnectionSettings(raw);
+  } catch {
+    throw new Error("Stored Ollama Connection settings are invalid");
+  }
+}
+
+/** Read a Connection's endpoint root off its durable projection. */
+function connectionApiBaseUrl(
+  connection: ConnectionView | undefined,
+): string | undefined {
+  const candidate = connection?.settings?.[API_BASE_URL_SETTING];
+  return candidate === undefined
+    ? undefined
+    : decodeOllamaApiBaseUrl(candidate);
+}
+
 export interface OllamaUserBackendHost {
   storage: UserSettingsStorage &
     CredentialStorage & {
@@ -154,7 +230,10 @@ export interface OllamaUserBackendHost {
     };
   settings: UserSettingsBackendContribution;
   credentials: OllamaCredentialContribution;
+  /** A client the host supplies for every Connection; wins when given. */
   client?: OllamaCloudClient;
+  /** Build a client for one Connection's endpoint. */
+  createClient?(config: OllamaCloudClientConfig): OllamaCloudClient;
   now?: () => number;
   randomId?: () => string;
 }
@@ -285,6 +364,7 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       "credentialGeneration",
       "expectedGeneration",
       "label",
+      "settings",
       "enabled",
       "revokeUpstream",
       "receipt",
@@ -384,6 +464,9 @@ function decodeStoredCommand(input: unknown): StoredCommand {
     ...(value.label === undefined
       ? {}
       : { label: storedText(value.label, "label", 120) }),
+    ...(value.settings === undefined
+      ? {}
+      : { settings: decodeStoredConnectionSettings(value.settings) }),
     ...(value.enabled === undefined
       ? {}
       : { enabled: value.enabled as boolean }),
@@ -558,7 +641,6 @@ function retainResolvedModel(
 
 export class OllamaCloudUserBackendContribution {
   readonly packageId = PACKAGE_ID;
-  private readonly client: OllamaCloudClient;
   private readonly now: () => number;
   private readonly randomId: () => string;
   private readonly resumptions = new Map<
@@ -567,7 +649,6 @@ export class OllamaCloudUserBackendContribution {
   >();
 
   constructor(private readonly host: OllamaUserBackendHost) {
-    this.client = host.client ?? new OllamaCloudClient();
     this.now = host.now ?? Date.now;
     this.randomId = host.randomId ?? crypto.randomUUID.bind(crypto);
   }
@@ -692,6 +773,20 @@ export class OllamaCloudUserBackendContribution {
       }
       const connectionId = `connection-${this.randomId()}`;
       const generation = this.randomId();
+      // An unusable endpoint is admitted and then refused, so the User sees a
+      // failed receipt and a failed Connection carrying the reason rather than
+      // an unhandled throw. No provider request is made for it.
+      let accepted: Record<string, string> = {};
+      let settingsFailure: string | undefined;
+      try {
+        accepted = decodeOllamaConnectionSettings(command.settings);
+      } catch (error) {
+        settingsFailure = (
+          error instanceof Error && error.message
+            ? error.message
+            : "Ollama Cloud Connection settings are invalid"
+        ).slice(0, 500);
+      }
       const record: StoredCommand = {
         schemaVersion: 1,
         commandId: command.commandId,
@@ -701,7 +796,14 @@ export class OllamaCloudUserBackendContribution {
         credentialGeneration: generation,
         operation: command.type,
         label: command.label,
+        ...(Object.keys(accepted).length > 0 ? { settings: accepted } : {}),
         providerRetryPolicy: "safe-metadata-read",
+        ...(settingsFailure === undefined
+          ? {}
+          : {
+              validationFailure: settingsFailure,
+              validationStatus: "failed" as const,
+            }),
       };
       const prepared = await this.host.credentials.prepareApiKey({
         accountId,
@@ -967,7 +1069,7 @@ export class OllamaCloudUserBackendContribution {
           updatedAt,
         },
       },
-      settings: {},
+      settings: { ...(record.settings ?? {}) },
       safeMetadata: { creationCommandId: record.commandId },
     };
   }
@@ -1119,8 +1221,12 @@ export class OllamaCloudUserBackendContribution {
         // promotes a bad key to `ready` and the User only learns it is bad when
         // a Turn ends `model-error`. `POST /api/chat` authenticates, so a
         // one-token completion is what proves the key.
-        const models = await this.client.listModels(apiKey);
-        await this.client.probeInference(apiKey, probeModelId(models));
+        const client = this.clientFor(
+          record.settings?.[API_BASE_URL_SETTING] ??
+            connectionApiBaseUrl(existingProjection),
+        );
+        const models = await client.listModels(apiKey);
+        await client.probeInference(apiKey, probeModelId(models));
         outcome = {
           ...record,
           validationCatalog: this.catalog(models),
@@ -1367,10 +1473,11 @@ export class OllamaCloudUserBackendContribution {
     let lease: CredentialLeaseV1 | undefined;
     let models: ConnectionModelCatalogV1["models"] | undefined;
     let failure: unknown;
+    let refreshEndpoint: string | undefined;
     try {
       lease = await this.host.storage.transaction(
         async (storage: UserSettingsTransaction & CredentialTransaction) => {
-          await this.requireModelAuthority(
+          const authority = await this.requireModelAuthority(
             {
               accountId: record.accountId,
               connectionId: record.connectionId,
@@ -1378,6 +1485,7 @@ export class OllamaCloudUserBackendContribution {
             },
             storage,
           );
+          refreshEndpoint = connectionApiBaseUrl(authority);
           return this.host.credentials.lease(
             {
               accountId: record.accountId,
@@ -1396,7 +1504,7 @@ export class OllamaCloudUserBackendContribution {
         packageId: PACKAGE_ID,
         lease,
       });
-      models = await this.client.listModels(apiKey);
+      models = await this.clientFor(refreshEndpoint).listModels(apiKey);
     } catch (error) {
       failure = error;
     }
@@ -2009,10 +2117,9 @@ export class OllamaCloudUserBackendContribution {
             packageId: PACKAGE_ID,
             lease: resolution.lease,
           });
-          const model = await this.client.resolveModel(
-            apiKey,
-            input.providerModelId,
-          );
+          const model = await this.clientFor(
+            connectionApiBaseUrl(connection),
+          ).resolveModel(apiKey, input.providerModelId);
           outcome = { ...journal, status: "applied", model };
         } catch (error) {
           outcome = {
@@ -2188,6 +2295,22 @@ export class OllamaCloudUserBackendContribution {
       );
     }
     await this.scheduleNextAlarm(accountId);
+  }
+
+  /**
+   * The provider client for one Connection's endpoint.
+   *
+   * A host-supplied client wins, so a test or an embedding host can serve every
+   * Connection from one stub; otherwise the host's factory, or the Package
+   * default pointing at https://ollama.com, builds one per endpoint.
+   */
+  private clientFor(apiBaseUrl?: string): OllamaCloudClient {
+    if (this.host.client) return this.host.client;
+    const config: OllamaCloudClientConfig =
+      apiBaseUrl === undefined ? {} : { apiBaseUrl };
+    return this.host.createClient
+      ? this.host.createClient(config)
+      : new OllamaCloudClient(config);
   }
 
   private async requireConnection(

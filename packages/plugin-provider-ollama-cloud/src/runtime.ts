@@ -10,7 +10,11 @@ import {
   OpenAICompatibleProvider,
 } from "@frockbot/provider-openai-compatible";
 import type { Plugin } from "cordis";
-import type { OllamaFetch } from "./client.js";
+import {
+  DEFAULT_OLLAMA_API_BASE_URL,
+  decodeOllamaApiBaseUrl,
+  type OllamaFetch,
+} from "./client.js";
 
 interface CredentialLeaseOpener {
   open(input: {
@@ -46,9 +50,19 @@ export interface OllamaCloudRuntimeConfig {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential(effectId: string): Promise<void>;
+  /**
+   * OpenAI-compatible chat root for this Connection's endpoint. Defaults to
+   * the Package endpoint `https://ollama.com/v1`; a Connection that points
+   * elsewhere supplies `<apiBaseUrl>/v1`.
+   */
   chatBaseUrl?: string;
   fetch?: OllamaFetch;
   now?: () => number;
+}
+
+/** Compose the OpenAI-compatible chat root from a Connection endpoint root. */
+export function ollamaChatBaseUrl(apiBaseUrl?: string): string {
+  return `${decodeOllamaApiBaseUrl(apiBaseUrl ?? DEFAULT_OLLAMA_API_BASE_URL)}/v1`;
 }
 
 interface AuthorizedRequest {
@@ -138,7 +152,7 @@ class OllamaCloudProvider implements LlmProvider {
       );
     }
     const provider = new OpenAICompatibleProvider({
-      baseUrl: this.config.chatBaseUrl ?? "https://ollama.com/v1",
+      baseUrl: this.config.chatBaseUrl ?? ollamaChatBaseUrl(),
       apiKey: authorization.apiKey,
       providerId: this.id,
       fetch: this.config.fetch,

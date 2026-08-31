@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // The harness and the Playwright config run in Node, and the specs drive a
+    // browser, so neither the Worker globals of the parent config nor its
+    // WebWorker lib apply here.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["bun"]
+  },
+  "include": ["./**/*.ts"]
+}

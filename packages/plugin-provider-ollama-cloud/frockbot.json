@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "id": "provider-ollama-cloud",
   "displayName": "Ollama Cloud",
   "version": "0.0.1",
@@ -25,7 +25,20 @@
         "displayName": "Ollama Cloud account",
         "allowMultiple": true,
         "authorization": { "kind": "api-key", "driverId": "ollama-cloud" },
-        "capabilities": ["ollama-cloud-models"]
+        "capabilities": ["ollama-cloud-models"],
+        "settings": [
+          {
+            "id": "api-base-url",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "API base URL",
+              "description": "Root URL of the Ollama-compatible endpoint, without a trailing slash. Absent means https://ollama.com; use http://127.0.0.1:11434 for a local Ollama server.",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          }
+        ]
       }
     ],
     "capabilities": [

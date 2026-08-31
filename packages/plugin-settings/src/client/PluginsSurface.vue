@@ -31,6 +31,14 @@ const mcpLabel = ref("");
 const mcpUrl = ref("");
 const mcpTransport = ref<"streamable-http" | "sse">("streamable-http");
 const mcpApiKey = ref("");
+/**
+ * The endpoint root of an Ollama Cloud Connection, declared by that Connection
+ * Type as `api-base-url` (manifest v4). It is the only Connection Type the
+ * shared API-key form has a field for, the way the MCP form above carries the
+ * two settings its own Connection Types declare.
+ */
+const OLLAMA_PACKAGE_ID = "provider-ollama-cloud";
+const apiKeyBaseUrl = ref("");
 const rotatingConnectionId = ref<string>();
 const rotationKey = ref("");
 const labelingConnectionId = ref<string>();
@@ -207,6 +215,7 @@ function beginApiKeyConnection(
   apiKeyConnectionTypeId.value = connectionTypeId;
   apiKeyLabel.value = displayName;
   apiKey.value = "";
+  apiKeyBaseUrl.value = "";
 }
 
 function beginMcpConnection(): void {
@@ -271,13 +280,18 @@ function beginConnect(item: PluginCatalogItem): void {
 async function connectApiKey(): Promise<void> {
   if (!apiKeyPackageId.value || !apiKeyConnectionTypeId.value) return;
   try {
+    // An empty endpoint field means the Package default, so the command
+    // carries no settings at all rather than an empty bag.
+    const apiBaseUrl = apiKeyBaseUrl.value.trim();
     await web.value.createApiKeyConnection({
       packageId: apiKeyPackageId.value,
       connectionTypeId: apiKeyConnectionTypeId.value,
       label: apiKeyLabel.value,
       apiKey: apiKey.value,
+      ...(apiBaseUrl ? { settings: { "api-base-url": apiBaseUrl } } : {}),
     });
     apiKey.value = "";
+    apiKeyBaseUrl.value = "";
     apiKeyPackageId.value = undefined;
     apiKeyConnectionTypeId.value = undefined;
     expandedPackageId.value = undefined;
@@ -290,6 +304,7 @@ async function connectApiKey(): Promise<void> {
 
 function cancelApiKeyConnection(): void {
   apiKey.value = "";
+  apiKeyBaseUrl.value = "";
   apiKeyPackageId.value = undefined;
   apiKeyConnectionTypeId.value = undefined;
 }
@@ -656,6 +671,21 @@ async function disconnect(connectionId: string): Promise<void> {
               required
             />
           </label>
+          <label v-if="apiKeyPackageId === OLLAMA_PACKAGE_ID">
+            <span>API base URL</span>
+            <input
+              v-model="apiKeyBaseUrl"
+              type="url"
+              inputmode="url"
+              autocomplete="off"
+              maxlength="2048"
+              placeholder="https://ollama.com"
+            />
+          </label>
+          <p v-if="apiKeyPackageId === OLLAMA_PACKAGE_ID" class="api-key-hint">
+            Leave empty for Ollama Cloud. Point this at a local Ollama server
+            (http://127.0.0.1:11434) or any Ollama-compatible endpoint.
+          </p>
           <div class="api-key-actions">
             <UiButton @click="cancelApiKeyConnection">Cancel</UiButton>
             <UiButton type="submit" variant="primary">Connect account</UiButton>
@@ -1104,6 +1134,12 @@ async function disconnect(connectionId: string): Promise<void> {
   background: var(--frock-surface-raised);
   color: var(--frock-text);
   font-size: var(--frock-text-base);
+}
+
+.api-key-hint {
+  margin: 0;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
 }
 
 .api-key-actions {
