@@ -361,8 +361,9 @@ the shipped Vue client executes at all.
 
 `e2e/harness.ts` is the `webServer`. It performs the steps `dev-electron.ts`
 already scripts for local development (build the artifact, `wrangler r2 object
-put --local`, `wrangler dev`), starts a fake Ollama HTTP server on a loopback
-port, and tears the whole tree down afterwards; every run uses a fresh
+put --local`, `wrangler dev`), publishes and seeds one Package Catalog
+generation the way the production deploy does, starts a fake Ollama HTTP server
+on a loopback port, and tears the whole tree down afterwards; every run uses a fresh
 `--persist-to` directory, so no Durable Object, R2 object or D1 row survives
 into the next. Authentication is the development identity (`?as_user=`), and
 each spec takes a fresh random User, so the layer needs no secret.

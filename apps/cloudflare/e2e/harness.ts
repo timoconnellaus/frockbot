@@ -23,7 +23,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -289,6 +289,58 @@ async function waitForManifest(baseUrl: string): Promise<void> {
   );
 }
 
+/**
+ * Seed the remote Package Catalog the way the production deploy does: build one
+ * immutable generation with `scripts/publish-catalog.ts`, then put its
+ * documents into the local bucket. Without it `GET /catalog/v1/index` answers
+ * 503 and the Plugins surface opens with a load error on every spec.
+ *
+ * Only the pointer and the index are uploaded. Entry documents are read one at
+ * a time, when a User opens a Catalog row, and no spec opens one; each
+ * `wrangler r2 object put` costs several seconds of wrangler start-up, and 23
+ * unread entries would cost more than the whole browser layer. A spec that
+ * opens a row must seed that entry — its key is
+ * `catalog/<generation>/entry/<catalogId>.json` in the same directory.
+ */
+async function seedPackageCatalog(persistDirectory: string): Promise<void> {
+  const source = join(persistDirectory, "catalog-source");
+  await run("bun", [
+    resolve(cloudflareRoot, "../../scripts/publish-catalog.ts"),
+    "--out",
+    source,
+  ]);
+  const pointerPath = join(source, "catalog", "current");
+  const pointer = JSON.parse(await readFile(pointerPath, "utf8")) as {
+    generation?: unknown;
+  };
+  if (typeof pointer.generation !== "string") {
+    throw new Error("the published Catalog pointer names no generation");
+  }
+  const indexKey = `catalog/${pointer.generation}/index.json`;
+  // The index first, so the pointer never names a generation that is not there.
+  for (const [key, file] of [
+    [indexKey, join(source, "catalog", pointer.generation, "index.json")],
+    ["catalog/current", pointerPath],
+  ] as const) {
+    await run("bunx", [
+      "wrangler",
+      "--env",
+      "e2e",
+      "r2",
+      "object",
+      "put",
+      `frockbot-package-catalog/${key}`,
+      "--file",
+      file,
+      "--content-type",
+      "application/json",
+      "--local",
+      "--persist-to",
+      persistDirectory,
+    ]);
+  }
+}
+
 export interface HarnessOptions {
   /** The port `wrangler dev` listens on. */
   port: number;
@@ -336,6 +388,8 @@ export async function startHarness(
       "--persist-to",
       persistDirectory,
     ]);
+
+    await seedPackageCatalog(persistDirectory);
 
     ollama = await startFakeOllama(options.ollamaPort);
 

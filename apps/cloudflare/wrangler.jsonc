@@ -225,6 +225,11 @@
           "bucket_name": "frockbot-memory-files-e2e",
           "remote": false,
         },
+        {
+          "binding": "PACKAGE_CATALOG",
+          "bucket_name": "frockbot-package-catalog",
+          "remote": false,
+        },
       ],
       "d1_databases": [
         {

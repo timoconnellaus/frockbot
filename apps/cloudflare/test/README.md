@@ -76,7 +76,10 @@ it is the only layer in which the shipped Vue client executes.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`, seeds
 `dist/artifacts/foundation-v1.mjs` into the local `APPLICATION_ARTIFACTS`
-bucket, starts a fake Ollama HTTP server on a loopback port, and starts
+bucket, publishes one Package Catalog generation with
+`scripts/publish-catalog.ts` and seeds its pointer and index into
+`PACKAGE_CATALOG` (entry documents are read one row at a time and no spec opens
+one), starts a fake Ollama HTTP server on a loopback port, and starts
 `wrangler dev --env e2e`. That environment exists because `development` marks
 `MEMORY_FILES`, `MEMORY_INDEX` and `AI` remote, and a remote binding makes
 `wrangler dev` open a Cloudflare API session that a pull request has no

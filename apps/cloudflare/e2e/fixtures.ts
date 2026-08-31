@@ -136,10 +136,16 @@ export function firstRunDialog(page: Page): Locator {
 /** Create a Bot through the flock dialog. */
 export async function createBot(page: Page, name: string): Promise<void> {
   const dialog = firstRunDialog(page);
-  if (!(await dialog.isVisible().catch(() => false))) {
+  // Two states have to converge here: for a User with no Bots the dialog opens
+  // by itself, and while it is opening its backdrop swallows a click on the
+  // sidebar trigger. Retrying the decision rather than sampling it once makes
+  // the helper correct whichever state the shell settles into.
+  await expect(async () => {
+    if (await dialog.isVisible()) return;
     // The sidebar trigger is an icon button, so it is the one with a title.
-    await page.getByTitle("Create Bot").click();
-  }
+    await page.getByTitle("Create Bot").click({ timeout: 2_000 });
+    await expect(dialog).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
   await expect(dialog).toBeVisible();
   await dialog.getByLabel("Bot name").fill(name);
   await dialog.getByRole("button", { name: "Create Bot" }).click();
