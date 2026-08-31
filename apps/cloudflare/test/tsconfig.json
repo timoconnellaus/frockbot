@@ -1,7 +1,15 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
+    // `manifest-catalog.integration.ts` imports the production client decoder,
+    // whose module graph reaches browser code. `packages/plugin-shell` compiles
+    // under the same combination.
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
     "types": ["@cloudflare/vitest-plugin/types", "@cloudflare/workers-types"]
   },
-  "include": ["./**/*.ts", "../vitest.config.ts"]
+  "include": [
+    "./**/*.ts",
+    "../vitest.config.ts",
+    "../vitest.integration.config.ts"
+  ]
 }
