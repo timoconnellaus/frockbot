@@ -142,6 +142,23 @@ export function createPackageAuthoringHost(
   }
 
   /**
+   * The constitutional shadowing rule: a Bot authors only over its own
+   * Packages. A member of the current Composition whose provenance is
+   * first-party or User is not the Bot's to supersede, so authoring that
+   * `packageId` is refused before any durable effect. Superseding the Bot's
+   * own prior version is the ordinary re-authoring path and passes.
+   */
+  async function shadowedMember(
+    packageId: string,
+  ): Promise<CompositionMemberV1 | undefined> {
+    const parent = await options.composition.current();
+    return parent.members.find(
+      (member) =>
+        member.packageId === packageId && member.provenance.kind !== "bot",
+    );
+  }
+
+  /**
    * The member set of the next generation: every member of the pinned-forward
    * current generation except the one this Package supersedes, plus the new
    * one. A recorded generation is never edited.
@@ -261,6 +278,21 @@ export function createPackageAuthoringHost(
     ): Promise<AuthorPackageOutcomeV1> {
       const { effectId } = request;
       const packageId = request.input.packageId;
+
+      // Ahead of every other path, including a settled effect being composed
+      // after recovery: a shadowed Package never reaches a generation.
+      const shadowed = await shadowedMember(packageId);
+      if (shadowed) {
+        return refused(
+          await recordFailure({
+            effectId,
+            packageId,
+            phase: "compose",
+            reason: `Package "${packageId}" is already in this Bot's Composition with ${shadowed.provenance.kind} provenance, and a Bot may author only over its own Packages`,
+          }),
+        );
+      }
+
       const intent = await options.storage.get<AuthorshipIntentV1>(
         authorshipIntentKey(effectId),
       );
