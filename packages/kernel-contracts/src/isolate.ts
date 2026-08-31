@@ -18,14 +18,25 @@
 //
 // Everything decoded here is untrusted: Bot-authored code produces the results
 // and the capability requests, and the isolate produces the health report.
-import type {
-  LlmStreamEvent,
-  NormalizedModelRequest,
-  ToolSchema,
+import type { TurnAdmissionV1 } from "./tool-execution.js";
+import {
+  decodeTurnTypeV1,
+  type LlmStreamEvent,
+  type NormalizedModelRequest,
+  type ToolSchema,
 } from "./types.js";
 
-/** The wire contract version the kernel wrapper and this module agree on. */
-export const ISOLATE_CONTRACT_VERSION = 1;
+/**
+ * The wire contract version the kernel wrapper emits. Version 2 added
+ * per-tool turn admission; a version 1 isolate declares no admission and its
+ * tools are therefore offered on every turn type.
+ */
+export const ISOLATE_CONTRACT_VERSION = 2;
+
+/** Every contract version the kernel still decodes. */
+export type IsolateContractVersion = 1 | 2;
+
+const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [1, 2];
 
 /** The upper bound on a single isolate invocation, enforced on both sides. */
 export const ISOLATE_MAX_DEADLINE_MS = 60_000;
@@ -40,6 +51,8 @@ export interface IsolateToolDescriptorV1 {
   description: string;
   inputSchema: Record<string, unknown>;
   idempotent: boolean;
+  /** Contract version 2 and later. Absent means every turn type. */
+  admission?: TurnAdmissionV1;
 }
 
 export interface IsolateToolInvocationV1 {
@@ -64,7 +77,7 @@ export interface IsolateHealthV1 {
   schemaVersion: 1;
   ok: boolean;
   packageId: string;
-  contractVersion: 1;
+  contractVersion: IsolateContractVersion;
   tools: IsolateToolDescriptorV1[];
 }
 
@@ -272,12 +285,47 @@ function jsonValue(value: unknown, label: string, depth = 0): void {
   throw new Error(`${label} must be JSON`);
 }
 
+/** The exact decoder for one turn admission declaration crossing the seam. */
+export function decodeIsolateAdmissionV1(
+  input: unknown,
+  label = "isolate admission",
+): TurnAdmissionV1 {
+  const value = record(input, label);
+  exactKeys(value, ["turnTypes"], label);
+  if (!Array.isArray(value.turnTypes)) {
+    throw new Error(`${label}.turnTypes must be an array`);
+  }
+  if (value.turnTypes.length === 0) {
+    throw new Error(`${label}.turnTypes must not be empty`);
+  }
+  const turnTypes = value.turnTypes.map((turnType, index) =>
+    decodeTurnTypeV1(turnType, `${label}.turnTypes[${index}]`),
+  );
+  if (new Set(turnTypes).size !== turnTypes.length) {
+    throw new Error(`${label}.turnTypes contains duplicates`);
+  }
+  return { turnTypes };
+}
+
 export function decodeIsolateToolDescriptorV1(
   input: unknown,
   label = "isolate tool descriptor",
+  contractVersion: IsolateContractVersion = 1,
 ): IsolateToolDescriptorV1 {
   const value = record(input, label);
-  exactKeys(value, ["name", "description", "inputSchema", "idempotent"], label);
+  exactKeys(
+    value,
+    [
+      "name",
+      "description",
+      "inputSchema",
+      "idempotent",
+      ...(contractVersion >= 2 && Object.hasOwn(value, "admission")
+        ? ["admission"]
+        : []),
+    ],
+    label,
+  );
   const name = boundedString(value.name, `${label}.name`, 64);
   if (!TOOL_NAME.test(name)) throw new Error(`${label}.name is invalid`);
   const description = boundedString(
@@ -291,7 +339,20 @@ export function decodeIsolateToolDescriptorV1(
   if (typeof value.idempotent !== "boolean") {
     throw new Error(`${label}.idempotent must be a boolean`);
   }
-  return { name, description, inputSchema, idempotent: value.idempotent };
+  return {
+    name,
+    description,
+    inputSchema,
+    idempotent: value.idempotent,
+    ...(contractVersion >= 2 && value.admission !== undefined
+      ? {
+          admission: decodeIsolateAdmissionV1(
+            value.admission,
+            `${label}.admission`,
+          ),
+        }
+      : {}),
+  };
 }
 
 export function decodeIsolateToolInvocationV1(
@@ -382,7 +443,10 @@ export function decodeIsolateHealthV1(
   if (value.schemaVersion !== 1) {
     throw new Error(`${label}.schemaVersion is unsupported`);
   }
-  if (value.contractVersion !== ISOLATE_CONTRACT_VERSION) {
+  const contractVersion = ISOLATE_CONTRACT_VERSIONS.find(
+    (candidate) => candidate === value.contractVersion,
+  );
+  if (contractVersion === undefined) {
     throw new Error(`${label}.contractVersion is unsupported`);
   }
   if (typeof value.ok !== "boolean") {
@@ -395,7 +459,11 @@ export function decodeIsolateHealthV1(
     throw new Error(`${label}.tools exceeds its bound`);
   }
   const tools = value.tools.map((tool, index) =>
-    decodeIsolateToolDescriptorV1(tool, `${label}.tools[${index}]`),
+    decodeIsolateToolDescriptorV1(
+      tool,
+      `${label}.tools[${index}]`,
+      contractVersion,
+    ),
   );
   if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
     throw new Error(`${label}.tools contains duplicate names`);
@@ -404,7 +472,7 @@ export function decodeIsolateHealthV1(
     schemaVersion: 1,
     ok: value.ok,
     packageId: boundedString(value.packageId, `${label}.packageId`, 128),
-    contractVersion: ISOLATE_CONTRACT_VERSION,
+    contractVersion,
     tools,
   };
 }

@@ -161,8 +161,56 @@ describe("isolate health v1", () => {
 
   test("rejects an unsupported contract version", () => {
     expect(() =>
-      decodeIsolateHealthV1({ ...health, contractVersion: 2 }),
+      decodeIsolateHealthV1({ ...health, contractVersion: 3 }),
     ).toThrow(/contractVersion is unsupported/);
+    expect(() =>
+      decodeIsolateHealthV1({ ...health, contractVersion: 0 }),
+    ).toThrow(/contractVersion is unsupported/);
+  });
+
+  test("admits a v1 descriptor onto every turn type", () => {
+    const decoded = decodeIsolateHealthV1(health);
+    expect(decoded.contractVersion).toBe(1);
+    expect(decoded.tools[0]?.admission).toBeUndefined();
+  });
+
+  test("carries a v2 descriptor admission through, and refuses one on v1", () => {
+    const decoded = decodeIsolateHealthV1({
+      ...health,
+      contractVersion: 2,
+      tools: [descriptor({ admission: { turnTypes: ["chat"] } })],
+    });
+    expect(decoded).toMatchObject({
+      contractVersion: 2,
+      tools: [{ admission: { turnTypes: ["chat"] } }],
+    });
+    expect(
+      decodeIsolateHealthV1({ ...health, contractVersion: 2 }).tools[0]
+        ?.admission,
+    ).toBeUndefined();
+    expect(() =>
+      decodeIsolateHealthV1({
+        ...health,
+        tools: [descriptor({ admission: { turnTypes: ["chat"] } })],
+      }),
+    ).toThrow(/invalid fields/);
+  });
+
+  test("rejects an unknown turn type in a v2 descriptor", () => {
+    expect(() =>
+      decodeIsolateHealthV1({
+        ...health,
+        contractVersion: 2,
+        tools: [descriptor({ admission: { turnTypes: ["routine"] } })],
+      }),
+    ).toThrow(/turnTypes\[0\] is invalid/);
+    expect(() =>
+      decodeIsolateHealthV1({
+        ...health,
+        contractVersion: 2,
+        tools: [descriptor({ admission: { turnTypes: [] } })],
+      }),
+    ).toThrow(/turnTypes must not be empty/);
   });
 
   test("rejects duplicate tool names", () => {

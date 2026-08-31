@@ -1,3 +1,5 @@
+import { decodeTurnTypeV1, type TurnTypeV1 } from "@frockbot/kernel-contracts";
+
 /** The Contribution kinds a Package manifest can declare. */
 export type ManifestContributionKind =
   "backend" | "runtime" | "client" | "desktop" | "mobile";
@@ -93,6 +95,12 @@ export interface CapabilityDefinition {
   id: string;
   kind: "tool" | "model" | "memory" | "notification" | "computer";
   connectionTypes: string[];
+  /**
+   * Manifest v4. The durable ceiling on the turn types this Capability's
+   * tools may be admitted onto: a Contribution cannot offer a tool on a turn
+   * type its manifest does not list. Absent means the manifest set no bound.
+   */
+  admission?: { turnTypes: TurnTypeV1[] };
 }
 
 export interface PackageConfiguration {
@@ -102,7 +110,7 @@ export interface PackageConfiguration {
 }
 
 export interface FrockBotManifest {
-  schemaVersion: 2 | 3;
+  schemaVersion: 2 | 3 | 4;
   id: string;
   displayName: string;
   version: string;
@@ -270,6 +278,11 @@ function decodeV1(value: Record<string, unknown>): FrockBotManifest {
   };
 }
 
+/** Manifest v4 extends v3, so every v3 rule applies unchanged to a v4 body. */
+function isV3OrLater(value: Record<string, unknown>): boolean {
+  return value.schemaVersion === 3 || value.schemaVersion === 4;
+}
+
 function decodeV2(value: Record<string, unknown>): FrockBotManifest {
   const identity = decodeIdentity(value);
   if (!isRecord(value.compatibility)) {
@@ -281,13 +294,13 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
   }
   exactFields(
     value.contributions,
-    value.schemaVersion === 3
+    isV3OrLater(value)
       ? ["backend", "runtime", "client", "desktop", "mobile"]
       : ["runtime", "client", "desktop", "mobile"],
     "manifest contributions",
   );
   const contributions: FrockBotManifest["contributions"] = {};
-  if (value.schemaVersion === 3 && value.contributions.backend !== undefined) {
+  if (isV3OrLater(value) && value.contributions.backend !== undefined) {
     const backend = Array.isArray(value.contributions.backend)
       ? value.contributions.backend
       : [value.contributions.backend];
@@ -378,10 +391,10 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     const execution = desktop.execution;
     if (
       execution !== "sandboxed-renderer" &&
-      (value.schemaVersion !== 3 || execution !== "trusted-main")
+      (!isV3OrLater(value) || execution !== "trusted-main")
     ) {
       throw new Error(
-        value.schemaVersion === 3
+        isV3OrLater(value)
           ? 'manifest desktop execution must be "sandboxed-renderer" or "trusted-main"'
           : 'manifest v2 desktop execution must be "sandboxed-renderer"',
       );
@@ -876,7 +889,34 @@ function safeSchema(value: unknown): PackageSettingSchema {
   return decodeSafeSchema(value, 0);
 }
 
-function decodeConfiguration(value: unknown): PackageConfiguration {
+function decodeCapabilityAdmission(value: unknown): {
+  turnTypes: TurnTypeV1[];
+} {
+  if (!isRecord(value)) {
+    throw new Error("manifest capability admission must be an object");
+  }
+  exactFields(value, ["turnTypes"], "manifest capability admission");
+  if (!Array.isArray(value.turnTypes)) {
+    throw new Error("manifest capability admission turnTypes must be an array");
+  }
+  if (value.turnTypes.length === 0) {
+    throw new Error(
+      "manifest capability admission turnTypes must not be empty",
+    );
+  }
+  const turnTypes = value.turnTypes.map((turnType) =>
+    decodeTurnTypeV1(turnType),
+  );
+  if (new Set(turnTypes).size !== turnTypes.length) {
+    throw new Error("manifest capability admission turnTypes has duplicates");
+  }
+  return { turnTypes };
+}
+
+function decodeConfiguration(
+  value: unknown,
+  allowAdmission: boolean,
+): PackageConfiguration {
   if (value === undefined) {
     return { settings: [], connectionTypes: [], capabilities: [] };
   }
@@ -959,7 +999,12 @@ function decodeConfiguration(value: unknown): PackageConfiguration {
     (capability) => {
       exactFields(
         capability,
-        ["id", "kind", "connectionTypes"],
+        [
+          "id",
+          "kind",
+          "connectionTypes",
+          ...(allowAdmission ? ["admission"] : []),
+        ],
         "manifest capability definition",
       );
       const rawKind = requiredString(capability, "kind");
@@ -977,6 +1022,9 @@ function decodeConfiguration(value: unknown): PackageConfiguration {
         id: definitionId(capability),
         kind,
         connectionTypes: optionalStringArray(capability, "connectionTypes"),
+        ...(allowAdmission && capability.admission !== undefined
+          ? { admission: decodeCapabilityAdmission(capability.admission) }
+          : {}),
       };
     },
   );
@@ -988,7 +1036,17 @@ function decodeV3(value: Record<string, unknown>): FrockBotManifest {
   return {
     ...base,
     schemaVersion: 3,
-    configuration: decodeConfiguration(value.configuration),
+    configuration: decodeConfiguration(value.configuration, false),
+  };
+}
+
+/** v4 is v3 plus the Capability admission ceiling, and nothing else. */
+function decodeV4(value: Record<string, unknown>): FrockBotManifest {
+  const base = decodeV2(value);
+  return {
+    ...base,
+    schemaVersion: 4,
+    configuration: decodeConfiguration(value.configuration, true),
   };
 }
 
@@ -1009,7 +1067,11 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
     );
     return decodeV1(value);
   }
-  if (value.schemaVersion === 2 || value.schemaVersion === 3) {
+  if (
+    value.schemaVersion === 2 ||
+    value.schemaVersion === 3 ||
+    value.schemaVersion === 4
+  ) {
     exactFields(
       value,
       [
@@ -1021,11 +1083,12 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
         "compatibility",
         "dependencies",
         "contributions",
-        ...(value.schemaVersion === 3 ? ["configuration"] : []),
+        ...(isV3OrLater(value) ? ["configuration"] : []),
       ],
       "manifest",
     );
-    return value.schemaVersion === 2 ? decodeV2(value) : decodeV3(value);
+    if (value.schemaVersion === 2) return decodeV2(value);
+    return value.schemaVersion === 3 ? decodeV3(value) : decodeV4(value);
   }
   throw new Error("unsupported FrockBot manifest version");
 }

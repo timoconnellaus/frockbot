@@ -18,6 +18,7 @@ import {
   type ToolCall,
   type ToolCallOccurrence,
   type ToolExecutionResult,
+  type TurnTypeV1,
   toolCallOccurrences,
   turnEndReason,
   validateSettledToolOccurrenceJournal,
@@ -137,6 +138,8 @@ class LoopAgent implements Agent {
   #options: EffectAdmittingAgentOptions;
   #maxSteps: number;
   #composition: CompositionPinV1;
+  /** The turn type every Turn of this Agent is admitted as. */
+  #turnType: TurnTypeV1;
   #status: AgentStatus = "idle";
   #inbox: AgentInput[] = [];
   #activity: Promise<void> = Promise.resolve();
@@ -160,6 +163,7 @@ class LoopAgent implements Agent {
     ).agentId?.trim();
     this.id = explicitAgentId || options.sessionId;
     this.#options = options;
+    this.#turnType = options.turnType ?? "chat";
     this.#maxSteps = maxSteps;
   }
 
@@ -398,7 +402,7 @@ class LoopAgent implements Agent {
           turnOutcome = "completed";
           return;
         }
-        await this.#executeTools(
+        const endsTurn = await this.#executeTools(
           toolCallOccurrences(openTurn, latestStep, response.toolCalls),
           signal,
         );
@@ -410,6 +414,10 @@ class LoopAgent implements Agent {
           outcome: "completed",
         });
         openStep = undefined;
+        if (endsTurn) {
+          turnOutcome = "completed";
+          return;
+        }
         nextStep = latestStep + 1;
       } else if (latestStepStatus === "open" && latestAssistant) {
         openStep = latestStep;
@@ -429,7 +437,7 @@ class LoopAgent implements Agent {
           latestStep,
           latestAssistant.toolCalls,
         );
-        await this.#executeTools(occurrences, signal);
+        const endsTurn = await this.#executeTools(occurrences, signal);
         signal.throwIfAborted();
         this.session.append({
           type: "step/end",
@@ -438,6 +446,10 @@ class LoopAgent implements Agent {
           outcome: "completed",
         });
         openStep = undefined;
+        if (endsTurn) {
+          turnOutcome = "completed";
+          return;
+        }
         nextStep = latestStep + 1;
       } else if (latestStepStatus === "ended") {
         turnOutcome = latestStepOutcome ?? "interrupted";
@@ -480,7 +492,7 @@ class LoopAgent implements Agent {
           turnOutcome = "completed";
           return;
         }
-        await this.#executeTools(
+        const endsTurn = await this.#executeTools(
           toolCallOccurrences(openTurn, step, response.toolCalls),
           signal,
         );
@@ -492,6 +504,10 @@ class LoopAgent implements Agent {
           outcome: "completed",
         });
         openStep = undefined;
+        if (endsTurn) {
+          turnOutcome = "completed";
+          return;
+        }
       }
       throw new Error(`agent exceeded ${this.#maxSteps} steps`);
     } catch (error) {
@@ -552,6 +568,7 @@ class LoopAgent implements Agent {
         generationId: this.#composition.generationId,
         artifactSetHash: this.#composition.artifactSetHash,
       },
+      { type: "turn/admission", turn, turnType: this.#turnType },
       { type: "input/admitted", messageId: input.messageId, turn },
     ]);
     await this.session.flush();
@@ -617,7 +634,7 @@ class LoopAgent implements Agent {
           return;
         }
 
-        await this.#executeTools(
+        const endsTurn = await this.#executeTools(
           toolCallOccurrences(turn, step, response.toolCalls),
           signal,
         );
@@ -629,6 +646,12 @@ class LoopAgent implements Agent {
           outcome: "completed",
         });
         openStep = undefined;
+        // A tool result that ends the Turn closes it here: no further model
+        // request, and the log replays as a completed Turn with none.
+        if (endsTurn) {
+          turnOutcome = "completed";
+          return;
+        }
         inputs = [];
       }
       throw new Error(`agent exceeded ${this.#maxSteps} steps`);
@@ -713,7 +736,7 @@ class LoopAgent implements Agent {
         model: this.#options.model,
         system: assembly.text,
         messages: this.session.deriveMessages(),
-        tools: this.#ctx.tools.schemas(),
+        tools: this.#ctx.tools.schemas({ turnType: this.#turnType }),
         ...(this.#options.modelBinding
           ? { modelBinding: structuredClone(this.#options.modelBinding) }
           : {}),
@@ -925,10 +948,16 @@ class LoopAgent implements Agent {
     }
   }
 
+  /**
+   * Runs every occurrence and reports whether any result ended the Turn. The
+   * boolean is per *result*, not per definition: one tool can end a Turn for
+   * one payload and not another, and the kernel never inspects which.
+   */
   async #executeTools(
     occurrences: readonly ToolCallOccurrence[],
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    let endsTurn = false;
     for (const occurrence of occurrences) {
       signal.throwIfAborted();
       const { call, occurrenceId, turn, step } = occurrence;
@@ -942,6 +971,7 @@ class LoopAgent implements Agent {
         effectId: occurrenceId,
         toolCall: call,
         compositionGenerationId: this.#composition.generationId,
+        turnType: this.#turnType,
         signal,
       };
       const preparation = await this.#ctx.tools.prepare(call, context);
@@ -1038,6 +1068,7 @@ class LoopAgent implements Agent {
           this.#ctx.emit("tools/result", call, result);
         }
       }
+      if (result.endsTurn === true) endsTurn = true;
       this.session.append({
         type: "tool/result",
         turn,
@@ -1050,6 +1081,7 @@ class LoopAgent implements Agent {
       });
       await this.session.flush();
     }
+    return endsTurn;
   }
 
   async #settleCancelledStep(turn: number, step: number): Promise<void> {

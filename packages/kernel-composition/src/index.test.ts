@@ -429,6 +429,128 @@ describe("decodeFrockBotManifest", () => {
     });
   });
 
+  test("decodes a manifest v4 Capability admission ceiling", () => {
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 4,
+      id: "shell",
+      displayName: "Shell",
+      version: "1.0.0",
+      compatibility: { frockbot: ">=0.0.1" },
+      contributions: { runtime: { entry: "./runtime" } },
+      permissions: [],
+      configuration: {
+        capabilities: [
+          {
+            id: "user-voice",
+            kind: "tool",
+            connectionTypes: [],
+            admission: { turnTypes: ["chat"] },
+          },
+          { id: "work", kind: "tool", connectionTypes: [] },
+        ],
+      },
+    });
+
+    expect(decoded).toMatchObject({
+      schemaVersion: 4,
+      configuration: {
+        capabilities: [
+          { id: "user-voice", admission: { turnTypes: ["chat"] } },
+          { id: "work" },
+        ],
+      },
+    });
+    expect(decoded.configuration?.capabilities[1]?.admission).toBeUndefined();
+  });
+
+  test("rejects an unknown turn type in a v4 admission ceiling", () => {
+    const manifestWith = (admission: unknown) => ({
+      schemaVersion: 4,
+      id: "shell",
+      displayName: "Shell",
+      version: "1.0.0",
+      compatibility: { frockbot: ">=0.0.1" },
+      contributions: { runtime: { entry: "./runtime" } },
+      permissions: [],
+      configuration: {
+        capabilities: [
+          { id: "user-voice", kind: "tool", connectionTypes: [], admission },
+        ],
+      },
+    });
+    expect(() =>
+      decodeFrockBotManifest(manifestWith({ turnTypes: ["routine"] })),
+    ).toThrow(/turn type is invalid/);
+    expect(() =>
+      decodeFrockBotManifest(manifestWith({ turnTypes: [] })),
+    ).toThrow(/admission turnTypes must not be empty/);
+    expect(() =>
+      decodeFrockBotManifest(manifestWith({ turnTypes: ["chat"], extra: 1 })),
+    ).toThrow(/unknown field/);
+  });
+
+  test("keeps the admission ceiling exclusive to manifest v4", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 3,
+        id: "shell",
+        displayName: "Shell",
+        version: "1.0.0",
+        compatibility: { frockbot: ">=0.0.1" },
+        contributions: { runtime: { entry: "./runtime" } },
+        permissions: [],
+        configuration: {
+          capabilities: [
+            {
+              id: "user-voice",
+              kind: "tool",
+              connectionTypes: [],
+              admission: { turnTypes: ["chat"] },
+            },
+          ],
+        },
+      }),
+    ).toThrow(/unknown field "admission"/);
+  });
+
+  test("decodes a v4 manifest exactly as v3 apart from the admission field", () => {
+    const body = {
+      id: "composio",
+      displayName: "Composio",
+      version: "1.0.0",
+      compatibility: { frockbot: ">=0.0.1" },
+      contributions: {
+        backend: { entry: "./backend", host: "gateway" },
+        desktop: {
+          entry: "./desktop",
+          execution: "trusted-main",
+          commands: [],
+        },
+      },
+      permissions: ["connections:manage"],
+      configuration: {
+        capabilities: [{ id: "gmail-tools", kind: "tool" }],
+      },
+    };
+    const v3 = decodeFrockBotManifest({ ...body, schemaVersion: 3 });
+    const v4 = decodeFrockBotManifest({ ...body, schemaVersion: 4 });
+    expect({ ...v4, schemaVersion: 3 }).toEqual(v3);
+  });
+
+  test("rejects an unsupported manifest version", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 5,
+        id: "future",
+        displayName: "Future",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: { runtime: { entry: "./runtime" } },
+        permissions: [],
+      }),
+    ).toThrow(/unsupported FrockBot manifest version/);
+  });
+
   test("rejects unknown fields at every manifest object boundary", () => {
     const cases: Array<[string, unknown]> = [
       ["", { ...manifest(), unexpected: true }],

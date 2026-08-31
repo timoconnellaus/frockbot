@@ -154,6 +154,7 @@ input/queued
 input/admitted
 input/cancelled
 turn/start
+turn/admission
 step/start
 user/message
 model/request
@@ -256,6 +257,25 @@ tools/pre-execute
 No side-effecting tool implementation runs before its `tool/call` intent is durable. A crash before effect admission is structurally repaired as interrupted. After admission, an uncertain tool effect remains reconciling: an idempotent tool may retry with the same `effectId`, while other tools use provider-neutral reconciliation and remain resumable when the outcome is unavailable.
 
 A tool definition declares whether calls may run concurrently, which resources they mutate, and whether it supports idempotent retry. The loop may use bounded parallelism only when definitions and policy allow it. Permission prompts and sandbox selection are plugins at the tool seam, not branches in the loop.
+
+### Turn admission
+
+Every Turn is admitted as one **turn type** — `chat`, `automation`, `subagent`, or `channel` — and the tool catalog is trimmed to what that turn type admits. This is the parity register's row 57: in GrokBot the user-facing tools exist only on chat turns, the hand-off tool only on automation and subagent turns, and work tools on both.
+
+The kernel carries the value and holds no opinion about it. `AgentOptions.turnType` defaults to `chat`, the loop records `turn/admission { turn, turnType }` beside `composition/pinned`, and it passes the turn type into `ToolExecution.schemas({ turnType })` and into every `ToolExecutionContext`. Which tools a turn type admits is entirely Package policy.
+
+Admission is declared at two levels, a ceiling and a narrowing inside it:
+
+1. **Manifest, the durable ceiling.** Manifest `schemaVersion: 4` adds `CapabilityDefinition.admission: { turnTypes }`. It is part of the immutable artifact set, so it is inspectable, quota-bounded, and Assignment-checkable, and a Contribution may never offer a tool on a turn type its manifest does not list. Manifest v4 is v3 plus this one field; v1, v2, and v3 bodies decode exactly as before.
+2. **Registration, per tool.** `ToolDefinition.admission: { turnTypes }` narrows within the ceiling. A tool that declares nothing is offered on every turn type — every tool shipped today is a work tool — and fail-closed lives at the manifest, where a Package must name a turn type explicitly. A Bot isolate declares the same field on its tool descriptors under isolate contract version 2; a version 1 isolate declares none and its tools stay on every turn type.
+
+`ToolRegistry` resolves the intersection once at registration, so the catalog the model saw and the call the loop admits can never disagree. `prepare` then denies an out-of-admission call with a `tool/result` denial rather than executing it — defence in depth, so a hallucinated chat-only name on an automation turn is refused, not run.
+
+Reconstructibility needs nothing new. `model/request` already persists the whole normalized request including its tool schemas, so the trimmed catalog **is** the recorded request; `turn/admission` records the input that produced it. A Turn recorded before turn admission existed carries no `turn/admission` event and replays as `chat`.
+
+### Ending a Turn from a tool
+
+`ToolExecutionResult.endsTurn` lets one tool result close the Turn: after `#executeTools`, the loop closes the step and ends the Turn `completed` with no further `model/request`, on both the fresh and the resume path. It is declared per _result_, not per definition, because the same tool can end a Turn for one payload and not another — GrokBot's question widget is a send payload that ends the turn, while an ordinary text send does not, and its hand-off tool always does. Nothing new is persisted: the log already shows `tool/result` then `turn/end { outcome: "completed" }` with no request after it, which replays identically.
 
 ## Package model
 

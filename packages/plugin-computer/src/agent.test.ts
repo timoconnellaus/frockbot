@@ -23,6 +23,7 @@ async function execute(
     botId: "bot-1",
     agentId: "run-9",
     compositionGenerationId: "bootstrap",
+    turnType: "chat" as const,
     sessionId: "session-1",
     effectId: "tool:1:1:0",
     signal: new AbortController().signal,

@@ -311,6 +311,8 @@ export class BotIsolateContributionHost implements ContributionHost {
     return {
       ...isolateToolSchemaV1(descriptor),
       idempotent: descriptor.idempotent,
+      // A contract v1 isolate declares none, and its tools stay on every turn.
+      ...(descriptor.admission ? { admission: descriptor.admission } : {}),
       execute: async (
         input: unknown,
         context: ToolExecutionContext,

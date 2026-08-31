@@ -149,10 +149,12 @@ describe("Memory boundaries", () => {
     await root.plugin(AgentLoop, { maxSteps: 2, composition: COMPOSITION });
 
     // The Computer tools really are mounted: this Turn simply never uses them.
-    expect(root.tools.schemas().map((schema) => schema.name)).toContain(
-      "computer_exec",
-    );
-    expect(root.tools.schemas().map((schema) => schema.name)).toEqual(
+    expect(
+      root.tools.schemas({ turnType: "chat" }).map((schema) => schema.name),
+    ).toContain("computer_exec");
+    expect(
+      root.tools.schemas({ turnType: "chat" }).map((schema) => schema.name),
+    ).toEqual(
       expect.arrayContaining([
         "memory_write",
         "memory_forget",

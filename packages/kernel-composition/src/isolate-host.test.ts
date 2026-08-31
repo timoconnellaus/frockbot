@@ -142,6 +142,7 @@ function executionContext(): ToolExecutionContext {
     agentId: "bot-1",
     sessionId: "session-1",
     compositionGenerationId: "gen-1",
+    turnType: "chat" as const,
     effectId: "tool:1:1:0",
     signal: new AbortController().signal,
   };
