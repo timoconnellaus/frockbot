@@ -133,6 +133,14 @@ export interface ClientSearchBotGroupV1 {
   archived: boolean;
   /** A Bot the sidebar hides is still searchable, and is labelled. */
   hidden: boolean;
+  /**
+   * The Bot's uploaded avatar, when it has one.
+   *
+   * Absent means the Bot's generated sheep, which only the Flock Package can
+   * draw; the overlay falls back to a monogram rather than reaching into
+   * another Package's client internals for a recipe.
+   */
+  avatarUrl?: string;
   hits: ClientSearchHitV1[];
   totalHits: number;
 }
@@ -470,7 +478,15 @@ export function decodeClientSearchBotGroupV1(
   const group = record(input, "client search group");
   exactKeys(
     group,
-    ["botId", "botName", "archived", "hidden", "hits", "totalHits"],
+    [
+      "botId",
+      "botName",
+      "archived",
+      "hidden",
+      "avatarUrl",
+      "hits",
+      "totalHits",
+    ],
     "client search group",
   );
   const hits = list(group.hits, "client search group.hits");
@@ -488,6 +504,16 @@ export function decodeClientSearchBotGroupV1(
     botName: text(group, "botName", MAX_NAME_LENGTH, "client search group"),
     archived: boolean(group, "archived", "client search group"),
     hidden: boolean(group, "hidden", "client search group"),
+    ...(group.avatarUrl === undefined
+      ? {}
+      : {
+          avatarUrl: text(
+            group,
+            "avatarUrl",
+            MAX_DEEP_LINK_LENGTH,
+            "client search group",
+          ),
+        }),
     hits: hits.map(decodeClientSearchHitV1),
     totalHits: group.totalHits as number,
   };

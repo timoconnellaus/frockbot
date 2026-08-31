@@ -1,0 +1,212 @@
+/* The Search surface and its header control. */
+
+/*
+ * The header control sits at the end of the topbar, which is a drag region in
+ * the desktop shell; a button inside one has to opt out or it cannot be
+ * clicked.
+ */
+.search-box {
+  display: inline-flex;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  color: var(--frock-text-muted);
+  cursor: pointer;
+  background: var(--frock-surface-subtle);
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-control);
+}
+
+.search-box:hover {
+  color: var(--frock-text);
+  background: var(--frock-fill-hover);
+}
+
+.search-box:focus-visible {
+  outline: var(--frock-focus-ring);
+}
+
+.search-box-label {
+  font-size: var(--frock-text-sm);
+}
+
+.search-box-shortcut {
+  padding: 1px 5px;
+  font-family: var(--frock-font-mono);
+  font-size: var(--frock-text-xs);
+  color: var(--frock-text-subtle);
+  background: var(--frock-surface);
+  border: 1px solid var(--frock-border);
+  border-radius: 5px;
+}
+
+.search-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.search-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  color: var(--frock-text-muted);
+  background: var(--frock-surface-subtle);
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-control);
+}
+
+.search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--frock-text-base);
+  color: var(--frock-text);
+  background: transparent;
+  border: 0;
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.search-filters {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.search-filter {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--frock-text-sm);
+  color: var(--frock-text-muted);
+}
+
+.search-rebuild {
+  margin-left: auto;
+}
+
+.search-note {
+  padding: 8px 10px;
+  font-size: var(--frock-text-sm);
+  color: var(--frock-text-muted);
+  background: var(--frock-surface-subtle);
+  border-radius: var(--frock-radius-control);
+}
+
+.search-error {
+  padding: 8px 10px;
+  font-size: var(--frock-text-sm);
+  color: var(--frock-danger-text);
+  background: var(--frock-danger-surface);
+  border: 1px solid var(--frock-danger-border);
+  border-radius: var(--frock-radius-control);
+}
+
+.search-empty {
+  padding: 24px 8px;
+  font-size: var(--frock-text-sm);
+  color: var(--frock-text-subtle);
+  text-align: center;
+}
+
+.search-groups,
+.search-hits {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.search-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.search-group-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.search-group-avatar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: var(--frock-avatar-sm);
+  height: var(--frock-avatar-sm);
+  overflow: hidden;
+  object-fit: cover;
+  border-radius: 9px;
+}
+
+.search-group-monogram {
+  font-size: var(--frock-text-sm);
+  color: var(--frock-accent-text);
+  background: var(--frock-surface-accent);
+}
+
+.search-group-name {
+  font-size: var(--frock-text-sm);
+  color: var(--frock-text);
+}
+
+.search-tag {
+  padding: 1px 6px;
+  font-size: var(--frock-text-xs);
+  color: var(--frock-text-subtle);
+  background: var(--frock-surface-subtle);
+  border: 1px solid var(--frock-border);
+  border-radius: 999px;
+}
+
+.search-group-count {
+  margin-left: auto;
+  font-size: var(--frock-text-xs);
+  color: var(--frock-text-subtle);
+}
+
+.search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--frock-surface-subtle);
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-control);
+}
+
+.search-hit:hover {
+  background: var(--frock-fill-hover);
+}
+
+.search-hit:focus-visible {
+  outline: var(--frock-focus-ring);
+}
+
+.search-hit-meta {
+  display: flex;
+  gap: 8px;
+  font-size: var(--frock-text-xs);
+  color: var(--frock-text-subtle);
+}
+
+.search-hit-kind {
+  color: var(--frock-text-muted);
+}
+
+.search-hit-snippet {
+  font-size: var(--frock-text-sm);
+  color: var(--frock-text);
+}
