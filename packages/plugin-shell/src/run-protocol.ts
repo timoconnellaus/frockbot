@@ -1,4 +1,4 @@
-import type { SessionEvent } from "@frockbot/agent-core";
+import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { isPublicIdentifier } from "@frockbot/configuration-core";
 import type {
   ClientNotificationIntent,

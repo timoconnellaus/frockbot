@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiSidebarOverlay } from "@frockbot/client-ui";
-import { computed, inject, ref, watch } from "vue";
+import { computed, inject, onMounted, ref, watch } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
@@ -30,10 +30,13 @@ const isRunning = computed(() => Boolean(state.value.activeRunId));
 const canSend = computed(
   () =>
     state.value.connection === "ready" &&
+    state.value.modelReady &&
     Boolean(state.value.activeBotId) &&
     !isRunning.value &&
     draft.value.trim().length > 0,
 );
+
+onMounted(() => web.value.loadPluginCatalog());
 
 watch(
   composerContext,
@@ -113,8 +116,16 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         <section class="thread" aria-live="polite">
           <div v-if="state.messages.length === 0" class="empty-thread">
             <div class="empty-mark">⌁</div>
-            <h1>{{ botName }} is ready.</h1>
-            <p>Start with a conversation. Cordis plugins can add the rest.</p>
+            <h1>
+              {{ state.modelReady ? `${botName} is ready.` : "Choose a model" }}
+            </h1>
+            <p>
+              {{
+                state.modelReady
+                  ? "Start with a conversation. Cordis plugins can add the rest."
+                  : "Select a model Connection in Bot settings to begin."
+              }}
+            </p>
           </div>
           <article
             v-for="message in state.messages"
@@ -159,7 +170,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             type="button"
             @click="web.resumeRun(state.activeRun.runId)"
           >
-            Resume Turn
+            Resolve Turn
           </button>
         </div>
 
@@ -167,11 +178,15 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           <textarea
             v-model="draft"
             :placeholder="
-              state.connection === 'ready'
-                ? `Message ${botName}`
-                : 'Waiting for Cordis…'
+              state.connection !== 'ready'
+                ? 'Waiting for Cordis…'
+                : !state.modelReady
+                  ? 'Select a model in Bot settings'
+                  : `Message ${botName}`
             "
-            :disabled="state.connection !== 'ready' || isRunning"
+            :disabled="
+              state.connection !== 'ready' || !state.modelReady || isRunning
+            "
             rows="1"
             @keydown="handleComposerKeydown"
           />

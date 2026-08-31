@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-  LlmRegistry,
   type LlmStreamEvent,
   type NormalizedModelRequest,
-} from "@frockbot/agent-core";
+} from "@frockbot/kernel-contracts";
+import { LlmRegistry } from "@frockbot/plugin-models";
 import {
   createPluginHarness,
   verifyPluginPackage,

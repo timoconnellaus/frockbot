@@ -1,16 +1,12 @@
+import {
+  workspaceRootKeyV1,
+  type WorkspaceFilesV1,
+  type WorkspaceRootKindV1,
+  type WorkspaceGenerationsV1,
+  type WorkspaceRootV1,
+  type WorkspaceSyncEffectsV1,
+} from "@frockbot/kernel-contracts";
 import { type Context, Service } from "cordis";
-
-/** Persistent identity used to resolve one Bot's selected Computer. */
-export interface ComputerTarget {
-  userId: string;
-  botId: string;
-}
-
-export interface ComputerAssignment {
-  providerId: string;
-  generation: number;
-  configuration?: unknown;
-}
 
 export type ComputerErrorCode =
   | "not-assigned"
@@ -36,6 +32,179 @@ export class ComputerError extends Error {
   }
 }
 
+/**
+ * The provisioning key of a Computer. "One Computer serves all of a User's
+ * Bots" (ADR 0012), so a Computer is identified by its User and by nothing
+ * else. Provisioning, hibernation, the browser profile, and the Workspace are
+ * all properties of this identity.
+ */
+export interface ComputerIdentityV1 {
+  userId: string;
+}
+
+/**
+ * One Bot as a tenant of its User's Computer. "each Bot receives its own
+ * directories and desktop on it, and all Bots share the User's browser
+ * profile." Separation between tenants is organizational, not a security
+ * boundary — `directory` and `display` are conventions the Computer provider
+ * Package enforces, never isolation the caller may rely on.
+ *
+ * A caller supplies `botId`; a provider answers on its handle with the
+ * `directory` and `display` it resolved for that tenant.
+ */
+export interface ComputerTenantV1 {
+  botId: string;
+  /** The tenant's directory tree, relative to the Workspace root. */
+  directory?: string;
+  /** The tenant's desktop, when the provider offers one. */
+  display?: string;
+}
+
+/**
+ * The assignment key. One Computer per User means one key per User: two Bots
+ * of one User resolve to one assignment and one generation.
+ */
+export function computerIdentityKeyV1(identity: ComputerIdentityV1): string {
+  const userId = identity.userId.trim();
+  if (!userId) {
+    throw new ComputerError(
+      "invalid-request",
+      "Computer identity requires a non-empty userId",
+    );
+  }
+  return encodeURIComponent(userId);
+}
+
+/** Validates the tenant making a call and returns its normalized Bot id. */
+export function computerTenantBotIdV1(tenant: ComputerTenantV1): string {
+  const botId = tenant.botId.trim();
+  if (!botId) {
+    throw new ComputerError(
+      "invalid-request",
+      "Computer tenant requires a non-empty botId",
+    );
+  }
+  return botId;
+}
+
+/**
+ * One durable root a Computer Package's Workspace layout declares: "durable
+ * roots, declared by the Computer Package's Workspace layout and by Package
+ * manifests, survive hibernation, cold start, host migration, and image
+ * rebuild; everything else on the Computer may be lost."
+ *
+ * `kind` is the kernel's `WorkspaceRootKindV1`, so the Computer Package, the
+ * Skills loader, and the Memory Package all name the same roots. `access` is
+ * how the Computer presents the root: Memory roots are `read-only` there
+ * because the Memory Package is their single writer (ADR 0013).
+ *
+ * `mountPath` is a template. Three placeholders are substituted:
+ * `{bot}` — the provider's directory key for the tenant Bot;
+ * `{package}` — a `package-declared` root's Package id, made path-safe;
+ * `{root}` — a `package-declared` root's `rootId`.
+ */
+export interface WorkspaceRootDeclarationV1 {
+  kind: WorkspaceRootKindV1;
+  /** Present only when the declaration covers one `package-declared` rootId. */
+  rootId?: string;
+  scope: "user" | "bot";
+  /** Absolute path template on the Computer where the root is mounted. */
+  mountPath: string;
+  access: "read-write" | "read-only";
+}
+
+/** The durable roots one Computer Package declares for a User's Computer. */
+export interface WorkspaceLayoutV1 {
+  schemaVersion: 1;
+  /** The Workspace root on the Computer, e.g. `/home/box`. */
+  home: string;
+  roots: WorkspaceRootDeclarationV1[];
+}
+
+/** The declaration governing one root, or `undefined` when none does. */
+export function workspaceRootDeclarationV1(
+  layout: WorkspaceLayoutV1,
+  root: WorkspaceRootV1,
+): WorkspaceRootDeclarationV1 | undefined {
+  return layout.roots.find(
+    (declaration) =>
+      declaration.kind === root.kind &&
+      (declaration.rootId === undefined ||
+        (root.kind === "package-declared" &&
+          declaration.rootId === root.rootId)),
+  );
+}
+
+function pathSafe(value: string): string {
+  return (
+    value
+      .normalize("NFKD")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "unnamed"
+  );
+}
+
+/**
+ * Resolves one durable root to its absolute mount path on the Computer.
+ *
+ * `botDirectoryKey` maps a Bot id to the provider's own directory key. It is
+ * applied to the *root's* owner, never to the caller: Bots of one User share
+ * one Computer and may read each other's Workspace files, so the mount of
+ * another Bot's root is that Bot's directory, not the reader's.
+ *
+ * No caller outside a Computer Package ever sees a mount path.
+ */
+export function workspaceMountPathV1(
+  layout: WorkspaceLayoutV1,
+  root: WorkspaceRootV1,
+  botDirectoryKey?: (botId: string) => string,
+): string {
+  const declaration = workspaceRootDeclarationV1(layout, root);
+  if (!declaration) {
+    throw new ComputerError(
+      "capability-unavailable",
+      `This Computer declares no durable root for ${workspaceRootKeyV1(root)}`,
+    );
+  }
+  const resolved = declaration.mountPath
+    .replace("{bot}", () => {
+      if (!botDirectoryKey || !("botId" in root)) {
+        throw new ComputerError(
+          "invalid-request",
+          `A Bot-scoped durable root needs a Bot: ${workspaceRootKeyV1(root)}`,
+        );
+      }
+      return botDirectoryKey(root.botId);
+    })
+    .replace("{package}", () =>
+      root.kind === "package-declared" ? pathSafe(root.packageId) : "",
+    )
+    .replace("{root}", () =>
+      root.kind === "package-declared" ? root.rootId : "",
+    );
+  if (
+    !resolved.startsWith("/") ||
+    resolved.includes("//") ||
+    resolved.split("/").some((segment) => segment === "." || segment === "..")
+  ) {
+    throw new ComputerError(
+      "provider-failure",
+      `Computer mount path is not a normalized absolute path: ${resolved}`,
+    );
+  }
+  return resolved;
+}
+
+export interface ComputerAssignment {
+  providerId: string;
+  generation: number;
+  configuration?: unknown;
+}
+
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+
 export function normalizeComputerPath(path: string): string {
   const normalized = path.trim();
   const segments = normalized.split("/");
@@ -44,7 +213,7 @@ export function normalizeComputerPath(path: string): string {
     normalized !== path ||
     normalized.startsWith("/") ||
     normalized.includes("\\") ||
-    /[\u0000-\u001f\u007f]/.test(normalized) ||
+    CONTROL_CHARACTERS.test(normalized) ||
     segments.some((segment) => !segment || segment === "." || segment === "..")
   ) {
     throw new ComputerError(
@@ -59,58 +228,20 @@ export interface ComputerOperationOptions {
   signal?: AbortSignal;
 }
 
-export interface ComputerFileInfo {
-  path: string;
-  version: string;
-  size: number;
-  modifiedAt?: string;
-  mediaType?: string;
-}
-
-export interface ComputerFile extends ComputerFileInfo {
-  bytes: Uint8Array;
-}
-
-export interface ComputerFilePage {
-  files: ComputerFileInfo[];
-  cursor?: string;
-}
-
-export interface ComputerDirectory {
-  readFile(
-    path: string,
-    options?: ComputerOperationOptions,
-  ): Promise<ComputerFile | null>;
-  writeFile(
-    path: string,
-    bytes: Uint8Array,
-    options?: ComputerOperationOptions & {
-      ifVersion?: string | null;
-      mediaType?: string;
-    },
-  ): Promise<ComputerFileInfo>;
-  deleteFile(
-    path: string,
-    options?: ComputerOperationOptions & { ifVersion?: string },
-  ): Promise<boolean>;
-  listFiles(
-    options?: ComputerOperationOptions & {
-      prefix?: string;
-      cursor?: string;
-      limit?: number;
-    },
-  ): Promise<ComputerFilePage>;
-}
-
-export interface ComputerWorkspace {
-  openDirectory(
-    request: {
-      namespace: string;
-      scope: "bot" | "user";
-      durability: "durable";
-    },
-    options?: ComputerOperationOptions,
-  ): Promise<ComputerDirectory>;
+/**
+ * The Computer's Workspace surface.
+ *
+ * It *is* `WorkspaceFilesV1` — the narrow file interface the kernel declares —
+ * addressed by `WorkspacePathV1`, so a durable root is named by kind and owner
+ * and never by an absolute path on the Computer. `layout` is where mount paths
+ * live, and the only place they live.
+ *
+ * Memory roots are read-only here: `write` and `delete` answer `refused`,
+ * because "The Memory Package is the single writer of Memory roots ... the
+ * Workspace presents Memory roots read-only through the durable-root sync."
+ */
+export interface ComputerWorkspace extends WorkspaceFilesV1 {
+  readonly layout: WorkspaceLayoutV1;
 }
 
 export interface ComputerExecRequest {
@@ -187,9 +318,114 @@ export interface ComputerControl {
   ): Promise<void>;
 }
 
+/** Why one run of the durable-root sync happened. */
+export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end";
+
+/**
+ * What one sync run moved, flattened to counts.
+ *
+ * The provider-neutral answer is deliberately small: a caller outside the
+ * Computer Package decides nothing from a sync report except what to record,
+ * and the detailed report (which paths, which conflicting generations) belongs
+ * to the provider that produced it and to the durable generation records.
+ *
+ * There is no failure branch. "Connections to the Computer are expected to
+ * drop on every pause; every Computer client reconnects and resumes rather
+ * than treating a dropped connection as failure" — so an unreachable Computer
+ * answers `unavailable` and a Turn continues.
+ */
+export interface ComputerSyncSummaryV1 {
+  status: "ok" | "unavailable" | "refused" | "skipped";
+  /** Human-readable reason, empty when the run had nothing to say. */
+  detail: string;
+  pulled: number;
+  pushed: number;
+  restored: number;
+  removed: number;
+  adopted: number;
+  conflicts: number;
+  failures: number;
+}
+
+export function computerSyncSummaryV1(
+  status: ComputerSyncSummaryV1["status"],
+  detail = "",
+): ComputerSyncSummaryV1 {
+  return {
+    status,
+    detail: detail.slice(0, 512),
+    pulled: 0,
+    pushed: 0,
+    restored: 0,
+    removed: 0,
+    adopted: 0,
+    conflicts: 0,
+    failures: 0,
+  };
+}
+
+/**
+ * The durable-root sync of ADR 0013, as the provider-neutral Computer
+ * interface exposes it. "Bots invoke Computers only through the
+ * provider-neutral Computer interface", so the Package that gives a Bot its
+ * Computer tools reaches the sync here and never through a provider type.
+ *
+ * A `sync` is present only on a Computer that is already open for a Bot.
+ * Reconciling is therefore never a reason to wake a Computer: "The Agent loop,
+ * Memory, Skills, Package composition, and Routines function correctly while
+ * the Computer is hibernated and do not wake it", and the object-storage side
+ * stays authoritative while it sleeps.
+ */
+export interface ComputerSyncV1 {
+  /** Reconciles every declared durable root. Never throws. */
+  reconcile(
+    reason: ComputerSyncReasonV1,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerSyncSummaryV1>;
+  /**
+   * The Computer-side watcher's change signal, or `undefined` when it cannot
+   * be read. A caller reconciles again when this changes, rather than scanning
+   * every root on every tool call.
+   */
+  signal(options?: ComputerOperationOptions): Promise<string | undefined>;
+}
+
+/**
+ * What a host supplies so a Computer Package can build the sync: the
+ * object-storage side of the durable roots, and the Durable Object records the
+ * push depends on. A provider that receives none simply has no `sync` on its
+ * handle, and the Computer's durable roots then live on the Computer alone.
+ *
+ * Every member is authority the host owns. The Computer Package holds none of
+ * it: it drives the reconciliation and records nothing itself.
+ */
+export interface ComputerSyncHostV1 {
+  /** The durable roots in object storage, built with the `sync` surface. */
+  store: WorkspaceFilesV1;
+  /** Where a push records its intent, in the Bot's Durable Object. */
+  effects?: WorkspaceSyncEffectsV1;
+  /** The owning object's generation ledger, read to recover a removal writer. */
+  generations?: WorkspaceGenerationsV1;
+  // There is deliberately no writer here. "A file that reaches a durable root
+  // without passing through the Workspace file surface (a shell write on the
+  // Computer) is mirrored to object storage by the sync with an unattributed
+  // writer": one Computer serves all of a User's Bots, so no host can say
+  // which Bot's process wrote a file, and a sync that named the Turn's Bot
+  // would be recording a guess as provenance.
+}
+
+/**
+ * One open Computer, addressed by the User whose Computer it is and by the Bot
+ * tenant that opened it. The provider answers with the tenant's resolved
+ * directory and desktop.
+ */
 export interface ComputerHandle {
   assignment: ComputerAssignment;
+  identity: ComputerIdentityV1;
+  tenant: ComputerTenantV1;
   workspace?: ComputerWorkspace;
+  /** The durable-root sync, when the host supplied its object-storage side. */
+  sync?: ComputerSyncV1;
   exec?: ComputerExec;
   browser?: ComputerBrowser;
   viewer?: ComputerViewer;
@@ -199,8 +435,20 @@ export interface ComputerHandle {
 
 export interface ComputerProvider {
   id: string;
+  /**
+   * The durable roots this provider guarantees. Absent when a provider
+   * declares no durable root.
+   */
+  workspaceLayout?: WorkspaceLayoutV1;
+  /**
+   * Provisions the User's Computer when needed and attaches one Bot tenant to
+   * it. The split arguments are ADR 0012 in a signature: `identity` is the
+   * provisioning key, `tenant` is the caller, and a provider can finally tell
+   * "provision the Computer" from "attach this tenant".
+   */
   open(
-    target: ComputerTarget,
+    identity: ComputerIdentityV1,
+    tenant: ComputerTenantV1,
     assignment: ComputerAssignment,
     options?: ComputerOperationOptions,
   ): Promise<ComputerHandle>;
@@ -218,23 +466,29 @@ function guardedOperation<T>(
   }
 }
 
-function guardedDirectory(
-  directory: ComputerDirectory,
+function guardedFiles(
+  files: WorkspaceFilesV1,
   assertCurrent: () => void,
-): ComputerDirectory {
+): WorkspaceFilesV1 {
   return {
-    readFile: (path, options) =>
-      guardedOperation(assertCurrent, () => directory.readFile(path, options)),
-    writeFile: (path, bytes, options) =>
-      guardedOperation(assertCurrent, () =>
-        directory.writeFile(path, bytes, options),
-      ),
-    deleteFile: (path, options) =>
-      guardedOperation(assertCurrent, () =>
-        directory.deleteFile(path, options),
-      ),
-    listFiles: (options) =>
-      guardedOperation(assertCurrent, () => directory.listFiles(options)),
+    read: (path) => guardedOperation(assertCurrent, () => files.read(path)),
+    list: (request) =>
+      guardedOperation(assertCurrent, () => files.list(request)),
+    stat: (path) => guardedOperation(assertCurrent, () => files.stat(path)),
+    write: (request) =>
+      guardedOperation(assertCurrent, () => files.write(request)),
+    delete: (request) =>
+      guardedOperation(assertCurrent, () => files.delete(request)),
+  };
+}
+
+function guardedWorkspace(
+  workspace: ComputerWorkspace,
+  assertCurrent: () => void,
+): ComputerWorkspace {
+  return {
+    ...guardedFiles(workspace, assertCurrent),
+    layout: workspace.layout,
   };
 }
 
@@ -242,19 +496,22 @@ function guardedHandle(
   handle: ComputerHandle,
   assertCurrent: () => void,
 ): ComputerHandle {
-  const { workspace, exec, browser, viewer, control } = handle;
+  const { workspace, sync, exec, browser, viewer, control } = handle;
   return {
     assignment: handle.assignment,
+    identity: handle.identity,
+    tenant: handle.tenant,
     workspace: workspace
+      ? guardedWorkspace(workspace, assertCurrent)
+      : undefined,
+    sync: sync
       ? {
-          openDirectory: (request, options) =>
+          reconcile: (reason, options) =>
             guardedOperation(assertCurrent, () =>
-              workspace
-                .openDirectory(request, options)
-                .then((directory) =>
-                  guardedDirectory(directory, assertCurrent),
-                ),
+              sync.reconcile(reason, options),
             ),
+          signal: (options) =>
+            guardedOperation(assertCurrent, () => sync.signal(options)),
         }
       : undefined,
     exec: exec
@@ -301,18 +558,14 @@ function guardedHandle(
   };
 }
 
-function targetKey(target: ComputerTarget): string {
-  const userId = target.userId.trim();
-  const botId = target.botId.trim();
-  if (!userId || !botId) {
-    throw new ComputerError(
-      "invalid-request",
-      "Computer target requires non-empty userId and botId",
-    );
-  }
-  return `${encodeURIComponent(userId)}:${encodeURIComponent(botId)}`;
-}
-
+/**
+ * The Computer assignments of the resident application, keyed per User.
+ *
+ * "The User's Durable Object is the authority for everything User-scoped:
+ * ... the Computer assignment" — so the assignment map is keyed by
+ * `ComputerIdentityV1` alone. Two Bots of one User share one assignment, one
+ * generation, and one provider Computer; each is a tenant on it.
+ */
 export class ComputerRegistry extends Service {
   private readonly providers = new Map<string, ComputerProvider>();
   private readonly assignments = new Map<string, ComputerAssignment>();
@@ -334,11 +587,11 @@ export class ComputerRegistry extends Service {
   }
 
   assign(
-    target: ComputerTarget,
+    identity: ComputerIdentityV1,
     providerId: string,
     configuration?: unknown,
   ): ComputerAssignment {
-    const key = targetKey(target);
+    const key = computerIdentityKeyV1(identity);
     const normalizedProviderId = providerId.trim();
     if (!this.providers.has(normalizedProviderId)) {
       throw new ComputerError(
@@ -356,20 +609,23 @@ export class ComputerRegistry extends Service {
     return assignment;
   }
 
-  assignment(target: ComputerTarget): ComputerAssignment | undefined {
-    return this.assignments.get(targetKey(target));
+  assignment(identity: ComputerIdentityV1): ComputerAssignment | undefined {
+    return this.assignments.get(computerIdentityKeyV1(identity));
   }
 
   async open(
-    target: ComputerTarget,
+    identity: ComputerIdentityV1,
+    tenant: ComputerTenantV1,
     options?: ComputerOperationOptions,
   ): Promise<ComputerHandle> {
     options?.signal?.throwIfAborted();
-    const assignment = this.assignments.get(targetKey(target));
+    const key = computerIdentityKeyV1(identity);
+    computerTenantBotIdV1(tenant);
+    const assignment = this.assignments.get(key);
     if (!assignment) {
       throw new ComputerError(
         "not-assigned",
-        `Bot "${target.botId}" has no Computer assignment`,
+        `User "${identity.userId}" has no Computer assignment`,
       );
     }
     const provider = this.providers.get(assignment.providerId);
@@ -380,16 +636,16 @@ export class ComputerRegistry extends Service {
         true,
       );
     }
-    const handle = await provider.open(target, assignment, options);
+    const handle = await provider.open(identity, tenant, assignment, options);
     return guardedHandle(handle, () => {
-      const current = this.assignments.get(targetKey(target));
+      const current = this.assignments.get(key);
       if (
         current?.providerId !== assignment.providerId ||
         current.generation !== assignment.generation
       ) {
         throw new ComputerError(
           "stale-assignment",
-          `Computer assignment for Bot "${target.botId}" changed`,
+          `Computer assignment for User "${identity.userId}" changed`,
         );
       }
     });

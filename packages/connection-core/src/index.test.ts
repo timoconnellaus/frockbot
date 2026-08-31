@@ -1,10 +1,46 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeConnectionCommandIdV1,
+  decodeConnectionCommandV1,
+  decodeConnectionModelCatalogV1,
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
 } from "./index.js";
 
 describe("Connection result contracts", () => {
+  test("uses one recoverable command ID contract", () => {
+    expect(decodeConnectionCommandIdV1("command-1")).toBe("command-1");
+    expect(() =>
+      decodeConnectionCommandV1({
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId: "lost response",
+        connectionId: "connection-1",
+      }),
+    ).toThrow("commandId is invalid");
+    expect(() => decodeConnectionCommandIdV1("lost response")).toThrow(
+      "commandId is invalid",
+    );
+  });
+
+  test("bounds advisory model catalogs", () => {
+    const model = {
+      providerModelId: "model:cloud",
+      displayName: "Model",
+      capabilities: { tools: false, vision: false, reasoning: false },
+      source: "discovered",
+    };
+
+    expect(() =>
+      decodeConnectionModelCatalogV1({
+        schemaVersion: 1,
+        generation: "catalog-1",
+        state: "fresh",
+        models: Array.from({ length: 101 }, () => model),
+      }),
+    ).toThrow("Connection model catalog is invalid");
+  });
+
   test("requires exact versioned Connection start variants", () => {
     expect(
       decodeStartConnectionResultV1({

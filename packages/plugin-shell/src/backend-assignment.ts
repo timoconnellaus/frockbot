@@ -6,8 +6,13 @@ export interface StoredAssignmentSaga {
   commandFingerprint: string;
   userId: string;
   botId: string;
+  assignmentId: string;
   connectionId: string;
   generation: string;
+  mode?: "assign" | "release";
+  supersededAssignmentId?: string;
+  supersededConnectionId?: string;
+  supersededGeneration?: string;
   phase: "claiming" | "committed";
   deadlineAt: number;
   receipt?: OperationReceiptV1;
@@ -19,6 +24,7 @@ export type AssignmentSagaSettlement =
 export interface AssignmentSagaEffects {
   acknowledge(saga: StoredAssignmentSaga): Promise<boolean>;
   compensate(saga: StoredAssignmentSaga): Promise<void>;
+  release(saga: StoredAssignmentSaga): Promise<boolean>;
   rejectCommitted(saga: StoredAssignmentSaga): Promise<void>;
 }
 
@@ -31,6 +37,10 @@ export async function settleAssignmentSaga(
     return "compensated";
   }
   if (await effects.acknowledge(saga)) return "acknowledged";
+  await effects.compensate(saga);
+  if (!(await effects.release(saga))) {
+    throw new Error("Rejected Connection dependency was not released");
+  }
   await effects.rejectCommitted(saga);
   return "rejected";
 }

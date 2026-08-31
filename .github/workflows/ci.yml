@@ -48,6 +48,9 @@ jobs:
       - name: Test Cloudflare runtime compatibility
         run: bun run --filter @frockbot/cloudflare test:workerd
 
+      - name: Test Package bundler runtime
+        run: bun run --filter @frockbot/cloudflare-bundler test:workerd
+
       - name: Build
         run: bun run build
 
@@ -139,6 +142,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
+          CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
         shell: bash
         run: |
           missing=()
@@ -150,7 +154,8 @@ jobs:
             BETTER_AUTH_SECRET \
             GOOGLE_CLIENT_ID \
             GOOGLE_CLIENT_SECRET \
-            SPRITES_TOKEN; do
+            SPRITES_TOKEN \
+            CREDENTIAL_KEYRING; do
             if [[ -z "${!name}" ]]; then missing+=("$name"); fi
           done
 
@@ -158,6 +163,11 @@ jobs:
             printf 'Missing production configuration: %s\n' "${missing[*]}" >&2
             exit 1
           fi
+
+          bun -e '
+            import { parseCredentialKeyringV1 } from "./packages/connection-core/src/index.ts";
+            parseCredentialKeyringV1(process.env.CREDENTIAL_KEYRING ?? "");
+          '
       - name: Configure production D1 database
         working-directory: apps/cloudflare
         env:
@@ -227,6 +237,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
+          CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"
@@ -239,6 +250,7 @@ jobs:
             'GOOGLE_CLIENT_ID',
             'GOOGLE_CLIENT_SECRET',
             'SPRITES_TOKEN',
+            'CREDENTIAL_KEYRING',
           ]) {
             console.log(`${name}=${JSON.stringify(process.env[name])}`);
           }

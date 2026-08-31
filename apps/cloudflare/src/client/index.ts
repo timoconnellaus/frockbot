@@ -12,6 +12,10 @@ import {
   type StartConnectionCommandV1,
 } from "@frockbot/configuration-core";
 import {
+  decodeConnectionCommandReceiptV1,
+  type ConnectionCommandV1,
+} from "@frockbot/connection-core";
+import {
   ClientApplication,
   decodeAcknowledgement,
   decodeNotificationList,
@@ -184,7 +188,7 @@ async function apiRequest(
 }
 
 const application = new ClientApplication({
-  connectionsAvailable: !usesMobileShell(),
+  connectionsAvailable: true,
   async turn(
     botId: string,
     text: string,
@@ -296,6 +300,17 @@ const application = new ClientApplication({
         }),
       ),
     );
+  },
+  executeConnection(command: ConnectionCommandV1) {
+    return apiRequest("/api/connections", "POST", JSON.stringify(command)).then(
+      decodeConnectionCommandReceiptV1,
+    );
+  },
+  async lookupConnectionCommand(packageId: string, commandId: string) {
+    const value = await apiRequest(
+      `/api/connection-commands?packageId=${encodeURIComponent(packageId)}&commandId=${encodeURIComponent(commandId)}`,
+    );
+    return value === null ? undefined : decodeConnectionCommandReceiptV1(value);
   },
   readApplicationManifest() {
     return apiRequest("/app-manifest");

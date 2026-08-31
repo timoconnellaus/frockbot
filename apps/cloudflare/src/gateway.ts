@@ -2,8 +2,11 @@ import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
   decodeBotIdV1,
+  decodeBotSettingsViewV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
+  decodeOperationReceiptV1,
+  decodeUserSettingsViewV1,
   isApplicationDeploymentHash,
   isPublicIdentifier,
 } from "@frockbot/configuration-core";
@@ -75,10 +78,16 @@ function developmentIdentity(request: Request): DevelopmentIdentity {
 
 function allowedClientOrigin(
   request: Request,
+  requestOrigin: string,
   allowedOrigins: string[] | undefined,
 ): string | null {
   const origin = request.headers.get("origin");
-  if (!origin || !allowedOrigins?.includes(origin)) return null;
+  if (
+    !origin ||
+    (origin !== requestOrigin && !allowedOrigins?.includes(origin))
+  ) {
+    return null;
+  }
   return origin;
 }
 
@@ -159,9 +168,11 @@ export function createGateway(dependencies: GatewayDependencies) {
         if (request.method === "GET") {
           if (!botSettingsMatch) {
             return Response.json(
-              await dependencies
-                .userConfigurationFor(userId)
-                .readConfiguration({ schemaVersion: 1, userId }),
+              decodeUserSettingsViewV1(
+                await dependencies
+                  .userConfigurationFor(userId)
+                  .readConfiguration({ schemaVersion: 1, userId }),
+              ),
             );
           }
           const query = decodeConfigurationQueryV1({
@@ -175,13 +186,15 @@ export function createGateway(dependencies: GatewayDependencies) {
             );
           }
           return Response.json(
-            await dependencies
-              .botConfigurationFor(userId, query.botId)
-              .readConfiguration({
-                schemaVersion: 1,
-                userId,
-                botId: query.botId,
-              }),
+            decodeBotSettingsViewV1(
+              await dependencies
+                .botConfigurationFor(userId, query.botId)
+                .readConfiguration({
+                  schemaVersion: 1,
+                  userId,
+                  botId: query.botId,
+                }),
+            ),
           );
         }
         if (request.method !== "POST") {
@@ -203,22 +216,28 @@ export function createGateway(dependencies: GatewayDependencies) {
         }
         if ("botId" in command) {
           return Response.json(
-            await dependencies
-              .botConfigurationFor(userId, command.botId)
-              .executeConfiguration({
-                schemaVersion: 1,
-                userId,
-                botId: command.botId,
-                command,
-              }),
+            decodeOperationReceiptV1(
+              await dependencies
+                .botConfigurationFor(userId, command.botId)
+                .executeConfiguration({
+                  schemaVersion: 1,
+                  userId,
+                  botId: command.botId,
+                  command,
+                }),
+            ),
           );
         }
         return Response.json(
-          await dependencies.userConfigurationFor(userId).executeConfiguration({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
+          decodeOperationReceiptV1(
+            await dependencies
+              .userConfigurationFor(userId)
+              .executeConfiguration({
+                schemaVersion: 1,
+                userId,
+                command,
+              }),
+          ),
         );
       } catch (error) {
         if (error instanceof ConfigurationDecodeError) {
@@ -327,9 +346,20 @@ export function createGateway(dependencies: GatewayDependencies) {
 
     const origin = allowedClientOrigin(
       request,
+      url.origin,
       dependencies.allowedClientOrigins,
     );
     const isApiPath = url.pathname.startsWith("/api/");
+    const presentedOrigin = request.headers.get("origin");
+    if (
+      isApiPath &&
+      presentedOrigin &&
+      !origin &&
+      request.method !== "GET" &&
+      request.method !== "HEAD"
+    ) {
+      return jsonError(403, "request origin is not allowed");
+    }
     if (!origin || !isApiPath) return route(request, url);
     if (request.method === "OPTIONS") return preflightResponse(origin);
     return withClientOrigin(await route(request, url), origin);

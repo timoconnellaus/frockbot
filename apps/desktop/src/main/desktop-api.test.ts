@@ -53,6 +53,17 @@ describe("desktop hosted protocol", () => {
       },
       {
         schemaVersion: 1,
+        path: "/api/connections",
+        method: "POST",
+        body: "{}",
+      },
+      {
+        schemaVersion: 1,
+        path: "/api/connection-commands?packageId=provider-ollama-cloud&commandId=connect-1",
+        method: "GET",
+      },
+      {
+        schemaVersion: 1,
         path: "/api/plugins/composio/connections",
         method: "POST",
         body: "{}",
@@ -79,6 +90,17 @@ describe("desktop hosted protocol", () => {
         method: "DELETE",
       }),
     ).toThrow("invalid API request");
+    for (const path of [
+      "/api/connection-commands?packageId=provider-ollama-cloud",
+      "/api/connection-commands?packageId=provider-ollama-cloud&commandId=connect-1&extra=true",
+      "/api/connection-commands?packageId=bad%2Fpackage&commandId=connect-1",
+      "/api/connection-commands?packageId=provider-ollama-cloud&commandId=lost%20response",
+      "/api/connection-commands?packageId=provider-ollama-cloud&commandId=connect@1",
+    ]) {
+      expect(() =>
+        decodeDesktopApiRequest({ schemaVersion: 1, path, method: "GET" }),
+      ).toThrow("invalid API request");
+    }
     for (const botId of ["bad:bot", "bad@bot", "b".repeat(129)]) {
       expect(() =>
         decodeDesktopApiRequest({

@@ -17,14 +17,22 @@ import {
   type ClientRunListQueryV1,
   type ClientRunListV1,
 } from "@frockbot/plugin-shell/run-protocol";
+import {
+  decodeCompositionCommandReceiptV1,
+  decodeCompositionGenerationListViewV1,
+  decodeCompositionGenerationViewV1,
+} from "@frockbot/configuration-core";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
+  BundlerBinding,
+  PackageArtifactStore,
   BotConfigurationBinding,
   BotNotificationIntent,
   BotTurnCommand,
   BotTurnResult,
+  BotPackageLoader,
   UserConfigurationBinding,
   WorkerLoader,
 } from "./contracts.js";
@@ -40,11 +48,19 @@ import {
 import { createImmutablePlanRequestFactory } from "./immutable-application.js";
 import { UserConfiguration } from "./user-configuration.js";
 
+export { BotCapabilities } from "./bot-capabilities.js";
 export { BotState, UserConfiguration };
 
 interface Env {
   USER_APPLICATIONS: WorkerLoader;
+  // Bot-authored Package isolates, driven from the Bot Durable Object with
+  // `globalOutbound` disabled (plan Step 4). A separate loader namespace from
+  // USER_APPLICATIONS so the two never share an identity.
+  BOT_PACKAGES: BotPackageLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
+  // `apps/cloudflare-bundler`; the Bot Durable Object calls it after recording
+  // its authorship intent (plan Step 3, decision D4).
+  PACKAGE_BUNDLER: BundlerBinding;
   MEMORY_FILES: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
@@ -57,6 +73,7 @@ interface Env {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   SPRITES_TOKEN?: string;
+  CREDENTIAL_KEYRING?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
 }
@@ -108,6 +125,11 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     updateSheep: (request) => rpc.updateSheep(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
+    listCompositionGenerations: (request) =>
+      rpc.listCompositionGenerations(request),
+    getCompositionGeneration: (request) =>
+      rpc.getCompositionGeneration(request),
+    revertComposition: (request) => rpc.revertComposition(request),
     run: (command) =>
       rpc.run({
         schemaVersion: 1,
@@ -160,6 +182,11 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     hasBot: (request) => rpc.hasBot(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
+    executeConnection: (request) => rpc.executeConnection(request),
+    lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
+    getConnection: (request) => rpc.getConnection(request),
+    leaseModelCredential: (request) => rpc.leaseModelCredential(request),
+    settleModelCredential: (request) => rpc.settleModelCredential(request),
     readPackageRevisions: (request) => rpc.readPackageRevisions(request),
     publishPackage: (request) => rpc.publishPackage(request),
     rollbackPackage: (request) => rpc.rollbackPackage(request),
@@ -288,7 +315,26 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   }
 }
 
-class R2ApplicationArtifacts implements ApplicationArtifactStore {
+function packageArtifactKey(contentHash: string): string {
+  if (!/^[0-9a-f]{64}$/.test(contentHash)) {
+    throw new Error("package artifact contentHash is invalid");
+  }
+  return `packages/${contentHash}.mjs`;
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+class R2ApplicationArtifacts
+  implements ApplicationArtifactStore, PackageArtifactStore
+{
   constructor(private readonly bucket: R2Bucket) {}
 
   async load(applicationHash: string): Promise<string> {
@@ -299,6 +345,45 @@ class R2ApplicationArtifacts implements ApplicationArtifactStore {
       );
     }
     return object.text();
+  }
+
+  /**
+   * Content-addressed, so the write is idempotent: the same bytes always land
+   * at the same key. The hash is verified here too — the caller does not get to
+   * name bytes something they are not.
+   */
+  async putPackageArtifact(contentHash: string, module: string): Promise<void> {
+    const key = packageArtifactKey(contentHash);
+    if ((await sha256Hex(module)) !== contentHash) {
+      throw new Error(
+        `package artifact "${contentHash}" does not match its content hash`,
+      );
+    }
+    await this.bucket.put(key, module, {
+      httpMetadata: { contentType: "application/javascript" },
+    });
+  }
+
+  async headPackageArtifact(
+    contentHash: string,
+  ): Promise<{ contentHash: string; size: number } | undefined> {
+    const object = await this.bucket.head(packageArtifactKey(contentHash));
+    return object ? { contentHash, size: object.size } : undefined;
+  }
+
+  /** Hash-verified read: mismatched bytes are never handed to a loader. */
+  async loadPackageArtifact(contentHash: string): Promise<string> {
+    const object = await this.bucket.get(packageArtifactKey(contentHash));
+    if (!object) {
+      throw new Error(`package artifact "${contentHash}" was not found`);
+    }
+    const module = await object.text();
+    if ((await sha256Hex(module)) !== contentHash) {
+      throw new Error(
+        `package artifact "${contentHash}" failed hash verification`,
+      );
+    }
+    return module;
   }
 }
 
@@ -332,6 +417,52 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             schemaVersion: 1,
             userId,
             botId,
+          }),
+        ),
+      executeConnection: (userId, command) =>
+        userConfigurationStub(env, userId).executeConnection({
+          schemaVersion: 1,
+          userId,
+          command,
+        }),
+      lookupConnectionCommand: (userId, packageId, commandId) =>
+        userConfigurationStub(env, userId).lookupConnectionCommand({
+          schemaVersion: 1,
+          userId,
+          packageId,
+          commandId,
+        }),
+      listCompositionGenerations: async (userId, botId, query) =>
+        decodeCompositionGenerationListViewV1(
+          await botStateStub(env, userId, botId).listCompositionGenerations({
+            schemaVersion: 1,
+            userId,
+            botId,
+            query,
+          }),
+        ),
+      getCompositionGeneration: async (userId, botId, generationId) => {
+        const generation = await botStateStub(
+          env,
+          userId,
+          botId,
+        ).getCompositionGeneration({
+          schemaVersion: 1,
+          userId,
+          botId,
+          generationId,
+        });
+        return generation === undefined
+          ? undefined
+          : decodeCompositionGenerationViewV1(generation);
+      },
+      revertComposition: async (userId, botId, command) =>
+        decodeCompositionCommandReceiptV1(
+          await botStateStub(env, userId, botId).revertComposition({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
           }),
         ),
       updateSheep: async (userId, botId, command) =>

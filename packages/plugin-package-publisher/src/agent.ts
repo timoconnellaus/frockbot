@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@frockbot/agent-core";
+import type { ToolDefinition } from "@frockbot/kernel-contracts";
 import type { ComputerHandle } from "@frockbot/computer-core";
 import type { Plugin } from "cordis";
 import {
@@ -160,13 +160,17 @@ export function createPackagePublisherAgentPlugin(
         }
       },
       execute: async (input, context) => {
-        const target = { userId, botId: context.botId };
-        if (!ctx.computers.assignment(target)) {
-          ctx.computers.assign(target, defaultProviderId);
+        // One Computer per User (ADR 0012): the assignment is keyed by the
+        // User, and the Bot attaches to it as a tenant.
+        const identity = { userId };
+        if (!ctx.computers.assignment(identity)) {
+          ctx.computers.assign(identity, defaultProviderId);
         }
-        const computer = await ctx.computers.open(target, {
-          signal: context.signal,
-        });
+        const computer = await ctx.computers.open(
+          identity,
+          { botId: context.botId },
+          { signal: context.signal },
+        );
         let candidate: PackageCandidateV1;
         try {
           await executeText(

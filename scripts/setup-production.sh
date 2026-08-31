@@ -200,7 +200,7 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=4
+TOTAL_STAGES=5
 
 GITHUB_REPOSITORY="timoconnellaus/frockbot"
 GITHUB_ENVIRONMENT="production"
@@ -218,6 +218,18 @@ set_production_secret() {
   fi
   SKIPPED+=("GitHub production secret $name")
   warn "could not set $name; authenticate gh and rerun this wizard"
+}
+
+set_required_production_secret() {
+  local name="$1" value="$2"
+  if ! printf '%s' "$value" | gh secret set "$name" \
+    --repo "$GITHUB_REPOSITORY" \
+    --env "$GITHUB_ENVIRONMENT" >/dev/null 2>&1; then
+    warn "could not set required production secret $name"
+    return 1
+  fi
+  WRITTEN_SECRET+=("$name")
+  printf '  %s✓ set%s required GitHub production secret %s\n' "$GREEN" "$RESET" "$name"
 }
 
 banner "FrockBot production setup"
@@ -268,6 +280,41 @@ ask_secret SPRITES_TOKEN "Paste the Fly Sprites token:"
   exit 1
 }
 set_production_secret SPRITES_TOKEN "$SPRITES_TOKEN"
+
+stage "FrockBot: per-account credential encryption"
+say "Provision the versioned backend keyring that encrypts Connection credentials at rest."
+if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+  warn "GitHub CLI authentication is required to inspect the production keyring"
+  exit 1
+fi
+if ! PRODUCTION_SECRETS="$(
+  gh secret list --repo "$GITHUB_REPOSITORY" --env "$GITHUB_ENVIRONMENT"
+)"; then
+  warn "Could not inspect production secrets; preserving the existing keyring requires a successful inspection"
+  exit 1
+fi
+if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx CREDENTIAL_KEYRING; then
+  note "Preserving the existing CREDENTIAL_KEYRING so stored credentials remain decryptable."
+else
+  CREDENTIAL_KEYRING="$({
+    node <<'NODE'
+const { randomBytes } = require('node:crypto');
+const keyId = new Date().toISOString().slice(0, 7);
+process.stdout.write(JSON.stringify({
+  schemaVersion: 1,
+  currentKeyId: keyId,
+  keys: { [keyId]: randomBytes(32).toString('base64url') },
+}));
+NODE
+  } 2>/dev/null)"
+  [[ -n "$CREDENTIAL_KEYRING" ]] || {
+    warn "Credential keyring generation failed"
+    exit 1
+  }
+  set_required_production_secret CREDENTIAL_KEYRING "$CREDENTIAL_KEYRING"
+  unset CREDENTIAL_KEYRING
+fi
+unset PRODUCTION_SECRETS
 
 stage "GitHub: verify production configuration"
 say "The repository already has the account ID, auth secret, app URL, and D1 ID."

@@ -1,11 +1,26 @@
+import { plugin } from "bun";
 import { afterEach, describe, expect, test } from "bun:test";
-import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import {
+  initializeBotSettingsV1,
+  type UserSettingsViewV1,
+} from "@frockbot/configuration-core";
+
+plugin({
+  name: "shell-client-vue-test-loader",
+  setup(build) {
+    build.onLoad({ filter: /FrockBotApp\.vue$/ }, () => ({
+      contents: "export default {};",
+      loader: "js",
+    }));
+  },
+});
+
+const {
   decodePluginCatalog,
   projectCompletedRuns,
   projectDurableRuns,
   shellClientPlugin,
-} from "./index.js";
+} = await import("./index.js");
 import type { FrockBotWebData } from "../shared.js";
 import type { Ref } from "vue";
 
@@ -18,6 +33,24 @@ const originalDocument = Object.getOwnPropertyDescriptor(
   globalThis,
   "document",
 );
+
+async function secretDerivations(secret: string): Promise<string[]> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)),
+  );
+  const hex = Array.from(digest, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return [
+    hex,
+    hex.toUpperCase(),
+    btoa(String.fromCharCode(...digest)),
+    btoa(String.fromCharCode(...digest))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, ""),
+  ];
+}
 
 function installMemoryStorage(): void {
   const values = new Map<string, string>();
@@ -55,16 +88,66 @@ afterEach(() => {
 });
 
 describe("application manifest protocol", () => {
-  test("requires the owned manifest response version", () => {
-    expect(decodePluginCatalog({ schemaVersion: 1, packages: [] })).toEqual([]);
+  const emptyManifest = {
+    schemaVersion: 1,
+    deployment: { userId: "user-1", applicationHash: "hash-1" },
+    applicationHash: "hash-1",
+    packages: [],
+  };
+
+  test("requires the exact owned manifest response", () => {
+    expect(decodePluginCatalog(emptyManifest)).toEqual([]);
+    expect(
+      decodePluginCatalog({
+        ...emptyManifest,
+        packages: [
+          {
+            id: "provider-ollama-cloud",
+            displayName: "Ollama Cloud",
+            version: "0.0.1",
+            contributions: ["backend", "runtime", "client"],
+            configuration: {
+              settings: [],
+              capabilities: [
+                {
+                  id: "ollama-cloud-models",
+                  kind: "model",
+                  connectionTypes: ["ollama-cloud-account"],
+                },
+              ],
+              connectionTypes: [
+                {
+                  id: "ollama-cloud-account",
+                  displayName: "Ollama Cloud account",
+                  allowMultiple: true,
+                  authorization: {
+                    kind: "api-key",
+                    driverId: "ollama-api-key",
+                  },
+                  capabilities: ["ollama-cloud-models"],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        packageId: "provider-ollama-cloud",
+        capabilities: [{ id: "ollama-cloud-models", kind: "model" }],
+        connectionTypes: [
+          expect.objectContaining({ id: "ollama-cloud-account" }),
+        ],
+      }),
+    ]);
     for (const manifest of [
       { packages: [] },
-      { schemaVersion: 2, packages: [] },
-      { schemaVersion: "1", packages: [] },
+      { ...emptyManifest, schemaVersion: 2 },
+      { ...emptyManifest, schemaVersion: "1" },
+      { ...emptyManifest, unexpected: true },
+      { ...emptyManifest, packages: [42] },
     ]) {
-      expect(() => decodePluginCatalog(manifest)).toThrow(
-        "Application manifest is invalid",
-      );
+      expect(() => decodePluginCatalog(manifest)).toThrow();
     }
   });
 });
@@ -113,6 +196,7 @@ describe("composer hydration context", () => {
     expect(provided.value.composerContext).toBeUndefined();
     expect(provided.value.activeBotId).toBeUndefined();
     expect(provided.value.botSettings).toBeUndefined();
+    expect(provided.value.modelReady).toBe(false);
   });
 });
 
@@ -172,6 +256,403 @@ describe("Bot selection", () => {
     expect(requested).toEqual(["old", "new"]);
     expect(provided.value.activeBotId).toBe("new");
     expect(provided.value.botSettings?.botId).toBe("new");
+  });
+  test("preserves load failures and ignores stale User settings", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const older = Promise.withResolvers<UserSettingsViewV1>();
+    const newer = Promise.withResolvers<UserSettingsViewV1>();
+    let userReads = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) => {
+          if (query.type === "bot/get") {
+            return Promise.reject(new Error("Bot settings unavailable"));
+          }
+          userReads += 1;
+          return userReads === 1 ? older.promise : newer.promise;
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    const botLoad = provided.value.loadBotSettings();
+    const olderLoad = provided.value.loadUserSettings();
+    const newerLoad = provided.value.loadUserSettings();
+    newer.resolve({
+      schemaVersion: 1,
+      revision: 2,
+      profile: { name: "Newer" },
+      packages: [],
+      connections: [],
+    });
+    await newerLoad;
+    older.resolve({
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "Older" },
+      packages: [],
+      connections: [],
+    });
+    await Promise.all([botLoad, olderLoad]);
+
+    expect(provided.value.userSettings?.profile.name).toBe("Newer");
+    expect(provided.value.settingsError).toBe("Bot settings unavailable");
+  });
+
+  test("commits a catalog without overwriting newer User settings", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const catalogManifest = Promise.withResolvers<unknown>();
+    const catalogUser = Promise.withResolvers<UserSettingsViewV1>();
+    const directUser = Promise.withResolvers<UserSettingsViewV1>();
+    let userReads = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readApplicationManifest: () => catalogManifest.promise,
+        readConfiguration: () => {
+          userReads += 1;
+          return userReads === 1 ? catalogUser.promise : directUser.promise;
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.pluginCatalog = [
+      {
+        packageId: "stale-package",
+        displayName: "Stale",
+        version: "0.0.1",
+        capabilities: [],
+        connectionTypes: [],
+      },
+    ];
+
+    const catalogLoad = provided.value.loadPluginCatalog();
+    const userLoad = provided.value.loadUserSettings();
+    directUser.resolve({
+      schemaVersion: 1,
+      revision: 2,
+      profile: { name: "Newer" },
+      packages: [],
+      connections: [],
+    });
+    await userLoad;
+    catalogUser.resolve({
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "Older" },
+      packages: [],
+      connections: [],
+    });
+    catalogManifest.resolve({
+      schemaVersion: 1,
+      deployment: { userId: "user-1", applicationHash: "hash-1" },
+      applicationHash: "hash-1",
+      packages: [],
+    });
+    await catalogLoad;
+
+    expect(provided.value.pluginCatalog).toEqual([]);
+    expect(provided.value.userSettings?.profile.name).toBe("Newer");
+  });
+
+  test("labels an explicitly bound Ollama Bot by its provider", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const bot = {
+      ...initializeBotSettingsV1("ollama-bot"),
+      model: {
+        connectionId: "ollama-work",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+      assignments: [
+        {
+          assignmentId: "ollama-model",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "ollama-work",
+          state: "enabled" as const,
+        },
+      ],
+    };
+    const user: UserSettingsViewV1 = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          providerType: "ollama-cloud",
+          safeMetadata: {},
+        },
+      ],
+    };
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) =>
+          Promise.resolve(query.type === "user/get" ? user : bot),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = bot.botId;
+    provided.value.pluginCatalog = [
+      {
+        packageId: "provider-ollama-cloud",
+        displayName: "Ollama Cloud",
+        version: "0.0.1",
+        capabilities: [
+          { id: "ollama-cloud-models", kind: "model" },
+          { id: "ollama-cloud-tools", kind: "tool" },
+        ],
+        connectionTypes: [
+          {
+            id: "ollama-cloud-account",
+            displayName: "Ollama Cloud account",
+            allowMultiple: true,
+            authorizationKind: "api-key",
+            capabilities: ["ollama-cloud-models", "ollama-cloud-tools"],
+          },
+        ],
+      },
+    ];
+
+    await provided.value.loadBotSettings();
+    await provided.value.loadUserSettings();
+
+    expect(provided.value.modelLabel).toBe("Ollama Cloud · Dynamic Worker");
+    expect(provided.value.modelReady).toBe(true);
+
+    bot.assignments[0] = {
+      ...bot.assignments[0]!,
+      capabilityId: "ollama-cloud-tools",
+    };
+    await provided.value.loadBotSettings();
+    expect(provided.value.modelReady).toBe(false);
+  });
+
+  test("assigns a newly connected model capability before model selection", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    let bot = initializeBotSettingsV1("ollama-bot");
+    const commands: Array<{ type: string; expectedRevision: number }> = [];
+    const user: UserSettingsViewV1 = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-work",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          providerType: "ollama-cloud",
+          safeMetadata: {},
+        },
+      ],
+    };
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) =>
+          Promise.resolve(query.type === "user/get" ? user : bot),
+        executeConfiguration: (command) => {
+          if (!("botId" in command)) throw new Error("unexpected User command");
+          commands.push({
+            type: command.type,
+            expectedRevision: command.expectedRevision,
+          });
+          if (command.type === "bot/assign-capability") {
+            bot = {
+              ...bot,
+              revision: 1,
+              model: command.model,
+              assignments: [{ ...command.assignment, state: "enabled" }],
+            };
+          } else if (command.type === "bot/select-model") {
+            bot = { ...bot, revision: bot.revision + 1, model: command.model };
+          } else if (command.type === "bot/unbind-model") {
+            bot = {
+              ...bot,
+              revision: bot.revision + 1,
+              model: undefined,
+              assignments: bot.assignments.map((assignment) =>
+                assignment.assignmentId === command.assignmentId
+                  ? { ...assignment, state: "unavailable" }
+                  : assignment,
+              ),
+            };
+          } else {
+            throw new Error("unexpected Bot command");
+          }
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            revision: bot.revision,
+            status: "applied" as const,
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = bot.botId;
+    provided.value.botSettings = bot;
+    provided.value.userSettings = user;
+    provided.value.pluginCatalog = [
+      {
+        packageId: "provider-ollama-cloud",
+        displayName: "Ollama Cloud",
+        version: "0.0.1",
+        capabilities: [{ id: "ollama-cloud-models", kind: "model" }],
+        connectionTypes: [
+          {
+            id: "ollama-cloud-account",
+            displayName: "Ollama Cloud account",
+            allowMultiple: true,
+            authorizationKind: "api-key",
+            capabilities: ["ollama-cloud-models"],
+          },
+        ],
+      },
+    ];
+
+    await provided.value.saveBotModel({
+      connectionId: "ollama-work",
+      providerModelId: "glm-5.3-flash:cloud",
+    });
+
+    expect(commands).toEqual([
+      { type: "bot/assign-capability", expectedRevision: 0 },
+    ]);
+    expect(bot).toMatchObject({
+      revision: 1,
+      model: {
+        connectionId: "ollama-work",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+      assignments: [
+        {
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "ollama-work",
+          state: "enabled",
+        },
+      ],
+    });
+
+    bot = {
+      ...bot,
+      assignments: bot.assignments.map((assignment) => ({
+        ...assignment,
+        state: "unavailable",
+      })),
+    };
+    provided.value.botSettings = bot;
+
+    await provided.value.clearBotModel();
+
+    expect(commands.at(-1)).toEqual({
+      type: "bot/unbind-model",
+      expectedRevision: 1,
+    });
+    expect(bot).toMatchObject({
+      revision: 2,
+      model: undefined,
+      assignments: [{ state: "unavailable" }],
+    });
+  });
+
+  test("does not resubmit an unchanged unavailable model", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const bot = {
+      ...initializeBotSettingsV1("ollama-bot"),
+      model: {
+        connectionId: "revoked-connection",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+      assignments: [],
+    };
+    let executed = false;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        executeConfiguration: () => {
+          executed = true;
+          throw new Error("model was resubmitted");
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = bot.botId;
+    provided.value.botSettings = bot;
+    provided.value.userSettings = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [],
+      connections: [],
+    };
+
+    await provided.value.saveBotModel(bot.model);
+
+    expect(executed).toBe(false);
   });
 });
 
@@ -690,6 +1171,349 @@ describe("uncertain Turn admission", () => {
 });
 
 describe("Connection operation reconciliation", () => {
+  test("reuses API-key command identity after an ambiguous response loss", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    const commandIds: string[] = [];
+    const requestBodies: string[] = [];
+    let attempts = 0;
+    const mount = async (): Promise<Ref<FrockBotWebData>> => {
+      let provided: Ref<FrockBotWebData> | undefined;
+      await shellClientPlugin({
+        transport: {
+          turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+          readAuthenticatedUserId: () => Promise.resolve("user-a"),
+          executeConnection: (command) => {
+            commandIds.push(command.commandId);
+            requestBodies.push(JSON.stringify(command));
+            attempts += 1;
+            if (attempts === 1) {
+              return Promise.reject(new Error("response lost"));
+            }
+            return Promise.resolve({
+              schemaVersion: 1,
+              commandId: command.commandId,
+              connectionId: "connection-1",
+              status: "applied",
+            });
+          },
+        },
+        slot: () => () => {},
+        inject: () => {
+          throw new Error("unexpected client provider injection");
+        },
+        provide: (_key, value) => {
+          provided = value as Ref<FrockBotWebData>;
+          return () => {};
+        },
+      });
+      if (!provided) throw new Error("shell data was not provided");
+      return provided;
+    };
+    const input = {
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "super-secret-api-key",
+    };
+
+    const first = await mount();
+    await expect(first.value.createApiKeyConnection(input)).rejects.toThrow(
+      "response lost",
+    );
+    const retained =
+      globalThis.localStorage.getItem(
+        "frockbot.pending-connection-operations.v1",
+      ) ?? "";
+    expect(retained).not.toContain(input.apiKey);
+    for (const derived of await secretDerivations(input.apiKey)) {
+      expect(retained).not.toContain(derived);
+    }
+    const second = await mount();
+    await second.value.createApiKeyConnection(input);
+
+    expect(commandIds).toHaveLength(2);
+    expect(new Set(commandIds).size).toBe(1);
+    expect(requestBodies).toHaveLength(2);
+    for (const body of requestBodies) {
+      const envelope = JSON.parse(body) as Record<string, unknown>;
+      expect(envelope.apiKey).toBe(input.apiKey);
+      const withoutSecret = JSON.stringify({ ...envelope, apiKey: undefined });
+      for (const derived of await secretDerivations(input.apiKey)) {
+        expect(withoutSecret).not.toContain(derived);
+      }
+    }
+  });
+
+  test("mints a fresh operation identity for a settled submission", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    const commandIds: string[] = [];
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readAuthenticatedUserId: () => Promise.resolve("user-a"),
+        executeConnection: (command) => {
+          commandIds.push(command.commandId);
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            connectionId: "connection-1",
+            status: "applied",
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    const input = {
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "super-secret-api-key",
+    };
+
+    await provided.value.createApiKeyConnection(input);
+    await provided.value.createApiKeyConnection({
+      ...input,
+      apiKey: "another-secret-api-key",
+    });
+
+    expect(commandIds).toHaveLength(2);
+    expect(commandIds[1]).not.toBe(commandIds[0]);
+    expect(
+      globalThis.localStorage.getItem(
+        "frockbot.pending-connection-operations.v1",
+      ),
+    ).toBe("{}");
+  });
+
+  test("retires a lost rotation from its durable command receipt", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    let generation = "generation-1";
+    const commandIds: string[] = [];
+    const receipts = new Map<
+      string,
+      {
+        schemaVersion: 1;
+        commandId: string;
+        connectionId: string;
+        status: "applied";
+      }
+    >();
+    let lostResponses = 2;
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readAuthenticatedUserId: () => Promise.resolve("user-a"),
+        readConfiguration: () =>
+          Promise.resolve({
+            schemaVersion: 1,
+            revision: 1,
+            profile: { name: "User" },
+            packages: [],
+            connections: [
+              {
+                connectionId: "connection-1",
+                packageId: "provider-ollama-cloud",
+                connectionTypeId: "ollama-cloud-account",
+                displayName: "Work",
+                state: "ready",
+                providerType: "ollama-cloud",
+                generation,
+                safeMetadata: {},
+              },
+            ],
+          }),
+        executeConnection: (command) => {
+          commandIds.push(command.commandId);
+          generation = `generation-${commandIds.length + 1}`;
+          receipts.set(command.commandId, {
+            schemaVersion: 1,
+            commandId: command.commandId,
+            connectionId: "connection-1",
+            status: "applied",
+          });
+          if (lostResponses > 0) {
+            lostResponses -= 1;
+            return Promise.reject(new Error("response lost"));
+          }
+          return Promise.resolve(receipts.get(command.commandId)!);
+        },
+        lookupConnectionCommand: (_packageId, commandId) =>
+          Promise.resolve(receipts.get(commandId)),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    await provided.value.loadUserSettings();
+
+    await expect(
+      provided.value.rotateApiKeyConnection("connection-1", "key-a"),
+    ).rejects.toThrow("response lost");
+    const lostCommandId = commandIds[0];
+    await expect(
+      provided.value.rotateApiKeyConnection("connection-1", "key-b"),
+    ).rejects.toThrow("response lost");
+    await provided.value.rotateApiKeyConnection("connection-1", "key-a");
+
+    expect(commandIds).toHaveLength(3);
+    expect(commandIds[2]).not.toBe(lostCommandId);
+  });
+
+  test("retires a lost API-key create from its durable Connection projection", async () => {
+    installMemoryStorage();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    const commandIds: string[] = [];
+    let createdCommandId: string | undefined;
+    let attempts = 0;
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readAuthenticatedUserId: () => Promise.resolve("user-a"),
+        readConfiguration: () =>
+          Promise.resolve({
+            schemaVersion: 1,
+            revision: 1,
+            profile: { name: "User" },
+            packages: [],
+            connections: createdCommandId
+              ? [
+                  {
+                    connectionId: "connection-created",
+                    packageId: "provider-ollama-cloud",
+                    connectionTypeId: "ollama-cloud-account",
+                    displayName: "Work",
+                    state: "ready",
+                    safeMetadata: { creationCommandId: createdCommandId },
+                  },
+                ]
+              : [],
+          }),
+        executeConnection: (command) => {
+          commandIds.push(command.commandId);
+          attempts += 1;
+          if (attempts === 1) {
+            createdCommandId = command.commandId;
+            return Promise.reject(new Error("response lost"));
+          }
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            connectionId: "connection-recreated",
+            status: "applied",
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    const input = {
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Work",
+      apiKey: "super-secret-api-key",
+    };
+
+    await expect(provided.value.createApiKeyConnection(input)).rejects.toThrow(
+      "response lost",
+    );
+    await provided.value.loadUserSettings();
+    expect(
+      globalThis.localStorage.getItem(
+        "frockbot.pending-connection-operations.v1",
+      ),
+    ).toBe("{}");
+    createdCommandId = undefined;
+    await provided.value.createApiKeyConnection(input);
+
+    expect(commandIds).toHaveLength(2);
+    expect(commandIds[1]).not.toBe(commandIds[0]);
+  });
+
+  test("surfaces failed label, disable, and disconnect receipts", async () => {
+    const commands: string[] = [];
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        executeConnection: (command) => {
+          commands.push(command.type);
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            connectionId:
+              "connectionId" in command
+                ? command.connectionId
+                : "created-connection",
+            status: "failed",
+          });
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    await expect(
+      provided.value.updateConnectionLabel("connection-1", "Renamed"),
+    ).rejects.toThrow("Connection label update failed");
+    await expect(
+      provided.value.setConnectionEnabled("connection-1", false),
+    ).rejects.toThrow("Connection state update failed");
+    await expect(
+      provided.value.disconnectConnection("connection-1"),
+    ).rejects.toThrow("Connection revocation failed");
+    expect(commands).toEqual([
+      "connection/update-label",
+      "connection/set-enabled",
+      "connection/disconnect",
+    ]);
+  });
+
   test("reuses the desktop command ID and nonce until durable settlement", async () => {
     installMemoryStorage();
     Object.defineProperty(globalThis, "window", {

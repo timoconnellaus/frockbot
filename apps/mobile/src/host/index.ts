@@ -9,7 +9,7 @@ import {
   type ContributionResolver,
   LocalCordisContributionHost,
   PackageCatalog,
-} from "@frockbot/plugin-catalog";
+} from "@frockbot/kernel-composition";
 import mobileClipboardPlugin from "@frockbot/plugin-mobile-clipboard/mobile";
 import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
 import mobileNotificationsPlugin from "@frockbot/plugin-mobile-notifications/mobile";

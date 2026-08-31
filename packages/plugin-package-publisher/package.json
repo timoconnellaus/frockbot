@@ -23,7 +23,9 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/agent-core": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/plugin-prompt": "workspace:*",
+    "@frockbot/plugin-tools": "workspace:*",
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry, ToolRegistry } from "@frockbot/agent-core";
-import { ComputerRegistry } from "@frockbot/computer-core";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
+import { ToolRegistry } from "@frockbot/plugin-tools";
+import {
+  ComputerRegistry,
+  type ComputerProvider,
+} from "@frockbot/computer-core";
 import {
   createPluginHarness,
   verifyPluginPackage,
@@ -28,27 +32,23 @@ const history: PackageRevisionHistoryV1 = {
 };
 
 async function execute(
-  tools: ToolRegistry,
+  tools: Pick<ToolRegistry, "prepare" | "executePrepared">,
   name: string,
   input: unknown,
 ): Promise<{ content: string; isError: boolean }> {
-  const controller = new AbortController();
-  const prepared = await tools.prepare(
-    { id: crypto.randomUUID(), name, input },
-    {
-      botId: "bot-1",
-      agentId: "bot-1",
-      sessionId: "session-1",
-      signal: controller.signal,
-    },
-  );
-  if (prepared.kind !== "ready") throw new Error("tool was denied");
-  return tools.executePrepared(prepared, {
+  const context = {
     botId: "bot-1",
     agentId: "bot-1",
+    compositionGenerationId: "bootstrap",
     sessionId: "session-1",
-    signal: controller.signal,
-  });
+    signal: new AbortController().signal,
+  };
+  const prepared = await tools.prepare(
+    { id: crypto.randomUUID(), name, input },
+    context,
+  );
+  if (prepared.kind !== "ready") throw new Error("tool was denied");
+  return tools.executePrepared(prepared, context);
 }
 
 describe("Package Publisher Agent contribution", () => {
@@ -68,11 +68,13 @@ describe("Package Publisher Agent contribution", () => {
       SystemPromptRegistry,
       ToolRegistry,
     ]);
-    harness.root.computers.register({
+    const provider: ComputerProvider = {
       id: "fixture",
-      open: (_target, assignment) =>
+      open: (identity, tenant, assignment) =>
         Promise.resolve({
           assignment,
+          identity,
+          tenant,
           exec: {
             execute: (request) => {
               const command = (request.args ?? []).join(" ");
@@ -90,7 +92,8 @@ describe("Package Publisher Agent contribution", () => {
           },
           close: () => Promise.resolve(),
         }),
-    });
+    };
+    harness.root.computers.register(provider);
     const fiber = await harness.mount(
       createPackagePublisherAgentPlugin(
         {

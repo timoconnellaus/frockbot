@@ -3,7 +3,7 @@ import {
   decodeFrockBotManifest,
   declaredContributionKinds,
   type FrockBotManifest,
-} from "@frockbot/plugin-catalog";
+} from "@frockbot/kernel-composition";
 import { Context, type Plugin } from "cordis";
 
 export interface PluginPackageFixture {

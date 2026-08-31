@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry, ToolRegistry } from "@frockbot/agent-core";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
+import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
   ComputerRegistry,
   type ComputerProvider,
@@ -8,6 +9,7 @@ import {
   createPluginHarness,
   verifyPluginPackage,
 } from "@frockbot/plugin-testkit";
+import { SessionStore } from "@frockbot/kernel-contracts";
 import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
 import { createComputerAgentPlugin } from "./agent.js";
@@ -20,6 +22,7 @@ async function execute(
   const context = {
     botId: "bot-1",
     agentId: "run-9",
+    compositionGenerationId: "bootstrap",
     sessionId: "session-1",
     signal: new AbortController().signal,
   };
@@ -36,10 +39,12 @@ describe("computer agent contribution", () => {
     const calls: string[] = [];
     const provider: ComputerProvider = {
       id: "fixture",
-      open: async (target, assignment) => {
-        calls.push(`open:${target.userId}:${target.botId}`);
+      open: async (identity, tenant, assignment) => {
+        calls.push(`open:${identity.userId}:${tenant.botId}`);
         return {
           assignment,
+          identity,
+          tenant,
           exec: {
             execute: async (request) => {
               calls.push(
@@ -67,6 +72,7 @@ describe("computer agent contribution", () => {
       ComputerRegistry,
       ToolRegistry,
       SystemPromptRegistry,
+      SessionStore,
     ]);
     harness.root.computers.register(provider);
     await harness.mount(

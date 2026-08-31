@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/agent-core": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/plugin-models": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {

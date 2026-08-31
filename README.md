@@ -39,7 +39,9 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-The left sidebar lists the authenticated User's Bots and switches the active workspace. **Add sheep** creates a Bot with a durable random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs available Packages and explicitly assigns their Capabilities to Bots; external account controls appear only when the compiled application includes a Connection Package. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser, desktop, and mobile render the same hosted Bot and sheep UI; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
+The left sidebar lists the authenticated User's Bots and switches the active workspace. **Add sheep** creates a Bot with a durable random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs available Packages and manages external account Connections when the compiled application includes a Connection Package. Selecting a connected model in Bot settings atomically commits that Bot's explicit durable model Capability Assignment and exact provider model. **Unbind model** removes the model authority and releases the Connection dependency so the account can disconnect it. User profile settings are under **Profile → Settings**, while model selection remains Bot-specific and User defaults apply only when creating a Bot. Browser, desktop, and mobile render the same hosted Bot, sheep, Connection, and model-selection workflows; native authorization handoff remains an optional enhancement for Packages that require it.
+
+`@frockbot/plugin-provider-ollama-cloud` lets each account create multiple named Ollama Cloud Connections with its own write-only API key. The backend validates and encrypts each credential, discovers that Connection's model catalog, and exposes the normalized models in Bot settings. Every Bot binds explicitly to a Connection ID and provider model ID, and execution additionally requires that Bot's enabled Ollama model Capability Assignment. Rotation affects subsequent model effects while already-admitted effects retain their durable credential lease; disconnect blocks new leases without cancelling admitted Turns.
 
 To attach the built-in Fly Sprites Computer provider Package, provide a Sprites token. The provider sits behind the provider-neutral Computer interface used by generic tools and memory. It assigns a distinct persistent Sprite and Chromium/noVNC desktop to each Bot, plus a separate User-scoped storage Sprite for global memory. `FROCKBOT_SPRITE_NAME` optionally selects the base name used to derive Bot and User storage Sprite names for standalone development; the hosted backend supplies durable User and Bot identity. `FROCKBOT_COMPUTER_PROVIDER` selects an installed provider and currently defaults to `fly-sprite`.
 
@@ -103,6 +105,7 @@ Configure these GitHub `production` environment values:
 | Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
 | Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
 | Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                  |
+| Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-account Connection credentials              |
 
 Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
 
@@ -142,20 +145,22 @@ apps/
   marketing/        Public frockbot.com site and static-assets Worker
   cordis-poc/       Executable pinned Cordis/Electron/WebUI foundation proof
 packages/
-  agent-core/       Session, LLM, prompt, tool, and agent Cordis services
-  agent-loop/       Concrete event-sourced custom agent-loop plugin
+  kernel-contracts/ Session, LLM, prompt, and tool execution contracts
+  kernel-agent-loop/ Concrete event-sourced durable agent loop and Agent registry
+  kernel-composition/ Package manifest, activation, isolate host, and compiler
+  kernel-do/        Bot Durable Object admission, log, cursor, and scheduling
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Cordis-free reusable Vue primitives and surface registry
   computer-core/    Provider registry and capability interfaces for Computers
   configuration-core/ Versioned durable User/Bot settings contracts
   connection-core/  Provider-neutral Connection transport result contracts
-  plugin-catalog/   Manifest decoding, scoped activation, and rollback
+  architecture-checks/ Automated checks for the constitutional rules
   plugin-clock/     Reference package with agent, host, and WebUI contributions
   plugin-composio/  Dormant Composio source pending Connect MCP redesign
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-flock/     Durable Bot directory and composable sheep identity Package
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
-  plugin-memory/    Computer-workspace or R2-backed durable Markdown memory
+  plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
   plugin-package-publisher/ Durable User application publication and rollback
   plugin-settings/  Plugin-owned Bot, Package, and User settings surfaces
   plugin-shell/     Hosted application geometry and surface presenter
@@ -238,7 +243,7 @@ Cordis contexts provide composition and lifecycle ownership, not security isolat
 
 ## Current limitations
 
-- model configuration currently uses environment variables rather than onboarding UI;
+- Ollama Cloud model onboarding uses hosted account Connections and explicit per-Bot model bindings; standalone Foundation provider defaults still use environment configuration;
 - Fly Sprite live provisioning requires a valid Sprites token and has not been exercised by repository CI;
 - Fly uses one Sprite per Bot, but live isolation still depends on Fly's VM and network enforcement and has not been exercised by repository CI;
 - the local derived memory vector index is process-local and rebuilt through canonical-file fallback; cloud Vectorize remains durable;

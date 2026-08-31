@@ -1,0 +1,23 @@
+{
+  "name": "@frockbot/cloudflare-bundler",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --env=\"\" --outdir dist",
+    "test": "bun test src && bun run test:workerd",
+    "test:workerd": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json"
+  },
+  "dependencies": {
+    "@cloudflare/worker-bundler": "0.2.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.1.1",
+    "@cloudflare/workers-types": "latest",
+    "@types/bun": "1.4.0",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.0",
+    "wrangler": "latest"
+  }
+}
