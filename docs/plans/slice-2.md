@@ -141,6 +141,35 @@ call; a Workspace write into a Memory root is rejected at runtime; conflicting
 Workspace and object-storage writes to a non-Memory durable root both survive
 as generations and are surfaced; indexes rebuild from the files.
 
+### Parity facts
+
+From `docs/research/grokbot-computer.md` (§4.1a–b, GrokBot's own injected
+prompt and its harness renderers). These are observations about the system we
+are matching, not a change to the Step 3 scope above; they are recorded here
+because they bear on the Memory root layout this step lands.
+
+- GrokBot has **three** memory scopes, not two: own (Bot), **project**, and
+  user, in injected order user → project → own. AGENTS.md § Memory names only a
+  Bot Memory root and a User Memory root, and `plugin-memory` today has tiers
+  `agent` and `global` — no project tier, no membership.
+- **User memory is sharded by writer**: `user-memory/by-agent/<agent-uuid>/`,
+  one `profile.md` + `log/` per writing Bot, _"so every file has a single
+  writer"_; a Bot corrects another's shared fact by writing the correction into
+  its own shard, and newest wins. Project memory shards identically. Our
+  `user-memory` root is currently one prefix per owner
+  (`plugin-memory/src/scopes.ts`), so "writes are segregated by writer" in
+  AGENTS.md is satisfied by generation records rather than by path.
+- Precedence is own > project > user, newest-wins within a shared tier.
+- What is injected is capped and then **frozen per compaction epoch**
+  (`resolveFrozenMemoryPrompt`), which is GrokBot's own best explanation for
+  own-profile facts sitting on disk and never reaching the prompt. AGENTS.md
+  already requires the session event log to record exactly what was injected,
+  _"so an injection gap is visible in durable state"_ — this is the concrete
+  failure that rule is for.
+- On-disk fact lines are `- (YYYY-MM-DD) <fact>`; injected lines are
+  `- (learned YYYY-MM-DD) [via <assistant>] <fact>`. Notes and episodes are a
+  `[note] ` / `[episode] ` prefix on the fact text, not separate files.
+
 ---
 
 ## Parallelism and the one shared file

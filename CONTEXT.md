@@ -61,8 +61,12 @@ The durable disk of a Computer. Declared durable roots on it survive hibernation
 _Avoid_: Volume, filesystem, box
 
 **Memory**:
-Markdown files under a durable root of the Workspace that persist what a Bot knows across Sessions, written only through the Memory Package and mirrored to the Workspace. Bot Memory belongs to one Bot; User Memory is shared by a User's Bots.
+Markdown files under a durable root of the Workspace that persist what a Bot knows across Sessions, written only through the Memory Package and mirrored to the Workspace. Bot Memory belongs to one Bot; User Memory is shared by a User's Bots; Project Memory is shared by the Bots that have joined a Project. Shared tiers are sharded per writing Bot so each file has one writer.
 _Avoid_: Context, history, knowledge base
+
+**Project**:
+An opt-in grouping a Bot creates or joins that carries its own shared Memory tier; only the Projects a Bot has joined are injected into its prompts.
+_Avoid_: Workspace, folder, team
 
 **Skill**:
 An instruction file under a Bot's instruction root on the Workspace that the Bot loads to learn how to do something. A Bot may write its own.
