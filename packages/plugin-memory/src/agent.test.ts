@@ -3,15 +3,17 @@
 import { describe, expect, test } from "bun:test";
 import { SessionStore, type Session } from "@frockbot/kernel-contracts";
 import { Context } from "cordis";
+import type { WorkspaceFilesV1 } from "@frockbot/kernel-contracts";
 import {
   createMemoryForgetTool,
+  createMemorySearchTool,
   createMemoryWriteTool,
   createProjectTools,
   MemoryProjection,
   type MemoryRuntimeHostV1,
 } from "./agent.ts";
 import { userMemoryRootV1 } from "./roots.ts";
-import { MemoryStore } from "./store.ts";
+import { MemoryStore, MEMORY_MAX_FILES_PER_TIER } from "./store.ts";
 import {
   createInMemoryMemoryProjectsV1,
   createTestMemoryFilesV1,
@@ -63,6 +65,45 @@ function hostFor(
       clock: () => AT,
     }),
     writer: WRITER,
+  };
+}
+
+/** The Bot provenance one shard's writes carry. */
+function botWriter(botId: string) {
+  return {
+    kind: "bot" as const,
+    botId,
+    sessionId: `user-1:${botId}`,
+    turnId: "turn-4",
+    runId: "run-9",
+  };
+}
+
+/**
+ * A Workspace surface that serves reads normally and stops accepting writes
+ * after `allowed` of them, so a change that spans two files can be interrupted
+ * between them.
+ */
+function writesFailAfter(
+  files: WorkspaceFilesV1,
+  allowed: number,
+): WorkspaceFilesV1 {
+  let seen = 0;
+  return {
+    read: (path) => files.read(path),
+    list: (request) => files.list(request),
+    stat: (path) => files.stat(path),
+    write: (request) => {
+      seen += 1;
+      if (seen > allowed) {
+        return Promise.resolve({
+          status: "unavailable" as const,
+          reason: "the bucket went away",
+        });
+      }
+      return files.write(request);
+    },
+    delete: (request) => files.delete(request),
   };
 }
 
@@ -225,17 +266,6 @@ describe("the Turn projection", () => {
     expect(projection.loadedTurn()).toBe(4);
     await dispose();
   });
-
-  test("makes no Computer interface call — nothing on the path holds one", async () => {
-    // The structural half of the architecture check: this Package's runtime
-    // host carries a Workspace file surface and nothing else, so there is no
-    // Computer object a read or a write could reach.
-    const host = hostFor();
-    expect(Object.keys(host).sort()).toEqual(["owner", "store", "writer"]);
-    const { session, dispose } = await openSession();
-    await new MemoryProjection(host).refresh(4, session);
-    await dispose();
-  });
 });
 
 describe("the Project tools", () => {
@@ -306,5 +336,185 @@ describe("the Project tools", () => {
       "ghetto-movement",
     ]);
     await dispose();
+  });
+});
+
+describe("a Memory read that a bound cut short", () => {
+  test("records an omission naming the tier rather than a complete-looking injection", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    // One profile shard per Bot, one more than the tier read bound.
+    const shards = MEMORY_MAX_FILES_PER_TIER + 1;
+    for (let index = 0; index < shards; index += 1) {
+      const botId = `bot-${String(index).padStart(3, "0")}`;
+      const store = new MemoryStore({
+        files,
+        owner: { userId: "user-1", botId },
+        clock: () => AT,
+      });
+      const written = await store.write({
+        root: userMemoryRootV1(OWNER),
+        tier: "profile",
+        fact: `Shard ${index} learned something.`,
+        writer: botWriter(botId),
+      });
+      expect(written.status).toBe("ok");
+    }
+    const host = hostFor("bot-000", files);
+    const { session, dispose } = await openSession();
+
+    await new MemoryProjection(host).refresh(4, session);
+
+    const injected = session.events.find(
+      (event) => event.type === "memory/injected",
+    );
+    if (injected?.type !== "memory/injected") throw new Error("unreachable");
+    const omission = injected.omissions.find(
+      (entry) =>
+        entry.scope === "user" && entry.reason.includes("read bound were not"),
+    );
+    expect(omission).toBeDefined();
+    expect(omission?.reason).toContain(`1 Memory file(s)`);
+    await dispose();
+  });
+});
+
+describe("a project-scope change to a Project the Bot never joined", () => {
+  test("is refused, and nothing is recorded or written", async () => {
+    const host = { ...hostFor(), projects: createInMemoryMemoryProjectsV1() };
+    const { session, sessions, dispose } = await openSession();
+    const projection = new MemoryProjection(host);
+    const write = createMemoryWriteTool(host, sessions, projection);
+    const forget = createMemoryForgetTool(host, sessions, projection);
+
+    const written = await write.execute(
+      { scope: "project", project: "never-joined", fact: "A shared fact." },
+      CONTEXT,
+    );
+    const forgotten = await forget.execute(
+      { scope: "project", project: "never-joined", fact: "A shared fact." },
+      CONTEXT,
+    );
+
+    expect(written.isError).toBe(true);
+    expect(written.content).toContain("you have not joined");
+    expect(forgotten.isError).toBe(true);
+    expect(forgotten.content).toContain("you have not joined");
+    expect(
+      session.events.some((event) => event.type === "memory/written"),
+    ).toBe(false);
+    expect(
+      session.events.some((event) => event.type === "memory/write-intent"),
+    ).toBe(false);
+    await dispose();
+  });
+});
+
+describe("a memory_forget that changes one file and then fails", () => {
+  test("records the generation it did write, so the log matches the files", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const seed = new MemoryStore({ files, owner: OWNER, clock: () => AT });
+    const fact = "Tim teaches on Tuesdays.";
+    for (const tier of ["profile", "log"] as const) {
+      const written = await seed.write({
+        root: userMemoryRootV1(OWNER),
+        tier,
+        fact,
+        writer: botWriter("bot-1"),
+      });
+      expect(written.status).toBe("ok");
+    }
+    // The forget rewrites log/2026-08.md then profile.md; only the first lands.
+    const host = hostFor("bot-1", writesFailAfter(files, 1));
+    const { session, sessions, dispose } = await openSession();
+    const tool = createMemoryForgetTool(
+      host,
+      sessions,
+      new MemoryProjection(host),
+    );
+
+    const result = await tool.execute({ scope: "user", fact }, CONTEXT);
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("after changing 1 file(s)");
+    const written = session.events.filter(
+      (event) => event.type === "memory/written",
+    );
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({
+      action: "forget",
+      path: "by-agent/bot-1/log/2026-08.md",
+    });
+    // The event log names the file that really changed on disk.
+    const remaining = await host.store.read(userMemoryRootV1(OWNER));
+    expect(remaining.recent.map((entry) => entry.text)).toEqual([]);
+    expect(remaining.profile.map((entry) => entry.text)).toEqual([fact]);
+    await dispose();
+  });
+});
+
+describe("project_create when the descriptor write conflicts", () => {
+  test("is a visible refusal, and no membership change is recorded", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const conflicting: WorkspaceFilesV1 = {
+      read: (path) => files.read(path),
+      list: (request) => files.list(request),
+      stat: (path) => files.stat(path),
+      write: () =>
+        Promise.resolve({
+          status: "conflict" as const,
+          reason: "another writer holds a newer generation",
+        }),
+      delete: (request) => files.delete(request),
+    };
+    const host = {
+      ...hostFor("bot-1", conflicting),
+      projects: createInMemoryMemoryProjectsV1(),
+    };
+    const { session, sessions, dispose } = await openSession();
+    const [create] = createProjectTools(
+      host,
+      sessions,
+      new MemoryProjection(host),
+    );
+
+    const created = await create!.execute(
+      { project: "ghetto-movement", name: "Ghetto Movement" },
+      CONTEXT,
+    );
+
+    expect(created.isError).toBe(true);
+    expect(created.content).toContain("conflict");
+    expect(
+      session.events.some((event) => event.type === "memory/project-changed"),
+    ).toBe(false);
+    expect(await host.projects.joined()).toEqual([]);
+    await dispose();
+  });
+});
+
+describe("memory_search", () => {
+  test("decodes its input at the seam, refusing an unknown field", async () => {
+    const host = hostFor();
+    const projection = new MemoryProjection(host);
+    const tool = createMemorySearchTool(host, projection);
+
+    expect(tool.validate?.({ query: "tuesdays", limit: 3 })).toBe(false);
+    const unknown = await tool.execute(
+      { query: "tuesdays", limit: 3 },
+      CONTEXT,
+    );
+    expect(unknown.isError).toBe(true);
+    expect(unknown.content).toContain("unknown fields");
+
+    expect(tool.validate?.({ query: "tuesdays", maxResults: 99 })).toBe(false);
+    const range = await tool.execute(
+      { query: "tuesdays", maxResults: 99 },
+      CONTEXT,
+    );
+    expect(range.isError).toBe(true);
+    expect(range.content).toContain("maxResults");
+
+    const ok = await tool.execute({ query: "tuesdays" }, CONTEXT);
+    expect(ok.isError).toBe(false);
   });
 });

@@ -33,6 +33,7 @@ import type {} from "@frockbot/kernel-agent-loop/agent";
 import type { Plugin } from "cordis";
 import {
   botInstructionRootV1,
+  countSkillDocumentsV1,
   emptySkillCatalogV1,
   loadSkillCatalogV1,
   renderSkillCatalogPromptV1,
@@ -45,7 +46,6 @@ import {
   type SkillQuotaConfigV1,
 } from "./quota.js";
 import {
-  isSkillDocumentPathV1,
   isSkillSlugV1,
   renderSkillDocumentV1,
   skillDocumentPathV1,
@@ -204,6 +204,9 @@ const SKILL_WRITE_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/** C0 controls, DEL, and the C1 range: never valid in a frontmatter scalar. */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
+
 interface SkillWriteInputV1 {
   name: string;
   description: string;
@@ -220,7 +223,7 @@ function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
   if (!Object.keys(value).every((key) => allowed.includes(key))) {
     throw new Error("skill_write input has unknown fields");
   }
-  const text = (key: string, maximum: number): string => {
+  const text = (key: string, maximum: number, singleLine: boolean): string => {
     const candidate = value[key];
     if (
       typeof candidate !== "string" ||
@@ -229,12 +232,20 @@ function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
     ) {
       throw new Error(`skill_write ${key} must be a bounded string`);
     }
+    // `name` and `description` become one frontmatter line each. A newline or
+    // a control character there renders a `SKILL.md` this Package's own parser
+    // refuses, so the Bot would have written a Skill it can never load.
+    if (singleLine && CONTROL_CHARACTERS.test(candidate)) {
+      throw new Error(
+        `skill_write ${key} must not contain newlines or control characters`,
+      );
+    }
     return candidate.trim();
   };
   const decoded: SkillWriteInputV1 = {
-    name: text("name", SKILL_MAX_NAME_LENGTH),
-    description: text("description", SKILL_MAX_DESCRIPTION_LENGTH),
-    body: text("body", 65_536),
+    name: text("name", SKILL_MAX_NAME_LENGTH, true),
+    description: text("description", SKILL_MAX_DESCRIPTION_LENGTH, true),
+    body: text("body", 65_536, false),
   };
   if (value.slug !== undefined) {
     if (!isSkillSlugV1(value.slug)) {
@@ -345,17 +356,18 @@ export function createSkillWriteTool(
           `the instruction root is unavailable: ${existing.reason}`,
         );
       }
-      const listed = await host.files.list({ root: path.root });
-      const existingSkills =
-        listed.status === "ok"
-          ? listed.entries.filter((entry) =>
-              isSkillDocumentPathV1(entry.path.path),
-            ).length
-          : 0;
+      // The count is paged to completion, and a listing that cannot be read is
+      // a refusal rather than a zero: a quota that falls open is not a quota.
+      const counted = await countSkillDocumentsV1(host.files, path.root);
+      if (counted.status !== "ok") {
+        return writeRefusal(
+          `${counted.reason}, so the per-Bot Skill quota cannot be enforced`,
+        );
+      }
       const verdict = checkSkillQuotaV1(
         {
           bytes: bytes.byteLength,
-          existingSkills,
+          existingSkills: counted.count,
           replaces: existing.status === "ok",
         },
         quota,
