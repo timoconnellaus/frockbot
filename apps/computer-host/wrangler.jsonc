@@ -9,9 +9,15 @@
   // No routes, by design. The shared Computer host (ADR 0004) is reachable
   // only through the app Worker's COMPUTER_HOST service binding, and the
   // container re-checks a shared token on top of that.
+  // The container class keeps the prototype's `FlyHostContainer` name. A
+  // Cloudflare container application is bound to one Durable Object class for
+  // its lifetime, so renaming the class asks for a second application on the
+  // same script and the deploy fails with
+  // `DURABLE_OBJECT_ALREADY_HAS_APPLICATION`. Taking a new name would mean
+  // deleting the live application first, dropping the running containers.
   "containers": [
     {
-      "class_name": "ComputerHostContainer",
+      "class_name": "FlyHostContainer",
       "image": "./Dockerfile",
       // The image needs the two workspace packages the container imports, so
       // the build context is the repository root; the root `.dockerignore`
@@ -25,13 +31,13 @@
     "bindings": [
       {
         "name": "COMPUTER_HOST_CONTAINER",
-        "class_name": "ComputerHostContainer",
+        "class_name": "FlyHostContainer",
       },
       // The superseded single-effect seam addressed the same containers under
       // this name. Kept so live ComputerEffectJournal objects keep resolving.
       {
         "name": "FLY_HOST",
-        "class_name": "ComputerHostContainer",
+        "class_name": "FlyHostContainer",
       },
       {
         "name": "COMPUTER_EFFECTS",
@@ -39,9 +45,10 @@
       },
     ],
   },
-  // v1 and v2 are the prototype's, already applied to this script. v3
-  // renames its container class rather than deleting it, so no durable
-  // object and no recorded effect outcome is dropped by the supersession.
+  // Exactly the prototype's migrations, already applied to this script. The
+  // supersession renames no durable class and creates none, so the list must
+  // not grow: a rename migration here is what tried to create a second
+  // container application and broke the deploy.
   "migrations": [
     {
       "tag": "v1",
@@ -50,15 +57,6 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["ComputerEffectJournal"],
-    },
-    {
-      "tag": "v3",
-      "renamed_classes": [
-        {
-          "from": "FlyHostContainer",
-          "to": "ComputerHostContainer",
-        },
-      ],
     },
   ],
   "vars": {

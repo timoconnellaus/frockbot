@@ -10,7 +10,7 @@ frockbot-cloudflare (app Worker)
    ▼
 src/index.ts  →  shardKey = fnv1a(userId) % COMPUTER_HOST_SHARDS
    ▼            (userId, never botId: one Computer per User, ADR 0012)
-ComputerHostContainer  ×  max_instances 3, basic, sleepAfter 10m
+FlyHostContainer  ×  max_instances 3, basic, sleepAfter 10m
    ▼  :8080
 container/server.ts  →  container/computer.ts  →  @fly/sprites 0.1.0
    ▼  WebSocket spawn("bash", ["-s"]) + stdin  /  filesystem API
