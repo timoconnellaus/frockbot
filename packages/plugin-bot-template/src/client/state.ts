@@ -3,7 +3,10 @@ import type {
   TemplateShareRecordV1,
   TemplateVisibilityV1,
 } from "@frockbot/template-core";
-import type { TemplateExportSummaryV1 } from "../shared.js";
+import type {
+  TemplateExportSummaryV1,
+  TemplateImportRecordV1,
+} from "../shared.js";
 
 export interface BotTemplateClientState {
   /** Every share this User holds; the section filters to the active Bot. */
@@ -22,6 +25,18 @@ export interface BotTemplateClientState {
     visibility: TemplateVisibilityV1,
   ): Promise<void>;
   revoke(shareId: string): Promise<void>;
+
+  /** Imports this User has planned or applied, newest last. */
+  imports: TemplateImportRecordV1[];
+  /** The card currently open for review; nothing is applied while it is. */
+  reviewing?: TemplateImportRecordV1;
+  importError?: string;
+  loadImports(): Promise<void>;
+  /** Reads the shared template and opens a review card. Applies nothing. */
+  planImport(shareId: string): Promise<void>;
+  /** The User's confirmation, and the only thing that applies anything. */
+  applyImport(importId: string): Promise<void>;
+  dismissReview(): void;
 }
 
 export const botTemplateStateKey: InjectionKey<Ref<BotTemplateClientState>> =

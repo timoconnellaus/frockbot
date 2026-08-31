@@ -70,6 +70,11 @@ interface TemplateCommandMetaV1 {
 
 export type TemplateCommandV1 =
   | (TemplateCommandMetaV1 & { type: "template/stage"; botId: string })
+  | (TemplateCommandMetaV1 & { type: "template/plan-import"; shareId: string })
+  | (TemplateCommandMetaV1 & {
+      type: "template/apply-import";
+      importId: string;
+    })
   | (TemplateCommandMetaV1 & {
       type: "template/set-visibility";
       shareId: string;
@@ -79,6 +84,8 @@ export type TemplateCommandV1 =
 
 export const TEMPLATE_COMMAND_TYPES_V1: readonly TemplateCommandV1["type"][] = [
   "template/stage",
+  "template/plan-import",
+  "template/apply-import",
   "template/set-visibility",
   "template/revoke",
 ];
@@ -160,6 +167,25 @@ export function decodeTemplateCommandV1(input: unknown): TemplateCommandV1 {
       type,
       commandId: identifier(value.commandId, "template commandId"),
       botId: identifier(value.botId, "template command botId"),
+    };
+  }
+  if (type === "template/plan-import") {
+    exact(value, ["schemaVersion", "type", "commandId", "shareId"], type);
+    parseTemplateShareIdV1(value.shareId);
+    return {
+      schemaVersion: 1,
+      type,
+      commandId: identifier(value.commandId, "template commandId"),
+      shareId: value.shareId as string,
+    };
+  }
+  if (type === "template/apply-import") {
+    exact(value, ["schemaVersion", "type", "commandId", "importId"], type);
+    return {
+      schemaVersion: 1,
+      type,
+      commandId: identifier(value.commandId, "template commandId"),
+      importId: identifier(value.importId, "template importId"),
     };
   }
   if (type === "template/set-visibility") {
@@ -290,6 +316,7 @@ export function templateCommandFingerprintV1(
     semantic.type,
     "botId" in semantic ? semantic.botId : null,
     "shareId" in semantic ? semantic.shareId : null,
+    "importId" in semantic ? semantic.importId : null,
     "visibility" in semantic ? semantic.visibility : null,
   ]);
 }
@@ -298,4 +325,297 @@ export function templateCommandFingerprintV1(
 export function templateSharePathV1(shareId: string): string {
   parseTemplateShareIdV1(shareId);
   return `/templates/v1/${encodeURIComponent(shareId)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Import: the durable record and the review card.
+//
+// "Failures are observable through durable state rather than existing only in
+// process logs or client memory." An import is a saga with one receipt per
+// step, so a Bot that came out half-built says exactly which step failed and
+// why, and re-applying resumes from there rather than starting again.
+// ---------------------------------------------------------------------------
+
+export const TEMPLATE_IMPORT_STEP_STATUSES_V1 = [
+  "pending",
+  "in-flight",
+  "done",
+  "skipped",
+  "failed",
+] as const;
+
+export type TemplateImportStepStatusV1 =
+  (typeof TEMPLATE_IMPORT_STEP_STATUSES_V1)[number];
+
+export interface TemplateImportStepReceiptV1 {
+  key: string;
+  kind:
+    | "bot/create"
+    | "user/install-package"
+    | "skill/write"
+    | "routine/create"
+    | "routine/disable";
+  status: TemplateImportStepStatusV1;
+  subject?: string;
+  /** What the step produced: a generation id, a routine id, a receipt id. */
+  detail?: string;
+  failure?: string;
+}
+
+export const TEMPLATE_IMPORT_STATUSES_V1 = [
+  "planned",
+  "applying",
+  "applied",
+  "failed",
+] as const;
+
+export type TemplateImportStatusV1 =
+  (typeof TEMPLATE_IMPORT_STATUSES_V1)[number];
+
+/**
+ * One import, as the User Durable Object holds it and the client renders it.
+ *
+ * `status: "planned"` is the state a review card is shown in, and nothing has
+ * been applied in it. Only an explicit `template/apply-import` moves it on,
+ * which is what "Nothing is applied before the User confirms" means in durable
+ * state rather than in a component's `v-if`.
+ */
+export interface TemplateImportRecordV1 {
+  schemaVersion: 1;
+  importId: string;
+  shareId: string;
+  hash: string;
+  botId: string;
+  status: TemplateImportStatusV1;
+  botName: string;
+  packages: {
+    catalogId: string;
+    packageId: string;
+    displayName: string;
+    version: string;
+    status: "will-install" | "already-installed" | "missing";
+  }[];
+  connections: {
+    name: string;
+    connectionTypeId?: string;
+    url?: string;
+    hint?: string;
+  }[];
+  skills: string[];
+  routines: { slug: string; disabled: boolean }[];
+  steps: TemplateImportStepReceiptV1[];
+  createdAt: string;
+  updatedAt: string;
+  catalogGeneration?: string;
+  failure?: string;
+}
+
+export interface TemplateImportListViewV1 {
+  schemaVersion: 1;
+  imports: TemplateImportRecordV1[];
+}
+
+export interface TemplateImportReceiptV1 {
+  schemaVersion: 1;
+  commandId: string;
+  status: "applied";
+  import: TemplateImportRecordV1;
+}
+
+/** Most imports one User may hold, so planning cannot fill the object. */
+export const MAX_TEMPLATE_IMPORTS_V1 = 100;
+
+function importStatus(value: unknown): TemplateImportStatusV1 {
+  const found = TEMPLATE_IMPORT_STATUSES_V1.find((known) => known === value);
+  if (!found)
+    throw new TemplateDecodeError("template import status is invalid");
+  return found;
+}
+
+function importStepStatus(value: unknown): TemplateImportStepStatusV1 {
+  const found = TEMPLATE_IMPORT_STEP_STATUSES_V1.find(
+    (known) => known === value,
+  );
+  if (!found) {
+    throw new TemplateDecodeError("template import step status is invalid");
+  }
+  return found;
+}
+
+const IMPORT_STEP_KINDS = [
+  "bot/create",
+  "user/install-package",
+  "skill/write",
+  "routine/create",
+  "routine/disable",
+] as const;
+
+function optional(value: unknown, label: string, maximum: number) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length > maximum) {
+    throw new TemplateDecodeError(`${label} is invalid`);
+  }
+  return value;
+}
+
+function required(value: unknown, label: string, maximum: number): string {
+  if (typeof value !== "string" || !value || value.length > maximum) {
+    throw new TemplateDecodeError(`${label} is invalid`);
+  }
+  return value;
+}
+
+export function decodeTemplateImportStepReceiptV1(
+  input: unknown,
+): TemplateImportStepReceiptV1 {
+  const value = record(input, "template import step");
+  const kind = IMPORT_STEP_KINDS.find((known) => known === value.kind);
+  if (!kind) {
+    throw new TemplateDecodeError("template import step kind is unknown");
+  }
+  return {
+    key: required(value.key, "template import step key", 200),
+    kind,
+    status: importStepStatus(value.status),
+    ...(value.subject === undefined
+      ? {}
+      : { subject: required(value.subject, "step subject", 200) }),
+    ...(value.detail === undefined
+      ? {}
+      : { detail: required(value.detail, "step detail", 500) }),
+    ...(value.failure === undefined
+      ? {}
+      : { failure: required(value.failure, "step failure", 2_000) }),
+  };
+}
+
+export function decodeTemplateImportRecordV1(
+  input: unknown,
+): TemplateImportRecordV1 {
+  const value = record(input, "template import");
+  if (value.schemaVersion !== 1) {
+    throw new TemplateDecodeError("template import schemaVersion is invalid");
+  }
+  if (
+    !Array.isArray(value.steps) ||
+    !Array.isArray(value.packages) ||
+    !Array.isArray(value.connections) ||
+    !Array.isArray(value.skills) ||
+    !Array.isArray(value.routines)
+  ) {
+    throw new TemplateDecodeError("template import sections are invalid");
+  }
+  parseTemplateShareIdV1(value.shareId);
+  return {
+    schemaVersion: 1,
+    importId: identifier(value.importId, "template importId"),
+    shareId: value.shareId as string,
+    hash: required(value.hash, "template import hash", 64),
+    botId: required(value.botId, "template import botId", 128),
+    status: importStatus(value.status),
+    botName: required(value.botName, "template import botName", 100),
+    packages: value.packages.map((entry) => {
+      const line = record(entry, "template import package");
+      const status = ["will-install", "already-installed", "missing"].find(
+        (known) => known === line.status,
+      );
+      if (!status) {
+        throw new TemplateDecodeError(
+          "template import package status is invalid",
+        );
+      }
+      return {
+        catalogId: required(line.catalogId, "catalogId", 64),
+        packageId: required(line.packageId, "packageId", 64),
+        displayName: required(line.displayName, "displayName", 100),
+        version: required(line.version, "version", 100),
+        status: status as "will-install" | "already-installed" | "missing",
+      };
+    }),
+    connections: value.connections.map((entry) => {
+      const line = record(entry, "template import connection");
+      return {
+        name: required(line.name, "connection name", 100),
+        ...(line.connectionTypeId === undefined
+          ? {}
+          : {
+              connectionTypeId: required(
+                line.connectionTypeId,
+                "connectionTypeId",
+                64,
+              ),
+            }),
+        ...(line.url === undefined
+          ? {}
+          : { url: required(line.url, "connection url", 2_048) }),
+        ...(line.hint === undefined
+          ? {}
+          : { hint: required(line.hint, "connection hint", 500) }),
+      };
+    }),
+    skills: value.skills.map((slug) => required(slug, "skill slug", 128)),
+    routines: value.routines.map((entry) => {
+      const line = record(entry, "template import routine");
+      if (typeof line.disabled !== "boolean") {
+        throw new TemplateDecodeError("template import routine is invalid");
+      }
+      return {
+        slug: required(line.slug, "routine slug", 128),
+        disabled: line.disabled,
+      };
+    }),
+    steps: value.steps.map(decodeTemplateImportStepReceiptV1),
+    createdAt: required(value.createdAt, "template import createdAt", 64),
+    updatedAt: required(value.updatedAt, "template import updatedAt", 64),
+    ...(value.catalogGeneration === undefined
+      ? {}
+      : {
+          catalogGeneration: required(
+            value.catalogGeneration,
+            "catalogGeneration",
+            64,
+          ),
+        }),
+    ...(value.failure === undefined
+      ? {}
+      : { failure: required(value.failure, "template import failure", 2_000) }),
+  };
+}
+
+export function decodeTemplateImportReceiptV1(
+  input: unknown,
+): TemplateImportReceiptV1 {
+  const value = record(input, "template import receipt");
+  exact(
+    value,
+    ["schemaVersion", "commandId", "status", "import"],
+    "template import receipt",
+  );
+  if (value.schemaVersion !== 1 || value.status !== "applied") {
+    throw new TemplateDecodeError("template import receipt is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    commandId: identifier(value.commandId, "template receipt commandId"),
+    status: "applied",
+    import: decodeTemplateImportRecordV1(value.import),
+  };
+}
+
+export function decodeTemplateImportListViewV1(
+  input: unknown,
+): TemplateImportListViewV1 {
+  const value = record(input, "template import list");
+  exact(value, ["schemaVersion", "imports"], "template import list");
+  if (
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.imports) ||
+    value.imports.length > MAX_TEMPLATE_IMPORTS_V1
+  ) {
+    throw new TemplateDecodeError("template import list is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    imports: value.imports.map(decodeTemplateImportRecordV1),
+  };
 }

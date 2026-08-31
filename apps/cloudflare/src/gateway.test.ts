@@ -636,6 +636,12 @@ class MemoryConfiguration
   resolveTemplateShare(): Promise<undefined> {
     return Promise.resolve(undefined);
   }
+  listTemplateImports() {
+    return Promise.resolve({ schemaVersion: 1 as const, imports: [] });
+  }
+  executeTemplateImport(): never {
+    throw new Error("template imports are not exercised here");
+  }
   readSheep(request: Parameters<BotConfigurationBinding["readSheep"]>[0]) {
     return Promise.resolve({
       schemaVersion: 1 as const,

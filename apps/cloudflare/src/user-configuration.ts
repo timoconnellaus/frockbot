@@ -16,8 +16,15 @@ import {
   decodeUserConfigurationReadRpcV1,
   type ConnectionDependencyRequirementV1,
 } from "@frockbot/configuration-core";
-import { MAX_TEMPLATE_BYTES_V1 } from "@frockbot/template-core";
-import { decodeRoutineListViewV1 } from "@frockbot/plugin-routines/shared";
+import {
+  MAX_TEMPLATE_BYTES_V1,
+  parseTemplateShareIdV1,
+} from "@frockbot/template-core";
+import { parseCatalogIndexDocumentV1 } from "@frockbot/catalog-core";
+import {
+  decodeRoutineCommandReceiptV1,
+  decodeRoutineListViewV1,
+} from "@frockbot/plugin-routines/shared";
 import {
   decodeConnectionDependencyCommandV1,
   type ConnectionDependencyResultV1,
@@ -29,6 +36,7 @@ import {
 import type {
   TemplateBlobStoreV1,
   TemplateBotReaderV1,
+  TemplateImportWriterV1,
 } from "@frockbot/plugin-bot-template/user";
 import {
   decodeBotLifecycleCommandV1,
@@ -143,6 +151,22 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           botTemplate: {
             bots: this.templateBotReader(),
             blobs: this.templateBlobStore(),
+            importer: this.templateImportWriter(),
+            readPublishedShare: (shareId: string) =>
+              this.readPublishedShare(shareId),
+            ...(this.env.PACKAGE_CATALOG
+              ? {
+                  readCatalogIds: async (generation: string) => {
+                    const found = await new R2PackageCatalog(
+                      this.env.PACKAGE_CATALOG!,
+                    ).readIndexDocument(generation);
+                    if (!found) return [];
+                    return parseCatalogIndexDocumentV1(
+                      found.document,
+                    ).entries.map((entry) => entry.catalogId);
+                  },
+                }
+              : {}),
             ...(this.env.PACKAGE_CATALOG
               ? {
                   readCatalogDisplayName: async (
@@ -996,6 +1020,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       await contribution.alarm?.();
     }
     await contributions.publisher.recover();
+    // An import left mid-apply by an eviction resumes here, from the first
+    // step its record does not already mark done.
+    const importer = this.identity;
+    if (importer) await contributions.botTemplate.recoverImports(importer);
     // The Bot lifecycle sagas (archive and restore) resume on the same firing.
     await contributions.flock.alarm();
     // An archive that settled on a retry rather than on its command purges the
@@ -1303,6 +1331,163 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
+   * The import writer: the importing User's own commands, and no others.
+   *
+   * `bot/create` goes to this object's Flock, `user/install-package` to its
+   * Settings Contribution, and the two Bot-scoped writes to the Bot Durable
+   * Object that owns them. There is no method here for a Connection or an
+   * Assignment — not because the import declines to call one, but because the
+   * seam cannot express it.
+   */
+  private templateImportWriter(): TemplateImportWriterV1 {
+    const botState = (userId: string, botId: string) => {
+      const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+      // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+      return this.env.BOT_STATES.get(id) as unknown as {
+        writeUserSkill(input: unknown): Promise<unknown>;
+        executeRoutineCommand(input: unknown): Promise<unknown>;
+      };
+    };
+    return {
+      listBots: async () => {
+        const directory = await (await this.flockContribution()).listBots();
+        return {
+          revision: directory.revision,
+          bots: directory.bots.map((bot) => ({ botId: bot.botId })),
+        };
+      },
+      createBot: async (command) => {
+        const receipt = await (
+          await this.flockContribution()
+        ).createBot(command.userId, {
+          schemaVersion: 1,
+          type: "bot/create",
+          commandId: command.commandId,
+          expectedRevision: command.expectedRevision,
+          botId: command.botId,
+          name: command.name,
+          ...(command.description === undefined
+            ? {}
+            : { description: command.description }),
+          sheep: command.sheep,
+        });
+        return receipt.status === "applied"
+          ? { status: "applied" as const }
+          : {
+              status: "rejected" as const,
+              ...(receipt.failure === undefined
+                ? {}
+                : { failure: receipt.failure }),
+            };
+      },
+      installPackage: async (install) => {
+        // The User's own install command, validated against their own pinned
+        // generation by the Settings Contribution and receipted on its
+        // `commandId`, so a replayed step is a read. It carries no `values`:
+        // a template never exports setup values, because they may hold keys,
+        // and an install with none leaves the store the User already has.
+        const receipt = await (
+          await this.settingsContribution()
+        ).executeConfiguration({
+          schemaVersion: 1,
+          userId: install.userId,
+          command: {
+            schemaVersion: 1,
+            type: "user/install-package",
+            commandId: install.commandId,
+            expectedRevision: (
+              await (await this.settingsContribution()).read(install.userId)
+            ).revision,
+            packageId: install.packageId,
+            version: install.version,
+            catalogId: install.catalogId,
+            catalogGeneration: install.catalogGeneration,
+          },
+        });
+        return receipt.status === "rejected"
+          ? {
+              status: "rejected",
+              ...(receipt.failure === undefined
+                ? {}
+                : { failure: receipt.failure }),
+            }
+          : { status: receipt.status };
+      },
+      writeSkill: async (skill) => {
+        const outcome = rpcJsonSnapshotV1(
+          await botState(skill.userId, skill.botId).writeUserSkill({
+            schemaVersion: 1,
+            userId: skill.userId,
+            botId: skill.botId,
+            slug: skill.slug,
+            name: skill.name,
+            description: skill.description,
+            body: skill.body,
+          }),
+        ) as Record<string, unknown>;
+        return outcome.status === "written"
+          ? {
+              status: "written" as const,
+              generationId: String(outcome.generationId),
+            }
+          : {
+              status: "refused" as const,
+              reason: String(outcome.reason ?? "the Skill write was refused"),
+            };
+      },
+      executeRoutineCommand: async (routine) => {
+        const receipt = rpcJsonSnapshotV1(
+          await botState(routine.userId, routine.botId).executeRoutineCommand({
+            schemaVersion: 1,
+            userId: routine.userId,
+            botId: routine.botId,
+            command: routine.command,
+          }),
+        ) as Record<string, unknown>;
+        const decoded = decodeRoutineCommandReceiptV1(receipt);
+        return {
+          status: decoded.status,
+          ...(decoded.status === "applied"
+            ? { routineId: decoded.routine.routineId }
+            : { routineId: decoded.routineId }),
+        };
+      },
+    };
+  }
+
+  /**
+   * One published share, of any User.
+   *
+   * The share id names its owner, so this derives that User's Durable Object
+   * and asks it. Nothing here can read another User's storage directly; the
+   * owning object still decides, and it answers only for `link` and `public`.
+   */
+  private async readPublishedShare(
+    shareId: string,
+  ): Promise<{ hash: string; document: string } | undefined> {
+    let ownerId: string;
+    try {
+      ownerId = parseTemplateShareIdV1(shareId).ownerId;
+    } catch {
+      return undefined;
+    }
+    const owner = this.env.USER_CONFIGURATIONS.idFromName(ownerId);
+    // SAFETY: USER_CONFIGURATIONS is bound to this class; generated RPC methods are not represented by workers-types.
+    const rpc = this.env.USER_CONFIGURATIONS.get(owner) as unknown as {
+      resolveTemplateShare(input: unknown): Promise<unknown>;
+    };
+    const answered = await rpc.resolveTemplateShare({
+      schemaVersion: 1,
+      shareId,
+    });
+    if (answered === undefined || answered === null) return undefined;
+    const found = rpcJsonSnapshotV1(answered) as Record<string, unknown>;
+    return typeof found.hash === "string" && typeof found.document === "string"
+      ? { hash: found.hash, document: found.document }
+      : undefined;
+  }
+
+  /**
    * The immutable template blob store, over the Catalog bucket.
    *
    * The collision check is the whole write rule, and it is the one
@@ -1371,6 +1556,34 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       }
     }
     return (await this.botTemplateContribution()).execute(userId, command);
+  }
+
+  async listTemplateImports(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.botTemplateContribution()).listImports(
+      request.userId as string,
+    );
+  }
+
+  /**
+   * `template/plan-import` and `template/apply-import`.
+   *
+   * Planning reads and writes a `planned` record; only an explicit apply moves
+   * it on. "Nothing is applied before the User confirms" is durable state here,
+   * not a client-side guard.
+   */
+  async executeTemplateImport(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeTemplateCommandV1),
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    return (await this.botTemplateContribution()).executeImport(
+      userId,
+      request.command,
+    );
   }
 
   /**

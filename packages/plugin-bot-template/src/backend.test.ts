@@ -6,6 +6,7 @@ import {
 } from "./backend.ts";
 import type {
   TemplateCommandV1,
+  TemplateImportRecordV1,
   TemplateShareListViewV1,
   TemplateShareReceiptV1,
 } from "./shared.ts";
@@ -51,6 +52,30 @@ function host(
         visibility: "link",
         document: DOCUMENT,
       }),
+    listTemplateImports: () =>
+      Promise.resolve({ schemaVersion: 1 as const, imports: [] }),
+    executeTemplateImport: (
+      _userId: string,
+      command: TemplateCommandV1,
+    ): Promise<TemplateImportRecordV1> => {
+      commands.push(command);
+      return Promise.resolve({
+        schemaVersion: 1,
+        importId: "import-1",
+        shareId: SHARE_ID,
+        hash: HASH,
+        botId: "budget-abc123456789",
+        status: "planned",
+        botName: "Budget",
+        packages: [],
+        connections: [],
+        skills: [],
+        routines: [],
+        steps: [{ key: "bot/create", kind: "bot/create", status: "pending" }],
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      });
+    },
     ...overrides,
   };
 }
@@ -230,5 +255,72 @@ describe("the authenticated share route", () => {
       { userId: "user-1", client: "browser" },
     );
     expect(response?.status).toBe(404);
+  });
+});
+
+describe("the import route", () => {
+  it("plans an import and returns the review card", async () => {
+    const dependencies = host();
+    const contribution = createBotTemplateBackendContribution(dependencies);
+    const url = new URL("https://bot.frockbot.com/api/bot-template-imports");
+    const response = await contribution.route(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "template/plan-import",
+          commandId: "import-1",
+          shareId: SHARE_ID,
+        }),
+      }),
+      url,
+      { userId: "user-b", client: "browser" },
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({ status: "planned" });
+    expect(dependencies.commands[0]).toMatchObject({
+      type: "template/plan-import",
+    });
+  });
+
+  it("refuses a share command on the import route", async () => {
+    const contribution = createBotTemplateBackendContribution(host());
+    const url = new URL("https://bot.frockbot.com/api/bot-template-imports");
+    const response = await contribution.route(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "template/revoke",
+          commandId: "revoke-1",
+          shareId: SHARE_ID,
+        }),
+      }),
+      url,
+      { userId: "user-b", client: "browser" },
+    );
+    expect(response?.status).toBe(400);
+  });
+
+  it("refuses an import command on the share route", async () => {
+    const contribution = createBotTemplateBackendContribution(host());
+    const url = new URL("https://bot.frockbot.com/api/bot-templates");
+    const response = await contribution.route(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "template/apply-import",
+          commandId: "apply-1",
+          importId: "import-1",
+        }),
+      }),
+      url,
+      { userId: "user-b", client: "browser" },
+    );
+    expect(response?.status).toBe(400);
   });
 });

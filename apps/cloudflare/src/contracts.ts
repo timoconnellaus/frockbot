@@ -46,6 +46,8 @@ import type {
 } from "@frockbot/plugin-flock/shared";
 import type {
   TemplateCommandV1,
+  TemplateImportListViewV1,
+  TemplateImportRecordV1,
   TemplateShareListViewV1,
   TemplateShareReceiptV1,
 } from "@frockbot/plugin-bot-template/shared";
@@ -520,6 +522,15 @@ export interface UserConfigurationBinding {
    * Durable Object answers only for a `link` or `public` share it has not had
    * revoked. Everything else is `undefined`, which the route serves as 404.
    */
+  listTemplateImports(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<TemplateImportListViewV1>;
+  executeTemplateImport(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: TemplateCommandV1;
+  }): Promise<TemplateImportRecordV1>;
   resolveTemplateShare(request: { schemaVersion: 1; shareId: string }): Promise<
     | {
         schemaVersion: 1;

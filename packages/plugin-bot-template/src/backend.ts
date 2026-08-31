@@ -23,9 +23,13 @@ import {
 } from "@frockbot/template-core";
 import {
   decodeTemplateCommandV1,
+  decodeTemplateImportListViewV1,
+  decodeTemplateImportRecordV1,
   decodeTemplateShareListViewV1,
   decodeTemplateShareReceiptV1,
   type TemplateCommandV1,
+  type TemplateImportListViewV1,
+  type TemplateImportRecordV1,
   type TemplateShareListViewV1,
   type TemplateShareReceiptV1,
 } from "./shared.js";
@@ -46,6 +50,11 @@ export interface BotTemplateGatewayHostV1 {
   readPublishedTemplate(
     shareId: string,
   ): Promise<PublishedTemplateV1 | undefined>;
+  listTemplateImports(userId: string): Promise<TemplateImportListViewV1>;
+  executeTemplateImport(
+    userId: string,
+    command: TemplateCommandV1,
+  ): Promise<TemplateImportRecordV1>;
 }
 
 export interface BotTemplateBackendRouteContribution {
@@ -63,6 +72,7 @@ export interface BotTemplateBackendRouteContribution {
 }
 
 const SHARES_PATH = "/api/bot-templates";
+const IMPORTS_PATH = "/api/bot-template-imports";
 const PUBLIC_PREFIX = "/templates/v1/";
 
 function jsonError(status: number, message: string): Response {
@@ -169,10 +179,43 @@ export function createBotTemplateBackendContribution(
     },
 
     async route(request, url, context) {
-      if (url.pathname !== SHARES_PATH) return undefined;
+      if (url.pathname !== SHARES_PATH && url.pathname !== IMPORTS_PATH) {
+        return undefined;
+      }
       if (!context.userId) return jsonError(401, "authentication required");
       if ([...url.searchParams.keys()].length > 0) {
         return jsonError(400, "the template route takes no query parameters");
+      }
+      if (url.pathname === IMPORTS_PATH) {
+        try {
+          if (request.method === "GET") {
+            return Response.json(
+              decodeTemplateImportListViewV1(
+                await host.listTemplateImports(context.userId),
+              ),
+            );
+          }
+          if (request.method !== "POST") {
+            return jsonError(405, "method not allowed");
+          }
+          const command = decodeTemplateCommandV1(await request.json());
+          if (
+            command.type !== "template/plan-import" &&
+            command.type !== "template/apply-import"
+          ) {
+            return jsonError(
+              400,
+              "the import route takes an import command only",
+            );
+          }
+          return Response.json(
+            decodeTemplateImportRecordV1(
+              await host.executeTemplateImport(context.userId, command),
+            ),
+          );
+        } catch (error) {
+          return errorResponse(error);
+        }
       }
       try {
         if (request.method === "GET") {
@@ -186,6 +229,15 @@ export function createBotTemplateBackendContribution(
           return jsonError(405, "method not allowed");
         }
         const command = decodeTemplateCommandV1(await request.json());
+        if (
+          command.type === "template/plan-import" ||
+          command.type === "template/apply-import"
+        ) {
+          return jsonError(
+            400,
+            "an import command belongs on the import route",
+          );
+        }
         return Response.json(
           decodeTemplateShareReceiptV1(
             await host.executeTemplateCommand(context.userId, command),
