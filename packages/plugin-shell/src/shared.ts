@@ -19,6 +19,7 @@ import type {
   SendToUserPayloadV1,
   SkillRefV1,
 } from "@frockbot/kernel-contracts";
+import type { McpServerStatusViewV1 } from "@frockbot/plugin-mcp/records";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { InjectionKey, Ref } from "vue";
 
@@ -130,6 +131,13 @@ export interface FrockBotWebData {
    * names and descriptions — never a body.
    */
   skillCatalog: ClientSkillCatalogEntryV1[];
+  /**
+   * The User's MCP servers: state, tool count, last handshake, instructions,
+   * failure, and the durable refusal ledger. Absent until it is loaded, and
+   * absent for a deployment with no MCP route — the Plugins surface then
+   * shows the servers as Connections and nothing more.
+   */
+  mcpServers?: McpServerStatusViewV1;
   settingsError?: string;
   selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
@@ -161,6 +169,19 @@ export interface FrockBotWebData {
   /** The model every Bot uses unless it overrides it. */
   saveDefaultModel(model: ModelAssignment | undefined): Promise<void>;
   loadPluginCatalog(): Promise<void>;
+  /** Refreshes {@link FrockBotWebData.mcpServers}. */
+  loadMcpServers(): Promise<void>;
+  /**
+   * The instructions attached to one MCP server, which become the description
+   * its tools carry in the next Turn's model request. An empty string clears
+   * them.
+   */
+  setMcpInstructions(serverId: string, instructions: string): Promise<void>;
+  /**
+   * Restarts one MCP server: its epoch is bumped, so the next admitted Turn
+   * re-handshakes and re-lists its tools.
+   */
+  restartMcpServer(serverId: string): Promise<void>;
   loadPackageCatalog(): Promise<void>;
   /** One entry detail, for the panel a User opens before installing. */
   loadCatalogEntry(catalogId: string): Promise<CatalogEntryV1 | undefined>;

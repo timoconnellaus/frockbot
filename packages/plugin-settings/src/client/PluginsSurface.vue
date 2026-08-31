@@ -39,6 +39,54 @@ const mcpApiKey = ref("");
  */
 const OLLAMA_PACKAGE_ID = "provider-ollama-cloud";
 const apiKeyBaseUrl = ref("");
+
+/**
+ * The MCP lifecycle panel: the durable server records the User Durable Object
+ * owns, which the Connection rows cannot show — a server's `needs-auth` or
+ * `error` state, when it last handshook, what its instructions are, and the
+ * refusals this build recorded rather than performed.
+ */
+const editingInstructionsFor = ref<string>();
+const instructionsDraft = ref("");
+const restartingServerId = ref<string>();
+const mcpServers = computed(() => web.value.mcpServers?.servers ?? []);
+const mcpRefusals = computed(() => web.value.mcpServers?.refusals ?? []);
+
+function mcpStateLabel(state: string): string {
+  if (state === "needs-auth") return "Needs authorization";
+  if (state === "connecting") return "Connecting";
+  if (state === "error") return "Error";
+  return "Ready";
+}
+
+function handshakeLabel(value: string): string {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value;
+}
+
+function beginInstructions(serverId: string, instructions: string): void {
+  editingInstructionsFor.value = serverId;
+  instructionsDraft.value = instructions;
+}
+
+function cancelInstructions(): void {
+  editingInstructionsFor.value = undefined;
+  instructionsDraft.value = "";
+}
+
+async function saveInstructions(serverId: string): Promise<void> {
+  await web.value.setMcpInstructions(serverId, instructionsDraft.value);
+  cancelInstructions();
+}
+
+async function restartServer(serverId: string): Promise<void> {
+  restartingServerId.value = serverId;
+  try {
+    await web.value.restartMcpServer(serverId);
+  } finally {
+    restartingServerId.value = undefined;
+  }
+}
 const rotatingConnectionId = ref<string>();
 const rotationKey = ref("");
 const labelingConnectionId = ref<string>();
@@ -74,6 +122,7 @@ const filteredPackageCatalog = computed(() => {
 onMounted(() => {
   void web.value.loadPluginCatalog();
   void web.value.loadPackageCatalog();
+  void web.value.loadMcpServers();
 });
 
 /**
@@ -612,6 +661,81 @@ async function disconnect(connectionId: string): Promise<void> {
           </div>
         </div>
 
+        <div
+          v-if="
+            item.packageId === MCP_PACKAGE_ID &&
+            (mcpServers.length > 0 || mcpRefusals.length > 0)
+          "
+          class="mcp-status"
+        >
+          <div
+            v-for="server in mcpServers"
+            :key="server.serverId"
+            class="mcp-server"
+          >
+            <div class="mcp-server-head">
+              <span class="mcp-server-name">{{ server.label }}</span>
+              <span :class="['mcp-state', `mcp-state-${server.state}`]">
+                {{ mcpStateLabel(server.state) }}
+              </span>
+            </div>
+            <p class="mcp-meta">
+              {{ server.toolCount }} tools · epoch {{ server.serverEpoch }} ·
+              last handshake {{ handshakeLabel(server.lastHandshakeAt) }}
+            </p>
+            <p v-if="server.failure" class="connection-failure">
+              {{ server.failure.code }}: {{ server.failure.message }}
+            </p>
+            <p v-if="server.instructions" class="mcp-instructions">
+              {{ server.instructions }}
+            </p>
+            <div class="account-actions">
+              <UiButton
+                @click="
+                  beginInstructions(server.serverId, server.instructions ?? '')
+                "
+              >
+                Instructions
+              </UiButton>
+              <UiButton
+                :disabled="restartingServerId === server.serverId"
+                @click="restartServer(server.serverId)"
+              >
+                {{
+                  restartingServerId === server.serverId
+                    ? "Restarting…"
+                    : "Restart"
+                }}
+              </UiButton>
+            </div>
+            <form
+              v-if="editingInstructionsFor === server.serverId"
+              class="api-key-form"
+              @submit.prevent="saveInstructions(server.serverId)"
+            >
+              <label>
+                <span>Instructions for this server's tools</span>
+                <textarea
+                  v-model="instructionsDraft"
+                  maxlength="4096"
+                  rows="4"
+                ></textarea>
+              </label>
+              <div class="api-key-actions">
+                <UiButton @click="cancelInstructions">Cancel</UiButton>
+                <UiButton type="submit" variant="primary">Save</UiButton>
+              </div>
+            </form>
+          </div>
+          <p
+            v-for="refusal in mcpRefusals"
+            :key="refusal.refusalId"
+            class="connection-failure"
+          >
+            {{ refusal.code }}: {{ refusal.message }}
+          </p>
+        </div>
+
         <form
           v-if="mcpFormOpen && item.packageId === MCP_PACKAGE_ID"
           class="api-key-form"
@@ -1136,10 +1260,66 @@ async function disconnect(connectionId: string): Promise<void> {
   font-size: var(--frock-text-base);
 }
 
-.api-key-hint {
+.mcp-status {
+  display: grid;
+  gap: 12px;
+  margin: 0 8px;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--frock-border);
+}
+
+.mcp-server {
+  display: grid;
+  gap: 6px;
+}
+
+.mcp-server-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-server-name {
+  font-size: var(--frock-text-base);
+  color: var(--frock-text);
+}
+
+.mcp-state {
+  padding: 1px 8px;
+  border: 1px solid var(--frock-border);
+  border-radius: 999px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+
+.mcp-state-ready {
+  color: var(--frock-text);
+}
+
+.mcp-state-error,
+.mcp-state-needs-auth {
+  color: var(--frock-danger-text);
+  border-color: var(--frock-danger-text);
+}
+
+.api-key-hint,
+.mcp-meta,
+.mcp-instructions {
   margin: 0;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
+}
+
+.api-key-form textarea {
+  min-width: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--frock-border);
+  border-radius: 9px;
+  background: var(--frock-surface-raised);
+  color: var(--frock-text);
+  font-size: var(--frock-text-base);
+  font-family: inherit;
+  resize: vertical;
 }
 
 .api-key-actions {

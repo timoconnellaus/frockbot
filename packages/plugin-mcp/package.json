@@ -10,7 +10,10 @@
     "./agent": "./src/agent.ts",
     "./manifest": "./src/manifest.ts",
     "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./backend": "./src/backend.ts",
+    "./records": "./src/records.ts",
+    "./lifecycle-tools": "./src/lifecycle-tools.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"

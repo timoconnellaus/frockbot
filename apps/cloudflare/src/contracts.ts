@@ -25,6 +25,11 @@ import type {
   RevokeConnectionResult,
   StartConnectionResult,
 } from "@frockbot/connection-core";
+import type {
+  McpLifecycleReceiptV1,
+  McpMountOutcomeReportV1,
+  McpServerStatusViewV1,
+} from "@frockbot/plugin-mcp/records";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
@@ -416,6 +421,20 @@ export interface UserConfigurationBinding {
     packageId: string;
     commandId: string;
   }): Promise<ConnectionCommandReceiptV1 | undefined>;
+  readMcpServers(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<McpServerStatusViewV1>;
+  executeMcpCommand(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: unknown;
+  }): Promise<McpLifecycleReceiptV1>;
+  recordMcpMountOutcome(request: {
+    schemaVersion: 1;
+    userId: string;
+    outcome: McpMountOutcomeReportV1;
+  }): Promise<void>;
   getConnection(request: {
     schemaVersion: 1;
     userId: string;

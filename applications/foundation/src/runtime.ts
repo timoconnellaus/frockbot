@@ -83,7 +83,22 @@ import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
 import mcpManifest from "@frockbot/plugin-mcp/manifest";
-import { createConfiguredMcpRuntimeContribution } from "@frockbot/plugin-mcp/agent";
+import {
+  createConfiguredMcpRuntimeContribution,
+  type McpMountOutcomeV1,
+} from "@frockbot/plugin-mcp/agent";
+import {
+  createMcpLifecycleRuntimePlugin,
+  type McpLifecycleToolHostV1,
+} from "@frockbot/plugin-mcp/lifecycle-tools";
+export type { McpLifecycleToolHostV1 } from "@frockbot/plugin-mcp/lifecycle-tools";
+// The MCP status and lifecycle routes are the Package's own; the Settings
+// gateway Contribution stays provider-neutral.
+import {
+  createMcpBackendContribution,
+  type McpGatewayHost,
+} from "@frockbot/plugin-mcp/backend";
+const createMcpGatewayPlugin = createMcpBackendContribution.plugin;
 import memoryManifest from "@frockbot/plugin-memory/manifest";
 import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
 import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
@@ -246,6 +261,13 @@ type AssignedRuntimeContributionFactory = (config: {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
+  /**
+   * Where a mount outcome goes durably, when the host carries the User's
+   * authority. A Contribution whose failure has no durable home simply omits
+   * it — and then an unreachable server is invisible, which is what this
+   * seam exists to prevent.
+   */
+  recordOutcome?(outcome: McpMountOutcomeV1): Promise<void>;
 }) => Plugin | undefined | Promise<Plugin | undefined>;
 
 const assignedRuntimeContributionFactories = new Map<
@@ -254,7 +276,11 @@ const assignedRuntimeContributionFactories = new Map<
 >([
   [
     "@frockbot/plugin-mcp/agent",
-    (config) => createConfiguredMcpRuntimeContribution(config),
+    (config) =>
+      createConfiguredMcpRuntimeContribution({
+        ...config,
+        ...(config.recordOutcome ? { onOutcome: config.recordOutcome } : {}),
+      }),
   ],
   [
     "@frockbot/plugin-web/agent",
@@ -430,6 +456,7 @@ export interface MountedFoundationBackend<T> {
 export type FoundationGatewayHost = {
   backendHost: "gateway";
 } & FlockGatewayHost &
+  McpGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
   SearchGatewayHost &
@@ -478,6 +505,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-flock/backend"
         ) {
           plugin = createFlockGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-mcp/backend"
+        ) {
+          plugin = createMcpGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-settings/backend"
@@ -677,10 +709,20 @@ export function createFoundationHostedRuntimePackages(
      * can name.
      */
     botSelfManagement?: FlockSelfRuntimeHostV1;
+    /**
+     * The MCP lifecycle seam, supplied by the Bot Durable Object for one
+     * admitted Turn. It carries the User's own MCP records, so the lifecycle
+     * tools run with exactly the authority the User already holds. Absent
+     * outside a Turn, and the tools are then not offered at all.
+     */
+    mcp?: McpLifecycleToolHostV1;
     packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
+    ...(host.mcp
+      ? [runtimePackage(plan, "mcp", createMcpLifecycleRuntimePlugin(host.mcp))]
+      : []),
     ...(host.botSelfManagement
       ? [
           runtimePackage(
@@ -739,6 +781,42 @@ export function createFoundationHostedRuntimePackages(
   ];
 }
 
+/**
+ * Collapse runtime Contributions that share a contribution specifier into one.
+ *
+ * The runtime resolves a Package's declared runtime entry to exactly one
+ * Plugin — `resolveContribution` takes the first match and `packages.install`
+ * dedupes by specifier — so two entries naming the same Contribution silently
+ * lose one. `plugin-mcp` produces several on purpose: one lifecycle
+ * Contribution for the Turn, and one per assigned server, up to the per-User
+ * ceiling. Merging them into a single Plugin that mounts each in order is how
+ * all of them reach the Bot; the order is preserved, so the lifecycle tools
+ * mount before the servers whose state they report.
+ */
+export function mergeFoundationRuntimePackages(
+  packages: readonly FoundationAssignedRuntimePackage[],
+): FoundationAssignedRuntimePackage[] {
+  const merged: FoundationAssignedRuntimePackage[] = [];
+  const byContribution = new Map<string, Plugin[]>();
+  for (const pkg of packages) {
+    const existing = byContribution.get(pkg.contributionSpecifier);
+    if (existing) {
+      existing.push(pkg.plugin);
+      continue;
+    }
+    byContribution.set(pkg.contributionSpecifier, [pkg.plugin]);
+    merged.push(pkg);
+  }
+  return merged.map((pkg) => {
+    const plugins = byContribution.get(pkg.contributionSpecifier) ?? [];
+    if (plugins.length <= 1) return pkg;
+    const composite: Plugin.Function = (ctx) => {
+      for (const plugin of plugins) ctx.plugin(plugin);
+    };
+    return { ...pkg, plugin: composite };
+  });
+}
+
 export async function createFoundationAssignedRuntimePackages(
   plan: ApplicationPlan,
   settings: BotSettingsViewV1,
@@ -761,6 +839,8 @@ export async function createFoundationAssignedRuntimePackages(
       assignment: BotSettingsViewV1["assignments"][number],
       effectId: string,
     ): Promise<void>;
+    /** The durable home of a mount outcome, when the host has one. */
+    recordOutcome?(outcome: McpMountOutcomeV1): Promise<void>;
   },
 ): Promise<FoundationAssignedRuntimePackage[]> {
   const result: FoundationAssignedRuntimePackage[] = [];
@@ -811,6 +891,7 @@ export async function createFoundationAssignedRuntimePackages(
               host.settleCredential!(admittedAssignment, effectId),
           }
         : {}),
+      ...(host.recordOutcome ? { recordOutcome: host.recordOutcome } : {}),
     });
     if (!plugin) continue;
     result.push({

@@ -39,6 +39,11 @@ import {
   type CatalogIndexEntryV1,
 } from "@frockbot/catalog-core";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
+import {
+  decodeMcpLifecycleReceiptV1,
+  decodeMcpServerStatusViewV1,
+} from "@frockbot/plugin-mcp/records";
+import { MCP_SERVERS_ROUTE } from "@frockbot/plugin-mcp/backend";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
 import { ref } from "vue";
 import {
@@ -986,6 +991,37 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     });
   }
 
+  /**
+   * One MCP lifecycle command, followed by a fresh status read. A refusal —
+   * a stdio server, a quota breach — comes back as a receipt, not an
+   * exception, and the surface shows it beside the servers rather than as an
+   * error that loses the reason.
+   */
+  async function executeMcpCommand(command: unknown): Promise<void> {
+    if (!ctx.transport.hostedRequest) {
+      throw new Error("MCP lifecycle is unavailable");
+    }
+    try {
+      const receipt = decodeMcpLifecycleReceiptV1(
+        await ctx.transport.hostedRequest(
+          MCP_SERVERS_ROUTE,
+          "POST",
+          JSON.stringify(command),
+        ),
+      );
+      if (receipt.status !== "applied") {
+        web.value.settingsError =
+          receipt.failure ?? "The MCP command was refused";
+      } else {
+        web.value.settingsError = undefined;
+      }
+    } catch (error) {
+      web.value.settingsError =
+        error instanceof Error ? error.message : "The MCP command failed";
+    }
+    await web.value.loadMcpServers();
+  }
+
   const web = ref<FrockBotWebData>({
     connection: "ready",
     modelLabel: "No default model",
@@ -1442,6 +1478,44 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           error instanceof Error ? error.message : "Could not load Plugins",
         );
       }
+    },
+    /**
+     * The MCP status projection. A separate read from the settings view: a
+     * restart changes a server's state without touching the User settings
+     * revision a client is holding an `expectedRevision` against.
+     */
+    async loadMcpServers(): Promise<void> {
+      if (!ctx.transport.hostedRequest) return;
+      try {
+        web.value.mcpServers = decodeMcpServerStatusViewV1(
+          await ctx.transport.hostedRequest(MCP_SERVERS_ROUTE),
+        );
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error
+            ? error.message
+            : "Could not load the MCP servers";
+      }
+    },
+    async setMcpInstructions(
+      serverId: string,
+      instructions: string,
+    ): Promise<void> {
+      await executeMcpCommand({
+        schemaVersion: 1,
+        type: "mcp/set-instructions",
+        commandId: crypto.randomUUID(),
+        serverId,
+        instructions,
+      });
+    },
+    async restartMcpServer(serverId: string): Promise<void> {
+      await executeMcpCommand({
+        schemaVersion: 1,
+        type: "mcp/restart",
+        commandId: crypto.randomUUID(),
+        serverId,
+      });
     },
     /**
      * The remote Catalog index. Read through the gateway route, never from

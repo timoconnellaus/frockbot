@@ -179,6 +179,17 @@ function toolCallStream(
 export const MCP_ORIGIN = "https://mcp.example.test";
 export const MCP_ENDPOINT = `${MCP_ORIGIN}/mcp`;
 export const MCP_GOOD_API_KEY = "workerd-mcp-key";
+/** A host that is reachable but answers nothing an MCP client can use. */
+export const MCP_UNREACHABLE_ENDPOINT = `${MCP_ORIGIN}/mcp-down`;
+/**
+ * How many `initialize` exchanges the stub has answered. It lives beside the
+ * stub, in the outbound service, because that is the only place a test can
+ * count what actually left the deployment — which is what proves a restart
+ * makes the next Turn handshake again rather than reusing a client.
+ */
+export const MCP_HANDSHAKE_COUNT_ENDPOINT = `${MCP_ORIGIN}/control/handshakes`;
+
+let mcpHandshakes = 0;
 
 /**
  * A remote MCP server, stubbed at the same outbound seam as Ollama Cloud.
@@ -192,6 +203,14 @@ export const MCP_GOOD_API_KEY = "workerd-mcp-key";
  */
 export async function mcpServerStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
+  if (url.pathname === "/control/handshakes") {
+    return Response.json({ handshakes: mcpHandshakes });
+  }
+  // A host that answers, and answers nothing an MCP client can use: the
+  // durable `error` state a mount must record has to come from somewhere.
+  if (url.pathname === "/mcp-down") {
+    return new Response("the MCP server is gone", { status: 503 });
+  }
   if (url.pathname !== "/mcp") {
     return new Response("unexpected MCP request", { status: 404 });
   }
@@ -217,6 +236,7 @@ export async function mcpServerStub(request: Request): Promise<Response> {
   const reply = (result: unknown): Response =>
     Response.json({ jsonrpc: "2.0", id: body.id, result });
   if (body.method === "initialize") {
+    mcpHandshakes += 1;
     return reply({
       protocolVersion: "2025-06-18",
       capabilities: { tools: {} },

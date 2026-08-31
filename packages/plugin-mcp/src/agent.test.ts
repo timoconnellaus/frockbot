@@ -6,6 +6,8 @@ import {
   createConfiguredMcpRuntimeContribution,
   decodeMcpConnectionSettingsV1,
   MAX_MCP_SERVERS_PER_USER_V1,
+  mcpAssignmentResolutionV1,
+  mcpConnectionLifecycleV1,
   mcpServerSlugV1,
   mcpToolNameV1,
 } from "./agent.js";
@@ -96,6 +98,7 @@ async function mount(config: {
   connection?: ConnectionView;
   assignmentIndex?: number;
   failures?: string[];
+  outcomes?: unknown[];
 }): Promise<{ root: Context; mounted: boolean }> {
   const plugin = await createConfiguredMcpRuntimeContribution({
     assignment: {
@@ -113,6 +116,13 @@ async function mount(config: {
       Promise.resolve(config.connection ?? connection()),
     fetch: config.fetch,
     onFailure: (reason) => config.failures?.push(reason),
+    ...(config.outcomes
+      ? {
+          onOutcome: (outcome) => {
+            config.outcomes!.push(outcome);
+          },
+        }
+      : {}),
   });
   const root = new Context();
   roots.push(root);
@@ -310,3 +320,95 @@ function context() {
     signal: new AbortController().signal,
   };
 }
+
+describe("the durable lifecycle a mount participates in", () => {
+  test("attaches the server's instructions to every one of its tool descriptions", async () => {
+    const { root } = await mount({
+      fetch: server({ tools: [{ name: "echo" }] }),
+      connection: connection({
+        safeMetadata: {
+          serverEpoch: 4,
+          instructions: "Search before answering.",
+        },
+      }),
+    });
+
+    const [schema] = root.tools.schemas({ turnType: "chat" });
+    expect(schema?.name).toBe("mcp__example__echo");
+    // The instructions reach the model in the exact normalized request the
+    // session log records, which is the only place a User can prove it.
+    expect(schema?.description).toContain("Search before answering.");
+  });
+
+  test("reports a ready mount and an unreachable one, with the epoch it ran at", async () => {
+    const ready: unknown[] = [];
+    await mount({
+      fetch: server({}),
+      connection: connection({ safeMetadata: { serverEpoch: 4 } }),
+      outcomes: ready,
+    });
+    expect(ready[0]).toMatchObject({
+      connectionId: "mcp-1",
+      serverEpoch: 4,
+      state: "ready",
+      protocolVersion: "2025-06-18",
+    });
+
+    const broken: unknown[] = [];
+    const failures: string[] = [];
+    const { mounted } = await mount({
+      fetch: (() =>
+        Promise.resolve(
+          new Response("gone", { status: 503 }),
+        )) as unknown as typeof fetch,
+      connection: connection({ safeMetadata: { serverEpoch: 4 } }),
+      outcomes: broken,
+      failures,
+    });
+    expect(mounted).toBe(false);
+    expect(broken[0]).toMatchObject({
+      connectionId: "mcp-1",
+      serverEpoch: 4,
+      state: "error",
+      failure: { code: "unreachable" },
+    });
+    expect(failures[0]).toContain("503");
+  });
+
+  test("reports needs-auth when the server refuses the credential", async () => {
+    const outcomes: unknown[] = [];
+    await mount({
+      fetch: (() =>
+        Promise.resolve(
+          new Response("Unauthorized", { status: 401 }),
+        )) as unknown as typeof fetch,
+      outcomes,
+    });
+    expect(outcomes[0]).toMatchObject({
+      state: "needs-auth",
+      failure: { code: "unauthorized" },
+    });
+  });
+
+  test("the Assignment's resolution key moves with the server epoch", () => {
+    const before = mcpAssignmentResolutionV1({
+      assignment: { connectionId: "mcp-1" },
+      connection: connection({ safeMetadata: { serverEpoch: 1 } }),
+    });
+    const restarted = mcpAssignmentResolutionV1({
+      assignment: { connectionId: "mcp-1" },
+      connection: connection({ safeMetadata: { serverEpoch: 2 } }),
+    });
+    expect(restarted).not.toBe(before);
+  });
+
+  test("reads no epoch or instructions from a Connection that carries none", () => {
+    expect(mcpConnectionLifecycleV1({ safeMetadata: {} })).toEqual({});
+    // A Bot cannot smuggle a lifecycle field in as the wrong type.
+    expect(
+      mcpConnectionLifecycleV1({
+        safeMetadata: { serverEpoch: "4", instructions: 7 },
+      }),
+    ).toEqual({});
+  });
+});
