@@ -27,6 +27,11 @@ export interface OpenAICompatibleConfig {
   providerId?: string;
   headers?: Record<string, string>;
   fetch?: FetchLike;
+  /**
+   * Whether this endpoint's model accepts image content. Absent, and the
+   * model id decides through {@link modelAcceptsImagesV1}.
+   */
+  acceptsImages?: boolean;
 }
 
 interface ToolAccumulator {
@@ -36,41 +41,118 @@ interface ToolAccumulator {
   arguments: string;
 }
 
-function messageToWire(message: LlmMessage): Record<string, unknown> {
+/**
+ * Model families this adapter will hand an image to.
+ *
+ * A guess, and named as one: there is no capability field on the wire and no
+ * catalog this adapter can consult, so the default is a list of families whose
+ * documented input includes images. `acceptsImages` overrides it in both
+ * directions, which is what a deployment that knows better sets.
+ */
+const VISION_MODEL_PATTERNS = [
+  /gpt-4o/i,
+  /gpt-4\.1/i,
+  /gpt-5/i,
+  /o[34]\b/i,
+  /claude-/i,
+  /gemini-/i,
+  /vision/i,
+  /-vl\b/i,
+  /llava/i,
+  /pixtral/i,
+  /internvl/i,
+];
+
+/** Whether this adapter will show `model` an image attachment. */
+export function modelAcceptsImagesV1(model: string): boolean {
+  return VISION_MODEL_PATTERNS.some((pattern) => pattern.test(model));
+}
+
+function dataUrl(mediaType: string, dataBase64: string): string {
+  return `data:${mediaType};base64,${dataBase64}`;
+}
+
+function messageToWire(
+  message: LlmMessage,
+  acceptsImages: boolean,
+): Record<string, unknown>[] {
   if (message.role === "user")
-    return { role: "user", content: message.content };
+    return [{ role: "user", content: message.content }];
   if (message.role === "tool") {
-    return {
+    const attachments = message.attachments ?? [];
+    // An attachment this adapter cannot show is said in the text rather than
+    // dropped in silence: a Bot that asked for a screenshot has to be able to
+    // tell "the model saw it" from "the model was told where it is".
+    const shown = acceptsImages
+      ? attachments.filter((attachment) => attachment.dataBase64 !== undefined)
+      : [];
+    const withheld = attachments.filter(
+      (attachment) => !shown.includes(attachment),
+    );
+    const notes = withheld.map(
+      (attachment) =>
+        `[attachment ${attachment.mediaType} not shown to this model; it is at ${attachment.workspacePath.path} (sha256 ${attachment.contentHash})]`,
+    );
+    const tool = {
       role: "tool",
       tool_call_id: message.callId,
-      content: message.content,
+      content: [message.content, ...notes].filter(Boolean).join("\n"),
     };
-  }
-  return {
-    role: "assistant",
-    content: message.content || null,
-    ...(message.toolCalls.length > 0
-      ? {
-          tool_calls: message.toolCalls.map((call) => ({
-            id: call.id,
-            type: "function",
-            function: {
-              name: call.name,
-              arguments: JSON.stringify(call.input),
+    if (shown.length === 0) return [tool];
+    // The image travels as a following user message rather than inside the
+    // tool result: an OpenAI-shaped `tool` message takes text, and a content
+    // array there is refused by the very endpoints that accept the image.
+    return [
+      tool,
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `Attachments from ${message.name}:`,
+          },
+          ...shown.map((attachment) => ({
+            type: "image_url",
+            image_url: {
+              url: dataUrl(attachment.mediaType, attachment.dataBase64!),
             },
           })),
-        }
-      : {}),
-  };
+        ],
+      },
+    ];
+  }
+  return [
+    {
+      role: "assistant",
+      content: message.content || null,
+      ...(message.toolCalls.length > 0
+        ? {
+            tool_calls: message.toolCalls.map((call) => ({
+              id: call.id,
+              type: "function",
+              function: {
+                name: call.name,
+                arguments: JSON.stringify(call.input),
+              },
+            })),
+          }
+        : {}),
+    },
+  ];
 }
 
 export function requestToWire(
   request: NormalizedModelRequest,
+  options: { acceptsImages?: boolean } = {},
 ): Record<string, unknown> {
+  const acceptsImages =
+    options.acceptsImages ?? modelAcceptsImagesV1(request.model);
   const messages: Record<string, unknown>[] = [];
   if (request.system)
     messages.push({ role: "system", content: request.system });
-  messages.push(...request.messages.map(messageToWire));
+  for (const message of request.messages) {
+    messages.push(...messageToWire(message, acceptsImages));
+  }
   return {
     model: request.model,
     stream: true,
@@ -209,7 +291,13 @@ export class OpenAICompatibleProvider implements LlmProvider {
     const response = await fetcher(`${this.config.baseUrl}/chat/completions`, {
       method: "POST",
       headers,
-      body: JSON.stringify(requestToWire(request)),
+      body: JSON.stringify(
+        requestToWire(request, {
+          ...(this.config.acceptsImages === undefined
+            ? {}
+            : { acceptsImages: this.config.acceptsImages }),
+        }),
+      ),
       signal,
     });
     if (!response.ok) {

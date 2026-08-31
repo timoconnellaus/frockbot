@@ -77,12 +77,14 @@ import type {
   BotPackageLoader,
   UserConfigurationBinding,
   WorkerLoader,
+  ClientWorkspaceFileV1,
 } from "./contracts.js";
 import { createGateway } from "./gateway.js";
 import {
   decodeRpcEnvelopeV1,
   rpcBotId,
   rpcDecoded,
+  rpcDecodedValue,
   rpcIdentifier,
   rpcObject,
   rpcString,
@@ -150,6 +152,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   fenceRunAdmission(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   listSkills(): Promise<ClientSkillCatalogV1>;
+  readWorkspaceFileV1(path: unknown): Promise<ClientWorkspaceFileV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
   readUnread(): Promise<BotUnreadViewV1>;
@@ -214,6 +217,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     fenceRunAdmission: (query) =>
       rpc.fenceRunAdmission({ schemaVersion: 1, userId, botId, query }),
     listSkills: () => rpc.listSkills({ schemaVersion: 1, userId, botId }),
+    readWorkspaceFileV1: (path) =>
+      rpc.readWorkspaceFileV1({ schemaVersion: 1, userId, botId, path }),
     listNotifications: () =>
       rpc.listNotifications({ schemaVersion: 1, userId, botId }),
     readUnread: () => rpc.readUnread({ schemaVersion: 1, userId, botId }),
@@ -411,6 +416,18 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).listSkills();
+  }
+
+  async readWorkspaceFileV1(input: unknown): Promise<ClientWorkspaceFileV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      path: rpcDecodedValue,
+    });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).readWorkspaceFileV1(request.path);
   }
 
   async listNotifications(input: unknown): Promise<BotNotificationIntent[]> {

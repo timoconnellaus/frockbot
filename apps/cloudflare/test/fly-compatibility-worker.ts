@@ -1071,6 +1071,46 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     }
   }
 
+  /**
+   * One capture, driven through the provider-neutral Computer interface.
+   *
+   * The pair is the subject: a guarded `exec` under the tenant's display and a
+   * `file/read` that brings the PNG back off the Computer. Only here do both
+   * travel the real v1 protocol on a real service binding.
+   */
+  async screenshot(
+    botId = "compatibility",
+  ): Promise<
+    | { ok: true; display: string; mediaType: string; bytesBase64: string }
+    | { ok: false; message: string }
+  > {
+    this.root ??= await this.createRoot("frockbot-workerd-compatibility");
+    const identity = { userId: "workerd" };
+    this.root.computers.assign(identity, "fly-sprite");
+    const computer = await this.root.computers.open(identity, { botId });
+    try {
+      const captured = await computer.screenshot!.capture();
+      let binary = "";
+      for (const byte of captured.bytes) binary += String.fromCharCode(byte);
+      return {
+        ok: true,
+        display: captured.display,
+        mediaType: captured.mediaType,
+        bytesBase64: btoa(binary),
+      };
+    } catch (error) {
+      // A refusal is answered, not thrown: an RPC rejection crossing the
+      // Durable Object boundary is observed twice by the test runner, and the
+      // refusal itself is what this probe exists to report.
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      await computer.close();
+    }
+  }
+
   async mountProvider(): Promise<FlyMountResult> {
     this.root ??= await this.createRoot("frockbot-workerd-compatibility");
     const identity = { userId: "workerd" };

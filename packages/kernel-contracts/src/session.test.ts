@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Context } from "cordis";
 import {
+  SESSION_ATTACHMENT_MAX_BASE64,
   SessionStore,
   type SessionStoreConfig,
   validateToolOccurrenceJournal,
@@ -613,5 +614,95 @@ describe("SessionStore", () => {
     expect(turnFailureMessage("interrupted")).toBe(
       "Bot turn ended with outcome interrupted",
     );
+  });
+});
+
+describe("resolved attachment bytes", () => {
+  const attachment = {
+    kind: "image" as const,
+    mediaType: "image/png" as const,
+    workspacePath: {
+      root: {
+        kind: "package-declared" as const,
+        userId: "user-1",
+        packageId: "computer",
+        rootId: "screenshots",
+      },
+      path: "bot-1/run-9-1.png",
+    },
+    contentHash: "c".repeat(64),
+    bytes: 3,
+  };
+
+  async function sessionWithScreenshot() {
+    const root = await createStore();
+    const session = root.sessions.create("session-1");
+    session.append({ type: "turn/start", turn: 1 });
+    session.append({ type: "step/start", turn: 1, step: 1 });
+    session.append({
+      type: "assistant/message",
+      turn: 1,
+      step: 1,
+      requestId: "request-1",
+      text: "",
+      toolCalls: [{ id: "call-1", name: "computer_screenshot", input: {} }],
+    });
+    session.append({
+      type: "tool/call",
+      turn: 1,
+      step: 1,
+      occurrenceId: "tool:1:1:0",
+      name: "computer_screenshot",
+      input: {},
+    });
+    session.append({
+      type: "tool/result",
+      turn: 1,
+      step: 1,
+      occurrenceId: "tool:1:1:0",
+      name: "computer_screenshot",
+      content: "{}",
+      isError: false,
+      status: "completed",
+      attachments: [attachment],
+    });
+    return session;
+  }
+
+  // The reference is durable and the bytes are not: while the Session is
+  // resident the request carries the picture, and on the far side of an
+  // eviction it carries the path, which is the observable outcome rather than
+  // a silent one.
+  test("reaches the derived request only while the Session holds them", async () => {
+    const session = await sessionWithScreenshot();
+
+    const before = session.deriveMessages().at(-1);
+    expect(before).toMatchObject({ attachments: [attachment] });
+
+    session.offerAttachmentBytes(attachment.contentHash, "AAAA");
+    const after = session.deriveMessages().at(-1);
+    expect(after).toMatchObject({
+      attachments: [{ ...attachment, dataBase64: "AAAA" }],
+    });
+
+    // And they never become durable: the event still holds a reference only.
+    const recorded = session.events.findLast(
+      (event) => event.type === "tool/result",
+    );
+    expect(JSON.stringify(recorded)).not.toContain("AAAA");
+  });
+
+  test("refuses an offer that is not a content hash or is oversized", async () => {
+    const session = await sessionWithScreenshot();
+
+    session.offerAttachmentBytes("not-a-hash", "AAAA");
+    session.offerAttachmentBytes(
+      attachment.contentHash,
+      "A".repeat(SESSION_ATTACHMENT_MAX_BASE64 + 1),
+    );
+
+    expect(session.deriveMessages().at(-1)).toMatchObject({
+      attachments: [attachment],
+    });
   });
 });

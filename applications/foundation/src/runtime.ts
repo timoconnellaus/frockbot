@@ -702,6 +702,13 @@ export function createFoundationHostedRuntimePackages(
      */
     computerSync?: ComputerSyncHostV1;
     /**
+     * The Session and Turn a Computer write records as its writer, supplied by
+     * the Bot Durable Object for one admitted Turn. Absent outside a Turn, and
+     * `computer_screenshot` is then not offered: a durable-root write with no
+     * Turn to name is a write with no writer.
+     */
+    computerWriter?: { sessionId: string; turnId: string; runId: string };
+    /**
      * The Bot self-management seam, supplied by the Bot Durable Object for one
      * admitted Turn. Absent outside a Turn, and the Flock runtime Contribution
      * is then not mounted: a Bot changes its own identity, or adds a Bot to
@@ -776,6 +783,7 @@ export function createFoundationHostedRuntimePackages(
       createComputerAgentPlugin({
         userId: host.userId,
         defaultProviderId: "fly-sprite",
+        ...(host.computerWriter ? { writer: host.computerWriter } : {}),
       }),
     ),
   ];

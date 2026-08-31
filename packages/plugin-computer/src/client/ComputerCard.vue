@@ -9,6 +9,7 @@ const expanded = ref(false);
 const state = computed(() => computer.value);
 const hasViewer = computed(() => Boolean(state.value.viewerUrl));
 const isHuman = computed(() => state.value.takingControl);
+const screenshots = computed(() => state.value.screenshots ?? []);
 const statusLabel = computed(() => {
   if (isHuman.value) return "Your control";
   if (state.value.phase === "ready") return "Agent control";
@@ -119,6 +120,18 @@ onBeforeUnmount(() =>
         </div>
       </div>
     </div>
+
+    <section v-if="screenshots.length > 0" class="computer-screenshots">
+      <h3>Screenshots</h3>
+      <ul>
+        <li v-for="shot in screenshots" :key="shot.contentHash">
+          <a :href="shot.url" target="_blank" rel="noreferrer">
+            <img :src="shot.url" :alt="`Screenshot taken ${shot.capturedAt}`" />
+          </a>
+          <small>{{ shot.capturedAt }}</small>
+        </li>
+      </ul>
+    </section>
 
     <footer class="computer-footer">
       <p>{{ state.message }}</p>

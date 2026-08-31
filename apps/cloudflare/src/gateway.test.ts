@@ -237,6 +237,12 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     assertRegistered: () => Promise.resolve(),
     listSkills: () =>
       Promise.resolve({ schemaVersion: 1 as const, skills: [] }),
+    readWorkspaceFileV1: () =>
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        status: "not-found" as const,
+        reason: "no workspace in this test",
+      }),
     run: ({ botId, command }) => state.run(botId, command),
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),

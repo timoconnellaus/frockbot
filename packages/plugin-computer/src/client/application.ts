@@ -13,6 +13,7 @@ export const computerClientPlugin: ClientPlugin = (ctx) => {
     providerLabel: "unconfigured",
     message: "No Computer provider is configured for this host",
     takingControl: false,
+    screenshots: [],
     connect: unavailable,
     takeControl: unavailable,
     releaseControl: unavailable,

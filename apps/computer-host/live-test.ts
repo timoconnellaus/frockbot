@@ -454,6 +454,65 @@ try {
     "bytes round-trip through the filesystem API",
   );
 
+  // --- a real screenshot on a real Xvfb ------------------------------------
+  // Everything else about `computer_screenshot` is proven against a fake. Two
+  // things only a Sprite can answer: whether provisioning's apt list really
+  // installs `scrot`, and whether a real Xvfb produces a decodable PNG. This
+  // Sprite was provisioned from scratch above, so both are fair questions.
+  const shotPath = `${RUNTIME_ROOT}/live-shot-${runId}.png`;
+  const shot = decodeComputerHostExecResultV1(
+    await expectOk(
+      await call(COMPUTER_HOST_ROUTES.exec, {
+        kind: "exec",
+        script: [
+          "export DISPLAY=:100",
+          `printf 'scrot=%s\\n' "$(command -v scrot || echo MISSING)"`,
+          // A display of this test's own, so the capture does not depend on a
+          // desktop service this Sprite was never asked to start.
+          "Xvfb :100 -screen 0 320x240x24 -nolisten tcp >/dev/null 2>&1 &",
+          "for _ in $(seq 1 100); do xdpyinfo -display :100 >/dev/null 2>&1 && break; sleep 0.1; done",
+          `rm -f ${shotPath}`,
+          `scrot --overwrite ${shotPath} 2>&1 || printf 'scrot-failed=%s\\n' "$?"`,
+          `printf 'size=%s\\n' "$(stat -c %s ${shotPath} 2>/dev/null || echo 0)"`,
+        ].join("\n"),
+        timeoutMs: 120_000,
+        maxOutputBytes: 8 * 1_024,
+        stream: false,
+      }),
+      "exec scrot",
+    ),
+  );
+  const shotReport = Buffer.from(shot.stdoutBase64, "base64").toString();
+  check(
+    shotReport.includes("scrot=/") &&
+      Number(/size=(\d+)/.exec(shotReport)?.[1] ?? 0) > 0,
+    `provisioning installed scrot and it captured a real display — ${shotReport
+      .trim()
+      .replace(/\n/g, " | ")}`,
+  );
+  const shotBytes = Buffer.from(
+    decodeComputerHostFileReadResultV1(
+      await expectOk(
+        await call(COMPUTER_HOST_ROUTES["file/read"], {
+          kind: "file/read",
+          path: shotPath,
+        }),
+        "file/read screenshot",
+      ),
+    ).bytesBase64,
+    "base64",
+  );
+  check(
+    shotBytes
+      .subarray(0, 8)
+      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+    `the capture is a PNG of ${shotBytes.length} bytes`,
+  );
+  check(
+    shotBytes.readUInt32BE(16) > 0 && shotBytes.readUInt32BE(20) > 0,
+    `its IHDR declares ${shotBytes.readUInt32BE(16)}x${shotBytes.readUInt32BE(20)}`,
+  );
+
   // --- reconstruction -----------------------------------------------------
   // The container is restarted, so its in-memory record of this Computer is
   // gone. A fresh SpritesClient inside it must re-derive everything from the

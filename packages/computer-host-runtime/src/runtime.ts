@@ -336,10 +336,10 @@ chmod 600 ${RUNTIME_ROOT}/tokens`,
   {
     name: "packages",
     label: "installing the desktop packages",
-    body: `if ! command -v Xvfb >/dev/null || ! command -v chromium >/dev/null || ! command -v websockify >/dev/null; then
+    body: `if ! command -v Xvfb >/dev/null || ! command -v chromium >/dev/null || ! command -v websockify >/dev/null || ! command -v scrot >/dev/null; then
   if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
   $SUDO apt-get update
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y chromium xvfb fluxbox x11vnc novnc websockify x11-utils ca-certificates util-linux
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y chromium xvfb fluxbox x11vnc novnc websockify x11-utils ca-certificates util-linux scrot
 fi`,
   },
   {

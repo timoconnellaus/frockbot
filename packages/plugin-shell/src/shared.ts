@@ -27,11 +27,21 @@ export type { CatalogEntryV1, CatalogIndexEntryV1 };
 
 export type WebConnection = "starting" | "ready" | "disconnected" | "error";
 
+/** One binary a tool filed, as the thread draws it: a reference, not bytes. */
+export interface WebToolAttachment {
+  kind: "image";
+  mediaType: string;
+  contentHash: string;
+  /** The encoded `WorkspacePathV1` the Workspace read route takes. */
+  path: string;
+}
+
 export interface WebToolActivity {
   id: string;
   name: string;
   status: "running" | "completed" | "failed";
   text?: string;
+  attachments?: WebToolAttachment[];
 }
 
 /**

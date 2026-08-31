@@ -29,9 +29,14 @@
 // what it moved, and nothing on this path can fail a Turn.
 import {
   type SessionStore,
+  type ToolAttachmentV1,
   type ToolDefinition,
+  type WorkspacePathV1,
+  type WorkspaceRootV1,
+  type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
 import {
+  computerBotPathKeyV1,
   ComputerError,
   type ComputerBrowserAction,
   type ComputerHandle,
@@ -43,10 +48,55 @@ import {
 import type {} from "@frockbot/kernel-agent-loop/agent";
 import type { Plugin } from "cordis";
 
+/**
+ * The Session and Turn a durable Workspace write records as its writer.
+ *
+ * Supplied by the Bot Durable Object for one admitted Turn. Absent, and
+ * `computer_screenshot` is not registered: "every write to a durable root
+ * records its writer", and outside a Turn there is no writer to record.
+ */
+export interface ComputerWriterIdentityV1 {
+  sessionId: string;
+  turnId: string;
+  runId: string;
+}
+
 export interface ComputerAgentPluginConfig {
   userId: string;
   defaultProviderId: string;
   idempotentEffects?: boolean;
+  writer?: ComputerWriterIdentityV1;
+}
+
+/** The Package-declared durable root screenshots are written to. */
+export const COMPUTER_SCREENSHOTS_ROOT_ID = "screenshots";
+/** Screenshots kept per Bot. Older captures are pruned on the next capture. */
+export const COMPUTER_SCREENSHOT_RETENTION = 20;
+
+/**
+ * The width and height a PNG declares in its IHDR chunk.
+ *
+ * Read here rather than asked of the Computer: `identify` is another package
+ * to provision and another exec to guard, and the two numbers are eight bytes
+ * at a fixed offset of the file the tool already holds.
+ */
+export function pngDimensionsV1(
+  bytes: Uint8Array,
+): { width: number; height: number } | undefined {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.byteLength < 24) return undefined;
+  if (signature.some((byte, index) => bytes[index] !== byte)) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  if (width === 0 || height === 0) return undefined;
+  return { width, height };
+}
+
+function base64Of(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 interface ExecInput {
@@ -238,6 +288,46 @@ class ComputerTurnSync {
   }
 }
 
+/**
+ * Keeps the newest {@link COMPUTER_SCREENSHOT_RETENTION} captures for one Bot.
+ *
+ * A screenshot of a logged-in page is User-scoped content that outlives its
+ * Turn, so the root is bounded rather than allowed to grow for the life of the
+ * Computer. Pruning is a best effort: a capture that was recorded is never
+ * failed because an older one could not be removed.
+ */
+async function prune(
+  workspace: NonNullable<ComputerHandle["workspace"]>,
+  root: WorkspaceRootV1,
+  botKey: string,
+  writer: WorkspaceWriterV1,
+): Promise<void> {
+  const listed = await workspace.list({
+    root,
+    prefix: botKey,
+    limit: COMPUTER_SCREENSHOT_RETENTION * 4,
+  });
+  if (listed.status !== "ok") return;
+  // Ordered by when each capture was written, not by its path: a path names
+  // the Turn and the ordinal within it, and neither sorts chronologically
+  // across Turns. The generation is the record of when, so it decides.
+  const sorted = [...listed.entries].sort((left, right) => {
+    const order = left.generation.writtenAt.localeCompare(
+      right.generation.writtenAt,
+    );
+    return order !== 0 ? order : left.path.path.localeCompare(right.path.path);
+  });
+  const excess = sorted.length - COMPUTER_SCREENSHOT_RETENTION;
+  for (let index = 0; index < excess; index += 1) {
+    const entry = sorted[index]!;
+    await workspace.delete({
+      path: entry.path,
+      writer,
+      expectedGenerationId: entry.generation.generationId,
+    });
+  }
+}
+
 async function useComputer<T>(
   computer: ComputerHandle,
   run: (computer: ComputerHandle) => Promise<T>,
@@ -339,6 +429,140 @@ export function createComputerAgentPlugin(
       },
     };
 
+    const writer = config.writer;
+    let captureSequence = 0;
+
+    /**
+     * Captures the Bot's own desktop into the Package-declared `screenshots`
+     * root.
+     *
+     * The bytes are written through the Workspace rather than left where
+     * `scrot` put them, because "every write to a durable root records its
+     * writer": a file a shell left on the Computer reaches object storage
+     * `unattributed`, which is data and never provenance. The result the model
+     * reads is JSON — where the capture is and exactly which bytes it is — and
+     * the image itself travels as an attachment, shown by a model-invocation
+     * adapter that can show it and named in the text by one that cannot.
+     *
+     * Declared read-only: it observes the Computer and changes nothing, so it
+     * records no durable intent. It is still refused while a human holds the
+     * takeover lease, because during a takeover the screen is theirs.
+     */
+    const screenshotTool: ToolDefinition = {
+      name: "computer_screenshot",
+      idempotent: true,
+      description:
+        "Capture a PNG of your own desktop on the Computer and file it in your durable screenshots root. Refused while the user has taken control of the Computer.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      validate: (input) =>
+        input === undefined ||
+        input === null ||
+        (typeof input === "object" && Object.keys(input).length === 0),
+      execute: async (_input, context) => {
+        if (!writer) {
+          return {
+            content:
+              "A screenshot is filed under the Turn that took it; this runtime has no Turn to record as its writer",
+            isError: true,
+          };
+        }
+        try {
+          return await useComputer(
+            await open(context.botId, context.sessionId, context.signal),
+            async (computer) => {
+              if (!computer.screenshot) {
+                throw new ComputerError(
+                  "capability-unavailable",
+                  "The selected Computer does not support screenshots",
+                );
+              }
+              const workspace = computer.workspace;
+              if (!workspace) {
+                throw new ComputerError(
+                  "capability-unavailable",
+                  "The selected Computer exposes no Workspace to file a screenshot in",
+                );
+              }
+              const captured = await computer.screenshot.capture({
+                signal: context.signal,
+                effectId: context.effectId,
+              });
+              const root: WorkspaceRootV1 = {
+                kind: "package-declared",
+                userId,
+                packageId: "computer",
+                rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
+              };
+              const botKey = computerBotPathKeyV1(context.botId);
+              captureSequence += 1;
+              const path: WorkspacePathV1 = {
+                root,
+                path: `${botKey}/${writer.turnId}-${captureSequence}.png`,
+              };
+              const botWriter: WorkspaceWriterV1 = {
+                kind: "bot",
+                botId: context.botId,
+                sessionId: writer.sessionId,
+                turnId: writer.turnId,
+                runId: writer.runId,
+              };
+              const written = await workspace.write({
+                path,
+                bytes: captured.bytes,
+                writer: botWriter,
+                expectedGenerationId: null,
+                mediaType: captured.mediaType,
+              });
+              if (written.status !== "ok") {
+                return {
+                  content: `The screenshot could not be filed: ${written.status}: ${written.reason}`,
+                  isError: true,
+                };
+              }
+              await prune(workspace, root, botKey, botWriter);
+              const dimensions = pngDimensionsV1(captured.bytes);
+              const attachment: ToolAttachmentV1 = {
+                kind: "image",
+                mediaType: captured.mediaType,
+                workspacePath: path,
+                contentHash: written.generation.contentHash,
+                bytes: written.generation.size,
+              };
+              // The bytes are offered to the resident Session so this Turn's
+              // next model request can show them. They are never recorded:
+              // the event log holds the reference, the Workspace holds the
+              // image.
+              ctx.sessions
+                .get(context.sessionId)
+                ?.offerAttachmentBytes(
+                  attachment.contentHash,
+                  base64Of(captured.bytes),
+                );
+              return {
+                content: JSON.stringify({
+                  path: path.path,
+                  rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
+                  contentHash: attachment.contentHash,
+                  bytes: attachment.bytes,
+                  ...(dimensions ?? {}),
+                  display: captured.display,
+                  capturedAt: captured.capturedAt,
+                }),
+                isError: false,
+                attachments: [attachment],
+              };
+            },
+          );
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    };
+
     const browserTool: ToolDefinition = {
       name: "computer_browser",
       idempotent: config.idempotentEffects === true,
@@ -396,6 +620,7 @@ export function createComputerAgentPlugin(
 
     return [
       ctx.tools.register(execTool),
+      ...(writer ? [ctx.tools.register(screenshotTool)] : []),
       ctx.tools.register(browserTool),
       // A Turn's first step is where the Turn's sync state begins; a Turn that
       // never touches the Computer never syncs and never wakes one.
@@ -431,6 +656,7 @@ export function createComputerAgentPlugin(
             "## Persistent Computer",
             "You share a persistent Linux Computer with your User's other Bots. You have your own directories and desktop on it; the browser profile is shared.",
             "Use computer_exec to inspect the filesystem before claiming that a path or file exists.",
+            "Use computer_screenshot to see your own desktop; each capture is filed in your durable screenshots root.",
             "Never invent a directory listing.",
           ].join("\n"),
       }),

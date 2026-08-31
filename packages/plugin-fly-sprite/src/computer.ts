@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { ComputerError } from "@frockbot/computer-core";
 import type {
   ComputerHostControlResultV1,
+  ComputerHostFileReadResultV1,
   ComputerHostOpenResultV1,
   ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
@@ -35,6 +36,8 @@ export { SLOT_IDLE_SECONDS, WORKSPACE_SYNC_SERVICE };
 const MAX_OUTPUT = 30_000;
 const MAX_STORAGE_OUTPUT = 500_000;
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
+/** Largest screenshot this provider will carry back off a Computer. */
+export const SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024;
 
 /** Deadlines this provider asks the host for, per phase. */
 const TIMEOUTS = {
@@ -42,6 +45,7 @@ const TIMEOUTS = {
   open: 10 * 60_000,
   command: 120_000,
   browser: 45_000,
+  screenshot: 30_000,
   control: 15_000,
   viewer: 30_000,
 } as const;
@@ -61,6 +65,10 @@ export interface ComputerHostSurfaceV1 {
     command: ComputerHostExecCommandV1,
     options?: ComputerHostCallOptions,
   ): Promise<ComputerHostExecOutcomeV1>;
+  fileRead(
+    path: string,
+    options?: ComputerHostCallOptions,
+  ): Promise<ComputerHostFileReadResultV1>;
   control(
     action: "acquire" | "renew" | "release",
     ownerId: string,
@@ -96,6 +104,16 @@ interface AgentLayout {
   key: string;
   runtimeDir: string;
   workspaceDir: string;
+}
+
+/** One capture of a tenant's desktop, as it left the Computer. */
+export interface SpriteScreenshotV1 {
+  bytes: Uint8Array;
+  /** The X display the capture was taken from, e.g. `:100`. */
+  display: string;
+  /** Where the capture sat on the Computer before it was read back. */
+  path: string;
+  capturedAt: string;
 }
 
 export interface SpriteAgentExecResult {
@@ -275,6 +293,11 @@ export class FlySpriteAgentComputer {
 
   browser(action: BrowserAction, signal: AbortSignal): Promise<string> {
     return this.computer.browserForAgent(this.layout, action, signal);
+  }
+
+  /** Captures this tenant's own desktop. */
+  screenshot(signal: AbortSignal): Promise<SpriteScreenshotV1> {
+    return this.computer.screenshotForAgent(this.layout, signal);
   }
 
   /** Opens a viewer session on this tenant's desktop. */
@@ -502,6 +525,84 @@ export class FlySpriteComputer {
       );
     }
     return stdout;
+  }
+
+  /**
+   * Captures the tenant's own desktop and carries the PNG back.
+   *
+   * Two host operations and no new one: a guarded `exec` runs `scrot` under
+   * the tenant's own `DISPLAY`, and `file/read` brings the bytes back. The
+   * guard is the same one every Bot command carries, so a screenshot taken
+   * while a human holds the takeover lease is refused rather than handing the
+   * Bot a picture of the human's session.
+   *
+   * The file is read back rather than left where it landed because a durable
+   * root reached by a shell write syncs back `unattributed`: the caller writes
+   * these bytes through the Workspace, which is what records the Bot as their
+   * writer.
+   */
+  async screenshotForAgent(
+    layout: AgentLayout,
+    signal: AbortSignal,
+  ): Promise<SpriteScreenshotV1> {
+    const host = await this.readyHost(layout, signal);
+    const display = this.displays.get(layout.key);
+    if (!display) {
+      throw new ComputerError(
+        "capability-unavailable",
+        `Bot "${layout.identity.id}" has no desktop on this Computer to capture`,
+      );
+    }
+    const bot = `${BOTS_ROOT}/${layout.key}`;
+    const path = `${bot}/screenshot.png`;
+    const script = [
+      this.agentControlGuard(layout),
+      ...this.tenantEnvironment(layout),
+      `export DISPLAY=${shellQuote(display)}`,
+      `rm -f ${shellQuote(path)}`,
+      `scrot --overwrite ${shellQuote(path)}`,
+      `stat -c %s ${shellQuote(path)}`,
+    ].join("\n");
+    const outcome = await this.execute(
+      host,
+      script,
+      {
+        signal,
+        timeoutMs: TIMEOUTS.screenshot,
+        maxOutputBytes: MAX_OUTPUT,
+      },
+      "Sprite screenshot failed",
+    );
+    const size = Number(outputText(outcome.stdout).trim().split("\n").pop());
+    if (!Number.isSafeInteger(size) || size <= 0) {
+      throw new ComputerError(
+        "provider-unavailable",
+        "The Computer produced no screenshot",
+      );
+    }
+    if (size > SCREENSHOT_MAX_BYTES) {
+      throw new ComputerError(
+        "limit-exceeded",
+        `The screenshot is ${size} bytes, past the ${SCREENSHOT_MAX_BYTES}-byte limit`,
+      );
+    }
+    const read = await host.fileRead(path, {
+      signal,
+      timeoutMs: TIMEOUTS.screenshot,
+    });
+    const bytes = Uint8Array.from(Buffer.from(read.bytesBase64, "base64"));
+    if (bytes.byteLength === 0) {
+      throw new ComputerError(
+        "provider-unavailable",
+        "The Computer returned an empty screenshot",
+      );
+    }
+    return {
+      bytes,
+      display,
+      path,
+      capturedAt: new Date().toISOString(),
+    };
   }
 
   async browserForAgent(

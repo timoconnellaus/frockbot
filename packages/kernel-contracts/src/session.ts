@@ -198,6 +198,11 @@ export type PersistSessionEvents = (
   events: readonly SessionEvent[],
 ) => Promise<void>;
 
+/** Most resolved attachments one resident Session holds. */
+export const SESSION_ATTACHMENT_CACHE_LIMIT = 4;
+/** Largest resolved attachment a Session holds, in base64 characters. */
+export const SESSION_ATTACHMENT_MAX_BASE64 = 8_000_000;
+
 export class Session {
   readonly id: string;
   #events: SessionEvent[] = [];
@@ -205,6 +210,20 @@ export class Session {
   #emit: (envelope: SessionEventEnvelope) => void;
   #persist?: PersistSessionEvents;
   #pendingPersistence: Promise<void> = Promise.resolve();
+  /**
+   * Resolved attachment bytes, keyed by content hash, held only while this
+   * Session is resident.
+   *
+   * The session event log is one Durable Object value and a screenshot in it
+   * would be a durable record that grows past what the object can hold, so an
+   * attachment records a Workspace path and a content hash and nothing else.
+   * A tool that produced the bytes offers them here, and the request derived
+   * while they are still held carries them to a model that can see images. On
+   * the far side of an eviction the reference stands alone: the adapter says
+   * where the image is rather than showing it, which is the observable
+   * outcome, not a silent one.
+   */
+  #attachmentBytes = new Map<string, string>();
 
   constructor(
     id: string,
@@ -265,6 +284,23 @@ export class Session {
     return this.#pendingPersistence;
   }
 
+  /**
+   * Offers the bytes of one attachment for as long as this Session is
+   * resident. Bounded by count and by size: a cache that could grow with the
+   * conversation would be durable state wearing a different hat.
+   */
+  offerAttachmentBytes(contentHash: string, dataBase64: string): void {
+    if (!/^[0-9a-f]{64}$/.test(contentHash)) return;
+    if (dataBase64.length > SESSION_ATTACHMENT_MAX_BASE64) return;
+    this.#attachmentBytes.delete(contentHash);
+    this.#attachmentBytes.set(contentHash, dataBase64);
+    while (this.#attachmentBytes.size > SESSION_ATTACHMENT_CACHE_LIMIT) {
+      const oldest = this.#attachmentBytes.keys().next().value;
+      if (oldest === undefined) break;
+      this.#attachmentBytes.delete(oldest);
+    }
+  }
+
   deriveMessages(): LlmMessage[] {
     const messages: LlmMessage[] = [];
     const journal = validateToolOccurrenceJournal(this.#events);
@@ -285,6 +321,18 @@ export class Session {
           name: event.name,
           content: event.content,
           isError: event.isError,
+          ...(event.attachments && event.attachments.length > 0
+            ? {
+                attachments: event.attachments.map((attachment) => {
+                  const resolved = this.#attachmentBytes.get(
+                    attachment.contentHash,
+                  );
+                  return resolved === undefined
+                    ? attachment
+                    : { ...attachment, dataBase64: resolved };
+                }),
+              }
+            : {}),
         });
       }
     }

@@ -58,6 +58,12 @@ export type ClientRunEventV1 =
       callId: string;
       content: string;
       isError: boolean;
+      /**
+       * Binaries the tool filed in a durable root. References, never bytes:
+       * the client fetches them from the Workspace read route, so a thread
+       * that scrolls past a hundred screenshots carries a hundred paths.
+       */
+      attachments?: ClientToolAttachmentV1[];
     }
   /**
    * A user-facing send, projected so the client can draw the payload. The
@@ -262,6 +268,16 @@ function isTerminalRunStatus(status: ClientRunStatusV1): boolean {
   );
 }
 
+/** One attachment of a projected tool result. */
+export interface ClientToolAttachmentV1 {
+  kind: "image";
+  mediaType: string;
+  contentHash: string;
+  bytes: number;
+  /** The encoded `WorkspacePathV1` the Workspace read route takes. */
+  path: string;
+}
+
 type ClientToolCallV1 = Extract<ClientRunEventV1, { type: "tool/call" }>;
 type ClientToolResultV1 = Extract<ClientRunEventV1, { type: "tool/result" }>;
 
@@ -322,6 +338,17 @@ function projectionUnits(
         callId: call.call.id,
         content: truncateWireString(event.content, MAX_EVENT_CONTENT_BYTES),
         isError: event.isError,
+        ...(event.attachments && event.attachments.length > 0
+          ? {
+              attachments: event.attachments.map((attachment) => ({
+                kind: attachment.kind,
+                mediaType: attachment.mediaType,
+                contentHash: attachment.contentHash,
+                bytes: attachment.bytes,
+                path: JSON.stringify(attachment.workspacePath),
+              })),
+            }
+          : {}),
       };
       unit.events.push(result);
       unit.droppable = true;

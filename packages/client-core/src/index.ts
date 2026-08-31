@@ -44,6 +44,18 @@ export interface ClientTurnEvent {
   payload?: unknown;
   /** A `wake/parent` hand-off message. */
   message?: string;
+  /**
+   * Binaries a tool filed in a durable root. References — media type, content
+   * hash, and the encoded Workspace path — never bytes: the client core holds
+   * no product shapes and a thread carries paths, not images.
+   */
+  attachments?: {
+    kind: "image";
+    mediaType: string;
+    contentHash: string;
+    bytes: number;
+    path: string;
+  }[];
 }
 
 export interface ClientNotificationIntent {

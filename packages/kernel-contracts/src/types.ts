@@ -2,6 +2,7 @@ import {
   decodeSendToUserPayloadV1,
   type SendToUserPayloadV1,
 } from "./send-to-user.js";
+import { decodeWorkspacePathV1, type WorkspacePathV1 } from "./workspace.js";
 import {
   decodeSkillRefV1,
   decodeSkillRefsV1,
@@ -72,6 +73,42 @@ export interface ToolSchema {
   inputSchema: Record<string, unknown>;
 }
 
+/** The media types a tool result attachment may carry. */
+export const TOOL_ATTACHMENT_MEDIA_TYPES_V1 = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+] as const;
+
+export type ToolAttachmentMediaTypeV1 =
+  (typeof TOOL_ATTACHMENT_MEDIA_TYPES_V1)[number];
+
+/** Most attachments one tool result may carry. */
+export const TOOL_ATTACHMENT_LIMIT_V1 = 8;
+
+/**
+ * A binary a tool produced, named by where it lives durably rather than by its
+ * bytes.
+ *
+ * The bytes are deliberately absent. An attachment is recorded in the session
+ * event log, and that log is one Durable Object value: a base64 screenshot in
+ * it would be a durable record that grows past what the object can hold. The
+ * Workspace holds the bytes, the content hash names exactly which bytes, and a
+ * model-invocation adapter that can show an image resolves them at request
+ * time. `dataBase64` is that resolution and is never durable — the session
+ * event decoder refuses it.
+ */
+export interface ToolAttachmentV1 {
+  kind: "image";
+  mediaType: ToolAttachmentMediaTypeV1;
+  /** The durable root and relative path the bytes were written to. */
+  workspacePath: WorkspacePathV1;
+  contentHash: string;
+  bytes: number;
+  /** Resolved bytes, in memory only, for one model request. */
+  dataBase64?: string;
+}
+
 export type LlmMessage =
   | { role: "user"; content: string }
   | { role: "assistant"; content: string; toolCalls: ToolCall[] }
@@ -81,6 +118,7 @@ export type LlmMessage =
       name: string;
       content: string;
       isError: boolean;
+      attachments?: ToolAttachmentV1[];
     };
 
 export interface ModelBindingSnapshot {
@@ -288,6 +326,8 @@ export interface SessionEventMap {
     content: string;
     isError: boolean;
     status: "completed" | "interrupted";
+    /** Durable references to binaries the tool produced. Never their bytes. */
+    attachments?: ToolAttachmentV1[];
   };
   /**
    * The Bot recorded the intent to author a Package, before the bundler ran.
@@ -615,9 +655,23 @@ function requireLlmMessage(value: unknown, label: string): void {
   if (role === "tool") {
     requireEventKeys(
       message,
-      ["role", "callId", "name", "content", "isError"],
+      [
+        "role",
+        "callId",
+        "name",
+        "content",
+        "isError",
+        ...(Object.hasOwn(message, "attachments") ? ["attachments"] : []),
+      ],
       label,
     );
+    if (message.attachments !== undefined) {
+      decodeToolAttachmentsV1(
+        message.attachments,
+        `${label}.attachments`,
+        false,
+      );
+    }
     eventString(message.callId, `${label}.callId`);
     eventString(message.name, `${label}.name`);
     eventString(message.content, `${label}.content`, true);
@@ -627,6 +681,86 @@ function requireLlmMessage(value: unknown, label: string): void {
     return;
   }
   throw new Error(`${label}.role is invalid`);
+}
+
+/**
+ * The exact v1 decoder for the attachments a tool result carries.
+ *
+ * `durable` refuses `dataBase64`: resolved bytes belong to one model request
+ * and never to the event log, so a record that carries them is a record that
+ * would grow without bound and is rejected at the seam rather than trimmed.
+ */
+export function decodeToolAttachmentsV1(
+  value: unknown,
+  label: string,
+  durable: boolean,
+): ToolAttachmentV1[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  if (value.length > TOOL_ATTACHMENT_LIMIT_V1) {
+    throw new Error(
+      `${label} must hold at most ${TOOL_ATTACHMENT_LIMIT_V1} attachments`,
+    );
+  }
+  return value.map((entry, index) => {
+    const item = `${label}[${index}]`;
+    const attachment = eventRecord(entry, item);
+    requireEventKeys(
+      attachment,
+      [
+        "kind",
+        "mediaType",
+        "workspacePath",
+        "contentHash",
+        "bytes",
+        ...(Object.hasOwn(attachment, "dataBase64") ? ["dataBase64"] : []),
+      ],
+      item,
+    );
+    if (attachment.kind !== "image") {
+      throw new Error(`${item}.kind is invalid`);
+    }
+    const mediaType = TOOL_ATTACHMENT_MEDIA_TYPES_V1.find(
+      (known) => known === attachment.mediaType,
+    );
+    if (!mediaType) throw new Error(`${item}.mediaType is invalid`);
+    if (
+      typeof attachment.bytes !== "number" ||
+      !Number.isSafeInteger(attachment.bytes) ||
+      attachment.bytes < 0
+    ) {
+      throw new Error(`${item}.bytes must be a non-negative integer`);
+    }
+    const contentHash = eventString(
+      attachment.contentHash,
+      `${item}.contentHash`,
+    );
+    if (!/^[0-9a-f]{64}$/.test(contentHash)) {
+      throw new Error(`${item}.contentHash must be a sha-256 digest`);
+    }
+    if (durable && attachment.dataBase64 !== undefined) {
+      throw new Error(
+        `${item}.dataBase64 is never durable; the Workspace holds the bytes`,
+      );
+    }
+    return {
+      kind: "image",
+      mediaType,
+      workspacePath: decodeWorkspacePathV1(
+        attachment.workspacePath,
+        `${item}.workspacePath`,
+      ),
+      contentHash,
+      bytes: attachment.bytes,
+      ...(attachment.dataBase64 === undefined
+        ? {}
+        : {
+            dataBase64: eventString(
+              attachment.dataBase64,
+              `${item}.dataBase64`,
+            ),
+          }),
+    } satisfies ToolAttachmentV1;
+  });
 }
 
 function requireToolSchema(value: unknown, label: string): void {
@@ -886,6 +1020,7 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           "content",
           "isError",
           "status",
+          ...(Object.hasOwn(event, "attachments") ? ["attachments"] : []),
         ),
         "session event",
       );
@@ -899,6 +1034,13 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       }
       if (event.status !== "completed" && event.status !== "interrupted") {
         throw new Error("session event.status is invalid");
+      }
+      if (event.attachments !== undefined) {
+        decodeToolAttachmentsV1(
+          event.attachments,
+          "session event.attachments",
+          true,
+        );
       }
       break;
     case "package/author-intent":

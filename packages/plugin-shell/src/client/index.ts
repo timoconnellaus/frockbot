@@ -77,6 +77,14 @@ function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {
       if (tool) {
         tool.status = event.isError ? "failed" : "completed";
         tool.text = event.content;
+        if (event.attachments && event.attachments.length > 0) {
+          tool.attachments = event.attachments.map((attachment) => ({
+            kind: attachment.kind,
+            mediaType: attachment.mediaType,
+            contentHash: attachment.contentHash,
+            path: attachment.path,
+          }));
+        }
       }
     }
   }
