@@ -107,6 +107,31 @@ describe("Bot run recovery", () => {
     });
   });
 
+  test("names the provider reason a failed durable Turn recorded", () => {
+    const events = [
+      {
+        type: "turn/start" as const,
+        seq: 0,
+        timestamp: "2026-08-28T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "turn/end" as const,
+        seq: 1,
+        timestamp: "2026-08-28T00:00:01.000Z",
+        turn: 1,
+        outcome: "model-error" as const,
+        reason: "Ollama Cloud responded 401: invalid api key",
+      },
+    ] satisfies SessionEvent[];
+
+    expect(planBotRunRecovery(run(events), events)).toEqual({
+      kind: "fail",
+      failure:
+        "Bot turn ended with outcome model-error: Ollama Cloud responded 401: invalid api key",
+    });
+  });
+
   test("preserves durable events when a post-execution operation fails", () => {
     const assistant = {
       type: "assistant/message" as const,

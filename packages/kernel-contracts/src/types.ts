@@ -104,6 +104,34 @@ export type StepOutcome =
 
 export type TurnOutcome = StepOutcome;
 
+/** Longest `reason` a `turn/end` event may carry. */
+export const TURN_END_REASON_MAX_LENGTH = 500;
+
+/**
+ * Truncates a failure description to what a `turn/end` `reason` accepts.
+ * Returns `undefined` when nothing describable remains.
+ */
+export function turnEndReason(value: unknown): string | undefined {
+  const text =
+    value instanceof Error && value.message
+      ? value.message
+      : typeof value === "string"
+        ? value
+        : "";
+  const bounded = text.slice(0, TURN_END_REASON_MAX_LENGTH);
+  return bounded.length > 0 ? bounded : undefined;
+}
+
+/** The failure text a User sees for a Turn that did not complete. */
+export function turnFailureMessage(
+  outcome: TurnOutcome,
+  reason?: string,
+): string {
+  return reason
+    ? `Bot turn ended with outcome ${outcome}: ${reason}`
+    : `Bot turn ended with outcome ${outcome}`;
+}
+
 /** The Composition generation an admitted Turn is pinned to. */
 export interface CompositionPinV1 {
   generationId: string;
@@ -339,7 +367,13 @@ export interface SessionEventMap {
     failures: number;
   };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
-  "turn/end": { turn: number; outcome: TurnOutcome };
+  /**
+   * `reason` states why a Turn ended in a non-`completed` outcome, so the
+   * failure a User sees names its cause instead of only its outcome. It is
+   * absent on a `completed` Turn and bounded to
+   * {@link TURN_END_REASON_MAX_LENGTH} characters.
+   */
+  "turn/end": { turn: number; outcome: TurnOutcome; reason?: string };
   "session/disposed": { disposedAt: string };
 }
 
@@ -1003,8 +1037,22 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       }
       break;
     case "turn/end":
-      requireEventKeys(event, keys("turn", "outcome"), "session event");
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "outcome",
+          ...(Object.hasOwn(event, "reason") ? ["reason"] : []),
+        ),
+        "session event",
+      );
       turn();
+      if (event.reason !== undefined) {
+        const reason = eventString(event.reason, "session event.reason");
+        if (reason.length > TURN_END_REASON_MAX_LENGTH) {
+          throw new Error("session event.reason is too long");
+        }
+      }
       if (
         ![
           "completed",

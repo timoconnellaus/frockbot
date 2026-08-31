@@ -10,6 +10,7 @@ import {
   type NormalizedModelRequest,
   type SessionEvent,
   type SessionEventInput,
+  turnFailureMessage,
 } from "./types.js";
 
 const roots: Context[] = [];
@@ -441,5 +442,40 @@ describe("SessionStore", () => {
 
     expect(session.disposed).toBe(true);
     expect(session.events.at(-1)?.type).toBe("session/disposed");
+  });
+  test("decodes a turn/end reason only within its declared bound", () => {
+    const base = {
+      type: "turn/end" as const,
+      seq: 0,
+      timestamp,
+      turn: 1,
+      outcome: "model-error" as const,
+    };
+    const withReason = {
+      ...base,
+      reason: "Ollama Cloud responded 401: invalid api key",
+    };
+    expect(decodeSessionEvent(structuredClone(withReason))).toEqual(withReason);
+    expect(
+      decodeSessionEvent(structuredClone({ ...base, reason: "x".repeat(500) })),
+    ).toMatchObject({ reason: "x".repeat(500) });
+    expect(() =>
+      decodeSessionEvent({ ...base, reason: "x".repeat(501) }),
+    ).toThrow("session event.reason is too long");
+    expect(() => decodeSessionEvent({ ...base, reason: "" })).toThrow(
+      "session event.reason must be a string",
+    );
+    expect(() =>
+      decodeSessionEvent({ ...base, reason: "why", cause: "extra" }),
+    ).toThrow("session event has invalid fields");
+  });
+
+  test("composes a failure message from a turn outcome and its reason", () => {
+    expect(turnFailureMessage("model-error", "provider said no")).toBe(
+      "Bot turn ended with outcome model-error: provider said no",
+    );
+    expect(turnFailureMessage("interrupted")).toBe(
+      "Bot turn ended with outcome interrupted",
+    );
   });
 });
