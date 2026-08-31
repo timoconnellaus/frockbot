@@ -59,6 +59,7 @@ import {
   reserveSubagentSlotV1,
   type SubagentSlotReceiptV1,
 } from "@frockbot/plugin-subagents/quota";
+import { machineTokenClaimsV1 } from "@frockbot/machine-protocol";
 import { DurableWorkspaceGenerations } from "@frockbot/kernel-do";
 import {
   decodeWorkspaceGenerationRecordV1,
@@ -123,6 +124,12 @@ const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
   CREDENTIAL_KEYRING?: string;
+  /**
+   * Signs every machine token and pairing code. Absent closes the door: a
+   * pairing is refused rather than offered under a signature nothing could
+   * verify.
+   */
+  MACHINE_TOKEN_SECRET?: string;
   /** Bot authority: archive and restore are carried to the Bot Durable Object. */
   BOT_STATES: DurableObjectNamespace;
   /**
@@ -155,7 +162,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       this.mounted = compileFoundationApplication().then((plan) =>
         createFoundationUserBackendContributions(plan, {
           storage: this.ctx.storage,
-          readSecret: () => this.env.CREDENTIAL_KEYRING,
+          readSecret: (name) =>
+            name === "MACHINE_TOKEN_SECRET"
+              ? this.env.MACHINE_TOKEN_SECRET
+              : this.env.CREDENTIAL_KEYRING,
           packagePublisher: createPackagePublicationHost(
             this.env,
             this.ctx.storage,
@@ -1900,6 +1910,153 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     await this.assertFlockIdentity(request.userId as string);
     return (await this.auditContribution()).purgeAuditForBot(
       request.botId as string,
+    );
+  }
+
+  private async machineContribution(): Promise<
+    MountedFoundationUserBackend["machines"]
+  > {
+    return (await this.contributions()).machines;
+  }
+
+  /**
+   * The registered-machine RPCs (parity register rows 48, 49, 57g).
+   *
+   * The four a machine reaches — poll, claim, result, and the enrollment that
+   * precedes them — arrive from the gateway's pre-session `publicRoute`, so
+   * this object is the first place a *session* was never involved. That is
+   * exactly why each carries the token's own claims and its digest rather than
+   * a caller's assertion: the claims were verified against the deployment
+   * secret at the edge, and the digest is checked here against the machine
+   * record, which is the authority. `assertUserIdentity` still runs, so a
+   * token naming another User cannot reach this object's state even if the
+   * gateway addressed it wrongly.
+   */
+  async createMachinePairing(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier },
+      { label: rpcString(200) },
+    );
+    const userId = await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).createPairing(
+      userId,
+      request.label === undefined ? {} : { label: request.label as string },
+    );
+  }
+
+  async enrollMachine(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      enrollment: rpcDecodedValue,
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).enroll(
+      {
+        userId,
+        machineId: request.machineId as string,
+        nonce: "",
+      },
+      request.enrollment,
+    );
+  }
+
+  async pollMachine(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      claims: rpcDecodedValue,
+      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
+      waitSeconds: rpcInteger({ minimum: 0, maximum: 25 }),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).poll(
+      machineTokenClaimsV1(request.claims),
+      request.tokenDigest as string,
+      request.machineId as string,
+      request.waitSeconds as number,
+    );
+  }
+
+  async claimMachineCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      commandId: rpcIdentifier,
+      claims: rpcDecodedValue,
+      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).claim(
+      machineTokenClaimsV1(request.claims),
+      request.tokenDigest as string,
+      request.machineId as string,
+      request.commandId as string,
+    );
+  }
+
+  async recordMachineResult(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      commandId: rpcIdentifier,
+      claims: rpcDecodedValue,
+      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
+      result: rpcDecodedValue,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).recordResult(
+      machineTokenClaimsV1(request.claims),
+      request.tokenDigest as string,
+      request.machineId as string,
+      request.commandId as string,
+      request.result,
+    );
+  }
+
+  async listMachines(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).list();
+  }
+
+  async revokeMachine(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).revoke(
+      request.machineId as string,
+    );
+  }
+
+  /**
+   * Put one approved command on a machine's queue.
+   *
+   * The caller that matters is R3's approval settlement — a command reaches a
+   * User's laptop only after a human decided — and it is here in R2 so the
+   * queue's own rules have a door.
+   */
+  async dispatchMachineCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecodedValue,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).dispatch(request.command);
+  }
+
+  /** One command's full result, read on demand rather than pushed. */
+  async readMachineResult(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      commandId: rpcIdentifier,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).readResult(
+      request.commandId as string,
     );
   }
 

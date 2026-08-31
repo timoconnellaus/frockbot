@@ -41,6 +41,11 @@ import {
   type McpUserBackendContribution,
 } from "@frockbot/plugin-mcp/user";
 import {
+  createMachineUserBackendPlugin,
+  type MachineUserBackendContribution,
+} from "@frockbot/plugin-user-machine/user";
+import type { MachineStorageV1 } from "@frockbot/plugin-user-machine/store";
+import {
   createSearchUserBackendPlugin,
   type SearchUserBackendContribution,
   type SearchUserBackendHost,
@@ -125,6 +130,12 @@ export interface MountedFoundationUserBackend {
    * is a projection: every row is rebuildable from the Bots' own stored runs.
    */
   audit: AuditUserBackendContribution;
+  /**
+   * The User's registered machines (parity register rows 48, 49, 57g): the
+   * registry, the pairing offers, the command queue and its results. A machine
+   * is a User asset, so its authority is here rather than on any Bot.
+   */
+  machines: MachineUserBackendContribution;
   dispose(): Promise<void>;
 }
 
@@ -133,11 +144,14 @@ export async function createFoundationUserBackendContributions(
   host: {
     storage: UserSettingsStorage &
       CredentialStorage &
-      FlockUserBackendHost["storage"] & {
+      FlockUserBackendHost["storage"] &
+      MachineStorageV1 & {
         getAlarm?(): Promise<number | null>;
         setAlarm(scheduledTime: number | Date): Promise<void>;
       };
-    readSecret(name: "CREDENTIAL_KEYRING"): string | undefined;
+    readSecret(
+      name: "CREDENTIAL_KEYRING" | "MACHINE_TOKEN_SECRET",
+    ): string | undefined;
     /**
      * The publication seam: the User Durable Object's own object storage and
      * Worker Loader, which the adapter owns and this application never names.
@@ -213,6 +227,7 @@ export async function createFoundationUserBackendContributions(
   let publisher: PackagePublisherUserContribution | undefined;
   let search: SearchUserBackendContribution | undefined;
   let audit: AuditUserBackendContribution | undefined;
+  let machines: MachineUserBackendContribution | undefined;
   const connections = new Map<
     string,
     FoundationConnectionUserBackendContribution
@@ -230,6 +245,7 @@ export async function createFoundationUserBackendContributions(
         | PackagePublisherUserContribution
         | SearchUserBackendContribution
         | AuditUserBackendContribution
+        | MachineUserBackendContribution
       >,
     ) => Plugin
   >([
@@ -375,6 +391,22 @@ export async function createFoundationUserBackendContributions(
             return lifecycle.mount(value);
           },
         }),
+    ],
+    [
+      "@frockbot/plugin-user-machine/user",
+      (lifecycle) =>
+        createMachineUserBackendPlugin(
+          {
+            storage: host.storage,
+            readSecret: (name) => host.readSecret(name),
+          },
+          {
+            mount(value: MachineUserBackendContribution) {
+              machines = value;
+              return lifecycle.mount(value);
+            },
+          },
+        ),
     ],
     [
       "@frockbot/plugin-search/user",
@@ -551,6 +583,7 @@ export async function createFoundationUserBackendContributions(
     | PackagePublisherUserContribution
     | SearchUserBackendContribution
     | AuditUserBackendContribution
+    | MachineUserBackendContribution
   >(plan, {
     backendHost: "user",
     resolve: (specifier, lifecycle) => {
@@ -570,11 +603,12 @@ export async function createFoundationUserBackendContributions(
     !botTemplate ||
     !publisher ||
     !search ||
-    !audit
+    !audit ||
+    !machines
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Bot Templates, Search, Audit, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
     );
   }
   return {
@@ -587,6 +621,7 @@ export async function createFoundationUserBackendContributions(
     publisher,
     search,
     audit,
+    machines,
     dispose: mounted.dispose,
   };
 }

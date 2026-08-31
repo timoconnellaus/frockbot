@@ -36,8 +36,13 @@ export const MACHINE_LIMITS_V1 = {
   label: 200,
   /** Reported agent version, e.g. `0.4.1`. */
   agentVersion: 64,
-  /** A pairing code as it is presented on enrollment. */
-  pairingCode: 128,
+  /**
+   * A pairing code as it is presented on enrollment. It is a *signed token*
+   * carrying the User it was minted for — enrollment runs before gateway
+   * authentication, so the code is the only thing that can name a Durable
+   * Object — which is why the bound is a token's and not a passphrase's.
+   */
+  pairingCode: 512,
   /** Capabilities one agent may report. */
   capabilities: 8,
   /** A path on the machine. Not a Computer path: no absolute-form rule. */

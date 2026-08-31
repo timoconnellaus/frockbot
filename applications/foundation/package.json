@@ -53,6 +53,7 @@
     "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-subagents": "workspace:*",
     "@frockbot/plugin-ui-theme": "workspace:*",
+    "@frockbot/plugin-user-machine": "workspace:*",
     "@frockbot/plugin-web": "workspace:*",
     "@frockbot/template-core": "workspace:*",
     "cordis": "4.0.0-rc.8"

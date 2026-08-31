@@ -200,6 +200,22 @@ const createSubagentsGatewayPlugin = (
     ): Plugin;
   }
 ).plugin;
+import userMachineManifest from "@frockbot/plugin-user-machine/manifest";
+// The registered-machine routes: three authenticated, four `publicRoute`s
+// carrying a machine token rather than a session.
+import {
+  createMachineBackendContribution,
+  type MachineGatewayHostV1,
+} from "@frockbot/plugin-user-machine/backend";
+export type { MachineGatewayHostV1 } from "@frockbot/plugin-user-machine/backend";
+const createMachineGatewayPlugin = (
+  createMachineBackendContribution as typeof createMachineBackendContribution & {
+    plugin(
+      host: MachineGatewayHostV1,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
 import {
   createSubagentsRuntimePlugin,
   type SubagentsRuntimeHostV1,
@@ -290,6 +306,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-settings", settingsManifest],
   ["@frockbot/plugin-routines", routinesManifest],
   ["@frockbot/plugin-subagents", subagentsManifest],
+  ["@frockbot/plugin-user-machine", userMachineManifest],
 ]);
 
 const runtimeContributions = new Map([
@@ -550,6 +567,7 @@ export type FoundationGatewayHost = {
   SettingsGatewayHost &
   RoutinesGatewayHost &
   SubagentsGatewayHost &
+  MachineGatewayHostV1 &
   SearchGatewayHost &
   AuditGatewayHost &
   PackagePublisherGatewayHost;
@@ -622,6 +640,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-subagents/backend"
         ) {
           plugin = createSubagentsGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-user-machine/backend"
+        ) {
+          plugin = createMachineGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-search/backend"

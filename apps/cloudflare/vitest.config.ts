@@ -66,6 +66,10 @@ export default defineConfig({
           COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
           // A fixed signing secret, so a test can mint the key it presents.
           ROUTINE_HOOK_SECRET: "workerd-routine-hook-secret-0123456789abcdef",
+          // The registered-machine door's signing secret. Fixed, so a test can
+          // mint the token a machine presents and forge one that must be
+          // refused.
+          MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
           // A leak canary: a Bot isolate must never see a host binding.
           SECRET_TOKEN: "host-only-secret",
         },

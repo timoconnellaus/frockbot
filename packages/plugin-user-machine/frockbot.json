@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 4,
+  "id": "user-machine",
+  "displayName": "Registered machines",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {},
+  "contributions": {
+    "backend": [
+      { "entry": "./user", "host": "user" },
+      { "entry": "./backend", "host": "gateway" }
+    ]
+  },
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [],
+    "capabilities": []
+  },
+  "permissions": []
+}

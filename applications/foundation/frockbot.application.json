@@ -147,6 +147,11 @@
       "grants": ["mobile:clipboard:read", "mobile:clipboard:write"]
     },
     {
+      "specifier": "@frockbot/plugin-user-machine",
+      "version": "0.0.1",
+      "grants": []
+    },
+    {
       "specifier": "@frockbot/plugin-mcp",
       "version": "0.0.1",
       "grants": ["connections:manage", "tools:execute", "network:mcp"]
