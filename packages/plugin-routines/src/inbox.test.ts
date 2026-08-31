@@ -231,3 +231,46 @@ describe("the pending-input codec", () => {
     ).toBeUndefined();
   });
 });
+
+describe("the approval variant's producer", () => {
+  test("an enqueued approval joins the same queue and drains with the wakes", async () => {
+    const store = storage();
+    await settle(store, { runId: "rf-1", handoff: "one" });
+    const inbox = new RoutineInboxStore(store);
+    await inbox.enqueue({
+      schemaVersion: 1,
+      kind: "approval",
+      approvalId: "ap-1",
+      decision: "approved",
+      createdAt: NOW,
+    });
+    const drained = await inbox.drainInto("chat-run-1");
+    expect(drained.map((input) => input.kind)).toEqual(["wake", "approval"]);
+    expect(pendingBotInputPreambleV1(drained)).toContain(
+      'The decision on "ap-1" is approved.',
+    );
+  });
+
+  test("enqueuing the same approval twice queues it once", async () => {
+    const store = storage();
+    const inbox = new RoutineInboxStore(store);
+    const input = {
+      schemaVersion: 1 as const,
+      kind: "approval" as const,
+      approvalId: "ap-1",
+      decision: "denied" as const,
+      createdAt: NOW,
+    };
+    await inbox.enqueue(input);
+    // A retried decision — the same answer arriving twice — must not tell the
+    // Bot the same thing twice.
+    await inbox.enqueue({ ...input, decision: "expired" });
+    const pending = await inbox.pending();
+    expect(pending).toHaveLength(1);
+    expect(
+      pending[0]!.input.kind === "approval"
+        ? pending[0]!.input.decision
+        : undefined,
+    ).toBe("denied");
+  });
+});

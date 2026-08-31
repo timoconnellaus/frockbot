@@ -1,3 +1,7 @@
+import type {
+  ApprovalDecisionReceiptV1,
+  ApprovalListViewV1,
+} from "@frockbot/plugin-shell/approvals";
 import { describe, expect, test } from "bun:test";
 import { type SessionEvent } from "@frockbot/kernel-contracts";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/connection-core";
@@ -176,6 +180,20 @@ class MemoryBotState implements BotStateBinding {
     return structuredClone(this.runs.get(botId) ?? []);
   }
 
+  /** Approvals are Bot-scoped durable state; this double keeps none. */
+  listApprovals(botId: string): Promise<ApprovalListViewV1> {
+    return Promise.resolve({
+      schemaVersion: 1,
+      botId,
+      approvals: [],
+      pending: 0,
+    });
+  }
+
+  decideApproval(): Promise<ApprovalDecisionReceiptV1> {
+    return Promise.reject(new Error("approvals are not wired in this test"));
+  }
+
   listNotifications(botId: string): Promise<BotNotificationIntent[]> {
     return Promise.resolve(
       structuredClone(this.notifications.get(botId) ?? []),
@@ -250,6 +268,9 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     fenceRunAdmission: ({ botId, query }) =>
       state.fenceRunAdmission(botId, query),
     listNotifications: ({ botId }) => state.listNotifications(botId),
+    listApprovals: ({ botId }) => state.listApprovals(botId),
+    decideApproval: ({ botId, approvalId, command }) =>
+      state.decideApproval(botId, approvalId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),

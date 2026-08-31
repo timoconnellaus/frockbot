@@ -93,6 +93,15 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "bot",
   },
   {
+    // Present only while something is waiting: a pending decision is state,
+    // not a permanent row, and `app-ui.md`'s own promise is that a row "can be
+    // absent per account, build and state".
+    anchor: "bot-approvals",
+    surface: "bot-settings",
+    label: "Waiting on you",
+    scope: "bot",
+  },
+  {
     anchor: "bot-model",
     surface: "bot-settings",
     label: "Model",

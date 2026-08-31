@@ -16,6 +16,14 @@
 // but their field lists are not recorded, so they are declared here in the
 // narrowest shape that carries the observed meaning, and widened when a
 // primary source says more.
+//
+// `approval` has no GrokBot payload behind it at all: row 53
+// records only the harness sentence "when your own action needs approval". It
+// is declared here because the constitution's *Self-modification* rule — "a
+// request for more becomes a durable pending decision for the User, never a
+// grant" — needs one shape to carry that request, and a card the Bot sends is
+// the only channel a Turn has to a person. Like `widget` it ends the Turn: the
+// Bot has nothing to do until a human answers.
 
 /** The widget shape, verbatim from §4.2: `options` holds 1–6 entries. */
 export interface SendToUserWidgetV1 {
@@ -47,7 +55,25 @@ export type SendToUserPayloadV1 =
       connectionId: string;
       title: string;
       body?: string;
+    }
+  | {
+      type: "approval";
+      /** The Bot's own id for the decision, and the key it is recorded under. */
+      approvalId: string;
+      /** What the Bot proposes to do, in the words the User is asked about. */
+      action: string;
+      /** Why, when the action does not speak for itself. */
+      rationale?: string;
+      risk: SendToUserApprovalRiskV1;
+      /** Clamped when it is recorded; absent takes the default. */
+      expiresInSeconds?: number;
     };
+
+/** How much a refused-by-silence outcome would cost. Ordered, not free text. */
+export type SendToUserApprovalRiskV1 = "low" | "medium" | "high";
+
+export const SEND_TO_USER_APPROVAL_RISKS_V1: readonly SendToUserApprovalRiskV1[] =
+  ["low", "medium", "high"];
 
 export const SEND_TO_USER_PAYLOAD_TYPES_V1: readonly SendToUserPayloadV1["type"][] =
   [
@@ -57,6 +83,7 @@ export const SEND_TO_USER_PAYLOAD_TYPES_V1: readonly SendToUserPayloadV1["type"]
     "secret-request",
     "agent-card",
     "connect-card",
+    "approval",
   ];
 
 /**
@@ -79,7 +106,17 @@ export const SEND_TO_USER_LIMITS_V1 = {
   connectionId: 128,
   title: 200,
   body: 8_000,
+  approvalId: 128,
+  action: 2_000,
+  rationale: 8_000,
 } as const;
+
+/**
+ * The shape an `approvalId` may take. Narrower than a bounded string because
+ * the id becomes a URL path segment and a durable storage key: an id that
+ * cannot be addressed is a decision that cannot be answered.
+ */
+const APPROVAL_ID_PATTERN_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
 function payloadRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -239,6 +276,66 @@ export function decodeSendToUserPayloadV1(
           limits.secretName,
           `${label}.secretName`,
         ),
+      };
+    }
+    case "approval": {
+      exactPayloadKeys(
+        payload,
+        [
+          "type",
+          "approvalId",
+          "action",
+          "rationale",
+          "risk",
+          "expiresInSeconds",
+        ],
+        label,
+      );
+      if (
+        typeof payload.risk !== "string" ||
+        !SEND_TO_USER_APPROVAL_RISKS_V1.includes(
+          payload.risk as SendToUserApprovalRiskV1,
+        )
+      ) {
+        throw new Error(`${label}.risk must be low, medium or high`);
+      }
+      // A window, not a duration to be interpreted: the record clamps it, and
+      // the decoder only refuses what could not be a window at all.
+      if (payload.expiresInSeconds !== undefined) {
+        if (
+          typeof payload.expiresInSeconds !== "number" ||
+          !Number.isSafeInteger(payload.expiresInSeconds) ||
+          payload.expiresInSeconds <= 0
+        ) {
+          throw new Error(
+            `${label}.expiresInSeconds must be a positive whole number of seconds`,
+          );
+        }
+      }
+      const rationale = optionalBoundedString(
+        payload.rationale,
+        limits.rationale,
+        `${label}.rationale`,
+      );
+      const approvalId = boundedString(
+        payload.approvalId,
+        limits.approvalId,
+        `${label}.approvalId`,
+      );
+      if (!APPROVAL_ID_PATTERN_V1.test(approvalId)) {
+        throw new Error(
+          `${label}.approvalId must be letters, digits, dot, underscore or dash`,
+        );
+      }
+      return {
+        type: "approval",
+        approvalId,
+        action: boundedString(payload.action, limits.action, `${label}.action`),
+        ...(rationale === undefined ? {} : { rationale }),
+        risk: payload.risk as SendToUserApprovalRiskV1,
+        ...(payload.expiresInSeconds === undefined
+          ? {}
+          : { expiresInSeconds: payload.expiresInSeconds }),
       };
     }
     case "agent-card": {

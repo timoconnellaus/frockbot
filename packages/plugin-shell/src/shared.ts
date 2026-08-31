@@ -23,6 +23,7 @@ import type {
 import type { McpServerStatusViewV1 } from "@frockbot/plugin-mcp/records";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
+import type { ApprovalCardViewV1 } from "./approvals.js";
 import type { InjectionKey, Ref } from "vue";
 
 export type { CatalogEntryV1, CatalogIndexEntryV1 };
@@ -155,6 +156,12 @@ export interface FrockBotWebData {
    */
   skillCatalog: ClientSkillCatalogEntryV1[];
   /**
+   * The Bot's approval cards, newest first — pending and already decided
+   * alike, so the card in the transcript can say what was decided rather than
+   * going quiet the moment somebody answers it. Loaded for the selected Bot.
+   */
+  approvals: ApprovalCardViewV1[];
+  /**
    * The User's MCP servers: state, tool count, last handshake, instructions,
    * failure, and the durable refusal ledger. Absent until it is loaded, and
    * absent for a deployment with no MCP route — the Plugins surface then
@@ -221,6 +228,17 @@ export interface FrockBotWebData {
   loadCatalogEntry(catalogId: string): Promise<CatalogEntryV1 | undefined>;
   /** Refreshes {@link FrockBotWebData.skillCatalog} for the active Bot. */
   loadSkillCatalog(): Promise<void>;
+  /** Refreshes {@link FrockBotWebData.approvals} for the active Bot. */
+  loadApprovals(): Promise<void>;
+  /**
+   * Records one decision on one approval card. The backend is the authority:
+   * this submits the command and re-reads what was recorded, so a card already
+   * answered elsewhere shows that answer rather than this client's guess.
+   */
+  decideApproval(
+    approvalId: string,
+    decision: "approved" | "denied",
+  ): Promise<void>;
   installPackage(packageId: string, version: string): Promise<void>;
   /**
    * A partial update of one installed Package's setting values. Only the ids

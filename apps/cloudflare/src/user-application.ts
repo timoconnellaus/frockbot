@@ -23,6 +23,7 @@ import {
   type ClientRunStopCommandV1,
   type ClientTurnCommandV1,
 } from "@frockbot/plugin-shell/run-protocol";
+import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
 import type { UserApplicationEnv } from "./contracts.js";
 
 const MAX_INPUT_LENGTH = 32_000;
@@ -253,6 +254,83 @@ export function createUserApplication() {
         schemaVersion: 1,
         status: "acknowledged",
       } satisfies ClientNotificationAcknowledgementV1);
+    }
+
+    // Approval cards (row 53). Bot-scoped and beside the notifications route,
+    // because a pending decision is Bot state the User answers, not a Package
+    // surface of its own.
+    const approvalsMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/approvals$/,
+    );
+    const approvalMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/approvals\/([^/]+)$/,
+    );
+    if (approvalsMatch || approvalMatch) {
+      let approvalBotId: string;
+      try {
+        approvalBotId = decodeBotIdV1(
+          decodeURIComponent((approvalsMatch ?? approvalMatch)![1]),
+        );
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      const missing = await requireRegisteredBot(env, approvalBotId);
+      if (missing) return missing;
+      if (approvalsMatch) {
+        if (request.method !== "GET") {
+          return jsonError(405, "method not allowed");
+        }
+        try {
+          return Response.json(
+            await env.BOT_STATE.listApprovals({
+              schemaVersion: 1,
+              botId: approvalBotId,
+            }),
+          );
+        } catch (error) {
+          return jsonError(
+            500,
+            error instanceof Error ? error.message : "approvals failed",
+          );
+        }
+      }
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let approvalId: string;
+      let command;
+      try {
+        approvalId = decodeURIComponent(approvalMatch![2]);
+        if (!isRpcIdentifier(approvalId)) {
+          throw new Error("approval id is invalid");
+        }
+        command = decodeApprovalDecisionCommandV1(await request.json());
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid approval decision",
+        );
+      }
+      try {
+        // The decision is durable before this answers: "admit input durably
+        // before acknowledging" applies to a person's answer as much as to a
+        // Turn's, and a replay reads back the one decision that was recorded.
+        return Response.json(
+          await env.BOT_STATE.decideApproval({
+            schemaVersion: 1,
+            botId: approvalBotId,
+            approvalId,
+            command,
+          }),
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "approval decision failed";
+        return jsonError(
+          message.includes("was not found") ? 404 : 500,
+          message,
+        );
+      }
     }
 
     const skillsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/skills$/);

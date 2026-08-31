@@ -177,7 +177,7 @@ describe("send_to_user", () => {
     }
   });
 
-  test("ends the Turn on a widget payload, and only on a widget", async () => {
+  test("ends the Turn on a widget and an approval, and on nothing else", async () => {
     const mounted = await mount();
     try {
       const widget = await invoke(
@@ -198,15 +198,67 @@ describe("send_to_user", () => {
         }),
       );
 
+      // An approval ends the Turn for the same reason a widget does: the Bot
+      // has nothing left to do until a person answers, and the answer is a
+      // later Turn's input rather than this one's.
+      const approval = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          payload: {
+            type: "approval",
+            approvalId: "ap-1",
+            action: "Delete the staging database",
+            risk: "high",
+          },
+        }),
+      );
+      const text = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          payload: { type: "text", text: "On it." },
+        }),
+      );
+      const secret = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          payload: {
+            type: "secret-request",
+            prompt: "Your API key",
+            secretName: "api_key",
+          },
+        }),
+      );
+      const card = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          payload: { type: "agent-card", agentId: "bot-2", title: "School" },
+        }),
+      );
+
       expect(widget.endsTurn).toBe(true);
+      expect(approval.endsTurn).toBe(true);
       expect(attachment.endsTurn).toBeUndefined();
+      expect(text.endsTurn).toBeUndefined();
+      expect(secret.endsTurn).toBeUndefined();
+      expect(card.endsTurn).toBeUndefined();
       expect(
         mounted.session.events
           .filter((event) => event.type === "send/to-user")
           .map((event) =>
             event.type === "send/to-user" ? event.payload.type : undefined,
           ),
-      ).toEqual(["widget", "attachment"]);
+      ).toEqual([
+        "widget",
+        "attachment",
+        "approval",
+        "text",
+        "secret-request",
+        "agent-card",
+      ]);
     } finally {
       await mounted.dispose();
     }

@@ -393,7 +393,9 @@ An automation Turn has no `send_to_user`; the tool registry refuses the call, an
 
 Both cursors (`routine-inbox-cursor`, `routine-wake-cursor`) exist because the terminal seam is handed a reader and not a lister: a record written inside the settling transaction must be addressable by key alone. The two bounds are retention rather than correctness, so they are enforced on the next read.
 
-`PendingBotInputV1` is deliberately wider than Routines: it is `{ kind: "wake", … } | { kind: "approval", approvalId, decision }`, and the `approval` variant is decoded with no producer. The approval-card slice adds a producer rather than a second queue, and adds no wire change doing it.
+The three producers that share the seam — unread, the completion inbox, and approval records — are composed in `plugin-shell/src/terminal-records.ts` rather than spread inline, because two properties have to hold and neither is visible in a spread: each producer runs **exactly once** per settlement, and no producer may silently overwrite another's key, which throws rather than picking a winner.
+
+`PendingBotInputV1` is deliberately wider than Routines: it is `{ kind: "wake", … } | { kind: "approval", approvalId, decision }`. Approval cards produce the second variant through `enqueuePendingBotInputV1`, which takes the caller's own transaction — a second producer, never a second queue, and no wire change.
 
 ### Draining a pending wake
 
@@ -416,6 +418,20 @@ Activity advances in the **same transaction that settles the Turn**. The kernel 
 Reading is an **authenticated command, never a side effect of a read**: a background poll that listed runs must not clear a badge. `BotUnreadCommandV1` is `bot/mark-read { upToCursor }` or `bot/mark-unread`, `POST`ed to `/api/bots/:botId/unread`, idempotent on its command id under the same canonicalization `configurationCommandFingerprintV1` uses and its own namespace. It carries no `expectedRevision`: a read receipt is not a field of the Bot settings view, and a rename racing a mark-read must not conflict. `mark-read` takes `max(lastSeenCursor, upToCursor)`, so out-of-order delivery is safe. The hosted client sends it when a thread is selected **and** `document.visibilityState === "visible"`, and from nowhere else.
 
 The sidebar reads two bounded fan-outs beside `/api/bots/identities`, on the same `FLOCK_DIRECTORY_LIMIT` and excluding archived Bots: `GET /api/bots/unread` for every Bot's projection, and `GET /api/bots/notifications` for every Bot's pending intents, so a completion on a Bot nobody is looking at surfaces. Acknowledgement stays per Bot. `notifications.enabled` (GrokBot's `notify_on_updates`) gates the **intent only, never the cursor** — a muted Bot still goes bold, matching GrokBot's four-mechanism split. `hiddenFromSidebar` is a layout choice rather than a mute: a hidden Bot emits intents and accumulates unread like any other, and contributes one aggregate badge on the "Show N hidden" entry because it has no row of its own.
+
+## Approval cards
+
+Row 53 of the parity register, and the one place the constitution's _Self-modification_ rule is executable rather than aspirational: "a request for more becomes a durable pending decision for the User, never a grant."
+
+The request is an `approval` payload on `send_to_user` — the sixth `SendToUserPayloadV1` member, `{ approvalId, action, rationale?, risk, expiresInSeconds? }`, bounded and exact-keyed like the other five, with `approvalId` narrowed to an addressable identifier because it becomes both a URL path segment and a storage key. Like a `widget` it **ends the Turn**: the Bot has nothing to do until a person answers, and the answer is a later Turn's input rather than this one's.
+
+The pending decision is `ApprovalRecordV1 { approvalId, runId, sessionId, action, risk, createdAt, expiresAt, decision, decidedAt?, decidedBy }` under `shell:approval:<approvalId>`, written by `approvalTerminalRecordsV1` through the same `terminalRecords` hook unread state and the completion inbox ride — so the card a person sees and the record their answer is written against become durable in one transaction, and a re-settled or recovered Turn leaves a decision somebody already made exactly as it stands.
+
+`POST /api/bots/:id/approvals/:approvalId { decision }` records the answer and `GET /api/bots/:id/approvals` lists the Bot's cards, decided ones beside the pending, so a card in the transcript can say what was decided rather than going quiet. **First write wins**: a replayed `POST` answers `status: "replayed"` with the decision already stored, which is what makes a double click, a retried request and an alarm racing a person all settle on one answer. The decision and the `PendingBotInputV1` it owes the Bot are written in the **same transaction**, so a recorded answer the Bot never hears is not a state this can reach.
+
+**Expiry rides the object's one alarm.** Every record carries `expiresAt`, clamped to five minutes and seven days with a day as the default; `scheduledDeadlines` returns every pending card's deadline beside the Assignment sagas and Routine firings, and `settleScheduledWork` writes `expired` and queues the same input. So a Bot never waits unboundedly on a person who never came back, and it always learns the outcome.
+
+An approval **ignores `notifications.enabled`**. That mute gates updates; an approval is not an update but a question that has stopped the Bot, so the intent is recorded at `urgency: "critical"` whatever the Bot's notification policy says, and the client seam hands the urgency to whichever notifications Package the shell exposes. `SendPayloadView.vue` draws the card with Approve and Deny and renders the _backend's_ decision rather than the click; `BotSettingsSurface.vue` lists the pending ones, because a decision nobody scrolled back to still has to be findable.
 
 One client seam raises every notification. `showClientNotificationV1` prefers `desktop.notifications.show` or `mobile.notifications.show` when the shell around the WebUI exposes its capability bridge, and falls back to the web `Notification` API when it does not — progressive enhancement, with no change to either Package.
 

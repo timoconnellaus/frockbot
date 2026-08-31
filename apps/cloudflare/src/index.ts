@@ -41,6 +41,14 @@ import {
   type BotUnreadViewV1,
 } from "@frockbot/plugin-shell/unread";
 import {
+  decodeApprovalDecisionCommandV1,
+  decodeApprovalDecisionReceiptV1,
+  decodeApprovalListViewV1,
+  type ApprovalDecisionCommandV1,
+  type ApprovalDecisionReceiptV1,
+  type ApprovalListViewV1,
+} from "@frockbot/plugin-shell/approvals";
+import {
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
@@ -184,6 +192,11 @@ interface BotStateRpc extends BotConfigurationBinding {
   readWorkspaceFileV1(path: unknown): Promise<ClientWorkspaceFileV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
+  listApprovals(): Promise<ApprovalListViewV1>;
+  decideApproval(
+    approvalId: string,
+    command: ApprovalDecisionCommandV1,
+  ): Promise<ApprovalDecisionReceiptV1>;
   readUnread(): Promise<BotUnreadViewV1>;
   executeUnreadCommand(
     command: BotUnreadCommandV1,
@@ -254,6 +267,15 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       rpc.readWorkspaceFileV1({ schemaVersion: 1, userId, botId, path }),
     listNotifications: () =>
       rpc.listNotifications({ schemaVersion: 1, userId, botId }),
+    listApprovals: () => rpc.listApprovals({ schemaVersion: 1, userId, botId }),
+    decideApproval: (approvalId, command) =>
+      rpc.decideApproval({
+        schemaVersion: 1,
+        userId,
+        botId,
+        approvalId,
+        command,
+      }),
     readUnread: () => rpc.readUnread({ schemaVersion: 1, userId, botId }),
     executeUnreadCommand: (command) =>
       rpc.executeUnreadCommand({ schemaVersion: 1, userId, botId, command }),
@@ -494,6 +516,40 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).listNotifications();
+  }
+
+  /**
+   * The Bot's approvals. Decoded at the seam, like every other read that
+   * crosses from a Durable Object into the gateway.
+   */
+  async listApprovals(input: unknown): Promise<ApprovalListViewV1> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    return decodeApprovalListViewV1(
+      await botStateStub(
+        this.env,
+        this.ctx.props.userId,
+        request.botId as string,
+      ).listApprovals(),
+    );
+  }
+
+  /** One decision, recorded durably before this answers. */
+  async decideApproval(input: unknown): Promise<ApprovalDecisionReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      approvalId: rpcIdentifier,
+      command: rpcDecoded(decodeApprovalDecisionCommandV1),
+    });
+    return decodeApprovalDecisionReceiptV1(
+      await botStateStub(
+        this.env,
+        this.ctx.props.userId,
+        request.botId as string,
+      ).decideApproval(
+        request.approvalId as string,
+        request.command as ApprovalDecisionCommandV1,
+      ),
+    );
   }
 
   async acknowledgeNotification(input: unknown): Promise<void> {

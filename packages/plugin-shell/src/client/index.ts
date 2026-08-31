@@ -51,6 +51,10 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
+import {
+  decodeApprovalDecisionReceiptV1,
+  decodeApprovalListViewV1,
+} from "../approvals.js";
 import { ref } from "vue";
 import {
   frockBotWebDataKey,
@@ -889,6 +893,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     if (generation !== selectionGeneration || web.value.activeBotId !== botId)
       return;
     const projected = projectDurableRuns(web.value, notifications, runs);
+    // A decision may have been recorded on another device since the last poll,
+    // and an expiry is recorded by an alarm nobody clicked.
+    await web.value.loadApprovals();
+    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
+      return;
     if (!ctx.transport.acknowledgeNotification) return;
     for (const notification of notifications) {
       if (generation !== selectionGeneration || web.value.activeBotId !== botId)
@@ -903,6 +912,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         const delivery = await showClientNotificationV1({
           title: notification.title,
           body: notification.body,
+          // An approval is recorded at `critical` whatever the Bot's
+          // notification policy says; the shell decides what critical means.
+          ...(notification.urgency === undefined
+            ? {}
+            : { urgency: notification.urgency }),
         });
         if (delivery === "unavailable") {
           web.value.settingsError =
@@ -1055,6 +1069,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     pluginCatalog: [],
     packageCatalog: [],
     skillCatalog: [],
+    approvals: [],
     async selectBot(botId: string): Promise<void> {
       activeRequest?.abort();
       admissionObserver?.abort();
@@ -1068,6 +1083,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.activeRun = undefined;
       web.value.activeRunId = undefined;
       web.value.skillCatalog = [];
+      web.value.approvals = [];
       const url = URL.parse(window.location.href);
       if (url) {
         url.searchParams.set("bot", botId);
@@ -1097,6 +1113,62 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId === botId
         )
           web.value.skillCatalog = [];
+      }
+    },
+    async loadApprovals(): Promise<void> {
+      // A deployment with no approvals route, or one that cannot be read, is
+      // an empty list rather than a banner: the cards in the transcript then
+      // simply say they cannot be answered here.
+      const read = ctx.transport.hostedRequest;
+      const botId = web.value.activeBotId;
+      if (!read || !botId) return;
+      const generation = selectionGeneration;
+      try {
+        const view = decodeApprovalListViewV1(
+          await read(`/api/bots/${encodeURIComponent(botId)}/approvals`),
+        );
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.approvals = view.approvals;
+      } catch {
+        if (
+          generation === selectionGeneration &&
+          web.value.activeBotId === botId
+        )
+          web.value.approvals = [];
+      }
+    },
+    async decideApproval(
+      approvalId: string,
+      decision: "approved" | "denied",
+    ): Promise<void> {
+      const post = ctx.transport.hostedRequest;
+      const botId = web.value.activeBotId;
+      if (!post || !botId) return;
+      try {
+        // The receipt carries what was actually recorded, which on a replay is
+        // somebody else's earlier answer. Rendering the receipt rather than the
+        // click is what keeps this client from becoming a second authority.
+        const receipt = decodeApprovalDecisionReceiptV1(
+          await post(
+            `/api/bots/${encodeURIComponent(botId)}/approvals/${encodeURIComponent(approvalId)}`,
+            "POST",
+            JSON.stringify({ schemaVersion: 1, decision }),
+          ),
+        );
+        if (web.value.activeBotId !== botId) return;
+        const others = web.value.approvals.filter(
+          (approval) => approval.approvalId !== approvalId,
+        );
+        web.value.approvals = [receipt.approval, ...others];
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error
+            ? error.message
+            : "Could not record the decision";
       }
     },
     async loadBotSettings(): Promise<void> {

@@ -24,6 +24,9 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     fenceRunAdmission: ({ botId, query }) =>
       state.fenceRunAdmission(botId, query),
     listNotifications: ({ botId }) => state.listNotifications(botId),
+    listApprovals: ({ botId }) => state.listApprovals(botId),
+    decideApproval: ({ botId, approvalId, command }) =>
+      state.decideApproval(botId, approvalId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
@@ -116,6 +119,14 @@ describe("user application Bot seam", () => {
       fenceRunAdmission: () =>
         Promise.resolve({ schemaVersion: 1, state: "not-admitted" }),
       listNotifications: () => Promise.resolve([]),
+      listApprovals: (botId) =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          botId,
+          approvals: [],
+          pending: 0,
+        }),
+      decideApproval: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       reconcileRun: () => Promise.resolve(result),
       stopRun: () => Promise.reject(new Error("must not stop")),
@@ -643,6 +654,14 @@ describe("run list failures", () => {
       lookupRun: () => Promise.reject(new Error("unexpected")),
       fenceRunAdmission: () => Promise.reject(new Error("unexpected")),
       listNotifications: () => Promise.resolve([]),
+      listApprovals: (botId) =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          botId,
+          approvals: [],
+          pending: 0,
+        }),
+      decideApproval: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       reconcileRun: () => Promise.reject(new Error("unexpected")),
       stopRun: () => Promise.reject(new Error("unexpected")),

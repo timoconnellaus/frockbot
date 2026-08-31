@@ -14,6 +14,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   asUser,
+  dueAtWithFiringHeadroomV1,
   expectOkJson,
   freshUserId,
   postAsUser,
@@ -48,6 +49,7 @@ function botStub(userId: string, botId: string) {
  * occurrence has arrived actually holds.
  */
 async function makeDue(userId: string, botId: string): Promise<void> {
+  const dueAt = await dueAtWithFiringHeadroomV1();
   await runInDurableObject(botStub(userId, botId), async (_instance, state) => {
     const record = await state.storage.get<{ updatedAt: string }>(
       "routine:brief",
@@ -56,7 +58,7 @@ async function makeDue(userId: string, botId: string): Promise<void> {
       schemaVersion: 1,
       routineId: "brief",
       anchor: record!.updatedAt,
-      dueAt: Date.now() - 1_000,
+      dueAt,
     });
   });
 }

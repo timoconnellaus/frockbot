@@ -150,14 +150,26 @@ import {
   routineFireOutcomeV1,
   routineInboxEntryViewV1,
   routineRunDetailViewV1,
-  routineTerminalRecordsForRunV1,
   routineTurnCommandV1,
   settledRoutineOriginV1,
 } from "./backend-routines.js";
+import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import {
-  RoutineInboxStore,
-  type RoutineTerminalRecordsV1,
-} from "@frockbot/plugin-routines/inbox-store";
+  approvalKeyV1,
+  approvalNotificationBodyV1,
+  approvalNotificationIdV1,
+  approvalSendsV1,
+  decodeApprovalRecordV1,
+  projectApprovalCardV1,
+  trimmableApprovalKeysV1,
+  APPROVAL_PREFIX,
+  ApprovalDecodeError,
+  type ApprovalDecisionCommandV1,
+  type ApprovalDecisionReceiptV1,
+  type ApprovalListViewV1,
+  type ApprovalRecordV1,
+} from "./approvals.js";
+import { enqueuePendingBotInputV1 } from "@frockbot/plugin-routines/inbox-store";
 import {
   pendingBotInputPreambleV1,
   routineHandoffTextV1,
@@ -211,6 +223,7 @@ import {
 } from "@frockbot/plugin-mcp/records";
 import { projectCompositionGenerationV1 } from "./composition-views.js";
 import { executeBotTurn } from "./backend-runner.js";
+import { shellTerminalRecordsV1 } from "./terminal-records.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
@@ -244,7 +257,6 @@ import {
 
 /** The Bot Durable Object key holding this Bot's durable configuration. */
 import {
-  advanceUnreadActivityV1,
   botUnreadCommandFingerprintV1,
   markUnreadReadV1,
   markUnreadV1,
@@ -2518,11 +2530,23 @@ export class ShellBotBackendContribution {
     const sagas = await transaction.list<unknown>({
       prefix: ASSIGNMENT_SAGA_PREFIX,
     });
+    // A pending approval is a deadline like any other: the object already owns
+    // one alarm, and expiry rides it rather than inventing a second clock.
+    const approvals = await transaction.list<unknown>({
+      prefix: APPROVAL_PREFIX,
+    });
+    const expiries: number[] = [];
+    for (const stored of approvals.values()) {
+      const approval = decodeApprovalRecordV1(stored);
+      if (approval.decision !== "pending") continue;
+      expiries.push(Date.parse(approval.expiresAt));
+    }
     return [
       ...[...sagas.values()].map(
         (stored) => requireStoredAssignmentSaga(stored).deadlineAt,
       ),
       ...(await this.routineScheduler.deadlines(transaction)),
+      ...expiries.filter((at) => Number.isFinite(at)),
     ];
   }
 
@@ -2562,6 +2586,7 @@ export class ShellBotBackendContribution {
       }
     }
     await this.settleRoutineFirings();
+    await this.expireDueApprovals();
     await this.replayPendingWakeNotifications();
     // The alarm that woke this object has been consumed. Re-arm on whatever is
     // owed next, or a Routine that fired once would never fire again.
@@ -3207,6 +3232,126 @@ export class ShellBotBackendContribution {
     }
   }
 
+  /**
+   * Every pending approval this Bot's alarm now owes an expiry, expired in one
+   * pass.
+   *
+   * Exactly once per approval: the write is conditional on the record still
+   * being `pending`, so an alarm that fires twice — or fires while a person is
+   * clicking Approve — settles on whichever answer got there first and the
+   * other is a no-op. The queued input is written in the same transaction as
+   * the decision, so the Bot always learns the outcome.
+   */
+  private async expireDueApprovals(): Promise<void> {
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: APPROVAL_PREFIX,
+    });
+    const now = Date.now();
+    for (const value of stored.values()) {
+      const approval = decodeApprovalRecordV1(value);
+      if (approval.decision !== "pending") continue;
+      if (Date.parse(approval.expiresAt) > now) continue;
+      await this.settleApproval(approval.approvalId, "expired", "expiry");
+    }
+  }
+
+  /**
+   * Record one decision, and queue the input it owes the Bot, in one
+   * transaction.
+   *
+   * First write wins. A record that is no longer `pending` is returned exactly
+   * as stored, which is what makes the route idempotent: a replayed `POST`, a
+   * second click, and an alarm racing a person all answer with the one
+   * decision that was actually recorded.
+   */
+  private async settleApproval(
+    approvalId: string,
+    decision: "approved" | "denied" | "expired",
+    decidedBy: "user" | "expiry",
+  ): Promise<{ approval: ApprovalRecordV1; status: "recorded" | "replayed" }> {
+    const key = approvalKeyV1(approvalId);
+    const at = new Date().toISOString();
+    return this.ctx.storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(key);
+      if (stored === undefined) {
+        throw new ApprovalDecodeError(`approval "${approvalId}" was not found`);
+      }
+      const approval = decodeApprovalRecordV1(stored);
+      if (approval.decision !== "pending") {
+        return { approval, status: "replayed" as const };
+      }
+      const decided: ApprovalRecordV1 = {
+        ...approval,
+        decision,
+        decidedAt: at,
+        decidedBy,
+      };
+      await transaction.put(key, decided);
+      // The Bot is owed the outcome whether a person gave it or the clock did:
+      // "its outcome is delivered to the Bot's next conversational Turn as
+      // durable input", and never an unbounded wait.
+      await enqueuePendingBotInputV1(transaction, {
+        schemaVersion: 1,
+        kind: "approval",
+        approvalId,
+        decision,
+        createdAt: at,
+      });
+      return { approval: decided, status: "recorded" as const };
+    });
+  }
+
+  /**
+   * The Bot's approvals, newest first. Decided cards are carried beside the
+   * pending ones so the card in the transcript can say what was decided rather
+   * than going quiet the moment somebody answers it.
+   */
+  async listApprovals(identity: BotIdentity): Promise<ApprovalListViewV1> {
+    await this.validateIdentity(identity);
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: APPROVAL_PREFIX,
+    });
+    // Retention is enforced on read rather than in the settling transaction,
+    // which cannot list. Trimming loses a row and never a fact: the send is
+    // still on the durable log of the Turn that made it.
+    for (const key of trimmableApprovalKeysV1([...stored.keys()])) {
+      await this.ctx.storage.delete(key);
+      stored.delete(key);
+    }
+    const approvals = [...stored.values()]
+      .map((value) => decodeApprovalRecordV1(value))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return {
+      schemaVersion: 1,
+      botId: identity.botId,
+      approvals: approvals.map((approval) => projectApprovalCardV1(approval)),
+      pending: approvals.filter((approval) => approval.decision === "pending")
+        .length,
+    };
+  }
+
+  /**
+   * One decision, from a person. The durable write happens before this
+   * answers, so the 200 is a statement about state and not about intent.
+   */
+  async decideApproval(
+    identity: BotIdentity,
+    approvalId: string,
+    command: ApprovalDecisionCommandV1,
+  ): Promise<ApprovalDecisionReceiptV1> {
+    await this.validateIdentity(identity);
+    const settled = await this.settleApproval(
+      approvalId,
+      command.decision,
+      "user",
+    );
+    return {
+      schemaVersion: 1,
+      approval: projectApprovalCardV1(settled.approval),
+      status: settled.status,
+    };
+  }
+
   /** The completion inbox, newest first, with the badge count beside it. */
   async listRoutineInbox(identity: BotIdentity): Promise<RoutineInboxViewV1> {
     await this.validateIdentity(identity);
@@ -3403,34 +3548,6 @@ export class ShellBotBackendContribution {
   }
 
   /**
-   * The unread record, written in the same transaction that settles the Turn —
-   * FrockBot's `lastTurnSettlement`. Activity advances whatever the Bot's
-   * notification policy says: muting silences the intent, never the badge.
-   * Only a chat Turn advances it; an automation Turn reaches the User through
-   * its own inbox entry.
-   */
-  private async unreadTerminalRecords(input: {
-    run: {
-      acceptedAt: string;
-      runId: string;
-      admission?: { turnType: string };
-    };
-    cursor: string;
-    read<T>(key: string): Promise<T | undefined>;
-  }): Promise<Record<string, unknown>> {
-    if ((input.run.admission?.turnType ?? "chat") !== "chat") return {};
-    const current = optionalUnreadStateV1(
-      await input.read<unknown>(UNREAD_STATE_KEY),
-    );
-    return {
-      [UNREAD_STATE_KEY]: advanceUnreadActivityV1(current, {
-        cursor: input.cursor,
-        at: new Date().toISOString(),
-      }),
-    };
-  }
-
-  /**
    * The Bot's unread projection. The count is derived from the admission index
    * on every read, one page longer than the cap so "99+" is exact.
    */
@@ -3517,6 +3634,22 @@ export class ShellBotBackendContribution {
     settings: BotSettingsViewV1,
     result: BotTurnCompletion,
   ): BotNotificationIntent | undefined {
+    // An approval is not an update, and `notifications.enabled` is the mute on
+    // updates. A question that has stopped the Bot outranks it: the intent is
+    // recorded at `critical` whatever the Bot's notification policy says,
+    // exactly as a secret request would be. Muting silences chatter, not a
+    // decision the Bot is waiting on.
+    const [asked] = approvalSendsV1(result.events);
+    if (asked) {
+      return {
+        notificationId: approvalNotificationIdV1(asked.approvalId),
+        runId: result.runId,
+        createdAt: new Date().toISOString(),
+        title: `${settings.profile.name} needs your approval`,
+        body: approvalNotificationBodyV1(asked),
+        urgency: "critical",
+      };
+    }
     if (!settings.notifications.enabled) return undefined;
     const automation = result.events.some(
       (event) => event.type === "turn/admission" && event.turnType !== "chat",
@@ -3546,11 +3679,11 @@ export class ShellBotBackendContribution {
   }
 
   /**
-   * Everything the Shell writes in the transaction that settles a Turn. Two
-   * policies share the seam and neither knows about the other: unread state
-   * advances for a conversational Turn, and an automation Turn writes its
-   * completion inbox entry instead, which is why a firing reaches its User
-   * without ever touching the badge a visible run moves.
+   * Everything the Shell writes in the transaction that settles a Turn.
+   *
+   * The composition itself lives in `terminal-records.ts`, where "each
+   * producer exactly once, and no producer silently overwrites another" is a
+   * checked property rather than the shape of three spreads.
    */
   private async terminalPackageRecords(input: {
     snapshot: BotSettingsViewV1;
@@ -3558,27 +3691,12 @@ export class ShellBotBackendContribution {
     cursor: string;
     read<T>(key: string): Promise<T | undefined>;
   }): Promise<Record<string, unknown>> {
-    return {
-      ...(await this.unreadTerminalRecords(input)),
-      ...(await this.routineTerminalRecords(input)),
-    };
-  }
-
-  /**
-   * The Package records that settle with an automation Turn. Returns nothing
-   * for a conversational one, so a chat Turn's settlement is byte-for-byte what
-   * it was.
-   */
-  private async routineTerminalRecords(input: {
-    run: StoredRun;
-    read<T>(key: string): Promise<T | undefined>;
-  }): Promise<Record<string, unknown>> {
-    const contributed = await routineTerminalRecordsForRunV1({
+    return shellTerminalRecordsV1({
       run: input.run,
-      read: input.read,
+      cursor: input.cursor,
       now: new Date().toISOString(),
+      read: input.read,
     });
-    return contributed?.records ?? {};
   }
 
   async alarm(): Promise<void> {

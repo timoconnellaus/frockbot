@@ -35,6 +35,14 @@ describe("the send payload codec", () => {
       },
       { type: "secret-request", prompt: "Your API key", secretName: "api_key" },
       { type: "agent-card", agentId: "bot-2", title: "School", body: "Term 3" },
+      {
+        type: "approval",
+        approvalId: "ap-1",
+        action: "Delete the staging database",
+        rationale: "It has been idle for a month.",
+        risk: "high",
+        expiresInSeconds: 3_600,
+      },
     ];
 
     for (const payload of payloads) {
@@ -55,6 +63,50 @@ describe("the send payload codec", () => {
         widget: { prompt: "Go?", options: ["Yes"] },
       }),
     ).toEqual({ type: "widget", widget: { prompt: "Go?", options: ["Yes"] } });
+  });
+
+  test("bounds an approval and refuses everything outside its exact keys", () => {
+    const approval = {
+      type: "approval" as const,
+      approvalId: "ap-1",
+      action: "Restart the host",
+      risk: "medium" as const,
+    };
+
+    // A card with no rationale and no window is the common case, and the
+    // absent fields stay absent rather than becoming undefined.
+    expect(decodeSendToUserPayloadV1(approval)).toEqual(approval);
+    expect(() =>
+      decodeSendToUserPayloadV1({ ...approval, risk: "catastrophic" }),
+    ).toThrow("risk must be low, medium or high");
+    expect(() =>
+      decodeSendToUserPayloadV1({ ...approval, decision: "approved" }),
+    ).toThrow('unexpected key "decision"');
+    expect(() =>
+      decodeSendToUserPayloadV1({ ...approval, expiresInSeconds: 0 }),
+    ).toThrow("expiresInSeconds");
+    expect(() =>
+      decodeSendToUserPayloadV1({ ...approval, expiresInSeconds: 1.5 }),
+    ).toThrow("expiresInSeconds");
+    // The id is a URL path segment and a durable key, so it is narrower than a
+    // bounded string: an id that cannot be addressed cannot be answered.
+    expect(() =>
+      decodeSendToUserPayloadV1({ ...approval, approvalId: "ap 1" }),
+    ).toThrow("approvalId must be letters");
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        ...approval,
+        approvalId: "a".repeat(SEND_TO_USER_LIMITS_V1.approvalId + 1),
+      }),
+    ).toThrow("approvalId exceeds");
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        ...approval,
+        action: "a".repeat(SEND_TO_USER_LIMITS_V1.action + 1),
+      }),
+    ).toThrow("action exceeds");
+    const { risk: _risk, ...withoutRisk } = approval;
+    expect(() => decodeSendToUserPayloadV1(withoutRisk)).toThrow("risk");
   });
 
   test("refuses an unknown type, a missing field and an extra key", () => {

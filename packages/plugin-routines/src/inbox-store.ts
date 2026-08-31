@@ -163,6 +163,38 @@ export async function routineTerminalRecordsV1(
   return { records, entry, wake };
 }
 
+/**
+ * Queue one durable input inside a transaction the caller already holds.
+ *
+ * Exported because the producer of the `approval` variant is another Package's
+ * decision write, and that decision and the input it owes the Bot have to
+ * become durable together: a decision recorded with nothing queued would be a
+ * question answered that the Bot never hears the answer to.
+ *
+ * Idempotent on the input's id — an id already waiting writes nothing, so a
+ * retried decision cannot tell the Bot the same thing twice.
+ */
+export async function enqueuePendingBotInputV1(
+  transaction: RoutineStorageWritesV1,
+  input: PendingBotInputV1,
+): Promise<void> {
+  const id = pendingBotInputIdV1(input);
+  const stored = await transaction.list<unknown>({
+    prefix: ROUTINE_WAKE_PREFIX,
+  });
+  for (const value of stored.values()) {
+    if (pendingBotInputIdV1(decodePendingBotInputV1(value)) === id) return;
+  }
+  const cursor = routineSequenceCursorV1(
+    await transaction.get<unknown>(ROUTINE_WAKE_CURSOR_KEY),
+  );
+  await transaction.put(routineWakeKeyV1(cursor.nextSeq), input);
+  await transaction.put(ROUTINE_WAKE_CURSOR_KEY, {
+    schemaVersion: 1,
+    nextSeq: cursor.nextSeq + 1,
+  });
+}
+
 export interface RoutineInboxStoreOptionsV1 {
   now?(): Date;
 }
@@ -237,6 +269,20 @@ export class RoutineInboxStore {
     return [...stored.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, value]) => ({ key, input: decodePendingBotInputV1(value) }));
+  }
+
+  /**
+   * Queue one durable input the Bot's next conversational Turn is owed.
+   *
+   * This is the seam the approval-card slice produces through: the queue was
+   * always wider than Routines, and a second producer is not a second queue.
+   * Idempotent on the input's id — an enqueue for an id already waiting writes
+   * nothing, so a retried decision cannot tell the Bot the same thing twice.
+   */
+  async enqueue(input: PendingBotInputV1): Promise<void> {
+    await this.#storage.transaction((transaction) =>
+      enqueuePendingBotInputV1(transaction, input),
+    );
   }
 
   /** Record that the alarm has re-emitted this wake's notification intent. */

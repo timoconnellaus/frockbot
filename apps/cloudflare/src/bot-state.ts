@@ -59,6 +59,10 @@ import {
   type BotUnreadCommandV1,
 } from "@frockbot/plugin-shell/unread";
 import {
+  decodeApprovalDecisionCommandV1,
+  type ApprovalDecisionCommandV1,
+} from "@frockbot/plugin-shell/approvals";
+import {
   decodeIsolateAuthorityRequestV1,
   decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
@@ -915,6 +919,36 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.executeUnreadCommand(
       identity,
       request.command as BotUnreadCommandV1,
+    );
+  }
+
+  /** The Bot's approvals, newest first, pending and decided alike. */
+  async listApprovals(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    return shell.listApprovals(identity);
+  }
+
+  /**
+   * One decision on one approval. First write wins: a replay answers with the
+   * decision already recorded rather than overwriting it.
+   */
+  async decideApproval(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      approvalId: rpcIdentifier,
+      command: rpcDecoded(decodeApprovalDecisionCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.decideApproval(
+      identity,
+      request.approvalId as string,
+      request.command as ApprovalDecisionCommandV1,
     );
   }
 

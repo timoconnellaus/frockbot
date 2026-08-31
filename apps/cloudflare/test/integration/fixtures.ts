@@ -20,6 +20,35 @@ export { OLLAMA_REVOKED_API_KEY } from "../harness/miniflare.ts";
  */
 export { toolCallTriggerPrompt } from "../harness/miniflare.ts";
 
+/**
+ * The `dueAt` a one-minute cron Routine holds when its occurrence has arrived,
+ * seeded so the firing it triggers is the only one the test can see.
+ *
+ * Two things matter and both are about the scheduler's recompute. It advances
+ * the clock to the next occurrence strictly after `dueAt` — so a fabricated
+ * `dueAt` a second before "now" puts the next occurrence anywhere in the
+ * following minute, and when the test happens to run in the last second of a
+ * wall-clock minute that occurrence is already due. The object then re-arms its
+ * alarm on a moment in the present, fires the Routine a second time, and a test
+ * asserting one firing sees two.
+ *
+ * So this waits until there is a whole minute of headroom, and seeds a real
+ * minute boundary rather than an off-grid instant. The recompute then lands a
+ * full period away, which is what a one-minute cron actually does, and the
+ * assertion is about the product rather than about the clock the suite
+ * happened to start on.
+ */
+export async function dueAtWithFiringHeadroomV1(
+  headroomMs = 15_000,
+): Promise<number> {
+  for (;;) {
+    const now = Date.now();
+    const boundary = Math.floor(now / 60_000) * 60_000;
+    if (boundary + 60_000 - now > headroomMs) return boundary;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 /** Matches `DEFAULT_APPLICATION_HASH` in the integration config. */
 export const APPLICATION_HASH = "foundation-v1";
 
