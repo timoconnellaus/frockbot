@@ -52,6 +52,16 @@ export const SCRATCH_ROOT = "/workspace";
 export const SCRATCH_ENV = "FROCKBOT_SCRATCH";
 /** Where the launcher and the sanctioned-surface shims are installed. */
 export const BIN_ROOT = `${HOME_ROOT}/bin`;
+/**
+ * Where the sanctioned-surface shims live.
+ *
+ * A directory of their own rather than `bin`, because `bin` holds real
+ * binaries — the browser launcher, and the browser itself — and a refusal
+ * named `chromium` sitting where the browser is expected would be a Computer
+ * that cannot start its own desktop. This directory leads a tenant's `PATH`;
+ * `bin` follows it.
+ */
+export const SHIMS_ROOT = `${RUNTIME_ROOT}/shims`;
 /** The shipped reference documents a Bot reads to debug its own Computer. */
 export const REFERENCE_ROOT = `${HOME_ROOT}/reference`;
 export const CONTROL_SCRIPT = `${RUNTIME_ROOT}/control.sh`;
@@ -277,7 +287,7 @@ if [ "\${${SANCTIONED_SURFACE_ENV}:-}" = 1 ]; then
   NEXT=""
   IFS=: read -ra PARTS <<< "$PATH"
   for PART in "\${PARTS[@]}"; do
-    [ "$PART" = ${BIN_ROOT} ] && continue
+    [ "$PART" = ${SHIMS_ROOT} ] && continue
     NEXT="\${NEXT:+$NEXT:}$PART"
   done
   export PATH="$NEXT"
@@ -681,7 +691,8 @@ the desktop starter calls it, and nothing else needs to know the flags exist.
 ${COMPUTER_GUI_SHELL_COMMANDS.map((name) => `\`${name}\``).join(", ")}.
 
 A \`computer_exec\` naming one of them is refused, and each has a shim in
-\`${BIN_ROOT}\` that prints the same refusal and exits 64. Neither is a
+\`${SHIMS_ROOT}\` — which leads your \`PATH\` — that prints the same refusal
+and exits 64. Neither is a
 security boundary — a shell can defeat both in one line, and this Computer is
 your User's trust boundary anyway. They exist so the sanctioned path is the
 easy one: a GUI driven from a shell leaves no record of who did what, and the
@@ -1001,11 +1012,11 @@ else
   record reference-docs fail "${REFERENCE_ROOT} holds version $INSTALLED, not ${REFERENCE_DOCS_VERSION}; it refreshes when the Computer is next opened"
 fi
 MISSING=""
-for TOOL in ${CHROME_LAUNCHER} ${COMPUTER_GUI_SHELL_COMMANDS.map((name) => `${BIN_ROOT}/${name}`).join(" ")}; do
+for TOOL in ${CHROME_LAUNCHER} ${COMPUTER_GUI_SHELL_COMMANDS.map((name) => `${SHIMS_ROOT}/${name}`).join(" ")}; do
   [ -x "$TOOL" ] || MISSING="\${MISSING:+$MISSING }$TOOL"
 done
 if [ -z "$MISSING" ]; then
-  record launcher pass "the launcher and ${COMPUTER_GUI_SHELL_COMMANDS.length} shims are installed in ${BIN_ROOT}"
+  record launcher pass "the launcher is installed in ${BIN_ROOT} and ${COMPUTER_GUI_SHELL_COMMANDS.length} shims in ${SHIMS_ROOT}"
 else
   record launcher fail "not executable: $MISSING"
 fi
@@ -1059,7 +1070,7 @@ export const PROVISION_PHASES: readonly {
   {
     name: "layout",
     label: "preparing the Computer layout",
-    body: `mkdir -p ${RUNTIME_ROOT} ${RUNTIME_ROOT}/sync ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${BIN_ROOT} ${REFERENCE_ROOT} ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT} ${SCRATCH_ROOT}
+    body: `mkdir -p ${RUNTIME_ROOT} ${RUNTIME_ROOT}/sync ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${BIN_ROOT} ${SHIMS_ROOT} ${REFERENCE_ROOT} ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT} ${SCRATCH_ROOT}
 touch ${RUNTIME_ROOT}/tokens
 chmod 700 ${RUNTIME_ROOT}
 chmod 600 ${RUNTIME_ROOT}/tokens
@@ -1096,7 +1107,7 @@ ${installFile(`${RUNTIME_ROOT}/watch-workspace.sh`, syncWatchScript)}
 ${installFile(DOCTOR_SCRIPT, boxDoctorScript)}
 ${installFile(CHROME_LAUNCHER, chromeLauncherScript)}
 ${COMPUTER_GUI_SHELL_COMMANDS.map((name) =>
-  installFile(`${BIN_ROOT}/${name}`, guiShimScript(name)),
+  installFile(`${SHIMS_ROOT}/${name}`, guiShimScript(name)),
 ).join("\n")}
 chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${BOUNDED_LOG_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh
 chmod 755 ${DOCTOR_SCRIPT} ${CHROME_LAUNCHER} ${COMPUTER_GUI_SHELL_COMMANDS.map(
@@ -1341,7 +1352,7 @@ export const COMPUTER_RUNTIME_FILES: readonly {
   { path: DOCTOR_SCRIPT, content: boxDoctorScript, mode: 0o755 },
   { path: CHROME_LAUNCHER, content: chromeLauncherScript, mode: 0o755 },
   ...COMPUTER_GUI_SHELL_COMMANDS.map((name) => ({
-    path: `${BIN_ROOT}/${name}`,
+    path: `${SHIMS_ROOT}/${name}`,
     content: guiShimScript(name),
     mode: 0o755,
   })),
@@ -1359,6 +1370,7 @@ export const COMPUTER_RUNTIME_FILES: readonly {
  */
 export const COMPUTER_REFRESH_DIRECTORIES: readonly string[] = [
   BIN_ROOT,
+  SHIMS_ROOT,
   REFERENCE_ROOT,
   SCRATCH_ROOT,
 ];
@@ -1387,7 +1399,7 @@ export const COMPUTER_REFRESH_FILES: readonly {
   { path: DOCTOR_SCRIPT, content: boxDoctorScript, mode: 0o755 },
   { path: CHROME_LAUNCHER, content: chromeLauncherScript, mode: 0o755 },
   ...COMPUTER_GUI_SHELL_COMMANDS.map((name) => ({
-    path: `${BIN_ROOT}/${name}`,
+    path: `${SHIMS_ROOT}/${name}`,
     content: guiShimScript(name),
     mode: 0o755,
   })),

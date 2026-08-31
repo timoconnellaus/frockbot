@@ -24,6 +24,7 @@ import {
   COMPUTER_REFRESH_FINGERPRINT,
   COMPUTER_RUNTIME_FILES,
   computerGuiRefusalV1,
+  SHIMS_ROOT,
   DOCTOR_LOG,
   DOCTOR_MARKER,
   DOCTOR_SCRIPT,
@@ -687,7 +688,7 @@ describe("the GUI is never driven from the shell", () => {
       const shimPath = join(binDirectory, "xdotool");
       await writeFile(
         shimPath,
-        guiShimScript("xdotool").replaceAll(BIN_ROOT, binDirectory),
+        guiShimScript("xdotool").replaceAll(SHIMS_ROOT, binDirectory),
       );
       await writeFile(
         join(realDirectory, "xdotool"),
@@ -818,7 +819,7 @@ describe("box-doctor", () => {
     expect(boxDoctorScript).toContain(PROVISION_TASK);
     expect(boxDoctorScript).toContain(REFERENCE_DOCS_VERSION);
     for (const command of COMPUTER_GUI_SHELL_COMMANDS) {
-      expect(boxDoctorScript).toContain(`${BIN_ROOT}/${command}`);
+      expect(boxDoctorScript).toContain(`${SHIMS_ROOT}/${command}`);
     }
   });
 });
@@ -849,7 +850,7 @@ describe("refreshing an adopted Computer", () => {
     expect(paths).toContain(CHROME_LAUNCHER);
     expect(paths).toContain(`${REFERENCE_ROOT}/.version`);
     for (const command of COMPUTER_GUI_SHELL_COMMANDS) {
-      expect(paths).toContain(`${BIN_ROOT}/${command}`);
+      expect(paths).toContain(`${SHIMS_ROOT}/${command}`);
     }
     for (const document of REFERENCE_DOCS) {
       expect(paths).toContain(`${REFERENCE_ROOT}/${document.name}`);

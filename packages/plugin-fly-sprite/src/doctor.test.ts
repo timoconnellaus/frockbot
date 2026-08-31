@@ -10,6 +10,7 @@ import {
   DOCTOR_MARKER,
   DOCTOR_SCRIPT,
   SCRATCH_ROOT,
+  SHIMS_ROOT,
 } from "@frockbot/computer-host-runtime";
 import { FlySpriteComputer } from "./computer.ts";
 import { FakeComputerHost } from "./host-double.ts";
@@ -104,7 +105,7 @@ describe("the tenant environment", () => {
     await bot.exec("true", signal());
 
     const script = host.scripts.at(-1) ?? "";
-    expect(script).toContain(`export PATH=${BIN_ROOT}:$PATH`);
+    expect(script).toContain(`export PATH=${SHIMS_ROOT}:${BIN_ROOT}:$PATH`);
     expect(script).toContain(`export FROCKBOT_SCRATCH=${SCRATCH_ROOT}`);
     // The cwd stays the Bot's own workspace: a default cwd shared by every Bot
     // of a User is a default cwd where their files collide.

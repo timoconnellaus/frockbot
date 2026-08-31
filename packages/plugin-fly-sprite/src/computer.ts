@@ -26,6 +26,7 @@ import {
   SCRATCH_ENV,
   SCRATCH_ROOT,
   shellQuote,
+  SHIMS_ROOT,
   SLOT_IDLE_SECONDS,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
@@ -1166,9 +1167,9 @@ export class FlySpriteComputer {
   /**
    * The environment every command this provider runs for a tenant starts in.
    *
-   * `PATH` leads with the Computer's own `bin`, which holds the browser
-   * launcher and the sanctioned-surface shims: a command that reaches for
-   * `chromium` or `xdotool` by name finds the refusal rather than the binary.
+   * `PATH` leads with the shims and then the Computer's own `bin`: a command
+   * that reaches for `chromium` or `xdotool` by name finds the refusal, and
+   * the browser launcher is still reachable by name.
    * That is policy, not a boundary — the real binaries are still on the box,
    * one absolute path away — and it is stated as policy in `browser.md` and in
    * the refusal itself.
@@ -1180,7 +1181,7 @@ export class FlySpriteComputer {
   private tenantEnvironment(layout: AgentLayout): string[] {
     return [
       `export HOME=${HOME_ROOT}`,
-      `export PATH=${BIN_ROOT}:$PATH`,
+      `export PATH=${SHIMS_ROOT}:${BIN_ROOT}:$PATH`,
       `export FROCKBOT_BOT_ID=${shellQuote(layout.identity.id)}`,
       `export FROCKBOT_BOT_KEY=${shellQuote(layout.key)}`,
       `export ${SCRATCH_ENV}=${SCRATCH_ROOT}`,
