@@ -493,10 +493,10 @@ trust domain — agent separation is organisational, not enforced.
 ## Divergences from FrockBot's Fly Sprite design
 
 The parity register below carries the capability comparison; three code-level divergences are worth naming.
-`plugin-fly-sprite/src/computer.ts:6` hardcodes `HOME_ROOT = "/home/box"` and `DATA_ROOT = ${HOME_ROOT}/agent-data` — GrokBot's
-paths, not Fly's, whose home is `/home/sprite`; this document is what that code was copying. `computer.ts:53` still gives each
-Bot its own `chrome-profiles/$KEY` where AGENTS.md and GrokBot both mandate one shared profile, and the Package still allocates
-one Sprite per Bot where ADR 0012 says one Computer per User. GrokBot's desktop also adds `plank`, `picom`, a WebAuthn proxy
+`plugin-fly-sprite/src/computer.ts` hardcodes `HOME_ROOT = "/home/box"` and `DATA_ROOT = ${HOME_ROOT}/agent-data` — GrokBot's
+paths, not Fly's, whose home is `/home/sprite`; this document is what that code was copying. Two divergences recorded here are
+now closed: the Package allocates one Sprite per **User** (ADR 0012), and every Bot on it shares one
+`/home/box/chrome-profile`. GrokBot's desktop still adds `plank`, `picom`, a WebAuthn proxy
 host, `sand-egress-tunnel`, `sand-ua-governor.mjs` and `sand-fingerprint-profiles.mjs`; FrockBot has no counterpart to any of
 those.
 
@@ -535,7 +535,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 20  | **Skills** — folder + `SKILL.md`, frontmatter `name`/`description`, markdown body, Bot-authorable                                | `workflows/<slug>/SKILL.md`; `update_state skill write`                                                                                                         | §2.2, §2.8       | new `plugin-skills`                          | not started |
 | 21  | User skills global across a user's Bots; managed skills read-only; plugin-borne skills indexed not copied                        | `workflows/`; `managed-skills/`; `plugin-skills/cache.json`                                                                                                     | §2.9             | `plugin-skills`                              | not started |
 | 22  | Catalog of path + description injected each turn; bodies read on demand; `/` or `@` invocation                                   | the `<agent_skills>` block                                                                                                                                      | §2.8             | `plugin-skills` + WebUI                      | not started |
-| 23  | **Computer** — one persistent Linux computer per user shared by all Bots, per-Bot durable roots, shared scratch                  | one container, 14 agents; `agent-data/agents/<uuid>/` vs `/workspace`                                                                                           | §B8, §A1         | `plugin-computer` + provider                 | partial     |
+| 23  | **Computer** — one persistent Linux computer per user shared by all Bots, per-Bot durable roots, shared scratch                  | one container, 14 agents; `agent-data/agents/<uuid>/` vs `/workspace`                                                                                           | §B8, §A1         | `plugin-computer` + provider                 | done        |
 | 24  | Desktops allocated on demand, not one per Bot: own display, VNC/noVNC route, owner token, exec port                              | 7 live displays for 14 agents; `sand-window-router.mjs` `14000 + display`, `:1` primary                                                                         | §C12, §3.8       | `plugin-fly-sprite`                          | partial     |
 | 25  | Screenshot of the Bot's own desktop; human takeover for a login or captcha                                                       | native `Screenshot`; `request_box_help`                                                                                                                         | §16, §2A         | `plugin-fly-sprite` lease                    | partial     |
 | 26  | "Update Computer" (fresh instance, keep files+logins, lose packages) and "Reset" (snapshot restore)                              | settings `update-computer` two-click confirm; `reset-computer`                                                                                                  | §2A, §9          | `plugin-computer`                            | not started |

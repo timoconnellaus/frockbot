@@ -18,8 +18,7 @@ import {
 import { configuredFlyBotId } from "./host.ts";
 import {
   FlySpriteComputerProvider,
-  flySpriteNameForTarget,
-  flySpriteNameForUserStorage,
+  flySpriteNameForComputer,
 } from "./provider.ts";
 
 class FakeStream implements SpriteServiceStream {
@@ -104,14 +103,19 @@ class FakeSprite implements SpriteHandle {
       });
     }
     if (shell.includes('mv "$TMP" "$TARGET"')) {
-      return Promise.resolve({
-        stdout: "version-1\n7\n1700000000\n",
-        stderr: "",
-      });
+      return Promise.resolve({ stdout: "__WRITTEN__\n", stderr: "" });
     }
     if (shell.includes('base64 -w0 "$TARGET"')) {
+      // meta, content hash, size, mtime, bytes — the Workspace file shape.
       return Promise.resolve({
-        stdout: `version-1\n7\n1700000000\n${Buffer.from("remember").toString("base64")}\n`,
+        stdout: [
+          "",
+          "0".repeat(64),
+          "8",
+          "1700000000",
+          Buffer.from("remember").toString("base64"),
+          "",
+        ].join("\n"),
         stderr: "",
       });
     }
@@ -250,11 +254,13 @@ describe("Fly Sprite computer", () => {
     expect(
       flySpriteNameForBot("general", `f${"x".repeat(62)}`).length,
     ).toBeLessThanOrEqual(63);
-    expect(
-      flySpriteNameForTarget({ userId: "owner:a", botId: "health" }),
-    ).not.toBe(flySpriteNameForTarget({ userId: "owner", botId: "a:health" }));
-    expect(flySpriteNameForTarget({ userId: "user", botId: "owner" })).not.toBe(
-      flySpriteNameForUserStorage("owner"),
+    // ADR 0012: the Sprite name is derived from the User and nothing else, so
+    // every Bot the User owns lands on the same Computer.
+    expect(flySpriteNameForComputer({ userId: "owner" })).toBe(
+      flySpriteNameForComputer({ userId: " owner " }),
+    );
+    expect(flySpriteNameForComputer({ userId: "owner" })).not.toBe(
+      flySpriteNameForComputer({ userId: "owner-2" }),
     );
     expect(configuredFlyBotId({ FROCKBOT_BOT_ID: "  bot-7  " })).toBe("bot-7");
     expect(configuredFlyBotId({})).toBe("barebones");
@@ -343,19 +349,25 @@ describe("Fly Sprite computer", () => {
     const providerComputer = await new FlySpriteComputerProvider(
       agentComputer,
     ).open(
-      { userId: "owner", botId: "general" },
+      { userId: "owner" },
+      { botId: "general" },
       { providerId: "fly-sprite", generation: 1 },
     );
-    const memory = await providerComputer.workspace?.openDirectory({
-      namespace: "memory",
-      scope: "bot",
-      durability: "durable",
-    });
     await expect(
-      memory?.writeFile("profile.md", new TextEncoder().encode("remember"), {
-        signal: signal(),
+      providerComputer.workspace?.write({
+        path: {
+          root: {
+            kind: "bot-instructions",
+            userId: "owner",
+            botId: "general",
+          },
+          path: "profile.md",
+        },
+        bytes: new TextEncoder().encode("remember"),
+        writer: { kind: "user", userId: "owner" },
+        expectedGenerationId: null,
       }),
-    ).resolves.toMatchObject({ path: "profile.md" });
+    ).resolves.toMatchObject({ status: "ok" });
     expect(
       await agentComputer.bot("health").run("echo tool-output", signal()),
     ).toContain("tool-output");
@@ -457,57 +469,75 @@ describe("Fly Sprite computer", () => {
       new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
     );
     const computer = await provider.open(
-      { userId: "owner", botId: "health" },
+      { userId: "owner" },
+      { botId: "health" },
       { providerId: "fly-sprite", generation: 1 },
     );
-    const directory = await computer.workspace?.openDirectory({
-      namespace: "memory",
-      scope: "bot",
-      durability: "durable",
-    });
 
-    await directory?.writeFile(
-      "profile.md",
-      new TextEncoder().encode("remember"),
-      { signal: signal() },
-    );
+    await computer.workspace?.write({
+      path: {
+        root: { kind: "bot-instructions", userId: "owner", botId: "health" },
+        path: "profile.md",
+      },
+      bytes: new TextEncoder().encode("remember"),
+      writer: { kind: "user", userId: "owner" },
+      expectedGenerationId: null,
+    });
 
     expect(client.sprite.services).toEqual([]);
     expect(client.sprite.auth).toBeUndefined();
   });
 
-  test("paginates workspace listings before provider output limits", async () => {
+  // ADR 0012: one Sprite per User, every Bot a tenant on it. Two Bots resolve
+  // to one provider Computer, one Sprite name, and one browser profile; only
+  // their directories and desktops differ.
+  test("puts two Bots of one User on one Sprite with one browser profile", async () => {
     const client = new FakeClient();
-    const computer = await new FlySpriteComputerProvider(
-      new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
-    ).open(
-      { userId: "owner", botId: "health" },
-      { providerId: "fly-sprite", generation: 1 },
+    const provider = new FlySpriteComputerProvider(undefined, "token");
+
+    const first = provider.computerFor({ userId: "owner" });
+    const second = provider.computerFor({ userId: "owner" });
+    const other = provider.computerFor({ userId: "owner-2" });
+
+    expect(first).toBe(second);
+    expect(first.spriteName).toBe(
+      flySpriteNameForComputer({ userId: "owner" }),
     );
-    const directory = await computer.workspace?.openDirectory({
-      namespace: "memory",
-      scope: "bot",
-      durability: "durable",
-    });
+    expect(other.spriteName).not.toBe(first.spriteName);
 
-    const first = await directory?.listFiles({ limit: 100, signal: signal() });
-    const second = await directory?.listFiles({
-      limit: 100,
-      cursor: first?.cursor,
-      signal: signal(),
-    });
-    const third = await directory?.listFiles({
-      limit: 100,
-      cursor: second?.cursor,
-      signal: signal(),
-    });
+    const shared = new FlySpriteComputerProvider(
+      new FlySpriteComputer({ client, spriteName: "frockbot-test" }),
+    );
+    const assignment = { providerId: "fly-sprite", generation: 1 };
+    const health = await shared.open(
+      { userId: "owner" },
+      { botId: "health" },
+      assignment,
+    );
+    const general = await shared.open(
+      { userId: "owner" },
+      { botId: "general" },
+      assignment,
+    );
 
-    expect(first?.files).toHaveLength(100);
-    expect(first?.cursor).toBe("100");
-    expect(second?.files[0]?.path).toBe("memory-100.md");
-    expect(second?.cursor).toBe("200");
-    expect(third?.files).toHaveLength(5);
-    expect(third?.cursor).toBeUndefined();
+    expect(health.identity).toEqual(general.identity);
+    expect(health.assignment).toBe(general.assignment);
+    expect(health.tenant.directory).not.toBe(general.tenant.directory);
+    expect(health.tenant.directory).toBe(
+      `agent-data/agents/${computerBotKey("health")}`,
+    );
+
+    await new FlySpriteComputer({ client, spriteName: "frockbot-test" })
+      .bot("health")
+      .ensure();
+    const provision = client.sprite.commands[0]?.args.join(" ") ?? "";
+    expect(provision).toContain("/home/box/chrome-profile ");
+    expect(provision).not.toContain("chrome-profiles");
+    const desktop = installedScript(
+      provision,
+      "/home/box/.frockbot/start-desktop.sh",
+    );
+    expect(desktop).toContain('--user-data-dir="/home/box/chrome-profile"');
   });
 
   test("adapts Fly execution through the provider-neutral Computer interface", async () => {
@@ -517,7 +547,8 @@ describe("Fly Sprite computer", () => {
     );
     const assignment = { providerId: "fly-sprite", generation: 1 };
     const computer = await provider.open(
-      { userId: "owner", botId: "health" },
+      { userId: "owner" },
+      { botId: "health" },
       assignment,
     );
 
@@ -556,34 +587,35 @@ describe("Fly Sprite computer", () => {
       accessibilitySnapshot: "- heading",
     });
 
-    const directory = await computer.workspace?.openDirectory({
-      namespace: "memory",
-      scope: "bot",
-      durability: "durable",
+    const skills = {
+      kind: "bot-instructions",
+      userId: "owner",
+      botId: "health",
+    } as const;
+    const written = await computer.workspace?.write({
+      path: { root: skills, path: "profile.md" },
+      bytes: new TextEncoder().encode("remember"),
+      writer: { kind: "user", userId: "owner" },
+      expectedGenerationId: null,
     });
-    const written = await directory?.writeFile(
-      "profile.md",
-      new TextEncoder().encode("remember"),
-      { ifVersion: null, signal: signal() },
-    );
-    const stored = await directory?.readFile("profile.md", {
-      signal: signal(),
+    const stored = await computer.workspace?.read({
+      root: skills,
+      path: "profile.md",
     });
 
-    expect(written).toMatchObject({ path: "profile.md", version: "version-1" });
-    expect(new TextDecoder().decode(stored?.bytes)).toBe("remember");
-    await expect(
-      directory?.readFile("missing.md", { signal: signal() }),
-    ).resolves.toBeNull();
-    await expect(
-      directory?.deleteFile("profile.md", { signal: signal() }),
-    ).resolves.toBe(true);
+    expect(written).toMatchObject({ status: "ok" });
+    expect(stored).toMatchObject({ status: "ok" });
+    expect(
+      await computer.workspace?.read({ root: skills, path: "missing.md" }),
+    ).toMatchObject({ status: "not-found" });
+    // The mount path comes from the declared layout and matches the GrokBot
+    // parity layout: durable per-Bot state under agent-data/agents/<key>.
     expect(
       client.sprite.commands.some(({ args }) =>
         args
           .at(-1)
           ?.includes(
-            `/home/box/agent-data/agents/${computerBotKey("health")}/packages/memory/profile.md`,
+            `ROOT='/home/box/agent-data/agents/${computerBotKey("health")}/skills'`,
           ),
       ),
     ).toBe(true);

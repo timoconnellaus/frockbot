@@ -38,10 +38,12 @@ describe("computer agent contribution", () => {
     const calls: string[] = [];
     const provider: ComputerProvider = {
       id: "fixture",
-      open: async (target, assignment) => {
-        calls.push(`open:${target.userId}:${target.botId}`);
+      open: async (identity, tenant, assignment) => {
+        calls.push(`open:${identity.userId}:${tenant.botId}`);
         return {
           assignment,
+          identity,
+          tenant,
           exec: {
             execute: async (request) => {
               calls.push(

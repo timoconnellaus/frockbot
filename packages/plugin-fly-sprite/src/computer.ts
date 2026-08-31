@@ -21,9 +21,6 @@ export interface ComputerBotIdentity {
   description?: string;
 }
 
-/** @deprecated Use ComputerBotIdentity. */
-export type ComputerAgentIdentity = ComputerBotIdentity;
-
 interface AgentLayout {
   identity: ComputerBotIdentity;
   key: string;
@@ -50,7 +47,7 @@ rm -f "/tmp/.X$DISPLAY_NUMBER-lock" "/tmp/.X11-unix/X$DISPLAY_NUMBER"
 Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp &
 for _ in $(seq 1 100); do xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break; sleep 0.1; done
 fluxbox >"$BOT/fluxbox.log" 2>&1 &
-chromium --no-sandbox --disable-dev-shm-usage --disable-gpu --user-data-dir="${HOME_ROOT}/chrome-profiles/$KEY" --remote-debugging-address=127.0.0.1 --remote-debugging-port="$CDP_PORT" --start-maximized about:blank >"$BOT/chromium.log" 2>&1 &
+chromium --no-sandbox --disable-dev-shm-usage --disable-gpu --user-data-dir="${HOME_ROOT}/chrome-profile" --remote-debugging-address=127.0.0.1 --remote-debugging-port="$CDP_PORT" --start-maximized about:blank >"$BOT/chromium.log" 2>&1 &
 x11vnc -display "$DISPLAY" -forever -shared -rfbport "$VNC_PORT" -passwd "$(cat "$BOT/vnc-password")" >"$BOT/x11vnc.log" 2>&1 &
 VNC_PID=$!
 wait "$VNC_PID"
@@ -66,7 +63,7 @@ DATA=${DATA_ROOT}
 AGENT_DATA="$DATA/agents/$KEY"
 WORKSPACE=${WORKSPACES_ROOT}/$KEY
 case "$KEY" in (*[!a-z0-9-]*|'') echo "invalid agent key" >&2; exit 64;; esac
-mkdir -p "$BOT" "$AGENT_DATA" "$WORKSPACE" "${HOME_ROOT}/bin" "${HOME_ROOT}/reference" "${HOME_ROOT}/chrome-profiles/$KEY"
+mkdir -p "$BOT" "$AGENT_DATA" "$AGENT_DATA/memory" "$AGENT_DATA/skills" "$DATA/user-memory" "$DATA/user-packages" "$WORKSPACE" "${HOME_ROOT}/bin" "${HOME_ROOT}/reference" "${HOME_ROOT}/chrome-profile"
 PROFILE_TMP=$(mktemp "$AGENT_DATA/profile.json.XXXXXX")
 printf '%s' "$PROFILE_BASE64" | base64 -d > "$PROFILE_TMP"
 chmod 600 "$PROFILE_TMP"
@@ -190,7 +187,7 @@ function installFile(path: string, content: string): string {
 }
 
 const provisionScript = `set -eu
-mkdir -p ${RUNTIME_ROOT} ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-packages ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profiles ${WORKSPACES_ROOT}
+mkdir -p ${RUNTIME_ROOT} ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT}
 if ! command -v Xvfb >/dev/null || ! command -v chromium >/dev/null || ! command -v websockify >/dev/null; then
   if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
   $SUDO apt-get update >/tmp/frockbot-provision.log 2>&1
@@ -212,7 +209,8 @@ cat > ${HOME_ROOT}/reference/README.md <<'EOF'
 # FrockBot computer
 
 /home/box/agent-data is durable application data. /workspaces contains Bot-private workspaces.
-Each Bot has a workspace, browser profile, desktop, and takeover lease.
+One Computer serves all of a User's Bots. Each Bot has its own directories
+and desktop; the browser profile at /home/box/chrome-profile is shared by all of them.
 Automations are stored but are not executed unless an automation runtime is installed.
 EOF
 `;
@@ -281,12 +279,12 @@ export interface BrowserAction {
 export interface ComputerConnection {
   botId: string;
   botKey: string;
-  /** @deprecated Use botId. */
-  agentId: string;
-  /** @deprecated Use botKey. */
-  agentKey: string;
   spriteName: string;
   viewerUrl: string;
+  /** The tenant's X display on the shared Computer, e.g. `:100`. */
+  display: string;
+  /** The tenant's durable directory, relative to the Workspace home. */
+  directory: string;
 }
 
 function configuredToken(): string | undefined {
@@ -344,9 +342,6 @@ export function computerBotKey(botId: string): string {
   const digest = createHash("sha256").update(id).digest("hex").slice(0, 12);
   return `${slug || "bot"}-${digest}`;
 }
-
-/** @deprecated Use computerBotKey. */
-export const computerAgentKey = computerBotKey;
 
 function layoutFor(input: string | ComputerBotIdentity): AgentLayout {
   const identity = normalizedIdentity(input);
@@ -419,10 +414,6 @@ async function settleService(
 export class FlySpriteAgentComputer {
   readonly botId: string;
   readonly botKey: string;
-  /** @deprecated Use botId. */
-  readonly agentId: string;
-  /** @deprecated Use botKey. */
-  readonly agentKey: string;
   private readonly computer: FlySpriteComputer;
   private readonly layout: AgentLayout;
 
@@ -431,8 +422,16 @@ export class FlySpriteAgentComputer {
     this.layout = layout;
     this.botId = layout.identity.id;
     this.botKey = layout.key;
-    this.agentId = this.botId;
-    this.agentKey = this.botKey;
+  }
+
+  /** The tenant's allocated X display, once its desktop has been ensured. */
+  get display(): string | undefined {
+    return this.computer.displayForTenant(this.layout.key);
+  }
+
+  /** The tenant's durable directory, relative to the Workspace home. */
+  get directory(): string {
+    return `agent-data/agents/${this.layout.key}`;
   }
 
   ensure(signal?: AbortSignal): Promise<ComputerConnection> {
@@ -484,6 +483,7 @@ export class FlySpriteComputer {
     Promise<ComputerConnection>
   >();
   private readonly storagePromises = new Map<string, Promise<SpriteHandle>>();
+  private readonly displays = new Map<string, string>();
 
   constructor(options: FlySpriteComputerOptions = {}) {
     const token = options.token?.trim() || configuredToken();
@@ -498,9 +498,14 @@ export class FlySpriteComputer {
     return new FlySpriteAgentComputer(this, layoutFor(identity));
   }
 
-  /** @deprecated Use bot(). */
-  agent(identity: string | ComputerBotIdentity): FlySpriteAgentComputer {
-    return this.bot(identity);
+  /**
+   * The X display this Computer allocated to one tenant, once its desktop has
+   * been ensured. Slots are allocated on demand, exactly as GrokBot allocates
+   * displays on demand rather than one per agent, so this is `undefined` until
+   * the tenant's desktop has started.
+   */
+  displayForTenant(botKey: string): string | undefined {
+    return this.displays.get(botKey);
   }
 
   async ensureAgent(
@@ -727,7 +732,7 @@ export class FlySpriteComputer {
     const current = await this.client?.getSprite(this.spriteName);
     const url = current?.url ?? sprite.url;
     if (!url) throw new Error("Sprites API did not return a computer URL");
-    const [password, token] = await Promise.all([
+    const [password, token, slot] = await Promise.all([
       sprite.execFileHTTP("cat", [`${layout.runtimeDir}/vnc-password`], {
         signal,
         timeout: 15_000,
@@ -736,7 +741,13 @@ export class FlySpriteComputer {
         signal,
         timeout: 15_000,
       }),
+      sprite.execFileHTTP("cat", [`${layout.runtimeDir}/slot`], {
+        signal,
+        timeout: 15_000,
+      }),
     ]);
+    const display = `:${100 + Number(outputText(slot.stdout).trim() || 0)}`;
+    this.displays.set(layout.key, display);
     const viewer = new URL("vnc.html", url.endsWith("/") ? url : `${url}/`);
     viewer.hash = new URLSearchParams({
       autoconnect: "1",
@@ -748,10 +759,10 @@ export class FlySpriteComputer {
     return {
       botId: layout.identity.id,
       botKey: layout.key,
-      agentId: layout.identity.id,
-      agentKey: layout.key,
       spriteName: this.spriteName,
       viewerUrl: viewer.toString(),
+      display,
+      directory: `agent-data/agents/${layout.key}`,
     };
   }
 
@@ -805,7 +816,9 @@ export class FlySpriteComputer {
       [
         "-p",
         layout.workspaceDir,
-        `${DATA_ROOT}/agents/${layout.key}/packages`,
+        `${DATA_ROOT}/agents/${layout.key}/memory`,
+        `${DATA_ROOT}/agents/${layout.key}/skills`,
+        `${DATA_ROOT}/user-memory`,
         `${DATA_ROOT}/user-packages`,
       ],
       { signal, timeout: 15_000, maxBuffer: MAX_OUTPUT },

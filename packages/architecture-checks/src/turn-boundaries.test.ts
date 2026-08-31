@@ -38,10 +38,12 @@ describe("Turn boundaries", () => {
     const computerCalls: string[] = [];
     const provider: ComputerProvider = {
       id: "recording",
-      open: (target, assignment) => {
-        computerCalls.push(`open:${target.userId}:${target.botId}`);
+      open: (identity, tenant, assignment) => {
+        computerCalls.push(`open:${identity.userId}:${tenant.botId}`);
         return Promise.resolve({
           assignment,
+          identity,
+          tenant,
           exec: {
             execute: () => {
               computerCalls.push("exec");

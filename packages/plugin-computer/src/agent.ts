@@ -111,12 +111,14 @@ export function createComputerAgentPlugin(
   }
 
   const plugin: Plugin.Function = (ctx) => {
+    // One Computer per User (ADR 0012): the assignment is keyed by the User,
+    // and the Bot attaches to it as a tenant.
+    const identity = { userId };
     const open = async (botId: string, signal: AbortSignal) => {
-      const target = { userId, botId };
-      if (!ctx.computers.assignment(target)) {
-        ctx.computers.assign(target, defaultProviderId);
+      if (!ctx.computers.assignment(identity)) {
+        ctx.computers.assign(identity, defaultProviderId);
       }
-      return ctx.computers.open(target, { signal });
+      return ctx.computers.open(identity, { botId }, { signal });
     };
 
     const execTool: ToolDefinition = {
@@ -234,7 +236,7 @@ export function createComputerAgentPlugin(
         render: () =>
           [
             "## Persistent Computer",
-            "You have a persistent Linux Computer assigned to this Bot.",
+            "You share a persistent Linux Computer with your User's other Bots. You have your own directories and desktop on it; the browser profile is shared.",
             "Use computer_exec to inspect the filesystem before claiming that a path or file exists.",
             "Never invent a directory listing.",
           ].join("\n"),

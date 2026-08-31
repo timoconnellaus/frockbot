@@ -399,9 +399,11 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
 
   async mountProvider(): Promise<FlyMountResult> {
     this.root ??= await this.createRoot("frockbot-workerd-compatibility");
-    const target = { userId: "workerd", botId: "compatibility" };
-    const assignment = this.root.computers.assign(target, "fly-sprite");
-    const computer = await this.root.computers.open(target);
+    const identity = { userId: "workerd" };
+    const assignment = this.root.computers.assign(identity, "fly-sprite");
+    const computer = await this.root.computers.open(identity, {
+      botId: "compatibility",
+    });
     await computer.close();
     return {
       providerId: assignment.providerId,
@@ -424,9 +426,11 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     }
     const root = await this.createRoot(spriteName);
     try {
-      const target = { userId: "workerd-live", botId: spriteName };
-      root.computers.assign(target, "fly-sprite");
-      const computer = await root.computers.open(target);
+      const identity = { userId: "workerd-live" };
+      root.computers.assign(identity, "fly-sprite");
+      const computer = await root.computers.open(identity, {
+        botId: spriteName,
+      });
       try {
         if (!computer.exec || !computer.workspace) {
           throw new Error("Fly provider did not expose exec and workspace");
@@ -440,13 +444,28 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
         if (result.exitCode !== 0) {
           throw new Error(`Fly echo exited with ${result.exitCode}`);
         }
-        const directory = await computer.workspace.openDirectory({
-          namespace: "live-smoke",
-          scope: "bot",
-          durability: "durable",
+        const root_ = {
+          kind: "package-declared",
+          userId: "workerd-live",
+          packageId: "@frockbot/plugin-fly-sprite",
+          rootId: "live-smoke",
+        } as const;
+        const written = await computer.workspace.write({
+          path: { root: root_, path: "probe.txt" },
+          bytes: new TextEncoder().encode(text),
+          writer: { kind: "user", userId: "workerd-live" },
+          expectedGenerationId: null,
         });
-        await directory.writeFile("probe.txt", new TextEncoder().encode(text));
-        await directory.readFile("probe.txt");
+        if (written.status !== "ok" && written.status !== "conflict") {
+          throw new Error(`Fly Workspace write failed: ${written.reason}`);
+        }
+        const read = await computer.workspace.read({
+          root: root_,
+          path: "probe.txt",
+        });
+        if (read.status !== "ok") {
+          throw new Error(`Fly Workspace read failed: ${read.reason}`);
+        }
       } finally {
         await computer.close();
       }
