@@ -14,9 +14,9 @@
 // `test/harness/miniflare.ts`.
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import vue from "@vitejs/plugin-vue";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
+import { readBuiltArtifact } from "./test/artifact-freshness.ts";
 import {
   createComputerHostFake,
   FAKE_COMPUTER_HOST_TOKEN,
@@ -34,10 +34,15 @@ import {
 // Vite's `?raw` from a test file: `tsc` resolves a relative specifier on disk
 // and never against an ambient wildcard module, so a `?raw` import would be a
 // permanent type error. Reading it here also means a run without a prior
-// `artifact:build` dies at config load with the missing path named.
-const foundationArtifact = readFileSync(
+// `artifact:build` dies at config load with the missing path named — and, since
+// `readBuiltArtifact` compares the artifact against every source the bundler
+// recorded in its map, so does a run against an artifact older than the tree.
+// `vitest run --config vitest.integration.config.ts` by hand is the way that
+// happens; the failure names the stale files instead of quietly testing bytes
+// nobody wrote.
+const foundationArtifact = readBuiltArtifact(
   resolve(import.meta.dirname, "dist/artifacts/foundation-v1.mjs"),
-  "utf8",
+  resolve(import.meta.dirname, "src/client"),
 );
 
 // better-auth's D1 schema. `gatewayAuth` degrades to an unconfigured stub when
@@ -160,5 +165,23 @@ export default defineConfig({
     // never runs on a commit.
     include: ["test/integration/**/*.integration.ts"],
     testTimeout: 60_000,
+    // Sequential, for the same reason `vitest.config.ts` is: the fakes these
+    // tests drive are single objects the whole project shares, and a file that
+    // scripts one or counts what it recorded cannot be running beside another
+    // file doing the same thing.
+    //
+    // Two of them, concretely. The Computer host fake above is one Node-side
+    // closure, shared across every pool worker: its `/__fake/exec` table, its
+    // file map and its call log belong to the run, not to a file. The Workers
+    // AI fake is a Worker, one per pool worker: `generate-image` and
+    // `package-settings` both read its call count, run a Turn, and assert the
+    // count went up by exactly one, which is only true if nothing else
+    // generated an image in between. So are the outbound stub's MCP handshake
+    // counter and its blocked-address tally in `test/harness/miniflare.ts`.
+    //
+    // Per-test `/__fake/reset` would not fix it — a reset is itself the thing
+    // that races — and the cost is small: this suite is dominated by module
+    // transform and Durable Object work, not by wall time in parallel files.
+    fileParallelism: false,
   },
 });
