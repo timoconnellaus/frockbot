@@ -93,6 +93,7 @@ describe("Routines client contribution", () => {
     const mounted = mount();
     expect(mounted.slots.map((slot) => slot.slot)).toEqual([
       "frockbot.bot-settings-sections",
+      "frockbot.header-actions",
     ]);
     mounted.dispose();
   });

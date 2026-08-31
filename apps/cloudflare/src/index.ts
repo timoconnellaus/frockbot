@@ -52,7 +52,10 @@ import {
 } from "@frockbot/configuration-core";
 import {
   decodeRoutineCommandReceiptV1,
+  decodeRoutineInboxReceiptV1,
+  decodeRoutineInboxViewV1,
   decodeRoutineListViewV1,
+  decodeRoutineRunDetailViewV1,
   decodeRoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
 import {
@@ -189,6 +192,10 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     executeRoutineCommand: (request) => rpc.executeRoutineCommand(request),
     listRoutineRuns: (request) => rpc.listRoutineRuns(request),
     deliverRoutineHook: (request) => rpc.deliverRoutineHook(request),
+    readRoutineRun: (request) => rpc.readRoutineRun(request),
+    listRoutineInbox: (request) => rpc.listRoutineInbox(request),
+    executeRoutineInboxCommand: (request) =>
+      rpc.executeRoutineInboxCommand(request),
     listCompositionGenerations: (request) =>
       rpc.listCompositionGenerations(request),
     getCompositionGeneration: (request) =>
@@ -929,6 +936,33 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             userId,
             botId,
             routineId,
+          }),
+        ),
+      readRoutineRun: async (userId, botId, routineId, runId) =>
+        decodeRoutineRunDetailViewV1(
+          await botStateStub(env, userId, botId).readRoutineRun({
+            schemaVersion: 1,
+            userId,
+            botId,
+            routineId,
+            runId,
+          }),
+        ),
+      listRoutineInbox: async (userId, botId) =>
+        decodeRoutineInboxViewV1(
+          await botStateStub(env, userId, botId).listRoutineInbox({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      executeRoutineInboxCommand: async (userId, botId, command) =>
+        decodeRoutineInboxReceiptV1(
+          await botStateStub(env, userId, botId).executeRoutineInboxCommand({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
           }),
         ),
       revertComposition: async (userId, botId, command) =>

@@ -10,9 +10,13 @@ import type { ClientPlugin } from "@frockbot/client-core";
 import { ref } from "vue";
 import {
   decodeRoutineCommandReceiptV1,
+  decodeRoutineInboxReceiptV1,
+  decodeRoutineInboxViewV1,
   decodeRoutineListViewV1,
+  decodeRoutineRunDetailViewV1,
   decodeRoutineRunListViewV1,
 } from "../shared.js";
+import RoutineInboxBadge from "./RoutineInboxBadge.vue";
 import RoutinesSection from "./RoutinesSection.vue";
 import {
   routinesStateKey,
@@ -54,6 +58,9 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
   const state = ref<RoutinesClientState>({
     routines: [],
     runs: {},
+    runDetails: {},
+    inbox: [],
+    unacknowledged: 0,
     loaded: false,
     busy: false,
     async load(botId: string) {
@@ -80,6 +87,58 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
         state.value.error = undefined;
       } catch (error) {
         state.value.error = message(error, "Could not load the run log");
+      }
+    },
+    async loadRun(botId: string, routineId: string, runId: string) {
+      try {
+        const view = decodeRoutineRunDetailViewV1(
+          await request(
+            `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}/runs/${encodeURIComponent(runId)}`,
+          ),
+        );
+        state.value.runDetails = { ...state.value.runDetails, [runId]: view };
+        state.value.error = undefined;
+      } catch (error) {
+        state.value.error = message(error, "Could not load the run");
+      }
+    },
+    async loadInbox(botId: string) {
+      try {
+        const view = decodeRoutineInboxViewV1(
+          await request(
+            `/api/bots/${encodeURIComponent(botId)}/routines/inbox`,
+          ),
+        );
+        state.value.inbox = view.entries;
+        state.value.unacknowledged = view.unacknowledged;
+        state.value.error = undefined;
+      } catch (error) {
+        state.value.error = message(error, "Could not load the inbox");
+      }
+    },
+    async acknowledgeInbox(botId: string, entryIds: string[]) {
+      state.value.busy = true;
+      try {
+        const receipt = decodeRoutineInboxReceiptV1(
+          await request(
+            `/api/bots/${encodeURIComponent(botId)}/routines/inbox`,
+            "POST",
+            JSON.stringify({
+              schemaVersion: 1,
+              commandId: crypto.randomUUID(),
+              botId,
+              type: "routine/acknowledge-inbox",
+              entryIds,
+            }),
+          ),
+        );
+        state.value.inbox = receipt.inbox.entries;
+        state.value.unacknowledged = receipt.inbox.unacknowledged;
+        state.value.error = undefined;
+      } catch (error) {
+        state.value.error = message(error, "Could not acknowledge the inbox");
+      } finally {
+        state.value.busy = false;
       }
     },
     async save(botId: string, submission: RoutineFormSubmissionV1) {
@@ -207,6 +266,14 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
       slot: "frockbot.bot-settings-sections",
       order: 10,
       component: RoutinesSection,
+    }),
+    // The header is where a completion that never spoke becomes visible: an
+    // automation Turn cannot reach the transcript, so the badge is the only
+    // thing that says a firing finished.
+    ctx.slot({
+      slot: "frockbot.header-actions",
+      order: 20,
+      component: RoutineInboxBadge,
     }),
   ];
 };

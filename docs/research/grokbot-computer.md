@@ -529,9 +529,9 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 15  | **Routines** — per-Bot definition file (name, prompt, trigger, enabled, provenance, timestamps) and durable run log              | `automations/<slug>/{automation.json,runs.json}`                                                                                                                | §2.6             | new `plugin-routines`                                                                    | landed      |
 | 16  | Cron triggers with timezone and `@daily` shorthands; inbound webhook with its own signing-key store                              | `trigger.type=cron`/`webhook`; `webhook-keys.json`                                                                                                              | §2.6             | `plugin-routines`                                                                        | landed      |
 | 17  | Integration triggers (slack, github, origin, teams, linear, sentry, pagerduty), `group`, manual run                              | typed trigger schemas; `runs.json trigger:"manual"`                                                                                                             | §2.6             | per-integration Packages                                                                 | partial     |
-| 18  | A firing runs as a fresh subagent turn under the same Bot id; runs of _different_ Bots overlap, same-routine runs are sequential | "fresh subagent with the same work capabilities as the parent"; overlapping `runs.json` windows, no lock found                                                  | §2.7, §3.1       | kernel Turn admission                                                                    | partial     |
+| 18  | A firing runs as a fresh subagent turn under the same Bot id; runs of _different_ Bots overlap, same-routine runs are sequential | "fresh subagent with the same work capabilities as the parent"; overlapping `runs.json` windows, no lock found                                                  | §2.7, §3.1       | kernel Turn admission                                                                    | landed      |
 | 19  | A routine run cannot speak to the user, lands silently in a parent inbox; pause/resume/delete/edit with a card                   | `automation_completion_inbox`; `update_state routine`                                                                                                           | §2.5, §2.7       | `plugin-routines`                                                                        | partial     |
-| 19b | A run finishing against a sleeping parent queues a pending wake the host replays, rather than dropping the result                | `host-pending-wakes.json` `kind:"subagent"`, `quietOrigin.automation`, `automationRunUuid`                                                                      | §3.2             | kernel Turn admission                                                                    | not started |
+| 19b | A run finishing against a sleeping parent queues a pending wake the host replays, rather than dropping the result                | `host-pending-wakes.json` `kind:"subagent"`, `quietOrigin.automation`, `automationRunUuid`                                                                      | §3.2             | kernel Turn admission                                                                    | landed      |
 | 20  | **Skills** — folder + `SKILL.md`, frontmatter `name`/`description`, markdown body, Bot-authorable                                | `workflows/<slug>/SKILL.md`; `update_state skill write`                                                                                                         | §2.2, §2.8       | new `plugin-skills`                                                                      | landed      |
 | 21  | User skills global across a user's Bots; managed skills read-only; plugin-borne skills indexed not copied                        | `workflows/`; `managed-skills/`; `plugin-skills/cache.json`                                                                                                     | §2.9             | `plugin-skills`                                                                          | partial     |
 | 22  | Catalog of path + description injected each turn; bodies read on demand; `/` or `@` invocation                                   | the `<agent_skills>` block                                                                                                                                      | §2.8             | `plugin-skills` + WebUI                                                                  | landed      |
@@ -684,24 +684,43 @@ the rows whose status the code moved:
   tool's `run_now` action, `webhook` as the delivery door. Both enqueue a
   durable firing that the alarm drains, and the run log records which. No
   integration trigger (slack, github, …) and no `group` exists.
-- **18** — a firing is an admitted Turn of the same Bot with
-  `turnType: "automation"` and a recorded `origin`, run from inside the Bot
-  Durable Object, and same-Routine firings are strictly sequential behind the
-  `routine-fire:<routineId>` lock — stricter than GrokBot, which showed no lock.
-  Runs of different Bots overlap freely, because they are separate Durable
-  Objects. What is missing is the "fresh subagent" half: the automation Turn
-  still starts from the Bot's shared event history rather than an empty one with
-  a pointer to the parent transcript.
+- **18** — landed, including the "fresh subagent" half. A firing is an admitted
+  Turn of the same Bot with `turnType: "automation"` and a recorded `origin`,
+  run from inside the Bot Durable Object; same-Routine firings are strictly
+  sequential behind the `routine-fire:<routineId>` lock — stricter than
+  GrokBot, which showed no lock — and runs of different Bots overlap freely,
+  because they are separate Durable Objects. Its prompt now starts from an
+  empty history plus one pointer line naming the parent conversation
+  (`plugin-shell/src/history.ts`), the parent transcript is never copied, and a
+  chat Turn's request in turn carries no automation Turn's events. Memory tiers
+  stay shared, which is the row's other half of "the same work capabilities as
+  the parent".
 - **19** — create, update, pause, resume, delete and run-now are landed end to
   end: as versioned Bot commands with durable fingerprinted receipts
   (`plugin-routines/src/store.ts`), as the `routine_manage` tool the Bot calls on
   any turn type (`agent.ts`), and as `RoutinesSection.vue` in the Bot settings
   surface, where "next run" is now the moment the scheduler armed an alarm on, a
   firing appears in the per-Routine run log, and a webhook Routine's delivery URL
-  and key are shown once with rotate and revoke beside them. What is missing is the silent half
-  of the row: an automation Turn is not yet hidden from the visible transcript —
-  it appears in `GET /api/bots/:id/turns` today — and there is no completion
-  inbox, no pending wake, and no confirmation card.
+  and key are shown once with rotate and revoke beside them. The silent half is
+  landed too: an automation Turn is absent from `GET /api/bots/:id/turns` and
+  from the run lookup, reachable only through the run log, and a completed
+  firing writes a `RoutineInboxEntryV1` in the transaction that settles it —
+  `attribution: "Automation: <name>"`, `acknowledged: false` — surfaced by the
+  header badge and drawer (`RoutineInboxBadge.vue`) and cleared by an explicit
+  acknowledge command. What is still missing is the confirmation **card**:
+  a Routine write answers with a receipt the settings surface re-renders, not
+  with a card in the conversation, because a Bot-authored write happens on a
+  Turn whose only user-facing channel is `send_to_user`.
+- **19b** — landed. A firing that calls `wake_parent` writes a
+  `PendingBotInputV1` of kind `wake` beside its inbox entry, in the same
+  terminal transaction — GrokBot's `quietOrigin.automation` as
+  `quiet: { automation: true }`, and the run id in place of
+  `automationRunUuid`. It drains at exactly two points: the Bot's next admitted
+  chat Turn prefixes it to that Turn's input, durably and idempotently through
+  a `routine-drain:<runId>` receipt, and the alarm re-emits its notification
+  once for an entry still unread. The queue is bounded at 16 and its record is
+  already the wider `PendingBotInputV1`, whose `approval` variant is decoded
+  and has no producer yet.
 - **21** — two of the three halves are landed. **Managed** Skills are four
   first-party `SKILL.md` documents compiled into the `plugin-skills` artifact
   (`plugin-skills/src/managed.ts`), mirroring GrokBot's `add-connector`,

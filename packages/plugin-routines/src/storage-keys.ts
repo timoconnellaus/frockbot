@@ -127,3 +127,76 @@ export function routineHookKeyRecordV1(routineId: string): string {
 export function routineDeliveryKeyV1(deliveryId: string): string {
   return `${ROUTINE_DELIVERY_PREFIX}${deliveryId}`;
 }
+
+/** One `RoutineInboxEntryV1`, newest first. */
+export const ROUTINE_INBOX_PREFIX = "routine-inbox:";
+/** The inbox's monotonic sequence. Read by key, because the terminal seam cannot list. */
+export const ROUTINE_INBOX_CURSOR_KEY = "routine-inbox-cursor";
+/** One `PendingBotInputV1`, oldest first: a queue drains in the order it filled. */
+export const ROUTINE_WAKE_PREFIX = "routine-wake:";
+/** The pending-input queue's monotonic sequence. */
+export const ROUTINE_WAKE_CURSOR_KEY = "routine-wake-cursor";
+/** What one chat Turn drained, so a resumed Turn reproduces the same input. */
+export const ROUTINE_DRAIN_PREFIX = "routine-drain:";
+
+/**
+ * Most completion-inbox entries retained. Past it the oldest are trimmed on the
+ * next read: an entry is a convenience index over runs that are still durable,
+ * so trimming loses a row and never a fact.
+ */
+export const ROUTINE_INBOX_LIMIT = 100;
+
+/**
+ * Most pending inputs the Bot's next conversational Turn may be owed. A Bot
+ * that has not been spoken to in sixteen firings is not helped by a
+ * seventeenth hand-off; the oldest is dropped, and its inbox entry — which is
+ * the durable record — stays.
+ */
+export const ROUTINE_PENDING_INPUT_LIMIT = 16;
+
+/** Most drain receipts retained; one is only needed while its Turn is running. */
+export const ROUTINE_DRAIN_RECEIPT_LIMIT = 16;
+
+export function routineInboxKeyV1(seq: number): string {
+  if (!Number.isSafeInteger(seq) || seq < 0 || seq >= RUN_SEQUENCE_CEILING) {
+    throw new Error("Routine inbox sequence is out of range");
+  }
+  const descending = RUN_SEQUENCE_CEILING - seq;
+  return `${ROUTINE_INBOX_PREFIX}${String(descending).padStart(10, "0")}`;
+}
+
+export function routineWakeKeyV1(seq: number): string {
+  if (!Number.isSafeInteger(seq) || seq < 0 || seq >= RUN_SEQUENCE_CEILING) {
+    throw new Error("Routine wake sequence is out of range");
+  }
+  return `${ROUTINE_WAKE_PREFIX}${String(seq).padStart(10, "0")}`;
+}
+
+export function routineDrainKeyV1(runId: string): string {
+  return `${ROUTINE_DRAIN_PREFIX}${runId}`;
+}
+
+/**
+ * The sequence a cursor record holds. The cursor exists because the terminal
+ * seam is handed a reader and not a lister: a Package record written in the
+ * settling transaction must be addressable by key alone.
+ */
+export interface RoutineSequenceCursorV1 {
+  schemaVersion: 1;
+  nextSeq: number;
+}
+
+export function routineSequenceCursorV1(
+  value: unknown,
+): RoutineSequenceCursorV1 {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (value as { schemaVersion?: unknown }).schemaVersion !== 1 ||
+    !Number.isSafeInteger((value as { nextSeq?: unknown }).nextSeq) ||
+    (value as { nextSeq: number }).nextSeq < 0
+  ) {
+    return { schemaVersion: 1, nextSeq: 0 };
+  }
+  return { schemaVersion: 1, nextSeq: (value as { nextSeq: number }).nextSeq };
+}

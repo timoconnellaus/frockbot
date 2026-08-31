@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRoutinesBackendContribution } from "./backend.js";
 import { RoutineStore, RoutineNotFoundError } from "./store.js";
+import { RoutineInboxStore } from "./inbox-store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 import { decodeRoutineCommandV1 } from "./shared.js";
 
@@ -9,6 +10,7 @@ const CONTEXT = { userId: "tim", client: "browser" as const };
 function contribution(options: { ownedBots?: string[] } = {}) {
   const owned = new Set(options.ownedBots ?? ["scout"]);
   const stores = new Map<string, RoutineStore>();
+  const inboxes = new Map<string, RoutineInboxStore>();
   const store = (botId: string): RoutineStore => {
     if (!owned.has(botId)) {
       const error = new Error(`Bot "${botId}" not found`);
@@ -21,6 +23,32 @@ function contribution(options: { ownedBots?: string[] } = {}) {
     stores.set(botId, created);
     return created;
   };
+  const inbox = (botId: string): RoutineInboxStore => {
+    store(botId);
+    const existing = inboxes.get(botId);
+    if (existing) return existing;
+    const created = new RoutineInboxStore(createMemoryRoutineStorageV1());
+    inboxes.set(botId, created);
+    return created;
+  };
+  const inboxView = async (botId: string) => {
+    const entries = await inbox(botId).list();
+    return {
+      schemaVersion: 1 as const,
+      botId,
+      entries: entries.map((entry) => ({
+        schemaVersion: 1 as const,
+        entryId: entry.entryId,
+        runId: entry.runId,
+        routineId: entry.routineId,
+        text: entry.text,
+        attribution: entry.attribution,
+        createdAt: entry.createdAt,
+        acknowledged: entry.acknowledged,
+      })),
+      unacknowledged: entries.filter((entry) => !entry.acknowledged).length,
+    };
+  };
   return createRoutinesBackendContribution({
     deliverRoutineHook: () =>
       Promise.reject(new Error("no webhook in this fixture")),
@@ -29,6 +57,23 @@ function contribution(options: { ownedBots?: string[] } = {}) {
       store(botId).execute(command, { kind: "user" }),
     listRoutineRuns: (_userId, botId, routineId) =>
       store(botId).listRuns(botId, routineId),
+    readRoutineRun: (_userId, botId, routineId, runId) => {
+      store(botId);
+      const error = new Error(`run "${runId}" is unknown`);
+      error.name = "RoutineNotFoundError";
+      void routineId;
+      return Promise.reject(error);
+    },
+    listRoutineInbox: (_userId, botId) => inboxView(botId),
+    executeRoutineInboxCommand: async (_userId, botId, command) => {
+      await inbox(botId).acknowledge(command.entryIds);
+      return {
+        schemaVersion: 1 as const,
+        commandId: command.commandId,
+        status: "applied" as const,
+        inbox: await inboxView(botId),
+      };
+    },
   });
 }
 

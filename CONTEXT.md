@@ -139,3 +139,15 @@ _Avoid_: Author, source
 **Routine**:
 A persisted trigger and instruction that schedules future work for a bot.
 _Avoid_: Job, cron
+
+**Firing**:
+One occurrence of a Routine: a durable record written before the automation Turn it admits, and the same-Routine lock while that Turn is unsettled.
+_Avoid_: Execution, invocation
+
+**Completion inbox**:
+Where a firing's outcome lands for the User, because an automation Turn cannot speak in the conversation. One acknowledged-or-not entry per completed firing.
+_Avoid_: Notification list, activity feed
+
+**Pending input**:
+A durable input the Bot's next conversational Turn is owed — a Routine hand-off today, a decided approval later. Drained once, idempotently, and never delivered as something the User said.
+_Avoid_: Queued message, pending wake

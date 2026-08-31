@@ -144,19 +144,15 @@ describe("a Routine firing, from the command to the admitted Turn", () => {
     expect(after.routines[0]?.lastRunAt).toBeTypeOf("string");
 
     // THE TRANSCRIPT. `GET /turns` is the visible-conversation projection, and
-    // today it is a projection of every run: the automation run appears in it,
-    // and carries no admission because `ClientRunV1` has no field for one.
-    // Slice E hides an automation Turn from this list and delivers its outcome
-    // to the next chat Turn instead; this assertion is what that slice changes.
+    // an automation Turn is not in the conversation: the list does not move,
+    // and the run is reachable only through the Routine's run log above.
     const turns = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/turns`),
     )) as { runs: Array<Record<string, unknown>> };
-    expect(turns.runs.length).toBe(before.runs.length + 1);
-    const projected = turns.runs.find(
-      (run) => run.runId === automation[0]!.runId,
-    );
-    expect(projected).toBeDefined();
-    expect(projected).not.toHaveProperty("admission");
+    expect(turns.runs.length).toBe(before.runs.length);
+    expect(
+      turns.runs.find((run) => run.runId === automation[0]!.runId),
+    ).toBeUndefined();
   });
 
   it("runs a Routine on demand and records the firing as manual", async () => {

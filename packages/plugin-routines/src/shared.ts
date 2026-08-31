@@ -692,3 +692,297 @@ export function decodeRoutineCommandReceiptV1(
       : { hook: decodeRoutineHookMintV1(candidate.hook) }),
   };
 }
+
+/** Most inbox entries one listing carries. */
+export const ROUTINE_INBOX_LIST_MAX = 100;
+/** Most events one automation run's read-only view carries. */
+export const ROUTINE_RUN_EVENT_MAX = 200;
+
+/** One completed automation Turn, as the hosted client sees it. */
+export interface RoutineInboxEntryViewV1 {
+  schemaVersion: 1;
+  entryId: string;
+  runId: string;
+  routineId: string;
+  text: string;
+  attribution: string;
+  createdAt: string;
+  acknowledged: boolean;
+  acknowledgedAt?: string;
+}
+
+export interface RoutineInboxViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  entries: RoutineInboxEntryViewV1[];
+  /** What the header badge shows, so the client counts nothing itself. */
+  unacknowledged: number;
+}
+
+/**
+ * Acknowledging is a command, never a side effect of reading: a background poll
+ * must not clear a badge. An empty `entryIds` acknowledges every entry.
+ */
+export interface RoutineInboxCommandV1 {
+  schemaVersion: 1;
+  commandId: string;
+  botId: string;
+  type: "routine/acknowledge-inbox";
+  entryIds: string[];
+}
+
+export interface RoutineInboxReceiptV1 {
+  schemaVersion: 1;
+  commandId: string;
+  status: "applied";
+  inbox: RoutineInboxViewV1;
+}
+
+/**
+ * One event of an automation run, flattened for the run-log reader.
+ *
+ * An automation run is absent from the visible transcript by construction, so
+ * the only way to read one is here — and it is a read, in a shape that carries
+ * no tool inputs, no model requests and no payloads, only what happened.
+ */
+export interface RoutineRunEventViewV1 {
+  type: string;
+  at: string;
+  summary: string;
+}
+
+/** One automation run, read-only, reachable only through the run log. */
+export interface RoutineRunDetailViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  routineId: string;
+  runId: string;
+  status: string;
+  admittedAt: string;
+  input: string;
+  events: RoutineRunEventViewV1[];
+  outcome?: string;
+}
+
+export function decodeRoutineInboxEntryViewV1(
+  value: unknown,
+): RoutineInboxEntryViewV1 {
+  const candidate = record(value, "Routine inbox entry view");
+  routineExactKeys(
+    candidate,
+    [
+      "schemaVersion",
+      "entryId",
+      "runId",
+      "routineId",
+      "text",
+      "attribution",
+      "createdAt",
+      "acknowledged",
+    ],
+    ["acknowledgedAt"],
+    "Routine inbox entry view",
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new RoutineDecodeError(
+      "Routine inbox entry view schemaVersion is unsupported",
+    );
+  }
+  if (typeof candidate.acknowledged !== "boolean") {
+    throw new RoutineDecodeError(
+      "Routine inbox entry view acknowledged must be a boolean",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    entryId: routineText(candidate.entryId, 256, "Routine inbox entryId"),
+    runId: routineText(candidate.runId, 256, "Routine inbox runId"),
+    routineId: commandIdentifier(
+      candidate.routineId,
+      "Routine inbox routineId",
+    ),
+    text: routineText(candidate.text, 4_000, "Routine inbox text"),
+    attribution: routineText(
+      candidate.attribution,
+      128,
+      "Routine inbox attribution",
+    ),
+    createdAt: routineTimestamp(candidate.createdAt, "Routine inbox createdAt"),
+    acknowledged: candidate.acknowledged,
+    ...(candidate.acknowledgedAt === undefined
+      ? {}
+      : {
+          acknowledgedAt: routineTimestamp(
+            candidate.acknowledgedAt,
+            "Routine inbox acknowledgedAt",
+          ),
+        }),
+  };
+}
+
+export function decodeRoutineInboxViewV1(value: unknown): RoutineInboxViewV1 {
+  const candidate = record(value, "Routine inbox view");
+  routineExactKeys(
+    candidate,
+    ["schemaVersion", "botId", "entries", "unacknowledged"],
+    [],
+    "Routine inbox view",
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new RoutineDecodeError(
+      "Routine inbox view schemaVersion is unsupported",
+    );
+  }
+  if (!Array.isArray(candidate.entries)) {
+    throw new RoutineDecodeError("Routine inbox view entries must be an array");
+  }
+  if (candidate.entries.length > ROUTINE_INBOX_LIST_MAX) {
+    throw new RoutineDecodeError("Routine inbox view is over its bound");
+  }
+  if (
+    !Number.isSafeInteger(candidate.unacknowledged) ||
+    (candidate.unacknowledged as number) < 0
+  ) {
+    throw new RoutineDecodeError(
+      "Routine inbox view unacknowledged must be a non-negative integer",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    botId: commandIdentifier(candidate.botId, "Routine inbox view botId"),
+    entries: candidate.entries.map(decodeRoutineInboxEntryViewV1),
+    unacknowledged: candidate.unacknowledged as number,
+  };
+}
+
+export function decodeRoutineInboxCommandV1(
+  value: unknown,
+): RoutineInboxCommandV1 {
+  const candidate = record(value, "Routine inbox command");
+  routineExactKeys(
+    candidate,
+    ["schemaVersion", "commandId", "botId", "type", "entryIds"],
+    [],
+    "Routine inbox command",
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new RoutineDecodeError(
+      "Routine inbox command schemaVersion is unsupported",
+    );
+  }
+  if (candidate.type !== "routine/acknowledge-inbox") {
+    throw new RoutineDecodeError("Routine inbox command type is invalid");
+  }
+  if (!Array.isArray(candidate.entryIds)) {
+    throw new RoutineDecodeError(
+      "Routine inbox command entryIds must be an array",
+    );
+  }
+  if (candidate.entryIds.length > ROUTINE_INBOX_LIST_MAX) {
+    throw new RoutineDecodeError("Routine inbox command is over its bound");
+  }
+  return {
+    schemaVersion: 1,
+    commandId: commandIdentifier(candidate.commandId, "Routine commandId"),
+    botId: commandIdentifier(candidate.botId, "Routine inbox command botId"),
+    type: "routine/acknowledge-inbox",
+    entryIds: candidate.entryIds.map((entryId) =>
+      routineText(entryId, 256, "Routine inbox command entryId"),
+    ),
+  };
+}
+
+export function decodeRoutineInboxReceiptV1(
+  value: unknown,
+): RoutineInboxReceiptV1 {
+  const candidate = record(value, "Routine inbox receipt");
+  routineExactKeys(
+    candidate,
+    ["schemaVersion", "commandId", "status", "inbox"],
+    [],
+    "Routine inbox receipt",
+  );
+  if (candidate.schemaVersion !== 1 || candidate.status !== "applied") {
+    throw new RoutineDecodeError("Routine inbox receipt is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    commandId: commandIdentifier(candidate.commandId, "Routine commandId"),
+    status: "applied",
+    inbox: decodeRoutineInboxViewV1(candidate.inbox),
+  };
+}
+
+export function decodeRoutineRunDetailViewV1(
+  value: unknown,
+): RoutineRunDetailViewV1 {
+  const candidate = record(value, "Routine run detail");
+  routineExactKeys(
+    candidate,
+    [
+      "schemaVersion",
+      "botId",
+      "routineId",
+      "runId",
+      "status",
+      "admittedAt",
+      "input",
+      "events",
+    ],
+    ["outcome"],
+    "Routine run detail",
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new RoutineDecodeError(
+      "Routine run detail schemaVersion is unsupported",
+    );
+  }
+  if (!Array.isArray(candidate.events)) {
+    throw new RoutineDecodeError("Routine run detail events must be an array");
+  }
+  if (candidate.events.length > ROUTINE_RUN_EVENT_MAX) {
+    throw new RoutineDecodeError("Routine run detail is over its bound");
+  }
+  return {
+    schemaVersion: 1,
+    botId: commandIdentifier(candidate.botId, "Routine run detail botId"),
+    routineId: commandIdentifier(
+      candidate.routineId,
+      "Routine run detail routineId",
+    ),
+    runId: routineText(candidate.runId, 256, "Routine run detail runId"),
+    status: routineText(candidate.status, 64, "Routine run detail status"),
+    admittedAt: routineTimestamp(
+      candidate.admittedAt,
+      "Routine run detail admittedAt",
+    ),
+    input: routineText(candidate.input, 16_000, "Routine run detail input"),
+    events: candidate.events.map((event) => {
+      const entry = record(event, "Routine run detail event");
+      routineExactKeys(
+        entry,
+        ["type", "at", "summary"],
+        [],
+        "Routine run detail event",
+      );
+      return {
+        type: routineText(entry.type, 64, "Routine run detail event type"),
+        at: routineTimestamp(entry.at, "Routine run detail event at"),
+        summary: routineText(
+          entry.summary,
+          2_000,
+          "Routine run detail event summary",
+        ),
+      };
+    }),
+    ...(candidate.outcome === undefined
+      ? {}
+      : {
+          outcome: routineText(
+            candidate.outcome,
+            4_000,
+            "Routine run detail outcome",
+          ),
+        }),
+  };
+}

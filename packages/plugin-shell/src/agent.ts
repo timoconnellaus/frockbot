@@ -7,6 +7,11 @@
 //     One tool carrying the typed payload union, admitted on chat turns only,
 //     recording each send as `send/to-user` on the durable log. Row 57c: a
 //     `widget` payload ends the Turn, and no other payload does.
+//  3. One `agent/request` handler, which is where the transcript seam is: a
+//     chat Turn's request carries only chat Turns, and an automation Turn's
+//     carries its own Turn and a pointer to the parent it may not read. See
+//     `history.ts`.
+//
 //  2. `wake_parent` — row 40 / §2.13. One required `message`, a complete
 //     hand-off, admitted on automation and subagent turns only, and always
 //     ending the Turn. Delivering the hand-off into the parent's next
@@ -28,6 +33,7 @@ import {
 } from "@frockbot/kernel-contracts";
 // Merges the Agent loop's event declarations into the cordis Context type.
 import type {} from "@frockbot/kernel-agent-loop/agent";
+import { automationParentPointerV1, turnScopedMessagesV1 } from "./history.js";
 import type { Plugin } from "cordis";
 import manifest from "../frockbot.json" with { type: "json" };
 
@@ -288,6 +294,21 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
       createWakeParentTool(ctx.sessions),
       parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
     ),
+    // Applied after the rest of the chain, so this Package has the last word on
+    // what history a request carries — the one rule the visible transcript
+    // rests on.
+    ctx.on("agent/request", async (agent, _request, _signal, next) => {
+      const proposed = await next();
+      return {
+        ...proposed,
+        messages: turnScopedMessagesV1({
+          events: agent.session.events,
+          messages: proposed.messages,
+          pointer: automationParentPointerV1,
+          sessionId: agent.session.id,
+        }),
+      };
+    }),
   ];
   return () => {
     for (const dispose of disposers.toReversed()) dispose();

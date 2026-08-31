@@ -5,11 +5,13 @@ import {
   completeStoredRun as completeKernelStoredRun,
   failStoredRun as failKernelStoredRun,
   requireStoredRunReconciliation as requireKernelStoredRunReconciliation,
+  type TerminalPackageRecords,
 } from "@frockbot/kernel-do";
 import {
   storedRunCodecV1,
   type BotTurnCompletion,
 } from "./backend-contracts.js";
+import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
 
 export type { RunTerminalKeys, RunTerminalStorage } from "@frockbot/kernel-do";
 import type { RunTerminalKeys, RunTerminalStorage } from "@frockbot/kernel-do";
@@ -20,6 +22,7 @@ export function completeStoredRun(
   runId: string,
   previous: readonly SessionEvent[],
   result: BotTurnCompletion,
+  packageRecords?: TerminalPackageRecords<BotSettingsViewV1>,
 ): Promise<"completed" | "cancelled"> {
   return completeKernelStoredRun(
     storedRunCodecV1,
@@ -28,6 +31,7 @@ export function completeStoredRun(
     runId,
     previous,
     result,
+    packageRecords,
   );
 }
 

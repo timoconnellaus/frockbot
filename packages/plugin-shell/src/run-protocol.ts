@@ -463,10 +463,27 @@ function lookupState(
   return "running";
 }
 
+/**
+ * Whether one stored run belongs to the visible conversation.
+ *
+ * This is the client half of the transcript seam: the Bot Durable Object keeps
+ * one ordered log, and the projection — not the kernel — decides that only a
+ * Turn admitted as `chat` is a Turn a person sees. A run recorded before turn
+ * admission existed carries no marker and was a chat Turn, so it stays visible.
+ * An automation run is reachable only through its Routine's run log.
+ */
+export function isVisibleRunV1(run: {
+  admission?: { turnType?: string };
+}): boolean {
+  return (run.admission?.turnType ?? "chat") === "chat";
+}
+
 export function projectClientRunLookupV1(
   run: StoredRun | undefined,
 ): ClientRunLookupV1 {
-  if (!run) return { schemaVersion: 1, state: "not-admitted" };
+  if (!run || !isVisibleRunV1(run)) {
+    return { schemaVersion: 1, state: "not-admitted" };
+  }
   const projected = projectClientRunV1(run);
   return {
     schemaVersion: 1,

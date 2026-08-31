@@ -9,6 +9,7 @@ import {
   type IsolatePendingDecisionV1,
   type NormalizedModelRequest,
   type PackageBundlerBinding,
+  type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 import {
@@ -137,8 +138,22 @@ import {
   createBotRoutines,
   createBotRoutinesHost,
   routineFireOutcomeV1,
+  routineInboxEntryViewV1,
+  routineRunDetailViewV1,
+  routineTerminalRecordsForRunV1,
   routineTurnCommandV1,
+  settledRoutineOriginV1,
 } from "./backend-routines.js";
+import {
+  RoutineInboxStore,
+  type RoutineTerminalRecordsV1,
+} from "@frockbot/plugin-routines/inbox-store";
+import {
+  pendingBotInputPreambleV1,
+  routineHandoffTextV1,
+  type PendingBotInputV1,
+  type RoutineInboxEntryV1,
+} from "@frockbot/plugin-routines/inbox";
 import type { RoutineScheduler } from "@frockbot/plugin-routines/scheduler";
 import {
   RoutineNotFoundError,
@@ -147,7 +162,11 @@ import {
 import type {
   RoutineCommandReceiptV1,
   RoutineCommandV1,
+  RoutineInboxCommandV1,
+  RoutineInboxReceiptV1,
+  RoutineInboxViewV1,
   RoutineListViewV1,
+  RoutineRunDetailViewV1,
   RoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
 import {
@@ -191,6 +210,7 @@ import {
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
   decodeClientRunStopCommandV1,
+  isVisibleRunV1,
   projectClientRunLookupV1,
   projectClientRunV1,
   projectClientAnnouncementsV1,
@@ -395,6 +415,12 @@ export class ShellBotBackendContribution {
    * `settleScheduledWork` are the whole of its access to the clock.
    */
   private readonly routineScheduler: RoutineScheduler;
+  /**
+   * The completion inbox and the pending-input queue. An automation Turn cannot
+   * speak to its User, so this is where its outcome lands, written in the same
+   * transaction that settles the Turn.
+   */
+  private readonly routineInbox: RoutineInboxStore;
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -412,6 +438,7 @@ export class ShellBotBackendContribution {
     );
     this.routines = routines.store;
     this.routineScheduler = routines.scheduler;
+    this.routineInbox = new RoutineInboxStore(host.state.storage);
     const createAuthority: CreateBotDurableAuthority =
       host.createAuthority ?? ((options) => new BotDurableAuthority(options));
     this.authority = createAuthority<BotSettingsViewV1>({
@@ -426,7 +453,7 @@ export class ShellBotBackendContribution {
         executeTurn: (input) => this.executeTurn(input),
         notification: (snapshot, result) =>
           this.createNotification(snapshot, result),
-        terminalRecords: (input) => this.unreadTerminalRecords(input),
+        terminalRecords: (input) => this.terminalPackageRecords(input),
         scheduledDeadlines: (transaction) =>
           this.scheduledDeadlines(transaction),
         scheduledWorkInFlight: () => this.assignmentActivities.size > 0,
@@ -1987,7 +2014,10 @@ export class ShellBotBackendContribution {
     this.activeTurn = active;
     try {
       return await executeBotTurn({
-        command: input.command,
+        command: {
+          ...input.command,
+          text: await this.turnInputTextV1(input.command),
+        },
         previousEvents: input.previousEvents,
         composition: activation.mounted,
         resume: input.resume,
@@ -1995,6 +2025,32 @@ export class ShellBotBackendContribution {
     } finally {
       if (this.activeTurn === active) this.activeTurn = undefined;
     }
+  }
+
+  /**
+   * The text one admitted Turn actually runs on.
+   *
+   * A chat Turn drains the pending-input queue first — "its outcome is
+   * delivered to the Bot's next conversational Turn as durable input" — and
+   * carries the hand-offs as a preamble ahead of the person's own words. The
+   * drain is a durable receipt named by the run, so a resumed or recovered Turn
+   * reads back exactly the inputs it drained rather than draining a second
+   * time, and the recorded `model/request` stays reconstructible.
+   *
+   * An automation Turn drains nothing: a firing is not the conversation, and a
+   * hand-off addressed to the parent must not be consumed by another firing.
+   */
+  private async turnInputTextV1(command: {
+    runId: string;
+    text: string;
+    turnType?: TurnTypeV1;
+  }): Promise<string> {
+    if ((command.turnType ?? "chat") !== "chat") return command.text;
+    const drained = await this.routineInbox.drainInto(command.runId);
+    const preamble = pendingBotInputPreambleV1(drained);
+    return preamble.length === 0
+      ? command.text
+      : `${preamble}\n${command.text}`;
   }
 
   /**
@@ -2404,6 +2460,7 @@ export class ShellBotBackendContribution {
       }
     }
     await this.settleRoutineFirings();
+    await this.replayPendingWakeNotifications();
     // The alarm that woke this object has been consumed. Re-arm on whatever is
     // owed next, or a Routine that fired once would never fire again.
     await this.ctx.storage.transaction((transaction) =>
@@ -2940,6 +2997,97 @@ export class ShellBotBackendContribution {
     return accepted;
   }
 
+  /**
+   * The second of the two points a pending wake is heard at.
+   *
+   * The first is the Bot's next conversational Turn. This one is the User's:
+   * an intent recorded in the settling transaction cannot be lost, but a
+   * client that was not connected when it landed can miss the delivery, so the
+   * alarm re-emits it once for a wake whose inbox entry is still unread. Once
+   * per wake, recorded on the wake, so a Bot nobody talks to is not notified
+   * on every alarm forever.
+   */
+  private async replayPendingWakeNotifications(): Promise<void> {
+    const pending = await this.routineInbox.pending();
+    if (pending.length === 0) return;
+    const identity = await this.authority.readDurableIdentity();
+    if (!identity) return;
+    const settings = await this.getSettings(identity);
+    if (!settings.notifications.enabled) return;
+    const unread = new Map(
+      (await this.routineInbox.list())
+        .filter((entry) => !entry.acknowledged)
+        .map((entry) => [entry.runId, entry] as const),
+    );
+    for (const { key, input } of pending) {
+      if (input.kind !== "wake" || input.renotifiedAt !== undefined) continue;
+      const entry = unread.get(input.runId);
+      if (!entry) continue;
+      await this.authority.recordNotification({
+        notificationId: `routine-wake:${input.runId}`,
+        runId: input.runId,
+        createdAt: new Date().toISOString(),
+        title: `${settings.profile.name} finished a Routine`,
+        body: entry.text.slice(0, 240),
+      });
+      await this.routineInbox.markRenotified(key);
+    }
+  }
+
+  /** The completion inbox, newest first, with the badge count beside it. */
+  async listRoutineInbox(identity: BotIdentity): Promise<RoutineInboxViewV1> {
+    await this.validateIdentity(identity);
+    const entries = await this.routineInbox.list();
+    return {
+      schemaVersion: 1,
+      botId: identity.botId,
+      entries: entries.map((entry) => routineInboxEntryViewV1(entry)),
+      unacknowledged: entries.filter((entry) => !entry.acknowledged).length,
+    };
+  }
+
+  /**
+   * Acknowledge inbox entries. An explicit command, never a side effect of
+   * reading: a background poll must not clear the badge.
+   */
+  async executeRoutineInboxCommand(
+    identity: BotIdentity,
+    command: RoutineInboxCommandV1,
+  ): Promise<RoutineInboxReceiptV1> {
+    if (command.botId !== identity.botId) {
+      throw new RoutineNotFoundError(command.botId);
+    }
+    await this.validateIdentity(identity);
+    await this.routineInbox.acknowledge(command.entryIds);
+    return {
+      schemaVersion: 1,
+      commandId: command.commandId,
+      status: "applied",
+      inbox: await this.listRoutineInbox(identity),
+    };
+  }
+
+  /**
+   * One automation run, read-only.
+   *
+   * An automation Turn is absent from `listRuns` by construction, so this is
+   * the only read of one, and it is reached through the Routine's own run log:
+   * a run whose recorded origin names a different Routine is a 404 here.
+   */
+  async readRoutineRun(
+    identity: BotIdentity,
+    routineId: string,
+    runId: string,
+  ): Promise<RoutineRunDetailViewV1> {
+    await this.validateIdentity(identity);
+    const run = await this.authority.readStoredRun(runId);
+    const origin = run ? settledRoutineOriginV1(run) : undefined;
+    if (!run || origin?.routineId !== routineId) {
+      throw new RoutineNotFoundError(runId);
+    }
+    return routineRunDetailViewV1(identity.botId, routineId, run);
+  }
+
   /** One Routine's bounded run log, newest first. */
   async listRoutineRuns(
     identity: BotIdentity,
@@ -3197,6 +3345,24 @@ export class ShellBotBackendContribution {
     result: BotTurnCompletion,
   ): BotNotificationIntent | undefined {
     if (!settings.notifications.enabled) return undefined;
+    const automation = result.events.some(
+      (event) => event.type === "turn/admission" && event.turnType !== "chat",
+    );
+    if (automation) {
+      const handoff = routineHandoffTextV1(result.events);
+      // A firing that handed off is the only automation Turn that says
+      // anything to a person here. A silent completion lands in the inbox and
+      // notifies nobody: "persisted silently, arriving later as an
+      // `automation_completion_inbox` row".
+      if (handoff === undefined) return undefined;
+      return {
+        notificationId: `routine-wake:${result.runId}`,
+        runId: result.runId,
+        createdAt: new Date().toISOString(),
+        title: `${settings.profile.name} finished a Routine`,
+        body: handoff.slice(0, 240),
+      };
+    }
     return {
       notificationId: result.runId,
       runId: result.runId,
@@ -3204,6 +3370,42 @@ export class ShellBotBackendContribution {
       title: `${settings.profile.name} replied`,
       body: result.text.slice(0, 240),
     };
+  }
+
+  /**
+   * Everything the Shell writes in the transaction that settles a Turn. Two
+   * policies share the seam and neither knows about the other: unread state
+   * advances for a conversational Turn, and an automation Turn writes its
+   * completion inbox entry instead, which is why a firing reaches its User
+   * without ever touching the badge a visible run moves.
+   */
+  private async terminalPackageRecords(input: {
+    snapshot: BotSettingsViewV1;
+    run: StoredRun;
+    cursor: string;
+    read<T>(key: string): Promise<T | undefined>;
+  }): Promise<Record<string, unknown>> {
+    return {
+      ...(await this.unreadTerminalRecords(input)),
+      ...(await this.routineTerminalRecords(input)),
+    };
+  }
+
+  /**
+   * The Package records that settle with an automation Turn. Returns nothing
+   * for a conversational one, so a chat Turn's settlement is byte-for-byte what
+   * it was.
+   */
+  private async routineTerminalRecords(input: {
+    run: StoredRun;
+    read<T>(key: string): Promise<T | undefined>;
+  }): Promise<Record<string, unknown>> {
+    const contributed = await routineTerminalRecordsForRunV1({
+      run: input.run,
+      read: input.read,
+      now: new Date().toISOString(),
+    });
+    return contributed?.records ?? {};
   }
 
   async alarm(): Promise<void> {
@@ -3230,7 +3432,10 @@ export class ShellBotBackendContribution {
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
       const active = await this.authority.readStoredRun(activeRunId);
-      if (active)
+      // An automation firing occupies the object like any other run, and is
+      // still not part of the conversation: the visible transcript never
+      // shows one, running or settled.
+      if (active && isVisibleRunV1(active))
         selected.set(active.runId, { run: projectClientRunV1(active) });
     }
     const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
@@ -3242,7 +3447,7 @@ export class ShellBotBackendContribution {
         continue;
       }
       const stored = await this.authority.readStoredRun(candidate.runId);
-      if (!stored) continue;
+      if (!stored || !isVisibleRunV1(stored)) continue;
       const projected = projectClientRunV1(stored);
       const tentative = [
         ...selected.values(),
