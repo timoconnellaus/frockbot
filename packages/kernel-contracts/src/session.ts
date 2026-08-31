@@ -334,6 +334,9 @@ export class Session {
       if (event.type === "model/request") {
         unresolvedModelRequests.add(event.request.requestId);
       }
+      if (event.type === "model/effect-not-started") {
+        unresolvedModelRequests.delete(event.requestId);
+      }
       if (event.type === "assistant/message") {
         unresolvedModelRequests.delete(event.requestId);
         if (openStep?.turn === event.turn && openStep.step === event.step) {
@@ -343,19 +346,21 @@ export class Session {
     }
 
     const repairs: SessionEventInput[] = [];
-    for (const entry of journal.values()) {
-      if (!entry.intent || entry.result) continue;
-      const event = entry.intent;
-      repairs.push({
-        type: "tool/result",
-        turn: event.turn,
-        step: event.step,
-        occurrenceId: event.occurrenceId,
-        name: event.name,
-        content: "Interrupted before a durable result was recorded.",
-        isError: true,
-        status: "interrupted",
-      });
+    if (closeTurn) {
+      for (const entry of journal.values()) {
+        if (!entry.intent || entry.result) continue;
+        const event = entry.intent;
+        repairs.push({
+          type: "tool/result",
+          turn: event.turn,
+          step: event.step,
+          occurrenceId: event.occurrenceId,
+          name: event.name,
+          content: "Interrupted before a durable result was recorded.",
+          isError: true,
+          status: "interrupted",
+        });
+      }
     }
     if (
       openStep &&
@@ -393,6 +398,13 @@ export class SessionStore extends Service {
   private sessions = new Map<string, Session>();
   private initialSessions: Readonly<Record<string, readonly SessionEvent[]>>;
   private persistEvents?: PersistSessionEvents;
+  private preparedSessions = new Map<
+    string,
+    {
+      initialEvents?: readonly SessionEvent[];
+      persistEvents?: PersistSessionEvents;
+    }
+  >();
 
   constructor(ctx: Context, config: SessionStoreConfig = {}) {
     super(ctx, "sessions");
@@ -400,17 +412,37 @@ export class SessionStore extends Service {
     this.persistEvents = config.persistEvents;
   }
 
+  prepare(
+    sessionId: string,
+    options: {
+      initialEvents?: readonly SessionEvent[];
+      persistEvents?: PersistSessionEvents;
+    },
+  ): () => void {
+    if (this.sessions.has(sessionId) || this.preparedSessions.has(sessionId)) {
+      throw new Error(`session "${sessionId}" already exists`);
+    }
+    this.preparedSessions.set(sessionId, options);
+    return () => {
+      if (this.preparedSessions.get(sessionId) === options) {
+        this.preparedSessions.delete(sessionId);
+      }
+    };
+  }
+
   create(sessionId: string): Session {
     if (this.sessions.has(sessionId)) {
       throw new Error(`session "${sessionId}" already exists`);
     }
+    const prepared = this.preparedSessions.get(sessionId);
+    this.preparedSessions.delete(sessionId);
     const session = new Session(
       sessionId,
       (envelope) => {
         this.ctx.emit("session/event", envelope);
       },
-      this.initialSessions[sessionId],
-      this.persistEvents,
+      prepared?.initialEvents ?? this.initialSessions[sessionId],
+      prepared?.persistEvents ?? this.persistEvents,
     );
     this.sessions.set(sessionId, session);
     return session;
@@ -435,6 +467,7 @@ export class SessionStore extends Service {
     return () => {
       for (const session of this.sessions.values()) session.dispose();
       this.sessions.clear();
+      this.preparedSessions.clear();
     };
   }
 }

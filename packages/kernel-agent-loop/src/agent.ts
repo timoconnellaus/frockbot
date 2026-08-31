@@ -7,12 +7,18 @@ import type {
 
 export type AgentStatus = "idle" | "running" | "disposed";
 
+/** One exact new external effect whose durable intent is already journaled. */
+export type AgentEffectAdmission =
+  { kind: "model"; effectId: string } | { kind: "tool"; effectId: string };
+
 export interface AgentOptions {
   botId: string;
   agentId?: string;
   sessionId: string;
   provider: string;
   model: string;
+  /** Durably linearizes each new effect against Stop immediately before use. */
+  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   modelBinding?: ModelBindingSnapshot;
 }
 

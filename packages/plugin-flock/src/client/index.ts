@@ -2,6 +2,8 @@ import type { ClientPlugin } from "@frockbot/client-core";
 import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
 import { ref, type Ref } from "vue";
 import {
+  decodeBotLifecycleDirectoryViewV1,
+  decodeBotLifecycleReceiptV1,
   decodeCreateBotCommandV1,
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
@@ -39,14 +41,15 @@ function slug(name: string): string {
   return `${base}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-function replacePreferredBot(botId: string): void {
+function replacePreferredBot(botId?: string): void {
   let url: URL;
   try {
     url = new URL(window.location.href);
   } catch {
     throw new Error("Hosted application URL is invalid");
   }
-  url.searchParams.set("bot", botId);
+  if (botId) url.searchParams.set("bot", botId);
+  else url.searchParams.delete("bot");
   window.history.replaceState(window.history.state, "", url);
 }
 
@@ -69,6 +72,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
   const state = ref<FlockWebData>({
     directory: { schemaVersion: 1, revision: 0, bots: [] },
     identities: {},
+    lifecycles: {},
+    showArchived: false,
     loading: false,
     draftName: "",
     draftSheep: randomSheepRecipeV1(),
@@ -81,10 +86,21 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       state.value.error = undefined;
       try {
         const userId = await requireAuthenticatedUserId();
-        const directory = decodeDirectoryViewV1(await request("/api/bots"));
+        const [directory, lifecycleDirectory] = await Promise.all([
+          request("/api/bots").then(decodeDirectoryViewV1),
+          request("/api/bots/lifecycles").then(
+            decodeBotLifecycleDirectoryViewV1,
+          ),
+        ]);
         if (generation !== loadGeneration) return;
         authenticatedUserId = userId;
         state.value.directory = directory;
+        state.value.lifecycles = Object.fromEntries(
+          lifecycleDirectory.lifecycles.map((item) => [
+            item.botId,
+            item.status,
+          ]),
+        );
         const pending = readPendingCreate(userId);
         if (pending) {
           if (directory.bots.some((bot) => bot.botId === pending.botId)) {
@@ -145,15 +161,14 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
             clearPendingSheep(userId, botId);
         }
         const preferred = new URL(window.location.href).searchParams.get("bot");
+        const activeBots = state.value.directory.bots.filter(
+          (bot) => state.value.lifecycles[bot.botId] !== "archived",
+        );
         const preferredBot = preferred
-          ? state.value.directory.bots.find((bot) => bot.botId === preferred)
+          ? activeBots.find((bot) => bot.botId === preferred)
           : undefined;
-        if (preferred && !preferredBot) {
-          state.value.openCreate();
-          return;
-        }
-        const selected =
-          preferredBot?.botId ?? state.value.directory.bots[0]?.botId;
+        const selected = preferredBot?.botId ?? activeBots[0]?.botId;
+        if (preferred && !preferredBot) replacePreferredBot(selected);
         if (selected && shell) await state.value.select(selected);
         else if (!selected) state.value.openCreate();
       } catch (error) {
@@ -167,6 +182,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       const generation = ++selectionGeneration;
       if (!state.value.directory.bots.some((bot) => bot.botId === botId))
         throw new Error("Bot is not registered");
+      if (state.value.lifecycles[botId] === "archived")
+        throw new Error("Bot is archived");
       if (!state.value.identities[botId]) {
         const identity = decodeSheepIdentityViewV1(
           await request(`/api/bots/${encodeURIComponent(botId)}/sheep`),
@@ -188,6 +205,71 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         : randomSheepRecipeV1();
       state.value.overlay = "create";
       state.value.error = undefined;
+    },
+    toggleArchived() {
+      state.value.showArchived = !state.value.showArchived;
+    },
+    openArchive(botId) {
+      if (state.value.lifecycles[botId] === "archived") return;
+      state.value.lifecyclePending = botId;
+      state.value.overlay = "archive";
+      state.value.error = undefined;
+    },
+    async archive() {
+      const botId = state.value.lifecyclePending;
+      if (!botId) return;
+      try {
+        const receipt = decodeBotLifecycleReceiptV1(
+          await request(
+            `/api/bots/${encodeURIComponent(botId)}/lifecycle`,
+            "POST",
+            JSON.stringify({
+              schemaVersion: 1,
+              type: "bot/archive",
+              commandId: crypto.randomUUID(),
+              botId,
+            }),
+          ),
+        );
+        if (receipt.status === "rejected")
+          throw new Error(receipt.failure ?? "Bot archive was rejected");
+        if (receipt.status === "pending") {
+          state.value.error = "Bot archive is retrying in the backend.";
+          return;
+        }
+        state.value.overlay = undefined;
+        state.value.lifecyclePending = undefined;
+        await state.value.load();
+      } catch (error) {
+        state.value.error =
+          error instanceof Error ? error.message : "Could not archive Bot";
+      }
+    },
+    async restore(botId) {
+      try {
+        const receipt = decodeBotLifecycleReceiptV1(
+          await request(
+            `/api/bots/${encodeURIComponent(botId)}/lifecycle`,
+            "POST",
+            JSON.stringify({
+              schemaVersion: 1,
+              type: "bot/restore",
+              commandId: crypto.randomUUID(),
+              botId,
+            }),
+          ),
+        );
+        if (receipt.status === "rejected")
+          throw new Error(receipt.failure ?? "Bot restore was rejected");
+        if (receipt.status === "pending") {
+          state.value.error = "Bot restore is retrying in the backend.";
+          return;
+        }
+        await state.value.load();
+      } catch (error) {
+        state.value.error =
+          error instanceof Error ? error.message : "Could not restore Bot";
+      }
     },
     async openEdit() {
       const botId = shell?.value.activeBotId;
@@ -241,6 +323,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     },
     closeOverlay() {
       state.value.overlay = undefined;
+      state.value.lifecyclePending = undefined;
       state.value.error = undefined;
     },
     reroll() {

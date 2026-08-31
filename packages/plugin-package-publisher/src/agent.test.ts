@@ -40,6 +40,7 @@ async function execute(
     botId: "bot-1",
     agentId: "bot-1",
     compositionGenerationId: "bootstrap",
+    effectId: "tool:1:1:0",
     sessionId: "session-1",
     signal: new AbortController().signal,
   };

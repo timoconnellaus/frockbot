@@ -30,6 +30,12 @@
       "service": "frockbot-cloudflare-bundler",
     },
   ],
+  "services": [
+    {
+      "binding": "COMPUTER_HOST",
+      "service": "frockbot-computer-host",
+    },
+  ],
   "r2_buckets": [
     {
       "binding": "APPLICATION_ARTIFACTS",
@@ -98,6 +104,12 @@
         {
           "binding": "PACKAGE_BUNDLER",
           "service": "frockbot-cloudflare-bundler",
+        },
+      ],
+      "services": [
+        {
+          "binding": "COMPUTER_HOST",
+          "service": "frockbot-computer-host",
         },
       ],
       "r2_buckets": [

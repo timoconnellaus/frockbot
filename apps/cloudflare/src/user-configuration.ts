@@ -15,7 +15,16 @@ import {
   decodeUserConfigurationReadRpcV1,
   type ConnectionDependencyRequirementV1,
 } from "@frockbot/configuration-core";
-import { decodeCreateBotCommandV1 } from "@frockbot/plugin-flock/shared";
+import {
+  decodeConnectionDependencyCommandV1,
+  type ConnectionDependencyResultV1,
+} from "@frockbot/connection-core";
+import {
+  decodeBotLifecycleCommandV1,
+  decodeBotLifecycleReceiptV1,
+  decodeBotLifecycleViewV1,
+  decodeCreateBotCommandV1,
+} from "@frockbot/plugin-flock/shared";
 import {
   AUTHORING_QUOTA_CONFIG_KEY,
   AUTHORING_QUOTA_DAY,
@@ -64,6 +73,8 @@ const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
   CREDENTIAL_KEYRING?: string;
+  /** Bot authority: archive and restore are carried to the Bot Durable Object. */
+  BOT_STATES: DurableObjectNamespace;
   /**
    * This object's own namespace. Every caller reaches a User Durable Object
    * through `idFromName(userId)`, so the namespace is how the object checks
@@ -89,6 +100,33 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             this.env,
             this.ctx.storage,
           ),
+          commandBotLifecycle: async (userId, command) => {
+            const id = this.env.BOT_STATES.idFromName(
+              `${userId}:${command.botId}`,
+            );
+            // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+            const rpc = this.env.BOT_STATES.get(id) as unknown as {
+              executeLifecycle(input: unknown): Promise<unknown>;
+            };
+            return decodeBotLifecycleReceiptV1(
+              await rpc.executeLifecycle({
+                schemaVersion: 1,
+                userId,
+                botId: command.botId,
+                command,
+              }),
+            );
+          },
+          readBotLifecycle: async (userId, botId) => {
+            const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+            // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+            const rpc = this.env.BOT_STATES.get(id) as unknown as {
+              readLifecycle(input: unknown): Promise<unknown>;
+            };
+            return decodeBotLifecycleViewV1(
+              await rpc.readLifecycle({ schemaVersion: 1, userId, botId }),
+            );
+          },
         }),
       );
     }
@@ -247,6 +285,108 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       effectId: request.effectId as string,
       connectionGeneration: request.connectionGeneration as string,
     });
+  }
+
+  /**
+   * The provider-neutral Connection dependency protocol (ADR 0003): claim,
+   * read, acknowledge, release, and reconcile against the durable dependency
+   * records the User's Settings Contribution owns. One exact command, one
+   * durable shape; the Bot's Assignment saga speaks only this.
+   */
+  async executeConnectionDependency(
+    input: unknown,
+  ): Promise<ConnectionDependencyResultV1> {
+    const command = decodeConnectionDependencyCommandV1(input);
+    await this.assertUserIdentity(command.userId);
+    const settings = await this.settingsContribution();
+    const connection = await settings.getConnection(
+      command.userId,
+      command.connectionId,
+    );
+    if (connection && connection.packageId !== command.packageId) {
+      return {
+        schemaVersion: 1,
+        status: "rejected",
+        failure: `Connection "${command.connectionId}" does not belong to Package "${command.packageId}"`,
+      };
+    }
+    const settled = () =>
+      settings.readConnectionDependency(
+        command.userId,
+        command.connectionId,
+        command.botId,
+        command.generation,
+      );
+    switch (command.action) {
+      case "claim": {
+        if (!connection || connection.state !== "ready") {
+          return {
+            schemaVersion: 1,
+            status: "unavailable",
+            failure: `Connection "${command.connectionId}" is unavailable`,
+          };
+        }
+        return (await settings.claimConnectionDependency(
+          command.userId,
+          command.connectionId,
+          command.botId,
+          command.generation,
+          command.requirement,
+        ))
+          ? { schemaVersion: 1, status: "claimed" }
+          : {
+              schemaVersion: 1,
+              status: "unavailable",
+              failure: `Connection "${command.connectionId}" cannot serve this Capability`,
+            };
+      }
+      case "acknowledge":
+        return (await settings.acknowledgeConnectionDependency(
+          command.userId,
+          command.connectionId,
+          command.botId,
+          command.generation,
+        ))
+          ? { schemaVersion: 1, status: "acknowledged" }
+          : {
+              schemaVersion: 1,
+              status: "unavailable",
+              failure: `Connection "${command.connectionId}" cannot acknowledge this dependency`,
+            };
+      case "release":
+        return (await settings.releaseConnectionDependency(
+          command.userId,
+          command.connectionId,
+          command.botId,
+          command.generation,
+        ))
+          ? { schemaVersion: 1, status: "released" }
+          : { schemaVersion: 1, status: "pending" };
+      case "reconcile": {
+        await settings.compensateConnectionDependency(
+          command.userId,
+          command.connectionId,
+          command.botId,
+          command.generation,
+        );
+        const state = await settled();
+        if (state === "acknowledged") {
+          return { schemaVersion: 1, status: "acknowledged" };
+        }
+        return state === "pending"
+          ? { schemaVersion: 1, status: "pending" }
+          : { schemaVersion: 1, status: "released" };
+      }
+      case "read": {
+        const state = await settled();
+        if (state === "acknowledged") {
+          return { schemaVersion: 1, status: "acknowledged" };
+        }
+        return state === "pending"
+          ? { schemaVersion: 1, status: "pending" }
+          : { schemaVersion: 1, status: "absent" };
+      }
+    }
   }
 
   async claimConnectionDependency(input: unknown): Promise<boolean> {
@@ -659,6 +799,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       await contribution.alarm?.();
     }
     await contributions.publisher.recover();
+    // The Bot lifecycle sagas (archive and restore) resume on the same firing.
+    await contributions.flock.alarm();
   }
 
   async listBots(input: unknown) {
@@ -676,6 +818,24 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return (await this.flockContribution()).createBot(
       request.userId as string,
       request.command as ReturnType<typeof decodeCreateBotCommandV1>,
+    );
+  }
+
+  async listBotLifecycles(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).listBotLifecycles();
+  }
+
+  async executeBotLifecycle(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeBotLifecycleCommandV1),
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).executeLifecycle(
+      request.userId as string,
+      request.command,
     );
   }
 

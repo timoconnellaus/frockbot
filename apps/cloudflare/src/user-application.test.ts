@@ -19,6 +19,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
+    stopRun: ({ botId, command }) => state.stopRun(botId, command),
   };
 }
 
@@ -38,6 +39,29 @@ const securityEnv = {
 } as unknown as UserApplicationEnv;
 
 describe("user application security headers", () => {
+  test("strictly projects the gateway-owned auth mode into the hosted shell", async () => {
+    const fetchUserApplication = createUserApplication();
+    const response = await fetchUserApplication(
+      new Request("https://app.example/", {
+        headers: { "x-frockbot-auth-session-v1": "development" },
+      }),
+      securityEnv,
+    );
+    expect(await response.text()).toContain(
+      'data-frockbot-auth-mode="development"',
+    );
+
+    for (const mode of [undefined, "desktop", "development,better-auth"]) {
+      const headers = mode ? { "x-frockbot-auth-session-v1": mode } : undefined;
+      await expect(
+        fetchUserApplication(
+          new Request("https://app.example/", { headers }),
+          securityEnv,
+        ),
+      ).rejects.toThrow("hosted auth session projection is invalid");
+    }
+  });
+
   test("serves the stylesheet with a policy that allows the embedded fonts", async () => {
     const fetchUserApplication = createUserApplication();
 
@@ -55,10 +79,7 @@ describe("user application security headers", () => {
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
-    expect(policy.get("frame-ancestors")).toEqual([
-      "capacitor://localhost",
-      "frockbot://localhost",
-    ]);
+    expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
   });
 });
 
@@ -89,6 +110,7 @@ describe("user application Bot seam", () => {
       listNotifications: () => Promise.resolve([]),
       acknowledgeNotification: () => Promise.resolve(),
       reconcileRun: () => Promise.resolve(result),
+      stopRun: () => Promise.reject(new Error("must not stop")),
     };
     const env: UserApplicationEnv = {
       BOT_STATE: rpcBindingFor(botState),
@@ -131,6 +153,7 @@ describe("user application Bot seam", () => {
         listNotifications: unexpected,
         acknowledgeNotification: unexpected,
         reconcileRun: unexpected,
+        stopRun: unexpected,
       } as unknown as UserBotStateBinding,
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     } satisfies UserApplicationEnv;
@@ -143,6 +166,10 @@ describe("user application Bot seam", () => {
       }),
       new Request("https://frockbot.test/api/bots/missing/turns/run-1"),
       new Request("https://frockbot.test/api/bots/missing/turns/run-1/fence", {
+        method: "POST",
+        body: "{}",
+      }),
+      new Request("https://frockbot.test/api/bots/missing/turns/run-1/stop", {
         method: "POST",
         body: "{}",
       }),
@@ -159,6 +186,31 @@ describe("user application Bot seam", () => {
     for (const request of requests) {
       expect((await fetchUserApplication(request, env)).status).toBe(404);
     }
+    expect(dispatches).toBe(0);
+  });
+
+  test("rejects archived Bot routes before dispatch", async () => {
+    let dispatches = 0;
+    const archived = new Error('Bot "primary" is archived');
+    archived.name = "BotArchivedError";
+    const env = {
+      BOT_STATE: {
+        assertRegistered: () => Promise.reject(archived),
+        run: () => {
+          dispatches += 1;
+          return Promise.reject(new Error("must not dispatch"));
+        },
+      } as unknown as UserBotStateBinding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    } satisfies UserApplicationEnv;
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/turns"),
+      env,
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()) as { error: string }).toEqual({
+      error: 'Bot "primary" is archived',
+    });
     expect(dispatches).toBe(0);
   });
 
@@ -310,6 +362,107 @@ describe("user application Bot seam", () => {
     }
   });
 
+  test("delegates an exact Stop command to the Bot owner", async () => {
+    const calls: {
+      botId: string;
+      schemaVersion: 1;
+      action: "stop";
+      commandId: string;
+      runId: string;
+    }[] = [];
+    const botState = {
+      stopRun: (
+        botId: string,
+        command: {
+          schemaVersion: 1;
+          action: "stop";
+          commandId: string;
+          runId: string;
+        },
+      ) => {
+        calls.push({ botId, ...command });
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "accepted" as const,
+          commandId: command.commandId,
+          runId: command.runId,
+          run: {
+            schemaVersion: 1 as const,
+            runId: command.runId,
+            admittedAt: "2026-08-30T00:00:00.000Z",
+            input: "hello",
+            status: "running" as const,
+            events: [],
+            stopRequestedAt: "2026-08-30T00:00:01.000Z",
+          },
+        });
+      },
+    } as unknown as BotStateBinding;
+    const env: UserApplicationEnv = {
+      BOT_STATE: rpcBindingFor(botState),
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const fetchUserApplication = createUserApplication();
+    const stopRequest = (body: unknown, method = "POST") =>
+      new Request("https://frockbot.test/api/bots/primary/turns/run-1/stop", {
+        method,
+        headers: { "content-type": "application/json" },
+        body: method === "POST" ? JSON.stringify(body) : undefined,
+      });
+
+    const accepted = await fetchUserApplication(
+      stopRequest({
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop-1",
+        runId: "run-1",
+      }),
+      env,
+    );
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({
+      schemaVersion: 1,
+      status: "accepted",
+      commandId: "stop-1",
+      runId: "run-1",
+    });
+    expect(calls).toEqual([
+      {
+        botId: "primary",
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop-1",
+        runId: "run-1",
+      },
+    ]);
+
+    const rejected = await fetchUserApplication(
+      stopRequest(undefined, "GET"),
+      env,
+    );
+    expect(rejected.status).toBe(405);
+    for (const invalid of [
+      {
+        schemaVersion: 1,
+        action: "resume",
+        commandId: "stop-2",
+        runId: "run-1",
+      },
+      {
+        schemaVersion: 1,
+        action: "stop",
+        commandId: "stop-2",
+        runId: "run-1",
+        extra: true,
+      },
+      { schemaVersion: 1, action: "stop", commandId: "stop-2", runId: "run-2" },
+    ]) {
+      const response = await fetchUserApplication(stopRequest(invalid), env);
+      expect(response.status).toBe(400);
+    }
+    expect(calls).toHaveLength(1);
+  });
+
   test("delegates an authoritative admission fence", async () => {
     const calls: Array<{ botId: string; runId: string }> = [];
     const botState = {
@@ -411,6 +564,7 @@ describe("run list failures", () => {
       listNotifications: () => Promise.resolve([]),
       acknowledgeNotification: () => Promise.resolve(),
       reconcileRun: () => Promise.reject(new Error("unexpected")),
+      stopRun: () => Promise.reject(new Error("unexpected")),
     };
     const env: UserApplicationEnv = {
       BOT_STATE: rpcBindingFor(botState),

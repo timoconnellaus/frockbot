@@ -9,6 +9,7 @@ import {
   type SessionEvent,
   SessionStore,
   type ToolDefinition,
+  type ToolExecutionContext,
 } from "@frockbot/kernel-contracts";
 import { LlmRegistry } from "@frockbot/plugin-models";
 import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
@@ -18,6 +19,18 @@ import { Context, type Plugin } from "cordis";
 import { AgentLoop } from "./index.js";
 
 const roots: Context[] = [];
+const allowEffect = () => Promise.resolve(true);
+const allowEffectOptions = { admitEffect: allowEffect };
+
+type RecoverableToolDefinition = ToolDefinition & {
+  reconcile(
+    input: unknown,
+    context: ToolExecutionContext & { effectId: string },
+  ): Promise<
+    | { status: "recovered"; result: { content: string; isError: boolean } }
+    | { status: "unavailable"; reason: string }
+  >;
+};
 
 function recovered(
   ...events: LlmStreamEvent[]
@@ -70,6 +83,47 @@ async function mountRuntime(
   return root;
 }
 
+function openToolSessionEvents(
+  provider: string,
+  toolName: string,
+): SessionEvent[] {
+  const timestamp = "2026-08-30T00:00:00.000Z";
+  return [
+    { type: "session/created", createdAt: timestamp },
+    { type: "turn/start", turn: 1 },
+    { type: "step/start", turn: 1, step: 1 },
+    {
+      type: "model/request",
+      turn: 1,
+      step: 1,
+      request: {
+        requestId: "tool-model-request",
+        provider,
+        model: "test-model",
+        system: "",
+        messages: [],
+        tools: [],
+      },
+    },
+    {
+      type: "assistant/message",
+      turn: 1,
+      step: 1,
+      requestId: "tool-model-request",
+      text: "",
+      toolCalls: [{ id: "provider-call", name: toolName, input: {} }],
+    },
+    {
+      type: "tool/call",
+      turn: 1,
+      step: 1,
+      occurrenceId: "tool:1:1:0",
+      name: toolName,
+      input: {},
+    },
+  ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+}
+
 async function eventually(
   assertion: () => void,
   timeoutMs = 1_000,
@@ -93,6 +147,146 @@ afterEach(async () => {
 });
 
 describe("AgentLoop", () => {
+  test("fences a model after durable intent without invoking its provider", async () => {
+    let streams = 0;
+    const provider: LlmProvider = {
+      id: "fenced-model",
+      async *stream() {
+        streams += 1;
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider);
+    const admissions: Array<{ kind: "model" | "tool"; effectId: string }> = [];
+    let intentWasDurable = false;
+    const fenceOptions = {
+      admitEffect: (effect: { kind: "model" | "tool"; effectId: string }) => {
+        admissions.push(effect);
+        intentWasDurable =
+          root.sessions
+            .get("fenced-model")
+            ?.events.some(
+              (event) =>
+                event.type === "model/request" &&
+                event.request.requestId === effect.effectId,
+            ) ?? false;
+        return Promise.resolve(false);
+      },
+    };
+    const handle = await root.agents.create({
+      ...fenceOptions,
+      botId: "bot-1",
+      sessionId: "fenced-model",
+      provider: "fenced-model",
+      model: "model-1",
+    });
+
+    handle.agent.send("stop before dispatch");
+    await handle.agent.whenIdle();
+
+    const request = handle.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    if (request?.type !== "model/request") throw new Error("request missing");
+    expect(intentWasDurable).toBe(true);
+    expect(admissions).toEqual([
+      { kind: "model", effectId: request.request.requestId },
+    ]);
+    expect(streams).toBe(0);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "model/effect-not-started",
+        requestId: request.request.requestId,
+      }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "cancelled",
+    });
+  });
+
+  test("fences a tool after durable intent without execution or another model", async () => {
+    let streams = 0;
+    let executions = 0;
+    const provider: LlmProvider = {
+      id: "fenced-tool",
+      async *stream() {
+        streams += 1;
+        yield {
+          type: "tool-call",
+          call: { id: "provider-call", name: "effect", input: {} },
+        };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const tool: ToolDefinition = {
+      name: "effect",
+      description: "Must be fenced.",
+      inputSchema: { type: "object" },
+      execute() {
+        executions += 1;
+        return Promise.resolve({ content: "executed", isError: false });
+      },
+    };
+    const root = await mountRuntime(provider, tool);
+    const admissions: Array<{ kind: "model" | "tool"; effectId: string }> = [];
+    let toolIntentWasDurable = false;
+    const fenceOptions = {
+      admitEffect: (effect: { kind: "model" | "tool"; effectId: string }) => {
+        admissions.push(effect);
+        if (effect.kind === "tool") {
+          toolIntentWasDurable =
+            root.sessions
+              .get("fenced-tool")
+              ?.events.some(
+                (event) =>
+                  event.type === "tool/call" &&
+                  event.occurrenceId === effect.effectId,
+              ) ?? false;
+          return Promise.resolve(false);
+        }
+        return Promise.resolve(true);
+      },
+    };
+    const handle = await root.agents.create({
+      ...fenceOptions,
+      botId: "bot-1",
+      sessionId: "fenced-tool",
+      provider: "fenced-tool",
+      model: "model-1",
+    });
+
+    handle.agent.send("stop before the tool");
+    await handle.agent.whenIdle();
+
+    const request = handle.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    const call = handle.agent.session.events.find(
+      (event) => event.type === "tool/call",
+    );
+    if (request?.type !== "model/request") throw new Error("request missing");
+    if (call?.type !== "tool/call") throw new Error("tool call missing");
+    expect(toolIntentWasDurable).toBe(true);
+    expect(admissions).toEqual([
+      { kind: "model", effectId: request.request.requestId },
+      { kind: "tool", effectId: call.occurrenceId },
+    ]);
+    expect(streams).toBe(1);
+    expect(executions).toBe(0);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool/result",
+        occurrenceId: call.occurrenceId,
+        status: "interrupted",
+      }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "cancelled",
+    });
+  });
+
   test("announces model settlement only after the outcome is durable", async () => {
     let durableEvents: readonly SessionEvent[] = [];
     const committed: Array<{ requestId: string; durable: boolean }> = [];
@@ -125,6 +319,7 @@ describe("AgentLoop", () => {
       sessionId: "session-1",
       provider: provider.id,
       model: "test-model",
+      admitEffect: allowEffect,
     });
 
     handle.agent.send("Run once");
@@ -156,6 +351,7 @@ describe("AgentLoop", () => {
       sessionId: "pinned-session",
       provider: provider.id,
       model: "test-model",
+      admitEffect: allowEffect,
     });
 
     handle.agent.send("Run once");
@@ -202,6 +398,7 @@ describe("AgentLoop", () => {
       sessionId: "settlement-retry",
       provider: provider.id,
       model: "model-1",
+      admitEffect: allowEffect,
     });
 
     handle.agent.send("Run once");
@@ -268,6 +465,7 @@ describe("AgentLoop", () => {
       sessionId: "durable-assistant",
       provider: provider.id,
       model: "model-1",
+      admitEffect: allowEffect,
     });
 
     handle.agent.resume();
@@ -339,6 +537,7 @@ describe("AgentLoop", () => {
       recovering: initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "bot-1",
       sessionId: "recovering",
       provider: "recoverable",
@@ -440,6 +639,7 @@ describe("AgentLoop", () => {
       partial: initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "partial-bot",
       sessionId: "partial",
       provider: "partial-provider",
@@ -536,6 +736,7 @@ describe("AgentLoop", () => {
       divergent: initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "divergent-bot",
       sessionId: "divergent",
       provider: "divergent-provider",
@@ -626,6 +827,7 @@ describe("AgentLoop", () => {
       structural: initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "structural-bot",
       sessionId: "structural",
       provider: "structural-provider",
@@ -705,6 +907,7 @@ describe("AgentLoop", () => {
       unretrievable: initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "bot-1",
       sessionId: "unretrievable",
       provider: "unretrievable",
@@ -766,6 +969,7 @@ describe("AgentLoop", () => {
       },
     );
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "bot-lost-response",
       sessionId: "lost-response",
       provider: "lost-response",
@@ -835,6 +1039,7 @@ describe("AgentLoop", () => {
       return next();
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "bot-pre-effect-failure",
       sessionId: "pre-effect-failure",
       provider: "pre-effect-failure",
@@ -912,6 +1117,7 @@ describe("AgentLoop", () => {
       "no-effect": initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "no-effect-bot",
       sessionId: "no-effect",
       provider: "no-effect-provider",
@@ -1046,6 +1252,7 @@ describe("AgentLoop", () => {
       sessionId: "owner:general:conversation-1",
       provider: "scripted",
       model: "test-model",
+      ...allowEffectOptions,
     };
     const handle = await root.agents.create(agentOptions);
     handle.agent.send("Use the echo tool.");
@@ -1114,7 +1321,7 @@ describe("AgentLoop", () => {
     expect(session.events.at(-1)?.type).toBe("session/disposed");
   });
 
-  test("cancels an active stream and closes its step and turn", async () => {
+  test("keeps an aborted durable model request open for reconciliation", async () => {
     const provider: LlmProvider = {
       id: "blocking",
       async *stream(_request, signal) {
@@ -1132,6 +1339,7 @@ describe("AgentLoop", () => {
     };
     const root = await mountRuntime(provider);
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "bot-2",
       sessionId: "agent-2",
       provider: "blocking",
@@ -1149,16 +1357,309 @@ describe("AgentLoop", () => {
     handle.agent.cancel();
     await handle.agent.whenIdle();
 
-    const stepEnds = handle.agent.session.events.filter(
-      (event) => event.type === "step/end",
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "step/end" || event.type === "turn/end",
+      ),
+    ).toBe(false);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "model/reconciliation-required",
+        reason: expect.stringContaining("uncertain after cancellation"),
+      }),
     );
-    const turnEnds = handle.agent.session.events.filter(
-      (event) => event.type === "turn/end",
+  });
+
+  test("cancels after a recovered assistant response is durably flushed", async () => {
+    const timestamp = "2026-08-30T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "flush-request",
+          provider: "flush-cancellation",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const provider: LlmProvider = {
+      id: "flush-cancellation",
+      async *stream() {
+        throw new Error("recovery must not dispatch another model request");
+      },
+      reconciliation: {
+        retrieve: () =>
+          recovered(
+            { type: "text-delta", text: "Recovered answer" },
+            { type: "finish", reason: "completed" },
+          ),
+      },
+    };
+    let cancel = () => {};
+    const root = await mountRuntime(
+      provider,
+      undefined,
+      (_sessionId, events) => {
+        if (events.some((event) => event.type === "assistant/message"))
+          cancel();
+        return Promise.resolve();
+      },
+      { "agent-flush-cancel": initial },
     );
-    expect(stepEnds).toHaveLength(1);
-    expect(turnEnds).toHaveLength(1);
-    expect(stepEnds[0]).toMatchObject({ outcome: "cancelled" });
-    expect(turnEnds[0]).toMatchObject({ outcome: "cancelled" });
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "bot-flush-cancel",
+      sessionId: "agent-flush-cancel",
+      provider: "flush-cancellation",
+      model: "test-model",
+    });
+    cancel = () => handle.agent.cancel();
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "assistant/message",
+        text: "Recovered answer",
+      }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "cancelled",
+    });
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "turn/end" && event.outcome === "completed",
+      ),
+    ).toEqual([]);
+  });
+
+  test("keeps a cancelled non-idempotent tool effect open", async () => {
+    const provider: LlmProvider = {
+      id: "tool-cancellation",
+      async *stream() {
+        yield {
+          type: "tool-call",
+          call: { id: "external", name: "external", input: {} },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    };
+    let effectId: string | undefined;
+    let executions = 0;
+    const reconciliations: string[] = [];
+    const tool: RecoverableToolDefinition = {
+      name: "external",
+      description: "Potentially non-idempotent external effect.",
+      inputSchema: { type: "object" },
+      execute(_input, context) {
+        executions += 1;
+        effectId = context.effectId;
+        return new Promise((_resolve, reject) => {
+          context.signal.addEventListener(
+            "abort",
+            () => reject(context.signal.reason),
+            { once: true },
+          );
+        });
+      },
+      reconcile(_input, context) {
+        reconciliations.push(context.effectId);
+        return Promise.resolve({
+          status: "unavailable",
+          reason: "provider result is not retrievable yet",
+        });
+      },
+    };
+    const root = await mountRuntime(provider, tool);
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "bot-tool-cancel",
+      sessionId: "agent-tool-cancel",
+      provider: "tool-cancellation",
+      model: "test-model",
+    });
+
+    handle.agent.send("Start an external effect.");
+    await eventually(() =>
+      expect(
+        handle.agent.session.events.some((event) => event.type === "tool/call"),
+      ).toBe(true),
+    );
+    handle.agent.cancel();
+    await handle.agent.whenIdle();
+
+    expect(effectId).toBe("tool:1:1:0");
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "tool/result" || event.type === "turn/end",
+      ),
+    ).toBe(false);
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+    expect(executions).toBe(1);
+    expect(reconciliations).toEqual(["tool:1:1:0"]);
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "tool/result" || event.type === "turn/end",
+      ),
+    ).toBe(false);
+  });
+
+  test("recovers a non-idempotent open tool without executing it again", async () => {
+    let modelRequests = 0;
+    let executions = 0;
+    const reconciled: string[] = [];
+    const provider: LlmProvider = {
+      id: "non-idempotent-tool-recovery",
+      async *stream() {
+        modelRequests += 1;
+        yield { type: "text-delta", text: "Recovered safely." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const tool: RecoverableToolDefinition = {
+      name: "external",
+      description: "Recoverable non-idempotent effect.",
+      inputSchema: { type: "object" },
+      execute() {
+        executions += 1;
+        return Promise.resolve({ content: "duplicated", isError: false });
+      },
+      reconcile(_input, context) {
+        reconciled.push(context.effectId);
+        return Promise.resolve({
+          status: "recovered",
+          result: { content: "original result", isError: false },
+        });
+      },
+    };
+    const root = await mountRuntime(provider, tool, undefined, {
+      "recovered-tool-session": openToolSessionEvents(provider.id, tool.name),
+    });
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "recovered-tool-bot",
+      sessionId: "recovered-tool-session",
+      provider: provider.id,
+      model: "test-model",
+    });
+
+    expect(handle.agent.session.reconcileForResume()).toEqual([]);
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(executions).toBe(0);
+    expect(reconciled).toEqual(["tool:1:1:0"]);
+    expect(modelRequests).toBe(1);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool/result",
+        occurrenceId: "tool:1:1:0",
+        content: "original result",
+        status: "completed",
+      }),
+    );
+  });
+
+  test("reconciles an open idempotent tool with its durable effect id", async () => {
+    const timestamp = "2026-08-30T00:00:00.000Z";
+    const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: "tool-model-request",
+          provider: "idempotent-tool-recovery",
+          model: "test-model",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "tool-model-request",
+        text: "",
+        toolCalls: [{ id: "provider-call", name: "safe", input: {} }],
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "safe",
+        input: {},
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const effects: (string | undefined)[] = [];
+    const provider: LlmProvider = {
+      id: "idempotent-tool-recovery",
+      async *stream() {
+        yield { type: "text-delta", text: "Recovered safely." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const tool: ToolDefinition = {
+      name: "safe",
+      description: "Idempotent effect.",
+      inputSchema: { type: "object" },
+      idempotent: true,
+      execute(_input, context) {
+        effects.push(
+          (context as typeof context & { effectId?: string }).effectId,
+        );
+        return Promise.resolve({ content: "settled", isError: false });
+      },
+    };
+    const root = await mountRuntime(provider, tool, undefined, {
+      "idempotent-session": initial,
+    });
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "idempotent-bot",
+      sessionId: "idempotent-session",
+      provider: "idempotent-tool-recovery",
+      model: "test-model",
+    });
+
+    handle.agent.resume();
+    await handle.agent.whenIdle();
+
+    expect(effects).toEqual(["tool:1:1:0"]);
+    expect(
+      handle.agent.session.events.filter(
+        (event) =>
+          event.type === "tool/call" && event.occurrenceId === "tool:1:1:0",
+      ),
+    ).toHaveLength(1);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool/result",
+        occurrenceId: "tool:1:1:0",
+        status: "completed",
+      }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
   });
 
   test("settles remaining tool occurrences before closing a cancelled turn", async () => {
@@ -1208,6 +1709,7 @@ describe("AgentLoop", () => {
     };
     const root = await mountRuntime(provider, tool);
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "bot-cancel-tools",
       sessionId: "agent-cancel-tools",
       provider: "multi-tool-cancellation",
@@ -1300,6 +1802,7 @@ describe("AgentLoop", () => {
       name: "fails",
       description: "Always fails.",
       inputSchema: { type: "object" },
+      idempotent: true,
       validate: () => true,
       execute: () => Promise.reject(new Error("provider revoked")),
     };
@@ -1308,6 +1811,7 @@ describe("AgentLoop", () => {
       return Promise.resolve();
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "bot-failure",
       sessionId: "agent-failure",
       provider: "tool-failure",
@@ -1381,6 +1885,7 @@ describe("AgentLoop", () => {
       "resume-session": initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-session",
       provider: "resume-provider",
@@ -1478,6 +1983,7 @@ describe("AgentLoop", () => {
       { "resume-tools": initial },
     );
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-tools",
       provider: "resume-tools",
@@ -1596,6 +2102,7 @@ describe("AgentLoop", () => {
       { "duplicate-tools": initial },
     );
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "duplicate-tools",
       provider: "duplicate-tools",
@@ -1686,6 +2193,7 @@ describe("AgentLoop", () => {
       { "mismatched-tools": initial },
     );
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "mismatched-tools",
       provider: "mismatched-tools",
@@ -1782,6 +2290,7 @@ describe("AgentLoop", () => {
       { "malformed-tools": initial },
     );
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "malformed-tools",
       provider: "malformed-tools",
@@ -1837,6 +2346,7 @@ describe("AgentLoop", () => {
       "resume-text": initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-text",
       provider: "resume-text",
@@ -1896,6 +2406,7 @@ describe("AgentLoop", () => {
       "resume-ended-text": initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-ended-text",
       provider: "resume-ended-text",
@@ -1985,6 +2496,7 @@ describe("AgentLoop", () => {
       "resume-open-step": initial,
     });
     const handle = await root.agents.create({
+      ...allowEffectOptions,
       botId: "resume-bot",
       sessionId: "resume-open-step",
       provider: "resume-open-step",
@@ -2024,6 +2536,7 @@ describe("AgentLoop", () => {
       sessionId: "provider-rejects",
       provider: "provider-rejects",
       model: "test-model",
+      admitEffect: allowEffect,
     });
 
     handle.agent.send("Say hello.");
@@ -2050,6 +2563,7 @@ describe("AgentLoop", () => {
       sessionId: "provider-verbose-failure",
       provider: "provider-verbose-failure",
       model: "test-model",
+      admitEffect: allowEffect,
     });
 
     handle.agent.send("Say hello.");
@@ -2077,6 +2591,7 @@ describe("AgentLoop", () => {
       sessionId: "provider-completes",
       provider: "provider-completes",
       model: "test-model",
+      admitEffect: allowEffect,
     });
 
     handle.agent.send("Say hello.");

@@ -11,7 +11,7 @@ interface FlyHostContainerStub {
 
 type FlyHostContainerResolver = (shard: string) => FlyHostContainerStub;
 
-function shardForBot(botId: string, shards: number): string {
+export function shardForBot(botId: string, shards: number): string {
   const count = Math.max(1, Math.floor(shards));
   let hash = 2_166_136_261;
   for (const byte of new TextEncoder().encode(botId)) {

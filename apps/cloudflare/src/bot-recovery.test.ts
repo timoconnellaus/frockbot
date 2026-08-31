@@ -12,6 +12,7 @@ function run(events: SessionEvent[]): StoredRun {
     acceptedAt: "2026-08-28T00:00:00.000Z",
     input: "hello",
     events,
+    effectAdmissions: [],
     status: "running",
     phase: "executing",
     compositionGenerationId: "test-composition-generation",

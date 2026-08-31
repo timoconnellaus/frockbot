@@ -4,6 +4,7 @@ import {
   acknowledgeDependentAssignment,
   claimDependentAssignment,
   compensateDependentAssignment,
+  releaseDependentAssignment,
 } from "./dependency-coordination.js";
 
 function assignmentConnection(): ConnectionView {
@@ -53,7 +54,7 @@ describe("Connection dependency coordination", () => {
     ).toBeUndefined();
   });
 
-  test("preserves an acknowledged generation until a replacement commits", () => {
+  test("keeps two same-Bot Assignment generations independent on one Connection", () => {
     const acknowledged = {
       ...assignmentConnection(),
       state: "ready" as const,
@@ -91,13 +92,43 @@ describe("Connection dependency coordination", () => {
         status: "acknowledged",
       },
     ]);
+    const bothAcknowledged = acknowledgeDependentAssignment(
+      claimed!,
+      "bot-1",
+      "generation-2",
+    );
+    expect(bothAcknowledged?.safeMetadata.dependentAssignments).toEqual([
+      {
+        botId: "bot-1",
+        generation: "generation-1",
+        status: "acknowledged",
+      },
+      {
+        botId: "bot-1",
+        generation: "generation-2",
+        status: "acknowledged",
+      },
+    ]);
+
+    const firstReleased = releaseDependentAssignment(
+      bothAcknowledged!,
+      "bot-1",
+      "generation-1",
+    );
+    expect(firstReleased?.safeMetadata.dependentAssignments).toEqual([
+      {
+        botId: "bot-1",
+        generation: "generation-2",
+        status: "acknowledged",
+      },
+    ]);
     expect(
-      acknowledgeDependentAssignment(claimed!, "bot-1", "generation-2")
+      releaseDependentAssignment(bothAcknowledged!, "bot-1", "generation-2")
         ?.safeMetadata.dependentAssignments,
     ).toEqual([
       {
         botId: "bot-1",
-        generation: "generation-2",
+        generation: "generation-1",
         status: "acknowledged",
       },
     ]);

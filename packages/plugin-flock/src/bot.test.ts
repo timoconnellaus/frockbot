@@ -19,6 +19,15 @@ class MemoryStorage {
   transaction<T>(callback: (storage: MemoryStorage) => Promise<T>): Promise<T> {
     return callback(this);
   }
+  list<T>({ prefix }: { prefix: string }): Promise<Map<string, T>> {
+    return Promise.resolve(
+      new Map(
+        [...this.values.entries()].filter(([key]) =>
+          key.startsWith(prefix),
+        ) as Array<[string, T]>,
+      ),
+    );
+  }
 }
 const registration = {
   schemaVersion: 1 as const,
@@ -39,6 +48,7 @@ describe("Flock Bot contribution", () => {
           settingsMaterializations += 1;
           return Promise.resolve();
         },
+        archiveEligible: () => Promise.resolve(true),
       });
     expect(await create().read(registration, "user-1")).toMatchObject({
       botId: "alpha",
@@ -77,11 +87,78 @@ describe("Flock Bot contribution", () => {
     expect(settingsMaterializations).toBeGreaterThan(0);
   });
 
+  test("archives idempotently, fences mutations, rejects active work, and restores data", async () => {
+    const storage = new MemoryStorage();
+    let eligible = true;
+    const create = () =>
+      createFlockBotBackendContribution({
+        storage,
+        materializeSettings: () => Promise.resolve(),
+        archiveEligible: () => Promise.resolve(eligible),
+      });
+    const contribution = create();
+    await contribution.read(registration, "user-1");
+    const archive = {
+      schemaVersion: 1 as const,
+      type: "bot/archive" as const,
+      commandId: "archive-1",
+      botId: "alpha",
+    };
+    eligible = false;
+    expect(
+      await contribution.executeLifecycle(registration, "user-1", archive),
+    ).toMatchObject({ status: "rejected", lifecycle: { status: "active" } });
+    eligible = true;
+    const applied = await contribution.executeLifecycle(
+      registration,
+      "user-1",
+      {
+        ...archive,
+        commandId: "archive-2",
+      },
+    );
+    expect(applied).toMatchObject({
+      status: "applied",
+      lifecycle: { status: "archived" },
+    });
+    expect(
+      await contribution.executeLifecycle(registration, "user-1", {
+        ...archive,
+        commandId: "archive-2",
+      }),
+    ).toEqual(applied);
+    const reconstructed = create();
+    expect(
+      await reconstructed.readLifecycle(registration, "user-1"),
+    ).toMatchObject({ status: "archived" });
+    await expect(
+      reconstructed.update(registration, "user-1", {
+        schemaVersion: 1,
+        type: "bot/update-sheep",
+        commandId: "sheep-archived",
+        expectedRevision: 0,
+        botId: "alpha",
+        sheep: registration.sheep,
+      }),
+    ).rejects.toThrow("archived");
+    await reconstructed.executeLifecycle(registration, "user-1", {
+      schemaVersion: 1,
+      type: "bot/restore",
+      commandId: "restore-1",
+      botId: "alpha",
+    });
+    expect(await contribution.read(registration, "user-1")).toMatchObject({
+      revision: 0,
+      sheep: registration.sheep,
+    });
+  });
+
   test("rejects malformed durable sheep identity and receipt records", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockBotBackendContribution({
       storage,
       materializeSettings: () => Promise.resolve(),
+      archiveEligible: () => Promise.resolve(true),
     });
     await storage.put("flock:sheep:v1", {
       schemaVersion: 1,

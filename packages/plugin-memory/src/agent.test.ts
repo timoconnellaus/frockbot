@@ -28,6 +28,7 @@ const CONTEXT = {
   agentId: "bot-1",
   sessionId: "user-1:bot-1",
   compositionGenerationId: "2026-08-31T00:00:00.000Z:0123456789abcdef",
+  effectId: "tool:1:1:0",
   signal: new AbortController().signal,
 };
 

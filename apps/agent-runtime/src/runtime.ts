@@ -11,6 +11,7 @@ import {
   SessionStore,
 } from "@frockbot/kernel-contracts";
 import {
+  type AgentEffectAdmission,
   type AgentHandle,
   type AgentOptions,
   AgentRegistry,
@@ -37,7 +38,7 @@ import {
   createOpenAICompatiblePlugin,
   type FetchLike,
 } from "@frockbot/provider-openai-compatible";
-import { Context, type Plugin } from "cordis";
+import { Context, type Fiber, type Plugin } from "cordis";
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 
@@ -64,6 +65,44 @@ export interface FoundationAgentPackage {
   plugin: Plugin;
 }
 
+export interface FoundationResidentProjection {
+  generation: number;
+  agentPackages: readonly FoundationAgentPackage[];
+  systemPromptSection?: string;
+}
+
+export interface FoundationResidentExecution {
+  botId: string;
+  sessionId: string;
+  runId: string;
+  previousEvents: readonly SessionEvent[];
+  persistSessionEvents: PersistSessionEvents;
+  beforeStart(): Promise<boolean>;
+  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
+  resume?: boolean;
+  text: string;
+}
+
+/** Narrow cancellation request bound to one exact resident run. */
+export interface FoundationResidentCancellation {
+  sessionId: string;
+  runId: string;
+  reason?: "user" | "shutdown";
+}
+
+export interface FoundationResidentRuntime {
+  readonly root: Context;
+  readonly generation: number | undefined;
+  project(projection: FoundationResidentProjection): Promise<void>;
+  execute(execution: FoundationResidentExecution): Promise<AgentHandle>;
+  /**
+   * Cancels the resident Agent only while it executes that exact session and
+   * run, so a late Stop can never reach a different run.
+   */
+  cancel(cancellation: FoundationResidentCancellation): boolean;
+  dispose(): Promise<void>;
+}
+
 export interface RuntimeModelSelection {
   provider: string;
   model: string;
@@ -82,6 +121,8 @@ export interface FoundationRuntimeOptions {
   agentPackages?: readonly FoundationAgentPackage[];
   persistSessionEvents?: PersistSessionEvents;
   systemPromptSection?: string;
+  /** Explicit effect adapter for the standalone development/test runtime. */
+  admitEffect: AgentOptions["admitEffect"];
   modelSelection?: RuntimeModelSelection;
   /** The Composition generation this root is pinned to; defaults to bootstrap. */
   composition?: CompositionPinV1;
@@ -112,9 +153,269 @@ async function bootstrapCompositionPin(
   };
 }
 
+async function mountFoundationRuntimeServices(
+  root: Context,
+  application: FoundationRuntimeApplication,
+  options: {
+    stableAgentPackages?: readonly FoundationAgentPackage[];
+  } = {},
+): Promise<Fiber[]> {
+  const fibers: Fiber[] = [];
+  const mounted = async (fiber: Fiber & PromiseLike<Fiber>) => {
+    fibers.push(fiber);
+    await fiber;
+  };
+  try {
+    await mounted(root.plugin(SessionStore));
+    await mounted(root.plugin(SystemPromptRegistry));
+    await mounted(root.plugin(LlmRegistry));
+    await mounted(root.plugin(ToolRegistry));
+    await mounted(root.plugin(AgentRegistry));
+    await mounted(root.plugin(ComputerRegistry));
+    await mounted(root.plugin(PackageCatalog, runtimePackageCatalogConfig));
+    const stablePackages = options.stableAgentPackages ?? [];
+    const resolveContribution: ContributionResolver = (specifier) => {
+      const additional = stablePackages.find(
+        (pkg) => pkg.contributionSpecifier === specifier,
+      );
+      if (additional) return Promise.resolve({ default: additional.plugin });
+      return application.resolveContribution(specifier);
+    };
+    root.packages.registerHost(
+      createRuntimeContributionHost(root, resolveContribution),
+    );
+    const packageIds = application.packages.map(
+      (source: PackageSource) => root.packages.install(source).manifest.id,
+    );
+    const additionalIds = stablePackages.flatMap((pkg) => {
+      if (
+        root.packages
+          .list()
+          .some((installed) => installed.specifier === pkg.specifier)
+      ) {
+        return [];
+      }
+      return [
+        root.packages.install({
+          specifier: pkg.specifier,
+          manifest: pkg.manifest,
+        }).manifest.id,
+      ];
+    });
+    for (const packageId of [...additionalIds, ...packageIds]) {
+      await root.packages.enable(packageId);
+    }
+    await mounted(
+      root.plugin(AgentLoop, {
+        maxSteps: 8,
+        composition: await bootstrapCompositionPin(application),
+      }),
+    );
+    return fibers;
+  } catch (error) {
+    await Promise.allSettled(fibers.reverse().map((fiber) => fiber.dispose()));
+    throw error;
+  }
+}
+
+export async function createFoundationResidentRuntime(
+  root: Context,
+  options: {
+    application?: FoundationRuntimeApplication;
+    stableAgentPackages?: readonly FoundationAgentPackage[];
+  } = {},
+): Promise<FoundationResidentRuntime> {
+  const application =
+    options.application ?? (await createFoundationRuntimeApplication());
+  const stableFibers = await mountFoundationRuntimeServices(root, application, {
+    stableAgentPackages: options.stableAgentPackages,
+  });
+  let generation: number | undefined;
+  let dynamicFibers: Fiber[] = [];
+  let agent: AgentHandle | undefined;
+  let sessionId: string | undefined;
+  let activeRunId: string | undefined;
+  let activePersist: PersistSessionEvents | undefined;
+  let activeEffectAdmission:
+    FoundationResidentExecution["admitEffect"] | undefined;
+  let activeExecution: symbol | undefined;
+  let disposed = false;
+  let projectionQueue: Promise<void> = Promise.resolve();
+
+  const clearDynamic = async () => {
+    const previous = dynamicFibers;
+    dynamicFibers = [];
+    await Promise.allSettled(
+      previous.reverse().map((fiber) => fiber.dispose()),
+    );
+  };
+
+  const applyProjection = async (
+    projection: FoundationResidentProjection,
+  ): Promise<void> => {
+    if (disposed) throw new Error("resident Bot runtime is disposed");
+    if (
+      !Number.isSafeInteger(projection.generation) ||
+      projection.generation < 0
+    ) {
+      throw new Error("runtime generation is invalid");
+    }
+    if (generation === projection.generation) return;
+    if (agent?.agent.status === "running") {
+      throw new Error("cannot remount a resident runtime during active work");
+    }
+    await clearDynamic();
+    const mounted: Fiber[] = [];
+    try {
+      if (projection.systemPromptSection?.trim()) {
+        const content = projection.systemPromptSection.trim();
+        const settingsPromptPlugin: Plugin.Function = (ctx) =>
+          ctx.systemPrompt.register({
+            id: "bot-settings",
+            render: () => content,
+          });
+        settingsPromptPlugin.inject = ["systemPrompt"];
+        const fiber = root.plugin(settingsPromptPlugin);
+        mounted.push(fiber);
+        await fiber;
+      }
+      for (const pkg of projection.agentPackages) {
+        const fiber = root.plugin(pkg.plugin);
+        mounted.push(fiber);
+        await fiber;
+      }
+      dynamicFibers = mounted;
+      generation = projection.generation;
+    } catch (error) {
+      await Promise.allSettled(
+        mounted.reverse().map((fiber) => fiber.dispose()),
+      );
+      generation = undefined;
+      throw error;
+    }
+  };
+
+  return {
+    root,
+    get generation() {
+      return generation;
+    },
+    async project(projection) {
+      const operation = projectionQueue.then(() => applyProjection(projection));
+      projectionQueue = operation.catch(() => undefined);
+      await operation;
+    },
+    async execute(execution) {
+      if (disposed) throw new Error("resident Bot runtime is disposed");
+      if (activeExecution) {
+        throw new Error("resident Bot runtime already has active work");
+      }
+      const executionOwner = Symbol(execution.runId);
+      activeExecution = executionOwner;
+      try {
+        if (generation === undefined) {
+          throw new Error("resident Bot runtime projection is not applied");
+        }
+        if (agent) {
+          if (sessionId !== execution.sessionId) {
+            throw new Error("resident Bot runtime session identity changed");
+          }
+          const current = agent.agent.session.events;
+          if (
+            current.length !== execution.previousEvents.length ||
+            current.some(
+              (event, index) =>
+                JSON.stringify(event) !==
+                JSON.stringify(execution.previousEvents[index]),
+            )
+          ) {
+            throw new Error(
+              "resident Bot runtime history diverged from durable state",
+            );
+          }
+          activePersist = execution.persistSessionEvents;
+          activeEffectAdmission = execution.admitEffect;
+        } else {
+          sessionId = execution.sessionId;
+          activePersist = execution.persistSessionEvents;
+          activeEffectAdmission = execution.admitEffect;
+          const sessionStore = root.sessions as SessionStore & {
+            prepare(
+              sessionId: string,
+              options: {
+                initialEvents: readonly SessionEvent[];
+                persistEvents: PersistSessionEvents;
+              },
+            ): () => void;
+          };
+          const cancelPreparation = sessionStore.prepare(execution.sessionId, {
+            initialEvents: execution.previousEvents,
+            persistEvents: (id: string, events: readonly SessionEvent[]) => {
+              const persist = activePersist;
+              return persist ? persist(id, events) : Promise.resolve();
+            },
+          });
+          try {
+            agent = await root.agents.create({
+              botId: execution.botId,
+              agentId: execution.botId,
+              sessionId: execution.sessionId,
+              provider: FOUNDATION_PROVIDER,
+              model: FOUNDATION_MODEL,
+              admitEffect: (effect) => {
+                const admit = activeEffectAdmission;
+                return admit ? admit(effect) : Promise.resolve(false);
+              },
+            });
+          } finally {
+            cancelPreparation();
+          }
+        }
+        activeRunId = execution.runId;
+        if (!(await execution.beforeStart())) {
+          throw new Error("resident Bot execution was durably fenced");
+        }
+        if (execution.resume) agent.agent.resume();
+        else agent.agent.send(execution.text);
+        await agent.agent.whenIdle();
+        await agent.agent.session.flush();
+        return agent;
+      } finally {
+        if (activeExecution === executionOwner) {
+          activePersist = undefined;
+          activeEffectAdmission = undefined;
+          activeRunId = undefined;
+          activeExecution = undefined;
+        }
+      }
+    },
+    cancel(cancellation) {
+      if (
+        disposed ||
+        !agent ||
+        sessionId !== cancellation.sessionId ||
+        activeRunId !== cancellation.runId
+      ) {
+        return false;
+      }
+      agent.agent.cancel(cancellation.reason ?? "user");
+      return true;
+    },
+    async dispose() {
+      if (disposed) return;
+      disposed = true;
+      await projectionQueue;
+      await clearDynamic();
+      await Promise.allSettled(
+        stableFibers.reverse().map((fiber) => fiber.dispose()),
+      );
+    },
+  };
+}
+
 export async function createFoundationRuntime(
-  modelConfig?: RuntimeModelConfig,
-  options: FoundationRuntimeOptions = {},
+  modelConfig: RuntimeModelConfig | undefined,
+  options: FoundationRuntimeOptions,
 ): Promise<FoundationRuntime> {
   const sessionId = options.sessionId?.trim() || "barebones";
   const application =
@@ -206,6 +507,7 @@ export async function createFoundationRuntime(
     sessionId,
     provider,
     model,
+    admitEffect: options.admitEffect,
     ...(selection?.connectionId
       ? {
           modelBinding: {

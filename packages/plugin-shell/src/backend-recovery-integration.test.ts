@@ -148,6 +148,30 @@ describe("Bot recovery", () => {
       readConfiguration: () => Promise.resolve(structuredClone(userSettings)),
       getConnection: () =>
         Promise.resolve(structuredClone(userSettings.connections[0])),
+      executeConnectionDependency: (request: { action: string }) => {
+        if (request.action === "claim") {
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "claimed" as const,
+          });
+        }
+        if (request.action === "acknowledge") {
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "acknowledged" as const,
+          });
+        }
+        if (request.action === "read") {
+          return Promise.resolve({
+            schemaVersion: 1 as const,
+            status: "acknowledged" as const,
+          });
+        }
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "released" as const,
+        });
+      },
       claimConnectionDependency: () => Promise.resolve(true),
       acknowledgeConnectionDependency: () => Promise.resolve(true),
       compensateConnectionDependency: () => Promise.resolve(true),
@@ -442,6 +466,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -475,6 +500,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events: [],
+      effectAdmissions: [],
       status: "reconciliation-required",
       phase: "reconciliation-required",
       failure: "Provider confirmation required",
@@ -569,6 +595,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -665,6 +692,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -738,6 +766,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -803,6 +832,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -897,6 +927,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -971,6 +1002,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -1041,6 +1073,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -1068,6 +1101,7 @@ describe("Bot recovery", () => {
       acceptedAt: original.acceptedAt,
       input: original.text,
       events: [],
+      effectAdmissions: [],
       status: "completed",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -1155,6 +1189,7 @@ describe("Bot recovery", () => {
       acceptedAt: original.acceptedAt,
       input: original.text,
       events,
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -1201,6 +1236,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-29T00:00:00.000Z",
       input: "continue",
       events: [],
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -1394,6 +1430,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-29T00:00:00.000Z",
       input: "continue",
       events: [],
+      effectAdmissions: [],
       status: "running",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -1433,6 +1470,7 @@ describe("Bot recovery", () => {
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "legacy",
       events: [],
+      effectAdmissions: [],
       status: "completed",
       phase: "executing",
       compositionGenerationId: "test-composition-generation",
@@ -1468,6 +1506,7 @@ describe("Bot recovery", () => {
         acceptedAt,
         input: "🧪".repeat(8_000),
         events: [],
+        effectAdmissions: [],
         status: active ? "reconciliation-required" : "completed",
         phase: active ? "reconciliation-required" : "executing",
         compositionGenerationId: "test-composition-generation",

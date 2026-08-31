@@ -91,7 +91,7 @@ export interface ConnectionTypeDefinition {
 
 export interface CapabilityDefinition {
   id: string;
-  kind: "tool" | "model" | "memory" | "notification";
+  kind: "tool" | "model" | "memory" | "notification" | "computer";
   connectionTypes: string[];
 }
 
@@ -967,7 +967,8 @@ function decodeConfiguration(value: unknown): PackageConfiguration {
         rawKind !== "tool" &&
         rawKind !== "model" &&
         rawKind !== "memory" &&
-        rawKind !== "notification"
+        rawKind !== "notification" &&
+        rawKind !== "computer"
       ) {
         throw new Error("manifest capability kind is unsupported");
       }

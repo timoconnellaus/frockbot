@@ -18,6 +18,9 @@ describe("Flock gateway Contribution", () => {
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       createBot: () =>
         Promise.reject({ name: "FlockDecodeError", message: "collision" }),
+      listBotLifecycles: () =>
+        Promise.resolve({ schemaVersion: 1, lifecycles: [] }),
+      executeBotLifecycle: () => Promise.reject(new Error("not used")),
       readSheep: () => Promise.reject(new Error("not used")),
       updateSheep: () => Promise.reject(new Error("not used")),
     });
@@ -52,6 +55,26 @@ describe("Flock gateway Contribution", () => {
           commandId: command.commandId,
           status: "applied",
           revision: 1,
+        }),
+      listBotLifecycles: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          lifecycles: [
+            { schemaVersion: 1, botId: "alpha", status: "active", revision: 0 },
+          ],
+        }),
+      executeBotLifecycle: (_user, command) =>
+        Promise.resolve({
+          schemaVersion: 1,
+          commandId: command.commandId,
+          botId: command.botId,
+          status: "applied",
+          lifecycle: {
+            schemaVersion: 1,
+            botId: command.botId,
+            status: command.type === "bot/archive" ? "archived" : "active",
+            revision: 1,
+          },
         }),
       readSheep: (_user, botId) =>
         Promise.resolve({ schemaVersion: 1, botId, revision: 0, sheep }),
@@ -91,6 +114,21 @@ describe("Flock gateway Contribution", () => {
         )
       )?.status,
     ).toBe(201);
+    const archive = await contribution.route(
+      request("/api/bots/alpha/lifecycle", {
+        schemaVersion: 1,
+        type: "bot/archive",
+        commandId: "archive-1",
+        botId: "alpha",
+      }),
+      new URL("https://bot.example/api/bots/alpha/lifecycle"),
+      context,
+    );
+    expect(archive?.status).toBe(200);
+    expect(await archive?.json()).toMatchObject({
+      status: "applied",
+      lifecycle: { status: "archived" },
+    });
     const invalid = await contribution.route(
       request("/api/bots", { ...create, extra: true }),
       new URL("https://bot.example/api/bots"),

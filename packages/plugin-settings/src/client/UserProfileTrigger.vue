@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+import { authSessionClientKey } from "@frockbot/plugin-auth/shared";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
-import { inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
 
+const providedAuth = inject(authSessionClientKey);
 const surfaces = inject(clientSurfaceRegistryKey);
 const web = inject(frockBotWebDataKey);
-if (!surfaces || !web)
+if (!providedAuth || !surfaces || !web)
   throw new Error("settings client services were not provided");
+const auth = providedAuth;
 const menuOpen = ref(false);
+const signOutError = ref<string>();
+const developmentIdentity = computed(
+  () =>
+    auth.projection.value.status === "authenticated" &&
+    auth.projection.value.mode === "development",
+);
 
 function closeMenu(): void {
   menuOpen.value = false;
@@ -16,6 +25,17 @@ function closeMenu(): void {
 function openSettings(): void {
   closeMenu();
   surfaces?.open("user-settings");
+}
+
+async function signOut(): Promise<void> {
+  signOutError.value = undefined;
+  try {
+    await auth.signOut();
+    closeMenu();
+  } catch (error) {
+    signOutError.value =
+      error instanceof Error ? error.message : "Could not sign out";
+  }
 }
 
 onMounted(() => window.addEventListener("pointerdown", closeMenu));
@@ -38,6 +58,24 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
       <button type="button" role="menuitem" @click="openSettings">
         Settings
       </button>
+      <button v-if="developmentIdentity" type="button" role="menuitem" disabled>
+        Sign out unavailable
+      </button>
+      <button
+        v-else
+        type="button"
+        role="menuitem"
+        :disabled="auth.signingOut.value"
+        @click="signOut"
+      >
+        {{ auth.signingOut.value ? "Signing out…" : "Sign out" }}
+      </button>
+      <p v-if="developmentIdentity" class="profile-menu-hint">
+        Local development identity is selected by the development login URL.
+      </p>
+      <p v-if="signOutError" class="profile-menu-error" role="alert">
+        {{ signOutError }}
+      </p>
     </div>
   </div>
 </template>
@@ -110,7 +148,27 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
   transition: background-color var(--frock-motion-fast);
 }
 
-.profile-menu button:hover {
+.profile-menu button:hover:not(:disabled) {
   background: var(--frock-fill-hover);
+}
+
+.profile-menu button:disabled {
+  color: var(--frock-text-muted);
+  cursor: not-allowed;
+}
+
+.profile-menu-hint,
+.profile-menu-error {
+  margin: 5px 10px;
+  font-size: var(--frock-text-xs);
+  line-height: var(--frock-leading-snug);
+}
+
+.profile-menu-hint {
+  color: var(--frock-text-muted);
+}
+
+.profile-menu-error {
+  color: var(--frock-danger-text);
 }
 </style>

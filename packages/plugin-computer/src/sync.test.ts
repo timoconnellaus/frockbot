@@ -150,6 +150,7 @@ async function runTurn(
     sessionId: "session-1",
     provider: model.id,
     model: "test-model",
+    admitEffect: () => Promise.resolve(true),
   });
   handle.agent.send("use the Computer");
   await handle.agent.whenIdle();

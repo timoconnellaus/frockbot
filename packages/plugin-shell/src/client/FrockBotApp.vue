@@ -319,7 +319,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             icon="stop"
             label="Stop generating"
             variant="primary"
-            @click="web.abort()"
+            @click="web.stopRun()"
           />
           <UiIconButton
             v-else

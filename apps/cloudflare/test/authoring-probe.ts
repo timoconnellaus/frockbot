@@ -227,6 +227,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     const exports = this.ctx.exports as unknown as ProbeExports;
     const assignments = turn.assignments ?? [];
     const host = createShellCompositionHost({
+      admitEffect: () => Promise.resolve(true),
       botId: turn.botId,
       sessionId: input.command.sessionId,
       sessionEvents: input.previousEvents,

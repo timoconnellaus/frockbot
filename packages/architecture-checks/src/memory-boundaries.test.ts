@@ -166,6 +166,7 @@ describe("Memory boundaries", () => {
       sessionId: "user-1:bot-1",
       provider: model.id,
       model: "test-model",
+      admitEffect: () => Promise.resolve(true),
     });
     handle.agent.send("What do you remember?");
     await handle.agent.whenIdle();

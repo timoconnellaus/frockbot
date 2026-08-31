@@ -113,16 +113,32 @@ describe("Flock client reconciliation", () => {
     expect(selected).toEqual(["new"]);
   });
 
-  test("opens creation without selecting or writing for an unknown query Bot", async () => {
+  test("cleans an archived or unknown URL and selects the deterministic active fallback", async () => {
     installStorage();
+    const location = { href: "https://app.example/?bot=missing" };
     Object.defineProperty(globalThis, "window", {
       configurable: true,
-      value: { location: { href: "https://app.example/?bot=missing" } },
+      value: {
+        location,
+        history: {
+          state: null,
+          replaceState: (_state: unknown, _title: string, url: URL) => {
+            location.href = url.href;
+          },
+        },
+      },
     });
     const sheep = randomSheepRecipeV1(() => 0);
     const methods: Array<string | undefined> = [];
     const state = mount((path, method) => {
       methods.push(method);
+      if (path === "/api/bots/lifecycles")
+        return Promise.resolve({
+          schemaVersion: 1,
+          lifecycles: [
+            { schemaVersion: 1, botId: "alpha", status: "active", revision: 0 },
+          ],
+        });
       if (path === "/api/bots")
         return Promise.resolve({
           schemaVersion: 1,
@@ -158,8 +174,9 @@ describe("Flock client reconciliation", () => {
 
     await state.value.load();
 
-    expect(state.value.overlay).toBe("create");
-    expect(selected).toEqual([]);
+    expect(state.value.overlay).toBeUndefined();
+    expect(selected).toEqual(["alpha"]);
+    expect(new URL(location.href).searchParams.get("bot")).toBe("alpha");
     expect(methods).not.toContain("POST");
   });
 
@@ -249,6 +266,8 @@ describe("Flock client reconciliation", () => {
     const state = mount((path, method) => {
       if (path === "/api/bots" && method === "POST")
         return Promise.reject(definitive);
+      if (path === "/api/bots/lifecycles")
+        return Promise.resolve({ schemaVersion: 1, lifecycles: [] });
       if (path === "/api/bots")
         return Promise.resolve({ schemaVersion: 1, revision: 1, bots: [] });
       return Promise.reject(new Error(`unexpected request: ${path}`));
@@ -287,6 +306,20 @@ describe("Flock client reconciliation", () => {
           revision: 1,
         });
       }
+      if (path === "/api/bots/lifecycles")
+        return Promise.resolve({
+          schemaVersion: 1,
+          lifecycles: created
+            ? [
+                {
+                  schemaVersion: 1,
+                  botId: created.botId,
+                  status: "active",
+                  revision: 0,
+                },
+              ]
+            : [],
+        });
       if (path === "/api/bots")
         return Promise.resolve({
           schemaVersion: 1,
@@ -335,6 +368,92 @@ describe("Flock client reconciliation", () => {
     expect(state.value.overlay).toBeUndefined();
     expect(selected).not.toHaveLength(0);
     expect(selected.every((botId) => botId === createdBotId)).toBe(true);
+  });
+
+  test("archives with confirmation, hides archived Bots, and selects a fallback", async () => {
+    installStorage();
+    const location = { href: "https://app.example/?bot=alpha" };
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location,
+        history: {
+          state: null,
+          replaceState: (_state: unknown, _title: string, url: URL) => {
+            location.href = url.href;
+          },
+        },
+      },
+    });
+    const sheep = randomSheepRecipeV1(() => 0);
+    let alphaStatus: "active" | "archived" = "active";
+    const state = mount((path, method, body) => {
+      if (path === "/api/bots/alpha/lifecycle" && method === "POST") {
+        const command = JSON.parse(body ?? "") as {
+          commandId: string;
+          botId: string;
+        };
+        alphaStatus = "archived";
+        return Promise.resolve({
+          schemaVersion: 1,
+          commandId: command.commandId,
+          botId: command.botId,
+          status: "applied",
+          lifecycle: {
+            schemaVersion: 1,
+            botId: command.botId,
+            status: "archived",
+            revision: 1,
+          },
+        });
+      }
+      if (path === "/api/bots")
+        return Promise.resolve({
+          schemaVersion: 1,
+          revision: 2,
+          bots: ["alpha", "beta"].map((botId) => ({
+            schemaVersion: 1,
+            botId,
+            registeredAt: new Date(0).toISOString(),
+            initialName: botId,
+            sheep,
+          })),
+        });
+      if (path === "/api/bots/lifecycles")
+        return Promise.resolve({
+          schemaVersion: 1,
+          lifecycles: [
+            {
+              schemaVersion: 1,
+              botId: "alpha",
+              status: alphaStatus,
+              revision: alphaStatus === "archived" ? 1 : 0,
+            },
+            { schemaVersion: 1, botId: "beta", status: "active", revision: 0 },
+          ],
+        });
+      if (path.endsWith("/sheep")) {
+        const botId = path.split("/")[3]!;
+        return Promise.resolve({ schemaVersion: 1, botId, revision: 0, sheep });
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`));
+    });
+    const selected: string[] = [];
+    state.value.bindShell(
+      ref({
+        activeBotId: "alpha",
+        selectBot: (botId: string) => {
+          selected.push(botId);
+          return Promise.resolve();
+        },
+      }) as unknown as Ref<FrockBotWebData>,
+    );
+    state.value.openArchive("alpha");
+    expect(state.value.overlay).toBe("archive");
+    await state.value.archive();
+    expect(state.value.lifecycles.alpha).toBe("archived");
+    expect(selected.at(-1)).toBe("beta");
+    expect(new URL(location.href).searchParams.get("bot")).toBe("beta");
   });
 
   test("reconciles a lost sheep response and clears the exact pending command", async () => {

@@ -67,15 +67,58 @@ describe("production Bot durability in Workerd", () => {
     });
 
     expect(result.text).toBe("Ollama reply");
-    const durableEvents = await stub.durableSessionEvents();
-    expect(durableEvents.length).toBeGreaterThan(0);
-    expect(durableEvents.map((event) => event.seq)).toEqual(
-      durableEvents.map((_, index) => index),
+    const firstEvents = await stub.durableSessionEvents();
+    expect(firstEvents.length).toBeGreaterThan(0);
+    expect(firstEvents.map((event) => event.seq)).toEqual(
+      firstEvents.map((_, index) => index),
     );
+
+    await stub.executeConfiguration({
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        type: "bot/update-profile",
+        commandId: "rename-1",
+        expectedRevision: 0,
+        botId: identity.botId,
+        profile: { name: "Remounted Workerd Bot" },
+      },
+    });
+
+    const second = await stub.run({
+      ...identity,
+      command: {
+        runId: "run-2",
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: "2026-08-29T00:01:00.000Z",
+        text: "same resident root",
+      },
+    });
+    expect(second.text).toBe("Ollama reply");
+    const residentEvents = await stub.durableSessionEvents();
+    expect(
+      residentEvents.findLast((event) => event.type === "model/request"),
+    ).toMatchObject({
+      request: { system: expect.stringContaining("Remounted Workerd Bot") },
+    });
+    expect(residentEvents.length).toBeGreaterThan(firstEvents.length);
 
     await evictDurableObject(stub);
 
-    expect(await stub.durableSessionEvents()).toEqual(durableEvents);
+    expect(await stub.durableSessionEvents()).toEqual(residentEvents);
+    const reconstructed = await stub.run({
+      ...identity,
+      command: {
+        runId: "run-3",
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: "2026-08-29T00:02:00.000Z",
+        text: "after eviction",
+      },
+    });
+    expect(reconstructed.text).toBe("Ollama reply");
+    expect((await stub.durableSessionEvents()).length).toBeGreaterThan(
+      residentEvents.length,
+    );
   });
 
   test("runs recovery through the alarm seam", async () => {

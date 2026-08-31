@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "frockbot-fly-host-prototype",
+  "name": "frockbot-computer-host",
+  "workers_dev": false,
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
@@ -17,6 +18,10 @@
         "name": "FLY_HOST",
         "class_name": "FlyHostContainer",
       },
+      {
+        "name": "COMPUTER_EFFECTS",
+        "class_name": "ComputerEffectJournal",
+      },
     ],
   },
   "migrations": [
@@ -24,9 +29,13 @@
       "tag": "v1",
       "new_sqlite_classes": ["FlyHostContainer"],
     },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["ComputerEffectJournal"],
+    },
   ],
   "vars": {
     "FLY_HOST_SHARDS": "1",
-    "PROTOTYPE_CREDENTIAL_REF": "sprites:prototype",
+    "PROTOTYPE_CREDENTIAL_REF": "sprites:computer-host",
   },
 }

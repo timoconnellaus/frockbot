@@ -73,6 +73,9 @@ async function start(): Promise<void> {
       agentId: process.env.FROCKBOT_AGENT_ID?.trim() || botId,
       sessionId: process.env.FROCKBOT_SESSION_ID?.trim() || "barebones",
       agentPackages: desktopComputerRuntimePackages,
+      // This standalone process is a development adapter; hosted production
+      // supplies the Durable Object fence through the resident runtime.
+      admitEffect: () => Promise.resolve(true),
     });
   } catch (error) {
     post({ type: "error", phase: "startup", message: errorMessage(error) });

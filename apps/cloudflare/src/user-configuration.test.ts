@@ -59,6 +59,7 @@ function identity(userId: string): {
     USER_CONFIGURATIONS: DurableObjectNamespace;
     APPLICATION_ARTIFACTS: R2Bucket;
     USER_APPLICATIONS: WorkerLoader;
+    BOT_STATES: DurableObjectNamespace;
   };
 } {
   const idFor = (name: string) =>
@@ -85,6 +86,14 @@ function identity(userId: string): {
           throw new Error("no publication in this test");
         },
       } as unknown as WorkerLoader,
+      // Bot lifecycle commands are carried to the Bot Durable Object; reaching
+      // it is a failure, not a fixture.
+      BOT_STATES: {
+        idFromName: idFor,
+        get: () => {
+          throw new Error("no Bot lifecycle in this test");
+        },
+      } as unknown as DurableObjectNamespace,
     },
   };
 }

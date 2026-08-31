@@ -12,10 +12,14 @@ import {
 } from "@frockbot/configuration-core";
 
 export {
+  botStopCommandFingerprintV1,
   botTurnCommandFingerprintV1,
   type BotNotificationIntent,
+  type BotStopCommand,
   type BotTurnCommand,
   type BotTurnCompletion,
+  type StoredEffectAdmission,
+  type StoredEffectAdmissionOutcome,
   type StoredRunPhase,
   type StoredRunStatus,
 } from "@frockbot/kernel-do";

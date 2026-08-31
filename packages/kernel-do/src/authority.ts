@@ -683,6 +683,7 @@ export class BotDurableAuthority<Snapshot> {
         acceptedAt: command.acceptedAt,
         input: command.text,
         events: [],
+        effectAdmissions: [],
         status: "running",
         phase: "admitted",
         compositionGenerationId: pin.generationId,

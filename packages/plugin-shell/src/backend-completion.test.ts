@@ -44,6 +44,7 @@ function storedRun(): StoredRun {
     acceptedAt: "2026-08-28T00:00:00.000Z",
     input: "hello",
     events: [ended],
+    effectAdmissions: [],
     status: "running",
     phase: "executing",
     compositionGenerationId: "test-composition-generation",
@@ -107,6 +108,25 @@ describe("Bot run terminal persistence", () => {
     expect(storage.values.has(keys.activeRun)).toBe(false);
   });
 
+  test("cancels without notifying when Stop wins the terminal transaction", async () => {
+    const storage = new MemoryRunStorage();
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      stopRequestedAt: "2026-08-30T00:00:00.000Z",
+    } satisfies StoredRun);
+
+    await expect(
+      completeStoredRun(storage, keys, "run-1", [], result()),
+    ).resolves.toBe("cancelled");
+
+    expect(storage.values.get(keys.run)).toMatchObject({
+      status: "cancelled",
+      stopRequestedAt: "2026-08-30T00:00:00.000Z",
+    });
+    expect(storage.values.has("notification:run-1")).toBe(false);
+    expect(storage.values.has(keys.activeRun)).toBe(false);
+  });
+
   test("rejects malformed terminal events before clearing active work", async () => {
     const storage = new MemoryRunStorage();
     const malformed = {
@@ -163,6 +183,21 @@ describe("Bot run terminal persistence", () => {
 
     expect(storage.values.get(keys.run)).toMatchObject({ status: "failed" });
     expect(storage.values.has("notification:run-1")).toBe(false);
+  });
+
+  test("cancels instead of failing when Stop wins the failure transaction", async () => {
+    const storage = new MemoryRunStorage();
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      stopRequestedAt: "2026-08-30T00:00:00.000Z",
+    } satisfies StoredRun);
+
+    await expect(
+      failStoredRun(storage, keys, "run-1", [], [ended], "late failure"),
+    ).resolves.toBe("cancelled");
+
+    expect(storage.values.get(keys.run)).toMatchObject({ status: "cancelled" });
+    expect(storage.values.has(keys.activeRun)).toBe(false);
   });
 
   test("terminalizes an explicitly abandoned reconciliation", async () => {

@@ -24,6 +24,7 @@ async function execute(
     agentId: "run-9",
     compositionGenerationId: "bootstrap",
     sessionId: "session-1",
+    effectId: "tool:1:1:0",
     signal: new AbortController().signal,
   };
   const prepared = await harness.root.tools.prepare(

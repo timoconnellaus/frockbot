@@ -18,7 +18,16 @@ export interface StoredRunCodecV1<Snapshot> {
 }
 
 export type StoredRunStatus =
-  "running" | "completed" | "failed" | "reconciliation-required";
+  "running" | "completed" | "failed" | "cancelled" | "reconciliation-required";
+
+export type StoredEffectAdmissionOutcome = "admitted" | "fenced";
+
+/** Durable linearization result for one exact provider or tool effect. */
+export interface StoredEffectAdmission {
+  kind: "model" | "tool";
+  effectId: string;
+  outcome: StoredEffectAdmissionOutcome;
+}
 
 export type StoredRunPhase =
   "admitted" | "executing" | "reconciliation-required";
@@ -30,10 +39,13 @@ export interface StoredRunV1<Snapshot = unknown> {
   acceptedAt: string;
   input: string;
   events: SessionEvent[];
+  effectAdmissions: StoredEffectAdmission[];
   status: StoredRunStatus;
   responseText?: string;
   failure?: string;
   phase: StoredRunPhase;
+  /** Durable Stop intent; orthogonal to status and phase. */
+  stopRequestedAt?: string;
   /** The Composition generation pinned in the same transaction that admitted the run. */
   compositionGenerationId: string;
   configurationSnapshot: Snapshot;
@@ -44,6 +56,7 @@ const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
   "running",
   "completed",
   "failed",
+  "cancelled",
   "reconciliation-required",
 ];
 const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
@@ -58,13 +71,18 @@ const STORED_RUN_REQUIRED_KEYS = [
   "acceptedAt",
   "input",
   "events",
+  "effectAdmissions",
   "status",
   "phase",
   "compositionGenerationId",
   "configurationSnapshot",
   "previousEventCount",
 ] as const;
-const STORED_RUN_OPTIONAL_KEYS = ["responseText", "failure"] as const;
+const STORED_RUN_OPTIONAL_KEYS = [
+  "responseText",
+  "failure",
+  "stopRequestedAt",
+] as const;
 const UTF8_ENCODER = new TextEncoder();
 
 function boundedString(
@@ -82,6 +100,50 @@ function boundedString(
 function decodeStoredRunEvents(value: unknown): SessionEvent[] {
   if (!Array.isArray(value)) throw new Error("stored run has invalid events");
   return value.map(decodeSessionEvent);
+}
+
+const STORED_EFFECT_ADMISSIONS_MAX = 256;
+const STORED_EFFECT_ID_MAX_BYTES = 512;
+
+function decodeStoredEffectAdmissions(value: unknown): StoredEffectAdmission[] {
+  if (!Array.isArray(value) || value.length > STORED_EFFECT_ADMISSIONS_MAX) {
+    throw new Error("stored run has invalid effect admissions");
+  }
+  const effectIds = new Set<string>();
+  return value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("stored run has invalid effect admission");
+    }
+    const candidate = entry as Record<PropertyKey, unknown>;
+    const ownKeys = Reflect.ownKeys(candidate);
+    if (
+      ownKeys.length !== 3 ||
+      Object.keys(candidate).length !== 3 ||
+      !["kind", "effectId", "outcome"].every((key) =>
+        Object.hasOwn(candidate, key),
+      )
+    ) {
+      throw new Error("stored run has invalid effect admission fields");
+    }
+    if (candidate.kind !== "model" && candidate.kind !== "tool") {
+      throw new Error("stored run has invalid effect admission kind");
+    }
+    if (!boundedString(candidate.effectId, STORED_EFFECT_ID_MAX_BYTES)) {
+      throw new Error("stored run has invalid effect admission id");
+    }
+    if (candidate.outcome !== "admitted" && candidate.outcome !== "fenced") {
+      throw new Error("stored run has invalid effect admission outcome");
+    }
+    if (effectIds.has(candidate.effectId)) {
+      throw new Error("stored run has colliding effect admissions");
+    }
+    effectIds.add(candidate.effectId);
+    return {
+      kind: candidate.kind,
+      effectId: candidate.effectId,
+      outcome: candidate.outcome,
+    };
+  });
 }
 
 export function createStoredRunCodecV1<Snapshot>(
@@ -102,14 +164,19 @@ function requireStoredRunRecordV1<Snapshot>(
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("stored run is invalid");
   }
-  const candidate = input as Record<string, unknown>;
+  const candidate = input as Record<PropertyKey, unknown>;
   const allowed = new Set<string>([
     ...STORED_RUN_REQUIRED_KEYS,
     ...STORED_RUN_OPTIONAL_KEYS,
   ]);
+  // Exact decoding: a symbol-keyed or non-enumerable own property is a field
+  // this record does not have, so it is rejected rather than ignored.
+  const enumerableKeys = Object.keys(candidate);
+  const ownKeys = Reflect.ownKeys(candidate);
   if (
-    !STORED_RUN_REQUIRED_KEYS.every((key) => Object.hasOwn(candidate, key)) ||
-    !Object.keys(candidate).every((key) => allowed.has(key))
+    ownKeys.length !== enumerableKeys.length ||
+    ownKeys.some((key) => typeof key !== "string" || !allowed.has(key)) ||
+    !STORED_RUN_REQUIRED_KEYS.every((key) => Object.hasOwn(candidate, key))
   ) {
     throw new Error("stored run has invalid fields");
   }
@@ -135,6 +202,9 @@ function requireStoredRunRecordV1<Snapshot>(
     throw new Error(`run "${runId}" has no valid input`);
   }
   const events = decodeStoredRunEvents(candidate.events);
+  const effectAdmissions = decodeStoredEffectAdmissions(
+    candidate.effectAdmissions,
+  );
   const status = STORED_RUN_STATUSES.find(
     (value) => value === candidate.status,
   );
@@ -168,6 +238,13 @@ function requireStoredRunRecordV1<Snapshot>(
     throw new Error(`run "${runId}" has invalid failure`);
   }
   if (
+    candidate.stopRequestedAt !== undefined &&
+    (!boundedString(candidate.stopRequestedAt, 64) ||
+      !Number.isFinite(Date.parse(candidate.stopRequestedAt as string)))
+  ) {
+    throw new Error(`run "${runId}" has invalid stopRequestedAt`);
+  }
+  if (
     status === "completed"
       ? candidate.responseText === undefined || candidate.failure !== undefined
       : candidate.responseText !== undefined
@@ -180,6 +257,9 @@ function requireStoredRunRecordV1<Snapshot>(
       : candidate.failure !== undefined
   ) {
     throw new Error(`run "${runId}" has invalid failure fields`);
+  }
+  if (status === "cancelled" && candidate.stopRequestedAt === undefined) {
+    throw new Error(`run "${runId}" has no durable stop intent`);
   }
   if (
     (status === "reconciliation-required") !==
@@ -194,6 +274,7 @@ function requireStoredRunRecordV1<Snapshot>(
     acceptedAt: candidate.acceptedAt,
     input: candidate.input,
     events,
+    effectAdmissions,
     status,
     phase,
     compositionGenerationId: candidate.compositionGenerationId,
@@ -205,6 +286,9 @@ function requireStoredRunRecordV1<Snapshot>(
     ...(candidate.failure === undefined
       ? {}
       : { failure: candidate.failure as string }),
+    ...(candidate.stopRequestedAt === undefined
+      ? {}
+      : { stopRequestedAt: candidate.stopRequestedAt as string }),
   };
 }
 
@@ -223,6 +307,21 @@ export function botTurnCommandFingerprintV1(
     botId: command.botId,
     sessionId: command.sessionId,
     text: command.text,
+  })}`;
+}
+
+export interface BotStopCommand {
+  commandId: string;
+  runId: string;
+}
+
+export function botStopCommandFingerprintV1(
+  command: BotStopCommand & { userId: string; botId: string },
+): string {
+  return `bot-stop-command-v1:${JSON.stringify({
+    userId: command.userId,
+    botId: command.botId,
+    runId: command.runId,
   })}`;
 }
 

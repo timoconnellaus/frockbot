@@ -4,6 +4,9 @@ import {
   createFoundationBackendContributions,
 } from "@frockbot/application-foundation/runtime";
 import {
+  decodeBotLifecycleDirectoryViewV1,
+  decodeBotLifecycleReceiptV1,
+  type BotLifecycleCommandV1,
   decodeBotMembershipViewV1,
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
@@ -12,10 +15,13 @@ import {
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
+  decodeClientRunStopCommandV1,
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
+  type ClientRunStopCommandV1,
+  type ClientRunStopReceiptV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import {
   decodeCompositionCommandReceiptV1,
@@ -66,6 +72,7 @@ interface Env {
   AI: Ai;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
+  COMPUTER_HOST: Fetcher;
   AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;
@@ -101,6 +108,7 @@ interface BotStateRpc extends BotConfigurationBinding {
     identity: { userId: string; botId: string },
     runId: string,
   ): Promise<BotTurnResult>;
+  stopRun(command: ClientRunStopCommandV1): Promise<ClientRunStopReceiptV1>;
   markConnectionUnavailable(
     identity: { userId: string; botId: string },
     connectionId: string,
@@ -159,6 +167,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       }),
     reconcileRun: (identity, runId) =>
       rpc.reconcileRun({ schemaVersion: 1, ...identity, runId }),
+    stopRun: (command) =>
+      rpc.stopRun({ schemaVersion: 1, userId, botId, command }),
     markConnectionUnavailable: (identity, connectionId, compensation) =>
       rpc.markConnectionUnavailable({
         schemaVersion: 1,
@@ -169,6 +179,18 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   };
 }
 
+function rpcJsonSnapshot<T>(value: T): T {
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) {
+      throw new Error("RPC response is not a JSON value");
+    }
+    return JSON.parse(serialized) as T;
+  } catch (error) {
+    throw new Error("RPC response is not valid JSON", { cause: error });
+  }
+}
+
 function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its RPC surface.
@@ -177,6 +199,8 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
   ) as unknown as RpcBoundary<UserConfigurationRpc>;
   return {
     listBots: (request) => rpc.listBots(request),
+    listBotLifecycles: (request) => rpc.listBotLifecycles(request),
+    executeBotLifecycle: (request) => rpc.executeBotLifecycle(request),
     createBot: (request) => rpc.createBot(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
@@ -222,6 +246,23 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     if (!membership.registered) {
       const error = new Error(`Bot "${botId}" is not registered`);
       error.name = "BotNotFoundError";
+      throw error;
+    }
+    const lifecycles = decodeBotLifecycleDirectoryViewV1(
+      await userConfigurationStub(
+        this.env,
+        this.ctx.props.userId,
+      ).listBotLifecycles({
+        schemaVersion: 1,
+        userId: this.ctx.props.userId,
+      }),
+    );
+    if (
+      lifecycles.lifecycles.find((item) => item.botId === botId)?.status ===
+      "archived"
+    ) {
+      const error = new Error(`Bot "${botId}" is archived`);
+      error.name = "BotArchivedError";
       throw error;
     }
   }
@@ -297,6 +338,18 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).acknowledgeNotification(request.notificationId as string);
+  }
+
+  async stopRun(input: unknown): Promise<ClientRunStopReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      command: rpcDecoded(decodeClientRunStopCommandV1),
+    });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).stopRun(request.command as ClientRunStopCommandV1);
   }
 
   async reconcileRun(input: unknown): Promise<BotTurnResult> {
@@ -398,26 +451,54 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
       backendHost: "gateway",
       listBots: async (userId) =>
         decodeDirectoryViewV1(
-          await userConfigurationStub(env, userId).listBots({
-            schemaVersion: 1,
-            userId,
-          }),
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).listBots({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
+      listBotLifecycles: async (userId: string) =>
+        decodeBotLifecycleDirectoryViewV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).listBotLifecycles({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
+      executeBotLifecycle: async (
+        userId: string,
+        command: BotLifecycleCommandV1,
+      ) =>
+        decodeBotLifecycleReceiptV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).executeBotLifecycle({
+              schemaVersion: 1,
+              userId,
+              command,
+            }),
+          ),
         ),
       createBot: async (userId, command) =>
         decodeFlockReceiptV1(
-          await userConfigurationStub(env, userId).createBot({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).createBot({
+              schemaVersion: 1,
+              userId,
+              command,
+            }),
+          ),
         ),
       readSheep: async (userId, botId) =>
         decodeSheepIdentityViewV1(
-          await botStateStub(env, userId, botId).readSheep({
-            schemaVersion: 1,
-            userId,
-            botId,
-          }),
+          rpcJsonSnapshot(
+            await botStateStub(env, userId, botId).readSheep({
+              schemaVersion: 1,
+              userId,
+              botId,
+            }),
+          ),
         ),
       executeConnection: (userId, command) =>
         userConfigurationStub(env, userId).executeConnection({
@@ -467,12 +548,14 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         ),
       updateSheep: async (userId, botId, command) =>
         decodeFlockReceiptV1(
-          await botStateStub(env, userId, botId).updateSheep({
-            schemaVersion: 1,
-            userId,
-            botId,
-            command,
-          }),
+          rpcJsonSnapshot(
+            await botStateStub(env, userId, botId).updateSheep({
+              schemaVersion: 1,
+              userId,
+              botId,
+              command,
+            }),
+          ),
         ),
       read: (userId) =>
         userConfigurationStub(env, userId).readPackageRevisions({

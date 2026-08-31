@@ -142,6 +142,7 @@ describe("Turn boundaries", () => {
       sessionId: "session-1",
       provider: model.id,
       model: "test-model",
+      admitEffect: () => Promise.resolve(true),
     });
     handle.agent.send("Say something without the Computer");
     await handle.agent.whenIdle();
@@ -270,6 +271,7 @@ describe("Turn boundaries", () => {
         sessionId: "user-1:bot-1",
         provider: model.id,
         model: "test-model",
+        admitEffect: () => Promise.resolve(true),
       });
       handle.agent.send("What Skills do you have?");
       await handle.agent.whenIdle();
@@ -308,6 +310,7 @@ describe("Turn boundaries", () => {
           agentId: handle.agent.id,
           sessionId: "user-1:bot-1",
           compositionGenerationId: COMPOSITION.generationId,
+          effectId: "tool:1:1:0",
           signal: new AbortController().signal,
         },
       );

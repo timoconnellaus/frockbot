@@ -2,14 +2,11 @@ import {
   MobileClipboardCapability,
   MobileNotificationCapability,
   type MobileNotificationRequest,
-  MobileShareCapability,
-  type MobileShareRequest,
 } from "@frockbot/mobile-core";
 import type { Context } from "cordis";
 import type {
   MobileClipboardAdapter,
   MobileNotificationAdapter,
-  MobileShareAdapter,
 } from "./adapters.ts";
 
 export function createNotificationProvider(adapter: MobileNotificationAdapter) {
@@ -42,19 +39,6 @@ export function createClipboardProvider(adapter: MobileClipboardAdapter) {
     writeText(text: string, signal: AbortSignal): Promise<void> {
       signal.throwIfAborted();
       return adapter.writeText(text, signal);
-    }
-  };
-}
-
-export function createShareProvider(adapter: MobileShareAdapter) {
-  return class MobileShareProvider extends MobileShareCapability {
-    constructor(ctx: Context) {
-      super(ctx);
-    }
-
-    share(request: MobileShareRequest, signal: AbortSignal): Promise<void> {
-      signal.throwIfAborted();
-      return adapter.share(request, signal);
     }
   };
 }

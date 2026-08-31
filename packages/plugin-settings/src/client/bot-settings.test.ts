@@ -26,7 +26,13 @@ describe("Bot settings model selection", () => {
         packageId: "provider-ollama-cloud",
         displayName: "Ollama Cloud",
         version: "0.0.1",
-        capabilities: [{ id: "ollama-cloud-models", kind: "model" as const }],
+        capabilities: [
+          {
+            id: "ollama-cloud-models",
+            kind: "model" as const,
+            connectionTypes: ["ollama-cloud-account"],
+          },
+        ],
         connectionTypes: [
           {
             id: "ollama-cloud-account",
@@ -114,7 +120,13 @@ describe("shared model option building", () => {
       packageId: "provider-ollama-cloud",
       displayName: "Ollama Cloud",
       version: "0.0.1",
-      capabilities: [{ id: "ollama-cloud-models", kind: "model" as const }],
+      capabilities: [
+        {
+          id: "ollama-cloud-models",
+          kind: "model" as const,
+          connectionTypes: ["ollama-cloud-account"],
+        },
+      ],
       connectionTypes: [
         {
           id: "ollama-cloud-account",

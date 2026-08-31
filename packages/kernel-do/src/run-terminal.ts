@@ -28,7 +28,7 @@ export async function completeStoredRun<Snapshot>(
   runId: string,
   previous: readonly SessionEvent[],
   result: BotTurnCompletion,
-): Promise<void> {
+): Promise<"completed" | "cancelled"> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
   const stored = await storage.get<StoredRunV1<Snapshot>>(keys.run);
@@ -36,6 +36,26 @@ export async function completeStoredRun<Snapshot>(
   const run = codec.require(stored);
   const events = result.events.map(decodeSessionEvent);
   const latestEvents = [...previous, ...events].map(decodeSessionEvent);
+  // Durable Stop intent recorded before this settlement wins: the run becomes
+  // terminal `cancelled` with no response text, failure, or notification.
+  if (run.stopRequestedAt) {
+    const { responseText: _text, failure: _failure, ...settled } = run;
+    const cancelled = codec.require({
+      ...settled,
+      events,
+      status: "cancelled",
+      phase:
+        settled.phase === "reconciliation-required"
+          ? "executing"
+          : settled.phase,
+    } satisfies StoredRunV1<Snapshot>);
+    await storage.put({
+      [keys.run]: structuredClone(cancelled),
+      [keys.latestEvents]: structuredClone(latestEvents),
+    });
+    await storage.delete(keys.activeRun);
+    return "cancelled";
+  }
   const completed = codec.require({
     ...run,
     events,
@@ -52,6 +72,46 @@ export async function completeStoredRun<Snapshot>(
   }
   await storage.put(records);
   await storage.delete(keys.activeRun);
+  return "completed";
+}
+
+/**
+ * Settles a stopped run as terminal `cancelled` and clears its active marker.
+ * A cancelled run produces no response text, no failure, and no notification.
+ */
+export async function cancelStoredRun<Snapshot>(
+  codec: StoredRunCodecV1<Snapshot>,
+  storage: RunTerminalStorage,
+  keys: RunTerminalKeys,
+  runId: string,
+  previous: readonly SessionEvent[],
+  events: readonly SessionEvent[],
+): Promise<"cancelled" | "preserved-completion" | "missing"> {
+  const stored = await storage.get<StoredRunV1<Snapshot>>(keys.run);
+  if (!stored) return "missing";
+  const run = codec.require(stored);
+  if (run.status === "completed") return "preserved-completion";
+  if (!run.stopRequestedAt) {
+    throw new Error(`run "${runId}" has no durable stop intent`);
+  }
+  const decodedEvents = events.map(decodeSessionEvent);
+  const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
+  const { responseText: _text, failure: _failure, ...settled } = run;
+  const cancelled = codec.require({
+    ...settled,
+    events: decodedEvents,
+    status: "cancelled",
+    phase:
+      settled.phase === "reconciliation-required" ? "executing" : settled.phase,
+  } satisfies StoredRunV1<Snapshot>);
+  await storage.put({
+    [keys.run]: structuredClone(cancelled),
+    [keys.latestEvents]: structuredClone(latestEvents),
+  });
+  if ((await storage.get<string>(keys.activeRun)) === runId) {
+    await storage.delete(keys.activeRun);
+  }
+  return "cancelled";
 }
 
 export async function failStoredRun<Snapshot>(
@@ -62,11 +122,15 @@ export async function failStoredRun<Snapshot>(
   previous: readonly SessionEvent[],
   events: readonly SessionEvent[],
   failure: string,
-): Promise<"failed" | "preserved-completion" | "missing"> {
+): Promise<"failed" | "cancelled" | "preserved-completion" | "missing"> {
   const stored = await storage.get<StoredRunV1<Snapshot>>(keys.run);
   if (!stored) return "missing";
   const run = codec.require(stored);
   if (run.status === "completed") return "preserved-completion";
+  // A stopped run never becomes `failed`: Stop is the durable outcome.
+  if (run.stopRequestedAt) {
+    return cancelStoredRun(codec, storage, keys, runId, previous, events);
+  }
   const decodedEvents = events.map(decodeSessionEvent);
   const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
   const failed = codec.require({

@@ -5,6 +5,7 @@ import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
   decodeBotIdV1,
+  decodeBotSettingsViewV1,
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
@@ -97,6 +98,43 @@ describe("configuration DTO seam", () => {
         description: "Keeps the household organized.",
       },
     });
+  });
+
+  test("decodes exact Assign, Replace, and Unassign commands", () => {
+    const meta = {
+      schemaVersion: 1,
+      commandId: "operation-1",
+      expectedRevision: 2,
+      botId: "primary",
+    } as const;
+    const assignment = {
+      assignmentId: "mail",
+      packageId: "mail",
+      capabilityId: "send",
+      connectionId: "mail-1",
+    };
+    expect(
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "bot/replace-capability",
+        assignment,
+      }),
+    ).toMatchObject({ type: "bot/replace-capability", assignment });
+    expect(
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "bot/unassign-capability",
+        assignmentId: "mail",
+      }),
+    ).toMatchObject({ type: "bot/unassign-capability", assignmentId: "mail" });
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "bot/unassign-capability",
+        assignmentId: "mail",
+        assignment,
+      }),
+    ).toThrow(ConfigurationDecodeError);
   });
 
   test("accepts provider model IDs through the catalog limit", () => {
@@ -323,6 +361,79 @@ describe("configuration DTO seam", () => {
           : decodeStartConnectionCommandV1(value),
       ).toThrow(ConfigurationDecodeError);
     }
+  });
+
+  test("rejects hidden and symbol fields across Assignment seams", () => {
+    const assignment = {
+      assignmentId: "mail",
+      packageId: "mail",
+      capabilityId: "send",
+      connectionId: "mail-1",
+    };
+    const command = {
+      schemaVersion: 1,
+      type: "bot/assign-capability",
+      commandId: "command-1",
+      expectedRevision: 0,
+      botId: "primary",
+      assignment,
+    };
+    const receipt = {
+      schemaVersion: 1,
+      commandId: "command-1",
+      revision: 0,
+      status: "pending",
+    };
+    const view = {
+      schemaVersion: 1,
+      botId: "primary",
+      revision: 0,
+      profile: { name: "Primary" },
+      notifications: { enabled: false },
+      assignments: [],
+      assignmentOperations: [
+        {
+          commandId: "command-1",
+          kind: "assigning",
+          assignmentId: "mail",
+          state: "retrying",
+          target: assignment,
+        },
+      ],
+    };
+    const rpc = {
+      schemaVersion: 1,
+      userId: "user-1",
+      botId: "primary",
+      command,
+    };
+    for (const [decode, candidate] of [
+      [decodeConfigurationCommandV1, command],
+      [decodeConfigurationCommandV1, { ...command, assignment }],
+      [decodeOperationReceiptV1, receipt],
+      [decodeBotSettingsViewV1, view],
+      [decodeBotConfigurationExecuteRpcV1, rpc],
+    ] as const) {
+      const hidden = { ...candidate } as Record<PropertyKey, unknown>;
+      Object.defineProperty(hidden, "hidden", { value: true });
+      expect(() => decode(hidden)).toThrow(ConfigurationDecodeError);
+      const symbol = { ...candidate, [Symbol("extra")]: true };
+      expect(() => decode(symbol)).toThrow(ConfigurationDecodeError);
+    }
+    const hiddenTarget = { ...assignment };
+    Object.defineProperty(hiddenTarget, "hidden", { value: true });
+    expect(() =>
+      decodeConfigurationCommandV1({ ...command, assignment: hiddenTarget }),
+    ).toThrow(ConfigurationDecodeError);
+    const symbolTarget = { ...assignment, [Symbol("extra")]: true };
+    expect(() =>
+      decodeBotSettingsViewV1({
+        ...view,
+        assignmentOperations: [
+          { ...view.assignmentOperations[0], target: symbolTarget },
+        ],
+      }),
+    ).toThrow(ConfigurationDecodeError);
   });
 
   test("rejects unknown configuration RPC envelope fields", () => {
@@ -559,6 +670,7 @@ describe("Bot execution-plan authority", () => {
         state: "enabled" as const,
       },
     ],
+    assignmentOperations: [],
   };
   const packages = [
     {
