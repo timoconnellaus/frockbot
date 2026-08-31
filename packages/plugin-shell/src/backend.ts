@@ -29,6 +29,7 @@ import {
   type ConnectionDependencyRequirementV1,
   type BotExecutionPlanV1,
   type BotSettingsViewV1,
+  type CapabilityAssignmentView,
   type ConnectionView,
   type ConfigurationCommandV1,
   type OperationReceiptV1,
@@ -48,7 +49,27 @@ import {
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
+  type ShellIsolateMountOptions,
 } from "./backend-composition.js";
+import {
+  BOT_ISOLATE_COMPATIBILITY_DATE,
+  createIsolateCapabilityHost,
+  createR2PackageArtifactStore,
+  isolateBindingDigestV1,
+  matchingModelAssignmentV1,
+  type BotCapabilitiesPropsV1,
+  type IsolateAssignmentV1,
+  type IsolateCapabilityHost,
+  type IsolateModelPath,
+  type IsolateModelRequestRecordV1,
+  type IsolatePendingAuthorityDecisionV1,
+} from "./backend-isolate.js";
+import type {
+  BotCapabilitiesStub,
+  IsolateModelInvocationV1,
+  IsolatePendingDecisionV1,
+} from "@frockbot/kernel-contracts";
+import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
 import { executeBotTurn } from "./backend-runner.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
@@ -71,7 +92,8 @@ import {
   type BotTurnCompletion,
 } from "./backend-contracts.js";
 
-const BOT_CONFIGURATION_KEY = "bot-configuration";
+/** The Bot Durable Object key holding this Bot's durable configuration. */
+export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const ASSIGNMENT_GENERATION_PREFIX = "assignment-generation:";
 const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
@@ -114,6 +136,14 @@ export type { BotIdentity, OwnedBotTurnCommand };
 
 export interface BotStateEnv {
   MEMORY_FILES: R2Bucket;
+  /**
+   * The Bot Package Worker Loader (plan Step 4). Optional so a host without
+   * Bot-authored Packages — tests, the Electron shell — still compiles; a
+   * generation with an isolate member fails verification without it.
+   */
+  BOT_PACKAGES?: BotIsolateLoader;
+  /** Immutable, content-addressed Package artifacts, read hash-verified. */
+  APPLICATION_ARTIFACTS?: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
@@ -1240,6 +1270,12 @@ export class ShellBotBackendContribution {
         `run "${input.command.runId}" pins unknown Composition generation "${input.compositionGenerationId}"`,
       );
     }
+    const isolate = await this.isolateMountOptions(input.identity, {
+      runId: input.command.runId,
+      sessionId: input.command.sessionId,
+      generationId: input.compositionGenerationId,
+      assignments: settings.assignments,
+    });
     const host = createShellCompositionHost({
       botId: input.identity.botId,
       sessionId: input.command.sessionId,
@@ -1249,6 +1285,7 @@ export class ShellBotBackendContribution {
       agentPackages: runtime.agentPackages,
       modelSelection: runtime.modelSelection,
       systemPromptSection: promptParts.join("\n\n"),
+      ...(isolate ? { isolate } : {}),
     });
     const controller = new AbortController();
     const composition = await host.mount(generation, controller.signal);
@@ -1259,6 +1296,204 @@ export class ShellBotBackendContribution {
       composition,
       resume: input.resume,
     });
+  }
+
+  /**
+   * Everything a Bot isolate member needs. Returns `undefined` when this host
+   * has no Package loader, in which case an isolate member fails verification
+   * rather than silently running nowhere.
+   */
+  private async isolateMountOptions(
+    identity: BotIdentity,
+    turn: {
+      runId: string;
+      sessionId: string;
+      generationId: string;
+      assignments: readonly CapabilityAssignmentView[];
+    },
+  ): Promise<ShellIsolateMountOptions | undefined> {
+    const loader = this.env.BOT_PACKAGES;
+    const artifacts = this.env.APPLICATION_ARTIFACTS;
+    const exports = (
+      this.ctx as unknown as {
+        exports?: {
+          BotCapabilities?: (options: {
+            props: BotCapabilitiesPropsV1;
+          }) => BotCapabilitiesStub;
+        };
+      }
+    ).exports;
+    if (!loader || !artifacts || !exports?.BotCapabilities) return undefined;
+    const mintCapabilities = exports.BotCapabilities;
+    const assignments = await this.isolateAssignments(turn.assignments);
+    return {
+      userId: identity.userId,
+      runId: turn.runId,
+      // One admitted Turn is one run; the Turn ordinal lives in the session log.
+      turnId: turn.runId,
+      loader,
+      artifacts: createR2PackageArtifactStore(artifacts),
+      capabilitiesFor: (member) =>
+        mintCapabilities({
+          props: {
+            userId: identity.userId,
+            botId: identity.botId,
+            generationId: turn.generationId,
+            packageId: member.packageId,
+            assignments: structuredClone(assignments),
+          },
+        }),
+      bindingDigest: await isolateBindingDigestV1(assignments),
+      compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+    };
+  }
+
+  /**
+   * The Bot Durable Object side of `CAPABILITIES.requestAuthority`. Never a
+   * grant: it records a durable pending decision for the User.
+   */
+  async isolateRequestAuthority(input: {
+    botId: string;
+    packageId: string;
+    generationId: string;
+    request: unknown;
+  }): Promise<IsolatePendingDecisionV1> {
+    return await this.isolateCapabilities(input, []).requestAuthority(
+      input.request,
+    );
+  }
+
+  /**
+   * The Bot Durable Object side of `CAPABILITIES.invokeModel`. Refuses with a
+   * pending decision unless an enabled model Assignment matches; otherwise
+   * records the normalized request and streams through the provider path,
+   * which takes the credential lease on the way.
+   */
+  async isolateInvokeModel(
+    identity: BotIdentity,
+    input: {
+      packageId: string;
+      generationId: string;
+      request: NormalizedModelRequest;
+    },
+  ): Promise<IsolateModelInvocationV1> {
+    // The Bot Durable Object's own durable configuration — no User round trip
+    // and no Connection resolution — is what decides whether the Assignment
+    // exists at all. Nothing else can widen it.
+    const settings = await this.ctx.storage.get<BotSettingsViewV1>(
+      BOT_CONFIGURATION_KEY,
+    );
+    const assignments = await this.isolateAssignments(
+      settings?.assignments ?? [],
+    );
+    const host = this.isolateCapabilities(
+      {
+        botId: identity.botId,
+        packageId: input.packageId,
+        generationId: input.generationId,
+      },
+      assignments,
+      matchingModelAssignmentV1(assignments, input.request)
+        ? this.isolateModelPath(identity, settings, input.generationId)
+        : undefined,
+    );
+    return await host.invokeModel(input.request);
+  }
+
+  private isolateCapabilities(
+    scope: {
+      botId: string;
+      packageId: string;
+      generationId: string;
+      request?: unknown;
+    },
+    assignments: readonly IsolateAssignmentV1[],
+    modelPath?: IsolateModelPath,
+  ): IsolateCapabilityHost {
+    return createIsolateCapabilityHost({
+      storage: {
+        put: (key, value) => this.ctx.storage.put(key, value),
+        get: (key) => this.ctx.storage.get(key),
+        list: (options) => this.ctx.storage.list(options),
+      },
+      botId: scope.botId,
+      packageId: scope.packageId,
+      generationId: scope.generationId,
+      assignments,
+      ...(modelPath ? { modelPath } : {}),
+    });
+  }
+
+  /** The Bot's enabled Assignments, projected onto the isolate capability DTO. */
+  private async isolateAssignments(
+    assignments: readonly CapabilityAssignmentView[],
+  ): Promise<IsolateAssignmentV1[]> {
+    const application = await this.compileApplication();
+    const projected: IsolateAssignmentV1[] = [];
+    for (const assignment of assignments) {
+      if (assignment.state !== "enabled") continue;
+      const capability = application.packages
+        .find((candidate) => candidate.id === assignment.packageId)
+        ?.manifest.configuration?.capabilities.find(
+          (candidate) => candidate.id === assignment.capabilityId,
+        );
+      if (!capability) continue;
+      projected.push({
+        assignmentId: assignment.assignmentId,
+        packageId: assignment.packageId,
+        capabilityId: assignment.capabilityId,
+        kind: capability.kind,
+        ...(assignment.connectionId
+          ? { connectionId: assignment.connectionId }
+          : {}),
+      });
+    }
+    return projected;
+  }
+
+  /**
+   * Streams through the pinned Composition's mounted `ctx.llm` — the same
+   * provider path a Turn uses, so whichever provider Plugin serves the request
+   * is the one that takes the credential lease. A Bot with a configured model
+   * Connection gets its provider Packages; one without gets the first-party
+   * Composition alone.
+   */
+  private isolateModelPath(
+    identity: BotIdentity,
+    settings: BotSettingsViewV1 | undefined,
+    generationId: string,
+  ): IsolateModelPath {
+    const contribution = this;
+    return {
+      async *stream(request, signal) {
+        const generation =
+          await contribution.authority.composition.read(generationId);
+        if (!generation) {
+          throw new Error(
+            `isolate model invocation pins unknown Composition generation "${generationId}"`,
+          );
+        }
+        const runtime = settings?.model
+          ? await contribution.agentRuntime(identity, settings)
+          : undefined;
+        const composition = await createShellCompositionHost({
+          botId: identity.botId,
+          sessionId: `isolate-model:${request.requestId}`,
+          sessionEvents: [],
+          ...(runtime
+            ? {
+                agentPackages: runtime.agentPackages,
+                modelSelection: runtime.modelSelection,
+              }
+            : {}),
+        }).mount(generation, signal);
+        try {
+          yield* composition.root.llm.stream(request, signal);
+        } finally {
+          await composition.dispose();
+        }
+      },
+    };
   }
 
   /** The first-party generation this Bot starts on, from the compiled application. */

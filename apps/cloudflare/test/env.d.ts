@@ -1,3 +1,4 @@
+import type { BotIsolateProbe } from "./bot-isolate-probe.ts";
 import type {
   CompositionProbe,
   FlyCompatibilityProbe,
@@ -6,7 +7,9 @@ import type {
 import type { UserConfiguration } from "../src/user-configuration.ts";
 
 interface FlyTestEnv {
+  BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
+  SECRET_TOKEN: string;
   COMPOSITIONS: DurableObjectNamespace<CompositionProbe>;
   FLY_COMPATIBILITY: DurableObjectNamespace<FlyCompatibilityProbe>;
   FROCKBOT_RUN_LIVE_SPRITE_TEST: string;

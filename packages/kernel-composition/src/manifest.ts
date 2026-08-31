@@ -1,5 +1,14 @@
-export type ContributionKind =
+/** The Contribution kinds a Package manifest can declare. */
+export type ManifestContributionKind =
   "backend" | "runtime" | "client" | "desktop" | "mobile";
+
+/**
+ * Every execution host a Contribution can be mounted in. `bot-isolate` is not
+ * manifest-declared: it is derived from a Composition member carrying an
+ * immutable artifact, so a Package's provenance — not its manifest — decides
+ * whether it runs in the kernel isolate or a loaded Dynamic Worker.
+ */
+export type ContributionKind = ManifestContributionKind | "bot-isolate";
 
 export interface BackendContribution {
   entry: string;
@@ -1022,8 +1031,8 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
 
 export function declaredContributionKinds(
   manifest: FrockBotManifest,
-): ContributionKind[] {
-  const kinds: ContributionKind[] = [];
+): ManifestContributionKind[] {
+  const kinds: ManifestContributionKind[] = [];
   if (manifest.contributions.backend) kinds.push("backend");
   if (manifest.contributions.runtime) kinds.push("runtime");
   if (manifest.contributions.client) kinds.push("client");

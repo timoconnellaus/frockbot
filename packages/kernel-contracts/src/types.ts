@@ -298,6 +298,20 @@ function requireToolSchema(value: unknown, label: string): void {
   requireJsonValue(schema, `${label}.inputSchema`);
 }
 
+/**
+ * The exact v1 decoder for a normalized model request. Exported because the
+ * request crosses the Bot isolate boundary inbound — a Bot-authored model
+ * adapter composes it — and every inbound value is decoded at its seam.
+ */
+export function decodeNormalizedModelRequestV1(
+  value: unknown,
+  label = "normalized model request",
+): NormalizedModelRequest {
+  requireNormalizedModelRequest(value, label);
+  // SAFETY: requireNormalizedModelRequest validated every field exactly.
+  return value as NormalizedModelRequest;
+}
+
 function requireNormalizedModelRequest(value: unknown, label: string): void {
   const request = eventRecord(value, label);
   requireEventKeys(

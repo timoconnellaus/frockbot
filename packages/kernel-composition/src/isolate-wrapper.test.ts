@@ -1,0 +1,82 @@
+import { describe, expect, test } from "bun:test";
+import {
+  BOT_ISOLATE_DEADLINE_SOURCE,
+  BOT_ISOLATE_MAIN_MODULE,
+  BOT_ISOLATE_PACKAGE_MODULE,
+  BOT_ISOLATE_WRAPPER_SOURCE,
+  botIsolateModuleMap,
+} from "./isolate-wrapper.ts";
+
+type Deadline = (work: () => unknown, deadlineMs: number) => Promise<unknown>;
+
+// The wrapper ships as generated text, so the tested function is compiled from
+// exactly the source the wrapper embeds rather than from a TypeScript twin.
+const withIsolateDeadline = new Function(
+  `${BOT_ISOLATE_DEADLINE_SOURCE}\nreturn withIsolateDeadline;`,
+)() as Deadline;
+
+function never(): Promise<never> {
+  return new Promise(() => {});
+}
+
+describe("the generated wrapper's deadline", () => {
+  test("resolves work that finishes inside the deadline", async () => {
+    await expect(withIsolateDeadline(() => "done", 1_000)).resolves.toBe(
+      "done",
+    );
+  });
+
+  test("rejects work that outlives the deadline", async () => {
+    await expect(withIsolateDeadline(never, 10)).rejects.toThrow(
+      "isolate invocation exceeded its deadline of 10ms",
+    );
+  });
+
+  test("turns a synchronous throw into a rejection", async () => {
+    await expect(
+      withIsolateDeadline(() => {
+        throw new Error("boom");
+      }, 1_000),
+    ).rejects.toThrow("boom");
+  });
+
+  test("refuses a deadline outside the contract bound", async () => {
+    for (const deadline of [0, -1, 60_001, 1.5, Number.NaN]) {
+      await expect(withIsolateDeadline(() => "done", deadline)).rejects.toThrow(
+        "isolate invocation deadline is out of range",
+      );
+    }
+  });
+
+  test("does not hold the isolate open after the work settles", async () => {
+    const started = Date.now();
+    await withIsolateDeadline(() => "done", 50_000);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+});
+
+describe("the generated wrapper module map", () => {
+  test("is exactly two entries", () => {
+    const modules = botIsolateModuleMap("export const tools = [];");
+    expect(Object.keys(modules).sort()).toEqual([
+      BOT_ISOLATE_MAIN_MODULE,
+      BOT_ISOLATE_PACKAGE_MODULE,
+    ]);
+    expect(modules[BOT_ISOLATE_MAIN_MODULE]?.js).toBe(
+      BOT_ISOLATE_WRAPPER_SOURCE,
+    );
+    expect(modules[BOT_ISOLATE_PACKAGE_MODULE]?.js).toBe(
+      "export const tools = [];",
+    );
+  });
+
+  test("exposes only the wrapper entrypoint to the loader", () => {
+    expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain(
+      'import { WorkerEntrypoint } from "cloudflare:workers";',
+    );
+    expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain("async health()");
+    expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain(
+      "async execute(rawInvocation)",
+    );
+  });
+});

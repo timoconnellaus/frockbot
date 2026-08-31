@@ -27,6 +27,7 @@ import type {
   BotNotificationIntent,
   BotTurnCommand,
   BotTurnResult,
+  BotPackageLoader,
   UserConfigurationBinding,
   WorkerLoader,
 } from "./contracts.js";
@@ -42,10 +43,15 @@ import {
 import { createImmutablePlanRequestFactory } from "./immutable-application.js";
 import { UserConfiguration } from "./user-configuration.js";
 
+export { BotCapabilities } from "./bot-capabilities.js";
 export { BotState, UserConfiguration };
 
 interface Env {
   USER_APPLICATIONS: WorkerLoader;
+  // Bot-authored Package isolates, driven from the Bot Durable Object with
+  // `globalOutbound` disabled (plan Step 4). A separate loader namespace from
+  // USER_APPLICATIONS so the two never share an identity.
+  BOT_PACKAGES: BotPackageLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
   // `apps/cloudflare-bundler`; the Bot Durable Object calls it after recording
   // its authorship intent (plan Step 3, decision D4).

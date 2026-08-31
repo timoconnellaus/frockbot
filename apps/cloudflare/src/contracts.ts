@@ -1,5 +1,9 @@
 import type { SessionEvent } from "@frockbot/agent-core";
 import type {
+  BotIsolateEntrypoint,
+  BotIsolateEnv,
+} from "@frockbot/kernel-contracts";
+import type {
   BotConfigurationExecuteRpcV1,
   BotConfigurationReadRpcV1,
   BotSettingsViewV1,
@@ -177,12 +181,18 @@ export interface UserApplicationEnv {
   DEPLOYMENT: UserApplicationIdentity;
 }
 
-export interface WorkerCode {
+/**
+ * The loader-side `WorkerCode`. `env` is generic because two kinds of isolate
+ * are loaded from this Worker: a user application (`UserApplicationEnv`) and a
+ * Bot Package (`BotIsolateEnv`, from `@frockbot/kernel-contracts`), which sees
+ * only `IDENTITY` and the loopback `CAPABILITIES` service binding.
+ */
+export interface WorkerCode<Env = UserApplicationEnv> {
   compatibilityDate: string;
   mainModule: string;
   modules: Record<string, string | { js: string }>;
   globalOutbound: null;
-  env: UserApplicationEnv;
+  env: Env;
   limits?: {
     cpuMs?: number;
     subRequests?: number;
@@ -193,13 +203,25 @@ export interface WorkerEntrypointStub {
   fetch(request: Request): Promise<Response>;
 }
 
-export interface LoadedWorker {
-  getEntrypoint(name?: string | null): WorkerEntrypointStub;
+export interface LoadedWorker<Entrypoint = WorkerEntrypointStub> {
+  getEntrypoint(name?: string | null): Entrypoint;
 }
 
-export interface WorkerLoader {
-  get(id: string, callback: () => Promise<WorkerCode>): LoadedWorker;
+export interface WorkerLoader<
+  Env = UserApplicationEnv,
+  Entrypoint = WorkerEntrypointStub,
+> {
+  get(
+    id: string,
+    callback: () => Promise<WorkerCode<Env>>,
+  ): LoadedWorker<Entrypoint>;
 }
+
+/** The `BOT_PACKAGES` loader: Bot Package isolates, never user applications. */
+export type BotPackageLoader = WorkerLoader<
+  BotIsolateEnv,
+  BotIsolateEntrypoint
+>;
 
 export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;

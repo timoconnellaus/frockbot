@@ -38,7 +38,12 @@ export default defineConfig({
       miniflare: {
         compatibilityDate: "2026-08-27",
         compatibilityFlags: ["nodejs_compat"],
+        workerLoaders: {
+          BOT_PACKAGES: {},
+        },
+        r2Buckets: ["APPLICATION_ARTIFACTS"],
         durableObjects: {
+          BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",
           FLY_COMPATIBILITY: "FlyCompatibilityProbe",
@@ -47,6 +52,8 @@ export default defineConfig({
         bindings: {
           FROCKBOT_RUN_LIVE_SPRITE_TEST: runLiveSpriteTest ? "1" : "0",
           SPRITES_TOKEN: spritesToken,
+          // A leak canary: a Bot isolate must never see a host binding.
+          SECRET_TOKEN: "host-only-secret",
         },
       },
     }),

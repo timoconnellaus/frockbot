@@ -1,12 +1,15 @@
 import { type Context, FiberState, type Plugin, Service } from "cordis";
+import type { ArtifactRefV1 } from "./generation.ts";
 import {
   type ContributionKind,
+  type ManifestContributionKind,
   decodeFrockBotManifest,
   declaredContributionKinds,
   type FrockBotManifest,
 } from "./manifest.ts";
 
 export * from "./manifest.ts";
+export type { ArtifactRefV1 } from "./generation.ts";
 
 // Runtime source imports stay explicit because Electron executes workspace TypeScript.
 export type PackageStatus =
@@ -20,6 +23,12 @@ export interface PackageSource {
 export interface PackageDescriptor {
   specifier: string;
   manifest: FrockBotManifest;
+  /**
+   * Present only for a Composition member that carries an immutable,
+   * content-addressed artifact — that is, a Package whose provenance is not
+   * first-party and which therefore runs in a Bot isolate.
+   */
+  artifact?: ArtifactRefV1;
 }
 
 export interface ActiveContribution {
@@ -238,9 +247,9 @@ export class PackageCatalog extends Service {
 export type ContributionResolver = (specifier: string) => Promise<unknown>;
 
 export class PassiveContributionHost implements ContributionHost {
-  readonly kind: ContributionKind;
+  readonly kind: ManifestContributionKind;
 
-  constructor(kind: ContributionKind) {
+  constructor(kind: ManifestContributionKind) {
     this.kind = kind;
   }
 

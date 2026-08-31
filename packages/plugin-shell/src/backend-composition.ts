@@ -1,6 +1,8 @@
-// The Shell Package owns the Composition a Turn runs on. Until Bot-authored
-// Packages land, mounting a generation is the existing Foundation runtime
-// construction and verification is a no-op.
+// The Shell Package owns the Composition a Turn runs on. First-party members
+// are the compiled Foundation runtime, mounted in the kernel isolate; members
+// carrying an immutable artifact are Bot isolate members, mounted through the
+// kernel's `BotIsolateContributionHost` as a loaded Dynamic Worker with
+// `globalOutbound` disabled.
 import {
   createFoundationRuntime,
   type FoundationAgentPackage,
@@ -13,8 +15,18 @@ import {
   bootstrapGeneration,
   type CompositionGenerationV1,
   type CompositionHost,
+  type CompositionMemberV1,
   type MountedComposition,
 } from "@frockbot/kernel-composition/generation";
+import {
+  BotIsolateContributionHost,
+  botIsolatePackageDescriptorV1,
+  type BotIsolateArtifactStore,
+  type BotIsolateLimits,
+  type BotIsolateLoader,
+} from "@frockbot/kernel-composition/isolate";
+import type { ActiveContribution } from "@frockbot/kernel-composition";
+import type { BotCapabilitiesStub } from "@frockbot/kernel-contracts";
 import type { PersistSessionEvents, SessionEvent } from "@frockbot/agent-core";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 
@@ -38,6 +50,25 @@ export interface ShellMountedComposition extends MountedComposition {
   readonly runtime: FoundationRuntime;
 }
 
+/** Everything the Bot Durable Object supplies for isolate members. */
+export interface ShellIsolateMountOptions {
+  userId: string;
+  runId: string;
+  turnId: string;
+  loader: BotIsolateLoader;
+  artifacts: BotIsolateArtifactStore;
+  /**
+   * Mints the loopback `CAPABILITIES` service binding for one Package —
+   * `ctx.exports.BotCapabilities({ props })` in the Durable Object.
+   */
+  capabilitiesFor(member: CompositionMemberV1): BotCapabilitiesStub;
+  /** Content address of the Assignment-derived bindings; part of the loader id. */
+  bindingDigest?: string;
+  compatibilityDate: string;
+  limits?: BotIsolateLimits;
+  deadlineMs?: number;
+}
+
 export interface ShellCompositionMountOptions {
   botId: string;
   sessionId: string;
@@ -47,6 +78,8 @@ export interface ShellCompositionMountOptions {
   agentPackages?: readonly FoundationAgentPackage[];
   modelSelection?: RuntimeModelSelection;
   systemPromptSection?: string;
+  /** Absent when the host cannot load isolates; isolate members then fail verify. */
+  isolate?: ShellIsolateMountOptions;
 }
 
 export interface ShellCompositionHost extends CompositionHost {
@@ -54,6 +87,10 @@ export interface ShellCompositionHost extends CompositionHost {
     generation: CompositionGenerationV1,
     signal: AbortSignal,
   ): Promise<ShellMountedComposition>;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Mounts one pinned generation as the Cordis root a single Turn runs on. */
@@ -78,14 +115,81 @@ export function createShellCompositionHost(
         modelSelection: options.modelSelection,
         systemPromptSection: options.systemPromptSection,
       });
+
+      const isolateMembers = generation.members.filter(
+        (member) => member.artifact !== undefined,
+      );
+      const active: ActiveContribution[] = [];
+      const failures: string[] = [];
+      for (const member of isolateMembers) {
+        if (!options.isolate) {
+          failures.push(
+            `package "${member.packageId}" needs a Bot isolate and this host has no loader`,
+          );
+          continue;
+        }
+        const isolate = options.isolate;
+        try {
+          signal.throwIfAborted();
+          const host = new BotIsolateContributionHost({
+            loader: isolate.loader,
+            artifacts: isolate.artifacts,
+            tools: runtime.root.tools,
+            userId: isolate.userId,
+            botId: options.botId,
+            sessionId: options.sessionId,
+            runId: isolate.runId,
+            turnId: isolate.turnId,
+            generationId: generation.generationId,
+            capabilities: isolate.capabilitiesFor(member),
+            compatibilityDate: isolate.compatibilityDate,
+            ...(isolate.bindingDigest === undefined
+              ? {}
+              : { bindingDigest: isolate.bindingDigest }),
+            ...(isolate.limits ? { limits: isolate.limits } : {}),
+            ...(isolate.deadlineMs === undefined
+              ? {}
+              : { deadlineMs: isolate.deadlineMs }),
+          });
+          // Mount and health-check are one guarded phase (Worker Loader spike).
+          const prepared = await host.prepare(
+            botIsolatePackageDescriptorV1(member),
+          );
+          if (!prepared) {
+            failures.push(
+              `package "${member.packageId}" declared no Bot isolate contribution`,
+            );
+            continue;
+          }
+          active.push(await prepared.commit());
+        } catch (error) {
+          failures.push(errorMessage(error));
+        }
+      }
+
+      const dispose = async () => {
+        for (const contribution of active.toReversed()) {
+          await contribution.dispose();
+        }
+        await runtime.dispose();
+      };
+
       return {
         generation,
         root: runtime.root,
         runtime,
-        // First-party members run in the kernel isolate; there is nothing to
-        // health-check until isolate members exist.
-        verify: () => Promise.resolve(),
-        dispose: () => runtime.dispose(),
+        // First-party members run in the kernel isolate and have nothing to
+        // health-check; an isolate member that failed to mount or answer
+        // `health()` surfaces here. Fail-closed and last-known-good are Step 6.
+        verify: () => {
+          if (failures.length === 0) return Promise.resolve();
+          return Promise.reject(
+            new Error(
+              `Composition generation "${generation.generationId}" failed verification: ${failures.join("; ")}`,
+            ),
+          );
+        },
+        dispose,
       };
     },
   };

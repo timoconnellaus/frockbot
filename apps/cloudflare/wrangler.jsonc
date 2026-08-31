@@ -15,6 +15,12 @@
     {
       "binding": "USER_APPLICATIONS",
     },
+    // Bot-authored Package isolates, loaded from the Bot Durable Object with
+    // `globalOutbound` disabled (plan Step 4 / decision D2). A separate binding
+    // so Bot Packages and user applications never share a loader namespace.
+    {
+      "binding": "BOT_PACKAGES",
+    },
   ],
   // Package bundling runs outside the Durable Object, in a Worker with no
   // outbound bindings of its own (plan Step 3 / decision D4).
@@ -83,6 +89,9 @@
       "worker_loaders": [
         {
           "binding": "USER_APPLICATIONS",
+        },
+        {
+          "binding": "BOT_PACKAGES",
         },
       ],
       "services": [

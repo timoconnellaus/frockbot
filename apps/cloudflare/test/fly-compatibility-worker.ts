@@ -10,14 +10,20 @@ import { Context } from "cordis";
 import {
   BotDurableAuthority,
   createStoredRunCodecV1,
+  DurableCompositionStore,
   type BotTurnExecutionInput,
-  type DurableCompositionStore,
 } from "@frockbot/kernel-do";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
 } from "@frockbot/kernel-composition/generation";
 import { BotState } from "../src/bot-state.ts";
+import { BOT_CONFIGURATION_KEY } from "@frockbot/plugin-shell/backend";
+import {
+  ISOLATE_DECISION_PREFIX,
+  ISOLATE_MODEL_REQUEST_PREFIX,
+} from "@frockbot/plugin-shell/backend-isolate";
+import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
 import { UserConfiguration } from "../src/user-configuration.ts";
 
 interface FlyCompatibilityEnv {
@@ -29,7 +35,40 @@ export interface FlyMountResult {
   generation: number;
 }
 
+export { BotCapabilities } from "../src/bot-capabilities.ts";
+export { BotIsolateProbe } from "./bot-isolate-probe.ts";
+
 export class WorkerdBotState extends BotState {
+  /** Seeds the durable Bot configuration the isolate capability path reads. */
+  async seedBotConfiguration(settings: BotSettingsViewV1): Promise<void> {
+    await this.ctx.storage.put(BOT_CONFIGURATION_KEY, settings);
+  }
+
+  /** Seeds the Composition generation the isolate model path pins to. */
+  async seedCompositionGeneration(
+    generation: CompositionGenerationV1,
+  ): Promise<void> {
+    const store = new DurableCompositionStore({
+      state: this.ctx,
+      bootstrap: () => Promise.resolve(generation),
+    });
+    await store.materialize();
+  }
+
+  async isolateDecisions(): Promise<unknown[]> {
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: ISOLATE_DECISION_PREFIX,
+    });
+    return [...stored.values()];
+  }
+
+  async isolateModelRequestRecords(): Promise<unknown[]> {
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: ISOLATE_MODEL_REQUEST_PREFIX,
+    });
+    return [...stored.values()];
+  }
+
   async durableSessionEvents(): Promise<SessionEvent[]> {
     return (await this.ctx.storage.get<SessionEvent[]>("latest-events")) ?? [];
   }
