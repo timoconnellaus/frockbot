@@ -13,7 +13,6 @@
     "test": "bun test src && bun run test:workerd",
     "test:workerd": "vitest run --config vitest.config.ts",
     "test:integration": "bun run artifact:build && vitest run --config vitest.integration.config.ts",
-    "test:fly:workerd:live": "FROCKBOT_RUN_LIVE_SPRITE_TEST=1 vitest run --config vitest.config.ts test/fly-compatibility.workerd.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && vue-tsc --noEmit -p tsconfig.client.json"
   },
   "dependencies": {

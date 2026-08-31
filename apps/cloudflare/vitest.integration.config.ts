@@ -47,7 +47,10 @@ const authMigrations = await readD1Migrations(
 // The same fake the hermetic project binds, so a `SELF.fetch` Turn that uses
 // the Computer crosses the real v1 seam. See `test/computer-host-fake.ts` for
 // why a container cannot run under this pool.
-const computerHost = createComputerHostFake();
+// A scripted hang is capped well below `testTimeout`, so the Turn that armed
+// it reaches its durable failure inside the test that is watching for it
+// rather than at teardown.
+const computerHost = createComputerHostFake({ maximumHangMs: 3_000 });
 
 export default defineConfig({
   // `manifest-catalog.integration.ts` imports the production client decoder
@@ -60,7 +63,7 @@ export default defineConfig({
     cloudflareTest({
       main: "./src/index.ts",
       miniflare: {
-        outboundService: createOutboundService({ liveSpriteProbe: false }),
+        outboundService: createOutboundService(),
         compatibilityDate: "2026-08-27",
         compatibilityFlags: ["nodejs_compat"],
         workerLoaders: {
@@ -92,10 +95,12 @@ export default defineConfig({
           ALLOW_DEVELOPMENT_AUTH: "true",
           ALLOWED_CLIENT_ORIGINS: "capacitor://localhost,frockbot://localhost",
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
-          // No Sprite token reaches this Worker in production either: the
-          // Computer runs on the host (ADR 0004), and SPRITES_TOKEN survives
-          // here only as the "is a Computer configured" gate.
-          SPRITES_TOKEN: "",
+          // Not a credential: no Sprite token reaches this Worker in
+          // production either, because the Computer host holds the only copy
+          // (ADR 0004). `SPRITES_TOKEN` is only the "is a Computer configured"
+          // gate, so a placeholder is exactly what a deployment with a
+          // Computer looks like from here.
+          SPRITES_TOKEN: "configured",
           COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
         },
         // Deliberately absent, and why:

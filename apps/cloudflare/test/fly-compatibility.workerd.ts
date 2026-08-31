@@ -16,6 +16,11 @@ function user(name: string) {
 }
 
 describe("Fly provider Workerd compatibility", () => {
+  // The live probe that used to sit beside this one asserted the workerd
+  // chunk-framing failure. That path no longer exists: the Sprites SDK is on
+  // the Computer host now (ADR 0004), and the provider reaches a Computer only
+  // through the `COMPUTER_HOST` binding. It is retired with the path it
+  // probed; `apps/computer-host/live-test.ts` drives the real Sprite.
   test("mounts through the provider-neutral Computer interface", async () => {
     const result = await flyProbe(
       `mount-${crypto.randomUUID()}`,
@@ -26,24 +31,6 @@ describe("Fly provider Workerd compatibility", () => {
       generation: 1,
     });
   });
-
-  test.skipIf(env.FROCKBOT_RUN_LIVE_SPRITE_TEST !== "1")(
-    "records the Sprites HTTP framing incompatibility in Workerd",
-    async () => {
-      expect(env.SPRITES_TOKEN).not.toBe("");
-      const spriteName = `frockbot-test-${crypto.randomUUID().slice(0, 8)}`;
-      const message = `workerd-${crypto.randomUUID()}`;
-      const stub = flyProbe(`live-${crypto.randomUUID()}`);
-
-      try {
-        await expect(
-          stub.probeLiveWorkspace(spriteName, message),
-        ).rejects.toThrow(/preserved HTTP chunk boundaries/);
-      } finally {
-        await stub.deleteLiveSprite(spriteName);
-      }
-    },
-  );
 });
 
 describe("production Bot durability in Workerd", () => {

@@ -68,19 +68,12 @@ authenticate — which is what lets a test prove a Connection is validated by an
 inference call rather than by a catalog read. It exports three keys: a good one,
 a revoked one (validates, then fails on a Turn), and a bad one.
 
-## `bun run test:fly:workerd:live` — opt-in boundary probe
+## The Computer, and what no local pool can prove
 
-Records the known incompatibility between workerd response re-chunking and the
-Sprites HTTP exec framing used by provider workspace operations. The probe
-passes only when that specific failure is observed and always deletes its
-disposable `frockbot-test-*` Sprite.
-
-The outbound stub 403s every host it does not recognise, which previously also
-blocked this probe's own traffic and made it record a network refusal instead of
-the framing failure. `createOutboundService` now passes `api.sprites.dev` — the
-only host the `@fly/sprites` 0.1.0 SDK contacts — through to the real network,
-and only when `FROCKBOT_RUN_LIVE_SPRITE_TEST=1`.
-
-The local shared-host compatibility prototype lives in
-`apps/fly-host-prototype`. Run its `test:live` script to verify streaming,
-files, cancellation, reconstruction, and cleanup through a Cloudflare Container.
+There is no opt-in live Sprite probe here any more. The probe that used to sit
+in `fly-compatibility.workerd.ts` asserted the workerd chunk-framing failure in
+`@fly/sprites`; that path no longer exists, because the SDK is on the Computer
+host and a Bot Durable Object reaches a Computer only through the
+`COMPUTER_HOST` binding (ADR 0004). `apps/computer-host/live-test.ts` builds the
+production image and drives a real disposable Sprite; it is the only thing in
+the repository that touches one, and it deletes it in `finally`.

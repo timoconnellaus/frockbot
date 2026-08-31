@@ -16,14 +16,8 @@ import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
 } from "@frockbot/workspace-store/testing";
-import {
-  computerBotKey,
-  FlySpriteComputer,
-  WORKSPACE_SYNC_SERVICE,
-  type SpriteHandle,
-  type SpriteServiceStream,
-  type SpritesClientHandle,
-} from "./computer.ts";
+import { computerBotKey, FlySpriteComputer } from "./computer.ts";
+import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
 import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";
 import {
   createFlySpriteSyncV1,
@@ -73,43 +67,29 @@ function payload(shell: string, target: string): string | undefined {
 }
 
 /**
- * A Sprite whose durable filesystem is an in-memory map, interpreting the
+ * The Computer's durable filesystem as an in-memory map, interpreting the
  * shell the sync emits rather than running it — the scripts are GNU coreutils
  * and the test host is not. Every path the sync touches is an absolute path in
  * `files`, exactly as it would be on the Sprite.
+ *
+ * It is the runner behind a `FakeComputerHost` (ADR 0004): the sync's bash now
+ * travels to the shared host on a command's stdin rather than on a Sprite
+ * argv, so the same script text arrives here as one string.
  */
-class FakeSyncSprite implements SpriteHandle {
-  name = "frockbot-test";
-  url = "https://frockbot-test-123.sprites.app/";
+class FakeSyncSprite {
   readonly files = new Map<string, Uint8Array>();
-  readonly services: string[] = [];
   /** Set to fail every storage call, as a paused Sprite does. */
   paused = false;
   /** Drops the next sidecar write, as a pause between store and Computer does. */
   dropNextMaterialize = false;
 
-  execFileHTTP(
-    file: string,
-    args: string[] = [],
-  ): Promise<{ stdout: string; stderr: string }> {
-    if (this.paused) return Promise.reject(new Error("Sprite is paused"));
-    if (file !== "bash") return Promise.resolve({ stdout: "", stderr: "" });
-    const shell = args.at(-1) ?? "";
-    return Promise.resolve({ stdout: this.interpret(shell), stderr: "" });
-  }
-
-  createService(name: string): Promise<SpriteServiceStream> {
-    this.services.push(name);
-    return Promise.resolve({
-      async *[Symbol.asyncIterator]() {
-        yield { type: "started" };
-      },
-    });
-  }
-
-  updateURLSettings(): Promise<void> {
-    return Promise.resolve();
-  }
+  /** Runs one script for the host double. */
+  readonly run = (script: string): FakeComputerRunV1 => {
+    // A paused Sprite answers nothing, and the host reports the failed exit;
+    // the provider turns that into `Sprite storage operation failed: …`.
+    if (this.paused) return { exitCode: 1, stderr: "Sprite is paused" };
+    return { stdout: this.interpret(script) };
+  };
 
   /** Writes a file the way a shell command on the Computer would: no sidecar. */
   shellWrite(root: string, relative: string, text: string): void {
@@ -266,20 +246,13 @@ class FakeSyncSprite implements SpriteHandle {
   }
 }
 
-class FakeClient implements SpritesClientHandle {
-  constructor(readonly sprite: FakeSyncSprite) {}
-
-  listAllSprites(): Promise<SpriteHandle[]> {
-    return Promise.resolve([this.sprite]);
-  }
-
-  createSprite(): Promise<SpriteHandle> {
-    return Promise.resolve(this.sprite);
-  }
-
-  getSprite(): Promise<SpriteHandle> {
-    return Promise.resolve(this.sprite);
-  }
+/** One Computer whose disk is `sprite`, reached through the shared host. */
+function attach(sprite: FakeSyncSprite): FlySpriteComputer {
+  return new FlySpriteComputer({
+    identity: { userId: "sync-user" },
+    host: new FakeComputerHost(sprite.run).factory,
+    spriteName: "frockbot-test",
+  });
 }
 
 const MOUNTS = {
@@ -320,10 +293,7 @@ function harness(
     surface: "memory",
   });
   const sprite = new FakeSyncSprite();
-  const computer = new FlySpriteComputer({
-    client: new FakeClient(sprite),
-    spriteName: "frockbot-test",
-  }).bot(BOT);
+  const computer = attach(sprite).bot(BOT);
   const roots = declaredWorkspaceRootsV1(FLY_WORKSPACE_LAYOUT, {
     userId: USER,
     botIds: [BOT],
@@ -869,18 +839,12 @@ describe("the durable-root sync, pauses", () => {
 describe("the on-Sprite sync service", () => {
   // Constitution — Computer and Workspace: "Only Computer-provider-declared
   // services may be reattached; other processes are assumed dead after a cold
-  // pause."
-  test("is declared as a provider service so a cold pause brings it back", async () => {
-    const sprite = new FakeSyncSprite();
-    const computer = new FlySpriteComputer({
-      client: new FakeClient(sprite),
-      spriteName: "frockbot-test",
-    });
-
-    await computer.bot(BOT).ensure();
-
-    expect(sprite.services).toContain(WORKSPACE_SYNC_SERVICE);
-  });
+  // pause." The claim that `WORKSPACE_SYNC_SERVICE` is *declared* no longer has
+  // a subject in this Package: after ADR 0004 the provider never creates a
+  // service — the shared Computer host owns the Sprite's service declarations,
+  // and this suite's host double answers `open` without one. The test that
+  // asserted it against a `FakeSyncSprite.createService` recorder is gone with
+  // the SDK it drove; the declaration belongs to the host's own suite now.
 
   test("its change signal is what a caller polls to decide when to sync", async () => {
     const { sprite, agent } = harness();
@@ -938,10 +902,7 @@ describe("the durable-root sync on the Computer handle", () => {
     const log: string[] = [];
     const effects = recordingEffects(log);
     const sprite = new FakeSyncSprite();
-    const computer = new FlySpriteComputer({
-      client: new FakeClient(sprite),
-      spriteName: "frockbot-test",
-    });
+    const computer = attach(sprite);
     const provider = new FlySpriteComputerProvider(computer, undefined, {
       // Every write the store takes is announced, so "intent before the push"
       // is an ordering claim about this one list.
@@ -1041,12 +1002,7 @@ describe("the durable-root sync on the Computer handle", () => {
 
   test("carries no sync at all when the host supplies no object-storage side", async () => {
     const sprite = new FakeSyncSprite();
-    const provider = new FlySpriteComputerProvider(
-      new FlySpriteComputer({
-        client: new FakeClient(sprite),
-        spriteName: "frockbot-test",
-      }),
-    );
+    const provider = new FlySpriteComputerProvider(attach(sprite));
 
     const handle = await provider.open(
       { userId: USER },

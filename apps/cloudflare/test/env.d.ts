@@ -19,7 +19,6 @@ interface FlyTestEnv {
   COMPUTER_HOST_SHARDS: string;
   COMPUTER_HOST_TOKEN: string;
   FLY_COMPATIBILITY: DurableObjectNamespace<FlyCompatibilityProbe>;
-  FROCKBOT_RUN_LIVE_SPRITE_TEST: string;
   PACKAGE_CATALOG: R2Bucket;
   SPRITES_TOKEN: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;

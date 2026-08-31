@@ -692,7 +692,22 @@ the rows whose status the code moved:
   checked (`computer-core/src/index.test.ts`,
   `plugin-fly-sprite/src/computer.test.ts`); the shared scratch is not.
   `/workspaces/<bot>` is Bot-private, and the only User-shared thing on the
-  Sprite is the browser profile.
+  Sprite is the browser profile. Since ADR 0004 the Computer is reachable from
+  the cloud path rather than only from a local process: the Bot Durable Object
+  calls `apps/computer-host` over the `COMPUTER_HOST` service binding and holds
+  no Sprites SDK. What keeps the row `partial` is unchanged — no shared
+  scratch, and rows 26 and 27 below.
+- **24, 25** — a desktop slot, its viewer session, and the human-takeover lease
+  are all reachable from a Bot Durable Object now (`/v1/computer/viewer`,
+  `/v1/computer/control`), which they were not while the provider needed the
+  Sprites SDK. The rows stay `partial` for the surfaces above them: there is no
+  screenshot tool and no WebUI takeover flow on the hosted client (row 57d).
+- **28** — the interchangeable seam exists and has two implementations in
+  tests, but only one is a Computer: `packages/computer-host-protocol` is the
+  one contract, the container is the one runtime behind it, and
+  `apps/cloudflare/test/computer-host-fake.ts` is a second implementation of
+  the protocol rather than a second Computer runtime. A local Docker runtime
+  beside the Sprite is not started.
 - **26b** — durability exists, by the opposite mechanism. The durable-root sync
   (`plugin-fly-sprite/src/sync.ts`, called from `plugin-computer/src/agent.ts`)
   is bidirectional, per-file and generation-fenced rather than
