@@ -260,9 +260,16 @@ export async function provisionThroughUi(
   await expect(
     page.getByRole("heading", { name: `${options.botName} is ready.` }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("textbox", { name: "Message", exact: true }),
-  ).toBeEnabled();
+  await expect(composerInput(page)).toBeEnabled();
+}
+
+/**
+ * The message composer. Matched by its accessible name rather than by role:
+ * the Skill popover makes it a `combobox`, and which widget role the composer
+ * carries is not what any spec is about.
+ */
+export function composerInput(page: Page): Locator {
+  return page.getByLabel("Message", { exact: true });
 }
 
 /**
@@ -276,7 +283,7 @@ export async function provisionThroughUi(
  * is the signal that the Turn was admitted.
  */
 export async function sendMessage(page: Page, text: string): Promise<void> {
-  const composer = page.getByRole("textbox", { name: "Message", exact: true });
+  const composer = composerInput(page);
   const send = page.getByRole("button", { name: "Send message" });
   await composer.fill(text);
   await expect(composer).toHaveValue(text);
