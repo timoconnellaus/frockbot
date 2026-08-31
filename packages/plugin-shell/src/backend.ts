@@ -2494,6 +2494,33 @@ export class ShellBotBackendContribution {
           userId: identity.userId,
           readSecret,
           authorizeConnection: authorizeAssignedConnection,
+          // Assigned Contributions reach the network through the same
+          // outbound seam the model provider uses, so a deployment that stubs
+          // it stubs every one of them.
+          ...(this.outboundFetch ? { fetch: this.outboundFetch } : {}),
+          leaseCredential: async (
+            assignment,
+            effectId,
+            expectedGeneration,
+          ): Promise<CredentialLeaseV1> => {
+            if (!assignment.connectionId || !expectedGeneration) {
+              throw new Error("Assigned Connection generation is unavailable");
+            }
+            return userConfiguration.leaseToolCredential(
+              identity.userId,
+              assignment.connectionId,
+              effectId,
+              expectedGeneration,
+            );
+          },
+          settleCredential: async (assignment, effectId): Promise<void> => {
+            if (!assignment.connectionId) return;
+            await userConfiguration.settleToolCredential(
+              identity.userId,
+              assignment.connectionId,
+              effectId,
+            );
+          },
         },
       )),
     ];
@@ -3051,6 +3078,17 @@ export class ShellBotBackendContribution {
       effectId: string,
       connectionGeneration: string,
     ): Promise<CredentialLeaseV1>;
+    leaseToolCredential(
+      userId: string,
+      connectionId: string,
+      effectId: string,
+      connectionGeneration: string,
+    ): Promise<CredentialLeaseV1>;
+    settleToolCredential(
+      userId: string,
+      connectionId: string,
+      effectId: string,
+    ): Promise<void>;
     settleModelCredential(
       userId: string,
       connectionId: string,
@@ -3088,6 +3126,8 @@ export class ShellBotBackendContribution {
       compensateConnectionDependency(input: unknown): Promise<boolean>;
       leaseModelCredential(input: unknown): Promise<unknown>;
       settleModelCredential(input: unknown): Promise<void>;
+      leaseToolCredential(input: unknown): Promise<unknown>;
+      settleToolCredential(input: unknown): Promise<void>;
       listBots(input: unknown): Promise<unknown>;
       createBot(input: unknown): Promise<unknown>;
     };
@@ -3177,6 +3217,28 @@ export class ShellBotBackendContribution {
             connectionGeneration,
           }),
         ),
+      leaseToolCredential: async (
+        userId,
+        connectionId,
+        effectId,
+        connectionGeneration,
+      ) =>
+        decodeCredentialLeaseV1(
+          await rpc.leaseToolCredential({
+            schemaVersion: 1,
+            userId,
+            connectionId,
+            effectId,
+            connectionGeneration,
+          }),
+        ),
+      settleToolCredential: (userId, connectionId, effectId) =>
+        rpc.settleToolCredential({
+          schemaVersion: 1,
+          userId,
+          connectionId,
+          effectId,
+        }),
       settleModelCredential: (userId, connectionId, packageId, effectId) =>
         rpc.settleModelCredential({
           schemaVersion: 1,

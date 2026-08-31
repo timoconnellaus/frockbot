@@ -42,7 +42,11 @@ export interface MobileContribution {
   entry: string;
 }
 
-export type SettingScope = "user" | "bot";
+/**
+ * Where one setting's value lives. `connection` is manifest v4: a setting a
+ * Connection Type declares, whose value belongs to one Connection.
+ */
+export type SettingScope = "user" | "bot" | "connection";
 
 export type PackageSettingSchemaType =
   "object" | "array" | "string" | "number" | "integer" | "boolean" | "null";
@@ -89,6 +93,15 @@ export interface ConnectionTypeDefinition {
     driverId: string;
   };
   capabilities: string[];
+  /**
+   * Manifest v4. Connection-scoped settings: the configuration one Connection
+   * of this type carries beside its credential — an MCP server's URL and
+   * transport, say. They are declared here rather than under `settings`
+   * because their scope is a Connection, not the User or the Bot, and they are
+   * configuration only: a secret reaches the keyring through the Connection's
+   * credential and never through a setting.
+   */
+  settings?: PackageSettingDefinition[];
 }
 
 export interface CapabilityDefinition {
@@ -913,9 +926,60 @@ function decodeCapabilityAdmission(value: unknown): {
   return { turnTypes };
 }
 
+/**
+ * The setting definitions on one manifest record. A Package's own `settings`
+ * are scoped to a User or a Bot; a Connection Type's are scoped to one
+ * Connection and carry no `scopes` field at all, because their scope is the
+ * record that declares them.
+ */
+function settingDefinitions(
+  owner: Record<string, unknown>,
+  scope: "package" | "connection",
+): PackageSettingDefinition[] {
+  return definitionArray(owner, "settings").map((setting) => {
+    exactFields(
+      setting,
+      [
+        "id",
+        "schemaVersion",
+        "schema",
+        ...(scope === "package" ? ["scopes"] : []),
+      ],
+      "manifest setting definition",
+    );
+    const schemaVersion = setting.schemaVersion;
+    if (!Number.isSafeInteger(schemaVersion) || (schemaVersion as number) < 1) {
+      throw new Error(
+        "manifest setting schemaVersion must be a positive integer",
+      );
+    }
+    if (scope === "connection") {
+      return {
+        id: definitionId(setting),
+        schemaVersion: schemaVersion as number,
+        scopes: ["connection"],
+        schema: safeSchema(setting.schema),
+      };
+    }
+    const scopes = optionalStringArray(setting, "scopes");
+    if (
+      scopes.length === 0 ||
+      !scopes.every((candidate) => candidate === "user" || candidate === "bot")
+    ) {
+      throw new Error("manifest setting scopes must contain user or bot");
+    }
+    return {
+      id: definitionId(setting),
+      schemaVersion: schemaVersion as number,
+      scopes: scopes as SettingScope[],
+      schema: safeSchema(setting.schema),
+    };
+  });
+}
+
 function decodeConfiguration(
   value: unknown,
-  allowAdmission: boolean,
+  allowV4: boolean,
 ): PackageConfiguration {
   if (value === undefined) {
     return { settings: [], connectionTypes: [], capabilities: [] };
@@ -927,37 +991,19 @@ function decodeConfiguration(
     ["settings", "connectionTypes", "capabilities"],
     "manifest configuration",
   );
-  const settings = definitionArray(value, "settings").map((setting) => {
-    exactFields(
-      setting,
-      ["id", "schemaVersion", "scopes", "schema"],
-      "manifest setting definition",
-    );
-    const schemaVersion = setting.schemaVersion;
-    if (!Number.isSafeInteger(schemaVersion) || (schemaVersion as number) < 1) {
-      throw new Error(
-        "manifest setting schemaVersion must be a positive integer",
-      );
-    }
-    const scopes = optionalStringArray(setting, "scopes");
-    if (
-      scopes.length === 0 ||
-      !scopes.every((scope) => scope === "user" || scope === "bot")
-    ) {
-      throw new Error("manifest setting scopes must contain user or bot");
-    }
-    return {
-      id: definitionId(setting),
-      schemaVersion: schemaVersion as number,
-      scopes: scopes as SettingScope[],
-      schema: safeSchema(setting.schema),
-    };
-  });
+  const settings = settingDefinitions(value, "package");
   const connectionTypes = definitionArray(value, "connectionTypes").map(
     (connection) => {
       exactFields(
         connection,
-        ["id", "displayName", "allowMultiple", "authorization", "capabilities"],
+        [
+          "id",
+          "displayName",
+          "allowMultiple",
+          "authorization",
+          "capabilities",
+          ...(allowV4 ? ["settings"] : []),
+        ],
         "manifest connection definition",
       );
       if (!isRecord(connection.authorization)) {
@@ -992,6 +1038,9 @@ function decodeConfiguration(
           driverId: requiredString(connection.authorization, "driverId"),
         },
         capabilities: optionalStringArray(connection, "capabilities"),
+        ...(allowV4 && connection.settings !== undefined
+          ? { settings: settingDefinitions(connection, "connection") }
+          : {}),
       };
     },
   );
@@ -999,12 +1048,7 @@ function decodeConfiguration(
     (capability) => {
       exactFields(
         capability,
-        [
-          "id",
-          "kind",
-          "connectionTypes",
-          ...(allowAdmission ? ["admission"] : []),
-        ],
+        ["id", "kind", "connectionTypes", ...(allowV4 ? ["admission"] : [])],
         "manifest capability definition",
       );
       const rawKind = requiredString(capability, "kind");
@@ -1022,7 +1066,7 @@ function decodeConfiguration(
         id: definitionId(capability),
         kind,
         connectionTypes: optionalStringArray(capability, "connectionTypes"),
-        ...(allowAdmission && capability.admission !== undefined
+        ...(allowV4 && capability.admission !== undefined
           ? { admission: decodeCapabilityAdmission(capability.admission) }
           : {}),
       };

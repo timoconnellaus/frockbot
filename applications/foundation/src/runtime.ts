@@ -82,6 +82,8 @@ const createFlockGatewayPlugin = (
 import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
+import mcpManifest from "@frockbot/plugin-mcp/manifest";
+import { createConfiguredMcpRuntimeContribution } from "@frockbot/plugin-mcp/agent";
 import memoryManifest from "@frockbot/plugin-memory/manifest";
 import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
 import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
@@ -178,6 +180,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
+  ["@frockbot/plugin-mcp", mcpManifest],
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
@@ -205,15 +208,34 @@ const runtimeContributions = new Map([
 
 type AssignedRuntimeContributionFactory = (config: {
   assignment: BotExecutionPlanV1["assignments"][number];
+  /** This Assignment's ordinal among the enabled Assignments of its Package. */
+  assignmentIndex: number;
   userId: string;
   readSecret(name: string): string | undefined;
   authorizeConnection(): Promise<ConnectionView>;
-}) => Plugin | undefined;
+  /** The Package's own outbound seam, when the host owns one. */
+  fetch?: typeof fetch;
+  /**
+   * An expiring lease over the Assignment's Connection credential. Supplied
+   * only by a host that carries the User's authority; a Contribution that
+   * needs no credential never calls it.
+   */
+  leaseCredential?(
+    effectId: string,
+    expectedGeneration?: string,
+  ): Promise<CredentialLeaseV1>;
+  settleCredential?(effectId: string): Promise<void>;
+}) => Plugin | undefined | Promise<Plugin | undefined>;
 
 const assignedRuntimeContributionFactories = new Map<
   string,
   AssignedRuntimeContributionFactory
->();
+>([
+  [
+    "@frockbot/plugin-mcp/agent",
+    (config) => createConfiguredMcpRuntimeContribution(config),
+  ],
+]);
 
 interface ModelRuntimeContributionConfig {
   accountId: string;
@@ -656,9 +678,22 @@ export async function createFoundationAssignedRuntimePackages(
     authorizeConnection(
       assignment: BotSettingsViewV1["assignments"][number],
     ): Promise<ConnectionView>;
+    /** The Package's own outbound seam, passed through to each Contribution. */
+    fetch?: typeof fetch;
+    /** The User's credential authority, for Contributions that hold a key. */
+    leaseCredential?(
+      assignment: BotSettingsViewV1["assignments"][number],
+      effectId: string,
+      expectedGeneration?: string,
+    ): Promise<CredentialLeaseV1>;
+    settleCredential?(
+      assignment: BotSettingsViewV1["assignments"][number],
+      effectId: string,
+    ): Promise<void>;
   },
 ): Promise<FoundationAssignedRuntimePackage[]> {
   const result: FoundationAssignedRuntimePackage[] = [];
+  const assignmentIndexes = new Map<string, number>();
   for (const assignment of execution.assignments) {
     if (assignment.state !== "enabled") continue;
     const pkg = plan.packages.find(
@@ -674,11 +709,31 @@ export async function createFoundationAssignedRuntimePackages(
     );
     if (!admittedAssignment) continue;
     await host.authorizeConnection(admittedAssignment);
-    const plugin = factory({
+    const assignmentIndex = assignmentIndexes.get(pkg.id) ?? 0;
+    assignmentIndexes.set(pkg.id, assignmentIndex + 1);
+    const plugin = await factory({
       assignment,
+      assignmentIndex,
       userId: host.userId,
       readSecret: host.readSecret,
       authorizeConnection: () => host.authorizeConnection(admittedAssignment),
+      ...(host.fetch ? { fetch: host.fetch } : {}),
+      ...(host.leaseCredential
+        ? {
+            leaseCredential: (effectId, expectedGeneration) =>
+              host.leaseCredential!(
+                admittedAssignment,
+                effectId,
+                expectedGeneration,
+              ),
+          }
+        : {}),
+      ...(host.settleCredential
+        ? {
+            settleCredential: (effectId) =>
+              host.settleCredential!(admittedAssignment, effectId),
+          }
+        : {}),
     });
     if (!plugin) continue;
     result.push({
@@ -753,6 +808,9 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("package-publisher");
   // Assigned provider Packages mount only after durable Connections resolve.
   runtimeIds.delete("composio");
+  // Remote MCP servers mount per enabled Assignment, after the Connection and
+  // its handshake resolve.
+  runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
   return {
     plan,

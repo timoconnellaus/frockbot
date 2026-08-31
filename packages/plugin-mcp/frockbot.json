@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 4,
+  "id": "mcp",
+  "displayName": "MCP servers",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "credentials": ">=0.0.1",
+    "settings": ">=0.0.1"
+  },
+  "contributions": {
+    "backend": [{ "entry": "./user", "host": "user" }],
+    "runtime": { "entry": "./agent" }
+  },
+  "permissions": ["connections:manage", "tools:execute", "network:mcp"],
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [
+      {
+        "id": "mcp-remote",
+        "displayName": "MCP server",
+        "allowMultiple": true,
+        "authorization": { "kind": "none", "driverId": "mcp" },
+        "capabilities": ["mcp-tools"],
+        "settings": [
+          {
+            "id": "url",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Server URL",
+              "description": "The absolute https URL of the remote MCP endpoint.",
+              "minLength": 8,
+              "maxLength": 2048
+            }
+          },
+          {
+            "id": "transport",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Transport",
+              "description": "The MCP HTTP transport the server speaks. Absent means streamable-http.",
+              "enum": ["streamable-http", "sse"]
+            }
+          }
+        ]
+      },
+      {
+        "id": "mcp-remote-key",
+        "displayName": "MCP server (API key)",
+        "allowMultiple": true,
+        "authorization": { "kind": "api-key", "driverId": "mcp" },
+        "capabilities": ["mcp-tools"],
+        "settings": [
+          {
+            "id": "url",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Server URL",
+              "description": "The absolute https URL of the remote MCP endpoint.",
+              "minLength": 8,
+              "maxLength": 2048
+            }
+          },
+          {
+            "id": "transport",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Transport",
+              "description": "The MCP HTTP transport the server speaks. Absent means streamable-http.",
+              "enum": ["streamable-http", "sse"]
+            }
+          },
+          {
+            "id": "header-name",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Key header",
+              "description": "The header the API key is sent in. Defaults to Authorization, which carries the key as a bearer token.",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ]
+      }
+    ],
+    "capabilities": [
+      {
+        "id": "mcp-tools",
+        "kind": "tool",
+        "connectionTypes": ["mcp-remote", "mcp-remote-key"],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent", "channel"]
+        }
+      }
+    ]
+  }
+}

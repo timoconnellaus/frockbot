@@ -16,6 +16,10 @@ import {
 } from "@frockbot/plugin-package-publisher/user";
 export type { PackagePublisherUserHost } from "@frockbot/plugin-package-publisher/user";
 import {
+  createMcpUserBackendPlugin,
+  type McpUserBackendContribution,
+} from "@frockbot/plugin-mcp/user";
+import {
   createSearchUserBackendPlugin,
   type SearchUserBackendContribution,
   type SearchUserBackendHost,
@@ -51,6 +55,22 @@ export interface FoundationConnectionUserBackendContribution {
     connectionGeneration: string;
   }): Promise<unknown>;
   settleModelCredential(input: {
+    accountId: string;
+    connectionId: string;
+    effectId: string;
+  }): Promise<void>;
+  /**
+   * An expiring lease over this Connection's credential for a tool
+   * Contribution's mount. Absent on a Package whose Connections carry no
+   * credential a Bot ever opens.
+   */
+  leaseToolCredential?(input: {
+    accountId: string;
+    connectionId: string;
+    effectId: string;
+    connectionGeneration: string;
+  }): Promise<unknown>;
+  settleToolCredential?(input: {
     accountId: string;
     connectionId: string;
     effectId: string;
@@ -117,6 +137,7 @@ export async function createFoundationUserBackendContributions(
   let settings: UserSettingsBackendContribution | undefined;
   let credentials: CredentialUserBackendContribution | undefined;
   let ollama: OllamaCloudUserBackendContribution | undefined;
+  let mcp: McpUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
   let publisher: PackagePublisherUserContribution | undefined;
   let search: SearchUserBackendContribution | undefined;
@@ -131,6 +152,7 @@ export async function createFoundationUserBackendContributions(
         | UserSettingsBackendContribution
         | CredentialUserBackendContribution
         | OllamaCloudUserBackendContribution
+        | McpUserBackendContribution
         | FlockUserBackendContribution
         | PackagePublisherUserContribution
         | SearchUserBackendContribution
@@ -189,6 +211,32 @@ export async function createFoundationUserBackendContributions(
           {
             mount(value: OllamaCloudUserBackendContribution) {
               ollama = value;
+              connections.set(value.packageId, value);
+              const unregister =
+                userSettings.registerConnectionCommandOwner(value);
+              const dispose = lifecycle.mount(value);
+              return () => {
+                connections.delete(value.packageId);
+                unregister();
+                dispose();
+              };
+            },
+          },
+        );
+      },
+    ],
+    [
+      "@frockbot/plugin-mcp/user",
+      (lifecycle) => {
+        if (!settings || !credentials) {
+          throw new Error("MCP requires Settings and Credential Contributions");
+        }
+        const userSettings = settings;
+        return createMcpUserBackendPlugin(
+          { storage: host.storage, settings, credentials },
+          {
+            mount(value: McpUserBackendContribution) {
+              mcp = value;
               connections.set(value.packageId, value);
               const unregister =
                 userSettings.registerConnectionCommandOwner(value);
@@ -336,6 +384,7 @@ export async function createFoundationUserBackendContributions(
     | UserSettingsBackendContribution
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
+    | McpUserBackendContribution
     | FlockUserBackendContribution
     | PackagePublisherUserContribution
     | SearchUserBackendContribution
@@ -349,10 +398,18 @@ export async function createFoundationUserBackendContributions(
       return factory(lifecycle);
     },
   });
-  if (!settings || !credentials || !ollama || !flock || !publisher || !search) {
+  if (
+    !settings ||
+    !credentials ||
+    !ollama ||
+    !mcp ||
+    !flock ||
+    !publisher ||
+    !search
+  ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Flock, Search, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Search, and Package Publisher User Contributions",
     );
   }
   return {
