@@ -253,7 +253,7 @@ export interface BundlerBinding {
 
 **Tests.** Same source ⇒ same `contentHash`; a syntax error returns `status: "failed"` with diagnostics and writes nothing to R2; replaying the same `effectId` returns the first result and does not re-write; source > the size quota is refused. Bundler tests run under Miniflare, not Bun.
 
-**Risk.** `@cloudflare/worker-bundler` may not be usable inside a Worker, or may exceed CPU/memory on cold start. Spike this _first_ inside Step 3 and fall back to (a) transpile-only TS-strip in the Worker, or (b) a Container, per ADR 0004's Fly/Container precedent. Also: bundler CPU is on the _bundler's_ limits, not the DO's — do not `await` it inside a storage transaction.
+**Spike result (2026-08-31, `docs/research/spike-bundler-runtime.md`).** Resolved in favour of (a): `@cloudflare/worker-bundler@0.2.3` runs in a dedicated Worker under the pinned harness — warm ≈18–30 ms, cold ≈250 ms, deterministic `sha256`, 3.8 MiB gzip. Two hard rules follow: (1) the bundler Worker has **no network egress** (`globalOutbound`-style restriction or no outbound bindings at all), because with a `package.json` present the bundler live-fetches npm — Bot-authored text must never drive a subrequest; (2) it accepts exactly one `package.ts`, rejects any `package.json`, and fails the request if the output still contains a bare import specifier, because the bundler otherwise reports success on an unresolved import that would only fail at mount. `bundlerVersion` is recorded per artifact; memory under the 128 MB limit is unproven in Miniflare and needs a production smoke test before the size quota is final. Fallback A (`sucrase`, 1 ms, 79 KiB) stands ready. Bundler CPU is on the _bundler's_ limits, not the DO's — do not `await` it inside a storage transaction.
 
 ---
 
@@ -301,7 +301,7 @@ export interface BotIsolateEntrypoint {
 /** Everything Bot code can see. Nothing else is in scope: globalOutbound is null. */
 export interface BotIsolateEnv {
   IDENTITY: { botId: string; generationId: string; packageId: string };
-  CAPABILITIES: BotCapabilitiesStub; // an RpcTarget, Assignment-derived only
+  CAPABILITIES: BotCapabilitiesStub; // loopback service binding via ctx.exports, Assignment-derived only
 }
 export interface BotCapabilitiesStub {
   list(): Promise<
@@ -342,7 +342,7 @@ export interface IsolateHost {
 
 **Tests (Miniflare/workerd, mandatory).** Isolate tool callable end-to-end through `ctx.tools`; `fetch()` inside Bot code rejects; the isolate cannot reach `ctx.storage`, secrets, or another Bot's DO; `requestAuthority` returns a pending decision, never a grant; two Bots with the same artifact get different loader ids; a Turn that uses no isolate tool makes no loader call.
 
-**Risk.** Worker Loader is only usable from a Worker context — confirm it works from inside a DO under Miniflare _before_ building on it (this is the single highest-risk unknown in the plan; spike it at the top of Step 4). RPC across the isolate boundary is structured-clone/RpcTarget only, so `ToolDefinition.execute`'s `AbortSignal` cannot cross — use `deadlineMs` plus DO-side `Promise.race`.
+**Spike result (2026-08-31, `docs/research/spike-worker-loader-from-do.md`).** Resolved: a DO can call `env.BOT_PACKAGES.get()` under the pinned Miniflare/workerd with no upgrade. Three contract changes follow: (1) `CAPABILITIES` cannot be an `RpcTarget` placed in `env` (`DataCloneError`); it is a loopback service binding created with `this.ctx.exports.BotCapabilities({ props })`, and per-invocation narrowed objects are `RpcTarget`s _returned_ from its methods; (2) `.get()` never throws — a broken `package.js` fails on the first RPC, so mount and `health()` are one guarded phase; (3) a reused loader id with different code silently serves the first code, so the id must be the content-addressed `artifactSetHash` and nothing else. RPC across the isolate boundary is structured-clone/RpcTarget only, so `ToolDefinition.execute`'s `AbortSignal` cannot cross — use `deadlineMs` plus DO-side `Promise.race`.
 
 ---
 
