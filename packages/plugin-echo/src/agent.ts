@@ -1,8 +1,8 @@
-import type {
-  LlmStreamEvent,
-  NormalizedModelRequest,
-  ToolDefinition,
-} from "@frockbot/agent-core";
+import {
+  type LlmStreamEvent,
+  type NormalizedModelRequest,
+  type ToolDefinition,
+} from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
 export const ECHO_TOOL_NAME = "echo";

@@ -1,9 +1,9 @@
 import {
-  type Agent,
   LlmEffectNotStartedError,
   type LlmProvider,
   type NormalizedModelRequest,
-} from "@frockbot/agent-core";
+} from "@frockbot/kernel-contracts";
+import { type Agent } from "@frockbot/kernel-agent-loop/agent";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import {
   OpenAICompatibleHttpError,

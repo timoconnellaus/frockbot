@@ -1,7 +1,7 @@
-import type {
-  NormalizedModelRequest,
-  ToolDefinition,
-} from "@frockbot/agent-core";
+import {
+  type NormalizedModelRequest,
+  type ToolDefinition,
+} from "@frockbot/kernel-contracts";
 import type { Context, Plugin } from "cordis";
 import { createMemoryEmbedder } from "./embeddings.js";
 import { indexDocument, removeDocument } from "./indexer.js";

@@ -1,7 +1,7 @@
-import type { SessionEvent } from "@frockbot/agent-core";
-import type {
-  BotIsolateEntrypoint,
-  BotIsolateEnv,
+import {
+  type BotIsolateEntrypoint,
+  type BotIsolateEnv,
+  type SessionEvent,
 } from "@frockbot/kernel-contracts";
 import type {
   BotConfigurationExecuteRpcV1,

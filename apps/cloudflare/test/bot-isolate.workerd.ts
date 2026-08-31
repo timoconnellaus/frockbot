@@ -74,6 +74,30 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.loaderCalls).toBe(0);
   });
 
+  test("a non-first-party Package loads with globalOutbound disabled and Assignment-derived bindings only", async () => {
+    const stub = probe(`outbound-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    // A loader id is served from cache, so this Bot must be a fresh identity
+    // or the callback that produces the WorkerCode never runs again.
+    const loaded = await stub.observedWorkerCode({
+      userId: `user-${crypto.randomUUID()}`,
+      botId: `bot-${crypto.randomUUID()}`,
+      artifact,
+    });
+
+    expect(loaded).toHaveLength(1);
+    // Network access exists only through the bindings the Assignments grant.
+    expect(loaded[0]?.globalOutbound).toBeNull();
+    expect(loaded[0]?.envKeys).toEqual(["CAPABILITIES", "IDENTITY"]);
+    expect(loaded[0]?.identityKeys).toEqual([
+      "botId",
+      "generationId",
+      "packageId",
+    ]);
+    expect(loaded[0]?.limits.subRequests).toBeGreaterThan(0);
+  });
+
   test("fetch() inside Bot code is rejected", async () => {
     const stub = probe(`egress-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);

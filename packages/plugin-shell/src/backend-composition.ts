@@ -10,6 +10,10 @@ import {
   type RuntimeModelSelection,
 } from "@frockbot/agent-runtime/runtime";
 import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
+import {
+  CompositionMountFailureError,
+  type CompositionFailurePhaseV1,
+} from "@frockbot/kernel-composition/activation";
 import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
 import {
   bootstrapGeneration,
@@ -26,8 +30,11 @@ import {
   type BotIsolateLoader,
 } from "@frockbot/kernel-composition/isolate";
 import type { ActiveContribution } from "@frockbot/kernel-composition";
-import type { BotCapabilitiesStub } from "@frockbot/kernel-contracts";
-import type { PersistSessionEvents, SessionEvent } from "@frockbot/agent-core";
+import {
+  type BotCapabilitiesStub,
+  type PersistSessionEvents,
+  type SessionEvent,
+} from "@frockbot/kernel-contracts";
 import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 
 /** The bootstrap generation for a compiled first-party application. */
@@ -89,8 +96,19 @@ export interface ShellCompositionHost extends CompositionHost {
   ): Promise<ShellMountedComposition>;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+interface MemberVerificationFailure {
+  phase: CompositionFailurePhaseV1;
+  message: string;
+}
+
+function memberFailure(error: unknown): MemberVerificationFailure {
+  if (error instanceof CompositionMountFailureError) {
+    return { phase: error.phase, message: error.message };
+  }
+  return {
+    phase: "mount",
+    message: error instanceof Error ? error.message : String(error),
+  };
 }
 
 /** Mounts one pinned generation as the Cordis root a single Turn runs on. */
@@ -120,12 +138,13 @@ export function createShellCompositionHost(
         (member) => member.artifact !== undefined,
       );
       const active: ActiveContribution[] = [];
-      const failures: string[] = [];
+      const failures: MemberVerificationFailure[] = [];
       for (const member of isolateMembers) {
         if (!options.isolate) {
-          failures.push(
-            `package "${member.packageId}" needs a Bot isolate and this host has no loader`,
-          );
+          failures.push({
+            phase: "mount",
+            message: `package "${member.packageId}" needs a Bot isolate and this host has no loader`,
+          });
           continue;
         }
         const isolate = options.isolate;
@@ -156,14 +175,15 @@ export function createShellCompositionHost(
             botIsolatePackageDescriptorV1(member),
           );
           if (!prepared) {
-            failures.push(
-              `package "${member.packageId}" declared no Bot isolate contribution`,
-            );
+            failures.push({
+              phase: "resolve",
+              message: `package "${member.packageId}" declared no Bot isolate contribution`,
+            });
             continue;
           }
           active.push(await prepared.commit());
         } catch (error) {
-          failures.push(errorMessage(error));
+          failures.push(memberFailure(error));
         }
       }
 
@@ -179,13 +199,18 @@ export function createShellCompositionHost(
         root: runtime.root,
         runtime,
         // First-party members run in the kernel isolate and have nothing to
-        // health-check; an isolate member that failed to mount or answer
-        // `health()` surfaces here. Fail-closed and last-known-good are Step 6.
+        // health-check; an isolate member that failed to resolve, mount, or
+        // answer `health()` surfaces here, carrying the load site it failed at
+        // so `activateCompositionV1` records the phase rather than guessing it.
         verify: () => {
           if (failures.length === 0) return Promise.resolve();
           return Promise.reject(
-            new Error(
-              `Composition generation "${generation.generationId}" failed verification: ${failures.join("; ")}`,
+            new CompositionMountFailureError(
+              failures[0]!.phase,
+              `Composition generation "${generation.generationId}" failed verification: ${failures
+                .map((failure) => failure.message)
+                .join("; ")}`,
+              failures.map((failure) => `${failure.phase}: ${failure.message}`),
             ),
           );
         },

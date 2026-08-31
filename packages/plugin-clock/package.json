@@ -24,8 +24,8 @@
   },
   "dependencies": {
     "@cordisjs/plugin-webui": "0.8.2",
-    "@frockbot/agent-core": "workspace:*",
     "@frockbot/client-core": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"
   },

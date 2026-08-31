@@ -166,17 +166,54 @@ function scriptedProviderPackage(toolName: string): FoundationAgentPackage {
 
 export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
   private loaderIds: string[] = [];
+  private loadedCode: BotIsolateWorkerCode[] = [];
 
   /** Counts every `.get()` on the Bot Package loader for this probe. */
   private countingLoader(): BotIsolateLoader {
     const loader = this.env.BOT_PACKAGES;
     const loaderIds = this.loaderIds;
+    const loadedCode = this.loadedCode;
     return {
       get(id: string, callback: () => Promise<BotIsolateWorkerCode>) {
         loaderIds.push(id);
-        return loader.get(id, callback);
+        return loader.get(id, async () => {
+          const code = await callback();
+          loadedCode.push(code);
+          return code;
+        });
       },
     };
+  }
+
+  /**
+   * The `WorkerCode` a non-first-party Package is actually loaded with:
+   * `globalOutbound`, the env key set, and the limits, with nothing that could
+   * carry a secret.
+   */
+  async observedWorkerCode(input: {
+    userId: string;
+    botId: string;
+    artifact: ArtifactRefV1;
+  }): Promise<
+    {
+      globalOutbound: null;
+      envKeys: string[];
+      identityKeys: string[];
+      limits: { cpuMs: number; subRequests: number };
+    }[]
+  > {
+    this.loadedCode = [];
+    const { composition } = await this.mount(input);
+    await composition.verify(new AbortController().signal);
+    await composition.dispose();
+    return this.loadedCode.map((code) => ({
+      globalOutbound: code.globalOutbound,
+      envKeys: Object.keys(code.env).sort(),
+      identityKeys: Object.keys(
+        code.env.IDENTITY as Record<string, unknown>,
+      ).sort(),
+      limits: code.limits,
+    }));
   }
 
   async seedArtifact(source: string): Promise<ArtifactRefV1> {

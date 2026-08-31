@@ -14,7 +14,7 @@ import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
 } from "@frockbot/connection-core";
-import { decodeFrockBotManifest } from "@frockbot/plugin-catalog";
+import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNotificationPolicy,

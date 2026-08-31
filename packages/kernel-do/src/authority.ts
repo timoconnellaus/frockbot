@@ -10,6 +10,7 @@ import {
 } from "@frockbot/kernel-contracts";
 import type { CompositionGenerationV1 } from "@frockbot/kernel-composition/generation";
 import { DurableCompositionStore } from "./composition-store.js";
+import { DurableCompositionFailureLog } from "./composition-failures.js";
 import {
   botTurnCommandFingerprintV1,
   type BotNotificationIntent,
@@ -118,6 +119,8 @@ export class BotDurableAuthority<Snapshot> {
   private readonly hooks: BotDurableAuthorityHooks<Snapshot>;
   /** Durable Composition generations; every admitted Turn pins the current one. */
   readonly composition: DurableCompositionStore;
+  /** Why a generation failed to activate, and whether it is quarantined. */
+  readonly compositionFailures: DurableCompositionFailureLog;
   private executingRunId: string | undefined;
 
   constructor(options: BotDurableAuthorityOptions<Snapshot>) {
@@ -127,6 +130,9 @@ export class BotDurableAuthority<Snapshot> {
     this.composition = new DurableCompositionStore({
       state: options.state,
       bootstrap: () => options.hooks.bootstrapComposition(),
+    });
+    this.compositionFailures = new DurableCompositionFailureLog({
+      state: options.state,
     });
   }
 
@@ -424,6 +430,43 @@ export class BotDurableAuthority<Snapshot> {
     ) {
       throw new Error("Bot authority does not match its durable identity");
     }
+  }
+
+  /**
+   * Raises a visible failure through the notification channel. Used when a
+   * failure has no Turn completion to ride along with — a Composition that
+   * failed closed, for instance, whose Turn still succeeds on the last known
+   * good and would otherwise report nothing wrong.
+   */
+  async recordNotification(intent: BotNotificationIntent): Promise<void> {
+    await this.ctx.storage.put(
+      `${NOTIFICATION_PREFIX}${intent.notificationId}`,
+      structuredClone(intent),
+    );
+  }
+
+  /**
+   * Re-pins an admitted, still-running Turn onto the generation it actually
+   * ran under. Only fail-closed activation calls this: the Turn was admitted on
+   * a generation that would not mount, and the durable record must name the
+   * last known good it fell back to rather than the generation that failed.
+   */
+  async repinRun(
+    runId: string,
+    compositionGenerationId: string,
+  ): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const key = `${RUN_PREFIX}${runId}`;
+      const run = this.codec.optional(await transaction.get<unknown>(key));
+      if (!run || run.status !== "running") {
+        throw new Error(`run "${runId}" is not resumable`);
+      }
+      if (run.compositionGenerationId === compositionGenerationId) return;
+      await transaction.put(key, {
+        ...run,
+        compositionGenerationId,
+      } satisfies StoredRunV1<Snapshot>);
+    });
   }
 
   async listNotifications(): Promise<BotNotificationIntent[]> {

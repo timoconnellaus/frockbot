@@ -19,13 +19,12 @@
       "name": "@frockbot/application-foundation",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/application-compiler": "workspace:*",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
+        "@frockbot/kernel-composition": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
-        "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-clock": "workspace:*",
         "@frockbot/plugin-computer": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
@@ -55,14 +54,15 @@
       "name": "@frockbot/agent-runtime",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-core": "workspace:*",
-        "@frockbot/agent-loop": "workspace:*",
         "@frockbot/application-foundation": "workspace:*",
         "@frockbot/computer-core": "workspace:*",
+        "@frockbot/kernel-agent-loop": "workspace:*",
         "@frockbot/kernel-composition": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
-        "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
+        "@frockbot/plugin-models": "workspace:*",
+        "@frockbot/plugin-prompt": "workspace:*",
+        "@frockbot/plugin-tools": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "@frockbot/provider-openai-compatible": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -78,7 +78,6 @@
       "version": "0.0.1",
       "dependencies": {
         "@better-auth/electron": "1.7.2",
-        "@frockbot/agent-core": "workspace:*",
         "@frockbot/agent-runtime": "workspace:*",
         "@frockbot/application-foundation": "workspace:*",
         "@frockbot/client-core": "workspace:*",
@@ -214,8 +213,8 @@
         "@capacitor/preferences": "8.0.1",
         "@capacitor/share": "8.0.1",
         "@frockbot/configuration-core": "workspace:*",
+        "@frockbot/kernel-composition": "workspace:*",
         "@frockbot/mobile-core": "workspace:*",
-        "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-mobile-clipboard": "workspace:*",
         "@frockbot/plugin-mobile-notifications": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -233,43 +232,26 @@
         "vue-tsc": "3.3.10",
       },
     },
-    "packages/agent-core": {
-      "name": "@frockbot/agent-core",
+    "packages/architecture-checks": {
+      "name": "@frockbot/architecture-checks",
       "version": "0.0.1",
       "dependencies": {
+        "@frockbot/computer-core": "workspace:*",
+        "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-agent-loop": "workspace:*",
+        "@frockbot/kernel-composition": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/kernel-do": "workspace:*",
+        "@frockbot/plugin-computer": "workspace:*",
         "@frockbot/plugin-models": "workspace:*",
         "@frockbot/plugin-prompt": "workspace:*",
+        "@frockbot/plugin-provider-foundation": "workspace:*",
+        "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
+        "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
         "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/agent-loop": {
-      "name": "@frockbot/agent-loop",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/kernel-agent-loop": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/application-compiler": {
-      "name": "@frockbot/application-compiler",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/kernel-composition": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@types/semver": "7.8.0",
         "typescript": "^7.0.2",
       },
     },
@@ -441,26 +423,13 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/plugin-catalog": {
-      "name": "@frockbot/plugin-catalog",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/kernel-composition": "workspace:*",
-        "cordis": "4.0.0-rc.8",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "typescript": "^7.0.2",
-      },
-    },
     "packages/plugin-clock": {
       "name": "@frockbot/plugin-clock",
       "version": "0.0.1",
       "dependencies": {
         "@cordisjs/plugin-webui": "0.8.2",
-        "@frockbot/agent-core": "workspace:*",
         "@frockbot/client-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
         "cordis": "4.0.0-rc.8",
         "vue": "3.5.41",
       },
@@ -476,10 +445,11 @@
       "name": "@frockbot/plugin-composio",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-core": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
+        "@frockbot/plugin-tools": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -493,9 +463,11 @@
       "version": "0.0.1",
       "dependencies": {
         "@cordisjs/client": "0.8.2",
-        "@frockbot/agent-core": "workspace:*",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/computer-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-prompt": "workspace:*",
+        "@frockbot/plugin-tools": "workspace:*",
         "cordis": "4.0.0-rc.8",
         "vue": "3.5.41",
       },
@@ -562,7 +534,9 @@
       "name": "@frockbot/plugin-echo",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-models": "workspace:*",
+        "@frockbot/plugin-tools": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -577,7 +551,6 @@
       "dependencies": {
         "@frockbot/client-core": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
-        "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "cordis": "4.0.0-rc.8",
         "vue": "3.5.41",
@@ -613,7 +586,8 @@
       "name": "@frockbot/plugin-identity",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-prompt": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -626,8 +600,11 @@
       "name": "@frockbot/plugin-memory",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-core": "workspace:*",
         "@frockbot/computer-core": "workspace:*",
+        "@frockbot/kernel-agent-loop": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-prompt": "workspace:*",
+        "@frockbot/plugin-tools": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -690,7 +667,8 @@
       "name": "@frockbot/plugin-provider-foundation",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-models": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -703,10 +681,12 @@
       "name": "@frockbot/plugin-provider-ollama-cloud",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-core": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
+        "@frockbot/kernel-agent-loop": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
+        "@frockbot/plugin-models": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/provider-openai-compatible": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -742,7 +722,6 @@
       "version": "0.0.1",
       "dependencies": {
         "@cordisjs/plugin-webui": "0.8.2",
-        "@frockbot/agent-core": "workspace:*",
         "@frockbot/agent-runtime": "workspace:*",
         "@frockbot/application-foundation": "workspace:*",
         "@frockbot/client-core": "workspace:*",
@@ -753,7 +732,6 @@
         "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/kernel-do": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
-        "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -773,7 +751,7 @@
       "name": "@frockbot/plugin-testkit",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/plugin-catalog": "workspace:*",
+        "@frockbot/kernel-composition": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -818,7 +796,8 @@
       "name": "@frockbot/provider-openai-compatible",
       "version": "0.0.1",
       "dependencies": {
-        "@frockbot/agent-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-models": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -932,7 +911,7 @@
 
     "@cloudflare/workerd-windows-64": ["@cloudflare/workerd-windows-64@1.20260828.1", "", { "os": "win32", "cpu": "x64" }, "sha512-yvr77hC7dUbvK5K+SCg062kkPq3sx+drV1PcgHslzHDYcJBtT0V3X80qLE49LW1vq2svaeNmsVQS+vHsqWu8cQ=="],
 
-    "@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260830.1", "", {}, "sha512-LBn0wg8kmCbdriUYmz6BSm4ukjFinU4iYGYuBTPaSG6malMhbIFk7Az1gcsFuvBYva2yHxUZFirCwjQY7yBN9A=="],
+    "@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260831.1", "", {}, "sha512-yXg4pwfYjhsDH9rYc3qZ3K+z62DCSvO/aj7GiZo6AyDeWGZpyFRpPMYcQ6LF/zfaf1x0Ngw2gSqL8JjuUtMGlA=="],
 
     "@cordisjs/client": ["@cordisjs/client@0.8.2", "", { "dependencies": { "@cordisjs/components": "0.4.0", "@cordisjs/muon": "^0.2.2", "@cordisjs/unyaml": "^2.0.3", "@vitejs/plugin-vue": "^6.0.6", "@vueuse/core": "^14.3.0", "cac": "^6.7.14", "cordis": "^4.0.0-rc.6", "cosmokit": "^1.8.1", "element-plus": "2.7.7", "marked-vue": "^1.3.0", "path-to-regexp": "^8.3.0", "sass": "^1.97.3", "unocss": "^66.6.8", "vite": "^7.3.2", "vue": "^3.5.33" }, "peerDependencies": { "yakumo": "^3.2.1" }, "optionalPeers": ["yakumo"], "bin": { "cordis-webui": "bin.js" } }, "sha512-XZ8T1TpMk7TaDWwS942bg+TXYFJo3WkjALwB2TwqSAgxULCqonJLckzErJz7quCO5OnPfI5WpBLRMqvRFOt9Og=="],
 
@@ -1046,15 +1025,11 @@
 
     "@fly/sprites": ["@fly/sprites@0.1.0", "", {}, "sha512-08jnuPEFmImqy3/iwL+jQJ6IwrHuZlmR3w9dRSSUiZ3N4uMSqWMi5FLyL1UKiL/vtcAb9Cayj8gHsEtckDDfkQ=="],
 
-    "@frockbot/agent-core": ["@frockbot/agent-core@workspace:packages/agent-core"],
-
-    "@frockbot/agent-loop": ["@frockbot/agent-loop@workspace:packages/agent-loop"],
-
     "@frockbot/agent-runtime": ["@frockbot/agent-runtime@workspace:apps/agent-runtime"],
 
-    "@frockbot/application-compiler": ["@frockbot/application-compiler@workspace:packages/application-compiler"],
-
     "@frockbot/application-foundation": ["@frockbot/application-foundation@workspace:applications/foundation"],
+
+    "@frockbot/architecture-checks": ["@frockbot/architecture-checks@workspace:packages/architecture-checks"],
 
     "@frockbot/client-core": ["@frockbot/client-core@workspace:packages/client-core"],
 
@@ -1095,8 +1070,6 @@
     "@frockbot/plugin-auth": ["@frockbot/plugin-auth@workspace:packages/plugin-auth"],
 
     "@frockbot/plugin-authoring": ["@frockbot/plugin-authoring@workspace:packages/plugin-authoring"],
-
-    "@frockbot/plugin-catalog": ["@frockbot/plugin-catalog@workspace:packages/plugin-catalog"],
 
     "@frockbot/plugin-clock": ["@frockbot/plugin-clock@workspace:packages/plugin-clock"],
 
@@ -2675,6 +2648,8 @@
     "@frockbot/client-ui/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/cloudflare/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "@frockbot/cloudflare-bundler/@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260830.1", "", {}, "sha512-LBn0wg8kmCbdriUYmz6BSm4ukjFinU4iYGYuBTPaSG6malMhbIFk7Az1gcsFuvBYva2yHxUZFirCwjQY7yBN9A=="],
 
     "@frockbot/cloudflare-bundler/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

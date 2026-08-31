@@ -145,14 +145,16 @@ apps/
   marketing/        Public frockbot.com site and static-assets Worker
   cordis-poc/       Executable pinned Cordis/Electron/WebUI foundation proof
 packages/
-  agent-core/       Session, LLM, prompt, tool, and agent Cordis services
-  agent-loop/       Concrete event-sourced custom agent-loop plugin
+  kernel-contracts/ Session, LLM, prompt, and tool execution contracts
+  kernel-agent-loop/ Concrete event-sourced durable agent loop and Agent registry
+  kernel-composition/ Package manifest, activation, isolate host, and compiler
+  kernel-do/        Bot Durable Object admission, log, cursor, and scheduling
   client-core/      Shared client runtime helpers and brand typography stylesheet
   client-ui/        Cordis-free reusable Vue primitives and surface registry
   computer-core/    Provider registry and capability interfaces for Computers
   configuration-core/ Versioned durable User/Bot settings contracts
   connection-core/  Provider-neutral Connection transport result contracts
-  plugin-catalog/   Manifest decoding, scoped activation, and rollback
+  architecture-checks/ Automated checks for the constitutional rules
   plugin-clock/     Reference package with agent, host, and WebUI contributions
   plugin-composio/  Dormant Composio source pending Connect MCP redesign
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI

@@ -1,5 +1,5 @@
 // Kernel run-recovery planning, bound to the Shell Package's run codec.
-import type { SessionEvent } from "@frockbot/agent-core";
+import { type SessionEvent } from "@frockbot/kernel-contracts";
 import {
   planBotRunRecovery as planKernelBotRunRecovery,
   type BotRunRecoveryPlan,

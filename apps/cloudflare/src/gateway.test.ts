@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionEvent } from "@frockbot/agent-core";
+import { type SessionEvent } from "@frockbot/kernel-contracts";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/connection-core";
 import { createSettingsBackendContribution } from "@frockbot/plugin-settings/backend";
 import type {
@@ -511,6 +511,7 @@ class MemoryConfiguration
       origin: { kind: "bootstrap" as const },
       isCurrent,
       members: [],
+      failures: [],
     };
   }
   listCompositionGenerations(

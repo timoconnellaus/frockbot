@@ -5,32 +5,34 @@ import {
   FOUNDATION_PROVIDER,
 } from "@frockbot/application-foundation/runtime";
 import {
-  AgentRegistry,
-  type AgentHandle,
-  type AgentOptions,
-  LlmRegistry,
+  type CompositionPinV1,
   type PersistSessionEvents,
   type SessionEvent,
   SessionStore,
-  SystemPromptRegistry,
-  ToolRegistry,
-} from "@frockbot/agent-core";
-import { AgentLoop } from "@frockbot/agent-loop";
+} from "@frockbot/kernel-contracts";
+import {
+  type AgentHandle,
+  type AgentOptions,
+  AgentRegistry,
+} from "@frockbot/kernel-agent-loop/agent";
+import { LlmRegistry } from "@frockbot/plugin-models";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
+import { ToolRegistry } from "@frockbot/plugin-tools";
+import { AgentLoop } from "@frockbot/kernel-agent-loop";
 import { ComputerRegistry } from "@frockbot/computer-core";
 import {
   type ContributionResolver,
   PackageCatalog,
   type PackageSource,
-} from "@frockbot/plugin-catalog";
+} from "@frockbot/kernel-composition";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
 } from "@frockbot/kernel-composition/generation";
-import type { CompositionPinV1 } from "@frockbot/kernel-contracts";
 import {
   createRuntimeContributionHost,
   runtimePackageCatalogConfig,
-} from "@frockbot/plugin-catalog/runtime";
+} from "@frockbot/kernel-composition/runtime";
 import {
   createMemoryPlugin,
   type MemoryPluginConfig,

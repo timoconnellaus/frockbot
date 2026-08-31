@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import {
-  type Agent,
-  type NormalizedModelRequest,
-  SystemPromptRegistry,
-  ToolRegistry,
-} from "@frockbot/agent-core";
+import { type NormalizedModelRequest } from "@frockbot/kernel-contracts";
+import { type Agent } from "@frockbot/kernel-agent-loop/agent";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
+import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
   createPluginHarness,
   verifyPluginPackage,

@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  type SessionEvent,
-  SessionStore,
-  ToolRegistry,
-} from "@frockbot/agent-core";
+import { type SessionEvent, SessionStore } from "@frockbot/kernel-contracts";
+import { ToolRegistry } from "@frockbot/plugin-tools";
 import { Context } from "cordis";
 import { createComposioRouterPlugin } from "./agent.js";
 import { ComposioClient } from "./composio-client.js";

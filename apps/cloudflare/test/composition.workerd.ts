@@ -101,3 +101,115 @@ describe("Composition generations in Workerd", () => {
     expect(second.generationIds).toEqual([created[0], bootstrap]);
   });
 });
+
+describe("Composition fails closed in Workerd", () => {
+  test("a broken Bot-authored generation leaves the last known-good Composition running and records a visible failure", async () => {
+    const stub = probe(`fail-closed-${crypto.randomUUID()}`);
+    const lastKnownGood = await stub.currentGenerationId();
+    const broken = await stub.proposeBrokenGeneration(
+      "2026-09-01T00:00:00.000Z",
+      "mount",
+    );
+
+    // The Turn is admitted anyway, on the last known good.
+    const result = await stub.runTurn("run-1");
+
+    expect(result.pinned).toBe(broken);
+    expect(await stub.mountedGenerationId()).toBe(lastKnownGood);
+    expect(await stub.generationStatus(broken)).toBe("failed");
+    expect(await stub.generationStatus(lastKnownGood)).toBe("active");
+    // The durable record names what the Turn actually ran under.
+    expect(await stub.storedPin("run-1")).toBe(lastKnownGood);
+    const failures = await stub.compositionFailures(broken);
+    expect(failures).toMatchObject([{ attempt: 1, phase: "mount" }]);
+    expect(await stub.visibleFailures()).toMatchObject([
+      { notificationId: `composition-failure:${broken}:1` },
+    ]);
+
+    await evictDurableObject(stub);
+    expect(await stub.generationStatus(broken)).toBe("failed");
+    expect(await stub.compositionFailures(broken)).toHaveLength(1);
+  });
+
+  test("each load site records its own failure phase", async () => {
+    for (const phase of ["resolve", "bundle", "mount", "health"] as const) {
+      const stub = probe(`phase-${phase}-${crypto.randomUUID()}`);
+      const broken = await stub.proposeBrokenGeneration(
+        "2026-09-01T00:00:00.000Z",
+        phase,
+      );
+      await stub.runTurn("run-1");
+      expect(await stub.compositionFailures(broken)).toMatchObject([
+        { attempt: 1, phase },
+      ]);
+    }
+  });
+
+  test("three consecutive failures quarantine the generation and the fourth Turn does not attempt it", async () => {
+    const stub = probe(`quarantine-${crypto.randomUUID()}`);
+    const lastKnownGood = await stub.currentGenerationId();
+    const broken = await stub.proposeBrokenGeneration(
+      "2026-09-01T00:00:00.000Z",
+      "health",
+    );
+
+    for (const attempt of [1, 2, 3]) {
+      if (attempt > 1) await stub.repinGeneration(broken);
+      await stub.runTurn(`run-${attempt}`);
+      expect(await stub.compositionFailures(broken)).toHaveLength(attempt);
+    }
+
+    expect(await stub.generationStatus(broken)).toBe("quarantined");
+    expect(await stub.compositionQuarantine(broken)).toMatchObject({
+      failures: 3,
+    });
+    // Quarantine moved the pointer back; the fourth Turn pins the good one.
+    expect(await stub.currentGenerationId()).toBe(lastKnownGood);
+
+    await evictDurableObject(stub);
+    await stub.runTurn("run-4");
+    expect(await stub.storedPin("run-4")).toBe(lastKnownGood);
+    expect(await stub.compositionFailures(broken)).toHaveLength(3);
+    expect(await stub.generationStatus(broken)).toBe("quarantined");
+  });
+
+  test("quarantine is per generation, so a later unrelated generation still activates", async () => {
+    const stub = probe(`quarantine-scope-${crypto.randomUUID()}`);
+    const broken = await stub.proposeBrokenGeneration(
+      "2026-09-01T00:00:00.000Z",
+      "mount",
+    );
+    for (const attempt of [1, 2, 3]) {
+      if (attempt > 1) await stub.repinGeneration(broken);
+      await stub.runTurn(`run-${attempt}`);
+    }
+    expect(await stub.generationStatus(broken)).toBe("quarantined");
+
+    const later = await stub.proposeGeneration("2026-09-04T00:00:00.000Z");
+    await stub.repinGeneration(later);
+    await stub.runTurn("run-4");
+
+    expect(await stub.generationStatus(later)).toBe("active");
+    expect(await stub.storedPin("run-4")).toBe(later);
+    expect(await stub.generationStatus(broken)).toBe("quarantined");
+  });
+
+  test("a repaired generation activates on its next Turn and clears its count", async () => {
+    const stub = probe(`repair-${crypto.randomUUID()}`);
+    const broken = await stub.proposeBrokenGeneration(
+      "2026-09-01T00:00:00.000Z",
+      "resolve",
+    );
+    await stub.runTurn("run-1");
+    expect(await stub.generationStatus(broken)).toBe("failed");
+
+    await stub.repairGeneration(broken);
+    await stub.repinGeneration(broken);
+    await stub.runTurn("run-2");
+
+    expect(await stub.generationStatus(broken)).toBe("active");
+    expect(await stub.storedPin("run-2")).toBe(broken);
+    // The recorded failure survives as repair history.
+    expect(await stub.compositionFailures(broken)).toHaveLength(1);
+  });
+});

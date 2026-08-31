@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed 2026-08-31 for the first implementation slice after ADR 0011. Decisions D1–D9 below were resolved by Tim on 2026-08-31 (see "Resolved decisions"); step 1 is in progress.
+implemented; see docs/architecture-checks.md
 
 ## Resolved decisions
 

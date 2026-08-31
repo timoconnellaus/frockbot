@@ -1,4 +1,4 @@
-import type { ApplicationDeclarationPlan } from "@frockbot/application-compiler";
+import type { ApplicationDeclarationPlan } from "@frockbot/kernel-composition/compiler";
 import authPlugin from "@frockbot/plugin-auth/desktop";
 import clockHostPlugin from "@frockbot/plugin-clock/host";
 import clipboardPlugin from "@frockbot/plugin-desktop-clipboard/desktop";

@@ -25,6 +25,7 @@ function generationView(
     createdAt: generationId.slice(0, 24),
     status: isCurrent ? "active" : "superseded",
     isCurrent,
+    failures: [],
     origin:
       generationId === BOOTSTRAP_GENERATION
         ? { kind: "bootstrap" }

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-  type Agent,
   LlmEffectNotStartedError,
-  LlmRegistry,
   type NormalizedModelRequest,
-} from "@frockbot/agent-core";
+} from "@frockbot/kernel-contracts";
+import { type Agent } from "@frockbot/kernel-agent-loop/agent";
+import { LlmRegistry } from "@frockbot/plugin-models";
 import {
   openCredentialV1,
   parseCredentialKeyringV1,

@@ -31,7 +31,6 @@
   },
   "dependencies": {
     "@cordisjs/plugin-webui": "0.8.2",
-    "@frockbot/agent-core": "workspace:*",
     "@frockbot/agent-runtime": "workspace:*",
     "@frockbot/application-foundation": "workspace:*",
     "@frockbot/client-core": "workspace:*",
@@ -42,7 +41,6 @@
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/kernel-do": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
-    "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "cordis": "4.0.0-rc.8",

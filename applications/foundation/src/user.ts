@@ -1,4 +1,4 @@
-import type { ApplicationPlan } from "@frockbot/application-compiler";
+import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
 import {
   createCredentialUserBackendPlugin,
   type CredentialStorage,

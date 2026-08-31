@@ -1,4 +1,10 @@
-import type { NormalizedModelRequest } from "@frockbot/agent-core";
+import {
+  type BotCapabilitiesStub,
+  type IsolateModelInvocationV1,
+  type IsolatePendingDecisionV1,
+  type NormalizedModelRequest,
+  type PackageBundlerBinding,
+} from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 import {
   BotDurableAuthority,
@@ -56,7 +62,14 @@ import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
   type ShellIsolateMountOptions,
+  type ShellMountedComposition,
 } from "./backend-composition.js";
+import {
+  activateCompositionV1,
+  type CompositionFailureV1,
+  type CompositionMountHost,
+  type CompositionQuarantineV1,
+} from "@frockbot/kernel-composition/activation";
 import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
@@ -79,14 +92,11 @@ import {
   type IsolateModelRequestRecordV1,
   type IsolatePendingAuthorityDecisionV1,
 } from "./backend-isolate.js";
-import type {
-  BotCapabilitiesStub,
-  IsolateModelInvocationV1,
-  IsolatePendingDecisionV1,
-  PackageBundlerBinding,
-} from "@frockbot/kernel-contracts";
 import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
-import type { CompositionMemberV1 } from "@frockbot/kernel-composition/generation";
+import type {
+  CompositionGenerationV1,
+  CompositionMemberV1,
+} from "@frockbot/kernel-composition/generation";
 import { projectCompositionGenerationV1 } from "./composition-views.js";
 import { executeBotTurn } from "./backend-runner.js";
 import {
@@ -1294,46 +1304,86 @@ export class ShellBotBackendContribution {
     ].filter((part): part is string => Boolean(part?.trim()));
     // The pin, never the current generation: activation takes effect at the
     // next admitted Turn, and an in-flight Turn completes on what it pinned.
-    const generation = await this.authority.composition.read(
-      input.compositionGenerationId,
-    );
-    if (!generation) {
-      throw new Error(
-        `run "${input.command.runId}" pins unknown Composition generation "${input.compositionGenerationId}"`,
-      );
-    }
-    const isolate = await this.isolateMountOptions(input.identity, {
-      runId: input.command.runId,
-      sessionId: input.command.sessionId,
-      generationId: input.compositionGenerationId,
-      assignments: settings.assignments,
-    });
-    const host = createShellCompositionHost({
-      botId: input.identity.botId,
-      sessionId: input.command.sessionId,
-      sessionEvents: input.previousEvents,
-      memory: memoryPluginConfig(this.env, input.identity),
-      persistSessionEvents: input.persistSessionEvents,
-      agentPackages: runtime.agentPackages,
-      modelSelection: runtime.modelSelection,
-      systemPromptSection: promptParts.join("\n\n"),
-      ...(isolate ? { isolate } : {}),
-    });
+    // The isolate bindings follow the generation actually being mounted, so a
+    // fail-closed fallback loads the last known good's members, not the
+    // pinned generation's.
+    const host: CompositionMountHost<ShellMountedComposition> = {
+      mount: async (mounting, signal) => {
+        const isolate = await this.isolateMountOptions(input.identity, {
+          runId: input.command.runId,
+          sessionId: input.command.sessionId,
+          generationId: mounting.generationId,
+          assignments: settings.assignments,
+        });
+        return createShellCompositionHost({
+          botId: input.identity.botId,
+          sessionId: input.command.sessionId,
+          sessionEvents: input.previousEvents,
+          memory: memoryPluginConfig(this.env, input.identity),
+          persistSessionEvents: input.persistSessionEvents,
+          agentPackages: runtime.agentPackages,
+          modelSelection: runtime.modelSelection,
+          systemPromptSection: promptParts.join("\n\n"),
+          ...(isolate ? { isolate } : {}),
+        }).mount(mounting, signal);
+      },
+    };
     const controller = new AbortController();
-    const composition = await host.mount(generation, controller.signal);
-    await composition.verify(controller.signal);
-    // Activation takes effect at the next admitted Turn: a generation a Bot
-    // authored earlier is pinned here, and committing it once it has mounted
-    // and verified is what makes it active and supersedes its parent.
-    // Fail-closed rollback and quarantine are Step 6.
-    if (generation.status === "pending") {
-      await this.authority.composition.commit(generation.generationId);
+    // Composition fails closed: a generation that does not resolve, mount, or
+    // pass `health()` leaves the last known good resident, records a durable
+    // failure, raises a visible one, and the Turn is admitted anyway.
+    const activation = await activateCompositionV1({
+      generationId: input.compositionGenerationId,
+      store: {
+        read: (generationId) => this.authority.composition.read(generationId),
+        lastKnownGood: () => this.authority.composition.lastKnownGood(),
+        commit: (generationId) =>
+          this.authority.composition.commit(generationId),
+        fail: (generationId, options) =>
+          this.authority.composition.fail(generationId, options),
+      },
+      failures: this.authority.compositionFailures,
+      host,
+      signal: controller.signal,
+      onFailure: (failure, fallback) =>
+        this.recordCompositionFailureNotification(
+          settings,
+          input.command.runId,
+          failure,
+          fallback,
+        ),
+    });
+    if (activation.status === "failed-closed") {
+      // The durable record names what the Turn actually ran under.
+      await this.authority.repinRun(
+        input.command.runId,
+        activation.fallback.generationId,
+      );
     }
     return executeBotTurn({
       command: input.command,
       previousEvents: input.previousEvents,
-      composition,
+      composition: activation.mounted,
       resume: input.resume,
+    });
+  }
+
+  /** The visible half of failing closed, on the Bot's existing channel. */
+  private async recordCompositionFailureNotification(
+    settings: BotSettingsViewV1,
+    runId: string,
+    failure: CompositionFailureV1,
+    fallback: CompositionGenerationV1,
+  ): Promise<void> {
+    await this.authority.recordNotification({
+      notificationId: `composition-failure:${failure.generationId}:${failure.attempt}`,
+      runId,
+      createdAt: failure.at,
+      title: `${settings.profile.name} kept its last working Packages`,
+      body: `Composition generation "${failure.generationId}" failed to activate at ${failure.phase} (attempt ${failure.attempt}); running "${fallback.generationId}" instead: ${failure.message}`.slice(
+        0,
+        240,
+      ),
     });
   }
 
@@ -1929,11 +1979,15 @@ export class ShellBotBackendContribution {
       botId: identity.botId,
       currentGenerationId: current.generationId,
       generations: await Promise.all(
-        page.generations.map((generation) =>
+        page.generations.map(async (generation) =>
           projectCompositionGenerationV1({
             botId: identity.botId,
             generation,
             currentGenerationId: current.generationId,
+            failures: await this.authority.compositionFailures.list(
+              generation.generationId,
+            ),
+            ...(await this.compositionQuarantineView(generation.generationId)),
           }),
         ),
       ),
@@ -1954,7 +2008,18 @@ export class ShellBotBackendContribution {
       generation,
       currentGenerationId: current.generationId,
       readMemberSource: (member) => this.readCompositionMemberSource(member),
+      failures: await this.authority.compositionFailures.list(generationId),
+      ...(await this.compositionQuarantineView(generationId)),
     });
+  }
+
+  /** Spread into a projection: absent unless the generation is quarantined. */
+  private async compositionQuarantineView(
+    generationId: string,
+  ): Promise<{ quarantine?: CompositionQuarantineV1 }> {
+    const quarantine =
+      await this.authority.compositionFailures.quarantine(generationId);
+    return quarantine === undefined ? {} : { quarantine };
   }
 
   /**

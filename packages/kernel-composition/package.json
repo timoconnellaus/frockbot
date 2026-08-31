@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./activation": "./src/activation.ts",
     "./runtime": "./src/runtime.ts",
     "./compiler": "./src/compiler.ts",
     "./generation": "./src/generation.ts",

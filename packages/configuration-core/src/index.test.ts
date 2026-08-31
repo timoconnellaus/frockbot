@@ -775,6 +775,7 @@ const authoredGenerationView = {
   createdAt: "2026-09-01T00:00:00.000Z",
   status: "active",
   isCurrent: true,
+  failures: [],
   parentGenerationId: BOOTSTRAP_GENERATION,
   origin: {
     kind: "bot-authored",

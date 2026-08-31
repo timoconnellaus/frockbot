@@ -46,6 +46,7 @@ const bootstrap: CompositionGenerationViewV1 = {
   isCurrent: false,
   origin: { kind: "bootstrap" },
   members: [shellMember],
+  failures: [],
 };
 
 const authored: CompositionGenerationViewV1 = {
@@ -55,6 +56,7 @@ const authored: CompositionGenerationViewV1 = {
   createdAt: "2026-09-01T00:00:00.000Z",
   status: "active",
   isCurrent: true,
+  failures: [],
   parentGenerationId: BOOTSTRAP_GENERATION,
   origin: {
     kind: "bot-authored",

@@ -15,6 +15,11 @@ export const COMPOSITION_CURRENT_KEY = "composition:current";
 export const COMPOSITION_GENERATION_PREFIX = "composition:generation:";
 export const COMPOSITION_INDEX_PREFIX = "composition:index:";
 export const COMPOSITION_LAST_KNOWN_GOOD_KEY = "composition:last-known-good";
+export const COMPOSITION_FAILURE_PREFIX = "composition:failure:";
+export const COMPOSITION_FAILURE_COUNT_PREFIX = "composition:failure-count:";
+export const COMPOSITION_QUARANTINE_PREFIX = "composition:quarantine:";
+/** Attempts are zero-padded so the prefix listing is attempt-ordered. */
+export const COMPOSITION_FAILURE_ATTEMPT_DIGITS = 4;
 export const RECOVERY_ALARM_DELAY_MS = 60_000;
 
 export function runIndexKey(acceptedAt: string, runId: string): string {
@@ -30,6 +35,28 @@ export function compositionIndexKey(
   generationId: string,
 ): string {
   return `${COMPOSITION_INDEX_PREFIX}${createdAt}:${generationId}`;
+}
+
+export function compositionFailurePrefix(generationId: string): string {
+  return `${COMPOSITION_FAILURE_PREFIX}${generationId}:`;
+}
+
+export function compositionFailureKey(
+  generationId: string,
+  attempt: number,
+): string {
+  return `${compositionFailurePrefix(generationId)}${String(attempt).padStart(
+    COMPOSITION_FAILURE_ATTEMPT_DIGITS,
+    "0",
+  )}`;
+}
+
+export function compositionFailureCountKey(generationId: string): string {
+  return `${COMPOSITION_FAILURE_COUNT_PREFIX}${generationId}`;
+}
+
+export function compositionQuarantineKey(generationId: string): string {
+  return `${COMPOSITION_QUARANTINE_PREFIX}${generationId}`;
 }
 
 export function storedRunAdmissionFences(input: unknown): string[] {

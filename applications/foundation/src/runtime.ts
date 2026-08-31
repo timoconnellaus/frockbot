@@ -4,11 +4,11 @@ import {
   type ApplicationDeclarationPlan,
   type ApplicationPlan,
   type ApplicationSource,
-} from "@frockbot/application-compiler";
+} from "@frockbot/kernel-composition/compiler";
 import type {
   ContributionResolver,
   PackageSource,
-} from "@frockbot/plugin-catalog";
+} from "@frockbot/kernel-composition";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import type {
   BotExecutionPlanV1,

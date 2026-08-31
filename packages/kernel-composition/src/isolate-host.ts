@@ -27,6 +27,7 @@ import {
   type ToolExecutionResult,
   type ToolRegistration,
 } from "@frockbot/kernel-contracts";
+import { CompositionMountFailureError } from "./activation.ts";
 import { canonicalJson, sha256 } from "./compiler.ts";
 import type { CompositionMemberV1 } from "./generation.ts";
 import type {
@@ -104,6 +105,8 @@ export interface BotIsolateHostOptions {
   limits?: BotIsolateLimits;
   /** Per-invocation deadline; `AbortSignal` cannot cross the RPC boundary. */
   deadlineMs?: number;
+  /** Verification deadline: an isolate that never answers `health()` fails closed. */
+  healthDeadlineMs?: number;
 }
 
 export const BOT_ISOLATE_DEFAULT_LIMITS: BotIsolateLimits = {
@@ -112,6 +115,7 @@ export const BOT_ISOLATE_DEFAULT_LIMITS: BotIsolateLimits = {
 };
 
 export const BOT_ISOLATE_DEFAULT_DEADLINE_MS = 15_000;
+export const BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS = 10_000;
 
 /**
  * The content address of what a Bot isolate mounts: the kernel wrapper text,
@@ -193,20 +197,38 @@ export class BotIsolateContributionHost implements ContributionHost {
     try {
       entrypoint = this.load(loaderId, packageId, source).getEntrypoint();
       health = decodeIsolateHealthV1(
-        await entrypoint.health(),
+        await raceDeadline(
+          () => entrypoint.health(),
+          Math.min(
+            this.options.healthDeadlineMs ??
+              BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS,
+            ISOLATE_MAX_DEADLINE_MS,
+          ),
+        ),
         `package "${packageId}" isolate health`,
       );
     } catch (error) {
-      throw new Error(
+      // Site two: `LOADER.get` plus the first RPC. `.get()` is lazy, so a
+      // broken `package.js` surfaces here and nowhere earlier.
+      throw new CompositionMountFailureError(
+        "mount",
         `package "${packageId}" failed to mount in its isolate: ${errorMessage(error)}`,
+        [`loader:${loaderId}`],
       );
     }
+    // Site three: the isolate answered, but failed its declared check.
     if (!health.ok || health.tools.length === 0) {
-      throw new Error(`package "${packageId}" reported an unhealthy isolate`);
+      throw new CompositionMountFailureError(
+        "health",
+        `package "${packageId}" reported an unhealthy isolate`,
+        [`ok:${health.ok}`, `tools:${health.tools.length}`],
+      );
     }
     if (health.packageId !== packageId) {
-      throw new Error(
+      throw new CompositionMountFailureError(
+        "health",
         `package "${packageId}" isolate reported a different package id`,
+        [`reported:${health.packageId}`],
       );
     }
 
@@ -242,8 +264,12 @@ export class BotIsolateContributionHost implements ContributionHost {
     try {
       return await this.options.artifacts.loadPackageArtifact(contentHash);
     } catch (error) {
-      throw new Error(
+      // Site one: the immutable artifact read. A generation whose artifact is
+      // gone never resolves, and that is a different repair from a broken one.
+      throw new CompositionMountFailureError(
+        "resolve",
         `package "${packageId}" artifact "${contentHash}" is unavailable: ${errorMessage(error)}`,
+        [`contentHash:${contentHash}`],
       );
     }
   }

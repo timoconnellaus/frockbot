@@ -57,7 +57,9 @@ async function revert(generationId: string): Promise<void> {
       <h3>Composition</h3>
       <small>
         Every admitted Turn runs on one recorded generation. Reverting records a
-        new generation; it takes effect at the next Turn.
+        new generation; it takes effect at the next Turn. A generation that
+        fails to activate leaves the last known-good one running, and three
+        consecutive failures quarantine it until you act.
       </small>
     </header>
     <p v-if="!composition?.available" class="composition-empty">
@@ -93,6 +95,19 @@ async function revert(generationId: string): Promise<void> {
           >
             {{ member.packageId }}@{{ member.version }} —
             {{ describeCompositionProvenanceV1(member.provenance) }}
+          </small>
+          <small v-if="generation.quarantine" class="composition-quarantine">
+            Quarantined {{ generation.quarantine.quarantinedAt }} after
+            {{ generation.quarantine.failures }} failed activations. It is not
+            retried until you revert or the Bot authors a new generation.
+          </small>
+          <small
+            v-for="failure in generation.failures"
+            :key="failure.attempt"
+            class="composition-failure"
+          >
+            Attempt {{ failure.attempt }} failed at {{ failure.phase }} —
+            {{ failure.message }}
           </small>
         </div>
         <div class="composition-actions">
@@ -289,6 +304,12 @@ async function revert(generationId: string): Promise<void> {
 
 .composition-hash {
   font-family: var(--frock-font-mono, monospace);
+}
+
+.composition-failure,
+.composition-quarantine {
+  white-space: normal;
+  color: var(--frock-danger-text);
 }
 
 .settings-error {

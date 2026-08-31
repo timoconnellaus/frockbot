@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { LlmRegistry, type NormalizedModelRequest } from "@frockbot/agent-core";
+import { type NormalizedModelRequest } from "@frockbot/kernel-contracts";
+import { LlmRegistry } from "@frockbot/plugin-models";
 import { Context } from "cordis";
 import { OpenAICompatibleProvider, requestToWire } from "./index.js";
 

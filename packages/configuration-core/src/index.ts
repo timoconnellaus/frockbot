@@ -1253,6 +1253,31 @@ export interface CompositionMemberViewV1 {
   source?: string;
 }
 
+export type CompositionFailurePhaseViewV1 =
+  "resolve" | "bundle" | "mount" | "health";
+
+const COMPOSITION_FAILURE_PHASES_V1: readonly CompositionFailurePhaseViewV1[] =
+  ["resolve", "bundle", "mount", "health"];
+
+export const MAX_COMPOSITION_FAILURE_PAGE_V1 = 32;
+
+/**
+ * One recorded activation failure. Diagnostics stay durable-side: they name
+ * artifact content hashes and loader identities, which never cross this seam.
+ */
+export interface CompositionFailureViewV1 {
+  attempt: number;
+  at: string;
+  phase: CompositionFailurePhaseViewV1;
+  message: string;
+}
+
+export interface CompositionQuarantineViewV1 {
+  quarantinedAt: string;
+  reason: string;
+  failures: number;
+}
+
 export interface CompositionGenerationViewV1 {
   schemaVersion: 1;
   botId: string;
@@ -1263,6 +1288,10 @@ export interface CompositionGenerationViewV1 {
   parentGenerationId?: string;
   isCurrent: boolean;
   members: CompositionMemberViewV1[];
+  /** Oldest attempt first; empty for a generation that never failed. */
+  failures: CompositionFailureViewV1[];
+  /** Present once three consecutive failures quarantined this generation. */
+  quarantine?: CompositionQuarantineViewV1;
 }
 
 export interface CompositionGenerationListViewV1 {
@@ -1465,6 +1494,64 @@ function compositionMemberView(input: unknown): CompositionMemberViewV1 {
   };
 }
 
+function compositionFailureView(input: unknown): CompositionFailureViewV1 {
+  const value = exactRecord(input, "Composition failure", [
+    "attempt",
+    "at",
+    "phase",
+    "message",
+  ]);
+  if (
+    !Number.isSafeInteger(value.attempt) ||
+    (value.attempt as number) < 1 ||
+    (value.attempt as number) > 1_000
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition failure attempt is invalid",
+    );
+  }
+  if (
+    !COMPOSITION_FAILURE_PHASES_V1.includes(
+      value.phase as CompositionFailurePhaseViewV1,
+    )
+  ) {
+    throw new ConfigurationDecodeError("Composition failure phase is invalid");
+  }
+  return {
+    attempt: value.attempt as number,
+    at: compositionTimestamp(value.at, "Composition failure at"),
+    phase: value.phase as CompositionFailurePhaseViewV1,
+    message: text(value.message, "Composition failure message", 2_000),
+  };
+}
+
+function compositionQuarantineView(
+  input: unknown,
+): CompositionQuarantineViewV1 {
+  const value = exactRecord(input, "Composition quarantine", [
+    "quarantinedAt",
+    "reason",
+    "failures",
+  ]);
+  if (
+    !Number.isSafeInteger(value.failures) ||
+    (value.failures as number) < 1 ||
+    (value.failures as number) > 1_000
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition quarantine failures is invalid",
+    );
+  }
+  return {
+    quarantinedAt: compositionTimestamp(
+      value.quarantinedAt,
+      "Composition quarantine quarantinedAt",
+    ),
+    reason: text(value.reason, "Composition quarantine reason", 2_000),
+    failures: value.failures as number,
+  };
+}
+
 export function decodeCompositionGenerationViewV1(
   input: unknown,
 ): CompositionGenerationViewV1 {
@@ -1480,9 +1567,18 @@ export function decodeCompositionGenerationViewV1(
       "origin",
       "isCurrent",
       "members",
+      "failures",
     ],
-    ["parentGenerationId"],
+    ["parentGenerationId", "quarantine"],
   );
+  if (
+    !Array.isArray(value.failures) ||
+    value.failures.length > MAX_COMPOSITION_FAILURE_PAGE_V1
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition generation failures are invalid",
+    );
+  }
   schemaVersion(value);
   if (
     !COMPOSITION_GENERATION_STATUSES_V1.includes(
@@ -1525,6 +1621,10 @@ export function decodeCompositionGenerationViewV1(
     origin: compositionOriginView(value.origin),
     isCurrent: value.isCurrent,
     members,
+    failures: value.failures.map(compositionFailureView),
+    ...(value.quarantine === undefined
+      ? {}
+      : { quarantine: compositionQuarantineView(value.quarantine) }),
     ...(value.parentGenerationId === undefined
       ? {}
       : {

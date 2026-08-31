@@ -200,7 +200,14 @@ export class DurableCompositionStore implements CompositionStore {
       if (generation.generationId !== generationId) {
         throw new Error("composition generation does not match its lookup key");
       }
-      if (generation.status !== "pending" && generation.status !== "active") {
+      // A `failed` generation may still commit: a retry that finally mounts
+      // and verifies is exactly what clears a fail-closed activation. A
+      // `quarantined` or `superseded` one never does.
+      if (
+        generation.status !== "pending" &&
+        generation.status !== "active" &&
+        generation.status !== "failed"
+      ) {
         throw new Error(
           `composition generation "${generationId}" is ${generation.status}`,
         );
@@ -245,6 +252,55 @@ export class DurableCompositionStore implements CompositionStore {
         }
         writes[compositionGenerationKey(supersededId)] =
           decodeCompositionGenerationV1({ ...decoded, status: "superseded" });
+      }
+      await transaction.put(writes);
+    });
+  }
+
+  /**
+   * Fail-closed: records that a generation did not activate. The generation is
+   * marked `failed` so the next admitted Turn retries it, or `quarantined` on
+   * its third consecutive failure, in which case the pointer moves back to the
+   * last known good and the generation is never retried until a User acts.
+   */
+  async fail(
+    generationId: string,
+    options: { quarantined: boolean },
+  ): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(
+        compositionGenerationKey(generationId),
+      );
+      const writes: Record<string, unknown> = {};
+      // A pin whose generation record is missing is exactly the `resolve`
+      // failure this method exists for: there is no status to write, but the
+      // pointer still has to stop naming it once it is quarantined.
+      if (stored !== undefined) {
+        const generation = decodeCompositionGenerationV1(stored);
+        if (generation.status === "active") {
+          throw new Error(
+            `composition generation "${generationId}" is active and cannot fail closed`,
+          );
+        }
+        const status = options.quarantined ? "quarantined" : "failed";
+        writes[compositionGenerationKey(generationId)] =
+          decodeCompositionGenerationV1({ ...generation, status });
+      }
+      if (options.quarantined) {
+        const lastKnownGoodId = await transaction.get<string>(
+          COMPOSITION_LAST_KNOWN_GOOD_KEY,
+        );
+        const lastKnownGood =
+          lastKnownGoodId === undefined
+            ? undefined
+            : await transaction.get<unknown>(
+                compositionGenerationKey(lastKnownGoodId),
+              );
+        if (lastKnownGood !== undefined) {
+          writes[COMPOSITION_CURRENT_KEY] = compositionPinV1(
+            decodeCompositionGenerationV1(lastKnownGood),
+          );
+        }
       }
       await transaction.put(writes);
     });

@@ -132,6 +132,8 @@ export function optimisticRevertGenerationsV1(
       userId: input.userId,
     },
     members: target.members.map((member) => ({ ...member })),
+    // An optimistic revert has no activation history of its own yet.
+    failures: [],
     ...(current ? { parentGenerationId: current.generationId } : {}),
   };
   return [optimistic, ...input.generations];

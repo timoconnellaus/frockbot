@@ -1,5 +1,5 @@
 // Kernel run-terminal transitions, bound to the Shell Package's run codec.
-import type { SessionEvent } from "@frockbot/agent-core";
+import { type SessionEvent } from "@frockbot/kernel-contracts";
 import {
   completeStoredRun as completeKernelStoredRun,
   failStoredRun as failKernelStoredRun,

@@ -48,6 +48,9 @@ jobs:
       - name: Test Cloudflare runtime compatibility
         run: bun run --filter @frockbot/cloudflare test:workerd
 
+      - name: Test Package bundler runtime
+        run: bun run --filter @frockbot/cloudflare-bundler test:workerd
+
       - name: Build
         run: bun run build
 

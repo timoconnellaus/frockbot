@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { SystemPromptRegistry, ToolRegistry } from "@frockbot/agent-core";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
+import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
   ComputerRegistry,
   type ComputerProvider,
