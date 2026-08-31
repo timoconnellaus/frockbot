@@ -252,17 +252,24 @@ jobs:
           secrets_file="$RUNNER_TEMP/frockbot-production.env"
           trap 'rm -f "$secrets_file"' EXIT
 
+          # Wrangler reads a secrets file as JSON first and only falls back
+          # to dotenv. A dotenv line keeps the backslash escapes inside a
+          # double-quoted value, so a secret that is itself JSON (the
+          # credential keyring) would reach the Worker mangled. Write JSON.
           node <<'NODE' > "$secrets_file"
-          for (const name of [
+          const names = [
             'BETTER_AUTH_URL',
             'BETTER_AUTH_SECRET',
             'GOOGLE_CLIENT_ID',
             'GOOGLE_CLIENT_SECRET',
             'SPRITES_TOKEN',
             'CREDENTIAL_KEYRING',
-          ]) {
-            console.log(`${name}=${JSON.stringify(process.env[name])}`);
-          }
+          ];
+          console.log(
+            JSON.stringify(
+              Object.fromEntries(names.map((name) => [name, process.env[name]])),
+            ),
+          );
           NODE
 
           bunx wrangler deploy --secrets-file "$secrets_file"
