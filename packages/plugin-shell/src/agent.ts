@@ -6,7 +6,9 @@
 //  1. `send_to_user` (legacy alias `send_message`) — parity register row 57b.
 //     One tool carrying the typed payload union, admitted on chat turns only,
 //     recording each send as `send/to-user` on the durable log. Row 57c: a
-//     `widget` payload ends the Turn, and no other payload does.
+//     `widget` payload ends the Turn; row 53's `approval` payload is the only
+//     other one that does, and for the same reason — the Bot has nothing left
+//     to do until a person answers.
 //  3. One `agent/request` handler, which is where the transcript seam is: a
 //     chat Turn's request carries only chat Turns, and an automation Turn's
 //     carries its own Turn and a pointer to the parent it may not read. See
@@ -120,6 +122,10 @@ function sendAcknowledgement(payload: SendToUserPayloadV1): string {
       return "Agent card sent to the user.";
     case "connect-card":
       return "Connect card sent to the user. Only they can complete the authorization; you have recorded the request, not granted it.";
+    case "approval":
+      // Deliberately not "requested permission": nothing has been granted, and
+      // the Turn is over whatever the answer turns out to be.
+      return "Approval requested. This Turn is over; the decision reaches you as durable input on a later Turn.";
   }
 }
 
@@ -132,8 +138,12 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"secret-request","prompt":"…","secretName":"…"}',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
   '{"type":"connect-card","connectionId":"…","title":"…","body":"…"}',
+  '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
   "A widget asks the user a question with 1 to 6 options and ends your Turn;",
-  "their answer arrives as a new Turn. Every other payload leaves the Turn running.",
+  "their answer arrives as a new Turn. An approval asks the user to allow one",
+  "action you must not take without them; it also ends your Turn, and their",
+  "decision — or its expiry — reaches you as input on a later Turn.",
+  "Every other payload leaves the Turn running.",
 ].join(" ");
 
 const SEND_TO_USER_INPUT_SCHEMA = {
@@ -199,9 +209,12 @@ function createSendToUserTool(
       return {
         content: sendAcknowledgement(payload),
         isError: false,
-        // Row 57c: a widget ends the Turn, and only a widget does. The
-        // decision is per result, so the same tool leaves a text send running.
-        ...(payload.type === "widget" ? { endsTurn: true } : {}),
+        // Row 57c: a widget ends the Turn, and row 53's approval card is the
+        // only other payload that does. The decision is per result, so the
+        // same tool leaves a text send running.
+        ...(payload.type === "widget" || payload.type === "approval"
+          ? { endsTurn: true }
+          : {}),
       };
     },
   };

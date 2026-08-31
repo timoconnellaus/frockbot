@@ -511,6 +511,12 @@ export interface BotNotificationIntent {
   createdAt: string;
   title: string;
   body: string;
+  /**
+   * How loudly the User is told. `critical` is for an intent the Bot's own
+   * notification policy does not gate — a question that has stopped the Bot
+   * rather than an update about one that finished. Absent means `normal`.
+   */
+  urgency?: "normal" | "critical";
 }
 
 export interface BotTurnCompletion {

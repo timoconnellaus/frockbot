@@ -57,6 +57,11 @@ import type {
 } from "@frockbot/plugin-bot-template/shared";
 import type { TemplateVisibilityV1 } from "@frockbot/template-core";
 import type {
+  ApprovalDecisionCommandV1,
+  ApprovalDecisionReceiptV1,
+  ApprovalListViewV1,
+} from "@frockbot/plugin-shell/approvals";
+import type {
   RoutineCommandReceiptV1,
   RoutineCommandV1,
   RoutineInboxCommandV1,
@@ -156,6 +161,12 @@ export interface BotStateBinding {
     query: ClientRunLookupQueryV1,
   ): Promise<ClientRunLookupV1>;
   listNotifications(botId: string): Promise<BotNotificationIntent[]>;
+  listApprovals(botId: string): Promise<ApprovalListViewV1>;
+  decideApproval(
+    botId: string,
+    approvalId: string,
+    command: ApprovalDecisionCommandV1,
+  ): Promise<ApprovalDecisionReceiptV1>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
   reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;
   stopRun(
@@ -238,6 +249,16 @@ export interface UserBotStateBinding {
     schemaVersion: 1;
     botId: string;
   }): Promise<BotNotificationIntent[]>;
+  listApprovals(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<ApprovalListViewV1>;
+  decideApproval(input: {
+    schemaVersion: 1;
+    botId: string;
+    approvalId: string;
+    command: ApprovalDecisionCommandV1;
+  }): Promise<ApprovalDecisionReceiptV1>;
   acknowledgeNotification(input: {
     schemaVersion: 1;
     botId: string;

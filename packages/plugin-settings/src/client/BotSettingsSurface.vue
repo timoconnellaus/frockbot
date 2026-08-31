@@ -76,6 +76,27 @@ const description = ref("");
 const title = ref("");
 const hiddenFromSidebar = ref(false);
 const notifications = ref(false);
+/**
+ * The Bot's undecided approval cards. Read from the same backend state the
+ * conversation renders, so the two surfaces cannot disagree about what is
+ * still waiting.
+ */
+const pendingApprovals = computed(() =>
+  web.value.approvals.filter((approval) => approval.decision === "pending"),
+);
+const decidingApproval = ref<string>();
+
+async function decideApproval(
+  approvalId: string,
+  decision: "approved" | "denied",
+): Promise<void> {
+  decidingApproval.value = approvalId;
+  try {
+    await web.value.decideApproval(approvalId, decision);
+  } finally {
+    decidingApproval.value = undefined;
+  }
+}
 const saving = ref(false);
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement>();
@@ -493,6 +514,40 @@ async function unassign(
         <input v-model="hiddenFromSidebar" type="checkbox" />
       </label>
     </UiAnchor>
+    <!--
+      Pending decisions. The card in the conversation is where a decision is
+      normally answered; this is where the ones nobody scrolled back to are
+      still findable, because "a request for more authority becomes a durable
+      pending decision for the User" is only true if the User can find it.
+    -->
+    <UiAnchor
+      v-if="pendingApprovals.length > 0"
+      anchor="bot-approvals"
+      label="Waiting on you"
+      :href="link('bot-approvals')"
+      class="settings-row"
+    >
+      <ul class="pending-approvals">
+        <li v-for="approval in pendingApprovals" :key="approval.approvalId">
+          <span class="pending-approvals__risk">{{ approval.risk }}</span>
+          <span class="pending-approvals__action">{{ approval.action }}</span>
+          <span class="pending-approvals__actions">
+            <UiButton
+              :disabled="decidingApproval !== undefined"
+              @click="decideApproval(approval.approvalId, 'approved')"
+              >Approve</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              :disabled="decidingApproval !== undefined"
+              @click="decideApproval(approval.approvalId, 'denied')"
+              >Deny</UiButton
+            >
+          </span>
+        </li>
+      </ul>
+    </UiAnchor>
+
     <p v-if="overriding" class="model-note">Overrides default model</p>
     <details
       class="advanced"
@@ -901,6 +956,46 @@ async function unassign(
   height: 19px;
   flex: 0 0 auto;
   accent-color: var(--frock-action-primary);
+}
+
+.pending-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pending-approvals li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-card);
+  background: var(--frock-surface-raised);
+  padding: 0.5rem 0.75rem;
+}
+
+.pending-approvals__risk {
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-control);
+  padding: 0.125rem 0.5rem;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+  text-transform: uppercase;
+}
+
+.pending-approvals__action {
+  flex: 1 1 12rem;
+  color: var(--frock-text);
+  font-size: var(--frock-text-sm);
+}
+
+.pending-approvals__actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .model-note {

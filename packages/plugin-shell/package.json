@@ -6,8 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
-    "./backend-image": "./src/backend-image.ts",
+    "./approvals": "./src/approvals.ts",
     "./backend": "./src/backend.ts",
+    "./backend-image": "./src/backend-image.ts",
     "./backend-authoring": "./src/backend-authoring.ts",
     "./backend-composition": "./src/backend-composition.ts",
     "./backend-computer": "./src/backend-computer.ts",

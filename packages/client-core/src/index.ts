@@ -64,6 +64,8 @@ export interface ClientNotificationIntent {
   createdAt: string;
   title: string;
   body: string;
+  /** `critical` for an intent the Bot's notification policy does not gate. */
+  urgency?: "normal" | "critical";
 }
 
 export interface ClientNotificationListV1 {
@@ -262,13 +264,11 @@ function decodeTurnEvent(value: unknown): ClientTurnEvent {
 function decodeNotification(value: unknown): ClientNotificationIntent {
   const notification = responseRecord(value, "notification");
   if (
-    !hasExactKeys(notification, [
-      "notificationId",
-      "runId",
-      "createdAt",
-      "title",
-      "body",
-    ])
+    !hasExactKeys(
+      notification,
+      ["notificationId", "runId", "createdAt", "title", "body"],
+      ["urgency"],
+    )
   ) {
     throw new Error("notification is invalid");
   }
@@ -282,6 +282,9 @@ function decodeNotification(value: unknown): ClientNotificationIntent {
     createdAt: responseString(notification, "createdAt", "notification"),
     title: responseString(notification, "title", "notification"),
     body: responseString(notification, "body", "notification"),
+    ...(notification.urgency === "critical" || notification.urgency === "normal"
+      ? { urgency: notification.urgency }
+      : {}),
   };
 }
 
