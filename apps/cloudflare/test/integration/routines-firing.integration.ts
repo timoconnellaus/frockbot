@@ -19,6 +19,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  settledRoutineFiringV1,
   toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
@@ -53,6 +54,7 @@ async function makeDue(userId: string, botId: string): Promise<void> {
 
 interface StoredRunProbe {
   runId: string;
+  status: string;
   admission?: { turnType: string; origin?: { routineId: string } };
   events: Array<{ type: string; request?: { messages?: unknown } }>;
 }
@@ -105,7 +107,16 @@ function requestTexts(run: StoredRunProbe): string[] {
     );
 }
 
-async function fireRoutine(userId: string, botId: string): Promise<void> {
+/**
+ * Create the Routine, make it due, wake the object, and answer with the firing
+ * once it has settled. The alarm returning is not the firing being over — a
+ * second alarm delivery racing this one defers while the Turn executes — so the
+ * durable run is read through the settled wait rather than straight after.
+ */
+async function fireRoutine(
+  userId: string,
+  botId: string,
+): Promise<StoredRunProbe> {
   await expectOkJson(
     await postAsUser(userId, `/api/bots/${botId}/routines`, {
       schemaVersion: 1,
@@ -122,7 +133,12 @@ async function fireRoutine(userId: string, botId: string): Promise<void> {
     }),
   );
   await makeDue(userId, botId);
-  expect(await runDurableObjectAlarm(botStub(userId, botId))).toBe(true);
+  // A nudge, never a claim: on a slow runner the object's own scheduled alarm
+  // can arrive before this drive does, and the drive then finds nothing pending
+  // and answers `false` for a firing that has already happened. What the firing
+  // did is read from durable state, below.
+  await runDurableObjectAlarm(botStub(userId, botId));
+  return settledRoutineFiringV1<StoredRunProbe>(userId, botId);
 }
 
 describe("a Routine firing, and what it leaves behind", () => {
@@ -135,15 +151,12 @@ describe("a Routine firing, and what it leaves behind", () => {
       await asUser(userId, `/api/bots/${botId}/turns`),
     )) as { runs: Array<{ runId: string }> };
 
-    await fireRoutine(userId, botId);
+    const automation = await fireRoutine(userId, botId);
 
     // The firing ran, and it ran as an automation Turn.
-    const automation = (await storedRuns(userId, botId)).find(
-      (run) => run.admission?.origin?.routineId === "brief",
-    );
-    expect(automation?.admission?.turnType).toBe("automation");
+    expect(automation.admission?.turnType).toBe("automation");
     expect(
-      automation!.events.some((event) => event.type === "wake/parent"),
+      automation.events.some((event) => event.type === "wake/parent"),
     ).toBe(true);
 
     // THE TRANSCRIPT. `GET /turns` is the visible-conversation projection and
@@ -171,7 +184,7 @@ describe("a Routine firing, and what it leaves behind", () => {
     expect(inbox.entries).toHaveLength(1);
     expect(inbox.unacknowledged).toBe(1);
     expect(inbox.entries[0]).toMatchObject({
-      runId: automation!.runId,
+      runId: automation.runId,
       text: HANDOFF,
       attribution: "Automation: Morning brief",
       acknowledged: false,
@@ -197,16 +210,16 @@ describe("a Routine firing, and what it leaves behind", () => {
       await asUser(userId, `/api/bots/${botId}/routines/brief/runs`),
     )) as { entries: Array<{ runId: string; status: string }> };
     expect(log.entries[0]).toMatchObject({
-      runId: automation!.runId,
+      runId: automation.runId,
       status: "ok",
     });
     const detail = (await expectOkJson(
       await asUser(
         userId,
-        `/api/bots/${botId}/routines/brief/runs/${automation!.runId}`,
+        `/api/bots/${botId}/routines/brief/runs/${automation.runId}`,
       ),
     )) as { runId: string; events: Array<{ type: string; summary: string }> };
-    expect(detail.runId).toBe(automation!.runId);
+    expect(detail.runId).toBe(automation.runId);
     expect(detail.events.some((event) => event.type === "wake/parent")).toBe(
       true,
     );
@@ -230,11 +243,7 @@ describe("a Routine firing, and what it leaves behind", () => {
       "remember the mango pickle",
       "chat-before-1",
     );
-    await fireRoutine(userId, botId);
-
-    const automation = (await storedRuns(userId, botId)).find(
-      (run) => run.admission?.origin?.routineId === "brief",
-    )!;
+    const automation = await fireRoutine(userId, botId);
     // FRESH HISTORY. The firing's request carries a pointer and its own cue,
     // and not one word of the conversation it belongs to.
     const automationRequests = requestTexts(automation);

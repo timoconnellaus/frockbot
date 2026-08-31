@@ -4,8 +4,14 @@
 // the real artifact in the real bucket, the real dev-auth header the gateway
 // reads, and the product's own provisioning path. Nothing here reaches past
 // the gateway on a test's behalf.
-import { applyD1Migrations, env, SELF } from "cloudflare:test";
-import { beforeAll, expect } from "vitest";
+import {
+  applyD1Migrations,
+  env,
+  runDurableObjectAlarm,
+  runInDurableObject,
+  SELF,
+} from "cloudflare:test";
+import { beforeAll, expect, vi } from "vitest";
 import {
   OLLAMA_BAD_API_KEY,
   OLLAMA_GOOD_API_KEY,
@@ -47,6 +53,82 @@ export async function dueAtWithFiringHeadroomV1(
     if (boundary + 60_000 - now > headroomMs) return boundary;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+}
+
+/** The Bot Durable Object stub one User's Bot is held in. */
+export function botStateStubV1(userId: string, botId: string) {
+  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
+}
+
+/** The shape every caller needs of a durable run to recognise a firing. */
+interface RoutineFiringProbeV1 {
+  runId: string;
+  status: string;
+  admission?: { origin?: { routineId?: string } };
+}
+
+/**
+ * Wait for a Routine's firing to settle, and answer with its durable run.
+ *
+ * `runDurableObjectAlarm` resolves when the alarm handler it drove returns, and
+ * that is not the same moment the firing settles. The alarm defers whenever a
+ * Turn is already executing in the object, so a second alarm delivery racing
+ * the driven one returns straight away while the first is still running the
+ * Turn — and the run record is written at admission, carrying its Session and
+ * its origin, long before `status` becomes `completed`. Reading the runs the
+ * instant the alarm returns can therefore catch the firing mid-flight.
+ *
+ * So this polls to a bounded deadline for the whole firing, not just the run:
+ * the run is terminal *and* the scheduler's unsettled-firing lock is gone,
+ * which is the write that also rewrites the run-log entry and moves the
+ * Routine's `lastRunAt`. Everything a test asserts after this call is settled.
+ *
+ * Driving the alarm on each pass is deliberate and idempotent: a settled
+ * occurrence has already moved past its `dueAt`, and an alarm arriving while a
+ * firing is in flight only defers — so the poll doubles as the drain for a
+ * firing that was minted but has not been run yet.
+ *
+ * The drive is a nudge and its answer means nothing: `false` only says this
+ * call found no alarm pending, which is what a slow runner produces when the
+ * object's own scheduled delivery arrived first and already ran the firing. No
+ * test should assert on it. Durable state is the single source of truth for
+ * whether a Routine fired, and this is the only thing that reads it.
+ */
+export async function settledRoutineFiringV1<
+  Run extends RoutineFiringProbeV1 = RoutineFiringProbeV1,
+>(
+  userId: string,
+  botId: string,
+  routineId = "brief",
+  timeout = 5_000,
+): Promise<Run> {
+  const stub = botStateStubV1(userId, botId);
+  let settled: Run | undefined;
+  await vi.waitFor(
+    async () => {
+      await runDurableObjectAlarm(stub);
+      const probe = await runInDurableObject(
+        stub,
+        async (_instance, state) => ({
+          runs: [
+            ...(await state.storage.list<Run>({ prefix: "run:" })).values(),
+          ],
+          unsettled:
+            (await state.storage.get<unknown>(`routine-fire:${routineId}`)) !==
+            undefined,
+        }),
+      );
+      const fired = probe.runs.filter(
+        (run) => run.admission?.origin?.routineId === routineId,
+      );
+      expect(fired).toHaveLength(1);
+      expect(fired[0]!.status).toBe("completed");
+      expect(probe.unsettled).toBe(false);
+      settled = fired[0];
+    },
+    { timeout, interval: 50 },
+  );
+  return settled!;
 }
 
 /** Matches `DEFAULT_APPLICATION_HASH` in the integration config. */
