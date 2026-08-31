@@ -30,6 +30,10 @@ import type {
   McpMountOutcomeReportV1,
   McpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
+import type {
+  McpAuthorizationCompletionRequestV1,
+  McpAuthorizationStartRequestV1,
+} from "@frockbot/plugin-mcp/backend";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
@@ -470,6 +474,26 @@ export interface UserConfigurationBinding {
     userId: string;
     outcome: McpMountOutcomeReportV1;
   }): Promise<void>;
+  /**
+   * The three `mcp-oauth` seams. Every outbound OAuth request and every token
+   * lives on the far side of them: the gateway signs a callback state and
+   * forwards, and holds nothing.
+   */
+  startMcpAuthorization(request: {
+    schemaVersion: 1;
+    userId: string;
+    start: McpAuthorizationStartRequestV1;
+  }): Promise<StartConnectionResult>;
+  completeMcpAuthorization(request: {
+    schemaVersion: 1;
+    userId: string;
+    completion: McpAuthorizationCompletionRequestV1;
+  }): Promise<ConnectionCompletionResult>;
+  revokeMcpAuthorization(request: {
+    schemaVersion: 1;
+    userId: string;
+    connectionId: string;
+  }): Promise<RevokeConnectionResult>;
   getConnection(request: {
     schemaVersion: 1;
     userId: string;

@@ -83,6 +83,10 @@ import {
   parseTemplateShareIdV1,
   type TemplateVisibilityV1,
 } from "@frockbot/template-core";
+import {
+  decodeRevokeConnectionResultV1,
+  decodeStartConnectionResultV1,
+} from "@frockbot/connection-core";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -149,6 +153,12 @@ interface Env {
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
+  /**
+   * Signs the callback `state` of every redirect-based Connection. Absent — or
+   * weak, or equal to `BETTER_AUTH_SECRET` — closes the `mcp-oauth` door: the
+   * routes answer 503 rather than trusting a forgeable identity.
+   */
+  FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
 }
@@ -300,6 +310,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     readMcpServers: (request) => rpc.readMcpServers(request),
     executeMcpCommand: (request) => rpc.executeMcpCommand(request),
     recordMcpMountOutcome: (request) => rpc.recordMcpMountOutcome(request),
+    startMcpAuthorization: (request) => rpc.startMcpAuthorization(request),
+    completeMcpAuthorization: (request) =>
+      rpc.completeMcpAuthorization(request),
+    revokeMcpAuthorization: (request) => rpc.revokeMcpAuthorization(request),
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),
@@ -1034,6 +1048,45 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
               schemaVersion: 1,
               userId,
               command,
+            }),
+          ),
+        ),
+      // The `mcp-oauth` gateway seams. The Contribution reads the signing
+      // secret through `readSecret` and refuses to serve its routes at all
+      // when this deployment has none, so a Worker without the secret has no
+      // callback door rather than an unsigned one.
+      readSecret: (name: string) =>
+        name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
+          ? env.FROCKBOT_AUTHORIZATION_STATE_SECRET
+          : name === "BETTER_AUTH_SECRET"
+            ? env.BETTER_AUTH_SECRET
+            : undefined,
+      ...(env.BETTER_AUTH_URL ? { callbackBaseUrl: env.BETTER_AUTH_URL } : {}),
+      startMcpAuthorization: async (userId, start) =>
+        decodeStartConnectionResultV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).startMcpAuthorization({
+              schemaVersion: 1,
+              userId,
+              start,
+            }),
+          ),
+        ),
+      completeMcpAuthorization: async (userId, completion) =>
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).completeMcpAuthorization({
+            schemaVersion: 1,
+            userId,
+            completion,
+          }),
+        ),
+      revokeMcpAuthorization: async (userId, connectionId) =>
+        decodeRevokeConnectionResultV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).revokeMcpAuthorization({
+              schemaVersion: 1,
+              userId,
+              connectionId,
             }),
           ),
         ),

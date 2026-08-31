@@ -213,6 +213,12 @@ export async function mcpServerStub(request: Request): Promise<Response> {
   if (url.pathname === "/mcp-down") {
     return new Response("the MCP server is gone", { status: 503 });
   }
+  if (
+    url.pathname === "/.well-known/oauth-protected-resource/mcp-oauth" ||
+    url.pathname === "/mcp-oauth"
+  ) {
+    return mcpOAuthProtectedStub(request, url);
+  }
   if (url.pathname !== "/mcp") {
     return new Response("unexpected MCP request", { status: 404 });
   }
@@ -228,6 +234,15 @@ export async function mcpServerStub(request: Request): Promise<Response> {
       headers: { "content-type": "application/json" },
     });
   }
+  return mcpJsonRpc(request);
+}
+
+/**
+ * The four JSON-RPC messages the stub answers, with no opinion about how the
+ * caller authenticated. Shared by the keyed endpoint and the OAuth-protected
+ * one, so both prove the same protocol.
+ */
+async function mcpJsonRpc(request: Request): Promise<Response> {
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;
@@ -363,6 +378,9 @@ async function webSearchStub(request: Request, key: string): Promise<Response> {
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.origin === MCP_ORIGIN) return mcpServerStub(request);
+  if (url.origin === MCP_OAUTH_ORIGIN) {
+    return mcpAuthorizationServerStub(request);
+  }
   if (url.origin === WEB_STUB_ORIGIN) return webStub(url);
   if (!url.hostname.includes("ollama.com")) {
     // Anything a Bot should never reach is counted before it is refused, so a
@@ -442,4 +460,294 @@ export function createOutboundService(): (
 ) => Promise<Response> {
   return (request: Request): Promise<Response> =>
     Promise.resolve(ollamaCloudStub(request));
+}
+
+/**
+ * The OAuth half of the MCP stub: one authorization server, and one MCP
+ * endpoint behind it.
+ *
+ * It lives at the outbound seam beside the plain MCP server for the same
+ * reason that one does — `plugin-mcp` reaches every authorization server with
+ * the Package's own `fetch`, so impersonating one here proves the production
+ * request shapes without injecting anything past a Package boundary. Between
+ * them the two stubs cover the whole `mcp-oauth` flow: RFC 9728 metadata on
+ * the resource, RFC 8414 metadata on the server, RFC 7591 registration, the
+ * authorization redirect, both token grants, and RFC 7009 revocation.
+ */
+export const MCP_OAUTH_ORIGIN = "https://mcp-oauth.example.test";
+/** The MCP endpoint that answers 401 until a live access token is presented. */
+export const MCP_OAUTH_ENDPOINT = `${MCP_ORIGIN}/mcp-oauth`;
+export const MCP_OAUTH_RESOURCE_METADATA = `${MCP_ORIGIN}/.well-known/oauth-protected-resource/mcp-oauth`;
+/**
+ * Expires every live access token, as an authorization server does when one
+ * times out. `POST` it and the next MCP request must be preceded by a refresh.
+ */
+export const MCP_OAUTH_EXPIRE_ENDPOINT = `${MCP_OAUTH_ORIGIN}/control/expire`;
+/** Revokes everything, as a User does in the server's own console. */
+export const MCP_OAUTH_REVOKE_ALL_ENDPOINT = `${MCP_OAUTH_ORIGIN}/control/revoke-all`;
+/** What the stub has issued and been asked, so a test can prove the wire. */
+export const MCP_OAUTH_LEDGER_ENDPOINT = `${MCP_OAUTH_ORIGIN}/control/ledger`;
+
+/**
+ * The access-token lifetime the stub advertises, in seconds.
+ *
+ * Deliberately inside `plugin-mcp`'s 60-second refresh skew, so every lease a
+ * Bot's mount opens is one the driver must refresh before handing over. That
+ * makes "the Turn after the server expired the token still ran" a property the
+ * integration suite can assert deterministically, with no sleeping.
+ */
+const ACCESS_TOKEN_TTL_SECONDS = 60;
+
+interface AuthorizationCode {
+  codeChallenge: string;
+  redirectUri: string;
+  resource: string;
+  clientId: string;
+}
+
+interface RefreshRecord {
+  clientId: string;
+  resource: string;
+  scope?: string;
+}
+
+const authorizationCodes = new Map<string, AuthorizationCode>();
+const accessTokens = new Map<string, { expired: boolean }>();
+const refreshTokens = new Map<string, RefreshRecord>();
+const registeredClients = new Set<string>();
+
+/**
+ * Every fact a test needs to assert about the wire, counted where it actually
+ * happened. Assertions run in workerd and this handler runs in Node, so a
+ * counter read back over HTTP is the only way to observe what left.
+ */
+const ledger = {
+  registrations: 0,
+  authorizations: 0,
+  codeExchanges: 0,
+  refreshes: 0,
+  revocations: 0,
+  /** `resource` seen on the authorization request and on each token request. */
+  authorizeResource: "",
+  tokenResource: "",
+  refreshResource: "",
+  /** The PKCE method the authorization request carried. */
+  codeChallengeMethod: "",
+  /** Set when a token request presented a verifier that did not match. */
+  pkceRejections: 0,
+  /** MCP calls that arrived with no live token. */
+  unauthorizedMcpCalls: 0,
+};
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+async function codeChallengeOf(verifier: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(verifier),
+  );
+  return base64Url(new Uint8Array(digest));
+}
+
+function issued(prefix: string): string {
+  return `${prefix}-${globalThis.crypto.randomUUID()}`;
+}
+
+function oauthError(error: string, status = 400): Response {
+  return Response.json({ error }, { status });
+}
+
+/** Whether a bearer token is one this stub issued and has not expired. */
+export function mcpOAuthTokenIsLive(token: string): boolean {
+  const record = accessTokens.get(token);
+  return record !== undefined && !record.expired;
+}
+
+async function tokenGrant(request: Request): Promise<Response> {
+  const form = new URLSearchParams(await request.text());
+  const grant = form.get("grant_type");
+  const resource = form.get("resource") ?? "";
+  if (grant === "authorization_code") {
+    ledger.codeExchanges += 1;
+    ledger.tokenResource = resource;
+    const code = form.get("code") ?? "";
+    const issuedCode = authorizationCodes.get(code);
+    // An authorization code is single use, exactly as RFC 6749 §4.1.2 says.
+    authorizationCodes.delete(code);
+    if (!issuedCode) return oauthError("invalid_grant");
+    const verifier = form.get("code_verifier") ?? "";
+    if ((await codeChallengeOf(verifier)) !== issuedCode.codeChallenge) {
+      ledger.pkceRejections += 1;
+      return oauthError("invalid_grant");
+    }
+    if (form.get("redirect_uri") !== issuedCode.redirectUri) {
+      return oauthError("invalid_grant");
+    }
+    // RFC 8707: a token request naming no resource would produce a token good
+    // for every resource this server protects, which is the thing the
+    // indicator exists to prevent.
+    if (resource !== issuedCode.resource) return oauthError("invalid_target");
+    const accessToken = issued("mcp-access");
+    const refreshToken = issued("mcp-refresh");
+    accessTokens.set(accessToken, { expired: false });
+    refreshTokens.set(refreshToken, {
+      clientId: issuedCode.clientId,
+      resource,
+    });
+    return Response.json({
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: ACCESS_TOKEN_TTL_SECONDS,
+      refresh_token: refreshToken,
+      scope: "mcp:tools",
+    });
+  }
+  if (grant === "refresh_token") {
+    ledger.refreshes += 1;
+    ledger.refreshResource = resource;
+    const presented = form.get("refresh_token") ?? "";
+    const record = refreshTokens.get(presented);
+    if (!record) return oauthError("invalid_grant");
+    if (resource !== record.resource) return oauthError("invalid_target");
+    const accessToken = issued("mcp-access");
+    accessTokens.set(accessToken, { expired: false });
+    // A server that does not rotate its refresh token: the client must carry
+    // the old one forward rather than losing the ability to refresh again.
+    return Response.json({
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: ACCESS_TOKEN_TTL_SECONDS,
+      scope: "mcp:tools",
+    });
+  }
+  return oauthError("unsupported_grant_type");
+}
+
+export async function mcpAuthorizationServerStub(
+  request: Request,
+): Promise<Response> {
+  const url = new URL(request.url);
+  switch (url.pathname) {
+    case "/control/ledger":
+      return Response.json(ledger);
+    case "/control/expire": {
+      for (const record of accessTokens.values()) record.expired = true;
+      return Response.json({ expired: true });
+    }
+    case "/control/revoke-all": {
+      accessTokens.clear();
+      refreshTokens.clear();
+      return Response.json({ revoked: true });
+    }
+    case "/.well-known/oauth-authorization-server":
+      return Response.json({
+        issuer: MCP_OAUTH_ORIGIN,
+        authorization_endpoint: `${MCP_OAUTH_ORIGIN}/authorize`,
+        token_endpoint: `${MCP_OAUTH_ORIGIN}/token`,
+        registration_endpoint: `${MCP_OAUTH_ORIGIN}/register`,
+        revocation_endpoint: `${MCP_OAUTH_ORIGIN}/revoke`,
+        response_types_supported: ["code"],
+        grant_types_supported: ["authorization_code", "refresh_token"],
+        code_challenge_methods_supported: ["S256"],
+        token_endpoint_auth_methods_supported: ["none"],
+        scopes_supported: ["mcp:tools"],
+      });
+    case "/register": {
+      ledger.registrations += 1;
+      const body = (await request.json().catch(() => ({}))) as {
+        token_endpoint_auth_method?: unknown;
+      };
+      if (body.token_endpoint_auth_method !== "none") {
+        return oauthError("invalid_client_metadata");
+      }
+      const clientId = issued("mcp-client");
+      registeredClients.add(clientId);
+      // A public client: no `client_secret`, which is what makes this server
+      // one FrockBot will talk to at all.
+      return Response.json({ client_id: clientId }, { status: 201 });
+    }
+    case "/authorize": {
+      ledger.authorizations += 1;
+      const redirectUri = url.searchParams.get("redirect_uri") ?? "";
+      const state = url.searchParams.get("state") ?? "";
+      const codeChallenge = url.searchParams.get("code_challenge") ?? "";
+      ledger.codeChallengeMethod =
+        url.searchParams.get("code_challenge_method") ?? "";
+      ledger.authorizeResource = url.searchParams.get("resource") ?? "";
+      const clientId = url.searchParams.get("client_id") ?? "";
+      if (!redirectUri || !state || !codeChallenge || !clientId) {
+        return oauthError("invalid_request");
+      }
+      const code = issued("mcp-code");
+      authorizationCodes.set(code, {
+        codeChallenge,
+        redirectUri,
+        resource: ledger.authorizeResource,
+        clientId,
+      });
+      const destination = new URL(redirectUri);
+      destination.searchParams.set("code", code);
+      destination.searchParams.set("state", state);
+      return new Response(null, {
+        status: 303,
+        headers: { location: destination.toString() },
+      });
+    }
+    case "/token":
+      return tokenGrant(request);
+    case "/revoke": {
+      ledger.revocations += 1;
+      const form = new URLSearchParams(await request.text());
+      const token = form.get("token") ?? "";
+      refreshTokens.delete(token);
+      accessTokens.delete(token);
+      // RFC 7009 §2.2: an unknown token is a success, so the client cannot
+      // probe the server for which of its tokens are still live.
+      return new Response(null, { status: 200 });
+    }
+    default:
+      return new Response("unexpected authorization request", { status: 404 });
+  }
+}
+
+/**
+ * The OAuth-protected MCP endpoint, and the two documents that lead to it. It
+ * answers 401 with the `WWW-Authenticate` challenge RFC 9728 §5.1 defines
+ * until a live access token is presented, which is exactly what makes a
+ * mount's failure classifiable as `needs-auth` rather than `error`.
+ */
+export async function mcpOAuthProtectedStub(
+  request: Request,
+  url: URL,
+): Promise<Response> {
+  if (url.pathname === "/.well-known/oauth-protected-resource/mcp-oauth") {
+    return Response.json({
+      resource: MCP_OAUTH_ENDPOINT,
+      authorization_servers: [MCP_OAUTH_ORIGIN],
+      scopes_supported: ["mcp:tools"],
+      bearer_methods_supported: ["header"],
+    });
+  }
+  const header = request.headers.get("authorization") ?? "";
+  const token = header.toLowerCase().startsWith("bearer ")
+    ? header.slice(7)
+    : "";
+  if (!mcpOAuthTokenIsLive(token)) {
+    ledger.unauthorizedMcpCalls += 1;
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: {
+        "content-type": "application/json",
+        "www-authenticate": `Bearer realm="mcp", resource_metadata="${MCP_OAUTH_RESOURCE_METADATA}"`,
+      },
+    });
+  }
+  return mcpJsonRpc(request);
 }

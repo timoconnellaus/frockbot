@@ -3,12 +3,28 @@ import {
   decodeRevokeConnectionCommandV1,
   decodeStartConnectionCommandV1,
   isConnectionIdentifier,
-  isPublicIdentifier,
   type ConnectionView,
   type StartConnectionCommandV1,
 } from "@frockbot/configuration-core";
+import {
+  decodeAuthorizationState,
+  encodeAuthorizationState,
+  isStrongAuthorizationStateSecretV1,
+  type AuthorizationState,
+} from "@frockbot/connection-core";
 import type { Plugin } from "cordis";
 import { ComposioClient } from "./composio-client.js";
+/**
+ * The signed callback `state` moved to `@frockbot/connection-core` when a
+ * second Package began minting one (`plugin-mcp`'s `mcp-oauth` driver). The
+ * wire format is unchanged, so a state minted before the move still verifies,
+ * and it is re-exported here because this Package's own surface promised it.
+ */
+export {
+  decodeAuthorizationState,
+  encodeAuthorizationState,
+  type AuthorizationState,
+} from "@frockbot/connection-core";
 export type {
   ConnectionCompletionResult,
   RevokeConnectionResult,
@@ -21,11 +37,6 @@ import {
   type ComposioConnectionTypeConfig,
 } from "./connections.js";
 
-const MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH = 32;
-const MINIMUM_AUTHORIZATION_STATE_SECRET_UNIQUE_CHARACTERS = 8;
-const FORBIDDEN_AUTHORIZATION_STATE_SECRETS = new Set([
-  "replace-with-an-independent-random-secret",
-]);
 function decodeConnectionIdentifier(value: unknown): string | undefined {
   return isConnectionIdentifier(value) ? value : undefined;
 }
@@ -85,33 +96,6 @@ export interface ComposioBackendHost {
   ): Promise<"applied" | "stale">;
 }
 
-function isRepeatedAuthorizationStateSecret(secret: string): boolean {
-  for (
-    let patternLength = 1;
-    patternLength <= Math.min(16, Math.floor(secret.length / 2));
-    patternLength += 1
-  ) {
-    if (
-      secret.length % patternLength === 0 &&
-      secret ===
-        secret.slice(0, patternLength).repeat(secret.length / patternLength)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isStrongAuthorizationStateSecret(secret: string): boolean {
-  return (
-    secret.length >= MINIMUM_AUTHORIZATION_STATE_SECRET_LENGTH &&
-    new Set(secret).size >=
-      MINIMUM_AUTHORIZATION_STATE_SECRET_UNIQUE_CHARACTERS &&
-    !FORBIDDEN_AUTHORIZATION_STATE_SECRETS.has(secret) &&
-    !isRepeatedAuthorizationStateSecret(secret)
-  );
-}
-
 export function createConfiguredComposioBackendContribution(
   host: ComposioBackendHost,
 ): BackendRouteContribution {
@@ -125,7 +109,7 @@ export function createConfiguredComposioBackendContribution(
     !apiKey ||
     !gmailAuthConfigId ||
     !authorizationStateSecret ||
-    !isStrongAuthorizationStateSecret(authorizationStateSecret) ||
+    !isStrongAuthorizationStateSecretV1(authorizationStateSecret) ||
     authorizationStateSecret === betterAuthSecret
   ) {
     throw new Error("Composio backend Contribution is not configured");
@@ -154,98 +138,6 @@ export namespace createConfiguredComposioBackendContribution {
     return () =>
       lifecycle.mount(createConfiguredComposioBackendContribution(host));
   }
-}
-
-export interface AuthorizationState {
-  schemaVersion: 1;
-  authorizationStateId: string;
-  userId: string;
-  connectionId: string;
-  returnTarget: "browser" | "desktop";
-  expiresAt: number;
-  nativeReturnNonce?: string;
-}
-
-function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
-}
-
-function fromBase64Url(value: string): Uint8Array {
-  const padded = value.replaceAll("-", "+").replaceAll("_", "/");
-  const binary = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, "="));
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-async function stateKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
-}
-
-export async function encodeAuthorizationState(
-  state: AuthorizationState,
-  secret: string,
-): Promise<string> {
-  const payload = new TextEncoder().encode(JSON.stringify(state));
-  const signature = new Uint8Array(
-    await crypto.subtle.sign("HMAC", await stateKey(secret), payload),
-  );
-  return `${base64Url(payload)}.${base64Url(signature)}`;
-}
-
-export async function decodeAuthorizationState(
-  value: string,
-  secret: string,
-): Promise<AuthorizationState> {
-  const [payloadPart, signaturePart, extra] = value.split(".");
-  if (!payloadPart || !signaturePart || extra !== undefined) {
-    throw new Error("Composio authorization state is invalid");
-  }
-  const payload = fromBase64Url(payloadPart);
-  const signature = fromBase64Url(signaturePart);
-  if (
-    !(await crypto.subtle.verify(
-      "HMAC",
-      await stateKey(secret),
-      new Uint8Array(signature).buffer,
-      new Uint8Array(payload).buffer,
-    ))
-  ) {
-    throw new Error("Composio authorization state is invalid");
-  }
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(new TextDecoder().decode(payload));
-  } catch {
-    throw new Error("Composio authorization state is invalid");
-  }
-  if (!decoded || typeof decoded !== "object") {
-    throw new Error("Composio authorization state is invalid");
-  }
-  const state = decoded as Partial<AuthorizationState>;
-  if (
-    state.schemaVersion !== 1 ||
-    !isPublicIdentifier(state.authorizationStateId) ||
-    !isPublicIdentifier(state.userId) ||
-    !isPublicIdentifier(state.connectionId) ||
-    (state.returnTarget !== "browser" && state.returnTarget !== "desktop") ||
-    !Number.isSafeInteger(state.expiresAt) ||
-    (state.expiresAt as number) <= Date.now() ||
-    (state.nativeReturnNonce !== undefined &&
-      !isPublicIdentifier(state.nativeReturnNonce))
-  ) {
-    throw new Error("Composio authorization state is invalid or expired");
-  }
-  return state as AuthorizationState;
 }
 
 function jsonError(

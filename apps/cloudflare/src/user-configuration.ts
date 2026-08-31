@@ -84,6 +84,10 @@ import {
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
 import { decodeMcpMountOutcomeV1 } from "@frockbot/plugin-mcp/records";
+import type {
+  McpAuthorizationCompletionRequestV1,
+  McpAuthorizationStartRequestV1,
+} from "@frockbot/plugin-mcp/backend";
 import type { WorkerLoader } from "./contracts.js";
 import { createPackagePublicationHost } from "./package-publication.js";
 import { R2PackageCatalog } from "./package-catalog.js";
@@ -97,7 +101,9 @@ import {
   rpcString,
   rpcEnum,
   rpcDecodedValue,
+  rpcJsonRecord,
   rpcJsonSnapshotV1,
+  rpcObject,
 } from "./durable-rpc.js";
 
 /** The durable key holding this User's Project catalogue. */
@@ -652,6 +658,100 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       accountId: request.userId as string,
       ...(request.outcome as ReturnType<typeof decodeMcpMountOutcomeV1>),
     });
+  }
+
+  /**
+   * Start one `mcp-remote-oauth` authorization.
+   *
+   * The gateway signs the state and forwards; every outbound OAuth request —
+   * discovery, registration, the token exchange — happens on the far side of
+   * this seam, inside the object that holds the keyring. Nothing about the
+   * flow's secrets crosses back: the answer is a redirect URL and nothing
+   * else.
+   */
+  async startMcpAuthorization(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      start: rpcObject(
+        {
+          commandId: rpcIdentifier,
+          redirectUri: rpcString(2_048),
+          callbackState: rpcString(8_192),
+          authorizationStateId: rpcString(128),
+          authorizationStateExpiresAt: rpcInteger({
+            minimum: 0,
+            maximum: Number.MAX_SAFE_INTEGER,
+          }),
+          returnTarget: rpcString(16),
+        },
+        {
+          connectionId: rpcIdentifier,
+          label: rpcString(120),
+          settings: rpcJsonRecord,
+          nativeReturnNonce: rpcIdentifier,
+        },
+      ),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const start = request.start as McpAuthorizationStartRequestV1;
+    if (start.returnTarget !== "browser" && start.returnTarget !== "desktop") {
+      throw new Error("MCP authorization returnTarget is invalid");
+    }
+    return (await this.contributions()).mcp.startAuthorization(
+      request.userId as string,
+      start,
+    );
+  }
+
+  /**
+   * Finish one authorization, once the gateway has verified its signed state.
+   *
+   * The `authorizationStateId` is consumed here, transactionally: a replayed
+   * callback is a no-op that reports the Connection's settled state rather
+   * than a second token exchange.
+   */
+  async completeMcpAuthorization(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      completion: rpcObject(
+        {
+          authorizationStateId: rpcString(128),
+          connectionId: rpcIdentifier,
+          returnTarget: rpcString(16),
+        },
+        {
+          nativeReturnNonce: rpcIdentifier,
+          code: rpcString(4_096),
+          error: rpcString(512),
+        },
+      ),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const completion =
+      request.completion as McpAuthorizationCompletionRequestV1;
+    if (
+      completion.returnTarget !== "browser" &&
+      completion.returnTarget !== "desktop"
+    ) {
+      throw new Error("MCP authorization returnTarget is invalid");
+    }
+    return (await this.contributions()).mcp.completeAuthorization(
+      request.userId as string,
+      completion,
+    );
+  }
+
+  /** RFC 7009 revocation, then the local teardown. */
+  async revokeMcpAuthorization(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.contributions()).mcp.revokeAuthorization(
+      request.userId as string,
+      request.connectionId as string,
+    );
   }
 
   /**

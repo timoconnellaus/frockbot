@@ -13,7 +13,9 @@
     "./package.json": "./package.json",
     "./backend": "./src/backend.ts",
     "./records": "./src/records.ts",
-    "./lifecycle-tools": "./src/lifecycle-tools.ts"
+    "./lifecycle-tools": "./src/lifecycle-tools.ts",
+    "./oauth": "./src/oauth.ts",
+    "./oauth-records": "./src/oauth-records.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"

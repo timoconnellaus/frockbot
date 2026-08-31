@@ -105,13 +105,66 @@
             }
           }
         ]
+      },
+      {
+        "id": "mcp-remote-oauth",
+        "displayName": "MCP server (OAuth)",
+        "allowMultiple": true,
+        "authorization": {
+          "kind": "grant",
+          "driverId": "mcp-oauth"
+        },
+        "capabilities": ["mcp-tools"],
+        "settings": [
+          {
+            "id": "url",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Server URL",
+              "description": "The absolute https URL of the remote MCP endpoint.",
+              "minLength": 8,
+              "maxLength": 2048
+            }
+          },
+          {
+            "id": "transport",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Transport",
+              "description": "The MCP HTTP transport the server speaks. Absent means streamable-http.",
+              "enum": ["streamable-http", "sse"]
+            }
+          },
+          {
+            "id": "scope",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Scope",
+              "description": "The OAuth scopes to request. Absent asks the server's protected-resource metadata for its own default.",
+              "maxLength": 1024
+            }
+          },
+          {
+            "id": "client-id",
+            "schemaVersion": 1,
+            "schema": {
+              "type": "string",
+              "title": "Client ID",
+              "description": "A pre-registered public OAuth client id. Absent registers one dynamically (RFC 7591), which is what most MCP servers expect.",
+              "maxLength": 512
+            }
+          }
+        ]
       }
     ],
     "capabilities": [
       {
         "id": "mcp-tools",
         "kind": "tool",
-        "connectionTypes": ["mcp-remote", "mcp-remote-key"],
+        "connectionTypes": ["mcp-remote", "mcp-remote-key", "mcp-remote-oauth"],
         "admission": {
           "turnTypes": ["chat", "automation", "subagent", "channel"]
         }

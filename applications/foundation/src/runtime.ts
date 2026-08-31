@@ -56,10 +56,23 @@ import { Context, type Plugin } from "cordis";
 
 export interface BackendRouteContribution {
   packageId: string;
+  /**
+   * A route the gateway dispatches *before* it authenticates anyone.
+   *
+   * Exactly one Contribution needs it — the `mcp-oauth` callback, which an
+   * authorization server reaches by redirecting a browser that carries no
+   * FrockBot session. A `publicRoute` takes its identity from a signed
+   * artifact it verifies itself; it never reads one from the request.
+   */
+  publicRoute?(
+    request: Request,
+    url: URL,
+    context: { userId?: string; client?: "browser" | "desktop" },
+  ): Promise<Response | undefined>;
   route(
     request: Request,
     url: URL,
-    context: { userId?: string },
+    context: { userId?: string; client?: "browser" | "desktop" },
   ): Promise<Response | undefined>;
 }
 // pi-lens-ignore: ts:2307
