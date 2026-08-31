@@ -67,6 +67,8 @@ function hostFor(
       clock: () => AT,
     }),
     writer: WRITER,
+    // The Turn's clock, which the note fade's cutoff is derived from.
+    clock: () => AT,
   };
 }
 
@@ -210,6 +212,72 @@ describe("memory_forget", () => {
     if (written?.type !== "memory/written") throw new Error("unreachable");
     expect(written.action).toBe("forget");
     expect(written.path).toBe("by-agent/bot-1/log/2026-08.md");
+    await dispose();
+  });
+});
+
+describe("the note fade", () => {
+  test("drops a stale note from the prompt and records the fade beside the cutoff", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const host = hostFor("bot-1", files);
+    const writer = botWriter("bot-1");
+    const root = userMemoryRootV1(OWNER);
+    // Two notes, one either side of the 14-day cutoff, and one durable log
+    // fact that never fades. All three stay on disk.
+    await host.store.write({
+      root,
+      tier: "note",
+      fact: "[note] the standup moved to nine",
+      writer,
+      at: new Date("2026-08-30T10:00:00.000Z"),
+    });
+    await host.store.write({
+      root,
+      tier: "note",
+      fact: "[note] the standup moved to eight",
+      writer,
+      at: new Date("2026-08-01T10:00:00.000Z"),
+    });
+    await host.store.write({
+      root,
+      tier: "log",
+      fact: "Tim teaches on Tuesdays.",
+      writer,
+      at: new Date("2026-08-01T10:00:00.000Z"),
+    });
+
+    const { session, dispose } = await openSession();
+    const injection = await new MemoryProjection(host).refresh(4, session);
+
+    expect(injection.text).toContain("[note] the standup moved to nine");
+    expect(injection.text).not.toContain("moved to eight");
+    expect(injection.text).toContain("Tim teaches on Tuesdays.");
+
+    const injected = session.events.find(
+      (event) => event.type === "memory/injected",
+    );
+    if (injected?.type !== "memory/injected") throw new Error("unreachable");
+    // The cutoff is on the log, so the request reconstructs exactly.
+    expect(injected.noteTtlDays).toBe(14);
+    expect(injected.noteCutoff).toBe("2026-08-17");
+    expect(injected.faded).toEqual([
+      { scope: "user", projectId: "", count: 1 },
+    ]);
+    // A fade is not an omission.
+    expect(injected.omissions).toEqual([]);
+
+    // NO WRITES. The faded note is still on disk, in the same generation, and
+    // is still forgettable — the fade is a read-time filter and nothing else.
+    const tier = await host.store.read(root);
+    expect(tier.recent.map((entry) => entry.text)).toContain(
+      "[note] the standup moved to eight",
+    );
+    const forgotten = await host.store.forget({
+      root,
+      fact: "the standup moved to eight",
+      writer,
+    });
+    expect(forgotten.status).toBe("ok");
     await dispose();
   });
 });

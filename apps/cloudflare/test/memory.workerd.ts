@@ -27,6 +27,20 @@ function userMemoryRoot(userId: string): WorkspaceRootV1 {
   return { kind: "user-memory", userId };
 }
 
+function botMemoryRoot(identity: {
+  userId: string;
+  botId: string;
+}): WorkspaceRootV1 {
+  return { kind: "bot-memory", ...identity };
+}
+
+/** `YYYY-MM-DD`, `offset` days from now, in UTC — the Memory date grammar. */
+function day(offset: number): string {
+  return new Date(Date.now() + offset * 24 * 60 * 60 * 1_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
 const FACT = "Tim runs the gym build out of Wollongong.";
 
 describe("Memory in Workerd", () => {
@@ -227,5 +241,88 @@ describe("Memory in Workerd", () => {
         path: "by-agent/whoever/profile.md",
       }),
     ).resolves.toBeUndefined();
+  });
+
+  // Row 9's other half: the note tier "fades fast". The fade is a read-time
+  // filter and nothing else, so the strongest statement of that claim is that
+  // the note stops reaching the model while the file it lives in does not
+  // move — no sweep, no alarm, no generation minted behind the Turn's back.
+  test("a note past the 14-day fade leaves the prompt while its file stays exactly where it was", async () => {
+    const suffix = crypto.randomUUID();
+    const userId = `memory-user-${suffix}`;
+    const identity = { userId, botId: `memory-bot-e-${suffix}` };
+    await provisionBot(identity);
+    const stub = bot(`memory-e-${suffix}`);
+    const root = botMemoryRoot(identity);
+
+    const LIVE = "The standup moved to nine.";
+    const STALE = "The standup moved to eight.";
+    const DURABLE = "Tim teaches on Tuesdays.";
+    // Two notes either side of the cutoff and one ordinary log fact, in the
+    // Bot's own shard, written as the bytes a Bot would have left there.
+    const path = `log/${day(0).slice(0, 7)}.md`;
+    const written = await stub.memoryWriteWorkspaceFile({
+      ...identity,
+      root,
+      path,
+      text: [
+        `- (${day(0)}) [note] ${LIVE}`,
+        `- (${day(-30)}) [note] ${STALE}`,
+        `- (${day(-30)}) ${DURABLE}`,
+        "",
+      ].join("\n"),
+      writer: {
+        kind: "bot" as const,
+        botId: identity.botId,
+        sessionId: `${userId}:${identity.botId}`,
+        turnId: "t",
+        runId: "r",
+      },
+      expectedGenerationId: null,
+    });
+    expect(written.status).toBe("ok");
+
+    const result = await stub.run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: "run-1",
+        sessionId: `${userId}:${identity.botId}`,
+        acceptedAt: "2026-08-31T00:00:00.000Z",
+        text: "What do you know about me?",
+      },
+    });
+    expect(result.text).toBe("Ollama reply");
+
+    const events = await stub.durableSessionEvents();
+    const request = events.find((event) => event.type === "model/request");
+    if (request?.type !== "model/request") throw new Error("unreachable");
+    expect(request.request.system).toContain(LIVE);
+    expect(request.request.system).not.toContain(STALE);
+    // An unmarked log fact of the same age is untouched: only markers fade.
+    expect(request.request.system).toContain(DURABLE);
+
+    const injected = events.find((event) => event.type === "memory/injected");
+    if (injected?.type !== "memory/injected") throw new Error("unreachable");
+    // The cutoff is on the durable log, so this request reconstructs exactly.
+    expect(injected.noteTtlDays).toBe(14);
+    expect(injected.noteCutoff).toBe(day(-14));
+    expect(injected.faded).toContainEqual({
+      scope: "bot",
+      projectId: "",
+      count: 1,
+    });
+    // A fade is policy working, never an omission.
+    expect(injected.omissions).toEqual([]);
+
+    // AND THE FILE DID NOT MOVE. Same generation, same bytes, note included.
+    const after = await stub.memoryReadWorkspaceFile({
+      ...identity,
+      root,
+      path,
+    });
+    expect(after.status).toBe("ok");
+    expect(after.generationId).toBe(written.generationId);
+    expect(after.text).toContain(STALE);
   });
 });

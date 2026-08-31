@@ -428,6 +428,25 @@ export interface SessionEventMap {
       text: string;
     }>;
     omissions: Array<{ scope: MemoryScopeNameV1; reason: string }>;
+    /**
+     * Marked facts (`[note] `/`[episode] `) the note fade dropped before the
+     * caps were applied, per scope. Deliberately distinct from `omissions`: an
+     * omission is a gap to repair, a fade is the note tier working.
+     */
+    faded?: Array<{
+      scope: MemoryScopeNameV1;
+      projectId: string;
+      count: number;
+    }>;
+    /**
+     * `YYYY-MM-DD`: the oldest day a marked fact was still injected on, and
+     * the TTL it was derived from. Recorded because the fade is read-time, so
+     * the model request only reconstructs exactly if the day it used is on the
+     * log. Absent on an event written before the fade existed, which is the
+     * honest reading: no fade was applied.
+     */
+    noteCutoff?: string;
+    noteTtlDays?: number;
   };
   /** The Bot recorded the intent to change Memory, before the write ran. */
   "memory/write-intent": {
@@ -1198,7 +1217,17 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
     case "memory/injected": {
       requireEventKeys(
         event,
-        keys("turn", "sources", "facts", "omissions"),
+        keys(
+          "turn",
+          "sources",
+          "facts",
+          "omissions",
+          // The fade's bookkeeping arrived after the event did, so a session
+          // logged before it still decodes: absent means no fade ran.
+          ...(Object.hasOwn(event, "faded") ? ["faded"] : []),
+          ...(Object.hasOwn(event, "noteCutoff") ? ["noteCutoff"] : []),
+          ...(Object.hasOwn(event, "noteTtlDays") ? ["noteTtlDays"] : []),
+        ),
         "session event",
       );
       turn();
@@ -1249,6 +1278,25 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         memoryScope(entry.scope, `${label}.scope`);
         eventString(entry.reason, `${label}.reason`);
       });
+      if (Object.hasOwn(event, "faded")) {
+        if (!Array.isArray(event.faded)) {
+          throw new Error("session event faded must be an array");
+        }
+        event.faded.forEach((fade, index) => {
+          const label = `session event.faded[${index}]`;
+          const entry = eventRecord(fade, label);
+          requireEventKeys(entry, ["scope", "projectId", "count"], label);
+          memoryScope(entry.scope, `${label}.scope`);
+          eventString(entry.projectId, `${label}.projectId`, true);
+          eventInteger(entry.count, `${label}.count`, 1);
+        });
+      }
+      if (Object.hasOwn(event, "noteCutoff")) {
+        eventString(event.noteCutoff, "session event.noteCutoff");
+      }
+      if (Object.hasOwn(event, "noteTtlDays")) {
+        eventInteger(event.noteTtlDays, "session event.noteTtlDays", 1);
+      }
       break;
     }
     case "memory/write-intent":

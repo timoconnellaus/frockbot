@@ -53,7 +53,9 @@ export type {
   MemoryProjectsOutcomeV1,
   MemoryProjectV1,
 } from "./projects.js";
+import { memoryDayV1, renderMemoryMarkerV1 } from "./facts.js";
 import {
+  MEMORY_NOTE_TTL_DAYS,
   renderMemoryInjectionV1,
   type MemoryInjectionV1,
   type MemoryProjectTierV1,
@@ -99,6 +101,13 @@ export interface MemoryRuntimeHostV1 {
   embed?: EmbedMemory;
   ai?: MemoryAiBinding;
   embeddingModel?: string;
+  /**
+   * The Turn's clock, for the note-fade cutoff only. Defaults to the wall
+   * clock; injected by tests so a fade can be driven without waiting a
+   * fortnight. Nothing else in this Package reads it — `MemoryStore` keeps its
+   * own, because a write's date is decided where the write happens.
+   */
+  clock?: () => Date;
 }
 
 export async function sha256HexV1(text: string): Promise<string> {
@@ -149,7 +158,12 @@ export function openMemoryTurnPositionV1(
  */
 export class MemoryProjection {
   #host: MemoryRuntimeHostV1;
-  #injection: MemoryInjectionV1 = { text: "", facts: [], omissions: [] };
+  #injection: MemoryInjectionV1 = {
+    text: "",
+    facts: [],
+    omissions: [],
+    faded: [],
+  };
   #index: MemoryIndexV1 = emptyMemoryIndexV1();
   #turn: number | undefined;
 
@@ -217,12 +231,21 @@ export class MemoryProjection {
         tier: await store.read(projectMemoryRootV1(owner, project.projectId)),
       });
     }
+    // The fade's cutoff is computed once, here, and recorded below. A render
+    // that decided "today" for itself would not replay: "The durable session
+    // event log reconstructs … every exact normalized model request, given the
+    // Composition generation and Memory generations it records."
+    const now = this.#host.clock?.() ?? new Date();
+    const noteCutoff = memoryDayV1(
+      new Date(now.getTime() - MEMORY_NOTE_TTL_DAYS * 24 * 60 * 60 * 1_000),
+    );
     this.#injection = renderMemoryInjectionV1({
       botId: owner.botId,
       own: ownTier,
       user: userTier,
       projects: projectTiers,
       joined: projects,
+      noteCutoff,
     });
     if (unavailable) {
       this.#injection.omissions.push({ scope: "project", reason: unavailable });
@@ -260,6 +283,9 @@ export class MemoryProjection {
       })),
       facts: this.#injection.facts,
       omissions: this.#injection.omissions,
+      faded: this.#injection.faded,
+      noteCutoff,
+      noteTtlDays: MEMORY_NOTE_TTL_DAYS,
     });
     await session.flush();
 
@@ -313,7 +339,7 @@ export class MemoryProjection {
 
   /** Drops the projection, so the next Turn reloads it rather than reusing it. */
   invalidate(): void {
-    this.#injection = { text: "", facts: [], omissions: [] };
+    this.#injection = { text: "", facts: [], omissions: [], faded: [] };
     this.#index = emptyMemoryIndexV1();
     this.#turn = undefined;
   }
@@ -527,8 +553,13 @@ export function createMemoryWriteTool(
         decoded.project,
       );
       if (unjoined) return refusal(`memory_write was refused: ${unjoined}`);
-      const text =
-        decoded.tier === "note" ? `[note] ${decoded.fact}` : decoded.fact;
+      // One vocabulary: the `note` tier writes the `[note] ` marker through
+      // the same renderer the parser is the inverse of, so the tier enum and
+      // the on-disk prefix can never drift apart.
+      const text = renderMemoryMarkerV1(
+        decoded.tier === "note" ? "note" : undefined,
+        decoded.fact,
+      );
       const contentHash = await sha256HexV1(text);
       const effectId = `memory:write:${decoded.scope}:${decoded.project ?? ""}:${decoded.tier}:${contentHash}`;
       const position = openMemoryTurnPositionV1(session);
