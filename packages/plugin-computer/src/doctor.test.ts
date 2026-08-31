@@ -22,13 +22,20 @@ import { createComputerAgentPlugin } from "./agent.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
 
 const REPORT: ComputerDoctorReportV1 = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   generation: 3,
   capturedAt: "2026-09-01T00:00:00.000Z",
   checks: [
     { name: "disk-root", status: "pass", detail: "12% full, 90 GiB free" },
     { name: "dns", status: "fail", detail: "api.fly.io does not resolve" },
   ],
+  // Parity row 34b: what the browser announced itself as, filed with the rest
+  // of the report so the measurement is readable while the Computer sleeps.
+  browserIdentity: {
+    userAgent: "Mozilla/5.0 … Chrome/141.0.0.0 Safari/537.36",
+    webdriver: false,
+    brands: ["Chromium/141"],
+  },
   summary: "2 checks, 1 passed, 1 failed",
 };
 
@@ -130,7 +137,7 @@ describe("computer_doctor", () => {
     expect(result.isError).toBe(false);
     const answer = JSON.parse(result.content) as Record<string, unknown>;
     expect(answer).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       generation: 3,
       summary: "2 checks, 1 passed, 1 failed",
       rootId: "doctor",

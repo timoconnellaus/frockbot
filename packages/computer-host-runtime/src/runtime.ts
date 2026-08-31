@@ -525,6 +525,19 @@ const browser = await chromium.connectOverCDP(\`http://127.0.0.1:\${port}\`);
 const context = browser.contexts()[0];
 const pages = context.pages();
 const page = pages.at(-1) ?? await context.newPage();
+// box-doctor's browser-identity measurement (parity row 34b). It answers
+// before any navigation and before the snapshot, so the check reads what the
+// browser presents without moving the page a human or a Bot left open.
+if (action.action === "identity") {
+  const identity = await page.evaluate(() => ({
+    userAgent: navigator.userAgent,
+    webdriver: navigator.webdriver === true,
+    brands: (navigator.userAgentData?.brands ?? []).map((brand) => \`\${brand.brand}/\${brand.version}\`),
+  }));
+  console.log(JSON.stringify(identity));
+  await browser.close();
+  process.exit(0);
+}
 if (action.action === "navigate") await page.goto(action.url, { waitUntil: "domcontentloaded" });
 if (action.action === "click") await page.getByRole(action.role, { name: action.name, exact: action.exact ?? false }).click();
 if (action.action === "fill") await page.getByLabel(action.label, { exact: action.exact ?? false }).fill(action.text);
@@ -568,8 +581,24 @@ export const DOCTOR_SCRIPT = `${RUNTIME_ROOT}/box-doctor.sh`;
 export const DOCTOR_LOG = "/tmp/box-doctor.log";
 /** Prefixes the one line of the run that is the machine-readable report. */
 export const DOCTOR_MARKER = "__FROCKBOT_DOCTOR__";
-/** The report schema box-doctor prints. Bumped, never migrated. */
-export const DOCTOR_REPORT_SCHEMA_VERSION = 1;
+/**
+ * The report schema box-doctor prints. Bumped, never migrated.
+ *
+ * 2 adds `browserIdentity` (parity row 34b). A Computer provisioned before
+ * this bump prints 1, which the decoder refuses — deliberately: the script is
+ * reinstalled on the next open, and a half-read report is worse than a
+ * Computer that says it has nothing to say yet.
+ */
+export const DOCTOR_REPORT_SCHEMA_VERSION = 2;
+
+/**
+ * What box-doctor asks the browser, base64url as `browser.mjs` takes it.
+ *
+ * A literal rather than an encode at module load: this module builds shell
+ * documents in a Worker, where `Buffer` is not a given, and the encoding is
+ * asserted against the decode in `runtime.test.ts`.
+ */
+export const DOCTOR_BROWSER_IDENTITY_ACTION = "eyJhY3Rpb24iOiJpZGVudGl0eSJ9";
 /** Log lines kept in `/tmp/box-doctor.log` before the oldest are dropped. */
 export const DOCTOR_LOG_MAX_LINES = 500;
 /**
@@ -999,6 +1028,42 @@ if [ -d "$PROFILE" ] && [ -w "$PROFILE" ]; then
 else
   record browser-profile fail "the shared browser profile at $PROFILE is missing or not writable"
 fi
+# What the browser announces itself as (parity row 34b).
+#
+# Measured, not governed: the register declines UA pinning and per-site
+# fingerprint profiles, and keeps this, because "does our browser announce
+# itself as a robot" was an assumption nobody had checked and it costs one
+# CDP round trip to make it a recorded fact. A FAIL means a tell was found —
+# a HeadlessChrome token or navigator.webdriver — and the fix is one entry in
+# the flag list the launcher already holds.
+#
+# A browser that is not running is not a failure. There is nothing to ask, so
+# the check passes and the report carries no measurement, which is a
+# different fact from a browser that presented no tells.
+IDENTITY=null
+if [ ! -x ${CHROMIUM_PATH} ]; then
+  record browser-identity fail "no browser at ${CHROMIUM_PATH}, so nothing could be asked what it announces itself as"
+elif [ -z "$SLOT" ] || ! (exec 3<>/dev/tcp/127.0.0.1/$((9222 + SLOT))) 2>/dev/null; then
+  record browser-identity pass "no browser answers CDP for this report, so nothing was asked what it announces itself as"
+else
+  MEASURED=$(timeout 15 node ${RUNTIME_ROOT}/browser.mjs $((9222 + SLOT)) ${DOCTOR_BROWSER_IDENTITY_ACTION} 2>/dev/null | tail -n 1)
+  case "$MEASURED" in (*'"userAgent"'*) ;; (*) MEASURED="";; esac
+  if [ -z "$MEASURED" ]; then
+    record browser-identity fail "a browser answers CDP on $((9222 + SLOT)) but did not say what it presents"
+  else
+    IDENTITY="$MEASURED"
+    UA=$(printf '%s' "$MEASURED" | sed -n 's/.*"userAgent":"\\([^"]*\\)".*/\\1/p')
+    BRANDS=$(printf '%s' "$MEASURED" | sed -n 's/.*"brands":\\[\\(.*\\)\\].*/\\1/p')
+    TELLS=""
+    case "$UA" in (*HeadlessChrome*) TELLS="a HeadlessChrome token in its user agent";; esac
+    case "$MEASURED" in (*'"webdriver":true'*) TELLS="\${TELLS:+$TELLS and }navigator.webdriver true";; esac
+    if [ -n "$TELLS" ]; then
+      record browser-identity fail "the browser presents $TELLS; user agent $UA, brands [$BRANDS]"
+    else
+      record browser-identity pass "the browser presents no automation tell; user agent $UA, brands [$BRANDS]"
+    fi
+  fi
+fi
 SIGNAL=${RUNTIME_ROOT}/sync/signal
 CONFLICTS=$(find ${DATA_ROOT} -path '*/.frockbot-sync/conflicts/*' -type f 2>/dev/null | wc -l | tr -d ' ')
 if [ ! -f "$SIGNAL" ]; then
@@ -1046,7 +1111,7 @@ else
 fi
 SUMMARY="$((PASSED + FAILED)) checks, $PASSED passed, $FAILED failed"
 printf '[box-doctor] SUMMARY %s\\n' "$SUMMARY" >> "$LOG" 2>/dev/null || true
-printf '${DOCTOR_MARKER}{"schemaVersion":${DOCTOR_REPORT_SCHEMA_VERSION},"generation":%s,"capturedAt":"%s","checks":[%s],"summary":"%s"}\\n' "$GENERATION" "$CAPTURED_AT" "$CHECKS" "$SUMMARY"
+printf '${DOCTOR_MARKER}{"schemaVersion":${DOCTOR_REPORT_SCHEMA_VERSION},"generation":%s,"capturedAt":"%s","checks":[%s],"browserIdentity":%s,"summary":"%s"}\\n' "$GENERATION" "$CAPTURED_AT" "$CHECKS" "$IDENTITY" "$SUMMARY"
 `;
 
 /**

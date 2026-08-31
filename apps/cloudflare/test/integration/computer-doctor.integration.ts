@@ -41,7 +41,7 @@ interface ClientTurn {
 
 function reportLine(): string {
   return `${DOCTOR_MARKER}${JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     generation: 1,
     capturedAt: "2026-09-01T00:00:00Z",
     checks: [
@@ -49,6 +49,11 @@ function reportLine(): string {
       { name: "scratch", status: "pass", detail: "/workspace holds 0 MiB" },
       { name: "dns", status: "fail", detail: "api.fly.io does not resolve" },
     ],
+    browserIdentity: {
+      userAgent: "Mozilla/5.0 Chrome/141.0.0.0 Safari/537.36",
+      webdriver: false,
+      brands: ["Chromium/141"],
+    },
     summary: "3 checks, 2 passed, 1 failed",
   })}\n`;
 }
@@ -107,8 +112,13 @@ describe("a Turn whose model asks the Computer how it is", () => {
       rootId?: string;
       path?: string;
       checks: { name: string; status: string; detail: string }[];
+      browserIdentity?: {
+        userAgent: string;
+        webdriver: boolean;
+        brands: string[];
+      };
     };
-    expect(report.schemaVersion).toBe(1);
+    expect(report.schemaVersion).toBe(2);
     expect(report.summary).toBe("3 checks, 2 passed, 1 failed");
     expect(report.checks.map((check) => check.name)).toEqual([
       "disk-root",
@@ -118,6 +128,14 @@ describe("a Turn whose model asks the Computer how it is", () => {
     expect(
       report.checks.filter((check) => check.status === "fail"),
     ).toHaveLength(1);
+    // Parity row 34b: the browser measurement reaches the model with the rest
+    // of the report, so what our browser announces itself as is readable
+    // without a second call.
+    expect(report.browserIdentity).toEqual({
+      userAgent: "Mozilla/5.0 Chrome/141.0.0.0 Safari/537.36",
+      webdriver: false,
+      brands: ["Chromium/141"],
+    });
     // Filed through the Workspace, which is what records the Bot as its
     // writer; a report left on the Computer would sync back `unattributed`.
     expect(report.rootId).toBe("doctor");

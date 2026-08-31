@@ -41,6 +41,7 @@ import {
   computerSpriteNameV1,
   DOCTOR_LOG,
   DOCTOR_MARKER,
+  DOCTOR_REPORT_SCHEMA_VERSION,
   DOCTOR_SCRIPT,
   PROVISION_PHASES,
   REFERENCE_DOCS_VERSION,
@@ -532,10 +533,16 @@ try {
     schemaVersion: number;
     generation: number;
     checks: { name: string; status: string; detail: string }[];
+    browserIdentity: {
+      userAgent: string;
+      webdriver: boolean;
+      brands: string[];
+    } | null;
     summary: string;
   };
   check(
-    doctorReport.schemaVersion === 1 && doctorReport.checks.length >= 10,
+    doctorReport.schemaVersion === DOCTOR_REPORT_SCHEMA_VERSION &&
+      doctorReport.checks.length >= 10,
     `its report carries ${doctorReport.checks.length} checks: ${doctorReport.summary}`,
   );
   const doctorFailures = doctorReport.checks.filter(
@@ -548,6 +555,17 @@ try {
       : `checks failed: ${doctorFailures
           .map((entry) => `${entry.name} (${entry.detail})`)
           .join("; ")}`,
+  );
+  // Parity row 34b, and the only place the measurement can actually be taken:
+  // what a real Sprite's browser announces itself as. This is the decision
+  // input for whether `--user-agent` is ever added to the launcher's flag
+  // list, so it is printed whether or not anything was running to ask.
+  check(
+    doctorReport.browserIdentity === null ||
+      typeof doctorReport.browserIdentity.userAgent === "string",
+    doctorReport.browserIdentity
+      ? `the browser presents "${doctorReport.browserIdentity.userAgent}" (navigator.webdriver ${String(doctorReport.browserIdentity.webdriver)}; brands ${doctorReport.browserIdentity.brands.join(", ") || "none"})`
+      : "no browser was answering CDP, so no identity was measured on this run",
   );
   // The log a human reads, in GrokBot's own format and at GrokBot's own path.
   const doctorLog = Buffer.from(

@@ -18,7 +18,7 @@ import { FLY_WORKSPACE_LAYOUT } from "./provider.ts";
 
 function report(generation: number): string {
   return `${DOCTOR_MARKER}${JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     generation,
     capturedAt: "2026-09-01T00:00:00Z",
     checks: [

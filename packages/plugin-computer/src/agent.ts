@@ -1027,7 +1027,7 @@ export function createComputerAgentPlugin(
       idempotent: true,
       admission: { turnTypes: ["chat", "automation", "subagent", "channel"] },
       description:
-        "Run the Computer's self-check and read the report: disk, the shared scratch, the desktop gateway, your display, the browser profile, the durable-root sync and its conflicts, the reference docs, the browser launcher, the clock, and DNS. Read-only; it changes nothing and repairs nothing.",
+        "Run the Computer's self-check and read the report: disk, the shared scratch, the desktop gateway, your display, the browser profile and what the browser announces itself as, the durable-root sync and its conflicts, the reference docs, the browser launcher, the clock, and DNS. Read-only; it changes nothing and repairs nothing.",
       inputSchema: {
         type: "object",
         properties: {},

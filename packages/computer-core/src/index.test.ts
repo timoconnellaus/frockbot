@@ -263,21 +263,45 @@ describe("ComputerRegistry", () => {
 // something else is a Computer that answered something else.
 describe("the self-check report", () => {
   const report = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generation: 3,
     capturedAt: "2026-09-01T00:00:00Z",
     checks: [{ name: "disk-root", status: "pass", detail: "12% full" }],
+    browserIdentity: null,
     summary: "1 checks, 1 passed, 0 failed",
   };
 
   test("decodes a report the Computer printed", () => {
     expect(decodeComputerDoctorReportV1(report)).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       generation: 3,
       capturedAt: "2026-09-01T00:00:00Z",
       checks: [{ name: "disk-root", status: "pass", detail: "12% full" }],
       summary: "1 checks, 1 passed, 0 failed",
     });
+  });
+
+  // Parity row 34b. The measurement is optional because a Computer with no
+  // browser running has nothing to measure, and `null` says that rather than
+  // pretending to an empty user agent.
+  test("keeps the browser measurement when the Computer made one", () => {
+    expect(
+      decodeComputerDoctorReportV1({
+        ...report,
+        browserIdentity: {
+          userAgent: "Mozilla/5.0 … Chrome/141.0.0.0 Safari/537.36",
+          webdriver: false,
+          brands: ["Chromium/141", "Not?A_Brand/24"],
+        },
+      })?.browserIdentity,
+    ).toEqual({
+      userAgent: "Mozilla/5.0 … Chrome/141.0.0.0 Safari/537.36",
+      webdriver: false,
+      brands: ["Chromium/141", "Not?A_Brand/24"],
+    });
+    expect(
+      decodeComputerDoctorReportV1({ ...report, browserIdentity: undefined }),
+    ).not.toHaveProperty("browserIdentity");
   });
 
   test("keeps a failing check as a report, not as a decode failure", () => {
@@ -295,7 +319,26 @@ describe("the self-check report", () => {
       undefined,
       null,
       "{}",
-      { ...report, schemaVersion: 2 },
+      { ...report, schemaVersion: 1 },
+      { ...report, schemaVersion: 3 },
+      { ...report, browserIdentity: "chrome" },
+      { ...report, browserIdentity: { webdriver: false, brands: [] } },
+      {
+        ...report,
+        browserIdentity: { userAgent: "", webdriver: false, brands: [] },
+      },
+      {
+        ...report,
+        browserIdentity: { userAgent: "Chrome", webdriver: "no", brands: [] },
+      },
+      {
+        ...report,
+        browserIdentity: { userAgent: "Chrome", webdriver: false, brands: "x" },
+      },
+      {
+        ...report,
+        browserIdentity: { userAgent: "Chrome", webdriver: false, brands: [7] },
+      },
       { ...report, generation: "3" },
       { ...report, capturedAt: "" },
       { ...report, summary: 12 },
