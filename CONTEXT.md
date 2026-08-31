@@ -149,5 +149,9 @@ Where a firing's outcome lands for the User, because an automation Turn cannot s
 _Avoid_: Notification list, activity feed
 
 **Pending input**:
-A durable input the Bot's next conversational Turn is owed — a Routine hand-off today, a decided approval later. Drained once, idempotently, and never delivered as something the User said.
+A durable input the Bot's next conversational Turn is owed — a Routine hand-off or a decided approval. Drained once, idempotently, and never delivered as something the User said.
 _Avoid_: Queued message, pending wake
+
+**Approval**:
+A durable pending decision the User answers: what the Bot proposes to do, its risk, and a deadline past which it expires. Recorded once — a replayed answer reads back the decision already stored — and never a grant of authority the Bot did not already hold.
+_Avoid_: Permission, consent prompt, confirmation
