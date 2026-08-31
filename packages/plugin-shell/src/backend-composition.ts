@@ -35,7 +35,6 @@ import {
   type PersistSessionEvents,
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 
 /** The bootstrap generation for a compiled first-party application. */
 export function bootstrapCompositionGeneration(
@@ -85,7 +84,6 @@ export interface ShellCompositionMountOptions {
   botId: string;
   sessionId: string;
   sessionEvents: readonly SessionEvent[];
-  memory?: MemoryPluginConfig;
   persistSessionEvents?: PersistSessionEvents;
   agentPackages?: readonly FoundationAgentPackage[];
   modelSelection?: RuntimeModelSelection;
@@ -132,7 +130,6 @@ export function createShellCompositionHost(
           generationId: generation.generationId,
           artifactSetHash: generation.artifactSetHash,
         },
-        memory: options.memory,
         persistSessionEvents: options.persistSessionEvents,
         agentPackages: options.agentPackages,
         modelSelection: options.modelSelection,

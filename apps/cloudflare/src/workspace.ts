@@ -15,7 +15,10 @@
 // implementation types remain inside their adapters", so `@frockbot/workspace-
 // store` sees only the structural `ObjectBucketV1` this file supplies.
 import { DurableWorkspaceGenerations } from "@frockbot/kernel-do";
-import type { WorkspaceFilesV1 } from "@frockbot/kernel-contracts";
+import type {
+  WorkspaceFilesV1,
+  WorkspaceGenerationsV1,
+} from "@frockbot/kernel-contracts";
 import {
   createObjectWorkspaceFilesV1,
   type ObjectBucketV1,
@@ -102,13 +105,30 @@ export interface WorkspaceStoreEnv {
 export function createDurableWorkspaceFilesV1(
   state: DurableObjectState,
   env: WorkspaceStoreEnv,
-  options: { surface?: WorkspaceStoreSurfaceV1 } = {},
+  options: {
+    surface?: WorkspaceStoreSurfaceV1;
+    /**
+     * The User whose durable roots this store serves. Passed as soon as the
+     * Durable Object knows it — a Bot object learns its User on the RPC that
+     * addresses it — so a root belonging to another User is refused at the
+     * store rather than reaching object storage.
+     */
+    owner?: { userId: string };
+    /**
+     * The generation ledger, when it is not simply this object's own. Shared
+     * Memory roots record in the User Durable Object (`AGENTS.md`
+     * § Authorities), so the Memory surface is built with a routed ledger.
+     */
+    generations?: WorkspaceGenerationsV1;
+  } = {},
 ): WorkspaceFilesV1 | undefined {
   const bucket = env.MEMORY_FILES;
   if (!bucket) return undefined;
   return createObjectWorkspaceFilesV1({
     bucket: createR2ObjectBucketV1(bucket),
-    generations: new DurableWorkspaceGenerations({ state }),
+    generations:
+      options.generations ?? new DurableWorkspaceGenerations({ state }),
+    ...(options.owner ? { owner: options.owner } : {}),
     ...(options.surface ? { surface: options.surface } : {}),
   });
 }

@@ -95,3 +95,26 @@ export async function provisionBot(identity: {
     },
   });
 }
+
+/**
+ * A second Bot for a User whose Packages, Connection and default model
+ * `provisionBot` already set up. Only `bot/create` is left, and the Flock's
+ * revision has moved on by one Bot.
+ */
+export async function provisionSiblingBot(
+  identity: { userId: string; botId: string },
+  expectedRevision: number,
+): Promise<void> {
+  await user(identity.userId).createBot({
+    schemaVersion: 1,
+    userId: identity.userId,
+    command: {
+      schemaVersion: 1,
+      type: "bot/create",
+      commandId: `create-${identity.botId}`,
+      expectedRevision,
+      botId: identity.botId,
+      name: "Workerd Sibling",
+    },
+  });
+}

@@ -2,10 +2,11 @@
 
 ## Status
 
-steps 0, 1, and 2 landed (the shared Workspace contract; one Computer per
-User; the Skills loader), and step 3a landed (the object-storage Workspace
-store, which also mounts the Skills loader in production); the rest of step 3
-not started
+steps 0, 1, 2, 3a and 3 landed (the shared Workspace contract; one Computer
+per User; the Skills loader; the object-storage Workspace store; the Memory
+Package). What remains of slice 2 is the Computer-side durable-root sync of
+ADR 0013 — the FUSE half — which is the other half of the ADR and a sibling
+step.
 
 ## Resolved decisions
 
@@ -319,6 +320,88 @@ only the Bot object's ledger is wired today. Nothing writes a shared root in
 production yet, so nothing is wrong at runtime — the Memory step closes it by
 routing shared roots to the User object through the same interface. It is in
 the **Open** list of `docs/architecture-checks.md`.
+
+### Landed
+
+`packages/plugin-memory` is a first-party Package with one runtime
+Contribution, mounted like Skills: only for a Turn whose Memory roots the host
+can reach. The old Package — `agent`/`global` scopes, an R2 bucket of its own,
+a Vectorize index, `workspace-storage.ts` over the Computer's `memoryWriter`
+seam — is deleted, not kept alongside.
+
+- **Storage.** Every read and write goes through `WorkspaceFilesV1` from
+  `@frockbot/workspace-store` with `surface: "memory"`, to the three Memory
+  roots. Bot Memory root: `profile.md` + `log/YYYY-MM.md`. User and Project
+  roots: the writing Bot's shard `by-agent/<botId>/{profile.md,log/…}` through
+  `memoryShardPathV1`, never another Bot's. Every write carries Bot (or, for
+  the Project descriptor, User) provenance and produces a generation.
+- **Ledger ownership.** `apps/cloudflare/src/memory.ts` routes a _shared_ root
+  — `user-memory`, `project-memory` — to the **User** Durable Object over RPC
+  (`createUserWorkspaceGenerationsV1`), and everything else to the Bot's own
+  ledger. `WorkspaceGenerationsV1.mint` gained a `root` parameter so the ids
+  that order a shared root's generations are minted by the authority that
+  holds them; without it two Bots would mint from two counters and
+  "newest wins" would have no answer. The production store is now constructed
+  with the `owner` guard, in `BotState.bindSurfaces`, which is the first point
+  a Bot Durable Object knows which User it serves.
+- **Tools.** `memory_write({scope, project?, tier, fact})`,
+  `memory_forget({scope, project?, fact})`, `memory_search`,
+  `memory_rebuild_index`, and `project_create` / `project_join` /
+  `project_leave`. Each mutation records `memory/write-intent` (or
+  `memory/project-intent`) with an effect identifier before the effect and
+  `memory/written` / `memory/project-changed` after it, mirroring
+  `plugin-skills`. Project membership is durable state in the **User** Durable
+  Object (`memory:projects` catalogue plus a joined list per Bot); the Project
+  descriptor is `projects/<slug>/project.md` in the Project's Memory root,
+  written with User provenance because it sits outside every `by-agent/` shard
+  and `writerOwnsMemoryPathV1` allows no Bot writer there — which is right:
+  creating a Project is a User-scoped act.
+- **Forgetting.** A fact this Bot recorded is removed from its own file. A
+  shared fact another Bot recorded is never edited: a `[forgotten] <fact>`
+  retraction goes into this Bot's own log, and newest-wins suppresses the fact
+  at read time in every Bot's view.
+- **Injection.** One block per Turn, user → project → own, labelled paragraphs
+  rather than headings, `- (learned YYYY-MM-DD) [via <bot>] <fact>` lines with
+  `[via …]` omitted on own facts. Precedence own > project > user is applied
+  before rendering, so a fact the Bot holds itself appears once. GrokBot's caps
+  exactly: own recall(30) / 4000 chars / 500 per fact; user 50/15 + 4000/2000;
+  project at most 3 joined, 25/10 + 2500/1500. `memory/injected` records every
+  file generation read, every fact injected, and every omission.
+- **Compaction-epoch freeze: deliberately not implemented.** GrokBot's
+  `resolveFrozenMemoryPrompt` reuses the rendered block for as long as
+  `compactionEpoch` holds, and that freeze is its own best explanation for the
+  divergence we observed (§3.6): own profile facts on disk while the injected
+  block said "No facts recorded yet". Rendering fresh each Turn costs one
+  listing; the constitutional requirement is that what was injected is
+  _recorded_, which `memory/injected` satisfies, not that it is cached. Parity
+  register row 13c is therefore a deliberate divergence, not a gap.
+- **Indexes.** `chunker` is unchanged; `indexer` and `searcher` are rebuilt
+  over the files. `buildMemoryIndexV1(documents)` and
+  `updateMemoryIndexV1(previous, documents)` must answer the same index for
+  the same documents, and a test proves it; `memory_rebuild_index` throws the
+  derived half away. Embeddings and a vector index are optional bindings —
+  Memory is complete without them and searches lexically.
+- **Package policy: no secrets.** `packages/plugin-memory/src/secrets.ts`
+  refuses a fact matching a bounded list of obvious credential shapes: PEM
+  blocks, `sk-…`, GitHub and Slack tokens, AWS access key ids, bearer tokens,
+  JWTs, and `api_key`/`password`/`secret` assignments. It is deliberately
+  shallow and says so: the rule it enforces is "do not write the API key into
+  Memory", not "prove this string holds no entropy". The refusal is a value the
+  tool reports, never a throw and never a silent redaction.
+- **Electron.** `apps/agent-runtime` no longer mounts Memory. It used to, over
+  the Computer's `memoryWriter` seam, which meant the Computer had to be awake
+  for a Bot to read its own Memory. The hosted backend is the production path
+  and supplies the Durable Object binding; the Electron utility runtime is a
+  platform shell with no such binding, so it mounts no Memory Package rather
+  than reaching a second store.
+
+**Left for the Computer-side sync (a sibling step).** `ComputerWorkspace.
+memoryWriter` still exists in `packages/computer-core` and
+`packages/plugin-fly-sprite`; nothing calls it. ADR 0013 stays **proposed**,
+because "conflicting Workspace and object-storage writes to any other durable
+root both survive as generations and are surfaced" is proven on the
+object-storage side only — the FUSE half has to exist before the ADR's claim
+is whole.
 
 ### Parity facts
 

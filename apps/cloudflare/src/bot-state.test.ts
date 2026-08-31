@@ -234,7 +234,15 @@ describe("BotState Ollama execution", () => {
       CREDENTIAL_KEYRING: credentialKeyring,
       USER_CONFIGURATIONS: {
         idFromName: () => "user-configuration-id",
-        get: () => rpc,
+        get: () => ({
+          ...rpc,
+          // The Memory half of the User Durable Object: the shared-root
+          // generation ledger and Project membership. This Bot writes no
+          // shared root in the test, so only the read paths are exercised.
+          listMemoryProjects: () => Promise.resolve([]),
+          currentWorkspaceGeneration: () => Promise.resolve(undefined),
+          listWorkspaceConflicts: () => Promise.resolve([]),
+        }),
       },
       MEMORY_FILES: memoryFiles(),
       MEMORY_INDEX: memoryIndex(),

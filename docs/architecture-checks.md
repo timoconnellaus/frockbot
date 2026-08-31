@@ -95,6 +95,33 @@ Durable Object (`packages/kernel-do/src/workspace-generations.ts`), and the
 | — its runtime half: a Bot writes only its own shard, and a listing with no shard merges every Bot's                     | `packages/workspace-store/src/store.test.ts`           | `shared Memory tiers are sharded per writing Bot` (5 tests)                               | Bun     |
 | a Workspace write into a Memory root is rejected — **object-storage half**                                              | `packages/workspace-store/src/store.test.ts`           | `the kernel surface refuses every Memory root and the Memory surface refuses every other` | Bun     |
 
+## Memory
+
+Rows for `docs/plans/slice-2.md` Step 3 — the Memory Package
+(`packages/plugin-memory`) over the object-storage Workspace store, its shared
+roots' generation ledger in the User Durable Object, and the injected block.
+
+| Constitutional check                                                                                 | File                                                         | Test name                                                                                                                                                    | Runner  |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
+| Memory is readable and writable with no Computer interface call                                      | `packages/architecture-checks/src/memory-boundaries.test.ts` | `Memory is readable and writable with no Computer interface call`                                                                                            | Bun     |
+| — its seam half: the Memory host carries a Workspace file surface and no Computer                    | `packages/plugin-memory/src/agent.test.ts`                   | `makes no Computer interface call — nothing on the path holds one`                                                                                           | Bun     |
+| the Memory Package is the single writer of Memory roots, and writes only the writing Bot's own shard | `packages/plugin-memory/src/store.test.ts`                   | `writes a shared fact into the writing Bot's own shard only`                                                                                                 | Bun     |
+| — its deployed half: another Bot's shard is refused against real R2                                  | `apps/cloudflare/test/memory.workerd.ts`                     | `a Bot may not write another Bot's shard of a shared Memory root`                                                                                            | workerd |
+| readers merge shards, newest fact wins, and every shared fact records which Bot learned it           | `packages/plugin-memory/src/store.test.ts`                   | `merges shards and tags every shared fact with the Bot that learned it`                                                                                      | Bun     |
+| — correcting a shared fact is a write into your own shard, never an edit of another's                | `packages/plugin-memory/src/store.test.ts`                   | `retracts another Bot's shared fact in this Bot's own shard, never editing theirs`                                                                           | Bun     |
+| the User Durable Object holds the generation records of User Memory roots                            | `apps/cloudflare/test/memory.workerd.ts`                     | `a user-scope write records its generation in the User Durable Object, and another Bot of the same User is told who learned it`                              | workerd |
+| — and survives eviction of that object                                                               | `apps/cloudflare/test/memory.workerd.ts`                     | same test (`evictDurableObject` before the ledger is read)                                                                                                   | workerd |
+| what Memory enters a model request is recorded, so an injection gap is visible in durable state      | `packages/plugin-memory/src/agent.test.ts`                   | `records exactly what it injected, generations included`                                                                                                     | Bun     |
+| — a tier a cap or a failure cut short is recorded as an omission, not silently dropped               | `packages/plugin-memory/src/render.test.ts`                  | `records a tier it could not read as an omission rather than staying silent`, `applies GrokBot's caps: 3 projects, 50/15 user, 25/10 project, 30 own recent` | Bun     |
+| — its deployed half: the injected block and its record on a real Turn of a second Bot                | `apps/cloudflare/test/memory.workerd.ts`                     | `a user-scope write records its generation in the User Durable Object, and another Bot of the same User is told who learned it`                              | workerd |
+| on conflict between tiers the most specific wins: Bot, then Project, then User                       | `packages/plugin-memory/src/render.test.ts`                  | `own memory wins over project, and project over user, on the same fact`                                                                                      | Bun     |
+| indexes and embeddings are derived from Memory files and always rebuildable from them                | `packages/plugin-memory/src/indexer.test.ts`                 | `a rebuilt index equals an incrementally updated one`, `drops the chunks of a document that is gone`                                                         | Bun     |
+| Memory contains no secrets and no credential references                                              | `packages/plugin-memory/src/store.test.ts`                   | `refuses a fact that looks like a credential`                                                                                                                | Bun     |
+| — its tool half: the refusal is a visible outcome, and the attempt is still recorded                 | `packages/plugin-memory/src/agent.test.ts`                   | `refuses a credential-shaped fact, visibly, and writes nothing`                                                                                              | Bun     |
+| a Memory change records durable intent with an effect identifier before the effect                   | `packages/plugin-memory/src/agent.test.ts`                   | `records intent before the effect, then the generation it produced`                                                                                          | Bun     |
+| — and Project membership does the same                                                               | `packages/plugin-memory/src/agent.test.ts`                   | `create is join, and membership reaches durable state through the authority`                                                                                 | Bun     |
+| Memory functions while the Computer is hibernated: the seam reaches the Workspace and nothing else   | `packages/plugin-shell/src/backend-memory.ts`                | covered by the architecture check above; the seam holds no Computer type by construction                                                                     | Bun     |
+
 ## Open
 
 Rules in `AGENTS.md` § Architecture checks that no named test proves yet. They
@@ -117,16 +144,23 @@ step start awaiting its model request`) but never across a real workerd
 - **Browser and native shells use the same backend execution path.** No check.
   The desktop and mobile hosts have their own tests, but nothing asserts that
   both reach the same backend protocol and Agent runtime.
-- **The Memory rules.** `packages/plugin-memory/src/agent.test.ts` proves the
-  storage and recall behaviour, and the row above proves the _contract_ half of
-  one of the three constitutional Memory checks: the kernel-consumed interface
-  for a Memory root has no write. The runtime rejection now has a row under
-  **Computer** above. Two behavioural halves still have no test: Memory
-  readable and writable with no Computer interface call, and conflicting
-  Workspace and object-storage writes to another durable root both surviving
-  as generations and surfaced. The durable-root sync named in ADR 0013 does
-  not exist yet, so the Memory Package still writes Memory roots through the
-  Computer's named `memoryWriter` seam rather than object storage.
+- **The Memory rules, the half the Computer still owns.** Two of the three
+  constitutional Memory checks now have rows: a Workspace write into a Memory
+  root is rejected (contract and runtime), and Memory is readable and writable
+  with no Computer interface call. The third — "conflicting Workspace and
+  object-storage writes to any other durable root both survive as generations
+  and are surfaced" — is proven on the object-storage side only
+  (`apps/cloudflare/test/workspace.workerd.ts`). Nothing yet writes the same
+  file from a Computer _and_ from object storage concurrently, because the
+  Computer-side sync agent of ADR 0013 does not exist. That is why ADR 0013
+  stays **proposed**: this step landed its object-storage half and its Memory
+  single-writer half; the bidirectional half is a sibling's work.
+- **The Computer's `memoryWriter` seam still exists.** `ComputerWorkspace.
+memoryWriter` in `packages/computer-core` and `packages/plugin-fly-sprite`
+  was Step 1's stopgap and Step 3 was to delete it. Nothing calls it any more —
+  the Memory Package writes object storage, and the Electron utility runtime
+  no longer mounts Memory over a Computer — but the seam itself is removed by
+  the Computer-side sync work, which owns those files.
 - **Computer tools operate without a desktop client.** No check. The Computer
   Package's tests exercise provider routing, not the absence of a desktop
   shell.
@@ -137,14 +171,14 @@ step start awaiting its model request`) but never across a real workerd
   Package-local rather than durable per-User configuration, so no check ties it
   to the User Durable Object the way authoring's does. Second, Workspace disk
   is still not measurable as a per-User quota.
-- **Where the generation ledger lives.** `AGENTS.md` § Authorities gives the
-  User's Durable Object "the generation records of User Memory roots", but the
-  only ledger wired today is the Bot object's, so a shared Memory root written
-  from two Bots would record its generations in two places. Nothing writes a
-  shared root in production yet — the Memory Package still writes the
-  Computer's `memoryWriter` seam — so the disagreement is latent, and the
-  Memory step closes it by routing shared roots to the User object through the
-  same `WorkspaceGenerationsV1` interface.
+- **Where the generation ledger lives — closed.** `AGENTS.md` § Authorities
+  gives the User's Durable Object "the generation records of User Memory
+  roots". `apps/cloudflare/src/memory.ts` now routes a shared Memory root's
+  mint, record, tombstone and conflict calls to the User object over RPC, and
+  the workerd row above proves the record lands there and not in the writing
+  Bot's object. `WorkspaceGenerationsV1.mint` gained a `root` parameter so the
+  id that orders a shared root's generations is minted by the authority that
+  holds them.
 - **UI style contract** (`scripts/check-ui-styles.ts`) and the **kernel import
   contract** (`scripts/check-kernel-imports.ts`) remain standalone linters as
   well as tests, because `bun run typecheck` must fail on them before any test

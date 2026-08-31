@@ -34,10 +34,6 @@ import {
   runtimePackageCatalogConfig,
 } from "@frockbot/kernel-composition/runtime";
 import {
-  createMemoryPlugin,
-  type MemoryPluginConfig,
-} from "@frockbot/plugin-memory";
-import {
   createOpenAICompatiblePlugin,
   type FetchLike,
 } from "@frockbot/provider-openai-compatible";
@@ -84,7 +80,6 @@ export interface FoundationRuntimeOptions {
   application?: FoundationRuntimeApplication;
   resolveContribution?: ContributionResolver;
   agentPackages?: readonly FoundationAgentPackage[];
-  memory?: MemoryPluginConfig;
   persistSessionEvents?: PersistSessionEvents;
   systemPromptSection?: string;
   modelSelection?: RuntimeModelSelection;
@@ -162,9 +157,6 @@ export async function createFoundationRuntime(
   }
 
   const resolveContribution: ContributionResolver = (specifier) => {
-    if (specifier === "@frockbot/plugin-memory/agent" && options.memory) {
-      return Promise.resolve({ default: createMemoryPlugin(options.memory) });
-    }
     const additional = options.agentPackages?.find(
       (pkg) => pkg.contributionSpecifier === specifier,
     );
@@ -197,7 +189,6 @@ export async function createFoundationRuntime(
   });
   // Provider contributions must mount before consumers that open their capabilities.
   for (const packageId of [...additionalIds, ...packageIds]) {
-    if (packageId === "memory" && !options.memory) continue;
     await root.packages.enable(packageId);
   }
   const composition =

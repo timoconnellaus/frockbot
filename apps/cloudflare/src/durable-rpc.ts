@@ -184,6 +184,19 @@ function cloneJson(value: unknown, label: string, depth: number): RpcJsonValue {
 export const rpcJsonRecord: RpcValueDecoder = (value, label) =>
   cloneJson(record(value, label), label, 0);
 
+/**
+ * Carries an inbound value through the envelope decoder unchanged, for a
+ * caller that decodes it against a richer contract of its own — a Workspace
+ * root, a generation record — immediately afterwards. It is never a way to
+ * skip decoding: the value is still refused before it reaches durable state.
+ */
+export const rpcDecodedValue: RpcValueDecoder = (value, label) => {
+  if (!value || typeof value !== "object") {
+    throw new Error(`${label} must be an object`);
+  }
+  return value;
+};
+
 export function rpcDecoded(
   decoder: (input: unknown) => unknown,
 ): RpcValueDecoder {

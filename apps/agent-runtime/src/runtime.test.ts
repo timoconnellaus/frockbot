@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { desktopComputerRuntimePackages } from "../../../applications/foundation/src/desktop-runtime.js";
-import type {
-  MemoryBucketObject,
-  MemoryPluginConfig,
-  MemoryVector,
+import {
+  createMemoryRuntimePlugin,
+  memoryManifest,
+  MemoryStore,
+  botMemoryRootV1,
+  createTestMemoryFilesV1,
 } from "@frockbot/plugin-memory";
 import type { FoundationRuntime } from "./runtime.js";
 import { createFoundationRuntime } from "./runtime.js";
@@ -107,96 +109,64 @@ describe("foundation Cordis runtime", () => {
     );
   });
 
-  test("journals automatically recalled tiered memory in the model request", async () => {
-    const objects = new Map<string, string>();
-    const vectors = new Map<string, MemoryVector>();
-    const memory: MemoryPluginConfig = {
-      ownerId: "alice",
-      botId: "primary",
-      bucket: {
-        get: (key) => {
-          const body = objects.get(key);
-          return Promise.resolve<MemoryBucketObject | null>(
-            body === undefined
-              ? null
-              : {
-                  text: () => Promise.resolve(body),
-                  json: <T>() => Promise.resolve(JSON.parse(body) as T),
-                },
-          );
-        },
-        put: (key, body) => {
-          objects.set(key, body);
-          return Promise.resolve();
-        },
-        delete: (key) => {
-          objects.delete(key);
-          return Promise.resolve();
-        },
-        list: ({ prefix }) =>
-          Promise.resolve({
-            objects: [...objects.keys()]
-              .filter((key) => key.startsWith(prefix))
-              .map((key) => ({ key })),
-            truncated: false,
-          }),
-      },
-      vectorize: {
-        upsert: (entries) => {
-          for (const entry of entries) vectors.set(entry.id, entry);
-          return Promise.resolve();
-        },
-        query: (_query, options) =>
-          Promise.resolve({
-            matches: [...vectors.values()]
-              .filter((vector) => vector.namespace === options.namespace)
-              .map((vector) => ({
-                id: vector.id,
-                score: 1,
-                metadata: vector.metadata,
-              })),
-          }),
-        deleteByIds: (ids) => {
-          for (const id of ids) vectors.delete(id);
-          return Promise.resolve();
-        },
-      },
-      embed: (texts) => Promise.resolve(texts.map(() => [1, 0])),
-    };
+  test("injects Memory into the model request, through the Memory Package", async () => {
+    const owner = { userId: "alice", botId: "primary" };
+    const store = new MemoryStore({
+      files: createTestMemoryFilesV1({ userId: owner.userId }),
+      owner,
+    });
     const runtime = await createFoundationRuntime(undefined, {
+      botId: owner.botId,
       sessionId: "alice:primary",
-      memory,
+      agentPackages: [
+        {
+          specifier: "@frockbot/plugin-memory",
+          contributionSpecifier: "@frockbot/plugin-memory/agent",
+          manifest: memoryManifest,
+          plugin: createMemoryRuntimePlugin({
+            owner,
+            store,
+            writer: {
+              sessionId: "alice:primary",
+              turnId: "turn-1",
+              runId: "run-1",
+            },
+          }),
+        },
+      ],
     });
     runtimes.push(runtime);
-    const call = {
-      id: "remember",
-      name: "memory_write",
-      input: {
-        path: "pets.md",
-        content: "The user's dog is named Rex.",
+    // The fact is recorded the way a previous Turn's `memory_write` recorded
+    // it: through the Package's own writer, into this Bot's own Memory root.
+    const written = await store.write({
+      root: botMemoryRootV1(owner),
+      tier: "profile",
+      fact: "The user's dog is named Rex.",
+      writer: {
+        kind: "bot",
+        botId: owner.botId,
+        sessionId: "alice:primary",
+        turnId: "turn-0",
+        runId: "run-0",
       },
-    };
-    const context = {
-      botId: "primary",
-      agentId: "primary",
-      compositionGenerationId: "bootstrap",
-      sessionId: "alice:primary",
-      signal: new AbortController().signal,
-    };
-    const preparation = await runtime.root.tools.prepare(call, context);
-    if (preparation.kind !== "ready") throw new Error("memory tool was denied");
-    await runtime.root.tools.executePrepared(preparation, context);
+    });
+    expect(written.status).toBe("ok");
 
     runtime.agent.agent.send("What is my dog's name?");
     await runtime.agent.agent.whenIdle();
 
-    const request = runtime.agent.agent.session.events.find(
+    const requests = runtime.agent.agent.session.events.filter(
       (event) => event.type === "model/request",
     );
-    expect(request).toMatchObject({
+    expect(requests.at(-1)).toMatchObject({
       type: "model/request",
       request: { system: expect.stringContaining("dog is named Rex") },
     });
+    expect(
+      runtime.agent.agent.session.events.some(
+        (event) => event.type === "memory/injected",
+      ),
+    ).toBe(true);
   });
 
   test("selects the configured OpenAI-compatible provider", async () => {

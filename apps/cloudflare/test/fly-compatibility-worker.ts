@@ -23,6 +23,12 @@ import type {
   WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
 import { createDurableWorkspaceFilesV1 } from "../src/workspace.ts";
+import { SessionStore } from "@frockbot/kernel-contracts";
+import {
+  createMemoryWriteTool,
+  MemoryProjection,
+} from "@frockbot/plugin-memory/agent";
+import { createBotMemoryHost } from "@frockbot/plugin-shell/backend-memory";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
@@ -211,6 +217,75 @@ export class WorkerdBotState extends BotState {
       prefix: ISOLATE_MODEL_REQUEST_PREFIX,
     });
     return [...stored.values()];
+  }
+
+  /**
+   * Runs the production `memory_write` tool for one identity, inside a real
+   * open step, through the Memory host the Durable Object binds.
+   *
+   * Everything below the tool is production: the Memory surface built in
+   * `bindSurfaces`, the routed generation ledger that sends a shared root to
+   * the User Durable Object, the conditional write against real R2. Only the
+   * caller differs — a probe instead of a model's tool call.
+   */
+  async memoryWrite(input: {
+    userId: string;
+    botId: string;
+    scope: "bot" | "user" | "project";
+    project?: string;
+    tier: "profile" | "log" | "note";
+    fact: string;
+  }): Promise<{ content: string; isError: boolean; events: SessionEvent[] }> {
+    this.bindSurfaces({ userId: input.userId, botId: input.botId });
+    const host = createBotMemoryHost(
+      { userId: input.userId, botId: input.botId },
+      {
+        runId: "memory-probe-run",
+        turnId: "memory-probe-turn",
+        sessionId: `${input.userId}:${input.botId}`,
+      },
+      this.backendEnv,
+    );
+    if (!host?.writer) throw new Error("no Memory surface is bound");
+    const root = new Context();
+    await root.plugin(SessionStore);
+    const sessionId = `${input.userId}:${input.botId}`;
+    const session = root.sessions.create(sessionId);
+    session.appendBatch([
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+    ]);
+    const tool = createMemoryWriteTool(
+      { ...host, writer: host.writer },
+      root.sessions,
+      new MemoryProjection(host),
+    );
+    const result = await tool.execute(
+      {
+        scope: input.scope,
+        ...(input.project ? { project: input.project } : {}),
+        tier: input.tier,
+        fact: input.fact,
+      },
+      {
+        botId: input.botId,
+        agentId: input.botId,
+        sessionId,
+        compositionGenerationId: "probe",
+        signal: new AbortController().signal,
+      },
+    );
+    const events = [...session.events];
+    await root.fiber.dispose();
+    return { ...result, events };
+  }
+
+  /** The Bot object's own ledger, to show a shared root is *not* recorded here. */
+  async botLedgerGeneration(input: {
+    root: WorkspaceRootV1;
+    path: string;
+  }): Promise<WorkspaceGenerationRecordV1 | undefined> {
+    return this.generations().current(input.root, input.path);
   }
 
   async durableSessionEvents(): Promise<SessionEvent[]> {

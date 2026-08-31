@@ -1,27 +1,13 @@
-export type MemoryTier = "agent" | "global";
+// The optional bindings the derived index consumes, and nothing else.
+//
+// Memory itself needs none of these: facts are Markdown files, read and
+// written through `WorkspaceFilesV1`. Embeddings are derived state over those
+// files, so their bindings are optional throughout — a Bot with no Workers AI
+// binding indexes and searches its Memory lexically.
+import type { MemoryScopeNameV1 } from "@frockbot/kernel-contracts";
 
 export const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
 export const EMBEDDING_DIMENSIONS = 768;
-
-export interface MemoryBucketObject {
-  text(): Promise<string>;
-  json<T>(): Promise<T>;
-}
-
-export interface MemoryBucket {
-  get(key: string): Promise<MemoryBucketObject | null>;
-  put(
-    key: string,
-    value: string,
-    options?: { httpMetadata?: { contentType?: string } },
-  ): Promise<unknown>;
-  delete(key: string): Promise<unknown>;
-  list(options: { prefix: string; cursor?: string }): Promise<{
-    objects: Array<{ key: string }>;
-    truncated: boolean;
-    cursor?: string;
-  }>;
-}
 
 export interface MemoryVector {
   id: string;
@@ -55,23 +41,14 @@ export interface MemoryAiBinding {
 
 export type EmbedMemory = (texts: string[]) => Promise<number[][]>;
 
-export interface MemoryScope {
-  tier: MemoryTier;
-  storagePrefix: string;
-  vectorNamespace: string;
-}
-
+/** One search hit: where the text is, never the authority for what it says. */
 export interface MemorySearchResult {
+  scope: MemoryScopeNameV1;
+  /** `""` for the two unprojected tiers. */
+  projectId: string;
   path: string;
-  tier: MemoryTier;
   startLine: number;
   endLine: number;
   snippet: string;
   score?: number;
-}
-
-export interface MemoryIndexResult {
-  chunksTotal: number;
-  chunksEmbedded: number;
-  vectorsDeleted: number;
 }
