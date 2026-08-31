@@ -285,6 +285,13 @@ export interface BotStateEnv {
   AI: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   COMPUTER_HOST?: Fetcher;
+  /**
+   * The shared secret the app Worker presents to the Computer host. Absent,
+   * and no Computer host call is made: an unauthenticated call would be
+   * refused at the host anyway, and a missing secret is a deployment fault
+   * that should be visible as "no Computer" rather than as a 401 per Turn.
+   */
+  COMPUTER_HOST_TOKEN?: string;
   SPRITES_TOKEN?: string;
   CREDENTIAL_KEYRING?: string;
 }

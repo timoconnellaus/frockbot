@@ -32,6 +32,31 @@ The file suffix matters: root `bun test` matches `*.test.ts` and `*.spec.ts` and
 neither `*.workerd.ts` nor `*.integration.ts`, so the pre-commit hook never runs
 either project.
 
+## The Computer host fake
+
+`test/computer-host-fake.ts` stands in for the `COMPUTER_HOST` service binding
+in both projects. It runs `@frockbot/computer-host-protocol` verbatim — the
+same decoder at the seam, the same `problem()` refusals, the same NDJSON exec
+framing, the same token check — and the real host Worker's own
+`computerHostShardV1`, so a test can prove that every Bot of one User routes to
+one container. What it replaces is only the Computer: an in-memory file map and
+a scripted exec table instead of a Sprite.
+
+It has to be a stand-in because `@cloudflare/vitest-plugin` cannot build, tag,
+or start a container image; its pool never touches Docker. A real container runs
+only under `wrangler dev` or in production, and `apps/computer-host/live-test.ts`
+is what drives it there.
+
+The fake runs in Node, so a workerd test cannot reach its state directly.
+Control travels over the same binding under `/__fake/*` — `reset`, `exec` to
+script an answer (exit codes, chunk splits, hangs, 429s), `calls` to read back
+what the host was sent, `file`/`files` to seed and inspect the file map. The
+real host serves none of those routes and the client never calls them.
+
+`test/computer-host-client.workerd.ts` drives `ComputerHostClient` against it
+from inside `ComputerHostClientProbe`, a Durable Object that records each
+effect's intent and outcome in real Durable Object storage.
+
 ## Shared harness
 
 `test/harness/miniflare.ts` holds what both projects need: the `.dev.vars`

@@ -6,14 +6,15 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
-    "./host": "./src/host.ts",
-    "./manifest": "./src/manifest.ts",
     "./computer": "./src/computer.ts",
-    "./provider": "./src/provider.ts",
-    "./workspace": "./src/workspace.ts",
     "./frockbot.json": "./frockbot.json",
+    "./host": "./src/host.ts",
+    "./host-client": "./src/host-client.ts",
+    "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
-    "./sync": "./src/sync.ts"
+    "./provider": "./src/provider.ts",
+    "./sync": "./src/sync.ts",
+    "./workspace": "./src/workspace.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"
@@ -26,6 +27,7 @@
     "@cordisjs/plugin-webui": "0.8.2",
     "@fly/sprites": "0.1.0",
     "@frockbot/computer-core": "workspace:*",
+    "@frockbot/computer-host-protocol": "workspace:*",
     "@frockbot/computer-host-runtime": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-computer": "workspace:*",

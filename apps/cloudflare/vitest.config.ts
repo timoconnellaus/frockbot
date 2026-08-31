@@ -1,6 +1,11 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 import {
+  createComputerHostFake,
+  FAKE_COMPUTER_HOST_SHARDS,
+  FAKE_COMPUTER_HOST_TOKEN,
+} from "./test/computer-host-fake.ts";
+import {
   createOutboundService,
   readDevVariable,
   TEST_CREDENTIAL_KEYRING,
@@ -10,6 +15,10 @@ const runLiveSpriteTest = process.env.FROCKBOT_RUN_LIVE_SPRITE_TEST === "1";
 const spritesToken = runLiveSpriteTest
   ? (process.env.SPRITES_TOKEN ?? readDevVariable("SPRITES_TOKEN") ?? "")
   : "";
+
+// One instance for the whole project. It runs in Node, so the suites reach its
+// state over the same binding, under `/__fake/*`.
+const computerHost = createComputerHostFake();
 
 export default defineConfig({
   plugins: [
@@ -24,12 +33,18 @@ export default defineConfig({
         workerLoaders: {
           BOT_PACKAGES: {},
         },
+        // The shared Computer host (ADR 0004) as the Durable Object sees it:
+        // a service binding, decoding the real v1 protocol.
+        serviceBindings: {
+          COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
+        },
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         durableObjects: {
           AUTHORING: "AuthoringProbe",
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",
+          COMPUTER_HOST_CLIENT: "ComputerHostClientProbe",
           FLY_COMPATIBILITY: "FlyCompatibilityProbe",
           SEARCH_SPIKE: { className: "SearchSpikeProbe", useSQLite: true },
           // The User Durable Object is in `new_sqlite_classes` in
@@ -45,6 +60,8 @@ export default defineConfig({
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
           FROCKBOT_RUN_LIVE_SPRITE_TEST: runLiveSpriteTest ? "1" : "0",
           SPRITES_TOKEN: spritesToken,
+          COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
+          COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
           // A leak canary: a Bot isolate must never see a host binding.
           SECRET_TOKEN: "host-only-secret",
         },

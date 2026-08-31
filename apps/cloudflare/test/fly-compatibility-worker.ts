@@ -78,6 +78,7 @@ export { BotCapabilities } from "../src/bot-capabilities.ts";
 export { BotIsolateProbe } from "./bot-isolate-probe.ts";
 export { AuthoringProbe } from "./authoring-probe.ts";
 export { SearchSpikeProbe } from "./search-probe.ts";
+export { ComputerHostClientProbe } from "./computer-host-probe.ts";
 
 /**
  * A write outcome flattened for the RPC seam: the fields a test asserts on,
