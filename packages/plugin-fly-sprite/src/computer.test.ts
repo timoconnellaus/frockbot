@@ -434,10 +434,13 @@ describe("Fly Sprite computer", () => {
     );
     await writeFile(
       statPath,
+      // `stat -c %Y` is GNU; the shim answers with the host's own stat in one
+      // exec. A scripting-language shim here was the slow half of a hundred
+      // tenant scans and flaked the suite under load.
       [
-        "#!/usr/bin/env python3",
-        "import os, sys",
-        "print(int(os.stat(sys.argv[-1]).st_mtime))",
+        "#!/usr/bin/env bash",
+        'if /usr/bin/stat -f %m / >/dev/null 2>&1; then exec /usr/bin/stat -f %m "${@: -1}"; fi',
+        'exec /usr/bin/stat -c %Y "${@: -1}"',
         "",
       ].join("\n"),
     );
@@ -694,10 +697,13 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
     );
     await writeFile(
       join(directory, "stat"),
+      // `stat -c %Y` is GNU; the shim answers with the host's own stat in one
+      // exec. A scripting-language shim here was the slow half of a hundred
+      // tenant scans and flaked the suite under load.
       [
-        "#!/usr/bin/env python3",
-        "import os, sys",
-        "print(int(os.stat(sys.argv[-1]).st_mtime))",
+        "#!/usr/bin/env bash",
+        'if /usr/bin/stat -f %m / >/dev/null 2>&1; then exec /usr/bin/stat -f %m "${@: -1}"; fi',
+        'exec /usr/bin/stat -c %Y "${@: -1}"',
         "",
       ].join("\n"),
     );
@@ -777,7 +783,7 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test("refuses the new tenant when every display is live, rather than sharing one", async () => {
     const { directory, runtimeRoot, run } = await installEnsureScript();
@@ -794,7 +800,7 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test("an idle tenant under human control keeps its display", async () => {
     const { directory, runtimeRoot, run } = await installEnsureScript();
@@ -816,5 +822,5 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
