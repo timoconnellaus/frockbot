@@ -296,6 +296,7 @@
       "dependencies": {
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "vue": "3.5.41",
       },

@@ -1,3 +1,4 @@
+import type { SkillRefV1 } from "@frockbot/kernel-contracts";
 import {
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
@@ -111,7 +112,17 @@ export interface AgentTransport {
     text: string,
     signal: AbortSignal,
     commandId: string,
+    /**
+     * The Skills this message invokes, as canonical refs. Optional so a
+     * transport that has no composer — a Routine's, a test's — needs no change.
+     */
+    skills?: readonly SkillRefV1[],
   ): Promise<ClientTurnResponse>;
+  /**
+   * The Bot's invocable Skills, for the composer's `/` and `@` popover.
+   * Optional: a platform that cannot read it simply offers no popover.
+   */
+  readSkillCatalog?(botId: string): Promise<unknown>;
   readConfiguration?(query: ConfigurationQueryV1): Promise<ConfigurationViewV1>;
   executeConfiguration?(
     command: ConfigurationCommandV1,

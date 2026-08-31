@@ -32,6 +32,8 @@ import {
   decodeClientRunStopReceiptV1,
   decodeClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
+import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
+import type { SkillRefV1 } from "@frockbot/kernel-contracts";
 
 function requireAuthenticatedUserId(value: unknown): string {
   if (!isRpcIdentifier(value) || value === "anonymous") {
@@ -107,10 +109,18 @@ const application = new ClientApplication({
     text: string,
     signal: AbortSignal,
     commandId: string,
+    skills?: readonly SkillRefV1[],
   ): Promise<ClientTurnResponse> {
     signal.throwIfAborted();
     const path = `/api/bots/${encodeURIComponent(botId)}/turns`;
-    const body = JSON.stringify({ schemaVersion: 1, text, commandId });
+    const body = JSON.stringify({
+      schemaVersion: 1,
+      text,
+      commandId,
+      // Omitted rather than sent empty: the command decoder takes exact keys,
+      // and "no Skills" is the absence of the field.
+      ...(skills && skills.length > 0 ? { skills } : {}),
+    });
     const response = window.frockbotDesktop
       ? await Promise.race([
           window.frockbotDesktop
@@ -160,6 +170,11 @@ const application = new ClientApplication({
       query.type === "user/get"
         ? decodeUserSettingsViewV1(value)
         : decodeBotSettingsViewV1(value),
+    );
+  },
+  async readSkillCatalog(botId: string) {
+    return decodeClientSkillCatalogV1(
+      await apiRequest(`/api/bots/${encodeURIComponent(botId)}/skills`),
     );
   },
   async listNotifications(botId: string) {

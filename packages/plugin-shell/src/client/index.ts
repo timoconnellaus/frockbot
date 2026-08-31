@@ -38,6 +38,8 @@ import {
   type CatalogEntryV1,
   type CatalogIndexEntryV1,
 } from "@frockbot/catalog-core";
+import type { SkillRefV1 } from "@frockbot/kernel-contracts";
+import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
 import { ref } from "vue";
 import {
   frockBotWebDataKey,
@@ -993,6 +995,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     messages: [],
     pluginCatalog: [],
     packageCatalog: [],
+    skillCatalog: [],
     async selectBot(botId: string): Promise<void> {
       activeRequest?.abort();
       admissionObserver?.abort();
@@ -1005,12 +1008,37 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.messages = [];
       web.value.activeRun = undefined;
       web.value.activeRunId = undefined;
+      web.value.skillCatalog = [];
       const url = URL.parse(window.location.href);
       if (url) {
         url.searchParams.set("bot", botId);
         window.history.replaceState(null, "", url);
       }
       await web.value.loadBotSettings();
+    },
+    async loadSkillCatalog(): Promise<void> {
+      // A missing transport method or an unreadable catalog is an empty
+      // popover, never a visible error: a Skill list the User did not ask for
+      // must not put a banner over their conversation.
+      const read = ctx.transport.readSkillCatalog;
+      const botId = web.value.activeBotId;
+      if (!read || !botId) return;
+      const generation = selectionGeneration;
+      try {
+        const catalog = decodeClientSkillCatalogV1(await read(botId));
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.skillCatalog = catalog.skills;
+      } catch {
+        if (
+          generation === selectionGeneration &&
+          web.value.activeBotId === botId
+        )
+          web.value.skillCatalog = [];
+      }
     },
     async loadBotSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
@@ -1699,7 +1727,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       }
       window.location.assign(authorizationUrl);
     },
-    async sendPrompt(text: string): Promise<SendPromptResult> {
+    async sendPrompt(
+      text: string,
+      skills?: readonly SkillRefV1[],
+    ): Promise<SendPromptResult> {
       if (web.value.activeRunId) return { accepted: false, error: "busy" };
       const botId = web.value.activeBotId;
       if (!botId) return { accepted: false, error: "no-bot" };
@@ -1742,6 +1773,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           text,
           requestController.signal,
           pendingRunId,
+          skills,
         );
         if (
           generation !== selectionGeneration ||

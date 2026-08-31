@@ -3,6 +3,7 @@ import type {
   ModelBindingSnapshot,
   NormalizedModelRequest,
   Session,
+  SkillRefV1,
   TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 
@@ -33,6 +34,19 @@ export interface AgentOptions {
 export interface AgentInput {
   messageId: string;
   text: string;
+  /**
+   * The Skills this input invoked from the composer. The kernel carries the
+   * refs and resolves nothing: which Skill a ref names, and what happens to
+   * its body, is the Skills Package's policy, read off this field in
+   * `agent/pre-step`.
+   */
+  skills?: SkillRefV1[];
+}
+
+/** What `Agent.send` accepts: bare text, or text with invoked Skills. */
+export interface AgentSendV1 {
+  text: string;
+  skills?: readonly SkillRefV1[];
 }
 
 export type PreStepDecision =
@@ -45,7 +59,7 @@ export interface Agent {
   readonly botId: string;
   readonly session: Session;
   readonly status: AgentStatus;
-  send(text: string): string;
+  send(input: string | AgentSendV1): string;
   resume(): void;
   cancel(reason?: "user" | "shutdown"): void;
   whenIdle(): Promise<void>;

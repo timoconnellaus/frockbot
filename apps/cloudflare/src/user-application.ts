@@ -255,6 +255,7 @@ export function createUserApplication() {
       } satisfies ClientNotificationAcknowledgementV1);
     }
 
+    const skillsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/skills$/);
     const turnMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/turns$/);
     const lookupMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)$/,
@@ -269,6 +270,7 @@ export function createUserApplication() {
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/stop$/,
     );
     if (
+      !skillsMatch &&
       !turnMatch &&
       !lookupMatch &&
       !reconcileMatch &&
@@ -280,7 +282,12 @@ export function createUserApplication() {
     let botId: string;
     try {
       const matched =
-        turnMatch ?? lookupMatch ?? reconcileMatch ?? fenceMatch ?? stopMatch;
+        skillsMatch ??
+        turnMatch ??
+        lookupMatch ??
+        reconcileMatch ??
+        fenceMatch ??
+        stopMatch;
       botId = decodeURIComponent(matched![1]);
     } catch {
       return jsonError(400, "invalid bot id");
@@ -292,6 +299,22 @@ export function createUserApplication() {
     }
     const missingBot = await requireRegisteredBot(env, botId);
     if (missingBot) return missingBot;
+
+    if (skillsMatch) {
+      // Read-only, and named refs only: the popover learns which Skills exist
+      // and never receives a body.
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      try {
+        return Response.json(
+          await env.BOT_STATE.listSkills({ schemaVersion: 1, botId }),
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "skill catalog failed",
+        );
+      }
+    }
 
     if (reconcileMatch) {
       if (request.method !== "POST")
@@ -458,7 +481,7 @@ export function createUserApplication() {
     }
     if (request.method !== "POST") return jsonError(405, "method not allowed");
 
-    let turnCommand: { commandId: string; text: string };
+    let turnCommand: ClientTurnCommandV1;
     try {
       turnCommand = await readTurnCommand(request);
     } catch (error) {
@@ -483,6 +506,10 @@ export function createUserApplication() {
             sessionId: `${env.DEPLOYMENT.userId}:${botId}`,
             acceptedAt: new Date().toISOString(),
             text: turnCommand.text,
+            // Refs only: the client names a Skill and never carries its text,
+            // so what a Turn runs on is still whatever the instruction root
+            // holds at the generation the Turn resolves.
+            ...(turnCommand.skills ? { skills: turnCommand.skills } : {}),
           },
         }),
       );

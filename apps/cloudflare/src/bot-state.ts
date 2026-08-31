@@ -559,6 +559,17 @@ export class BotState extends DurableObject<BotStateEnv> {
     });
   }
 
+  /**
+   * The Bot's invocable Skills, for the composer's `/` and `@` popover. A
+   * read: it binds the Workspace surfaces the Turn path binds, and writes
+   * nothing.
+   */
+  async listSkills(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    return shell.listSkills(identity);
+  }
+
   async stopRun(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

@@ -115,7 +115,16 @@ import {
 } from "@frockbot/plugin-flock/shared";
 import { createBotSelfManagementHost } from "./backend-flock.js";
 import { createBotMemoryHost } from "./backend-memory.js";
-import { createBotSkillsHost } from "./backend-skills.js";
+import { createBotSkillsHost, createBotSkillsReads } from "./backend-skills.js";
+import {
+  loadSkillCatalogV1,
+  skillRefForLoadedSkillV1,
+} from "@frockbot/plugin-skills/catalog";
+import {
+  clientSkillCatalogEntryV1,
+  type ClientSkillCatalogEntryV1,
+  type ClientSkillCatalogV1,
+} from "./skill-protocol.js";
 import {
   createBotRoutinesHost,
   createBotRoutineStore,
@@ -1659,6 +1668,45 @@ export class ShellBotBackendContribution {
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
     return projectClientTurnV1(await this.authority.run(command));
+  }
+
+  /**
+   * The Bot's invocable Skills, for the composer's `/` and `@` popover.
+   *
+   * A read of the same instruction root the Turn loader reads, through the
+   * same `WorkspaceReadsV1`, so the popover can never offer a Skill a Turn
+   * would refuse as an instruction: a refused candidate is not in the catalog
+   * here either. Names and descriptions only — never a body.
+   *
+   * An unbound Workspace surface is an empty catalog, not a failure: the
+   * Skills Package is not mounted in that host either, so "no Skills" is the
+   * true answer rather than an error the composer has to explain.
+   */
+  async listSkills(identity: BotIdentity): Promise<ClientSkillCatalogV1> {
+    await this.validateIdentity(identity);
+    const reads = createBotSkillsReads(this.env);
+    if (!reads) return { schemaVersion: 1, skills: [] };
+    const catalog = await loadSkillCatalogV1(reads, {
+      userId: identity.userId,
+      botId: identity.botId,
+    });
+    const entries: ClientSkillCatalogEntryV1[] = [];
+    for (const skill of catalog.skills) {
+      const ref = skillRefForLoadedSkillV1(skill);
+      // A Skill whose directory is not a well-formed slug has no ref, so it
+      // cannot be invoked and is not offered. It is still listed to the model
+      // in `<agent_skills>` and still loadable by path.
+      if (!ref) continue;
+      entries.push(
+        clientSkillCatalogEntryV1({
+          skill: ref,
+          name: skill.name,
+          description: skill.description,
+          path: skill.path,
+        }),
+      );
+    }
+    return { schemaVersion: 1, skills: entries };
   }
 
   /**

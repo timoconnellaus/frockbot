@@ -1,3 +1,4 @@
+import { decodeSkillRefsV1, type SkillRefV1 } from "@frockbot/kernel-contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/configuration-core";
 import { decodeRunIdV1 } from "@frockbot/plugin-shell/backend-contracts";
 
@@ -246,6 +247,7 @@ export interface DecodedBotRunRpcV1 {
     sessionId: string;
     acceptedAt: string;
     text: string;
+    skills?: SkillRefV1[];
   };
 }
 
@@ -253,12 +255,17 @@ export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
   const request = decodeRpcEnvelopeV1(input, {
     userId: rpcIdentifier,
     botId: rpcBotId,
-    command: rpcObject({
-      runId: rpcString(128),
-      sessionId: rpcString(257),
-      acceptedAt: rpcString(64),
-      text: rpcString(32_000),
-    }),
+    command: rpcObject(
+      {
+        runId: rpcString(128),
+        sessionId: rpcString(257),
+        acceptedAt: rpcString(64),
+        text: rpcString(32_000),
+      },
+      // Invoked Skills cross the RPC as refs and are decoded here, at the
+      // Durable Object's door, exactly like every other inbound value.
+      { skills: (value, label) => decodeSkillRefsV1(value, label) },
+    ),
   });
   const command = request.command as DecodedBotRunRpcV1["command"];
   command.runId = decodeRunIdV1(command.runId);

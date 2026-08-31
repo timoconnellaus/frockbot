@@ -22,12 +22,14 @@
 // hibernation seam documented in `./catalog.ts`.
 import type {
   Session,
+  SkillRefV1,
   ToolDefinition,
   ToolExecutionContext,
   WorkspaceFilesV1,
   WorkspaceReadsV1,
   WorkspaceWriteRequestV1,
 } from "@frockbot/kernel-contracts";
+import { formatSkillRefV1 } from "@frockbot/kernel-contracts";
 // Merges the Agent loop's event declarations into the cordis Context type.
 import type {} from "@frockbot/kernel-agent-loop/agent";
 import type { Plugin } from "cordis";
@@ -35,8 +37,11 @@ import {
   botInstructionRootV1,
   countSkillDocumentsV1,
   emptySkillCatalogV1,
+  type InvokedSkillV1,
   loadSkillCatalogV1,
+  renderInvokedSkillsPromptV1,
   renderSkillCatalogPromptV1,
+  resolveSkillRefV1,
   type SkillCatalogV1,
   type SkillOwnerV1,
 } from "./catalog.js";
@@ -114,6 +119,11 @@ export function openSkillTurnPositionV1(session: Session): SkillTurnPositionV1 {
   return { turn: started.turn, step: started.step };
 }
 
+/** What resolving a Turn's invoked refs produced. Declared, never thrown. */
+export type SkillInvocationOutcomeV1 =
+  | { status: "ok"; invoked: InvokedSkillV1[] }
+  | { status: "unresolved"; reason: string };
+
 /**
  * The Turn-scoped catalog. Deep module, small surface: `refresh` is the only
  * way a catalog changes, and `current` is what the prompt and `skill_load`
@@ -124,6 +134,9 @@ export class SkillCatalog {
   #reads: WorkspaceReadsV1;
   #catalog: SkillCatalogV1;
   #turn: number | undefined;
+  #invoked: InvokedSkillV1[] = [];
+  #invokedTurn: number | undefined;
+  #step: { turn: number; step: number } | undefined;
 
   constructor(owner: SkillOwnerV1, reads: WorkspaceReadsV1) {
     this.#owner = owner;
@@ -161,10 +174,76 @@ export class SkillCatalog {
     return this.#catalog;
   }
 
+  /**
+   * Resolves the Skills one Turn's input invoked, and records each one.
+   *
+   * An unresolvable ref is a declared failure, never a silent drop: a User who
+   * typed `/daily-standup` and got an answer that ignored it would have no way
+   * to tell. The caller turns this into a blocked Turn with the reason.
+   */
+  async invoke(
+    turn: number,
+    session: Session,
+    refs: readonly SkillRefV1[],
+  ): Promise<SkillInvocationOutcomeV1> {
+    const invoked: InvokedSkillV1[] = [];
+    for (const ref of refs) {
+      const skill = resolveSkillRefV1(this.#catalog, ref);
+      if (!skill) {
+        return {
+          status: "unresolved",
+          reason: `no Skill "${formatSkillRefV1(ref)}" is available to this Bot on this Turn`,
+        };
+      }
+      invoked.push({ ref, skill });
+    }
+    if (invoked.length > 0) {
+      session.appendBatch(
+        invoked.map((entry) => ({
+          type: "skill/invoked" as const,
+          turn,
+          ref: entry.ref,
+          generationId: entry.skill.generationId,
+          contentHash: entry.skill.contentHash,
+        })),
+      );
+      await session.flush();
+    }
+    this.#invoked = invoked;
+    this.#invokedTurn = turn;
+    return { status: "ok", invoked };
+  }
+
+  /**
+   * The Skills whose bodies belong in the request being assembled right now.
+   *
+   * Empty unless this is the first step of the Turn that invoked them: an
+   * invocation expands once, into the step the User's message enters, and the
+   * later steps of the same Turn run on the conversation the expansion already
+   * produced.
+   */
+  invokedFor(turn: number, step: number): readonly InvokedSkillV1[] {
+    return turn === this.#invokedTurn && step === 1 ? this.#invoked : [];
+  }
+
+  /** The step whose request the prompt is being assembled for. */
+  enterStep(turn: number, step: number): void {
+    this.#step = { turn, step };
+  }
+
+  /** The invoked bodies for the open step, as the prompt section renders them. */
+  currentInvoked(): readonly InvokedSkillV1[] {
+    const open = this.#step;
+    return open ? this.invokedFor(open.turn, open.step) : [];
+  }
+
   /** Drops the catalog, so the next Turn reloads it rather than reusing it. */
   invalidate(): void {
     this.#catalog = emptySkillCatalogV1(this.#owner);
     this.#turn = undefined;
+    this.#invoked = [];
+    this.#invokedTurn = undefined;
+    this.#step = undefined;
   }
 }
 
@@ -454,7 +533,13 @@ export function createSkillsRuntimePlugin(
       ctx.systemPrompt.register({
         id: "skills",
         order: 90,
-        render: () => renderSkillCatalogPromptV1(catalog.current()),
+        render: () =>
+          [
+            renderSkillCatalogPromptV1(catalog.current()),
+            renderInvokedSkillsPromptV1(catalog.currentInvoked()),
+          ]
+            .filter((block) => block.length > 0)
+            .join("\n\n"),
       }),
     );
     disposers.push(ctx.tools.register(createSkillLoadTool(catalog)));
@@ -470,12 +555,20 @@ export function createSkillsRuntimePlugin(
       );
     }
     disposers.push(
-      ctx.on("agent/pre-step", async (agent, _inputs, turn, step, next) => {
+      ctx.on("agent/pre-step", async (agent, inputs, turn, step, next) => {
         // Once per Turn, at its first step: "an edit is visible to the Bot on
         // its next admitted Turn", so a Skill written mid-Turn does not change
         // the instructions the Turn is already running under.
         if (step === 1 || catalog.loadedTurn() !== turn) {
           await catalog.refresh(turn, agent.session);
+        }
+        catalog.enterStep(turn, step);
+        if (step === 1) {
+          const refs = inputs.flatMap((input) => input.skills ?? []);
+          const outcome = await catalog.invoke(turn, agent.session, refs);
+          if (outcome.status === "unresolved") {
+            return { kind: "reject", reason: outcome.reason };
+          }
         }
         return next();
       }),

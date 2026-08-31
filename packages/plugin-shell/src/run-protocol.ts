@@ -1,7 +1,9 @@
 import {
   decodeSendToUserPayloadV1,
+  decodeSkillRefsV1,
   type SendToUserPayloadV1,
   type SessionEvent,
+  type SkillRefV1,
 } from "@frockbot/kernel-contracts";
 import { isPublicIdentifier } from "@frockbot/configuration-core";
 import type {
@@ -161,6 +163,13 @@ export interface ClientTurnCommandV1 {
   schemaVersion: 1;
   commandId: string;
   text: string;
+  /**
+   * The Skills this message invokes, attached in the composer with `/` or `@`.
+   * Absent means none. Bounded by the kernel's `MAX_INVOKED_SKILLS_V1`; a ref names a
+   * Skill, it never carries its text, so a client cannot inject instructions
+   * by pretending to invoke one.
+   */
+  skills?: SkillRefV1[];
 }
 
 export interface ClientNotificationAcknowledgementCommandV1 {
@@ -1003,7 +1012,11 @@ export function decodeClientRunListQueryV1(
 
 export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
   const command = record(input, "turn command");
-  exactKeys(command, ["schemaVersion", "commandId", "text"], "turn command");
+  exactKeys(
+    command,
+    ["schemaVersion", "commandId", "text", "skills"],
+    "turn command",
+  );
   if (command.schemaVersion !== 1) {
     throw new Error("turn command.schemaVersion is invalid");
   }
@@ -1023,7 +1036,12 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     "turn command",
   ).trim();
   if (!text) throw new Error("turn command.text is required");
-  return { schemaVersion: 1, commandId, text };
+  if (command.skills === undefined)
+    return { schemaVersion: 1, commandId, text };
+  const skills = decodeSkillRefsV1(command.skills, "turn command.skills");
+  return skills.length > 0
+    ? { schemaVersion: 1, commandId, text, skills }
+    : { schemaVersion: 1, commandId, text };
 }
 
 export function decodeClientNotificationAcknowledgementCommandV1(

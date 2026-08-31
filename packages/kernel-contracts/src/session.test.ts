@@ -482,6 +482,51 @@ describe("SessionStore", () => {
     expect(session.disposed).toBe(true);
     expect(session.events.at(-1)?.type).toBe("session/disposed");
   });
+  test("decodes invoked Skills on an input, and refuses a malformed one", () => {
+    const base = {
+      type: "input/queued" as const,
+      seq: 0,
+      timestamp,
+      messageId: "message-1",
+      text: "run the standup",
+    };
+    // An input recorded before invocation existed still decodes unchanged.
+    expect(decodeSessionEvent(structuredClone(base))).toEqual(base);
+    const invoking = {
+      ...base,
+      skills: [
+        { schemaVersion: 1 as const, source: "bot" as const, slug: "s" },
+      ],
+    };
+    expect(decodeSessionEvent(structuredClone(invoking))).toEqual(invoking);
+    expect(() =>
+      decodeSessionEvent({ ...base, skills: [{ source: "bot", slug: "s" }] }),
+    ).toThrow();
+    expect(() => decodeSessionEvent({ ...base, skills: "bot/s" })).toThrow();
+  });
+
+  test("decodes skill/invoked with exact keys and a decoded ref", () => {
+    const event = {
+      type: "skill/invoked" as const,
+      seq: 0,
+      timestamp,
+      turn: 1,
+      ref: { schemaVersion: 1 as const, source: "bot" as const, slug: "s" },
+      generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
+      contentHash: "a".repeat(64),
+    };
+    expect(decodeSessionEvent(structuredClone(event))).toEqual(event);
+    expect(() => decodeSessionEvent({ ...event, step: 1 })).toThrow(
+      "session event has invalid fields",
+    );
+    expect(() =>
+      decodeSessionEvent({
+        ...event,
+        ref: { schemaVersion: 1, source: "workflow", slug: "s" },
+      }),
+    ).toThrow();
+  });
+
   test("decodes a turn/end reason only within its declared bound", () => {
     const base = {
       type: "turn/end" as const,

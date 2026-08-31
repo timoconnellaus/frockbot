@@ -72,6 +72,14 @@ _Avoid_: Workspace, folder, team
 An instruction file under a Bot's instruction root on the Workspace that the Bot loads to learn how to do something. A Bot may write its own.
 _Avoid_: Prompt, workflow, tool, instruction file
 
+**Skill ref**:
+The name that identifies one Skill across a seam — its source and slug — carried instead of its text, so what runs is the Skill generation the Turn resolves.
+_Avoid_: Skill id, skill path, handle
+
+**Invoke**:
+A User attaching a Skill ref to a message, which expands that Skill's body into the Turn's first step. Distinct from a Bot loading a Skill on its own initiative, and from merely mentioning one.
+_Avoid_: Run a skill, trigger, call
+
 **Channel**:
 A Package-provided delivery surface, such as Telegram or the hosted WebUI, through which a User and a Bot exchange messages.
 _Avoid_: Integration, transport

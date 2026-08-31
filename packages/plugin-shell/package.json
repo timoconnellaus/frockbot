@@ -25,7 +25,8 @@
     "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
     "./run-protocol": "./src/run-protocol.ts",
-    "./shared": "./src/shared.ts"
+    "./shared": "./src/shared.ts",
+    "./skill-protocol": "./src/skill-protocol.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"

@@ -235,6 +235,8 @@ class MemoryBotState implements BotStateBinding {
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
     assertRegistered: () => Promise.resolve(),
+    listSkills: () =>
+      Promise.resolve({ schemaVersion: 1 as const, skills: [] }),
     run: ({ botId, command }) => state.run(botId, command),
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),

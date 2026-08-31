@@ -4,11 +4,13 @@ import {
   type AgentHandle,
   type AgentInput,
   type AgentOptions,
+  type AgentSendV1,
   type AgentStatus,
   type PreStepDecision,
 } from "./agent.js";
 import {
   type CompositionPinV1,
+  decodeSkillRefsV1,
   LlmEffectNotStartedError,
   type LlmStreamEvent,
   type NormalizedModelRequest,
@@ -171,12 +173,24 @@ class LoopAgent implements Agent {
     return this.#status;
   }
 
-  send(text: string): string {
+  send(request: string | AgentSendV1): string {
     if (this.#disposeRequested)
       throw new Error(`agent "${this.id}" is disposing`);
-    const normalized = text.trim();
+    const sent = typeof request === "string" ? { text: request } : request;
+    const normalized = sent.text.trim();
     if (!normalized) throw new Error("agent input is empty");
-    const input = { messageId: crypto.randomUUID(), text: normalized };
+    // Decoded here rather than trusted: `send` is the kernel's inbound seam
+    // for an input, and an invoked Skill is durable state the moment
+    // `input/queued` is appended.
+    const skills =
+      sent.skills === undefined
+        ? undefined
+        : decodeSkillRefsV1([...sent.skills], "agent input skills");
+    const input: AgentInput = {
+      messageId: crypto.randomUUID(),
+      text: normalized,
+      ...(skills && skills.length > 0 ? { skills } : {}),
+    };
     this.session.append({ type: "input/queued", ...input });
     this.#inbox.push(input);
     this.#ctx.emit("agent/inbox/inserted", this, input);

@@ -14,6 +14,15 @@ import {
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
 import SendPayloadView from "./SendPayloadView.vue";
+import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
+import {
+  nextSkillHighlightV1,
+  rankSkillCandidatesV1,
+  SkillAttachmentStore,
+  skillPopoverForV1,
+  textWithoutSkillTriggerV1,
+  type SkillPopoverStateV1,
+} from "./skill-invocation.js";
 
 const injectedWeb = inject(frockBotWebDataKey);
 if (!injectedWeb) throw new Error("shell client data was not provided");
@@ -40,6 +49,32 @@ const composerContext = computed(
 const draftStore = new ComposerDraftStore();
 const draft = ref(draftStore.draftFor(composerContext.value));
 const rightPanelOpen = ref(true);
+/*
+ * Skill invocation. `/` or `@` at a word boundary opens a popover over the
+ * Bot's catalog; choosing one attaches a ref chip and removes the trigger from
+ * the message. The Skill's text is never pasted: the backend resolves the ref
+ * against the generation the Turn loads, so what runs is what the instruction
+ * root holds, not what the composer once showed.
+ */
+const composerInput = ref<HTMLTextAreaElement | undefined>(undefined);
+const skillStore = new SkillAttachmentStore();
+const attachedSkills = ref<readonly ClientSkillCatalogEntryV1[]>([]);
+const skillPopover = ref<SkillPopoverStateV1 | undefined>(undefined);
+const skillHighlight = ref(0);
+const skillCandidates = computed(() =>
+  skillPopover.value
+    ? rankSkillCandidatesV1(
+        state.value.skillCatalog,
+        skillPopover.value.query,
+        {
+          exclude: skillStore.refs(),
+        },
+      )
+    : [],
+);
+const skillPopoverOpen = computed(
+  () => Boolean(skillPopover.value) && skillCandidates.value.length > 0,
+);
 // The macOS desktop shell hides its title bar, so the window's traffic lights
 // sit inside the sidebar's top row and the wordmark has to clear them.
 const macDesktop =
@@ -154,7 +189,14 @@ watch(
   () => {
     pinnedToLatest.value = true;
     void scrollToLatest("auto");
+    // A Skill belongs to one Bot's instruction root, so a switch drops both
+    // the attached refs and the catalog they came from.
+    skillStore.take();
+    syncAttachedSkills();
+    closeSkillPopover();
+    void web.value.loadSkillCatalog();
   },
+  { immediate: true },
 );
 
 watch(
@@ -172,16 +214,72 @@ watch(panelSurface, (surface) => {
   if (surface) rightPanelOpen.value = true;
 });
 
+function syncAttachedSkills(): void {
+  attachedSkills.value = [...skillStore.attached()];
+}
+
+function closeSkillPopover(): void {
+  skillPopover.value = undefined;
+  skillHighlight.value = 0;
+}
+
+function refreshSkillPopover(): void {
+  const element = composerInput.value;
+  if (!element) return closeSkillPopover();
+  const open = skillPopoverForV1(draft.value, element.selectionStart ?? 0);
+  skillPopover.value = open;
+  skillHighlight.value = 0;
+}
+
+function attachSkill(entry: ClientSkillCatalogEntryV1): void {
+  const open = skillPopover.value;
+  if (!open) return;
+  const element = composerInput.value;
+  const caret = element?.selectionStart ?? draft.value.length;
+  const trimmed = textWithoutSkillTriggerV1(draft.value, open, caret);
+  // Attaching a ref, not pasting a body: the message keeps only what the User
+  // typed, and the Skill travels beside it.
+  skillStore.attach(entry);
+  syncAttachedSkills();
+  draft.value = trimmed.text;
+  closeSkillPopover();
+  void nextTick(() => {
+    const input = composerInput.value;
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(trimmed.caret, trimmed.caret);
+  });
+}
+
+function detachSkill(ref: string): void {
+  skillStore.detach(ref);
+  syncAttachedSkills();
+}
+
 async function sendMessage(): Promise<void> {
   const text = draft.value.trim();
   if (!text || !canSend.value) return;
+  closeSkillPopover();
+  const attached = [...skillStore.attached()];
+  const skills = skillStore.take();
+  syncAttachedSkills();
   const submission = draftStore.begin(composerContext.value, text);
   draft.value = "";
   // Sending is an explicit request to follow along again.
   pinnedToLatest.value = true;
   void scrollToLatest();
-  const result = await web.value.sendPrompt(text);
+  const result = await web.value.sendPrompt(
+    text,
+    skills.length > 0 ? skills : undefined,
+  );
+  // A Turn may have written a Skill, and an edit is visible on the next Turn,
+  // so the popover reads the catalog again rather than aging.
+  void web.value.loadSkillCatalog();
   if (!result.accepted) {
+    // A refused submission gives the Skills back too: the User attached them
+    // deliberately and should not have to find them again.
+    skillStore.restore(attached);
+    syncAttachedSkills();
     const restored = draftStore.reject(submission);
     if (
       restored !== undefined &&
@@ -193,6 +291,31 @@ async function sendMessage(): Promise<void> {
 }
 
 function handleComposerKeydown(event: KeyboardEvent): void {
+  if (skillPopoverOpen.value) {
+    const count = skillCandidates.value.length;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      skillHighlight.value = nextSkillHighlightV1(
+        skillHighlight.value,
+        count,
+        event.key === "ArrowDown" ? 1 : -1,
+      );
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSkillPopover();
+      return;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      const candidate = skillCandidates.value[skillHighlight.value];
+      if (candidate) {
+        event.preventDefault();
+        attachSkill(candidate.entry);
+        return;
+      }
+    }
+  }
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
   void sendMessage();
@@ -336,19 +459,66 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           :class="{ 'composer-busy': isRunning }"
           @submit.prevent="sendMessage"
         >
-          <textarea
-            v-model="draft"
-            :placeholder="
-              isConnecting
-                ? 'Connecting…'
-                : !state.modelReady
-                  ? 'Choose a default model in Settings'
-                  : `Message ${botName}`
-            "
-            :disabled="isConnecting || !state.modelReady || isRunning"
-            rows="1"
-            @keydown="handleComposerKeydown"
-          />
+          <ul
+            v-if="skillPopoverOpen"
+            id="skill-popover"
+            class="skill-popover"
+            role="listbox"
+            aria-label="Skills"
+          >
+            <li
+              v-for="(candidate, index) in skillCandidates"
+              :key="candidate.entry.ref"
+              class="skill-option"
+              :class="{ 'skill-option-active': index === skillHighlight }"
+              role="option"
+              :aria-selected="index === skillHighlight"
+              @mousedown.prevent="attachSkill(candidate.entry)"
+              @mousemove="skillHighlight = index"
+            >
+              <span class="skill-option-name">{{ candidate.entry.name }}</span>
+              <span class="skill-option-ref">{{ candidate.entry.ref }}</span>
+              <span class="skill-option-description">
+                {{ candidate.entry.description }}
+              </span>
+            </li>
+          </ul>
+          <div class="composer-body">
+            <ul v-if="attachedSkills.length > 0" class="skill-chips">
+              <li v-for="entry in attachedSkills" :key="entry.ref">
+                <button
+                  type="button"
+                  class="skill-chip"
+                  :title="entry.description"
+                  :aria-label="`Remove Skill ${entry.name}`"
+                  @click="detachSkill(entry.ref)"
+                >
+                  <span class="skill-chip-name">{{ entry.name }}</span>
+                  <UiIcon name="close" size="sm" />
+                </button>
+              </li>
+            </ul>
+            <textarea
+              ref="composerInput"
+              v-model="draft"
+              :placeholder="
+                isConnecting
+                  ? 'Connecting…'
+                  : !state.modelReady
+                    ? 'Choose a default model in Settings'
+                    : `Message ${botName}`
+              "
+              :disabled="isConnecting || !state.modelReady || isRunning"
+              rows="1"
+              role="combobox"
+              :aria-expanded="skillPopoverOpen"
+              aria-controls="skill-popover"
+              @keydown="handleComposerKeydown"
+              @keyup="refreshSkillPopover"
+              @click="refreshSkillPopover"
+              @blur="closeSkillPopover"
+            />
+          </div>
           <UiIconButton
             v-if="isRunning"
             class="stop-button"

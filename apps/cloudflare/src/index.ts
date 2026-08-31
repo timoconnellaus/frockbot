@@ -1,4 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { decodeSkillRefsV1 } from "@frockbot/kernel-contracts";
+import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import {
   compileFoundationApplication,
   createFoundationBackendContributions,
@@ -124,6 +126,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   fenceRunAdmission(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
+  listSkills(): Promise<ClientSkillCatalogV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
   reconcileRun(
@@ -173,6 +176,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
           sessionId: command.sessionId,
           acceptedAt: command.acceptedAt,
           text: command.text,
+          ...(command.skills ? { skills: command.skills } : {}),
         },
       }),
     listRuns: (query) =>
@@ -181,6 +185,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       rpc.lookupRun({ schemaVersion: 1, userId, botId, query }),
     fenceRunAdmission: (query) =>
       rpc.fenceRunAdmission({ schemaVersion: 1, userId, botId, query }),
+    listSkills: () => rpc.listSkills({ schemaVersion: 1, userId, botId }),
     listNotifications: () =>
       rpc.listNotifications({ schemaVersion: 1, userId, botId }),
     acknowledgeNotification: (notificationId) =>
@@ -295,12 +300,15 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   async run(input: unknown): Promise<BotTurnResult> {
     const request = decodeRpcEnvelopeV1(input, {
       botId: rpcBotId,
-      command: rpcObject({
-        runId: rpcIdentifier,
-        sessionId: rpcString(257),
-        acceptedAt: rpcString(64),
-        text: rpcString(100_000),
-      }),
+      command: rpcObject(
+        {
+          runId: rpcIdentifier,
+          sessionId: rpcString(257),
+          acceptedAt: rpcString(64),
+          text: rpcString(100_000),
+        },
+        { skills: (value, label) => decodeSkillRefsV1(value, label) },
+      ),
     });
     const command = request.command as BotTurnCommand;
     return botStateStub(
@@ -342,6 +350,15 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId,
     ).fenceRunAdmission(request.query);
+  }
+
+  async listSkills(input: unknown): Promise<ClientSkillCatalogV1> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).listSkills();
   }
 
   async listNotifications(input: unknown): Promise<BotNotificationIntent[]> {

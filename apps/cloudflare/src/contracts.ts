@@ -60,6 +60,7 @@ import type {
   ClientRunStopReceiptV1,
   ClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
+import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 
 export interface BackendRouteContribution {
   packageId: string;
@@ -185,6 +186,10 @@ export interface UserBotStateBinding {
     botId: string;
     query: ClientRunLookupQueryV1;
   }): Promise<ClientRunLookupV1>;
+  listSkills(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<ClientSkillCatalogV1>;
   listNotifications(input: {
     schemaVersion: 1;
     botId: string;
