@@ -334,7 +334,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       this.backendEnv.WORKSPACE_SYNC_EFFECTS = new DurableWorkspaceSyncEffects({
         state: this.ctx,
       });
-      this.backendEnv.WORKSPACE_SYNC_GENERATIONS = bot;
+      this.backendEnv.WORKSPACE_SYNC_GENERATIONS = routed;
     }
     if (memory) {
       this.backendEnv.MEMORY_WORKSPACE_FILES = memory;
