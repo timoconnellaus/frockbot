@@ -80,7 +80,7 @@ These rules govern production features and architecture. Treat them as invariant
 - The Memory Package is the single writer of Memory roots: it writes object storage, every write produces a generation recorded in the owning Durable Object, and the Workspace presents Memory roots read-only through the durable-root sync.
 - Every other durable root synchronizes bidirectionally between the Workspace and object storage. Writes are segregated by writer; every write produces a generation; a write that would overwrite a generation its writer has not seen is preserved as a conflicting generation and surfaced, never merged or dropped. The mechanism is named in ADR 0013 and proven before it ships.
 - Indexes, embeddings, and summaries are derived from Memory files and are always rebuildable from them.
-- What Memory enters a model request, and when, is Package policy, and the session event log records exactly what was injected.
+- What Memory enters a model request, and when, is Package policy, and the session event log records exactly what was injected, so an injection gap is visible in durable state rather than silently changing the Bot's behavior.
 - Memory contains no secrets and no credential references.
 
 ## Plugin-owned integrations
@@ -89,7 +89,7 @@ These rules govern production features and architecture. Treat them as invariant
 - Every model provider is a runtime Plugin behind the shared model interface. Provider-specific authentication, request translation, streaming normalization, usage reporting, and errors stay inside that Plugin.
 - Provider and model settings are durable cloud state scoped to their User or Bot.
 - Secrets remain server-side and cross interfaces only as opaque references when necessary.
-- A Routine executes as its Bot, with exactly that Bot's authority, and every firing is an admitted Turn.
+- A Routine executes as its Bot, with exactly that Bot's authority. Every firing is an admitted child Turn of that Bot: it may use the Bot's tools and record its own Session events, but it does not write to the User-visible conversation; its outcome is delivered to the Bot's next conversational Turn as durable input, and only an explicit hand-off surfaces it to the User immediately.
 - The Agent loop contains product-neutral orchestration and does not branch on individual providers, Packages, or client platforms.
 
 ## Explicit seams
