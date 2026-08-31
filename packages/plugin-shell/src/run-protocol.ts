@@ -6,6 +6,8 @@ import {
   type SkillRefV1,
 } from "@frockbot/kernel-contracts";
 import { isPublicIdentifier } from "@frockbot/configuration-core";
+import { decodeRunCursorV1, RUN_CURSOR_PATTERN } from "./run-cursor.js";
+export { decodeRunCursorV1, RUN_CURSOR_PATTERN };
 import type {
   ClientNotificationIntent,
   ClientRun,
@@ -34,28 +36,7 @@ const MAX_NOTIFICATION_TITLE_BYTES = 512;
 const MAX_NOTIFICATION_BODY_BYTES = 2_000;
 const MAX_CLIENT_TURN_BYTES = 256_000;
 const MAX_CURSOR_LENGTH = 320;
-const RUN_CURSOR_PATTERN = /^run-index:(.{24}):(.+)$/;
 export const CLIENT_RUN_PAGE_LIMIT = 32;
-
-function decodeRunCursor(value: string): string {
-  const match = RUN_CURSOR_PATTERN.exec(value);
-  const acceptedAt = match?.[1];
-  const runId = match?.[2];
-  if (
-    !acceptedAt ||
-    !runId ||
-    !Number.isFinite(Date.parse(acceptedAt)) ||
-    new Date(acceptedAt).toISOString() !== acceptedAt
-  ) {
-    throw new Error("run cursor is invalid");
-  }
-  try {
-    decodeRunIdV1(runId);
-  } catch {
-    throw new Error("run cursor is invalid");
-  }
-  return value;
-}
 export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
 export type ClientRunStatusV1 =
@@ -888,7 +869,7 @@ function decodePage(value: unknown): ClientRunPageV1 {
   const nextCursor =
     page.nextCursor === undefined
       ? undefined
-      : decodeRunCursor(
+      : decodeRunCursorV1(
           string(page, "nextCursor", MAX_CURSOR_LENGTH, "run list.page"),
         );
   if (page.truncated && !nextCursor) {
@@ -1002,7 +983,7 @@ export function decodeClientRunListQueryV1(
       : string(query, "before", MAX_CURSOR_LENGTH, "run list query");
   if (before !== undefined) {
     try {
-      decodeRunCursor(before);
+      decodeRunCursorV1(before);
     } catch {
       throw new Error("run list query.before is invalid");
     }

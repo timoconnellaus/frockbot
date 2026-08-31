@@ -299,6 +299,12 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       rebuildSearchIndex: () =>
         Promise.reject(new Error("not used while composing")),
+      listBotUnread: () =>
+        Promise.resolve({ schemaVersion: 1 as const, unread: [] }),
+      listBotNotifications: () =>
+        Promise.resolve({ schemaVersion: 1 as const, notifications: [] }),
+      executeBotUnreadCommand: () =>
+        Promise.reject(new Error("not used while composing")),
       readBotAvatar: () => Promise.resolve(undefined),
       uploadBotAvatar: () =>
         Promise.reject(new Error("not used while composing")),

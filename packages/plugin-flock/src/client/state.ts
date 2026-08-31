@@ -1,6 +1,7 @@
 import type { InjectionKey, Ref } from "vue";
 // Shell selection is injected through its public hosted-client interface.
 import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
+import type { BotUnreadViewV1 } from "@frockbot/plugin-shell/unread";
 import type {
   BotDirectoryViewV1,
   BotIdentityViewV1,
@@ -16,6 +17,8 @@ export interface FlockWebData {
   profiles: Record<string, BotIdentityViewV1>;
   /** Reveals Bots their own settings hide from the list. */
   showHidden: boolean;
+  /** Per-Bot unread, as the Bot Durable Objects derive it. Never computed here. */
+  unread: Record<string, BotUnreadViewV1>;
   loading: boolean;
   error?: string;
   overlay?: "create" | "edit" | "archive";
@@ -26,6 +29,12 @@ export interface FlockWebData {
   draftSheep: SheepRecipeV1;
   bindShell(shell: Ref<FrockBotWebData>): void;
   load(): Promise<void>;
+  /** Re-reads the bounded unread fan-out for the whole sidebar. */
+  refreshUnread(): Promise<void>;
+  /** The authenticated read receipt. Never fired from a poll. */
+  markRead(botId: string): Promise<void>;
+  /** User intent: keep this Bot bold until it is opened again. */
+  markUnread(botId: string): Promise<void>;
   select(botId: string): Promise<void>;
   openCreate(): void;
   openEdit(): Promise<void>;

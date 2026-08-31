@@ -25,6 +25,11 @@ describe("Flock gateway Contribution", () => {
       updateSheep: () => Promise.reject(new Error("not used")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
+      listBotUnread: () =>
+        Promise.resolve({ schemaVersion: 1 as const, unread: [] }),
+      listBotNotifications: () =>
+        Promise.resolve({ schemaVersion: 1 as const, notifications: [] }),
+      executeBotUnreadCommand: () => Promise.reject(new Error("not used")),
       readBotAvatar: () => Promise.resolve(undefined),
       uploadBotAvatar: () => Promise.reject(new Error("not used")),
     });
@@ -101,6 +106,24 @@ describe("Flock gateway Contribution", () => {
               hiddenFromSidebar: false,
             },
           ],
+        }),
+      listBotUnread: () =>
+        Promise.resolve({ schemaVersion: 1 as const, unread: [] }),
+      listBotNotifications: () =>
+        Promise.resolve({ schemaVersion: 1 as const, notifications: [] }),
+      executeBotUnreadCommand: (_user, botId, command) =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          commandId: command.commandId,
+          status: "applied" as const,
+          unread: {
+            schemaVersion: 1 as const,
+            botId,
+            count: 0,
+            capped: false,
+            unread: command.type === "bot/mark-unread",
+            manuallyUnread: command.type === "bot/mark-unread",
+          },
         }),
       readBotAvatar: () =>
         Promise.resolve({

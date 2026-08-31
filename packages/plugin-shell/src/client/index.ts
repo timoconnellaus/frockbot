@@ -53,6 +53,7 @@ import {
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
 import { modelRuntimeLabel } from "./model-presentation.js";
+import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";
 
@@ -872,15 +873,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         continue;
       }
       if (document.hidden) {
-        if (
-          !("Notification" in window) ||
-          Notification.permission !== "granted"
-        ) {
+        // One seam: the desktop or mobile notifications Package when the shell
+        // exposes it, the web API when it does not.
+        const delivery = await showClientNotificationV1({
+          title: notification.title,
+          body: notification.body,
+        });
+        if (delivery === "unavailable") {
           web.value.settingsError =
             "A completed Bot notification is waiting for permission";
           continue;
         }
-        new Notification(notification.title, { body: notification.body });
       }
       await ctx.transport.acknowledgeNotification(
         botId,

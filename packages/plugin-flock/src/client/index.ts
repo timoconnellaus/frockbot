@@ -19,6 +19,12 @@ import FlockOverlay from "./FlockOverlay.vue";
 import FlockIdentity from "./FlockIdentity.vue";
 import FlockAvatar from "./FlockAvatar.vue";
 import {
+  decodeBotNotificationDirectoryViewV1,
+  decodeBotUnreadDirectoryViewV1,
+  decodeBotUnreadReceiptV1,
+} from "@frockbot/plugin-shell/unread";
+import { showClientNotificationV1 } from "@frockbot/plugin-shell/client/notify";
+import {
   clearPendingCreate,
   clearPendingSheep,
   isDefinitiveFlockFailure,
@@ -54,6 +60,13 @@ function replacePreferredBot(botId?: string): void {
   window.history.replaceState(window.history.state, "", url);
 }
 
+/**
+ * How often the sidebar re-reads the unread fan-out and the pending intents of
+ * Bots nobody is looking at. A poll refreshes badges; it never clears one —
+ * "read" is an authenticated command the User's own selection sends.
+ */
+const UNREAD_POLL_INTERVAL_MS = 15_000;
+
 export const flockClientPlugin: ClientPlugin = (ctx) => {
   if (!ctx.transport.hostedRequest)
     throw new Error("Flock hosted transport is unavailable");
@@ -62,6 +75,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
   let authenticatedUserId: string | undefined;
   let loadGeneration = 0;
   let selectionGeneration = 0;
+  /** Intents already shown by this page, so a poll cannot show one twice. */
+  const deliveredNotifications = new Set<string>();
 
   async function requireAuthenticatedUserId(): Promise<string> {
     if (!ctx.transport.readAuthenticatedUserId)
@@ -74,6 +89,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     directory: { schemaVersion: 1, revision: 0, bots: [] },
     identities: {},
     profiles: {},
+    unread: {},
     lifecycles: {},
     showArchived: false,
     showHidden: false,
@@ -169,6 +185,12 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           )
             clearPendingSheep(userId, botId);
         }
+        try {
+          await state.value.refreshUnread();
+        } catch {
+          // A badge that cannot be read never blocks the flock from loading.
+        }
+        if (generation !== loadGeneration) return;
         const preferred = new URL(window.location.href).searchParams.get("bot");
         const activeBots = state.value.directory.bots.filter(
           (bot) => state.value.lifecycles[bot.botId] !== "archived",
@@ -187,6 +209,48 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         if (generation === loadGeneration) state.value.loading = false;
       }
     },
+    async refreshUnread() {
+      const directory = decodeBotUnreadDirectoryViewV1(
+        await request("/api/bots/unread"),
+      );
+      state.value.unread = Object.fromEntries(
+        directory.unread.map((view) => [view.botId, view]),
+      );
+    },
+    async markRead(botId) {
+      const cursor = state.value.unread[botId]?.lastActivityCursor;
+      // Nothing has ever settled on this Bot: there is no cursor to read up to.
+      if (!cursor) return;
+      const receipt = decodeBotUnreadReceiptV1(
+        await request(
+          `/api/bots/${encodeURIComponent(botId)}/unread`,
+          "POST",
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "bot/mark-read",
+            commandId: crypto.randomUUID(),
+            botId,
+            upToCursor: cursor,
+          }),
+        ),
+      );
+      state.value.unread[botId] = receipt.unread;
+    },
+    async markUnread(botId) {
+      const receipt = decodeBotUnreadReceiptV1(
+        await request(
+          `/api/bots/${encodeURIComponent(botId)}/unread`,
+          "POST",
+          JSON.stringify({
+            schemaVersion: 1,
+            type: "bot/mark-unread",
+            commandId: crypto.randomUUID(),
+            botId,
+          }),
+        ),
+      );
+      state.value.unread[botId] = receipt.unread;
+    },
     async select(botId) {
       const generation = ++selectionGeneration;
       if (!state.value.directory.bots.some((bot) => bot.botId === botId))
@@ -203,6 +267,19 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       if (generation !== selectionGeneration) return;
       if (!shell) throw new Error("Shell selection is unavailable");
       await shell.value.selectBot(botId);
+      // Selecting a thread while looking at it is what "read" means. A
+      // background poll that refreshed the same runs must never do this.
+      if (
+        generation === selectionGeneration &&
+        typeof document !== "undefined" &&
+        document.visibilityState === "visible"
+      ) {
+        try {
+          await state.value.markRead(botId);
+        } catch {
+          // The badge stays until the next selection; nothing durable is lost.
+        }
+      }
     },
     openCreate() {
       const pending = authenticatedUserId
@@ -439,7 +516,54 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       }
     },
   });
+  /**
+   * The fan-out half of the notification story: a Turn that settles on a Bot
+   * the User is not looking at raises its intent here, through the same seam
+   * the open Bot's intents use, and is acknowledged per Bot afterwards.
+   */
+  async function deliverBackgroundNotifications(): Promise<void> {
+    const directory = decodeBotNotificationDirectoryViewV1(
+      await request("/api/bots/notifications"),
+    );
+    for (const intent of directory.notifications) {
+      // The open Bot's intents belong to the Shell: it projects the Turn into
+      // the conversation and acknowledges it there.
+      if (intent.botId === shell?.value.activeBotId) continue;
+      const key = `${intent.botId}:${intent.notificationId}`;
+      if (deliveredNotifications.has(key)) continue;
+      const delivery = await showClientNotificationV1({
+        title: intent.title,
+        body: intent.body,
+      });
+      if (delivery === "unavailable") continue;
+      deliveredNotifications.add(key);
+      await request(
+        `/api/bots/${encodeURIComponent(intent.botId)}/notifications`,
+        "POST",
+        JSON.stringify({
+          schemaVersion: 1,
+          action: "acknowledge",
+          notificationId: intent.notificationId,
+        }),
+      );
+    }
+  }
+
+  const poll = setInterval(() => {
+    if (!state.value.directory.bots.length) return;
+    void (async () => {
+      try {
+        await state.value.refreshUnread();
+        await deliverBackgroundNotifications();
+      } catch {
+        // A poll is a refresh, not authority: the next tick tries again and
+        // nothing the User did is lost by a failed one.
+      }
+    })();
+  }, UNREAD_POLL_INTERVAL_MS);
+
   return [
+    () => clearInterval(poll),
     ctx.provide(flockWebDataKey, state),
     ctx.slot({
       slot: "frockbot.sidebar-bots",

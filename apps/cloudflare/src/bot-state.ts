@@ -55,6 +55,10 @@ import {
   type ClientRunStopCommandV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import {
+  decodeBotUnreadCommandV1,
+  type BotUnreadCommandV1,
+} from "@frockbot/plugin-shell/unread";
+import {
   decodeIsolateAuthorityRequestV1,
   decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
@@ -677,6 +681,31 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     return shell.reconcileRun(identity, request.runId as string);
+  }
+
+  /** The Bot's unread projection; the Bot Durable Object derives the count. */
+  async readUnread(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    return shell.readUnread(identity);
+  }
+
+  /** `bot/mark-read` / `bot/mark-unread`, idempotent on the command id. */
+  async executeUnreadCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeBotUnreadCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.executeUnreadCommand(
+      identity,
+      request.command as BotUnreadCommandV1,
+    );
   }
 
   async listNotifications(input: unknown) {

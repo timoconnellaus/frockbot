@@ -23,6 +23,14 @@ import {
   ConfigurationDecodeError,
   decodeUploadBotAvatarCommandV1,
 } from "@frockbot/configuration-core";
+import {
+  decodeBotUnreadCommandV1,
+  UnreadDecodeError,
+  type BotNotificationDirectoryViewV1,
+  type BotUnreadCommandV1,
+  type BotUnreadDirectoryViewV1,
+  type BotUnreadReceiptV1,
+} from "@frockbot/plugin-shell/unread";
 
 export interface FlockGatewayHost {
   listBots(userId: string): Promise<BotDirectoryViewV1>;
@@ -43,6 +51,22 @@ export interface FlockGatewayHost {
   ): Promise<FlockReceiptV1>;
   /** The live identity of every registered Bot, read through to its owner. */
   listBotIdentities(userId: string): Promise<BotIdentityDirectoryViewV1>;
+  /**
+   * Unread state for every non-archived Bot, through the same bounded fan-out
+   * the identity directory uses: one round trip for the whole sidebar.
+   */
+  listBotUnread(userId: string): Promise<BotUnreadDirectoryViewV1>;
+  /**
+   * Pending notification intents across every non-archived Bot, so a
+   * completion on a Bot the User is not looking at still surfaces.
+   */
+  listBotNotifications(userId: string): Promise<BotNotificationDirectoryViewV1>;
+  /** `bot/mark-read` / `bot/mark-unread`, applied by the Bot Durable Object. */
+  executeBotUnreadCommand(
+    userId: string,
+    botId: string,
+    command: BotUnreadCommandV1,
+  ): Promise<BotUnreadReceiptV1>;
   /** The stored avatar bytes, or `undefined` when the Bot uses its sheep. */
   readBotAvatar(
     userId: string,
@@ -71,11 +95,13 @@ function errorResponse(error: unknown): Response {
   if (
     error instanceof FlockDecodeError ||
     error instanceof ConfigurationDecodeError ||
+    error instanceof UnreadDecodeError ||
     (typeof error === "object" &&
       error !== null &&
       "name" in error &&
       (error.name === "FlockDecodeError" ||
-        error.name === "ConfigurationDecodeError"))
+        error.name === "ConfigurationDecodeError" ||
+        error.name === "UnreadDecodeError"))
   )
     return Response.json(
       {
@@ -150,13 +176,17 @@ export function createFlockBackendContribution(
     async route(request, url, context) {
       if (!context.userId) return undefined;
       const sheep = url.pathname.match(/^\/api\/bots\/([^/]+)\/sheep$/);
+      const unread = url.pathname.match(/^\/api\/bots\/([^/]+)\/unread$/);
       const lifecycle = url.pathname.match(/^\/api\/bots\/([^/]+)\/lifecycle$/);
       const avatar = url.pathname.match(/^\/api\/bots\/([^/]+)\/avatar$/);
       if (
         url.pathname !== "/api/bots" &&
         url.pathname !== "/api/bots/lifecycles" &&
         url.pathname !== "/api/bots/identities" &&
+        url.pathname !== "/api/bots/unread" &&
+        url.pathname !== "/api/bots/notifications" &&
         !sheep &&
+        !unread &&
         !lifecycle &&
         !avatar
       )
@@ -169,6 +199,38 @@ export function createFlockBackendContribution(
               { status: 405 },
             );
           return Response.json(await host.listBotIdentities(context.userId));
+        }
+        if (url.pathname === "/api/bots/unread") {
+          if (request.method !== "GET")
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          return Response.json(await host.listBotUnread(context.userId));
+        }
+        if (url.pathname === "/api/bots/notifications") {
+          if (request.method !== "GET")
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          return Response.json(await host.listBotNotifications(context.userId));
+        }
+        if (unread) {
+          const botId = decodePathId(unread[1]!);
+          if (request.method !== "POST")
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          const command = decodeBotUnreadCommandV1(await request.json());
+          if (command.botId !== botId)
+            throw new FlockDecodeError(
+              "unread command does not match request path",
+            );
+          return Response.json(
+            await host.executeBotUnreadCommand(context.userId, botId, command),
+          );
         }
         if (avatar) {
           const botId = decodePathId(avatar[1]!);

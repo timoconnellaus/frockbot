@@ -1,0 +1,284 @@
+import { describe, expect, test } from "bun:test";
+import {
+  advanceUnreadActivityV1,
+  botUnreadCommandFingerprintV1,
+  decodeBotNotificationDirectoryViewV1,
+  decodeBotUnreadCommandV1,
+  decodeBotUnreadDirectoryViewV1,
+  decodeUnreadStateV1,
+  emptyUnreadStateV1,
+  markUnreadReadV1,
+  markUnreadV1,
+  optionalUnreadStateV1,
+  projectBotUnreadViewV1,
+  UNREAD_COUNT_CAP,
+  type UnreadStateV1,
+} from "./unread.js";
+
+/** A cursor in the exact shape the Bot's admission index writes. */
+function cursor(minute: number, runId = `run-${minute}`): string {
+  const at = new Date(Date.UTC(2026, 7, 31, 0, minute, 0)).toISOString();
+  return `run-index:${at}:${runId}`;
+}
+
+/** Newest-first, exactly as `listRunIndex` returns it. */
+function index(count: number): string[] {
+  return Array.from({ length: count }, (_, offset) => cursor(count - offset));
+}
+
+describe("the unread codec", () => {
+  test("accepts the empty record and a full one", () => {
+    expect(decodeUnreadStateV1(emptyUnreadStateV1())).toEqual({
+      schemaVersion: 1,
+      manuallyUnread: false,
+    });
+    const full: UnreadStateV1 = {
+      schemaVersion: 1,
+      lastActivityCursor: cursor(2),
+      lastActivityAt: "2026-08-31T00:02:00.000Z",
+      lastSeenCursor: cursor(1),
+      lastViewedAt: "2026-08-31T00:01:30.000Z",
+      manuallyUnread: true,
+    };
+    expect(decodeUnreadStateV1(full)).toEqual(full);
+  });
+
+  test("refuses anything that is not the record it claims to be", () => {
+    const base = emptyUnreadStateV1();
+    for (const invalid of [
+      undefined,
+      null,
+      [],
+      "unread",
+      { ...base, schemaVersion: 2 },
+      { ...base, manuallyUnread: "yes" },
+      { ...base, surprise: true },
+      { schemaVersion: 1 },
+      // A cursor that is not an admission-index key.
+      { ...base, lastSeenCursor: "yesterday", lastViewedAt: base.lastViewedAt },
+      { ...base, lastSeenCursor: cursor(1) },
+      { ...base, lastActivityAt: "2026-08-31T00:01:00.000Z" },
+      {
+        ...base,
+        lastActivityCursor: cursor(1),
+        lastActivityAt: "not-a-time",
+      },
+    ]) {
+      expect(() => decodeUnreadStateV1(invalid)).toThrow();
+    }
+  });
+
+  test("reads an absent record as the empty one", () => {
+    expect(optionalUnreadStateV1(undefined)).toEqual(emptyUnreadStateV1());
+    expect(() => optionalUnreadStateV1({ schemaVersion: 3 })).toThrow();
+  });
+});
+
+describe("unread transitions", () => {
+  test("activity is monotonic, so a re-settled Turn cannot move it", () => {
+    const first = advanceUnreadActivityV1(emptyUnreadStateV1(), {
+      cursor: cursor(2),
+      at: "2026-08-31T00:02:00.000Z",
+    });
+    // Recovery settling the same Turn again, and an older Turn arriving late.
+    const replayed = advanceUnreadActivityV1(first, {
+      cursor: cursor(2),
+      at: "2026-08-31T00:09:00.000Z",
+    });
+    expect(replayed).toEqual(first);
+    expect(
+      advanceUnreadActivityV1(first, {
+        cursor: cursor(1),
+        at: "2026-08-31T00:01:00.000Z",
+      }),
+    ).toEqual(first);
+    const later = advanceUnreadActivityV1(first, {
+      cursor: cursor(3),
+      at: "2026-08-31T00:03:00.000Z",
+    });
+    expect(later.lastActivityCursor).toBe(cursor(3));
+  });
+
+  test("mark-read takes the max, so out-of-order marks are safe", () => {
+    const read = markUnreadReadV1(emptyUnreadStateV1(), {
+      upToCursor: cursor(5),
+      at: "2026-08-31T00:05:00.000Z",
+    });
+    const stale = markUnreadReadV1(read, {
+      upToCursor: cursor(2),
+      at: "2026-08-31T00:02:00.000Z",
+    });
+    expect(stale.lastSeenCursor).toBe(cursor(5));
+    expect(stale.lastViewedAt).toBe("2026-08-31T00:05:00.000Z");
+    const newer = markUnreadReadV1(stale, {
+      upToCursor: cursor(7),
+      at: "2026-08-31T00:07:00.000Z",
+    });
+    expect(newer.lastSeenCursor).toBe(cursor(7));
+  });
+
+  test("a later mark-read clears manual unread", () => {
+    const marked = markUnreadV1(
+      markUnreadReadV1(emptyUnreadStateV1(), {
+        upToCursor: cursor(1),
+        at: "2026-08-31T00:01:00.000Z",
+      }),
+    );
+    expect(marked.manuallyUnread).toBe(true);
+    // Even a mark that moves no cursor: the User is looking at the thread.
+    const read = markUnreadReadV1(marked, {
+      upToCursor: cursor(1),
+      at: "2026-08-31T00:04:00.000Z",
+    });
+    expect(read).toMatchObject({
+      manuallyUnread: false,
+      lastSeenCursor: cursor(1),
+    });
+  });
+});
+
+describe("the unread projection", () => {
+  test("counts only settled chat Turns the User has not seen", () => {
+    const state: UnreadStateV1 = {
+      schemaVersion: 1,
+      lastActivityCursor: cursor(3),
+      lastActivityAt: "2026-08-31T00:03:00.000Z",
+      lastSeenCursor: cursor(1),
+      lastViewedAt: "2026-08-31T00:01:00.000Z",
+      manuallyUnread: false,
+    };
+    // Four admitted Turns; the newest has not settled, so it is not counted.
+    const view = projectBotUnreadViewV1("alpha", state, index(4));
+    expect(view).toMatchObject({ botId: "alpha", count: 2, unread: true });
+  });
+
+  test("a manual mark shows unread with no count", () => {
+    const view = projectBotUnreadViewV1(
+      "alpha",
+      markUnreadV1(emptyUnreadStateV1()),
+      [],
+    );
+    expect(view).toMatchObject({
+      count: 0,
+      unread: true,
+      manuallyUnread: true,
+    });
+  });
+
+  test("caps the count and says so", () => {
+    const entries = index(UNREAD_COUNT_CAP + 1);
+    const state = advanceUnreadActivityV1(emptyUnreadStateV1(), {
+      cursor: entries[0]!,
+      at: "2026-08-31T02:00:00.000Z",
+    });
+    const view = projectBotUnreadViewV1("alpha", state, entries);
+    expect(view).toMatchObject({ count: UNREAD_COUNT_CAP, capped: true });
+  });
+
+  test("nothing settled means nothing unread", () => {
+    const view = projectBotUnreadViewV1(
+      "alpha",
+      emptyUnreadStateV1(),
+      index(3),
+    );
+    expect(view).toMatchObject({ count: 0, capped: false, unread: false });
+  });
+});
+
+describe("the unread command", () => {
+  test("decodes each type and refuses a mismatched cursor", () => {
+    expect(
+      decodeBotUnreadCommandV1({
+        schemaVersion: 1,
+        type: "bot/mark-read",
+        commandId: "mark-1",
+        botId: "alpha",
+        upToCursor: cursor(1),
+      }),
+    ).toMatchObject({ type: "bot/mark-read", upToCursor: cursor(1) });
+    expect(
+      decodeBotUnreadCommandV1({
+        schemaVersion: 1,
+        type: "bot/mark-unread",
+        commandId: "mark-2",
+        botId: "alpha",
+      }),
+    ).toMatchObject({ type: "bot/mark-unread" });
+    for (const invalid of [
+      // mark-read with no cursor, mark-unread with one.
+      {
+        schemaVersion: 1,
+        type: "bot/mark-read",
+        commandId: "mark-3",
+        botId: "alpha",
+      },
+      {
+        schemaVersion: 1,
+        type: "bot/mark-unread",
+        commandId: "mark-4",
+        botId: "alpha",
+        upToCursor: cursor(1),
+      },
+      {
+        schemaVersion: 1,
+        type: "bot/archive",
+        commandId: "mark-5",
+        botId: "alpha",
+      },
+    ]) {
+      expect(() => decodeBotUnreadCommandV1(invalid)).toThrow();
+    }
+  });
+
+  test("fingerprints the meaning, not the command id", () => {
+    const command = decodeBotUnreadCommandV1({
+      schemaVersion: 1,
+      type: "bot/mark-read",
+      commandId: "mark-1",
+      botId: "alpha",
+      upToCursor: cursor(1),
+    });
+    expect(botUnreadCommandFingerprintV1(command)).toBe(
+      botUnreadCommandFingerprintV1({ ...command, commandId: "mark-2" }),
+    );
+    expect(botUnreadCommandFingerprintV1(command)).not.toBe(
+      botUnreadCommandFingerprintV1({ ...command, upToCursor: cursor(2) }),
+    );
+  });
+});
+
+describe("the fan-out views", () => {
+  test("decode exactly what the routes answer", () => {
+    expect(
+      decodeBotUnreadDirectoryViewV1({
+        schemaVersion: 1,
+        unread: [projectBotUnreadViewV1("alpha", emptyUnreadStateV1(), [])],
+      }).unread,
+    ).toHaveLength(1);
+    expect(() =>
+      decodeBotUnreadDirectoryViewV1({ schemaVersion: 1, unread: [{}] }),
+    ).toThrow();
+    expect(
+      decodeBotNotificationDirectoryViewV1({
+        schemaVersion: 1,
+        notifications: [
+          {
+            schemaVersion: 1,
+            botId: "alpha",
+            notificationId: "run-1",
+            runId: "run-1",
+            createdAt: "2026-08-31T00:01:00.000Z",
+            title: "Alpha replied",
+            body: "hello",
+          },
+        ],
+      }).notifications,
+    ).toHaveLength(1);
+    expect(() =>
+      decodeBotNotificationDirectoryViewV1({
+        schemaVersion: 1,
+        notifications: [{ schemaVersion: 1, botId: "alpha" }],
+      }),
+    ).toThrow();
+  });
+});

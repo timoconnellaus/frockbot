@@ -529,3 +529,36 @@ img.flock-avatar {
     background: var(--frock-surface);
   }
 }
+
+/*
+ * Unread. A row goes bold and carries a count; the Hidden group carries one
+ * aggregate badge, because a hidden Bot has no row to put one on.
+ */
+.flock-bot-row.unread .flock-bot-copy strong {
+  color: var(--frock-text);
+  font-weight: 700;
+}
+
+.flock-bot-row.unread .flock-bot-copy small {
+  color: var(--frock-text);
+}
+
+.flock-unread-badge {
+  display: inline-flex;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--frock-radius-control);
+  background: var(--frock-action-primary);
+  padding: 0 5px;
+  color: var(--frock-on-accent);
+  font-size: var(--frock-text-xs);
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.flock-hidden-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

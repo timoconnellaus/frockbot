@@ -40,6 +40,29 @@ function botName(botId: string, fallback: string): string {
 function botSubtitle(botId: string): string {
   return flock.value.profiles[botId]?.title ?? botId;
 }
+/*
+ * Unread is backend state: the Bot Durable Object derives the count and the
+ * gateway fans it out. Nothing here computes one — these read the projection.
+ */
+function isUnread(botId: string): boolean {
+  return flock.value.unread[botId]?.unread === true;
+}
+function unreadLabel(botId: string): string | undefined {
+  const view = flock.value.unread[botId];
+  if (!view?.unread) return undefined;
+  if (view.count === 0) return undefined;
+  return view.capped ? `${view.count}+` : String(view.count);
+}
+/** Hidden Bots contribute no row, so their unread arrives as one badge. */
+const hiddenUnreadCount = computed(() =>
+  hiddenBots.value.reduce(
+    (total, bot) => total + (flock.value.unread[bot.botId]?.count ?? 0),
+    0,
+  ),
+);
+const hiddenUnread = computed(() =>
+  hiddenBots.value.some((bot) => isUnread(bot.botId)),
+);
 onMounted(() => void flock.value.load());
 </script>
 <template>
@@ -79,6 +102,7 @@ onMounted(() => void flock.value.load());
         :class="{
           active: active === bot.botId,
           archived: flock.lifecycles[bot.botId] === 'archived',
+          unread: isUnread(bot.botId),
         }"
       >
         <button
@@ -96,6 +120,12 @@ onMounted(() => void flock.value.load());
           <span class="flock-bot-copy"
             ><strong>{{ botName(bot.botId, bot.initialName) }}</strong
             ><small>{{ botSubtitle(bot.botId) }}</small></span
+          >
+          <span
+            v-if="unreadLabel(bot.botId)"
+            class="flock-unread-badge"
+            :aria-label="`${unreadLabel(bot.botId)} unread`"
+            >{{ unreadLabel(bot.botId) }}</span
           >
           <i
             v-if="active === bot.botId"
@@ -135,6 +165,12 @@ onMounted(() => void flock.value.load());
             ? `Hide ${hiddenBots.length} hidden`
             : `Show ${hiddenBots.length} hidden`
         }}
+        <span
+          v-if="hiddenUnread"
+          class="flock-unread-badge"
+          :aria-label="`${hiddenUnreadCount} unread in hidden Bots`"
+          >{{ hiddenUnreadCount > 0 ? hiddenUnreadCount : "" }}</span
+        >
       </button>
       <TransitionGroup
         v-if="flock.showHidden"
@@ -149,6 +185,7 @@ onMounted(() => void flock.value.load());
           :class="{
             active: active === bot.botId,
             archived: flock.lifecycles[bot.botId] === 'archived',
+            unread: isUnread(bot.botId),
           }"
         >
           <button
