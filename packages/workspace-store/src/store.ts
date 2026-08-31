@@ -430,7 +430,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     try {
       generation = {
         schemaVersion: 1,
-        generationId: await this.generations.mint(at),
+        generationId: await this.generations.mint(at, root),
         contentHash: await digestV1(request.bytes),
         size: request.bytes.byteLength,
         writer: request.writer,
@@ -582,7 +582,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     try {
       const tombstone: WorkspaceGenerationV1 = {
         schemaVersion: 1,
-        generationId: await this.generations.mint(at),
+        generationId: await this.generations.mint(at, root),
         contentHash: WORKSPACE_EMPTY_SHA256,
         size: 0,
         writer: request.writer,

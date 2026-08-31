@@ -160,7 +160,7 @@ packages/
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-flock/     Durable Bot directory and composable sheep identity Package
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
-  plugin-memory/    Computer-workspace or R2-backed durable Markdown memory
+  plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
   plugin-settings/  Plugin-owned Bot, Package, and User settings surfaces
   plugin-shell/     Hosted application geometry and surface presenter
   plugin-ui-theme/  Global semantic tokens for hosted client Contributions

@@ -916,8 +916,18 @@ export interface WorkspaceGenerationRecordV1 {
  * `WorkspaceFilesV1` consumes this interface and owns none of it.
  */
 export interface WorkspaceGenerationsV1 {
-  /** A sortable, monotonic generation id, minted by the owning authority. */
-  mint(at: Date): Promise<string>;
+  /**
+   * A sortable generation id, minted by the authority that owns `root` and
+   * monotonic within it.
+   *
+   * The root is a parameter because ordering is only meaningful inside one
+   * authority: "The User's Durable Object is the authority for ... the
+   * generation records of User Memory roots", so a shared Memory root's ids
+   * must come from the User object even when the Bot object is doing the
+   * writing. Two Bots minting from two counters would produce ids that do not
+   * order, and "newest fact wins on conflict" would have no answer.
+   */
+  mint(at: Date, root: WorkspaceRootV1): Promise<string>;
   /** The generation the authority believes the file currently holds. */
   current(
     root: WorkspaceRootV1,

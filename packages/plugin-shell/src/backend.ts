@@ -53,7 +53,6 @@ import {
 } from "@frockbot/configuration-core";
 import { createFoundationAssignedRuntimePackages } from "@frockbot/application-foundation/runtime";
 import { createFoundationHostedRuntimePackages } from "@frockbot/application-foundation/runtime";
-import type { MemoryPluginConfig } from "@frockbot/plugin-memory";
 import {
   settleAssignmentSaga,
   type StoredAssignmentSaga,
@@ -74,6 +73,7 @@ import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
 } from "./backend-authoring.js";
+import { createBotMemoryHost } from "./backend-memory.js";
 import { createBotSkillsHost } from "./backend-skills.js";
 import {
   decodeAuthoringQuotaReceiptV1,
@@ -199,70 +199,6 @@ export interface ShellBotBackendHost {
   outboundFetch?: typeof fetch;
   /** Supplied by the Durable Object; defaults to the kernel implementation. */
   createAuthority?: CreateBotDurableAuthority;
-}
-
-function parseStoredJson<T>(body: string): Promise<T> {
-  try {
-    return Promise.resolve(JSON.parse(body) as T);
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
-
-function memoryPluginConfig(
-  env: BotStateEnv,
-  identity: BotIdentity,
-): MemoryPluginConfig {
-  return {
-    ownerId: identity.userId,
-    agentId: identity.botId,
-    bucket: {
-      get: async (key) => {
-        const object = await env.MEMORY_FILES.get(key);
-        if (!object) return null;
-        const body = await object.text();
-        return {
-          text: () => Promise.resolve(body),
-          json: <T>() => parseStoredJson<T>(body),
-        };
-      },
-      put: (key, value, options) =>
-        env.MEMORY_FILES.put(key, value, {
-          httpMetadata: options?.httpMetadata?.contentType
-            ? { contentType: options.httpMetadata.contentType }
-            : undefined,
-        }),
-      delete: (key) => env.MEMORY_FILES.delete(key),
-      list: async ({ prefix, cursor }) => {
-        const page = await env.MEMORY_FILES.list({ prefix, cursor });
-        return {
-          objects: page.objects.map((object) => ({ key: object.key })),
-          truncated: page.truncated,
-          cursor: page.truncated ? page.cursor : undefined,
-        };
-      },
-    },
-    vectorize: {
-      upsert: (vectors) => env.MEMORY_INDEX.upsert(vectors),
-      query: async (vector, options) => {
-        const result = await env.MEMORY_INDEX.query(vector, options);
-        return {
-          matches: result.matches.map((match) => ({
-            id: match.id,
-            score: match.score,
-            metadata: match.metadata,
-          })),
-        };
-      },
-      deleteByIds: (ids) => env.MEMORY_INDEX.deleteByIds(ids),
-    },
-    ai: {
-      run: (model, input) =>
-        env.AI.run(model as keyof AiModels, {
-          text: input.text,
-        }) as Promise<{ data: number[][] }>,
-    },
-  };
 }
 
 export class ShellBotBackendContribution {
@@ -1320,7 +1256,6 @@ export class ShellBotBackendContribution {
           botId: input.identity.botId,
           sessionId: input.command.sessionId,
           sessionEvents: input.previousEvents,
-          memory: memoryPluginConfig(this.env, input.identity),
           persistSessionEvents: input.persistSessionEvents,
           agentPackages: runtime.agentPackages,
           modelSelection: runtime.modelSelection,
@@ -1829,6 +1764,9 @@ export class ShellBotBackendContribution {
         ...(turn ? { authoring: this.authoringHost(identity, turn) } : {}),
         ...(turn
           ? { skills: createBotSkillsHost(identity, turn, this.env) }
+          : {}),
+        ...(turn
+          ? { memory: createBotMemoryHost(identity, turn, this.env) }
           : {}),
       }),
       ...(await createFoundationAssignedRuntimePackages(

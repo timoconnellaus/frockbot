@@ -76,7 +76,12 @@ export class DurableWorkspaceGenerations implements WorkspaceGenerationsV1 {
     this.ctx = options.state;
   }
 
-  async mint(at: Date): Promise<string> {
+  /**
+   * The `root` is accepted and unused: this ledger *is* one authority, so
+   * every id it mints already orders against every other. Routing a root to
+   * the object that owns it happens above, in the Worker.
+   */
+  async mint(at: Date, _root?: WorkspaceRootV1): Promise<string> {
     const stored =
       this.cursor ??
       decodeCursor(

@@ -5,23 +5,24 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./host": "./src/host.ts",
-    "./client": "./src/client/index.ts",
     "./backend": "./src/backend.ts",
     "./backend-authoring": "./src/backend-authoring.ts",
-    "./backend-skills": "./src/backend-skills.ts",
     "./backend-composition": "./src/backend-composition.ts",
     "./backend-contracts": "./src/backend-contracts.ts",
     "./backend-isolate": "./src/backend-isolate.ts",
+    "./backend-memory": "./src/backend-memory.ts",
     "./backend-recovery": "./src/backend-recovery.ts",
     "./backend-runner": "./src/backend-runner.ts",
-    "./manifest": "./src/manifest.ts",
-    "./run-protocol": "./src/run-protocol.ts",
-    "./shared": "./src/shared.ts",
+    "./backend-skills": "./src/backend-skills.ts",
+    "./client": "./src/client/index.ts",
     "./client/FrockBotApp.vue": "./src/client/FrockBotApp.vue",
     "./client/styles.css": "./src/client/styles.css",
     "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
+    "./host": "./src/host.ts",
+    "./manifest": "./src/manifest.ts",
+    "./package.json": "./package.json",
+    "./run-protocol": "./src/run-protocol.ts",
+    "./shared": "./src/shared.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"

@@ -42,6 +42,14 @@ import type {
   WorkspaceFilesV1,
 } from "@frockbot/kernel-contracts";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
+import { DurableWorkspaceGenerations } from "@frockbot/kernel-do";
+import type { MemoryProjectsV1 } from "@frockbot/plugin-memory/agent";
+import {
+  createRoutedWorkspaceGenerationsV1,
+  createUserMemoryProjectsV1,
+  createUserWorkspaceGenerationsV1,
+  type UserMemoryRpc,
+} from "./memory.js";
 import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
@@ -84,9 +92,13 @@ export class BotState extends DurableObject<BotStateEnv> {
    * object store, with its generations recorded in this object — so it is
    * constructed here and never reaches the deployed bindings map.
    */
-  private readonly backendEnv: BotStateEnv & {
+  protected readonly backendEnv: BotStateEnv & {
     WORKSPACE_FILES?: WorkspaceFilesV1;
+    MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
+    MEMORY_PROJECTS?: MemoryProjectsV1;
   };
+  /** The identity the Workspace and Memory surfaces above were built for. */
+  private surfacesFor: string | undefined;
   private mounted:
     | Promise<{
         shell: ShellBotBackendContribution;
@@ -104,11 +116,10 @@ export class BotState extends DurableObject<BotStateEnv> {
     this.compileApplication =
       dependencies.compileApplication ?? compileFoundationApplication;
     this.outboundFetch = dependencies.outboundFetch;
-    const workspace = createDurableWorkspaceFilesV1(ctx, env);
-    this.backendEnv = {
-      ...env,
-      ...(workspace ? { WORKSPACE_FILES: workspace } : {}),
-    };
+    // The surfaces are built per identity in `bindSurfaces`, not here: they
+    // carry the `owner` guard, and a Durable Object learns which User it
+    // serves from the RPC that addresses it, never from its constructor.
+    this.backendEnv = { ...env };
   }
 
   private contributions(): Promise<{
@@ -242,7 +253,53 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
+  /** The User Durable Object, as this object's Memory authority. */
+  private userMemoryRpc(userId: string): UserMemoryRpc {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(userId);
+    // SAFETY: USER_CONFIGURATIONS binds UserConfiguration; workers-types cannot
+    // infer its generated Memory RPC surface.
+    return this.env.USER_CONFIGURATIONS.get(id) as unknown as UserMemoryRpc;
+  }
+
+  /**
+   * Builds the Workspace and Memory file surfaces for one identity.
+   *
+   * Two surfaces, deliberately: `WORKSPACE_FILES` is the kernel surface and
+   * refuses every Memory root; `MEMORY_WORKSPACE_FILES` is the Memory
+   * Package's and serves Memory roots and nothing else. The second routes a
+   * shared root's generations to the User Durable Object, because "The User's
+   * Durable Object is the authority for ... the generation records of User
+   * Memory roots", while the Bot's own Memory root stays in this object.
+   */
+  protected bindSurfaces(identity: { userId: string; botId: string }): void {
+    const key = `${identity.userId}\u0000${identity.botId}`;
+    if (this.surfacesFor === key) return;
+    const owner = { userId: identity.userId };
+    const workspace = createDurableWorkspaceFilesV1(this.ctx, this.env, {
+      owner,
+    });
+    const rpc = this.userMemoryRpc(identity.userId);
+    const memory = createDurableWorkspaceFilesV1(this.ctx, this.env, {
+      owner,
+      surface: "memory",
+      generations: createRoutedWorkspaceGenerationsV1({
+        bot: new DurableWorkspaceGenerations({ state: this.ctx }),
+        user: createUserWorkspaceGenerationsV1(rpc, identity.userId),
+      }),
+    });
+    if (workspace) this.backendEnv.WORKSPACE_FILES = workspace;
+    if (memory) {
+      this.backendEnv.MEMORY_WORKSPACE_FILES = memory;
+      this.backendEnv.MEMORY_PROJECTS = createUserMemoryProjectsV1(
+        rpc,
+        identity,
+      );
+    }
+    this.surfacesFor = key;
+  }
+
   private async materialized(identity: { userId: string; botId: string }) {
+    this.bindSurfaces(identity);
     const contributions = await this.contributions();
     const registration = await this.registration(identity);
     await contributions.flock.materialize(registration, identity.userId);

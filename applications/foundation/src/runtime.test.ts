@@ -171,12 +171,13 @@ describe("foundation application", () => {
   test("exposes only compiled runtime packages to the runtime host", async () => {
     const application = await createFoundationRuntimeApplication();
 
-    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(5);
+    // Memory is absent: like Skills, it mounts only for a Turn whose Memory
+    // roots the host can reach, so it is never a default runtime package.
+    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(4);
     expect(application.packages.map((pkg) => pkg.specifier)).toEqual([
       "@frockbot/plugin-clock",
       "@frockbot/plugin-echo",
       "@frockbot/plugin-identity",
-      "@frockbot/plugin-memory",
       "@frockbot/plugin-provider-foundation",
     ]);
   });

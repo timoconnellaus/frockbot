@@ -24,6 +24,16 @@ import {
   type AuthoringQuotaConfigV1,
   type AuthoringQuotaReceiptV1,
 } from "@frockbot/plugin-authoring/quota";
+import { DurableWorkspaceGenerations } from "@frockbot/kernel-do";
+import {
+  decodeWorkspaceGenerationRecordV1,
+  decodeWorkspaceRootV1,
+  isWorkspaceSharedMemoryRootV1,
+  normalizeWorkspaceRelativePathV1,
+  type WorkspaceGenerationRecordV1,
+  type WorkspaceRootV1,
+} from "@frockbot/kernel-contracts";
+import type { MemoryProjectV1 } from "@frockbot/plugin-memory/agent";
 import {
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -32,7 +42,16 @@ import {
   rpcInteger,
   rpcPattern,
   rpcString,
+  rpcEnum,
+  rpcDecodedValue,
 } from "./durable-rpc.js";
+
+/** The durable key holding this User's Project catalogue. */
+const MEMORY_PROJECTS_KEY = "memory:projects";
+/** Most Projects one User may have, and most one Bot may belong to. */
+const MEMORY_MAX_PROJECTS = 200;
+const MEMORY_MAX_JOINED_PROJECTS = 32;
+const MEMORY_PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
 interface UserConfigurationEnv {
   CREDENTIAL_KEYRING?: string;
@@ -283,6 +302,255 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     const quota = request.quota as AuthoringQuotaConfigV1;
     await this.ctx.storage.put(AUTHORING_QUOTA_CONFIG_KEY, quota);
     return quota;
+  }
+
+  // ---------------------------------------------------------------------
+  // Shared Memory roots.
+  //
+  // "The User's Durable Object is the authority for everything User-scoped:
+  // ... and the generation records of User Memory roots." The Bot's Durable
+  // Object does the writing — it is the Memory Package's host — but a shared
+  // root's generations are recorded here, so two Bots writing one root record
+  // into one ledger and their ids order against each other.
+  //
+  // Every one of these refuses a root that is not a shared Memory root of
+  // *this* User. The Bot object is a caller like any other; authority follows
+  // the root, not the caller.
+  // ---------------------------------------------------------------------
+
+  private readonly workspaceGenerations = new DurableWorkspaceGenerations({
+    state: this.ctx,
+  });
+
+  private sharedMemoryRoot(userId: string, value: unknown): WorkspaceRootV1 {
+    const root = decodeWorkspaceRootV1(value);
+    if (!isWorkspaceSharedMemoryRootV1(root) || root.userId !== userId) {
+      throw new Error(
+        "the User Durable Object records generations for its own shared Memory roots only",
+      );
+    }
+    return root;
+  }
+
+  private sharedMemoryRecord(
+    userId: string,
+    value: unknown,
+  ): WorkspaceGenerationRecordV1 {
+    const entry = decodeWorkspaceGenerationRecordV1(value);
+    this.sharedMemoryRoot(userId, entry.root);
+    return entry;
+  }
+
+  async mintWorkspaceGeneration(input: unknown): Promise<string> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      at: rpcString(64),
+      root: rpcDecodedValue,
+    });
+    const userId = request.userId as string;
+    this.sharedMemoryRoot(userId, request.root);
+    const at = new Date(request.at as string);
+    if (!Number.isFinite(at.getTime())) {
+      throw new Error("RPC request.at is invalid");
+    }
+    return this.workspaceGenerations.mint(at);
+  }
+
+  async currentWorkspaceGeneration(
+    input: unknown,
+  ): Promise<WorkspaceGenerationRecordV1 | undefined> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      root: rpcDecodedValue,
+      path: rpcString(1_024),
+    });
+    const root = this.sharedMemoryRoot(request.userId as string, request.root);
+    return this.workspaceGenerations.current(
+      root,
+      normalizeWorkspaceRelativePathV1(request.path),
+    );
+  }
+
+  async recordWorkspaceGeneration(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      entry: rpcDecodedValue,
+    });
+    await this.workspaceGenerations.record(
+      this.sharedMemoryRecord(request.userId as string, request.entry),
+    );
+  }
+
+  async tombstoneWorkspaceGeneration(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      entry: rpcDecodedValue,
+    });
+    await this.workspaceGenerations.tombstone(
+      this.sharedMemoryRecord(request.userId as string, request.entry),
+    );
+  }
+
+  async conflictWorkspaceGeneration(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      entry: rpcDecodedValue,
+    });
+    await this.workspaceGenerations.conflict(
+      this.sharedMemoryRecord(request.userId as string, request.entry),
+    );
+  }
+
+  async listWorkspaceConflicts(
+    input: unknown,
+  ): Promise<WorkspaceGenerationRecordV1[]> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      root: rpcDecodedValue,
+      path: rpcString(1_024),
+    });
+    const root = this.sharedMemoryRoot(request.userId as string, request.root);
+    return this.workspaceGenerations.conflicts(
+      root,
+      normalizeWorkspaceRelativePathV1(request.path),
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Project membership.
+  //
+  // "A Project is an opt-in grouping a Bot creates or joins that carries its
+  // own shared Memory tier; only the Projects a Bot has joined are injected
+  // into its prompts." Membership is User-scoped durable state, so it lives
+  // here: the catalogue of Projects the User has, and the joined list per Bot.
+  // ---------------------------------------------------------------------
+
+  private async projectCatalogue(): Promise<Record<string, MemoryProjectV1>> {
+    const stored = await this.ctx.storage.get<unknown>(MEMORY_PROJECTS_KEY);
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+      return {};
+    }
+    const catalogue: Record<string, MemoryProjectV1> = {};
+    for (const [projectId, value] of Object.entries(
+      stored as Record<string, unknown>,
+    )) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const record = value as Record<string, unknown>;
+      if (typeof record.name !== "string") continue;
+      catalogue[projectId] = {
+        projectId,
+        name: record.name.slice(0, 128),
+        description:
+          typeof record.description === "string"
+            ? record.description.slice(0, 512)
+            : "",
+      };
+    }
+    return catalogue;
+  }
+
+  private async joinedProjects(botId: string): Promise<string[]> {
+    const stored = await this.ctx.storage.get<unknown>(
+      `${MEMORY_PROJECTS_KEY}:${botId}`,
+    );
+    if (!Array.isArray(stored)) return [];
+    return stored
+      .filter((value): value is string => typeof value === "string")
+      .slice(0, MEMORY_MAX_JOINED_PROJECTS);
+  }
+
+  private async membership(botId: string): Promise<MemoryProjectV1[]> {
+    const catalogue = await this.projectCatalogue();
+    return (await this.joinedProjects(botId)).flatMap((projectId) => {
+      const project = catalogue[projectId];
+      return project ? [project] : [];
+    });
+  }
+
+  async listMemoryProjects(input: unknown): Promise<MemoryProjectV1[]> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return this.membership(request.botId as string);
+  }
+
+  /**
+   * Create, join, or leave. Create is join when the slug already exists, which
+   * is GrokBot's own `update_state project create` behaviour, and the refusal
+   * for an unknown slug on `join` is a value rather than a throw so the Bot's
+   * tool can report it.
+   */
+  async changeMemoryProjects(
+    input: unknown,
+  ): Promise<
+    | { status: "ok"; joined: MemoryProjectV1[] }
+    | { status: "refused"; reason: string }
+  > {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+        action: rpcEnum(["create", "join", "leave"]),
+        projectId: rpcPattern(MEMORY_PROJECT_ID, 128),
+      },
+      { project: rpcDecodedValue },
+    );
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    const botId = request.botId as string;
+    const projectId = request.projectId as string;
+    const action = request.action as "create" | "join" | "leave";
+    const catalogue = await this.projectCatalogue();
+    const joined = new Set(await this.joinedProjects(botId));
+
+    if (action === "create") {
+      if (!catalogue[projectId]) {
+        if (Object.keys(catalogue).length >= MEMORY_MAX_PROJECTS) {
+          return {
+            status: "refused",
+            reason: `this User already has ${MEMORY_MAX_PROJECTS} Projects`,
+          };
+        }
+        const supplied = request.project as Record<string, unknown> | undefined;
+        catalogue[projectId] = {
+          projectId,
+          name:
+            typeof supplied?.name === "string" && supplied.name.trim()
+              ? supplied.name.trim().slice(0, 128)
+              : projectId,
+          description:
+            typeof supplied?.description === "string"
+              ? supplied.description.trim().slice(0, 512)
+              : "",
+        };
+        await this.ctx.storage.put(MEMORY_PROJECTS_KEY, catalogue);
+      }
+      joined.add(projectId);
+    } else if (action === "join") {
+      if (!catalogue[projectId]) {
+        return {
+          status: "refused",
+          reason: `no Project "${projectId}" exists; create it first`,
+        };
+      }
+      joined.add(projectId);
+    } else {
+      joined.delete(projectId);
+    }
+    if (joined.size > MEMORY_MAX_JOINED_PROJECTS) {
+      return {
+        status: "refused",
+        reason: `a Bot may belong to at most ${MEMORY_MAX_JOINED_PROJECTS} Projects`,
+      };
+    }
+    await this.ctx.storage.put(
+      `${MEMORY_PROJECTS_KEY}:${botId}`,
+      [...joined].sort(),
+    );
+    return { status: "ok", joined: await this.membership(botId) };
   }
 
   async alarm() {

@@ -92,6 +92,10 @@ const createSettingsGatewayPlugin = (
     ): Plugin;
   }
 ).plugin;
+import {
+  createMemoryRuntimePlugin,
+  type MemoryRuntimeHostV1,
+} from "@frockbot/plugin-memory/agent";
 import shellManifest from "@frockbot/plugin-shell/manifest";
 import skillsManifest from "@frockbot/plugin-skills/manifest";
 import {
@@ -355,11 +359,21 @@ export function createFoundationHostedRuntimePackages(
      * readable instruction root loads no instructions rather than guessing.
      */
     skills?: SkillsRuntimeHostV1;
+    /**
+     * The Memory seam, supplied by the Bot Durable Object for one admitted
+     * Turn. Absent outside a Turn, and outside one whose Memory roots are
+     * reachable, and the Memory Package is then not mounted: a Turn with no
+     * readable Memory root injects no Memory rather than guessing.
+     */
+    memory?: MemoryRuntimeHostV1;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
     ...(host.skills
       ? [runtimePackage(plan, "skills", createSkillsRuntimePlugin(host.skills))]
+      : []),
+    ...(host.memory
+      ? [runtimePackage(plan, "memory", createMemoryRuntimePlugin(host.memory))]
       : []),
     ...(host.authoring
       ? [
@@ -484,6 +498,8 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("authoring");
   // Skills mount only for a Turn whose instruction root the host can read.
   runtimeIds.delete("skills");
+  // Memory mounts only for a Turn whose Memory roots the host can reach.
+  runtimeIds.delete("memory");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

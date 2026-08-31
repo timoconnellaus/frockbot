@@ -110,6 +110,13 @@ export interface CompositionPinV1 {
   artifactSetHash: string;
 }
 
+/**
+ * The three Memory tiers a fact can be written to or injected from, named as
+ * the session log records them. Bot Memory is the Bot's own; the other two are
+ * shared roots sharded per writing Bot.
+ */
+export type MemoryScopeNameV1 = "bot" | "user" | "project";
+
 export interface SessionEventMap {
   "session/created": { createdAt: string };
   "input/queued": { messageId: string; text: string };
@@ -230,6 +237,79 @@ export interface SessionEventMap {
     generationId: string;
     contentHash: string;
   };
+  /**
+   * The Memory this Turn injected, and what it left out. Constitution,
+   * Memory: "What Memory enters a model request, and when, is Package policy,
+   * and the session event log records exactly what was injected, so an
+   * injection gap is visible in durable state rather than silently changing
+   * the Bot's behavior." `sources` names every Memory file generation the
+   * render read; `facts` is every line that reached the prompt; `omissions`
+   * names each tier a cap or a failure cut short.
+   *
+   * `projectId` is `""` for the tiers that have none, so every entry has the
+   * same shape and the decoder needs no optional field.
+   */
+  "memory/injected": {
+    turn: number;
+    sources: Array<{
+      scope: MemoryScopeNameV1;
+      projectId: string;
+      path: string;
+      generationId: string;
+      contentHash: string;
+    }>;
+    facts: Array<{
+      scope: MemoryScopeNameV1;
+      projectId: string;
+      tier: "profile" | "log";
+      via: string;
+      learnedAt: string;
+      text: string;
+    }>;
+    omissions: Array<{ scope: MemoryScopeNameV1; reason: string }>;
+  };
+  /** The Bot recorded the intent to change Memory, before the write ran. */
+  "memory/write-intent": {
+    turn: number;
+    step: number;
+    effectId: string;
+    action: "write" | "forget";
+    scope: MemoryScopeNameV1;
+    projectId: string;
+    tier: "profile" | "log" | "note";
+    path: string;
+    contentHash: string;
+  };
+  /** The generation the Memory write produced. */
+  "memory/written": {
+    turn: number;
+    step: number;
+    effectId: string;
+    action: "write" | "forget";
+    scope: MemoryScopeNameV1;
+    projectId: string;
+    tier: "profile" | "log" | "note";
+    path: string;
+    generationId: string;
+    contentHash: string;
+  };
+  /** The Bot recorded the intent to change Project membership, before it ran. */
+  "memory/project-intent": {
+    turn: number;
+    step: number;
+    effectId: string;
+    action: "create" | "join" | "leave";
+    projectId: string;
+  };
+  /** The Project membership the durable authority holds after the change. */
+  "memory/project-changed": {
+    turn: number;
+    step: number;
+    effectId: string;
+    action: "create" | "join" | "leave";
+    projectId: string;
+    projects: string[];
+  };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   "turn/end": { turn: number; outcome: TurnOutcome };
   "session/disposed": { disposedAt: string };
@@ -264,6 +344,30 @@ function eventString(
     throw new Error(`${label} must be a string`);
   }
   return value;
+}
+
+function memoryScope(value: unknown, label: string): void {
+  if (value !== "bot" && value !== "user" && value !== "project") {
+    throw new Error(`${label} is invalid`);
+  }
+}
+
+function memoryTier(value: unknown, label: string): void {
+  if (value !== "profile" && value !== "log" && value !== "note") {
+    throw new Error(`${label} is invalid`);
+  }
+}
+
+function memoryAction(value: unknown, label: string): void {
+  if (value !== "write" && value !== "forget") {
+    throw new Error(`${label} is invalid`);
+  }
+}
+
+function memoryProjectAction(value: unknown, label: string): void {
+  if (value !== "create" && value !== "join" && value !== "leave") {
+    throw new Error(`${label} is invalid`);
+  }
 }
 
 function eventTimestamp(value: unknown, label: string): string {
@@ -669,6 +773,146 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.path, "session event.path");
       eventString(event.generationId, "session event.generationId");
       eventString(event.contentHash, "session event.contentHash");
+      break;
+    case "memory/injected": {
+      requireEventKeys(
+        event,
+        keys("turn", "sources", "facts", "omissions"),
+        "session event",
+      );
+      turn();
+      if (
+        !Array.isArray(event.sources) ||
+        !Array.isArray(event.facts) ||
+        !Array.isArray(event.omissions)
+      ) {
+        throw new Error(
+          "session event sources, facts and omissions must be arrays",
+        );
+      }
+      event.sources.forEach((source, index) => {
+        const label = `session event.sources[${index}]`;
+        const entry = eventRecord(source, label);
+        requireEventKeys(
+          entry,
+          ["scope", "projectId", "path", "generationId", "contentHash"],
+          label,
+        );
+        memoryScope(entry.scope, `${label}.scope`);
+        eventString(entry.projectId, `${label}.projectId`, true);
+        eventString(entry.path, `${label}.path`);
+        eventString(entry.generationId, `${label}.generationId`);
+        eventString(entry.contentHash, `${label}.contentHash`);
+      });
+      event.facts.forEach((fact, index) => {
+        const label = `session event.facts[${index}]`;
+        const entry = eventRecord(fact, label);
+        requireEventKeys(
+          entry,
+          ["scope", "projectId", "tier", "via", "learnedAt", "text"],
+          label,
+        );
+        memoryScope(entry.scope, `${label}.scope`);
+        eventString(entry.projectId, `${label}.projectId`, true);
+        if (entry.tier !== "profile" && entry.tier !== "log") {
+          throw new Error(`${label}.tier is invalid`);
+        }
+        eventString(entry.via, `${label}.via`, true);
+        eventString(entry.learnedAt, `${label}.learnedAt`);
+        eventString(entry.text, `${label}.text`);
+      });
+      event.omissions.forEach((omission, index) => {
+        const label = `session event.omissions[${index}]`;
+        const entry = eventRecord(omission, label);
+        requireEventKeys(entry, ["scope", "reason"], label);
+        memoryScope(entry.scope, `${label}.scope`);
+        eventString(entry.reason, `${label}.reason`);
+      });
+      break;
+    }
+    case "memory/write-intent":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "action",
+          "scope",
+          "projectId",
+          "tier",
+          "path",
+          "contentHash",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      memoryAction(event.action, "session event.action");
+      memoryScope(event.scope, "session event.scope");
+      eventString(event.projectId, "session event.projectId", true);
+      memoryTier(event.tier, "session event.tier");
+      eventString(event.path, "session event.path");
+      eventString(event.contentHash, "session event.contentHash");
+      break;
+    case "memory/written":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "action",
+          "scope",
+          "projectId",
+          "tier",
+          "path",
+          "generationId",
+          "contentHash",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      memoryAction(event.action, "session event.action");
+      memoryScope(event.scope, "session event.scope");
+      eventString(event.projectId, "session event.projectId", true);
+      memoryTier(event.tier, "session event.tier");
+      eventString(event.path, "session event.path");
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.contentHash, "session event.contentHash");
+      break;
+    case "memory/project-intent":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "effectId", "action", "projectId"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      memoryProjectAction(event.action, "session event.action");
+      eventString(event.projectId, "session event.projectId");
+      break;
+    case "memory/project-changed":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "effectId", "action", "projectId", "projects"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      memoryProjectAction(event.action, "session event.action");
+      eventString(event.projectId, "session event.projectId");
+      if (!Array.isArray(event.projects)) {
+        throw new Error("session event.projects must be an array");
+      }
+      event.projects.forEach((project, index) =>
+        eventString(project, `session event.projects[${index}]`),
+      );
       break;
     case "step/end":
       requireEventKeys(event, keys("turn", "step", "outcome"), "session event");

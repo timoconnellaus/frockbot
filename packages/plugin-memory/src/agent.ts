@@ -1,431 +1,959 @@
-import {
-  type NormalizedModelRequest,
-  type ToolDefinition,
+// The Memory runtime Contribution.
+//
+// Four responsibilities, and no authority of its own:
+//
+//  1. Render the Memory block into the system prompt once per admitted Turn,
+//     in GrokBot's shape and order (user → project → own).
+//  2. Record what it injected. "the session event log records exactly what was
+//     injected, so an injection gap is visible in durable state rather than
+//     silently changing the Bot's behavior" — `memory/injected` names every
+//     Memory file generation the render read, every fact that reached the
+//     prompt, and every tier a cap or a failure cut short.
+//  3. Offer the mutation surface GrokBot exposes as `update_state target
+//     memory`: `memory_write`, `memory_forget`, and the Project membership
+//     trio `project_create` / `project_join` / `project_leave`. Each records
+//     intent with an effect identifier *before* the effect runs.
+//  4. Keep the derived index in step with the files, and offer
+//     `memory_rebuild_index` so the derived half can always be thrown away.
+//
+// It never calls the Computer interface and never wakes a Computer; the seam
+// is documented on `MemoryStore`.
+import type {
+  Session,
+  ToolDefinition,
+  ToolExecutionContext,
+  ToolExecutionResult,
+  WorkspaceMemoryRootV1,
+  WorkspaceWriterV1,
+  MemoryScopeNameV1,
 } from "@frockbot/kernel-contracts";
-import type { Context, Plugin } from "cordis";
+// Merges the Agent loop's event declarations into the cordis Context type.
+import type {} from "@frockbot/kernel-agent-loop/agent";
+import type { Plugin } from "cordis";
 import { createMemoryEmbedder } from "./embeddings.js";
-import { indexDocument, removeDocument } from "./indexer.js";
-import { createMemoryScopes } from "./scopes.js";
 import {
-  formatMemoryResults,
-  scopesForTier,
-  searchMemory,
-} from "./searcher.js";
-import { type MemoryDocumentStore, MemoryStorage } from "./storage.js";
+  listAllMemoryDocumentsV1,
+  type MemoryDocumentV1,
+} from "./documents.js";
+import {
+  buildMemoryIndexV1,
+  emptyMemoryIndexV1,
+  embedMemoryIndexV1,
+  updateMemoryIndexV1,
+  type MemoryIndexV1,
+} from "./indexer.js";
+import {
+  parseProjectDocumentV1,
+  projectDocumentPathV1,
+  renderProjectDocumentV1,
+  type MemoryProjectsV1,
+} from "./projects.js";
+export type {
+  MemoryProjectsV1,
+  MemoryProjectsOutcomeV1,
+  MemoryProjectV1,
+} from "./projects.js";
+import {
+  renderMemoryInjectionV1,
+  type MemoryInjectionV1,
+  type MemoryProjectTierV1,
+  type MemoryProjectV1,
+} from "./render.js";
+import {
+  botMemoryRootV1,
+  isMemoryProjectIdV1,
+  memoryScopeRootV1,
+  projectMemoryRootV1,
+  userMemoryRootV1,
+  type MemoryOwnerV1,
+  type MemoryTierV1,
+} from "./roots.js";
+import { formatMemoryResultsV1, searchMemoryV1 } from "./searcher.js";
+import { MemoryStore, MEMORY_MAX_FACT_LENGTH } from "./store.js";
 import type {
   EmbedMemory,
   MemoryAiBinding,
-  MemoryBucket,
-  MemoryScope,
-  MemoryTier,
   MemoryVectorIndex,
 } from "./types.js";
 
-const PATH_PATTERN = /^[A-Za-z0-9._/-]+$/;
-const MAX_PATH_LENGTH = 200;
-const MAX_CONTENT_LENGTH = 50_000;
-const MAX_QUERY_LENGTH = 500;
-const DEFAULT_SEARCH_RESULTS = 5;
-const DEFAULT_AUTO_RECALL_RESULTS = 4;
+/** Bot write provenance: the Session and Turn that recorded a fact. */
+export interface MemoryWriterIdentityV1 {
+  sessionId: string;
+  turnId: string;
+  runId: string;
+}
 
-export interface MemoryPluginConfig {
-  ownerId: string;
-  botId?: string;
-  /** Legacy configuration alias; new compositions use botId. */
-  agentId?: string;
-  bucket?: MemoryBucket;
-  documents?: MemoryDocumentStore;
-  createDocuments?: (
-    ctx: Context,
-  ) => MemoryDocumentStore | Promise<MemoryDocumentStore>;
-  vectorize: MemoryVectorIndex;
-  ai?: MemoryAiBinding;
+/**
+ * The host seam this Package receives, supplied by the Durable Object for one
+ * admitted Turn. `files` and `writer` are present only when the Turn may
+ * write, so a Bot cannot change Memory outside a Turn whose Session and Turn
+ * its provenance can name.
+ */
+export interface MemoryRuntimeHostV1 {
+  owner: MemoryOwnerV1;
+  store: MemoryStore;
+  writer?: MemoryWriterIdentityV1;
+  projects?: MemoryProjectsV1;
+  /** Optional derived-index bindings; Memory is complete without them. */
+  vectorize?: MemoryVectorIndex;
   embed?: EmbedMemory;
+  ai?: MemoryAiBinding;
   embeddingModel?: string;
-  autoRecallResults?: number;
-  inject?: string[];
 }
 
-interface MemoryRuntime {
-  scopes: Record<MemoryTier, MemoryScope>;
-  storage: MemoryDocumentStore;
-  vectorize: MemoryVectorIndex;
-  embed: EmbedMemory;
-}
-
-function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function validTier(value: unknown): value is MemoryTier {
-  return value === "agent" || value === "global";
-}
-
-function validPath(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= MAX_PATH_LENGTH &&
-    PATH_PATTERN.test(value) &&
-    !value.startsWith("/") &&
-    !value.includes("..")
+export async function sha256HexV1(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text),
   );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-function validSearchInput(value: unknown): boolean {
-  const input = record(value);
-  if (!input || typeof input.query !== "string") return false;
-  if (!input.query.trim() || input.query.length > MAX_QUERY_LENGTH)
-    return false;
-  if (input.tier !== undefined && !validTier(input.tier)) return false;
-  return (
-    input.maxResults === undefined ||
-    (Number.isInteger(input.maxResults) &&
-      Number(input.maxResults) >= 1 &&
-      Number(input.maxResults) <= 20)
+/** The turn and step a Memory effect is recorded under. */
+export interface MemoryTurnPositionV1 {
+  turn: number;
+  step: number;
+}
+
+/**
+ * The open step a Memory event belongs to. The session log is the
+ * reconstruction surface, so an event without its turn and step would not
+ * replay in place.
+ */
+export function openMemoryTurnPositionV1(
+  session: Session,
+): MemoryTurnPositionV1 {
+  const started = session.events.findLast(
+    (event) => event.type === "step/start",
   );
+  const ended = session.events.findLast((event) => event.type === "step/end");
+  if (started?.type !== "step/start") {
+    throw new Error("a Memory effect has no open step to record against");
+  }
+  if (
+    ended?.type === "step/end" &&
+    ended.turn === started.turn &&
+    ended.step === started.step
+  ) {
+    throw new Error("a Memory effect has no open step to record against");
+  }
+  return { turn: started.turn, step: started.step };
 }
 
-function validGetInput(value: unknown): boolean {
-  const input = record(value);
-  return Boolean(
-    input &&
-    validPath(input.path) &&
-    (input.tier === undefined || validTier(input.tier)),
-  );
-}
+/**
+ * The Turn-scoped Memory projection. Deep module, small surface: `refresh` is
+ * the only way it changes, and `current` is what the prompt and the search
+ * tool both read, so those two can never disagree about what this Turn saw.
+ */
+export class MemoryProjection {
+  #host: MemoryRuntimeHostV1;
+  #injection: MemoryInjectionV1 = { text: "", facts: [], omissions: [] };
+  #index: MemoryIndexV1 = emptyMemoryIndexV1();
+  #turn: number | undefined;
 
-function validWriteInput(value: unknown): boolean {
-  const input = record(value);
-  return Boolean(
-    input &&
-    validPath(input.path) &&
-    (input.tier === undefined || validTier(input.tier)) &&
-    typeof input.content === "string" &&
-    input.content.trim() &&
-    input.content.length <= MAX_CONTENT_LENGTH,
-  );
-}
+  constructor(host: MemoryRuntimeHostV1) {
+    this.#host = host;
+  }
 
-function validDeleteInput(value: unknown): boolean {
-  const input = record(value);
-  return Boolean(
-    input &&
-    validPath(input.path) &&
-    (input.tier === undefined || validTier(input.tier)),
-  );
-}
+  current(): MemoryInjectionV1 {
+    return this.#injection;
+  }
 
-function jsonResult(value: unknown, isError = false) {
-  return { content: JSON.stringify(value), isError };
-}
+  index(): MemoryIndexV1 {
+    return this.#index;
+  }
 
-function latestUserText(request: NormalizedModelRequest): string | undefined {
-  const message = request.messages.findLast(
-    (candidate) => candidate.role === "user" && candidate.content.trim(),
-  );
-  return message?.role === "user" ? message.content.trim() : undefined;
-}
+  loadedTurn(): number | undefined {
+    return this.#turn;
+  }
 
-async function writeMemory(
-  runtime: MemoryRuntime,
-  scope: MemoryScope,
-  path: string,
-  content: string,
-) {
-  await runtime.storage.writeContent(scope, path, content);
-  try {
-    let candidate = content;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const result = await indexDocument(
-        scope,
-        path,
-        candidate,
-        runtime.embed,
-        runtime.vectorize,
-        runtime.storage,
-      );
-      const canonical = await runtime.storage.readContent(scope, path);
-      if (canonical === candidate) {
-        return { ok: true, indexed: true, path, tier: scope.tier, ...result };
-      }
-      if (canonical === null) {
-        await removeDocument(scope, path, runtime.vectorize, runtime.storage);
-        return {
-          ok: true,
-          indexed: false,
-          path,
-          tier: scope.tier,
-          warning: "memory was concurrently deleted while indexing",
-        };
-      }
-      candidate = canonical;
-    }
-    throw new Error("memory changed repeatedly while indexing");
-  } catch (error) {
-    // R2 is canonical. Remove any old derived index state when possible so
-    // retrieval falls back to the newly persisted R2 content instead of stale vectors.
-    try {
-      await removeDocument(scope, path, runtime.vectorize, runtime.storage);
-    } catch (cleanupError) {
-      console.error("[memory] failed to clear stale index state", cleanupError);
-    }
-    return {
-      ok: true,
-      indexed: false,
-      path,
-      tier: scope.tier,
-      warning:
-        error instanceof Error ? error.message : "memory indexing failed",
+  /**
+   * Every Memory root this Bot can see this Turn, in tier order.
+   *
+   * A Project authority that cannot be reached yields no Projects and says so
+   * — `unavailable` is an ordinary answer across a Durable Object seam, and a
+   * Turn must not fail because membership was briefly unreadable. The gap is
+   * carried into `memory/injected` as an omission rather than passing for "no
+   * Projects joined".
+   */
+  async roots(): Promise<{
+    own: WorkspaceMemoryRootV1;
+    user: WorkspaceMemoryRootV1;
+    projects: MemoryProjectV1[];
+    unavailable?: string;
+  }> {
+    const owner = this.#host.owner;
+    const roots = {
+      own: botMemoryRootV1(owner),
+      user: userMemoryRootV1(owner),
     };
+    if (!this.#host.projects) return { ...roots, projects: [] };
+    try {
+      return { ...roots, projects: await this.#host.projects.joined() };
+    } catch (error) {
+      return {
+        ...roots,
+        projects: [],
+        unavailable: `Project membership could not be read: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+  }
+
+  /** Reads every tier, renders the block, and records the injection. */
+  async refresh(turn: number, session: Session): Promise<MemoryInjectionV1> {
+    const store = this.#host.store;
+    const owner = this.#host.owner;
+    const { own, user, projects, unavailable } = await this.roots();
+    const ownTier = await store.read(own);
+    const userTier = await store.read(user);
+    const projectTiers: MemoryProjectTierV1[] = [];
+    for (const project of projects) {
+      projectTiers.push({
+        project,
+        tier: await store.read(projectMemoryRootV1(owner, project.projectId)),
+      });
+    }
+    this.#injection = renderMemoryInjectionV1({
+      botId: owner.botId,
+      own: ownTier,
+      user: userTier,
+      projects: projectTiers,
+      joined: projects,
+    });
+    if (unavailable) {
+      this.#injection.omissions.push({ scope: "project", reason: unavailable });
+    }
+    this.#turn = turn;
+
+    const sources = [
+      ...ownTier.sources.map((source) => ({
+        source,
+        scope: "bot" as const,
+        projectId: "",
+      })),
+      ...userTier.sources.map((source) => ({
+        source,
+        scope: "user" as const,
+        projectId: "",
+      })),
+      ...projectTiers.flatMap((entry) =>
+        entry.tier.sources.map((source) => ({
+          source,
+          scope: "project" as const,
+          projectId: entry.project.projectId,
+        })),
+      ),
+    ];
+    session.append({
+      type: "memory/injected",
+      turn,
+      sources: sources.map(({ source, scope, projectId }) => ({
+        scope,
+        projectId,
+        path: source.path,
+        generationId: source.generationId,
+        contentHash: source.contentHash,
+      })),
+      facts: this.#injection.facts,
+      omissions: this.#injection.omissions,
+    });
+    await session.flush();
+
+    // The index is derived from the same documents the render just read, so it
+    // is refreshed on the same boundary and never outlives the Turn's view.
+    await this.reindex();
+    return this.#injection;
+  }
+
+  /** Rebuilds the derived index incrementally from the current files. */
+  async reindex(): Promise<{ documentsChanged: number; chunksTotal: number }> {
+    const documents = await this.documents();
+    const update = await updateMemoryIndexV1(this.#index, documents);
+    this.#index = update.index;
+    await this.embed();
+    return {
+      documentsChanged: update.documentsChanged,
+      chunksTotal: update.chunksTotal,
+    };
+  }
+
+  /** Throws the derived index away and builds it again from the files. */
+  async rebuild(): Promise<{ chunksTotal: number }> {
+    this.#index = await buildMemoryIndexV1(await this.documents());
+    await this.embed();
+    return { chunksTotal: this.#index.chunks.length };
+  }
+
+  private async documents(): Promise<MemoryDocumentV1[]> {
+    const { own, user, projects } = await this.roots();
+    return listAllMemoryDocumentsV1(this.#host.store.reads, [
+      own,
+      user,
+      ...projects.map((project) =>
+        projectMemoryRootV1(this.#host.owner, project.projectId),
+      ),
+    ]);
+  }
+
+  private async embed(): Promise<void> {
+    const embed = memoryEmbedderV1(this.#host);
+    if (!embed || !this.#host.vectorize) return;
+    try {
+      await embedMemoryIndexV1(this.#index, embed, this.#host.vectorize);
+    } catch (error) {
+      // Embeddings are derived from the files and rebuildable; losing them
+      // costs recall quality, never a fact.
+      console.error("[memory] embedding the derived index failed", error);
+    }
+  }
+
+  /** Drops the projection, so the next Turn reloads it rather than reusing it. */
+  invalidate(): void {
+    this.#injection = { text: "", facts: [], omissions: [] };
+    this.#index = emptyMemoryIndexV1();
+    this.#turn = undefined;
   }
 }
 
-function createTools(runtime: MemoryRuntime): ToolDefinition[] {
-  return [
-    {
-      name: "memory_search",
+function memoryEmbedderV1(host: MemoryRuntimeHostV1): EmbedMemory | undefined {
+  if (host.embed) return host.embed;
+  if (host.ai) return createMemoryEmbedder(host.ai, host.embeddingModel);
+  return undefined;
+}
+
+const SCOPE_ENUM = ["bot", "user", "project"] as const;
+const TIER_ENUM = ["profile", "log", "note"] as const;
+
+const MEMORY_WRITE_SCHEMA = {
+  type: "object",
+  properties: {
+    scope: {
+      type: "string",
+      enum: [...SCOPE_ENUM],
       description:
-        "Search durable memory. Searches agent and global tiers by default; agent memory wins when the same path exists in both tiers.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", minLength: 1, maxLength: MAX_QUERY_LENGTH },
-          tier: { type: "string", enum: ["agent", "global"] },
-          maxResults: { type: "integer", minimum: 1, maximum: 20 },
-        },
-        required: ["query"],
-        additionalProperties: false,
-      },
-      idempotent: true,
-      validate: validSearchInput,
-      execute: async (value) => {
-        const input = value as {
-          query: string;
-          tier?: MemoryTier;
-          maxResults?: number;
+        "bot = your own memory (the default and the most specific); user = shared with every Bot of this User; project = shared with the Bots in one Project you have joined.",
+    },
+    project: {
+      type: "string",
+      description: "The Project slug. Required when scope is project.",
+    },
+    tier: {
+      type: "string",
+      enum: [...TIER_ENUM],
+      description:
+        "profile = a foundational fact kept in mind every turn; log = dated history (the default); note = something that fades fast.",
+    },
+    fact: {
+      type: "string",
+      description: "One complete sentence, exactly as it should be recorded.",
+    },
+  },
+  required: ["fact"],
+  additionalProperties: false,
+} as const;
+
+const MEMORY_FORGET_SCHEMA = {
+  type: "object",
+  properties: {
+    scope: { type: "string", enum: [...SCOPE_ENUM] },
+    project: { type: "string" },
+    fact: {
+      type: "string",
+      description: "The exact recorded text of the fact to forget.",
+    },
+  },
+  required: ["fact"],
+  additionalProperties: false,
+} as const;
+
+interface MemoryToolInputV1 {
+  scope: MemoryScopeNameV1;
+  project?: string;
+  tier: MemoryTierV1;
+  fact: string;
+}
+
+function decodeMemoryToolInputV1(
+  input: unknown,
+  allowTier: boolean,
+): MemoryToolInputV1 {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("input must be an object");
+  }
+  const value = input as Record<string, unknown>;
+  const allowed = allowTier
+    ? ["scope", "project", "tier", "fact"]
+    : ["scope", "project", "fact"];
+  if (!Object.keys(value).every((key) => allowed.includes(key))) {
+    throw new Error("input has unknown fields");
+  }
+  const fact = value.fact;
+  if (
+    typeof fact !== "string" ||
+    fact.trim().length === 0 ||
+    fact.length > MEMORY_MAX_FACT_LENGTH
+  ) {
+    throw new Error("fact must be a bounded non-empty string");
+  }
+  const scope = value.scope ?? "bot";
+  if (!SCOPE_ENUM.includes(scope as MemoryScopeNameV1)) {
+    throw new Error("scope is invalid");
+  }
+  const tier = allowTier ? (value.tier ?? "log") : "log";
+  if (!TIER_ENUM.includes(tier as MemoryTierV1)) {
+    throw new Error("tier is invalid");
+  }
+  const decoded: MemoryToolInputV1 = {
+    scope: scope as MemoryScopeNameV1,
+    tier: tier as MemoryTierV1,
+    fact: fact.trim(),
+  };
+  if (scope === "project") {
+    if (!isMemoryProjectIdV1(value.project)) {
+      throw new Error("the project scope requires a valid Project slug");
+    }
+    decoded.project = value.project;
+  } else if (value.project !== undefined) {
+    throw new Error("project is only valid with the project scope");
+  }
+  return decoded;
+}
+
+function refusal(reason: string): ToolExecutionResult {
+  return { content: reason, isError: true };
+}
+
+/**
+ * The provenance one Memory write records. A Bot writes its own shard as
+ * itself; the Project descriptor is a User-scoped file the Bot writes with its
+ * User's authority, which is the only writer `writerOwnsMemoryPathV1` allows
+ * outside a shard and the honest description of creating a Project.
+ */
+function botWriterV1(
+  owner: MemoryOwnerV1,
+  writer: MemoryWriterIdentityV1,
+): WorkspaceWriterV1 {
+  return {
+    kind: "bot",
+    botId: owner.botId,
+    sessionId: writer.sessionId,
+    turnId: writer.turnId,
+    runId: writer.runId,
+  };
+}
+
+export function createMemoryWriteTool(
+  host: MemoryRuntimeHostV1 & { writer: MemoryWriterIdentityV1 },
+  sessions: { get(sessionId: string): Session | undefined },
+  projection: MemoryProjection,
+): ToolDefinition {
+  return {
+    name: "memory_write",
+    description:
+      "Record one fact in memory. Choose the scope deliberately: bot memory is yours, user memory is shared with every Bot of this User, project memory is shared inside one Project. You always write into your own shard; never try to edit another Bot's.",
+    inputSchema: MEMORY_WRITE_SCHEMA as unknown as Record<string, unknown>,
+    idempotent: false,
+    validate: (input) => {
+      try {
+        decodeMemoryToolInputV1(input, true);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (input: unknown, context: ToolExecutionContext) => {
+      let decoded: MemoryToolInputV1;
+      try {
+        decoded = decodeMemoryToolInputV1(input, true);
+      } catch (error) {
+        return refusal(
+          `memory_write was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const session = sessions.get(context.sessionId);
+      if (!session) {
+        return refusal(
+          `memory_write was refused: session "${context.sessionId}" is unavailable, so the intent cannot be recorded`,
+        );
+      }
+      let root: WorkspaceMemoryRootV1;
+      try {
+        root = memoryScopeRootV1(decoded.scope, host.owner, decoded.project);
+      } catch (error) {
+        return refusal(
+          `memory_write was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const text =
+        decoded.tier === "note" ? `[note] ${decoded.fact}` : decoded.fact;
+      const contentHash = await sha256HexV1(text);
+      const effectId = `memory:write:${decoded.scope}:${decoded.project ?? ""}:${decoded.tier}:${contentHash}`;
+      const position = openMemoryTurnPositionV1(session);
+      const path = `${decoded.scope}/${decoded.tier}`;
+      // Intent before effect.
+      session.append({
+        type: "memory/write-intent",
+        ...position,
+        effectId,
+        action: "write",
+        scope: decoded.scope,
+        projectId: decoded.project ?? "",
+        tier: decoded.tier,
+        path,
+        contentHash,
+      });
+      await session.flush();
+
+      const outcome = await host.store.write({
+        root,
+        tier: decoded.tier,
+        fact: text,
+        writer: botWriterV1(host.owner, host.writer),
+      });
+      if (outcome.status !== "ok") {
+        return refusal(`memory_write was ${outcome.status}: ${outcome.reason}`);
+      }
+      session.append({
+        type: "memory/written",
+        ...position,
+        effectId,
+        action: "write",
+        scope: decoded.scope,
+        projectId: decoded.project ?? "",
+        tier: decoded.tier,
+        path: outcome.path,
+        generationId: outcome.generationId || "duplicate",
+        contentHash,
+      });
+      // The model must not be told it succeeded before the record is durable.
+      await session.flush();
+      await projection.reindex();
+      return {
+        content: outcome.duplicate
+          ? `That fact was already recorded in ${decoded.scope} memory; nothing changed.`
+          : `Recorded in ${decoded.scope} memory (${decoded.tier}) at ${outcome.path} as generation ${outcome.generationId}. It reaches your prompt on your next Turn.`,
+        isError: false,
+      };
+    },
+  };
+}
+
+export function createMemoryForgetTool(
+  host: MemoryRuntimeHostV1 & { writer: MemoryWriterIdentityV1 },
+  sessions: { get(sessionId: string): Session | undefined },
+  projection: MemoryProjection,
+): ToolDefinition {
+  return {
+    name: "memory_forget",
+    description:
+      "Forget one fact by its exact recorded text. A fact you recorded is removed. A shared fact another Bot recorded is not edited — a retraction is written into your own shard instead, and newest wins.",
+    inputSchema: MEMORY_FORGET_SCHEMA as unknown as Record<string, unknown>,
+    idempotent: false,
+    validate: (input) => {
+      try {
+        decodeMemoryToolInputV1(input, false);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (input: unknown, context: ToolExecutionContext) => {
+      let decoded: MemoryToolInputV1;
+      try {
+        decoded = decodeMemoryToolInputV1(input, false);
+      } catch (error) {
+        return refusal(
+          `memory_forget was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const session = sessions.get(context.sessionId);
+      if (!session) {
+        return refusal(
+          `memory_forget was refused: session "${context.sessionId}" is unavailable, so the intent cannot be recorded`,
+        );
+      }
+      let root: WorkspaceMemoryRootV1;
+      try {
+        root = memoryScopeRootV1(decoded.scope, host.owner, decoded.project);
+      } catch (error) {
+        return refusal(
+          `memory_forget was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const contentHash = await sha256HexV1(decoded.fact);
+      const effectId = `memory:forget:${decoded.scope}:${decoded.project ?? ""}:${contentHash}`;
+      const position = openMemoryTurnPositionV1(session);
+      session.append({
+        type: "memory/write-intent",
+        ...position,
+        effectId,
+        action: "forget",
+        scope: decoded.scope,
+        projectId: decoded.project ?? "",
+        tier: "log",
+        path: `${decoded.scope}/forget`,
+        contentHash,
+      });
+      await session.flush();
+
+      const outcome = await host.store.forget({
+        root,
+        fact: decoded.fact,
+        writer: botWriterV1(host.owner, host.writer),
+      });
+      if (outcome.status !== "ok") {
+        return refusal(
+          `memory_forget was ${outcome.status}: ${outcome.reason}`,
+        );
+      }
+      session.append({
+        type: "memory/written",
+        ...position,
+        effectId,
+        action: "forget",
+        scope: decoded.scope,
+        projectId: decoded.project ?? "",
+        tier: "log",
+        path: outcome.path,
+        generationId: outcome.generationId || "unchanged",
+        contentHash,
+      });
+      await session.flush();
+      await projection.reindex();
+      return {
+        content: outcome.retracted
+          ? `That fact was recorded by another Bot, so it was not edited. A retraction is now in your own shard and newest wins, so it stops being injected on your next Turn.`
+          : `Forgotten. The line is gone from ${outcome.path}.`,
+        isError: false,
+      };
+    },
+  };
+}
+
+const MEMORY_SEARCH_SCHEMA = {
+  type: "object",
+  properties: {
+    query: { type: "string", minLength: 1, maxLength: 500 },
+    scope: { type: "string", enum: [...SCOPE_ENUM] },
+    maxResults: { type: "integer", minimum: 1, maximum: 20 },
+  },
+  required: ["query"],
+  additionalProperties: false,
+} as const;
+
+export function createMemorySearchTool(
+  host: MemoryRuntimeHostV1,
+  projection: MemoryProjection,
+): ToolDefinition {
+  return {
+    name: "memory_search",
+    description:
+      "Search your memory files for anything the injected block did not carry. Your prompt holds only the most recent capped selection; the rest is on disk.",
+    inputSchema: MEMORY_SEARCH_SCHEMA as unknown as Record<string, unknown>,
+    idempotent: true,
+    validate: (input) =>
+      !!input &&
+      typeof input === "object" &&
+      typeof (input as { query?: unknown }).query === "string" &&
+      (input as { query: string }).query.trim().length > 0,
+    execute: async (input: unknown) => {
+      const value = input as {
+        query: string;
+        scope?: MemoryScopeNameV1;
+        maxResults?: number;
+      };
+      const embed = memoryEmbedderV1(host);
+      const results = await searchMemoryV1({
+        index: projection.index(),
+        query: value.query,
+        maxResults: value.maxResults ?? 5,
+        ...(value.scope ? { scope: value.scope } : {}),
+        ...(embed ? { embed } : {}),
+        ...(host.vectorize ? { vectorize: host.vectorize } : {}),
+      });
+      return {
+        content: formatMemoryResultsV1(results),
+        isError: false,
+      };
+    },
+  };
+}
+
+export function createMemoryRebuildIndexTool(
+  projection: MemoryProjection,
+): ToolDefinition {
+  return {
+    name: "memory_rebuild_index",
+    description:
+      "Throw away the derived memory index and build it again from the memory files. Safe at any time: the index holds no facts, only a way of finding them.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    } as unknown as Record<string, unknown>,
+    idempotent: true,
+    validate: () => true,
+    execute: async () => {
+      const rebuilt = await projection.rebuild();
+      return {
+        content: `Rebuilt the memory index from the files: ${rebuilt.chunksTotal} chunk(s).`,
+        isError: false,
+      };
+    },
+  };
+}
+
+const PROJECT_SCHEMA = {
+  type: "object",
+  properties: {
+    project: {
+      type: "string",
+      description: "The Project slug: lowercase letters, digits and hyphens.",
+    },
+    name: { type: "string", description: "The Project's display name." },
+    description: { type: "string" },
+  },
+  required: ["project"],
+  additionalProperties: false,
+} as const;
+
+function decodeProjectInputV1(input: unknown): {
+  project: string;
+  name?: string;
+  description?: string;
+} {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("input must be an object");
+  }
+  const value = input as Record<string, unknown>;
+  if (
+    !Object.keys(value).every((key) =>
+      ["project", "name", "description"].includes(key),
+    )
+  ) {
+    throw new Error("input has unknown fields");
+  }
+  if (!isMemoryProjectIdV1(value.project)) {
+    throw new Error("project must be a valid slug");
+  }
+  const decoded: { project: string; name?: string; description?: string } = {
+    project: value.project,
+  };
+  for (const key of ["name", "description"] as const) {
+    const candidate = value[key];
+    if (candidate === undefined) continue;
+    if (typeof candidate !== "string" || candidate.length > 512) {
+      throw new Error(`${key} must be a bounded string`);
+    }
+    decoded[key] = candidate.trim();
+  }
+  return decoded;
+}
+
+export function createProjectTools(
+  host: MemoryRuntimeHostV1 & {
+    writer: MemoryWriterIdentityV1;
+    projects: MemoryProjectsV1;
+  },
+  sessions: { get(sessionId: string): Session | undefined },
+  projection: MemoryProjection,
+): ToolDefinition[] {
+  const act = (
+    action: "create" | "join" | "leave",
+    name: string,
+    description: string,
+  ): ToolDefinition => ({
+    name,
+    description,
+    inputSchema: PROJECT_SCHEMA as unknown as Record<string, unknown>,
+    idempotent: false,
+    validate: (input) => {
+      try {
+        decodeProjectInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (input: unknown, context: ToolExecutionContext) => {
+      let decoded: ReturnType<typeof decodeProjectInputV1>;
+      try {
+        decoded = decodeProjectInputV1(input);
+      } catch (error) {
+        return refusal(
+          `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const session = sessions.get(context.sessionId);
+      if (!session) {
+        return refusal(
+          `${name} was refused: session "${context.sessionId}" is unavailable, so the intent cannot be recorded`,
+        );
+      }
+      const effectId = `memory:project:${action}:${decoded.project}`;
+      const position = openMemoryTurnPositionV1(session);
+      session.append({
+        type: "memory/project-intent",
+        ...position,
+        effectId,
+        action,
+        projectId: decoded.project,
+      });
+      await session.flush();
+
+      if (action === "create") {
+        // The descriptor is a Memory file like any other, so it goes through
+        // the same store and the same conditional write. It sits outside any
+        // shard, so its writer is the User whose Project it is.
+        const project: MemoryProjectV1 = {
+          projectId: decoded.project,
+          name: decoded.name || decoded.project,
+          description: decoded.description ?? "",
         };
-        const results = await searchMemory({
-          scopes: scopesForTier(runtime.scopes, input.tier),
-          query: input.query,
-          maxResults: input.maxResults ?? DEFAULT_SEARCH_RESULTS,
-          embed: runtime.embed,
-          vectorize: runtime.vectorize,
-          storage: runtime.storage,
-        });
-        return jsonResult({
-          count: results.length,
-          results,
-          formatted: formatMemoryResults(results),
-        });
-      },
-    },
-    {
-      name: "memory_get",
-      description:
-        "Read a complete memory file. Without a tier, checks agent memory first and then global memory.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          path: { type: "string", minLength: 1, maxLength: MAX_PATH_LENGTH },
-          tier: { type: "string", enum: ["agent", "global"] },
-        },
-        required: ["path"],
-        additionalProperties: false,
-      },
-      idempotent: true,
-      validate: validGetInput,
-      execute: async (value) => {
-        const input = value as { path: string; tier?: MemoryTier };
-        for (const scope of scopesForTier(runtime.scopes, input.tier)) {
-          const content = await runtime.storage.readContent(scope, input.path);
-          if (content !== null) {
-            return jsonResult({
-              found: true,
-              path: input.path,
-              tier: scope.tier,
-              content,
-            });
-          }
-        }
-        return jsonResult({ found: false, path: input.path });
-      },
-    },
-    {
-      name: "memory_write",
-      description:
-        "Create or replace durable memory. Defaults to agent memory; use global only for facts that should apply to every agent owned by this user.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          tier: { type: "string", enum: ["agent", "global"] },
-          path: { type: "string", minLength: 1, maxLength: MAX_PATH_LENGTH },
-          content: {
-            type: "string",
-            minLength: 1,
-            maxLength: MAX_CONTENT_LENGTH,
+        const written = await host.store.writeFile({
+          path: {
+            root: projectMemoryRootV1(host.owner, decoded.project),
+            path: projectDocumentPathV1(decoded.project),
           },
-        },
-        required: ["path", "content"],
-        additionalProperties: false,
-      },
-      validate: validWriteInput,
-      execute: async (value) => {
-        const input = value as {
-          tier?: MemoryTier;
-          path: string;
-          content: string;
-        };
-        const tier = input.tier ?? "agent";
-        return jsonResult(
-          await writeMemory(
-            runtime,
-            runtime.scopes[tier],
-            input.path,
-            input.content,
-          ),
-        );
-      },
-    },
-    {
-      name: "memory_delete",
-      description:
-        "Delete a durable memory file. Defaults to the agent tier to avoid accidentally deleting shared global memory.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          tier: { type: "string", enum: ["agent", "global"] },
-          path: { type: "string", minLength: 1, maxLength: MAX_PATH_LENGTH },
-        },
-        required: ["path"],
-        additionalProperties: false,
-      },
-      validate: validDeleteInput,
-      execute: async (value) => {
-        const input = value as { tier?: MemoryTier; path: string };
-        const tier = input.tier ?? "agent";
-        const scope = runtime.scopes[tier];
-        const vectorsRemoved = await removeDocument(
-          scope,
-          input.path,
-          runtime.vectorize,
-          runtime.storage,
-        );
-        await runtime.storage.deleteContent(scope, input.path);
-        return jsonResult({
-          ok: true,
-          path: input.path,
-          tier,
-          vectorsRemoved,
+          text: renderProjectDocumentV1(project),
+          writer: { kind: "user", userId: host.owner.userId },
         });
-      },
+        if (written.status !== "ok" && written.status !== "conflict") {
+          return refusal(`${name} was ${written.status}: ${written.reason}`);
+        }
+      }
+
+      const outcome =
+        action === "create"
+          ? await host.projects.create({
+              projectId: decoded.project,
+              name: decoded.name || decoded.project,
+              description: decoded.description ?? "",
+            })
+          : action === "join"
+            ? await host.projects.join(decoded.project)
+            : await host.projects.leave(decoded.project);
+      if (outcome.status !== "ok") {
+        return refusal(`${name} was refused: ${outcome.reason}`);
+      }
+      session.append({
+        type: "memory/project-changed",
+        ...position,
+        effectId,
+        action,
+        projectId: decoded.project,
+        projects: outcome.joined.map((project) => project.projectId),
+      });
+      await session.flush();
+      projection.invalidate();
+      return {
+        content: `Projects you have joined: ${
+          outcome.joined.map((project) => project.projectId).join(", ") ||
+          "none"
+        }. Project memory changes reach your prompt on your next Turn.`,
+        isError: false,
+      };
     },
+  });
+  return [
+    act(
+      "create",
+      "project_create",
+      "Create a Project and join it. If the slug already exists this joins it instead, exactly as create-is-join.",
+    ),
+    act("join", "project_join", "Join an existing Project."),
+    act(
+      "leave",
+      "project_leave",
+      "Leave a Project. Its shared memory stays on disk; it simply stops loading into your prompt.",
+    ),
   ];
 }
 
-export function createMemoryPlugin(
-  config: MemoryPluginConfig,
-): Plugin.Function {
-  if (!config.embed && !config.ai) {
-    throw new Error(
-      "memory plugin requires an embed function or Workers AI binding",
-    );
-  }
-  const botId = config.botId?.trim() || config.agentId?.trim();
-  if (!botId) throw new Error("memory plugin requires a persistent botId");
-  if (!config.bucket && !config.documents && !config.createDocuments) {
-    throw new Error(
-      "memory plugin requires a bucket, documents, or createDocuments",
-    );
-  }
-  const autoRecallResults =
-    config.autoRecallResults ?? DEFAULT_AUTO_RECALL_RESULTS;
-  if (
-    !Number.isInteger(autoRecallResults) ||
-    autoRecallResults < 0 ||
-    autoRecallResults > 20
-  ) {
-    throw new Error(
-      "memory auto-recall result count must be an integer from 0 to 20",
-    );
-  }
+/** Reads a Project descriptor back out of its Memory root, when one exists. */
+export async function readProjectDocumentV1(
+  store: MemoryStore,
+  owner: MemoryOwnerV1,
+  projectId: string,
+): Promise<MemoryProjectV1 | undefined> {
+  const outcome = await store.reads.read({
+    root: projectMemoryRootV1(owner, projectId),
+    path: projectDocumentPathV1(projectId),
+  });
+  if (outcome.status !== "ok") return undefined;
+  return parseProjectDocumentV1(
+    projectId,
+    new TextDecoder().decode(outcome.file.bytes),
+  );
+}
 
-  const plugin: Plugin.Function = async (ctx) => {
-    const storage: MemoryDocumentStore =
-      config.documents ??
-      (config.createDocuments
-        ? await config.createDocuments(ctx)
-        : new MemoryStorage(config.bucket as MemoryBucket));
-    const runtime: MemoryRuntime = {
-      scopes: createMemoryScopes(config.ownerId, botId),
-      storage,
-      vectorize: config.vectorize,
-      embed:
-        config.embed ??
-        createMemoryEmbedder(
-          config.ai as MemoryAiBinding,
-          config.embeddingModel,
-        ),
-    };
-    const disposers = createTools(runtime).map((tool) =>
-      ctx.tools.register(tool),
-    );
+/**
+ * The runtime Contribution. Registers the Memory prompt section, the read
+ * tools, and — only when the host supplies Bot provenance — the write tools.
+ */
+export function createMemoryRuntimePlugin(
+  host: MemoryRuntimeHostV1,
+): Plugin.Function {
+  const plugin: Plugin.Function = (ctx) => {
+    const projection = new MemoryProjection(host);
+    const disposers: Array<() => void> = [];
     disposers.push(
       ctx.systemPrompt.register({
         id: "memory",
         order: 100,
-        render: () =>
-          [
-            "## Durable memory",
-            "You have Bot memory (specific to this Bot) and global memory (shared by this User's Bots).",
-            "When memories conflict at the same path, Bot memory is authoritative.",
-            "Use memory_search for deeper recall. Write only when the user asks to remember or persist something; memory_write defaults to agent memory.",
-          ].join("\n"),
+        render: () => projection.current().text,
       }),
     );
-    if (autoRecallResults > 0) {
+    disposers.push(
+      ctx.tools.register(createMemorySearchTool(host, projection)),
+    );
+    disposers.push(
+      ctx.tools.register(createMemoryRebuildIndexTool(projection)),
+    );
+    if (host.writer) {
+      const writing = { ...host, writer: host.writer };
       disposers.push(
-        ctx.on("agent/request", async (_agent, _request, _signal, next) => {
-          const resolved = await next();
-          const query = latestUserText(resolved);
-          if (!query) return resolved;
-          try {
-            const results = await searchMemory({
-              scopes: [runtime.scopes.agent, runtime.scopes.global],
-              query,
-              maxResults: autoRecallResults,
-              embed: runtime.embed,
-              vectorize: runtime.vectorize,
-              storage: runtime.storage,
-            });
-            if (results.length === 0) return resolved;
-            const memoryBlock = [
-              "## Possibly relevant durable memory",
-              "Agent-tier entries override global-tier entries at the same path. Use only relevant facts.",
-              formatMemoryResults(results),
-            ].join("\n\n");
-            return {
-              ...resolved,
-              system: [resolved.system.trim(), memoryBlock]
-                .filter(Boolean)
-                .join("\n\n"),
-            };
-          } catch (error) {
-            console.error("[memory] automatic recall failed", error);
-            return resolved;
-          }
-        }),
+        ctx.tools.register(
+          createMemoryWriteTool(writing, ctx.sessions, projection),
+        ),
       );
+      disposers.push(
+        ctx.tools.register(
+          createMemoryForgetTool(writing, ctx.sessions, projection),
+        ),
+      );
+      if (host.projects) {
+        for (const tool of createProjectTools(
+          { ...writing, projects: host.projects },
+          ctx.sessions,
+          projection,
+        )) {
+          disposers.push(ctx.tools.register(tool));
+        }
+      }
     }
-    return async () => {
+    disposers.push(
+      ctx.on("agent/pre-step", async (agent, _inputs, turn, step, next) => {
+        // Once per Turn, at its first step. Memory a Turn writes reaches its
+        // own prompt on the next Turn, which is what makes the injected block
+        // and the `memory/injected` record describe the same thing.
+        if (step === 1 || projection.loadedTurn() !== turn) {
+          await projection.refresh(turn, agent.session);
+        }
+        return next();
+      }),
+    );
+    return () => {
       for (const dispose of disposers.toReversed()) dispose();
-      await storage.dispose?.();
+      projection.invalidate();
     };
   };
-  plugin.inject = ["tools", "systemPrompt", ...(config.inject ?? [])];
+  plugin.inject = ["tools", "systemPrompt", "sessions"];
   return plugin;
 }
 
-export default createMemoryPlugin;
+export default createMemoryRuntimePlugin;
