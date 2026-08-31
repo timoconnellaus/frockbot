@@ -508,7 +508,10 @@ first").
 shares one `/home/box/chrome-profile`.
 
 **And one whole layer has no counterpart.** GrokBot's desktop adds `plank`, `picom`, a WebAuthn proxy host,
-`sand-egress-tunnel`, `sand-ua-governor.mjs` and `sand-fingerprint-profiles.mjs`; FrockBot has none of them, which is row 34.
+`sand-egress-tunnel`, `sand-ua-governor.mjs` and `sand-fingerprint-profiles.mjs`; FrockBot has none of them. That is no
+longer one open gap: row 34 is now three decisions — routed egress (34a) and WebAuthn proxying (34c) are **declined**, each
+with the trigger that would reopen it, and the one piece with value before there are Users, measuring what our own browser
+announces itself as, is landed as `box-doctor`'s `browser-identity` check (34b).
 
 ## Parity register
 
@@ -525,7 +528,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 6   | Export/import a Bot as a shareable template: scrubbed prose, visibility scope, review card                                                            | `export-bot-template` + `create_bot_share_json`; `import-bot-template`                                                                                          | §2.11, §2A       | `plugin-bot-template`                                                                                                             | landed      |
 | 7   | **Memory** — profile tier: enduring facts, one per line, injected every turn                                                                          | `agents/<id>/memory/profile.md`                                                                                                                                 | §5, §2.2         | `plugin-memory`                                                                                                                   | landed      |
 | 8   | Log tier: dated monthly file, `- (YYYY-MM-DD) <fact>`, read on demand rather than injected                                                            | `memory/log/YYYY-MM.md`                                                                                                                                         | §2.2, §2.3       | `plugin-memory`                                                                                                                   | landed      |
-| 9   | Note tier that "fades fast" and is excluded from exports; fact dedupe on write; `forget` by exact text                                                | `tier: note`; `update_state memory write`/`forget`                                                                                                              | §2.2, §2.11      | `plugin-memory`                                                                                                                   | partial     |
+| 9   | Note tier that "fades fast" and is excluded from exports; fact dedupe on write; `forget` by exact text                                                | `tier: note`; `update_state memory write`/`forget`                                                                                                              | §2.2, §2.11      | `plugin-memory`                                                                                                                   | landed      |
 | 10  | Three write scopes chosen per fact: agent, user, project                                                                                              | `scope: agent\|user\|project`                                                                                                                                   | §2.2             | `plugin-memory`                                                                                                                   | landed      |
 | 11  | User memory sharded per writing Bot so every file has one writer; shards readable by all, writable by their owner only                                | `user-memory/by-agent/<uuid>/{profile.md,log/}`; _"Never edit another assistant's shard"_                                                                       | §2.3, §4.1a      | `plugin-memory`                                                                                                                   | landed      |
 | 11b | Correcting another Bot's shared fact = writing the correction into your own shard; newest wins, nothing edited in place                               | injected user-memory instruction                                                                                                                                | §4.1a            | `plugin-memory`                                                                                                                   | landed      |
@@ -534,7 +537,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 13  | Project memory tier: an opt-in third scope, per-Bot shards, only joined projects load, membership by create/join/leave                                | `update_state project create\|join\|leave`; `projects/<slug>/memory/by-agent/<id>/` (**absent on disk**)                                                        | §2.2, §B5, §4.1a | `plugin-memory`                                                                                                                   | landed      |
 | 13b | An injection cap on the shared tiers: at most 3 projects, per-tier profile/recent limits and char budgets, per-fact clamp                             | `MEMORY_PROJECT_INJECTED_CAP`=3; own `recall(30)`/4000/500; user 50/15; project 25/10                                                                           | §4.1b            | `plugin-memory`                                                                                                                   | landed      |
 | 13c | The rendered Memory block is frozen per compaction epoch and reused, with an env-var escape hatch                                                     | `resolveFrozenMemoryPrompt`, `compactionEpoch`, `SAND_DISABLE_MEMORY_FREEZE=1`                                                                                  | §4.1b            | `plugin-memory` + kernel session log                                                                                              | declined    |
-| 13d | Distinct on-disk and injected fact formats; `[note]`/`[episode]` as a prefix on the fact text                                                         | disk `- (YYYY-MM-DD) …` vs injected `- (learned YYYY-MM-DD) …`                                                                                                  | §4.1b            | `plugin-memory`                                                                                                                   | partial     |
+| 13d | Distinct on-disk and injected fact formats; `[note]`/`[episode]` as a prefix on the fact text                                                         | disk `- (YYYY-MM-DD) …` vs injected `- (learned YYYY-MM-DD) …`                                                                                                  | §4.1b            | `plugin-memory`                                                                                                                   | landed      |
 | 14  | Exactly what memory was injected is recorded per turn; memory mutated only through one tool                                                           | `store.db kv.*PromptSnapshot`; `update_state` (advisory — files stay writable)                                                                                  | §2.5             | kernel session log                                                                                                                | landed      |
 | 15  | **Routines** — per-Bot definition file (name, prompt, trigger, enabled, provenance, timestamps) and durable run log                                   | `automations/<slug>/{automation.json,runs.json}`                                                                                                                | §2.6             | new `plugin-routines`                                                                                                             | landed      |
 | 16  | Cron triggers with timezone and `@daily` shorthands; inbound webhook with its own signing-key store                                                   | `trigger.type=cron`/`webhook`; `webhook-keys.json`                                                                                                              | §2.6             | `plugin-routines`                                                                                                                 | landed      |
@@ -558,7 +561,9 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 31  | **Browser** — one profile shared by all of a user's Bots                                                                                              | `/home/box/chrome-profile`                                                                                                                                      | §B6              | `plugin-fly-sprite`                                                                                                               | landed      |
 | 32  | Cookies and logins survive computer replacement; seeding, periodic capture, cross-window mirroring, import                                            | `sand-cookie-persist.mjs` (5 s → `chrome-cookie-seed.json`), `sand-session-sync.mjs` (1.5 s CDP), `chrome-cookie-import`                                        | §A3, §2A, §3.3   | `plugin-computer`                                                                                                                 | not started |
 | 33  | A launcher that enforces correct browser flags; GUI never driven from the shell                                                                       | `box-chrome`; no `xdotool`/CDP from `Shell`                                                                                                                     | §B9, §2A         | `frockbot-chrome`; exec denylist + PATH shims                                                                                     | done        |
-| 34  | Egress routed through the desktop; UA/fingerprint governance; WebAuthn proxying                                                                       | settings `egress`, `sand-{ua-governor,fingerprint-profiles,webauthn-proxy-host}`                                                                                | §A3              | none proposed                                                                                                                     | not started |
+| 34a | Egress routed through the User's desktop                                                                                                              | settings `egress`, `sand-egress-tunnel`                                                                                                                         | §A3              | none — declined                                                                                                                   | declined    |
+| 34b | UA / fingerprint governance                                                                                                                           | `sand-ua-governor.mjs`, `sand-fingerprint-profiles.mjs`                                                                                                         | §A3              | `computer-host-runtime` (`box-doctor`'s `browser-identity` check); per-site profiles declined                                     | partial     |
+| 34c | WebAuthn proxying to the User's authenticator                                                                                                         | `sand-webauthn-proxy-host`, `.sand-webauthn-proxy-enabled`                                                                                                      | §A3              | none — declined                                                                                                                   | declined    |
 | 35  | **Channels** — Bot-to-Bot group chats, 1–6 members, in the sidebar, posted into by id                                                                 | `CreateChannel`/`UpdateChannel`; `SendToAgent`                                                                                                                  | §2.14            | new `plugin-channels`                                                                                                             | not started |
 | 36  | External channel connectors (Telegram etc.) connected and disconnected per Bot                                                                        | info-pane Channels; `update_state channel disconnect{platform}`                                                                                                 | §2.14, §2A       | per-platform Package                                                                                                              | not started |
 | 37  | **Subagents** — typed roles: executor, browserUse, computerUse, watchVideo, videoReview                                                               | `Task{description, prompt, subagent_type, model?, resume?, file_attachments?, run_in_background?}`                                                              | §2.15, §3.12     | new `plugin-subagents`                                                                                                            | not started |
@@ -590,12 +595,15 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 57g | Messages.app tools on the registered Mac behind a feature gate and a permission check                                                                 | `FindIMessageChats`/`ChatItems`/`SearchIMessages`/`IMessageActivity`/`FetchIMessageAttachment`/`SendIMessage`/`CheckIMessagePermissions`, `gates.messagesTools` | §4.2             | `plugin-user-machine` + per-platform Package                                                                                      | not started |
 | 57h | Bot asks the user to authorize a one-time virtual payment card, gated on the payment connector                                                        | `request_virtual_card`, `gates.stripeLink` + connector present                                                                                                  | §4.2             | new Package                                                                                                                       | not started |
 
-**Status `declined`** means FrockBot deliberately does not copy the row. Row 13c
-is the only one: GrokBot freezes the rendered Memory block per compaction epoch
-and reuses it, which is its own best explanation for the injection divergence in
-§3.6 — own profile facts on disk while the injected block said "No facts
-recorded yet". `plugin-memory` renders fresh every Turn and records exactly what
-it injected instead. The reasoning is in `docs/plans/slice-2.md` Step 3.
+**Status `declined`** means FrockBot deliberately does not copy the row, and the
+row itself carries why. Row 13c is the precedent: GrokBot freezes the rendered
+Memory block per compaction epoch and reuses it, which is its own best
+explanation for the injection divergence in §3.6 — own profile facts on disk
+while the injected block said "No facts recorded yet". `plugin-memory` renders
+fresh every Turn and records exactly what it injected instead. The reasoning is
+in `docs/plans/slice-2.md` Step 3. Rows 34a and 34c are the other two, each with
+a named revisit trigger below: a decline is a decision on the record, and the
+trigger is what would make it wrong.
 **Status `partial`** means some of the row exists at HEAD. What is missing, for
 the rows whose status the code moved:
 
@@ -682,21 +690,40 @@ the rows whose status the code moved:
   frozen per compaction epoch, which is why this row and 13c disagree on
   purpose. There is nothing outstanding, so the earlier unexplained `partial`
   was the register lagging its own code.
-- **9** — **`partial`.** The note tier is accepted and stored (`[note] `
-  prefix into the monthly log, `plugin-memory/src/agent.ts`), dedupe-on-write
-  and forget-by-exact-text are landed and tested, and the export half of the
-  row is now satisfied from the other direction: a Bot template carries no
-  Memory at all (ADR 0015, `plugin-bot-template/src/scrub.ts` adds `memory` to
-  the omissions unconditionally and never reads a Memory root), so a note
-  cannot leak into an export because nothing can. What is still missing is the
-  fade itself: there is no expiry, decay or preferential eviction for `[note]`
-  anywhere on the read or render path, so a note is an ordinary log line with a
-  prefix. The table said `landed` while this bullet said otherwise; the bullet
-  was right.
-- **13d** — the two formats are distinct and round-trip
-  (`renderMemoryFactLineV1` vs `renderInjectedFactLineV1` in
-  `plugin-memory/src/facts.ts`), but `[episode]` is documented only: nothing
-  writes, parses or recognises it, and the tier enum has no `episode`.
+- **9** — **`landed`, with the fade's one invented number stated.** The note
+  tier is accepted and stored (`[note] ` prefix into the monthly log,
+  `plugin-memory/src/agent.ts`), dedupe-on-write and forget-by-exact-text are
+  landed and tested, and the export half of the row is satisfied from the other
+  direction: a Bot template carries no Memory at all (ADR 0015,
+  `plugin-bot-template/src/scrub.ts` adds `memory` to the omissions
+  unconditionally and never reads a Memory root), so a note cannot leak into an
+  export because nothing can. The fade is now real: `MEMORY_NOTE_TTL_DAYS = 14`
+  in `plugin-memory/src/render.ts`, applied at **render time and purely** —
+  a marked fact older than the Turn's `noteCutoff` is dropped before any cap,
+  so a faded note never occupies a slot a live fact could have used, and the
+  cutoff, the TTL and a per-scope `faded[]` count are written into
+  `memory/injected` so a replayed Turn renders the same block. Nothing is
+  mutated or deleted: a faded note is still on disk, still greppable, still
+  searchable and still forgettable, which is the strongest reading of "fades
+  fast" that does not throw away a User's data. The fortnight is **FrockBot's
+  number, not GrokBot's** — the research records "fades fast" and no duration
+  anywhere (§2.2) — and it is one constant in one file for that reason.
+  `forget` matches the marker-stripped body, so a User can forget a note
+  without retyping a marker they never saw.
+- **13d** — **`landed`, with `[episode]` reserved rather than invented.** The
+  two formats are distinct and round-trip (`renderMemoryFactLineV1` vs
+  `renderInjectedFactLineV1` in `plugin-memory/src/facts.ts`), and the marker
+  is no longer opaque text: `MEMORY_MARKERS_V1` is one vocabulary that the
+  writer, the parser, the renderer, the fade and `forget` all share, the disk
+  bytes are unchanged from before it existed, and an unrecognised bracket
+  prefix (`[forgotten] `, a `[todo] ` a User typed) is deliberately **not** a
+  marker. The injected line is `- (learned <date>) [via <bot>] [note] <fact>`,
+  the order derived from §4.1b putting `[via …]` before the fact text and the
+  marker on it. `[episode]` is **parsed and reserved but never produced**:
+  FrockBot has no episodic summariser, and GrokBot exposes no episode tier
+  either (§2.2), so inventing a `memory_write` tier to close the row would be
+  inventing product surface. A parsed `[episode]` fades on the note's rule, so
+  a summariser that ever lands writes the marker and nothing else changes.
 - **15** — landed. `RoutineRecordV1` in the Bot Durable Object
   (`plugin-routines/src/records.ts`, keys in `storage-keys.ts`) carries name,
   prompt, schedule XOR webhook trigger, timezone, `enabled`, the writer of the
@@ -862,6 +889,61 @@ the rows whose status the code moved:
   and **"GUI never driven from the shell" is not enforced** — `computer_exec`
   can reach `DISPLAY` and CDP like any other command, so the rule is a
   convention rather than a control.
+
+- **34a** — **`declined`.** Routing the box's egress through the User's own
+  registered machine buys a residential IP, and costs a long-lived proxy
+  process inside the Sprite, a client-side tunnel on the User's machine
+  (`sprite proxy` "requires a running client-side tunnel"), a second
+  long-lived connection to babysit because the Sprite's one HTTP service port
+  is already the noVNC gateway, and a reconnect story for a link that dies on
+  every pause. It would make a **core** capability — the Bot browsing — depend
+  on a native client process being awake, which "core workflows remain
+  available without a native client process" forbids unless both paths and the
+  switch between them are built. The containment half is already free: Sprites
+  govern outbound by a DNS-based allowlist with raw-IP and private-IP egress
+  blocked, which is the policy we would otherwise have configured, so no policy
+  surface is built over it either. **Revisit trigger: the first real User
+  blocked by the Sprite's datacentre IP.** What is preserved cheaply is that
+  `CHROMIUM_FLAGS` is one declared list (row 33), so a future `--proxy-server`
+  is one line rather than a redesign.
+- **34b** — **`partial`, and deliberately scoped to the measurement.**
+  GrokBot's posture here is not "hide": the busiest process on its box is
+  `sand-web-bot-auth.mjs`, so it runs signed bot identity beside its
+  fingerprint governance. What FrockBot lacked was not governance but a fact —
+  whether our browser announces itself as a robot was an assumption nobody had
+  checked, and it depends on the headful/Xvfb path and the pinned Playwright
+  build. `box-doctor` now has a `browser-identity` check
+  (`packages/computer-host-runtime/src/runtime.ts`): it asks the browser over
+  the tenant's existing CDP port what it presents, records `navigator.userAgent`,
+  `navigator.webdriver` and the `userAgentData` brands as one
+  `[box-doctor] PASS|FAIL` line and a `browserIdentity` field on the report
+  (schema 2), and **fails only on a tell** — a `HeadlessChrome` token or
+  `navigator.webdriver` true. A Computer with no browser running measures
+  nothing and says so, which is a different fact from a browser with no tells.
+  Read-only like every other check, so `computer_doctor` stays exempt from
+  recording durable intent. **Declined: the rest.** Per-site rotating
+  fingerprint profiles are an arms race with no User to lose, they would make
+  the browser's presentation non-deterministic across Turns — which the session
+  log would then have to record to stay reconstructable — and they point away
+  from the honest-identity half of GrokBot's own posture. If pinning is ever
+  warranted the check is the evidence for it, and the fix is one entry in the
+  flag list that already exists.
+- **34c** — **`declined`.** CDP's WebAuthn domain offers _virtual_
+  authenticators, which is the opposite of what this row wants: a virtual
+  authenticator is a fake key, not the User's key. A faithful build is a real
+  CTAP2 relay — a process on the Sprite intercepting the ceremony, a backend
+  relay, an Electron shell with platform WebAuthn access, origin binding that
+  survives the hop, a per-ceremony User consent surface, and a durable
+  per-User enable — a vertical slice on the order of the takeover-lease work,
+  across the trust boundary. It is constitutionally admissible (an assertion is
+  origin-scoped and short-lived, so nothing secret comes to rest on the
+  Workspace), but it makes a native client load-bearing for a login path, so it
+  could only ever be an enhancement with a takeover fallback, which is most of
+  the build again. The mitigation is landed: human takeover over noVNC, where
+  the User drives the Sprite's own browser and any non-hardware factor —
+  password, TOTP, email OTP — completes there. **Takeover genuinely does not
+  solve a passkey-only site, and that is the honest cost of this decline.**
+  **Revisit trigger: a passkey-only site a real User needs.**
 
 - **41** — the Catalog half is landed and the MCP half is not. A remote,
   versioned Catalog exists (`packages/catalog-core`, the `PACKAGE_CATALOG`

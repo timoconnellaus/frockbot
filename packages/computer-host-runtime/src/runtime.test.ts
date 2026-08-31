@@ -16,6 +16,7 @@ import {
   BIN_ROOT,
   BOTS_ROOT,
   boxDoctorScript,
+  browserHelper,
   CHROME_LAUNCHER,
   chromeLauncherScript,
   CHROMIUM_PATH,
@@ -25,8 +26,10 @@ import {
   COMPUTER_RUNTIME_FILES,
   computerGuiRefusalV1,
   SHIMS_ROOT,
+  DOCTOR_BROWSER_IDENTITY_ACTION,
   DOCTOR_LOG,
   DOCTOR_MARKER,
+  DOCTOR_REPORT_SCHEMA_VERSION,
   DOCTOR_SCRIPT,
   guiShimScript,
   REFERENCE_DOCS,
@@ -781,9 +784,10 @@ describe("box-doctor", () => {
         generation: number;
         capturedAt: string;
         checks: { name: string; status: string; detail: string }[];
+        browserIdentity: unknown;
         summary: string;
       };
-      expect(report.schemaVersion).toBe(1);
+      expect(report.schemaVersion).toBe(DOCTOR_REPORT_SCHEMA_VERSION);
       expect(report.generation).toBe(7);
       expect(report.capturedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(report.summary).toMatch(/^\d+ checks, \d+ passed, \d+ failed$/);
@@ -798,6 +802,7 @@ describe("box-doctor", () => {
         "tenant-display",
         "browser",
         "browser-profile",
+        "browser-identity",
         "sync-signal",
         "reference-docs",
         "launcher",
@@ -809,6 +814,13 @@ describe("box-doctor", () => {
         expect(["pass", "fail"]).toContain(check.status);
         expect(check.detail.length).toBeGreaterThan(0);
       }
+      // Parity row 34b: nothing on this box is a browser, so the check fails
+      // legibly and the report carries no measurement rather than an empty
+      // one. The measured shape is proven at the decoder and on a live Sprite.
+      expect(report.browserIdentity).toBeNull();
+      expect(
+        report.checks.find((check) => check.name === "browser-identity"),
+      ).toMatchObject({ status: "fail" });
 
       const log = await readFile(logPath, "utf8");
       for (const check of report.checks) {
@@ -821,6 +833,26 @@ describe("box-doctor", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  // Parity row 34b. The action is a literal in the runtime because the module
+  // builds shell documents in a Worker, so the encoding is asserted here
+  // rather than trusted.
+  test("asks the browser helper for an identity it understands", () => {
+    expect(
+      JSON.parse(
+        Buffer.from(DOCTOR_BROWSER_IDENTITY_ACTION, "base64url").toString(
+          "utf8",
+        ),
+      ),
+    ).toEqual({ action: "identity" });
+    expect(browserHelper).toContain('action.action === "identity"');
+    expect(browserHelper).toContain("navigator.webdriver");
+    expect(boxDoctorScript).toContain(DOCTOR_BROWSER_IDENTITY_ACTION);
+    // A tell is a FAIL, and both tells are named in the script rather than
+    // inferred by whatever reads the report.
+    expect(boxDoctorScript).toContain("HeadlessChrome");
+    expect(boxDoctorScript).toContain('"webdriver":true');
+  });
 
   test("reports the scratch, the launcher, and the reference version it expects", () => {
     expect(boxDoctorScript).toContain(SCRATCH_ROOT);

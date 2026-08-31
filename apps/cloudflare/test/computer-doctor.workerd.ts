@@ -27,13 +27,15 @@ const DOCTOR_LOG = "/tmp/box-doctor.log";
 /** What the installed script prints: its report, on one marked line. */
 function reportLine(
   checks: { name: string; status: string; detail: string }[],
+  browserIdentity: unknown = null,
 ) {
   const failed = checks.filter((check) => check.status === "fail").length;
   return `${DOCTOR_MARKER}${JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     generation: 1,
     capturedAt: "2026-09-01T00:00:00Z",
     checks,
+    browserIdentity,
     summary: `${checks.length} checks, ${checks.length - failed} passed, ${failed} failed`,
   })}\n`;
 }
@@ -82,7 +84,7 @@ describe("the Computer's self-check through the shared Computer host", () => {
 
     expect(report, JSON.stringify(report)).toMatchObject({
       ok: true,
-      schemaVersion: 1,
+      schemaVersion: 2,
       generation: 1,
       summary: "3 checks, 2 passed, 1 failed",
     });
@@ -111,6 +113,55 @@ describe("the Computer's self-check through the shared Computer host", () => {
     const opened = recorded.find((call) => call.kind === "open");
     expect(exec!.shard).toBe(opened?.shard);
     expect(exec!.userId).toBe("workerd");
+  });
+
+  // Parity row 34b: the browser measurement crosses the same seam as the
+  // checks, decoded rather than handed back as a string, and a Computer that
+  // measured nothing says so with `null` rather than an empty user agent.
+  test("carries what the browser announced itself as", async () => {
+    await script({
+      match: DOCTOR_SCRIPT,
+      stdout: reportLine(
+        [
+          {
+            name: "browser-identity",
+            status: "pass",
+            detail: "the browser presents no automation tell",
+          },
+        ],
+        {
+          userAgent: "Mozilla/5.0 Chrome/141.0.0.0 Safari/537.36",
+          webdriver: false,
+          brands: ["Chromium/141", "Not?A_Brand/24"],
+        },
+      ),
+    });
+
+    const report =
+      await env.FLY_COMPATIBILITY.getByName("doctor-identity").doctor(
+        "doctor-identity",
+      );
+
+    expect(report, JSON.stringify(report)).toMatchObject({
+      ok: true,
+      browserIdentity: {
+        userAgent: "Mozilla/5.0 Chrome/141.0.0.0 Safari/537.36",
+        webdriver: false,
+        brands: ["Chromium/141", "Not?A_Brand/24"],
+      },
+    });
+
+    await script({
+      match: DOCTOR_SCRIPT,
+      stdout: reportLine([
+        { name: "browser-identity", status: "fail", detail: "no browser" },
+      ]),
+    });
+    const unmeasured =
+      await env.FLY_COMPATIBILITY.getByName("doctor-unmeasured").doctor(
+        "doctor-unmeasured",
+      );
+    expect(unmeasured).not.toHaveProperty("browserIdentity");
   });
 
   test("reads the marked line and leaves the log to the Computer", async () => {

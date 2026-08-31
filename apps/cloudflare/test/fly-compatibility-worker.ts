@@ -1127,6 +1127,11 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
         capturedAt: string;
         summary: string;
         checks: { name: string; status: string; detail: string }[];
+        browserIdentity?: {
+          userAgent: string;
+          webdriver: boolean;
+          brands: string[];
+        };
       }
     | { ok: false; message: string }
   > {

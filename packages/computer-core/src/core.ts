@@ -391,17 +391,39 @@ export interface ComputerDoctorCheckV1 {
 }
 
 /**
+ * What the Computer's browser announces itself as (parity row 34b).
+ *
+ * Recorded rather than governed: GrokBot pins the User-Agent and rotates
+ * per-site fingerprint profiles, and the register declines both. What is kept
+ * is the measurement, because "does our browser announce itself as a robot"
+ * was an assumption nobody had checked. `brands` is
+ * `navigator.userAgentData.brands` rendered `<brand>/<version>`, empty on a
+ * browser that does not expose it.
+ */
+export interface ComputerBrowserIdentityV1 {
+  userAgent: string;
+  webdriver: boolean;
+  brands: string[];
+}
+
+/**
  * One run of the Computer's self-check (parity row 27).
  *
  * `generation` is the Computer's provisioning generation as the host reported
  * it, so a report read later says which Computer it describes — a report from
  * before a reprovisioning is history, not a current answer.
+ *
+ * `browserIdentity` is absent whenever nothing was measured — no browser was
+ * running for this tenant, or the one that was did not answer — which is a
+ * different fact from a browser that presented no tells, and the two are kept
+ * apart rather than collapsed into an empty measurement.
  */
 export interface ComputerDoctorReportV1 {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generation: number;
   capturedAt: string;
   checks: ComputerDoctorCheckV1[];
+  browserIdentity?: ComputerBrowserIdentityV1;
   summary: string;
 }
 
@@ -417,8 +439,8 @@ export function decodeComputerDoctorReportV1(
 ): ComputerDoctorReportV1 | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;
-  if (record.schemaVersion !== 1) return undefined;
-  const { generation, capturedAt, checks, summary } = record;
+  if (record.schemaVersion !== 2) return undefined;
+  const { generation, capturedAt, checks, browserIdentity, summary } = record;
   if (typeof generation !== "number" || !Number.isSafeInteger(generation)) {
     return undefined;
   }
@@ -439,13 +461,42 @@ export function decodeComputerDoctorReportV1(
     });
   }
   if (decoded.length === 0) return undefined;
+  const identity = decodeComputerBrowserIdentityV1(browserIdentity);
+  if (identity === "invalid") return undefined;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generation,
     capturedAt,
     checks: decoded,
+    ...(identity ? { browserIdentity: identity } : {}),
     summary,
   };
+}
+
+/**
+ * Decodes the browser measurement, or says the report is not one.
+ *
+ * `null` and an absent field are both "nothing was measured" — the script
+ * prints `null` there rather than omitting the key, because a fixed shape is
+ * one fewer thing for a shell to get wrong. Anything else that is not this
+ * exact shape fails the whole report, like every other field here.
+ */
+function decodeComputerBrowserIdentityV1(
+  value: unknown,
+): ComputerBrowserIdentityV1 | undefined | "invalid" {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object") return "invalid";
+  const record = value as Record<string, unknown>;
+  const { userAgent, webdriver, brands } = record;
+  if (typeof userAgent !== "string" || !userAgent) return "invalid";
+  if (typeof webdriver !== "boolean") return "invalid";
+  if (!Array.isArray(brands)) return "invalid";
+  const decoded: string[] = [];
+  for (const brand of brands) {
+    if (typeof brand !== "string") return "invalid";
+    decoded.push(brand);
+  }
+  return { userAgent, webdriver, brands: decoded };
 }
 
 /**
