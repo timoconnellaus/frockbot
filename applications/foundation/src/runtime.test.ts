@@ -48,6 +48,7 @@ describe("foundation application", () => {
       "provider-foundation",
       "settings",
       "provider-ollama-cloud",
+      "routines",
       "skills",
     ]);
     expect(first.contributions).toEqual({
@@ -58,6 +59,7 @@ describe("foundation application", () => {
         "package-publisher",
         "settings",
         "provider-ollama-cloud",
+        "routines",
       ],
       runtime: [
         "authoring",
@@ -72,6 +74,7 @@ describe("foundation application", () => {
         "package-publisher",
         "provider-foundation",
         "provider-ollama-cloud",
+        "routines",
         "skills",
       ],
       client: [
@@ -83,6 +86,7 @@ describe("foundation application", () => {
         "flock",
         "package-publisher",
         "settings",
+        "routines",
       ],
       desktop: [
         "auth",
@@ -247,12 +251,17 @@ describe("foundation application", () => {
       read: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
       rollback: () => Promise.reject(new Error("not used while composing")),
+      listRoutines: () => Promise.reject(new Error("not used while composing")),
+      executeRoutineCommand: () =>
+        Promise.reject(new Error("not used while composing")),
+      listRoutineRuns: () =>
+        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions
         .map((contribution) => contribution.packageId)
         .sort(),
-    ).toEqual(["flock", "package-publisher", "settings"]);
+    ).toEqual(["flock", "package-publisher", "routines", "settings"]);
     interface TestContribution {
       specifier: string;
       executeConfiguration?(): void;

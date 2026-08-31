@@ -47,6 +47,11 @@
       "grants": []
     },
     {
+      "specifier": "@frockbot/plugin-routines",
+      "version": "0.0.1",
+      "grants": ["routines:read", "routines:write"]
+    },
+    {
       "specifier": "@frockbot/plugin-credentials",
       "version": "0.0.1",
       "grants": ["credentials:manage"]

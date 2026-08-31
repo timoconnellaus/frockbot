@@ -64,6 +64,10 @@ import type {
   WorkspaceGenerationsV1,
   WorkspaceSyncEffectsV1,
 } from "@frockbot/kernel-contracts";
+import {
+  decodeRoutineCommandV1,
+  type RoutineCommandV1,
+} from "@frockbot/plugin-routines/shared";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import {
   DurableWorkspaceGenerations,
@@ -603,6 +607,59 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.acknowledgeNotification(request.notificationId as string);
+  }
+
+  /**
+   * The Bot's Routines. Bot-scoped, so it proves directory membership the same
+   * way the other Bot RPCs do: a Bot that is not this User's is not found.
+   */
+  async listRoutines(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.listRoutines(identity);
+  }
+
+  /** One Routine command, applied durably with the User recorded as writer. */
+  async executeRoutineCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeRoutineCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.executeRoutineCommand(
+      identity,
+      request.command as RoutineCommandV1,
+    );
+  }
+
+  /** One Routine's bounded run log, newest first. */
+  async listRoutineRuns(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      routineId: rpcIdentifier,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.listRoutineRuns(identity, request.routineId as string);
   }
 
   /**

@@ -48,8 +48,9 @@
     "@frockbot/kernel-do": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
-    "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
+    "@frockbot/plugin-routines": "workspace:*",
+    "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"

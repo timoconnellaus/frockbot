@@ -38,6 +38,11 @@ import {
   type BotSettingsViewV1,
   type UploadBotAvatarCommandV1,
 } from "@frockbot/configuration-core";
+import {
+  decodeRoutineCommandReceiptV1,
+  decodeRoutineListViewV1,
+  decodeRoutineRunListViewV1,
+} from "@frockbot/plugin-routines/shared";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -143,6 +148,9 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     updateSheep: (request) => rpc.updateSheep(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
+    listRoutines: (request) => rpc.listRoutines(request),
+    executeRoutineCommand: (request) => rpc.executeRoutineCommand(request),
+    listRoutineRuns: (request) => rpc.listRoutineRuns(request),
     listCompositionGenerations: (request) =>
       rpc.listCompositionGenerations(request),
     getCompositionGeneration: (request) =>
@@ -671,6 +679,32 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           ? undefined
           : decodeCompositionGenerationViewV1(generation);
       },
+      listRoutines: async (userId, botId) =>
+        decodeRoutineListViewV1(
+          await botStateStub(env, userId, botId).listRoutines({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      executeRoutineCommand: async (userId, botId, command) =>
+        decodeRoutineCommandReceiptV1(
+          await botStateStub(env, userId, botId).executeRoutineCommand({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        ),
+      listRoutineRuns: async (userId, botId, routineId) =>
+        decodeRoutineRunListViewV1(
+          await botStateStub(env, userId, botId).listRoutineRuns({
+            schemaVersion: 1,
+            userId,
+            botId,
+            routineId,
+          }),
+        ),
       revertComposition: async (userId, botId, command) =>
         decodeCompositionCommandReceiptV1(
           await botStateStub(env, userId, botId).revertComposition({

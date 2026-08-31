@@ -2,6 +2,7 @@ import type { ClientPlugin } from "@frockbot/client-core";
 import authClientPlugin from "@frockbot/plugin-auth/client";
 import uiThemeClientPlugin from "@frockbot/plugin-ui-theme/client";
 import packagePublisherClientPlugin from "@frockbot/plugin-package-publisher/client";
+import routinesClientPlugin from "@frockbot/plugin-routines/client";
 import settingsClientPlugin from "@frockbot/plugin-settings/client";
 
 // The immutable application owns the concrete client contribution list.
@@ -19,5 +20,6 @@ export const foundationClientPlugins: readonly ClientPlugin[] = [
   computerClientPlugin,
   flockClientPlugin,
   settingsClientPlugin,
+  routinesClientPlugin,
   packagePublisherClientPlugin,
 ];

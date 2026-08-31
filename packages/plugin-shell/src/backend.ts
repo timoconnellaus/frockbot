@@ -117,6 +117,20 @@ import { createBotSelfManagementHost } from "./backend-flock.js";
 import { createBotMemoryHost } from "./backend-memory.js";
 import { createBotSkillsHost } from "./backend-skills.js";
 import {
+  createBotRoutinesHost,
+  createBotRoutineStore,
+} from "./backend-routines.js";
+import {
+  RoutineNotFoundError,
+  type RoutineStore,
+} from "@frockbot/plugin-routines/store";
+import type {
+  RoutineCommandReceiptV1,
+  RoutineCommandV1,
+  RoutineListViewV1,
+  RoutineRunListViewV1,
+} from "@frockbot/plugin-routines/shared";
+import {
   decodeAuthoringQuotaReceiptV1,
   type AuthoringQuotaBinding,
   type PackageAuthoringHost,
@@ -308,6 +322,11 @@ export class ShellBotBackendContribution {
    * configuration, Composition, and notification policy it needs.
    */
   private readonly authority: BotDurableAuthority<BotSettingsViewV1>;
+  /**
+   * The Routines authority for this Bot. One store per object, over the same
+   * Durable Object storage every other durable record lives in.
+   */
+  private readonly routines: RoutineStore;
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -316,6 +335,7 @@ export class ShellBotBackendContribution {
       host.compileApplication ?? compileFoundationApplication;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
+    this.routines = createBotRoutineStore(host.state.storage);
     const createAuthority: CreateBotDurableAuthority =
       host.createAuthority ?? ((options) => new BotDurableAuthority(options));
     this.authority = createAuthority<BotSettingsViewV1>({
@@ -2369,6 +2389,13 @@ export class ShellBotBackendContribution {
               }),
             }
           : {}),
+        // A Bot writes a Routine only inside a Turn, so the record's writer can
+        // name the Session and Turn that produced it.
+        ...(turn
+          ? {
+              routines: createBotRoutinesHost(identity, turn, this.routines),
+            }
+          : {}),
         // The durable-root sync runs only inside a Turn that uses the
         // Computer. It attributes nothing: a file a shell wrote there reaches
         // object storage with an unattributed writer.
@@ -2612,6 +2639,34 @@ export class ShellBotBackendContribution {
 
   async acknowledgeNotification(notificationId: string): Promise<void> {
     return this.authority.acknowledgeNotification(notificationId);
+  }
+
+  /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */
+  async listRoutines(identity: BotIdentity): Promise<RoutineListViewV1> {
+    return this.routines.list(identity.botId);
+  }
+
+  /**
+   * One Routine command, applied by the Bot Durable Object. The writer is a
+   * User here; the `routine_manage` tool calls the same store with a Bot
+   * writer, so the two paths cannot drift.
+   */
+  async executeRoutineCommand(
+    identity: BotIdentity,
+    command: RoutineCommandV1,
+  ): Promise<RoutineCommandReceiptV1> {
+    if (command.botId !== identity.botId) {
+      throw new RoutineNotFoundError(command.routineId ?? command.botId);
+    }
+    return this.routines.execute(command, { kind: "user" });
+  }
+
+  /** One Routine's bounded run log, newest first. */
+  async listRoutineRuns(
+    identity: BotIdentity,
+    routineId: string,
+  ): Promise<RoutineRunListViewV1> {
+    return this.routines.listRuns(identity.botId, routineId);
   }
   /**
    * The Bot's durable Composition generations, newest first. Bot-scoped: the
