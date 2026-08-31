@@ -16,6 +16,11 @@ import {
 } from "@frockbot/plugin-package-publisher/user";
 export type { PackagePublisherUserHost } from "@frockbot/plugin-package-publisher/user";
 import {
+  createSearchUserBackendPlugin,
+  type SearchUserBackendContribution,
+  type SearchUserBackendHost,
+} from "@frockbot/plugin-search/user";
+import {
   createOllamaCloudUserBackendPlugin,
   type OllamaCloudUserBackendContribution,
 } from "@frockbot/plugin-provider-ollama-cloud/user";
@@ -59,6 +64,12 @@ export interface MountedFoundationUserBackend {
   connections: ReadonlyMap<string, FoundationConnectionUserBackendContribution>;
   flock: FlockUserBackendContribution;
   publisher: PackagePublisherUserContribution;
+  /**
+   * The User's transcript index. It is User-scoped state like every other
+   * Contribution here, and it is the only one that is a *projection*: the rows
+   * are rebuildable from the Bots' own stored runs.
+   */
+  search: SearchUserBackendContribution;
   dispose(): Promise<void>;
 }
 
@@ -90,6 +101,17 @@ export async function createFoundationUserBackendContributions(
      * plan.
      */
     catalog?: UserPackageCatalogHost;
+    /**
+     * The transcript-index seams the adapter owns: this object's own SQL
+     * storage, and one page of a Bot's projected rows read from that Bot's
+     * Durable Object. The index never invents a row; a rebuild reads them from
+     * the authority that holds the runs.
+     */
+    search: {
+      sql: SearchUserBackendHost["sql"];
+      projectBotRows: SearchUserBackendHost["projectBotRows"];
+      maxRows?: number;
+    };
   },
 ): Promise<MountedFoundationUserBackend> {
   let settings: UserSettingsBackendContribution | undefined;
@@ -97,6 +119,7 @@ export async function createFoundationUserBackendContributions(
   let ollama: OllamaCloudUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
   let publisher: PackagePublisherUserContribution | undefined;
+  let search: SearchUserBackendContribution | undefined;
   const connections = new Map<
     string,
     FoundationConnectionUserBackendContribution
@@ -110,6 +133,7 @@ export async function createFoundationUserBackendContributions(
         | OllamaCloudUserBackendContribution
         | FlockUserBackendContribution
         | PackagePublisherUserContribution
+        | SearchUserBackendContribution
       >,
     ) => Plugin
   >([
@@ -188,6 +212,39 @@ export async function createFoundationUserBackendContributions(
             return lifecycle.mount(value);
           },
         }),
+    ],
+    [
+      "@frockbot/plugin-search/user",
+      (lifecycle) =>
+        createSearchUserBackendPlugin(
+          {
+            ...host.search,
+            // The Flock Contribution is the authority for which Bots exist and
+            // which are archived, so the index asks it at query time. A
+            // lifecycle copied into a row would go stale the moment a Bot is
+            // archived, and an archived Bot must leave the default results
+            // without waiting for a rebuild.
+            readDirectory: async () => {
+              if (!flock) {
+                throw new Error("Flock User Contribution is unavailable");
+              }
+              const directory = await flock.listBots();
+              const lifecycles = await flock.listBotLifecycles();
+              return {
+                botIds: directory.bots.map((bot) => bot.botId),
+                archivedBotIds: lifecycles.lifecycles
+                  .filter((lifecycle) => lifecycle.status === "archived")
+                  .map((lifecycle) => lifecycle.botId),
+              };
+            },
+          },
+          {
+            mount(value: SearchUserBackendContribution) {
+              search = value;
+              return lifecycle.mount(value);
+            },
+          },
+        ),
     ],
     [
       "@frockbot/plugin-flock/user",
@@ -281,6 +338,7 @@ export async function createFoundationUserBackendContributions(
     | OllamaCloudUserBackendContribution
     | FlockUserBackendContribution
     | PackagePublisherUserContribution
+    | SearchUserBackendContribution
   >(plan, {
     backendHost: "user",
     resolve: (specifier, lifecycle) => {
@@ -291,10 +349,10 @@ export async function createFoundationUserBackendContributions(
       return factory(lifecycle);
     },
   });
-  if (!settings || !credentials || !ollama || !flock || !publisher) {
+  if (!settings || !credentials || !ollama || !flock || !publisher || !search) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Flock, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Flock, Search, and Package Publisher User Contributions",
     );
   }
   return {
@@ -303,6 +361,7 @@ export async function createFoundationUserBackendContributions(
     connections,
     flock,
     publisher,
+    search,
     dispose: mounted.dispose,
   };
 }

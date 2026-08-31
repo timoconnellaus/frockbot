@@ -31,7 +31,15 @@ export default defineConfig({
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",
           FLY_COMPATIBILITY: "FlyCompatibilityProbe",
-          USER_CONFIGURATIONS: "UserConfiguration",
+          SEARCH_SPIKE: { className: "SearchSpikeProbe", useSQLite: true },
+          // The User Durable Object is in `new_sqlite_classes` in
+          // `wrangler.jsonc`, so it has SQL storage in production; miniflare
+          // needs that said explicitly or the transcript index has nowhere to
+          // live in this suite.
+          USER_CONFIGURATIONS: {
+            className: "UserConfiguration",
+            useSQLite: true,
+          },
         },
         bindings: {
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,

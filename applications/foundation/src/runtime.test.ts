@@ -50,6 +50,7 @@ describe("foundation application", () => {
       "settings",
       "provider-ollama-cloud",
       "routines",
+      "search",
       "skills",
     ]);
     expect(first.contributions).toEqual({
@@ -61,6 +62,7 @@ describe("foundation application", () => {
         "settings",
         "provider-ollama-cloud",
         "routines",
+        "search",
       ],
       runtime: [
         "shell",
@@ -334,7 +336,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(5);
+    expect(userBackend.contributions).toHaveLength(6);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

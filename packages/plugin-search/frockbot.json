@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 3,
+  "id": "search",
+  "displayName": "Search",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": { "flock": ">=0.0.1", "shell": ">=0.0.1" },
+  "contributions": {
+    "backend": [{ "entry": "./user", "host": "user" }]
+  },
+  "permissions": []
+}

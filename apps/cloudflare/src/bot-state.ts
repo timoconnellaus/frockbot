@@ -75,6 +75,15 @@ import {
 } from "@frockbot/kernel-do";
 import type { MemoryProjectsV1 } from "@frockbot/plugin-memory/agent";
 import {
+  searchRowsFromClientRunV1,
+  type SearchSinkV1,
+} from "@frockbot/plugin-search";
+import {
+  createBotSearchRowPageV1,
+  createUserSearchSinkV1,
+  type UserSearchRpc,
+} from "./search.js";
+import {
   createRoutedWorkspaceGenerationsV1,
   createUserMemoryProjectsV1,
   createUserWorkspaceGenerationsV1,
@@ -129,6 +138,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     WORKSPACE_SYNC_FILES?: WorkspaceFilesV1;
     WORKSPACE_SYNC_EFFECTS?: WorkspaceSyncEffectsV1;
     WORKSPACE_SYNC_GENERATIONS?: WorkspaceGenerationsV1;
+    /** The User-scoped transcript index a settled Turn projects into. */
+    SEARCH_SINK?: SearchSinkV1;
   };
   /** The identity the Workspace and Memory surfaces above were built for. */
   private surfacesFor: string | undefined;
@@ -388,6 +399,14 @@ export class BotState extends DurableObject<BotStateEnv> {
         identity,
       );
     }
+    // The transcript index is User-scoped state, so its authority is the User
+    // Durable Object and this object reaches it through a narrow binding —
+    // the same shape as `MEMORY_PROJECTS` above. It is a projection, never an
+    // authority, so nothing here waits on it and nothing here reads from it.
+    this.backendEnv.SEARCH_SINK = createUserSearchSinkV1(
+      rpc as unknown as UserSearchRpc,
+      identity,
+    );
     this.surfacesFor = key;
   }
 
@@ -548,15 +567,66 @@ export class BotState extends DurableObject<BotStateEnv> {
 
   async run(input: unknown) {
     const request = decodeBotRunRpcV1(input);
-    const { shell } = await this.materialized({
-      userId: request.userId,
-      botId: request.botId,
-    });
-    return shell.run({
-      userId: request.userId,
-      botId: request.botId,
-      ...request.command,
-    });
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    const turn = await shell.run({ ...identity, ...request.command });
+    await this.projectSettledRun(shell, identity, request.command.runId);
+    return turn;
+  }
+
+  /**
+   * Projects one settled run into the User's transcript index.
+   *
+   * After settlement, and never before it: the run is already durable in this
+   * object, so an index write that fails costs a rebuild rather than a Turn.
+   * The failure is swallowed for the same reason — a derived projection must
+   * not decide whether the thing it derives from succeeded.
+   */
+  private async projectSettledRun(
+    shell: ShellBotBackendContribution,
+    identity: { userId: string; botId: string },
+    runId: string,
+  ): Promise<void> {
+    const sink = this.backendEnv.SEARCH_SINK;
+    if (!sink) return;
+    try {
+      const lookup = await shell.lookupRun({ schemaVersion: 1, runId });
+      if (lookup.state === "not-admitted") return;
+      await sink.indexRows(
+        searchRowsFromClientRunV1(identity.botId, lookup.run),
+      );
+    } catch {
+      // Visible as a gap the index state and a rebuild both report; never a
+      // reason for an admitted Turn to look as if it failed.
+    }
+  }
+
+  /**
+   * One page of this Bot's rows, projected from its own stored runs.
+   *
+   * This is what makes the User's index disposable: every row it holds can be
+   * read back out of the authority that owns the conversation.
+   */
+  async projectSearchRows(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier, botId: rpcBotId },
+      { cursor: rpcString(512) },
+    );
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const cursor = request.cursor as string | undefined;
+    return createBotSearchRowPageV1(
+      identity.botId,
+      await shell.listRuns({
+        schemaVersion: 1,
+        ...(cursor === undefined ? {} : { before: cursor }),
+      }),
+    );
   }
 
   /**

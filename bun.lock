@@ -43,6 +43,7 @@
         "@frockbot/plugin-provider-foundation": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
+        "@frockbot/plugin-search": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
@@ -100,6 +101,7 @@
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
+        "@frockbot/plugin-search": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/workspace-store": "workspace:*",
@@ -802,6 +804,19 @@
         "vue-tsc": "3.3.10",
       },
     },
+    "packages/plugin-search": {
+      "name": "@frockbot/plugin-search",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/plugin-flock": "workspace:*",
+        "@frockbot/plugin-shell": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-settings": {
       "name": "@frockbot/plugin-settings",
       "version": "0.0.1",
@@ -1248,6 +1263,8 @@
     "@frockbot/plugin-provider-ollama-cloud": ["@frockbot/plugin-provider-ollama-cloud@workspace:packages/plugin-provider-ollama-cloud"],
 
     "@frockbot/plugin-routines": ["@frockbot/plugin-routines@workspace:packages/plugin-routines"],
+
+    "@frockbot/plugin-search": ["@frockbot/plugin-search@workspace:packages/plugin-search"],
 
     "@frockbot/plugin-settings": ["@frockbot/plugin-settings@workspace:packages/plugin-settings"],
 

@@ -385,6 +385,16 @@ Composio is temporarily absent from the compiled foundation application and prod
 
 Bot admission, Agent execution, session-event persistence, recovery alarms, and runtime reconstruction now run in the Bot Durable Object. Session persistence is asynchronous internally but exposes an explicit flush seam; the Agent loop flushes admission, `model/request`, `tool/call`, assistant completion, and terminal events before crossing their relevant effect or completion boundaries. A durably committed assistant or no-effect event remains the settlement cursor: settlement failure keeps the Turn resumable, and recovery preserves the current snapshot-authorized assigned runtime Packages while reconstructing that already-admitted provider from its durable request binding, independent of later Package disablement, until it idempotently settles the model lease and any derived exact-resolution lease. A Bot with notifications enabled records a durable notification intent before any browser or mobile adapter displays it; unacknowledged intents replay after disconnect, and adapters acknowledge only after display or when the visible conversation already delivered the result.
 
+## Transcript search
+
+Every User has one transcript index, and it lives in that User's Durable Object on its own SQL storage — the shape GrokBot's single `search-index.db` takes for all of a User's agents (parity register row 52). It is an FTS5 virtual table: the Durable Object SQL authorizer accepts `CREATE VIRTUAL TABLE … USING fts5`, and `apps/cloudflare/test/search.workerd.ts` asserts that before anything else in the suite runs. `UserConfiguration` is already an SQLite class, so no migration is involved.
+
+The index is a projection and never an authority. Each row is derived from a settled run the owning Bot Durable Object holds, keyed `(botId, runId, seq)` so re-projecting a Turn writes nothing, and `POST` rebuild reads every row back out of those runs through one Bot RPC. A lost, corrupt, or evicted index therefore costs a rebuild and nothing else. Projection happens after settlement and is deliberately fire-and-forget: an admitted Turn is durable before the index hears about it, and an index write that fails leaves a gap the index state reports and a rebuild repairs, rather than making a derived table decide whether a Turn succeeded.
+
+A row carries body text only: the user's input, the assistant's settled answer, and each tool call with its result. Never a model request, never the Composition snapshot, never Memory, which has its own search. Tool rows are indexed but excluded from default results, because a tool result can carry credentials-adjacent output; reading one back is an explicit `kinds` opt-in. The schema declares a `media` kind so attachments need no schema change when they arrive, and writes none today.
+
+Privacy is structural rather than filtered: there is no cross-User store to leak from, and the User Durable Object refuses any RPC naming a User it is not. Bot lifecycle is re-checked at query time against the live Flock directory rather than copied into a row, so a Bot archived after indexing leaves the default results immediately; archiving also purges that Bot's rows outright, on the command and again on the recovery alarm. Bounds are durable per-User quotas: 2 000 000 rows, 8 KiB of body per row, 256 characters of query, 50 hits per page. Exceeding the row quota evicts the oldest rows and records a durable truncation marker, so a User whose history was trimmed is told rather than silently answered with less. A query's words are quoted into the FTS5 match expression, so FTS5 operator syntax typed into a search box is searched for and never executed.
+
 ## Trust model
 
 | Trust tier              | Desktop contribution                 | Backend contribution                                 | WebUI contribution                                          |
@@ -421,6 +431,7 @@ packages/
   connection-core/         Credential, catalog, and Connection command DTOs
   catalog-core/            Remote Package Catalog DTOs, decoders, and object layout
   plugin-credentials/      Encrypted account credential records and leases
+  plugin-search/           User-scoped FTS5 transcript index and its rebuild
   plugin-shell/            Hosted Vue shell and backend shell Contributions
   plugin-*/                First-party feature and provider Packages
   protocol/                Versioned cross-runtime DTOs and decoders

@@ -119,6 +119,7 @@ import {
   type RoutinesRuntimeHostV1,
 } from "@frockbot/plugin-routines/agent";
 export type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
+import searchManifest from "@frockbot/plugin-search/manifest";
 import settingsManifest from "@frockbot/plugin-settings/manifest";
 // Provider-neutral Connection transport is owned by the Settings gateway Contribution.
 import {
@@ -171,6 +172,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-desktop-notifications", notificationsManifest],
   ["@frockbot/plugin-shell", shellManifest],
   ["@frockbot/plugin-skills", skillsManifest],
+  ["@frockbot/plugin-search", searchManifest],
   ["@frockbot/plugin-settings", settingsManifest],
   ["@frockbot/plugin-routines", routinesManifest],
 ]);
