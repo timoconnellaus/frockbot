@@ -344,7 +344,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(6);
+    expect(userBackend.contributions).toHaveLength(7);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
