@@ -539,7 +539,6 @@ describe("Bot selection", () => {
     if (!provided) throw new Error("shell data was not provided");
     provided.value.pluginCatalog = [
       {
-        settings: [],
         packageId: "stale-package",
         displayName: "Stale",
         version: "0.0.1",
@@ -637,7 +636,6 @@ describe("Bot selection", () => {
     provided.value.activeBotId = bot.botId;
     provided.value.pluginCatalog = [
       {
-        settings: [],
         packageId: "provider-ollama-cloud",
         displayName: "Ollama Cloud",
         version: "0.0.1",
@@ -785,7 +783,6 @@ describe("Bot selection", () => {
     provided.value.userSettings = user;
     provided.value.pluginCatalog = [
       {
-        settings: [],
         packageId: "provider-ollama-cloud",
         displayName: "Ollama Cloud",
         version: "0.0.1",

@@ -285,7 +285,7 @@ function beginPackageSettings(item: PluginCatalogItem): void {
   }
   const stored = storedPackageSettings(item.packageId);
   const draft: Record<string, string | number | boolean> = {};
-  for (const definition of item.settings) {
+  for (const definition of item.settings ?? []) {
     const value = stored[definition.id];
     if (
       typeof value === "string" ||
@@ -314,7 +314,7 @@ function cancelPackageSettings(): void {
  */
 async function savePackageSettings(item: PluginCatalogItem): Promise<void> {
   const values: Record<string, string | number | boolean> = {};
-  for (const definition of item.settings) {
+  for (const definition of item.settings ?? []) {
     const kind = settingFieldKind(definition.schema);
     const raw = settingsDraft.value[definition.id];
     if (kind === "boolean") {
@@ -637,7 +637,8 @@ async function disconnect(connectionId: string): Promise<void> {
           </span>
           <UiButton
             v-if="
-              isPackageInstalled(item.packageId) && item.settings.length > 0
+              isPackageInstalled(item.packageId) &&
+              (item.settings ?? []).length > 0
             "
             @click="beginPackageSettings(item)"
           >
@@ -943,7 +944,7 @@ async function disconnect(connectionId: string): Promise<void> {
           class="api-key-form"
           @submit.prevent="savePackageSettings(item)"
         >
-          <label v-for="definition in item.settings" :key="definition.id">
+          <label v-for="definition in item.settings ?? []" :key="definition.id">
             <span>{{ settingLabel(definition) }}</span>
             <select
               v-if="settingFieldKind(definition.schema) === 'enum'"

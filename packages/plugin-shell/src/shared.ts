@@ -110,8 +110,13 @@ export interface PluginCatalogItem {
    * The Package-level settings this Package declares at User scope — the form
    * the Plugins surface generates for it. Connection-scoped settings are not
    * here: they belong to one Connection and are edited with it.
+   *
+   * Optional, and read as `[]` when absent: the decoder always fills it, so
+   * absence means a catalog payload projected before this field existed, and a
+   * Package with no declared settings is the same thing as one whose settings
+   * a client cannot see — no form.
    */
-  settings: PackageSettingDefinition[];
+  settings?: PackageSettingDefinition[];
 }
 
 export interface FrockBotWebData {

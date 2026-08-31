@@ -42,7 +42,6 @@ describe("Bot settings model selection", () => {
             capabilities: ["ollama-cloud-models"],
           },
         ],
-        settings: [],
       },
     ];
 
@@ -137,7 +136,6 @@ describe("shared model option building", () => {
           capabilities: ["ollama-cloud-models"],
         },
       ],
-      settings: [],
     },
   ];
   const packages = [
