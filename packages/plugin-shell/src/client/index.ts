@@ -427,7 +427,10 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
     typeof value.applicationHash !== "string" ||
     value.applicationHash.length === 0 ||
     value.applicationHash.length > 256 ||
-    value.deployment.applicationHash !== value.applicationHash ||
+    // `deployment.applicationHash` names the artifact bytes the gateway
+    // loaded; `applicationHash` is the compiled plan's digest. They differ
+    // by construction, so each is checked on its own and never against
+    // the other.
     !Array.isArray(value.packages) ||
     value.packages.length > 256
   ) {
