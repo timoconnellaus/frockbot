@@ -73,6 +73,8 @@ import {
   decodeMcpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
 import {
+  decodeTemplateImportListViewV1,
+  decodeTemplateImportRecordV1,
   decodeTemplateShareListViewV1,
   decodeTemplateShareReceiptV1,
   type TemplateCommandV1,
@@ -308,6 +310,8 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     listTemplateShares: (request) => rpc.listTemplateShares(request),
     executeTemplateCommand: (request) => rpc.executeTemplateCommand(request),
     resolveTemplateShare: (request) => rpc.resolveTemplateShare(request),
+    listTemplateImports: (request) => rpc.listTemplateImports(request),
+    executeTemplateImport: (request) => rpc.executeTemplateImport(request),
   };
 }
 
@@ -877,6 +881,28 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         ),
       readPublishedTemplate: (shareId: string) =>
         readPublishedTemplate(env, shareId),
+      listTemplateImports: async (userId: string) =>
+        decodeTemplateImportListViewV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).listTemplateImports({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
+      executeTemplateImport: async (
+        userId: string,
+        command: TemplateCommandV1,
+      ) =>
+        decodeTemplateImportRecordV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).executeTemplateImport({
+              schemaVersion: 1,
+              userId,
+              command,
+            }),
+          ),
+        ),
       listBots: async (userId) =>
         decodeDirectoryViewV1(
           rpcJsonSnapshot(

@@ -298,6 +298,10 @@ describe("foundation application", () => {
       executeTemplateCommand: () =>
         Promise.reject(new Error("not used while composing")),
       readPublishedTemplate: () => Promise.resolve(undefined),
+      listTemplateImports: () =>
+        Promise.resolve({ schemaVersion: 1 as const, imports: [] }),
+      executeTemplateImport: () =>
+        Promise.reject(new Error("not used while composing")),
       createBot: () =>
         Promise.resolve({
           schemaVersion: 1,

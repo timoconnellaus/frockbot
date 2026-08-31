@@ -46,6 +46,7 @@ import {
   type SkillOwnerV1,
 } from "./catalog.js";
 import type { PluginSkillsSourceV1 } from "./plugin-index.js";
+import { writeSkillDocumentV1 } from "./write.js";
 import {
   checkSkillQuotaV1,
   SKILL_QUOTA_DEFAULTS_V1,
@@ -53,8 +54,6 @@ import {
 } from "./quota.js";
 import {
   isSkillSlugV1,
-  renderSkillDocumentV1,
-  skillDocumentPathV1,
   skillSlugFromNameV1,
   SKILL_MAX_DESCRIPTION_LENGTH,
   SKILL_MAX_NAME_LENGTH,
@@ -486,104 +485,68 @@ export function createSkillWriteTool(
           "the Skill name yields no usable slug; pass an explicit slug",
         );
       }
-      const relativePath = skillDocumentPathV1(slug);
       const session = sessions.get(context.sessionId);
       if (!session) {
         return writeRefusal(
           `session "${context.sessionId}" is unavailable, so the intent cannot be recorded`,
         );
       }
-      const text = renderSkillDocumentV1({
-        name: decoded.name,
-        description: decoded.description,
-        body: decoded.body,
-      });
-      const bytes = new TextEncoder().encode(text);
-
-      const path = {
-        root: botInstructionRootV1(host.owner),
-        path: relativePath,
-      };
-      const existing = await host.files.stat(path);
-      if (existing.status !== "ok" && existing.status !== "not-found") {
+      let position: { turn: number; step: number };
+      try {
+        position = openSkillTurnPositionV1(session);
+      } catch (error) {
         return writeRefusal(
-          `the instruction root is unavailable: ${existing.reason}`,
+          error instanceof Error ? error.message : String(error),
         );
       }
-      // The count is paged to completion, and a listing that cannot be read is
-      // a refusal rather than a zero: a quota that falls open is not a quota.
-      const counted = await countSkillDocumentsV1(host.files, path.root, {
-        // The quota only asks whether the root already holds more than it
-        // allows, so the count is bounded by Skills rather than by files.
-        stopAfter: quota.maxSkillsPerBot,
-      });
-      if (counted.status !== "ok") {
-        return writeRefusal(
-          `${counted.reason}, so the per-Bot Skill quota cannot be enforced`,
-        );
-      }
-      const verdict = checkSkillQuotaV1(
+      // One write path, shared with the template import (`./write.ts`); the
+      // only thing that differs between them is the writer, and here it is
+      // this Bot inside the Turn whose Session and Turn it names.
+      const outcome = await writeSkillDocumentV1(
+        host.files,
+        host.owner,
         {
-          bytes: bytes.byteLength,
-          existingSkills: counted.count,
-          replaces: existing.status === "ok",
-        },
-        quota,
-      );
-      if (verdict.status === "refused") {
-        // A quota breach is an observable outcome, not a throw. The refusal is
-        // durable through this Turn's `tool/result` event.
-        return writeRefusal(verdict.reason);
-      }
-
-      const contentHash = await sha256HexV1(text);
-      const effectId = `skill:${relativePath}:${contentHash}`;
-      const position = openSkillTurnPositionV1(session);
-      // Intent before effect.
-      session.append({
-        type: "skill/write-intent",
-        ...position,
-        effectId,
-        path: relativePath,
-        contentHash,
-      });
-      await session.flush();
-
-      const request: WorkspaceWriteRequestV1 = {
-        path,
-        bytes,
-        writer: {
           kind: "bot",
           botId: host.owner.botId,
           sessionId: writer.sessionId,
           turnId: writer.turnId,
           runId: writer.runId,
         },
-        expectedGenerationId:
-          existing.status === "ok"
-            ? existing.entry.generation.generationId
-            : null,
-        mediaType: "text/markdown",
-      };
-      const outcome = await host.files.write(request);
-      if (outcome.status !== "ok") {
-        return writeRefusal(
-          `the write was ${outcome.status}: ${outcome.reason}`,
-        );
-      }
+        {
+          slug,
+          name: decoded.name,
+          description: decoded.description,
+          body: decoded.body,
+        },
+        {
+          quota,
+          // Intent before effect, and durable before the write is attempted.
+          onIntent: async ({ path: relativePath, contentHash }) => {
+            session.append({
+              type: "skill/write-intent",
+              ...position,
+              effectId: `skill:${relativePath}:${contentHash}`,
+              path: relativePath,
+              contentHash,
+            });
+            await session.flush();
+          },
+        },
+      );
+      if (outcome.status === "refused") return writeRefusal(outcome.reason);
       session.append({
         type: "skill/written",
         ...position,
-        effectId,
-        path: relativePath,
-        generationId: outcome.generation.generationId,
-        contentHash,
+        effectId: `skill:${outcome.path}:${outcome.contentHash}`,
+        path: outcome.path,
+        generationId: outcome.generationId,
+        contentHash: outcome.contentHash,
       });
       // The model must not be told it succeeded before the record is durable.
       await session.flush();
       return {
         content: [
-          `Wrote Skill "${decoded.name}" to ${relativePath} as generation ${outcome.generation.generationId}.`,
+          `Wrote Skill "${decoded.name}" to ${outcome.path} as generation ${outcome.generationId}.`,
           "It is under your own instruction root with your provenance recorded.",
           "Your Skill catalog is fixed for this Turn, so it appears in <agent_skills> on your next Turn.",
         ].join(" "),

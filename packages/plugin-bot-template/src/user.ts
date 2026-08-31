@@ -26,6 +26,7 @@ import type {
 } from "@frockbot/plugin-settings/user";
 import {
   canonicalBotTemplateDocumentV1,
+  parseBotTemplateDocumentV1,
   decodeTemplateShareRecordV1,
   isTemplateShareReadableV1,
   parseTemplateShareIdV1,
@@ -43,8 +44,19 @@ import {
   type TemplateSkillCandidateV1,
 } from "./scrub.js";
 import {
+  importedBotIdV1,
+  importedRoutineIdV1,
+  planBotTemplateImportV1,
+  type TemplateImportPlanV1,
+} from "./import.js";
+import {
   decodeTemplateCommandV1,
+  decodeTemplateImportRecordV1,
+  MAX_TEMPLATE_IMPORTS_V1,
   MAX_TEMPLATE_SHARES_V1,
+  type TemplateImportListViewV1,
+  type TemplateImportRecordV1,
+  type TemplateImportStepReceiptV1,
   templateCommandFingerprintV1,
   type TemplateCommandV1,
   type TemplateExportSummaryV1,
@@ -55,6 +67,8 @@ import {
 export const BOT_TEMPLATE_PACKAGE_ID = "bot-template";
 
 const SHARE_PREFIX = "bot-template:share:";
+const IMPORT_PREFIX = "bot-template:import:";
+const IMPORT_INDEX_KEY = "bot-template:import-index";
 const SHARE_INDEX_KEY = "bot-template:share-index";
 const RECEIPT_PREFIX = "bot-template:receipt:";
 
@@ -92,11 +106,69 @@ export interface TemplateBotReaderV1 {
   ): Promise<readonly TemplateRoutineCandidateV1[]>;
 }
 
+/**
+ * What an import writes through.
+ *
+ * Every method is a command the importing User's own surfaces already issue —
+ * `bot/create` from the sidebar, `user/install-package` from the Plugins
+ * surface, a Skill write and a `routine/create` from the Bot's own settings.
+ * There is deliberately nothing here for a Connection or an Assignment: an
+ * import cannot create either, because this seam cannot express it.
+ */
+export interface TemplateImportWriterV1 {
+  listBots(): Promise<{ revision: number; bots: { botId: string }[] }>;
+  createBot(input: {
+    userId: string;
+    commandId: string;
+    expectedRevision: number;
+    botId: string;
+    name: string;
+    description?: string;
+    sheep: TemplateSheepRecipeV1;
+  }): Promise<{ status: "applied" | "rejected"; failure?: string }>;
+  installPackage(input: {
+    userId: string;
+    commandId: string;
+    packageId: string;
+    version: string;
+    catalogId: string;
+    catalogGeneration: string;
+  }): Promise<{ status: string; failure?: string }>;
+  /** Written with `writer: { kind: "user" }`: the importing User authored it. */
+  writeSkill(input: {
+    userId: string;
+    botId: string;
+    slug: string;
+    name: string;
+    description: string;
+    body: string;
+  }): Promise<
+    | { status: "written"; generationId: string }
+    | { status: "refused"; reason: string }
+  >;
+  executeRoutineCommand(input: {
+    userId: string;
+    botId: string;
+    command: unknown;
+  }): Promise<{ status: string; routineId?: string }>;
+}
+
 export interface BotTemplateUserHostV1 {
   storage: UserSettingsStorage;
   settings: UserSettingsBackendContribution;
   bots: TemplateBotReaderV1;
   blobs: TemplateBlobStoreV1;
+  /** Absent on a host that does not import; the import commands then refuse. */
+  importer?: TemplateImportWriterV1;
+  /**
+   * One published share, of any User. The adapter routes by the share id's
+   * owner half; this Package never learns another User's storage exists.
+   */
+  readPublishedShare?(
+    shareId: string,
+  ): Promise<{ hash: string; document: string } | undefined>;
+  /** Every `catalogId` the given generation's index holds. */
+  readCatalogIds?(generation: string): Promise<readonly string[]>;
   /**
    * The Catalog display name of one entry at an exact generation. Optional: a
    * deployment with no Catalog exports the `packageId` as the display name
@@ -201,6 +273,14 @@ export class BotTemplateUserBackendContribution {
       // so nothing is packed, stored, or published a second time.
       return stored.receipt;
     }
+    if (
+      command.type === "template/plan-import" ||
+      command.type === "template/apply-import"
+    ) {
+      throw new TemplateDecodeError(
+        "an import command is issued through executeImport, not execute",
+      );
+    }
     const receipt =
       command.type === "template/stage"
         ? await this.stage(userId, command)
@@ -216,7 +296,13 @@ export class BotTemplateUserBackendContribution {
     userId: string,
     command: Extract<TemplateCommandV1, { type: "template/stage" }>,
   ): Promise<TemplateShareReceiptV1> {
-    const user = await this.host.settings.read(userId);
+    // `readConfiguration` rather than `read`: the pinned generation is
+    // projected onto the view, and it is what the export records as its
+    // provenance and what an importer diffs against.
+    const user = await this.host.settings.readConfiguration({
+      schemaVersion: 1,
+      userId,
+    });
     const built = await this.build(userId, command.botId, user);
     const document = canonicalBotTemplateDocumentV1(built.template);
     const hash = await templateContentHashV1(document);
@@ -256,7 +342,10 @@ export class BotTemplateUserBackendContribution {
 
   private async applyShareChange(
     userId: string,
-    command: Exclude<TemplateCommandV1, { type: "template/stage" }>,
+    command: Extract<
+      TemplateCommandV1,
+      { type: "template/set-visibility" } | { type: "template/revoke" }
+    >,
   ): Promise<TemplateShareReceiptV1> {
     await this.host.settings.read(userId);
     // The share id names its owner, and only that owner's Durable Object holds
@@ -388,6 +477,391 @@ export class BotTemplateUserBackendContribution {
       // nothing else; it never costs it the entry.
       return installation.packageId;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Import.
+  //
+  // Two commands and one durable record. `template/plan-import` reads — it
+  // fetches the blob, decodes it strictly, diffs it against this User's own
+  // pinned generation and writes a `planned` record; it applies nothing.
+  // `template/apply-import` walks that record's steps, marking each one done as
+  // it goes, so an eviction mid-apply resumes at the first step that is not.
+  //
+  // Every step is idempotent on its own terms rather than on this record alone:
+  // the Bot id is derived so a replay collides with the Bot it already made,
+  // each install carries a derived `commandId` the Settings Contribution
+  // receipts, a Skill write is a content write to a derived path, and a Routine
+  // carries a derived `routineId` its store refuses to create twice. The record
+  // is the *cursor*, not the fence.
+  // -------------------------------------------------------------------------
+
+  async listImports(userId: string): Promise<TemplateImportListViewV1> {
+    await this.host.settings.read(userId);
+    const imports: TemplateImportRecordV1[] = [];
+    for (const importId of await this.importIndex()) {
+      const record = await this.readImport(importId);
+      if (record) imports.push(record);
+    }
+    return { schemaVersion: 1, imports };
+  }
+
+  async executeImport(
+    userId: string,
+    input: unknown,
+  ): Promise<TemplateImportRecordV1> {
+    const command = decodeTemplateCommandV1(input);
+    if (command.type === "template/plan-import") {
+      return this.planImport(userId, command.commandId, command.shareId);
+    }
+    if (command.type === "template/apply-import") {
+      return this.applyImport(userId, command.importId);
+    }
+    throw new TemplateDecodeError(
+      "only an import command is issued through executeImport",
+    );
+  }
+
+  /** Read-only. Nothing an import would do happens here. */
+  private async planImport(
+    userId: string,
+    importId: string,
+    shareId: string,
+  ): Promise<TemplateImportRecordV1> {
+    const existing = await this.readImport(importId);
+    // A replanned import is a read: the plan is what the User reviewed, and
+    // re-deriving it under a moved Catalog would change what they confirmed.
+    if (existing) return existing;
+    if (!this.host.readPublishedShare) {
+      throw new TemplateDecodeError("this deployment cannot import templates");
+    }
+    const found = await this.host.readPublishedShare(shareId);
+    if (!found) throw new TemplateShareNotFoundError(shareId);
+    const template = parseBotTemplateDocumentV1(found.document);
+    const user = await this.host.settings.readConfiguration({
+      schemaVersion: 1,
+      userId,
+    });
+    const generation = user.catalogGeneration;
+    const availableCatalogIds =
+      generation && this.host.readCatalogIds
+        ? await this.host.readCatalogIds(generation)
+        : [];
+    const plan = planBotTemplateImportV1({
+      importId,
+      shareId,
+      hash: found.hash,
+      botId: await importedBotIdV1(userId, importId, template.profile.name),
+      template,
+      installedPackages: user.packages.map((installation) => ({
+        packageId: installation.packageId,
+        state: installation.state,
+        ...(installation.catalogId === undefined
+          ? {}
+          : { catalogId: installation.catalogId }),
+      })),
+      ...(generation === undefined ? {} : { catalogGeneration: generation }),
+      availableCatalogIds,
+    });
+    const now = new Date(this.now()).toISOString();
+    const record: TemplateImportRecordV1 = decodeTemplateImportRecordV1({
+      schemaVersion: 1,
+      importId,
+      shareId,
+      hash: found.hash,
+      botId: plan.botId,
+      status: "planned",
+      botName: plan.profile.name,
+      packages: plan.packages,
+      connections: plan.connections,
+      skills: plan.skills.map((skill) => skill.slug),
+      routines: plan.routines.map((routine) => ({
+        slug: routine.slug,
+        disabled: routine.triggerKind === "webhook",
+      })),
+      steps: plan.steps.map((step) => ({
+        key: step.key,
+        kind: step.kind,
+        status: "pending",
+        ...(step.subject === undefined ? {} : { subject: step.subject }),
+      })),
+      createdAt: now,
+      updatedAt: now,
+      ...(plan.catalogGeneration === undefined
+        ? {}
+        : { catalogGeneration: plan.catalogGeneration }),
+    });
+    await this.putImport(record, plan);
+    return record;
+  }
+
+  /**
+   * Walk the plan. Resumable, and safe to call again after any failure.
+   *
+   * A failed step stops the walk and leaves a visible, repairable record: the
+   * Bot exists with whatever applied, the card is re-openable, and re-issuing
+   * the command retries from exactly that step.
+   */
+  async applyImport(
+    userId: string,
+    importId: string,
+  ): Promise<TemplateImportRecordV1> {
+    await this.host.settings.read(userId);
+    const writer = this.host.importer;
+    if (!writer) {
+      throw new TemplateDecodeError("this deployment cannot import templates");
+    }
+    let record = await this.readImport(importId);
+    if (!record) throw new TemplateShareNotFoundError(importId);
+    if (record.status === "applied") return record;
+    const plan = await this.readImportPlan(importId);
+    if (!plan) throw new TemplateShareNotFoundError(importId);
+
+    record = await this.patchImport(importId, (current) => ({
+      ...current,
+      status: "applying",
+      ...(current.failure === undefined ? {} : { failure: undefined }),
+    }));
+
+    for (const step of record.steps) {
+      if (step.status === "done" || step.status === "skipped") continue;
+      let outcome: { detail?: string; skipped?: boolean };
+      try {
+        outcome = await this.runImportStep(userId, plan, step, writer);
+      } catch (error) {
+        const failure = error instanceof Error ? error.message : String(error);
+        return this.patchImport(importId, (current) => ({
+          ...current,
+          status: "failed",
+          failure: `${step.key}: ${failure}`,
+          steps: current.steps.map((entry) =>
+            entry.key === step.key
+              ? { ...entry, status: "failed" as const, failure }
+              : entry,
+          ),
+        }));
+      }
+      record = await this.patchImport(importId, (current) => ({
+        ...current,
+        steps: current.steps.map((entry) =>
+          entry.key === step.key
+            ? {
+                ...entry,
+                status: outcome.skipped
+                  ? ("skipped" as const)
+                  : ("done" as const),
+                ...(outcome.detail === undefined
+                  ? {}
+                  : { detail: outcome.detail }),
+              }
+            : entry,
+        ),
+      }));
+    }
+    return this.patchImport(importId, (current) => ({
+      ...current,
+      status: "applied",
+    }));
+  }
+
+  /** Every import left mid-apply, resumed. Called from the User DO's alarm. */
+  async recoverImports(userId: string): Promise<void> {
+    if (!this.host.importer) return;
+    for (const importId of await this.importIndex()) {
+      const record = await this.readImport(importId);
+      if (record?.status !== "applying") continue;
+      try {
+        await this.applyImport(userId, importId);
+      } catch {
+        // The record already carries the failure; a recovery pass that cannot
+        // finish must not stop the other owners of this alarm from running.
+      }
+    }
+  }
+
+  private async runImportStep(
+    userId: string,
+    plan: TemplateImportPlanV1,
+    step: TemplateImportStepReceiptV1,
+    writer: TemplateImportWriterV1,
+  ): Promise<{ detail?: string; skipped?: boolean }> {
+    switch (step.kind) {
+      case "bot/create": {
+        const directory = await writer.listBots();
+        // The derived id is the fence. A replay finds the Bot it already made.
+        if (directory.bots.some((bot) => bot.botId === plan.botId)) {
+          return { detail: plan.botId };
+        }
+        const receipt = await writer.createBot({
+          userId,
+          commandId: `import-bot-${plan.importId}`,
+          expectedRevision: directory.revision,
+          botId: plan.botId,
+          name: plan.profile.name,
+          ...(plan.profile.description === undefined
+            ? {}
+            : { description: plan.profile.description }),
+          sheep: plan.sheep,
+        });
+        if (receipt.status === "rejected") {
+          throw new Error(receipt.failure ?? "the Flock refused bot/create");
+        }
+        return { detail: plan.botId };
+      }
+      case "user/install-package": {
+        const entry = plan.packages.find(
+          (candidate) => candidate.catalogId === step.subject,
+        );
+        if (!entry || entry.status !== "will-install") return { skipped: true };
+        if (!plan.catalogGeneration) return { skipped: true };
+        const receipt = await writer.installPackage({
+          userId,
+          // Derived, so the Settings Contribution's own receipt makes a replay
+          // a read rather than a second install.
+          commandId: `import-install-${plan.importId}-${entry.catalogId}`,
+          packageId: entry.packageId,
+          version: entry.version,
+          catalogId: entry.catalogId,
+          catalogGeneration: plan.catalogGeneration,
+        });
+        if (receipt.status === "rejected") {
+          throw new Error(receipt.failure ?? "the install was rejected");
+        }
+        return { detail: entry.catalogId };
+      }
+      case "skill/write": {
+        const skill = plan.skills.find(
+          (candidate) => candidate.slug === step.subject,
+        );
+        if (!skill) return { skipped: true };
+        const outcome = await writer.writeSkill({
+          userId,
+          botId: plan.botId,
+          slug: skill.slug,
+          name: skill.name,
+          description: skill.description ?? skill.name,
+          body: skill.body,
+        });
+        if (outcome.status === "refused") throw new Error(outcome.reason);
+        return { detail: outcome.generationId };
+      }
+      case "routine/create": {
+        const routine = plan.routines.find(
+          (candidate) => candidate.slug === step.subject,
+        );
+        if (!routine) return { skipped: true };
+        const routineId = importedRoutineIdV1(plan.importId, routine.slug);
+        const receipt = await writer.executeRoutineCommand({
+          userId,
+          botId: plan.botId,
+          command: {
+            schemaVersion: 1,
+            type: "routine/create",
+            commandId: `import-routine-${routineId}`,
+            botId: plan.botId,
+            routineId,
+            name: routine.name,
+            prompt: routine.prompt,
+            ...(routine.schedule === undefined
+              ? {}
+              : { schedule: routine.schedule }),
+            ...(routine.triggerKind === "webhook"
+              ? { trigger: { kind: "webhook" } }
+              : {}),
+            timezone: routine.timezone,
+          },
+        });
+        return { detail: receipt.routineId ?? routineId };
+      }
+      case "routine/disable": {
+        const routineId = importedRoutineIdV1(
+          plan.importId,
+          step.subject ?? "",
+        );
+        // An imported webhook Routine has no key in this deployment, and a
+        // stranger's trigger firing unannounced would be a surprise rather
+        // than a feature. It arrives paused, for its User to turn on.
+        await writer.executeRoutineCommand({
+          userId,
+          botId: plan.botId,
+          command: {
+            schemaVersion: 1,
+            type: "routine/pause",
+            commandId: `import-routine-pause-${routineId}`,
+            botId: plan.botId,
+            routineId,
+          },
+        });
+        return { detail: routineId };
+      }
+    }
+  }
+
+  private async putImport(
+    record: TemplateImportRecordV1,
+    plan: TemplateImportPlanV1,
+  ): Promise<void> {
+    await this.host.storage.transaction(async (transaction) => {
+      const index = await this.importIndex(transaction);
+      if (index.length >= MAX_TEMPLATE_IMPORTS_V1) {
+        throw new TemplateDecodeError(
+          `this User already holds ${MAX_TEMPLATE_IMPORTS_V1} template imports`,
+        );
+      }
+      await transaction.put({
+        [`${IMPORT_PREFIX}${record.importId}`]: record,
+        [`${IMPORT_PREFIX}plan:${record.importId}`]: plan,
+        [IMPORT_INDEX_KEY]: [...index, record.importId],
+      });
+    });
+  }
+
+  private async patchImport(
+    importId: string,
+    patch: (current: TemplateImportRecordV1) => TemplateImportRecordV1,
+  ): Promise<TemplateImportRecordV1> {
+    return this.host.storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(
+        `${IMPORT_PREFIX}${importId}`,
+      );
+      if (stored === undefined) throw new TemplateShareNotFoundError(importId);
+      const next = decodeTemplateImportRecordV1({
+        ...patch(decodeTemplateImportRecordV1(stored)),
+        updatedAt: new Date(this.now()).toISOString(),
+      });
+      await transaction.put(`${IMPORT_PREFIX}${importId}`, next);
+      return next;
+    });
+  }
+
+  private async readImport(
+    importId: string,
+  ): Promise<TemplateImportRecordV1 | undefined> {
+    const stored = await this.host.storage.get<unknown>(
+      `${IMPORT_PREFIX}${importId}`,
+    );
+    return stored === undefined
+      ? undefined
+      : decodeTemplateImportRecordV1(stored);
+  }
+
+  private async readImportPlan(
+    importId: string,
+  ): Promise<TemplateImportPlanV1 | undefined> {
+    return this.host.storage.get<TemplateImportPlanV1>(
+      `${IMPORT_PREFIX}plan:${importId}`,
+    );
+  }
+
+  private async importIndex(
+    storage: UserSettingsTransaction = this.host.storage,
+  ): Promise<string[]> {
+    const stored = await storage.get<unknown>(IMPORT_INDEX_KEY);
+    return Array.isArray(stored)
+      ? stored
+          .filter((value): value is string => typeof value === "string")
+          .slice(0, MAX_TEMPLATE_IMPORTS_V1)
+      : [];
   }
 
   private async shareIndex(

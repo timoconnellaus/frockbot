@@ -18,10 +18,12 @@ import {
   type BotTemplateUserBackendContribution,
   type TemplateBlobStoreV1,
   type TemplateBotReaderV1,
+  type TemplateImportWriterV1,
 } from "@frockbot/plugin-bot-template/user";
 export type {
   TemplateBlobStoreV1,
   TemplateBotReaderV1,
+  TemplateImportWriterV1,
 } from "@frockbot/plugin-bot-template/user";
 import {
   createFlockUserBackendPlugin,
@@ -165,6 +167,18 @@ export async function createFoundationUserBackendContributions(
         generation: string,
         catalogId: string,
       ): Promise<string | undefined>;
+      /**
+       * The import half. The writer carries the importing User's own commands
+       * and nothing wider — there is no method on it for a Connection or an
+       * Assignment, so an import cannot create either. `readPublishedShare`
+       * routes by the share id's owner half, which is the only way this
+       * application ever reaches another User's Durable Object.
+       */
+      importer?: TemplateImportWriterV1;
+      readPublishedShare?(
+        shareId: string,
+      ): Promise<{ hash: string; document: string } | undefined>;
+      readCatalogIds?(generation: string): Promise<readonly string[]>;
     };
     /**
      * The transcript-index seams the adapter owns: this object's own SQL
@@ -327,6 +341,15 @@ export async function createFoundationUserBackendContributions(
             settings,
             bots: host.botTemplate.bots,
             blobs: host.botTemplate.blobs,
+            ...(host.botTemplate.importer
+              ? { importer: host.botTemplate.importer }
+              : {}),
+            ...(host.botTemplate.readPublishedShare
+              ? { readPublishedShare: host.botTemplate.readPublishedShare }
+              : {}),
+            ...(host.botTemplate.readCatalogIds
+              ? { readCatalogIds: host.botTemplate.readCatalogIds }
+              : {}),
             ...(host.botTemplate.readCatalogDisplayName
               ? {
                   readCatalogDisplayName:

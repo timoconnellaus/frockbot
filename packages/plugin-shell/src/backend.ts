@@ -10,6 +10,7 @@ import {
   type NormalizedModelRequest,
   type PackageBundlerBinding,
   type TurnTypeV1,
+  type WorkspaceFilesV1,
 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 import {
@@ -136,6 +137,7 @@ import {
   loadSkillCatalogV1,
   skillRefForLoadedSkillV1,
 } from "@frockbot/plugin-skills/catalog";
+import { writeSkillDocumentV1 } from "@frockbot/plugin-skills/write";
 import {
   clientSkillCatalogEntryV1,
   type ClientSkillCatalogEntryV1,
@@ -1826,6 +1828,45 @@ export class ShellBotBackendContribution {
       );
     }
     return { schemaVersion: 1, skills: entries };
+  }
+
+  /**
+   * Write one Skill into this Bot's own instruction root as its **User**.
+   *
+   * The importing User authored the recipe by choosing to materialize it, and
+   * no Turn of the new Bot has run yet, so there is no Bot writer to record.
+   * `isLoadableSkillSourceV1` admits a `user` writer under the Bot's own
+   * instruction root, so an imported Skill is loadable on the Bot's first Turn
+   * and its provenance says who put it there. The write goes through the same
+   * `writeSkillDocumentV1` the Bot's own `skill_write` uses, quota included.
+   */
+  async writeUserSkill(
+    identity: BotIdentity,
+    draft: { slug: string; name: string; description: string; body: string },
+  ): Promise<
+    | { status: "written"; generationId: string }
+    | { status: "refused"; reason: string }
+  > {
+    await this.validateIdentity(identity);
+    // The same binding `createBotSkillsHost` hands the Skills Package for a
+    // Turn. Absent, and there is no writable instruction root to import into.
+    const files = (this.env as { WORKSPACE_FILES?: WorkspaceFilesV1 })
+      .WORKSPACE_FILES;
+    if (!files) {
+      return {
+        status: "refused",
+        reason: "this Bot has no writable instruction root",
+      };
+    }
+    const outcome = await writeSkillDocumentV1(
+      files,
+      { userId: identity.userId, botId: identity.botId },
+      { kind: "user", userId: identity.userId },
+      draft,
+    );
+    return outcome.status === "written"
+      ? { status: "written", generationId: outcome.generationId }
+      : outcome;
   }
 
   /**

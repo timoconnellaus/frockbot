@@ -14,7 +14,8 @@
     "./plugin-index": "./src/plugin-index.ts",
     "./quota": "./src/quota.ts",
     "./skill-md": "./src/skill-md.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./write": "./src/write.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"
