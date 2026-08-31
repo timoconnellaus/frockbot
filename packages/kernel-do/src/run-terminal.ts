@@ -21,6 +21,35 @@ export interface RunTerminalKeys {
   notificationPrefix: string;
 }
 
+/**
+ * Records a Package writes in the same transaction that settles a Turn. The
+ * kernel never reads them: it is handed opaque key/value pairs and a reader
+ * bound to the settling transaction, exactly as it is handed notification
+ * content, so a Package can make a durable decision atomic with the settlement
+ * without the kernel holding the policy that produced it.
+ */
+export type TerminalPackageRecords<Snapshot> = (input: {
+  run: StoredRunV1<Snapshot>;
+  read<T>(key: string): Promise<T | undefined>;
+}) => Promise<Record<string, unknown>>;
+
+/** The kernel owns these; a Package record may never land on one. */
+function assertPackageRecordKeys(
+  records: Record<string, unknown>,
+  keys: RunTerminalKeys,
+): void {
+  for (const key of Object.keys(records)) {
+    if (
+      key === keys.run ||
+      key === keys.activeRun ||
+      key === keys.latestEvents ||
+      key.startsWith(keys.notificationPrefix)
+    ) {
+      throw new Error(`terminal record "${key}" is a kernel key`);
+    }
+  }
+}
+
 export async function completeStoredRun<Snapshot>(
   codec: StoredRunCodecV1<Snapshot>,
   storage: RunTerminalStorage,
@@ -28,6 +57,7 @@ export async function completeStoredRun<Snapshot>(
   runId: string,
   previous: readonly SessionEvent[],
   result: BotTurnCompletion,
+  packageRecords?: TerminalPackageRecords<Snapshot>,
 ): Promise<"completed" | "cancelled"> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
@@ -69,6 +99,16 @@ export async function completeStoredRun<Snapshot>(
   if (result.notification) {
     records[`${keys.notificationPrefix}${result.notification.notificationId}`] =
       structuredClone(result.notification);
+  }
+  if (packageRecords) {
+    const contributed = await packageRecords({
+      run: completed,
+      read: <T>(key: string) => storage.get<T>(key),
+    });
+    assertPackageRecordKeys(contributed, keys);
+    for (const [key, value] of Object.entries(contributed)) {
+      records[key] = structuredClone(value);
+    }
   }
   await storage.put(records);
   await storage.delete(keys.activeRun);

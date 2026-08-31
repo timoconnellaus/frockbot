@@ -18,15 +18,18 @@
     "./backend-runner": "./src/backend-runner.ts",
     "./backend-skills": "./src/backend-skills.ts",
     "./client": "./src/client/index.ts",
+    "./client/notify": "./src/client/notify.ts",
     "./client/FrockBotApp.vue": "./src/client/FrockBotApp.vue",
     "./client/styles.css": "./src/client/styles.css",
     "./frockbot.json": "./frockbot.json",
     "./host": "./src/host.ts",
     "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
+    "./run-cursor": "./src/run-cursor.ts",
     "./run-protocol": "./src/run-protocol.ts",
     "./shared": "./src/shared.ts",
-    "./skill-protocol": "./src/skill-protocol.ts"
+    "./skill-protocol": "./src/skill-protocol.ts",
+    "./unread": "./src/unread.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"

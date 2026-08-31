@@ -23,6 +23,7 @@ import {
 } from "./run-records.js";
 import {
   completeStoredRun,
+  type TerminalPackageRecords,
   failStoredRun,
   requireStoredRunReconciliation,
 } from "./run-terminal.js";
@@ -99,6 +100,18 @@ export interface BotDurableAuthorityHooks<Snapshot> {
     snapshot: Snapshot,
     result: BotTurnCompletion,
   ): BotNotificationIntent | undefined;
+  /**
+   * Package records written in the same transaction that settles a Turn, given
+   * the settled run and the admission-index cursor it was admitted under. The
+   * kernel writes the returned keys without reading them, so the policy that
+   * produced them stays entirely in the Package.
+   */
+  terminalRecords?(input: {
+    snapshot: Snapshot;
+    run: StoredRunV1<Snapshot>;
+    cursor: string;
+    read<T>(key: string): Promise<T | undefined>;
+  }): Promise<Record<string, unknown>>;
   /** Package deadlines that share this object's single durable alarm. */
   scheduledDeadlines(transaction: DurableObjectTransaction): Promise<number[]>;
   /** True while Package work is in flight and recovery must be deferred. */
@@ -246,7 +259,7 @@ export class BotDurableAuthority<Snapshot> {
         resume: false,
       });
       const completed = this.withNotification(settings, result);
-      await this.completeRun(command.runId, previous, completed);
+      await this.completeRun(command.runId, previous, completed, settings);
       return completed;
     } catch (error) {
       const durableRun = this.codec.optional(
@@ -325,7 +338,7 @@ export class BotDurableAuthority<Snapshot> {
         events: durableRun.events,
       } satisfies BotTurnCompletion;
       const completed = this.withNotification(settings, fullResult);
-      await this.completeRun(run.runId, previous, completed);
+      await this.completeRun(run.runId, previous, completed, settings);
       return completed;
     } catch (error) {
       const durableRun = this.codec.optional(
@@ -748,6 +761,24 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
+  /**
+   * The Package's terminal-record hook, bound to the snapshot the Turn ran
+   * under. Absent when the Package contributes none.
+   */
+  private terminalPackageRecords(
+    snapshot: Snapshot,
+  ): TerminalPackageRecords<Snapshot> | undefined {
+    const hook = this.hooks.terminalRecords;
+    if (!hook) return undefined;
+    return ({ run, read }) =>
+      hook.call(this.hooks, {
+        snapshot,
+        run,
+        cursor: runIndexKey(run.acceptedAt, run.runId),
+        read,
+      });
+  }
+
   private terminalKeys(runId: string) {
     return {
       run: `${RUN_PREFIX}${runId}`,
@@ -761,6 +792,7 @@ export class BotDurableAuthority<Snapshot> {
     runId: string,
     previous: SessionEvent[],
     result: BotTurnCompletion,
+    snapshot: Snapshot,
   ): Promise<void> {
     await this.ctx.storage.transaction(async (transaction) => {
       await completeStoredRun(
@@ -770,6 +802,7 @@ export class BotDurableAuthority<Snapshot> {
         runId,
         previous,
         result,
+        this.terminalPackageRecords(snapshot),
       );
       await this.refreshRecoveryAlarm(transaction);
     });
@@ -854,6 +887,7 @@ export class BotDurableAuthority<Snapshot> {
           run.runId,
           latest.slice(0, run.previousEventCount),
           completed,
+          this.terminalPackageRecords(run.configurationSnapshot),
         );
         await this.refreshRecoveryAlarm(transaction);
         return undefined;

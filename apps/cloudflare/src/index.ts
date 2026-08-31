@@ -31,6 +31,16 @@ import {
   type ClientRunStopReceiptV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import {
+  decodeBotNotificationDirectoryViewV1,
+  decodeBotUnreadDirectoryViewV1,
+  decodeBotUnreadReceiptV1,
+  type BotNotificationDirectoryViewV1,
+  type BotUnreadCommandV1,
+  type BotUnreadDirectoryViewV1,
+  type BotUnreadReceiptV1,
+  type BotUnreadViewV1,
+} from "@frockbot/plugin-shell/unread";
+import {
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
@@ -136,6 +146,10 @@ interface BotStateRpc extends BotConfigurationBinding {
   listSkills(): Promise<ClientSkillCatalogV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
+  readUnread(): Promise<BotUnreadViewV1>;
+  executeUnreadCommand(
+    command: BotUnreadCommandV1,
+  ): Promise<BotUnreadReceiptV1>;
   reconcileRun(
     identity: { userId: string; botId: string },
     runId: string,
@@ -195,6 +209,9 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     listSkills: () => rpc.listSkills({ schemaVersion: 1, userId, botId }),
     listNotifications: () =>
       rpc.listNotifications({ schemaVersion: 1, userId, botId }),
+    readUnread: () => rpc.readUnread({ schemaVersion: 1, userId, botId }),
+    executeUnreadCommand: (command) =>
+      rpc.executeUnreadCommand({ schemaVersion: 1, userId, botId, command }),
     acknowledgeNotification: (notificationId) =>
       rpc.acknowledgeNotification({
         schemaVersion: 1,
@@ -557,6 +574,98 @@ async function listBotIdentities(
   return decodeBotIdentityDirectoryViewV1({ schemaVersion: 1, identities });
 }
 
+/**
+ * The Bots a fan-out reads: registered, not archived, and bounded by the same
+ * `FLOCK_DIRECTORY_LIMIT` the identity directory pays for.
+ */
+async function fanOutBotIds(env: Env, userId: string): Promise<string[]> {
+  const [directory, lifecycles] = await Promise.all([
+    userConfigurationStub(env, userId)
+      .listBots({ schemaVersion: 1, userId })
+      .then((value) => decodeDirectoryViewV1(rpcJsonSnapshot(value))),
+    userConfigurationStub(env, userId)
+      .listBotLifecycles({ schemaVersion: 1, userId })
+      .then((value) =>
+        decodeBotLifecycleDirectoryViewV1(rpcJsonSnapshot(value)),
+      ),
+  ]);
+  const archived = new Set(
+    lifecycles.lifecycles
+      .filter((entry) => entry.status === "archived")
+      .map((entry) => entry.botId),
+  );
+  return directory.bots
+    .slice(0, FLOCK_DIRECTORY_LIMIT)
+    .map((bot) => bot.botId)
+    .filter((botId) => !archived.has(botId));
+}
+
+/** Unread for the whole sidebar in one round trip. */
+async function listBotUnread(
+  env: Env,
+  userId: string,
+): Promise<BotUnreadDirectoryViewV1> {
+  const botIds = await fanOutBotIds(env, userId);
+  const unread = await Promise.all(
+    botIds.map((botId) =>
+      botStateStub(env, userId, botId)
+        .readUnread()
+        .then((value) => rpcJsonSnapshot(value)),
+    ),
+  );
+  return decodeBotUnreadDirectoryViewV1({ schemaVersion: 1, unread });
+}
+
+/**
+ * Pending intents across every non-archived Bot. Acknowledgement stays
+ * per-Bot: this route only makes a background Bot's completion visible.
+ */
+async function listBotNotifications(
+  env: Env,
+  userId: string,
+): Promise<BotNotificationDirectoryViewV1> {
+  const botIds = await fanOutBotIds(env, userId);
+  const perBot = await Promise.all(
+    botIds.map(async (botId) =>
+      (await botStateStub(env, userId, botId).listNotifications()).map(
+        (intent) => ({
+          schemaVersion: 1 as const,
+          botId,
+          ...rpcJsonSnapshot(intent),
+        }),
+      ),
+    ),
+  );
+  return decodeBotNotificationDirectoryViewV1({
+    schemaVersion: 1,
+    notifications: perBot.flat(),
+  });
+}
+
+async function executeBotUnreadCommand(
+  env: Env,
+  userId: string,
+  botId: string,
+  command: BotUnreadCommandV1,
+): Promise<BotUnreadReceiptV1> {
+  // Membership first: a Bot this User does not own is not found, never marked.
+  const membership = decodeBotMembershipViewV1(
+    rpcJsonSnapshot(
+      await userConfigurationStub(env, userId).hasBot({
+        schemaVersion: 1,
+        userId,
+        botId,
+      }),
+    ),
+  );
+  if (!membership.registered) throw new BotNotFoundError(botId);
+  return decodeBotUnreadReceiptV1(
+    rpcJsonSnapshot(
+      await botStateStub(env, userId, botId).executeUnreadCommand(command),
+    ),
+  );
+}
+
 async function readBotAvatar(
   env: Env,
   userId: string,
@@ -693,6 +802,14 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             }),
           ),
         ),
+      listBotUnread: (userId: string) => listBotUnread(env, userId),
+      listBotNotifications: (userId: string) =>
+        listBotNotifications(env, userId),
+      executeBotUnreadCommand: (
+        userId: string,
+        botId: string,
+        command: BotUnreadCommandV1,
+      ) => executeBotUnreadCommand(env, userId, botId, command),
       readBotAvatar: (userId: string, botId: string) =>
         readBotAvatar(env, userId, botId),
       uploadBotAvatar: (

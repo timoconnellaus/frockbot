@@ -845,6 +845,12 @@ function createTestGateway(
           }),
         listBotIdentities: () =>
           Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
+        listBotUnread: () =>
+          Promise.resolve({ schemaVersion: 1 as const, unread: [] }),
+        listBotNotifications: () =>
+          Promise.resolve({ schemaVersion: 1 as const, notifications: [] }),
+        executeBotUnreadCommand: () =>
+          Promise.reject(new Error("unread is not wired in this test")),
         readBotAvatar: () => Promise.resolve(undefined),
         uploadBotAvatar: () =>
           Promise.reject(new Error("avatar upload is not wired in this test")),

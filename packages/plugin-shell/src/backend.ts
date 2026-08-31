@@ -200,6 +200,21 @@ import {
 } from "./backend-contracts.js";
 
 /** The Bot Durable Object key holding this Bot's durable configuration. */
+import {
+  advanceUnreadActivityV1,
+  botUnreadCommandFingerprintV1,
+  markUnreadReadV1,
+  markUnreadV1,
+  optionalUnreadStateV1,
+  projectBotUnreadViewV1,
+  unreadReceiptKeyV1,
+  UNREAD_COUNT_CAP,
+  UNREAD_STATE_KEY,
+  type BotUnreadCommandV1,
+  type BotUnreadReceiptV1,
+  type BotUnreadViewV1,
+} from "./unread.js";
+
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const ASSIGNMENT_GENERATION_PREFIX = "assignment-generation:";
@@ -378,6 +393,7 @@ export class ShellBotBackendContribution {
         executeTurn: (input) => this.executeTurn(input),
         notification: (snapshot, result) =>
           this.createNotification(snapshot, result),
+        terminalRecords: (input) => this.unreadTerminalRecords(input),
         scheduledDeadlines: (transaction) =>
           this.scheduledDeadlines(transaction),
         scheduledWorkInFlight: () => this.assignmentActivities.size > 0,
@@ -2927,6 +2943,117 @@ export class ShellBotBackendContribution {
     });
     await this.ctx.storage.put(receiptKey, receipt);
     return receipt;
+  }
+
+  /**
+   * The unread record, written in the same transaction that settles the Turn —
+   * FrockBot's `lastTurnSettlement`. Activity advances whatever the Bot's
+   * notification policy says: muting silences the intent, never the badge.
+   * Only a chat Turn advances it; an automation Turn reaches the User through
+   * its own inbox entry.
+   */
+  private async unreadTerminalRecords(input: {
+    run: {
+      acceptedAt: string;
+      runId: string;
+      admission?: { turnType: string };
+    };
+    cursor: string;
+    read<T>(key: string): Promise<T | undefined>;
+  }): Promise<Record<string, unknown>> {
+    if ((input.run.admission?.turnType ?? "chat") !== "chat") return {};
+    const current = optionalUnreadStateV1(
+      await input.read<unknown>(UNREAD_STATE_KEY),
+    );
+    return {
+      [UNREAD_STATE_KEY]: advanceUnreadActivityV1(current, {
+        cursor: input.cursor,
+        at: new Date().toISOString(),
+      }),
+    };
+  }
+
+  /**
+   * The Bot's unread projection. The count is derived from the admission index
+   * on every read, one page longer than the cap so "99+" is exact.
+   */
+  async readUnread(identity: BotIdentity): Promise<BotUnreadViewV1> {
+    await this.authority.validateIdentity(identity);
+    const state = optionalUnreadStateV1(
+      await this.ctx.storage.get<unknown>(UNREAD_STATE_KEY),
+    );
+    const index = await this.authority.listRunIndex({
+      limit: UNREAD_COUNT_CAP + 1,
+    });
+    return projectBotUnreadViewV1(
+      identity.botId,
+      state,
+      index.map((entry) => entry.cursor),
+    );
+  }
+
+  /**
+   * `bot/mark-read` and `bot/mark-unread`. Idempotent on the command id and
+   * monotonic in the cursor, so a replay or an out-of-order delivery can only
+   * ever produce the same durable record.
+   */
+  async executeUnreadCommand(
+    identity: BotIdentity,
+    command: BotUnreadCommandV1,
+  ): Promise<BotUnreadReceiptV1> {
+    if (command.botId !== identity.botId) {
+      throw new Error("unread command does not match its Bot");
+    }
+    await this.authority.validateIdentity(identity);
+    const fingerprint = botUnreadCommandFingerprintV1(command);
+    const receiptKey = unreadReceiptKeyV1(command.commandId);
+    const stored = await this.ctx.storage.transaction(async (transaction) => {
+      const existing = await transaction.get<{
+        commandFingerprint: string;
+        state: unknown;
+      }>(receiptKey);
+      if (existing) {
+        if (existing.commandFingerprint !== fingerprint) {
+          throw new Error(
+            `unread command id "${command.commandId}" was reused for a different command`,
+          );
+        }
+        return optionalUnreadStateV1(existing.state);
+      }
+      const current = optionalUnreadStateV1(
+        await transaction.get<unknown>(UNREAD_STATE_KEY),
+      );
+      let next = current;
+      if (command.type === "bot/mark-read") {
+        if (!command.upToCursor) {
+          throw new Error("bot/mark-read requires upToCursor");
+        }
+        next = markUnreadReadV1(current, {
+          upToCursor: command.upToCursor,
+          at: new Date().toISOString(),
+        });
+      } else {
+        next = markUnreadV1(current);
+      }
+      await transaction.put({
+        [UNREAD_STATE_KEY]: next,
+        [receiptKey]: { commandFingerprint: fingerprint, state: next },
+      });
+      return next;
+    });
+    const index = await this.authority.listRunIndex({
+      limit: UNREAD_COUNT_CAP + 1,
+    });
+    return {
+      schemaVersion: 1,
+      commandId: command.commandId,
+      status: "applied",
+      unread: projectBotUnreadViewV1(
+        identity.botId,
+        stored,
+        index.map((entry) => entry.cursor),
+      ),
+    };
   }
 
   private createNotification(
