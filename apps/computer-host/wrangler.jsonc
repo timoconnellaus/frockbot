@@ -45,10 +45,10 @@
       },
     ],
   },
-  // Exactly the prototype's migrations, already applied to this script. The
-  // supersession renames no durable class and creates none, so the list must
-  // not grow: a rename migration here is what tried to create a second
-  // container application and broke the deploy.
+  // The prototype's v1/v2, plus the pair that reconciles this list with what
+  // production actually has: v3 records the rename a partial deploy already
+  // applied there, and v4 renames back to the legacy class name this script
+  // and its container application are built around.
   "migrations": [
     {
       "tag": "v1",
@@ -57,6 +57,24 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["ComputerEffectJournal"],
+    },
+    // v3 is already applied to production: PR #48's deploy renamed the class
+    // before its container-application step failed. Recorded here so wrangler
+    // can find production's current tag in this list.
+    {
+      "tag": "v3",
+      "renamed_classes": [
+        { "from": "FlyHostContainer", "to": "ComputerHostContainer" },
+      ],
+    },
+    // v4 renames back so production matches the kept legacy class name that
+    // the container application was originally created for (see the comment
+    // on `containers` above).
+    {
+      "tag": "v4",
+      "renamed_classes": [
+        { "from": "ComputerHostContainer", "to": "FlyHostContainer" },
+      ],
     },
   ],
   "vars": {
