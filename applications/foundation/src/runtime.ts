@@ -142,6 +142,11 @@ const createSearchGatewayPlugin = (
     ): Plugin;
   }
 ).plugin;
+import { createConfiguredOllamaWebSearchRuntimeContribution } from "@frockbot/plugin-provider-ollama-cloud/web-search";
+// The Web Package contributes `web_fetch`: no Connection, no provider, and no
+// Computer — it works while the User's Computer is hibernated.
+import webManifest from "@frockbot/plugin-web/manifest";
+import { createConfiguredWebFetchRuntimeContribution } from "@frockbot/plugin-web/agent";
 import settingsManifest from "@frockbot/plugin-settings/manifest";
 // Provider-neutral Connection transport is owned by the Settings gateway Contribution.
 import {
@@ -179,6 +184,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
   ["@frockbot/plugin-credentials", credentialsManifest],
+  ["@frockbot/plugin-web", webManifest],
   ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
@@ -209,6 +215,12 @@ const runtimeContributions = new Map([
   ["@frockbot/plugin-shell/agent", shellAgentPlugin],
 ]);
 
+/**
+ * What the host gives one Assignment-derived runtime Contribution. The
+ * Connection-bound fields are present only when the Assignment names a
+ * Connection, so a Capability with `connectionTypes: []` receives an
+ * Assignment and nothing else.
+ */
 type AssignedRuntimeContributionFactory = (config: {
   assignment: BotExecutionPlanV1["assignments"][number];
   /** This Assignment's ordinal among the enabled Assignments of its Package. */
@@ -218,6 +230,12 @@ type AssignedRuntimeContributionFactory = (config: {
   authorizeConnection(): Promise<ConnectionView>;
   /** The Package's own outbound seam, when the host owns one. */
   fetch?: typeof fetch;
+  /**
+   * The already-authorized Connection, when the Assignment binds one. A
+   * Capability with `connectionTypes: []` receives an Assignment and no
+   * Connection, so this is absent rather than empty.
+   */
+  connection?: ConnectionView;
   /**
    * An expiring lease over the Assignment's Connection credential. Supplied
    * only by a host that carries the User's authority; a Contribution that
@@ -237,6 +255,50 @@ const assignedRuntimeContributionFactories = new Map<
   [
     "@frockbot/plugin-mcp/agent",
     (config) => createConfiguredMcpRuntimeContribution(config),
+  ],
+  [
+    "@frockbot/plugin-web/agent",
+    ({ assignment, fetch: outbound }) =>
+      createConfiguredWebFetchRuntimeContribution({
+        assignment,
+        ...(outbound ? { fetch: outbound } : {}),
+      }),
+  ],
+  [
+    "@frockbot/plugin-provider-ollama-cloud/runtime",
+    ({
+      assignment,
+      userId,
+      connection,
+      leaseCredential,
+      settleCredential,
+      fetch: outbound,
+    }) => {
+      // `web_search` is authorized by its own Assignment and its own
+      // Connection generation; a Bot whose model runs elsewhere still holds it.
+      if (
+        !connection?.generation ||
+        !assignment.connectionId ||
+        !leaseCredential ||
+        !settleCredential
+      ) {
+        return undefined;
+      }
+      return createConfiguredOllamaWebSearchRuntimeContribution({
+        assignment,
+        accountId: userId,
+        connectionId: assignment.connectionId,
+        connectionGeneration: connection.generation,
+        // Every inbound value is decoded at its seam: the provider Package
+        // validates the endpoint root before it composes a request URL.
+        ...(typeof connection.settings?.apiBaseUrl === "string"
+          ? { apiBaseUrl: connection.settings.apiBaseUrl }
+          : {}),
+        leaseCredential,
+        settleCredential,
+        ...(outbound ? { fetch: outbound } : {}),
+      });
+    },
   ],
 ]);
 
@@ -717,7 +779,12 @@ export async function createFoundationAssignedRuntimePackages(
       (candidate) => candidate.assignmentId === assignment.assignmentId,
     );
     if (!admittedAssignment) continue;
-    await host.authorizeConnection(admittedAssignment);
+    // A Capability with no Connection type is authorized by its Assignment
+    // alone; asking the host to authorize a Connection the Assignment does not
+    // name would refuse a Capability the User did grant.
+    const connection = admittedAssignment.connectionId
+      ? await host.authorizeConnection(admittedAssignment)
+      : undefined;
     const assignmentIndex = assignmentIndexes.get(pkg.id) ?? 0;
     assignmentIndexes.set(pkg.id, assignmentIndex + 1);
     const plugin = await factory({
@@ -726,6 +793,7 @@ export async function createFoundationAssignedRuntimePackages(
       userId: host.userId,
       readSecret: host.readSecret,
       authorizeConnection: () => host.authorizeConnection(admittedAssignment),
+      ...(connection ? { connection } : {}),
       ...(host.fetch ? { fetch: host.fetch } : {}),
       ...(host.leaseCredential
         ? {
@@ -798,6 +866,49 @@ export function createFoundationModelRuntimePackage(
   };
 }
 
+/**
+ * Collapse runtime packages that share one Contribution specifier into one.
+ *
+ * A Package declares exactly one runtime entry, and the runtime host resolves
+ * a Contribution specifier to exactly one Plugin, so two packages naming the
+ * same entry would silently drop one. `provider-ollama-cloud` is the first
+ * Package to reach a Turn twice — once as the Bot's model provider, once as
+ * the Connection-backed `web_search` Capability — and both must mount. The
+ * merged Plugin mounts each child in order and inherits the union of their
+ * injections, so nothing observes the difference.
+ */
+export function mergeFoundationRuntimePackagesV1(
+  packages: readonly FoundationAssignedRuntimePackage[],
+): FoundationAssignedRuntimePackage[] {
+  const merged: FoundationAssignedRuntimePackage[] = [];
+  const byContribution = new Map<string, FoundationAssignedRuntimePackage[]>();
+  for (const pkg of packages) {
+    const existing = byContribution.get(pkg.contributionSpecifier);
+    if (existing) {
+      existing.push(pkg);
+      continue;
+    }
+    const group = [pkg];
+    byContribution.set(pkg.contributionSpecifier, group);
+    merged.push(pkg);
+  }
+  return merged.map((pkg) => {
+    const group = byContribution.get(pkg.contributionSpecifier) ?? [pkg];
+    if (group.length === 1) return pkg;
+    const children = group.map((member) => member.plugin);
+    const composed: Plugin.Function = (ctx) => {
+      for (const child of children) ctx.plugin(child);
+    };
+    const injections = new Set<string>();
+    for (const child of children) {
+      const declared = (child as { inject?: string[] | undefined }).inject;
+      for (const injection of declared ?? []) injections.add(injection);
+    }
+    if (injections.size > 0) composed.inject = [...injections];
+    return { ...pkg, plugin: composed };
+  });
+}
+
 export async function createFoundationRuntimeApplication(): Promise<FoundationRuntimeApplication> {
   const plan = await compileFoundationApplication();
   const runtimeIds = new Set(plan.contributions.runtime);
@@ -826,6 +937,9 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // its handshake resolve.
   runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
+  // The Web Package's `web_fetch` mounts only for a Bot whose User assigned
+  // the `web-fetch` Capability to it.
+  runtimeIds.delete("web");
   return {
     plan,
     packages: plan.packages

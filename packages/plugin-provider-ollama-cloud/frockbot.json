@@ -6,7 +6,8 @@
   "compatibility": { "frockbot": ">=0.0.1" },
   "dependencies": {
     "credentials": ">=0.0.1",
-    "settings": ">=0.0.1"
+    "settings": ">=0.0.1",
+    "web": ">=0.0.1"
   },
   "contributions": {
     "backend": [{ "entry": "./user", "host": "user" }],
@@ -15,6 +16,7 @@
   "permissions": [
     "connections:manage",
     "models:invoke",
+    "tools:execute",
     "network:ollama-cloud"
   ],
   "configuration": {
@@ -25,7 +27,7 @@
         "displayName": "Ollama Cloud account",
         "allowMultiple": true,
         "authorization": { "kind": "api-key", "driverId": "ollama-cloud" },
-        "capabilities": ["ollama-cloud-models"],
+        "capabilities": ["ollama-cloud-models", "ollama-cloud-web-search"],
         "settings": [
           {
             "id": "api-base-url",
@@ -45,7 +47,18 @@
       {
         "id": "ollama-cloud-models",
         "kind": "model",
-        "connectionTypes": ["ollama-cloud-account"]
+        "connectionTypes": ["ollama-cloud-account"],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent", "channel"]
+        }
+      },
+      {
+        "id": "ollama-cloud-web-search",
+        "kind": "tool",
+        "connectionTypes": ["ollama-cloud-account"],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent", "channel"]
+        }
       }
     ]
   }

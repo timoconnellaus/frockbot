@@ -9,7 +9,8 @@
     "./user": "./src/user.ts",
     "./manifest": "./src/manifest.ts",
     "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./web-search": "./src/web-search.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"
@@ -26,10 +27,12 @@
     "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-models": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
+    "@frockbot/plugin-web": "workspace:*",
     "@frockbot/provider-openai-compatible": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
+    "@frockbot/plugin-tools": "workspace:*",
     "@types/bun": "1.3.6",
     "typescript": "^7.0.2"
   },

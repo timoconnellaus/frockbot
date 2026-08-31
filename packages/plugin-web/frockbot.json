@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 4,
+  "id": "web",
+  "displayName": "Web",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "contributions": {
+    "runtime": { "entry": "./agent" }
+  },
+  "permissions": ["network:web"],
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [],
+    "capabilities": [
+      {
+        "id": "web-fetch",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent", "channel"]
+        }
+      }
+    ]
+  }
+}

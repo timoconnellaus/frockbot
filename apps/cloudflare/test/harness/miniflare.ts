@@ -263,9 +263,93 @@ export async function mcpServerStub(request: Request): Promise<Response> {
   return reply({});
 }
 
+/**
+ * The stub origin the web-tools suite fetches. It is a real origin name with a
+ * dot, so `web_fetch`'s classifier allows it, and it is answered here rather
+ * than on the network: nothing in this repository's tests ever leaves the
+ * machine except the opt-in live Sprite probe. `MCP_ORIGIN` is a *subdomain*
+ * of it and is dispatched first, so the two stubs never see each other's
+ * requests.
+ */
+export const WEB_STUB_ORIGIN = "https://example.test";
+
+/**
+ * What the stub origin serves, by path. `/counters` reports how many outbound
+ * requests the stub has seen for an address `web_fetch` must never reach —
+ * the only way a workerd test can observe a request that was correctly *not*
+ * made, since this handler runs in Node and the assertions run in workerd.
+ */
+const WEB_STUB_PAGE = `<!doctype html>
+<html><head><title>Stub page</title><style>.x{color:red}</style></head>
+<body><h1>Stub page</h1><p>The quick brown fox &amp; friends.</p>
+<a href="https://example.test/other">another page</a>
+<script>window.tracked = "never-extracted";</script></body></html>`;
+
+/** Requests the outbound seam saw for a non-public address, by host. */
+const blockedAddressCalls = new Map<string, number>();
+
+function webStub(url: URL): Response {
+  if (url.pathname === "/counters") {
+    return Response.json({
+      metadata: blockedAddressCalls.get("169.254.169.254") ?? 0,
+    });
+  }
+  if (url.pathname === "/plain.txt") {
+    return new Response("plain body", {
+      headers: { "content-type": "text/plain" },
+    });
+  }
+  if (url.pathname === "/binary.pdf") {
+    return new Response("%PDF-1.4", {
+      headers: { "content-type": "application/pdf" },
+    });
+  }
+  return new Response(WEB_STUB_PAGE, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+}
+
+/**
+ * The Ollama Cloud web-search endpoint. Authenticated exactly like the two
+ * chat endpoints and unlike the catalog reads — the asymmetry measured in
+ * `docs/research/ollama-cloud-auth.md`.
+ */
+async function webSearchStub(request: Request, key: string): Promise<Response> {
+  if (key !== OLLAMA_GOOD_API_KEY) {
+    return new Response(UNAUTHORIZED, {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  let body: { query?: unknown; max_results?: unknown } = {};
+  try {
+    body = (await request.clone().json()) as typeof body;
+  } catch {
+    body = {};
+  }
+  const count =
+    typeof body.max_results === "number" ? Math.min(body.max_results, 3) : 3;
+  return Response.json({
+    results: Array.from({ length: count }, (_value, index) => ({
+      title: `Result ${index} for ${String(body.query ?? "")}`,
+      url: `https://example.test/result-${index}`,
+      content: `A snippet about ${String(body.query ?? "")}.`,
+    })),
+  });
+}
+
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.origin === MCP_ORIGIN) return mcpServerStub(request);
+  if (url.origin === WEB_STUB_ORIGIN) return webStub(url);
+  if (!url.hostname.includes("ollama.com")) {
+    // Anything a Bot should never reach is counted before it is refused, so a
+    // test can prove the request was not made rather than only that it failed.
+    blockedAddressCalls.set(
+      url.hostname,
+      (blockedAddressCalls.get(url.hostname) ?? 0) + 1,
+    );
+  }
   if (url.origin !== "https://ollama.com") {
     return new Response("outbound request is not allowed in tests", {
       status: 403,
@@ -280,6 +364,9 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     return Response.json({ capabilities: ["tools"], model_info: {} });
   }
   const key = bearerKey(request);
+  if (url.pathname === "/api/web_search") {
+    return webSearchStub(request, key);
+  }
   if (url.pathname === "/api/chat") {
     if (key !== OLLAMA_GOOD_API_KEY && key !== OLLAMA_REVOKED_API_KEY) {
       return new Response(UNAUTHORIZED, {
