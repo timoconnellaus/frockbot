@@ -26,6 +26,16 @@ const ROUTINE_ORIGIN: StoredRunOriginV1 = {
   trigger: "cron",
 };
 
+/**
+ * A subagent Turn's origin (ADR 0017): recorded in the *child* Durable Object,
+ * naming the task it is and the parent run that asked for it.
+ */
+const SUBAGENT_ORIGIN: StoredRunOriginV1 = {
+  kind: "subagent",
+  taskId: "tk-1",
+  parentRunId: "run-parent",
+};
+
 const codec = createStoredRunCodecV1<undefined>({
   decodeRunId: (value) => value as string,
   decodeConfigurationSnapshot: () => undefined,
@@ -130,6 +140,62 @@ describe("the admission record names what produced the Turn", () => {
     );
 
     expect(Object.hasOwn(decoded.admission ?? {}, "origin")).toBe(false);
+  });
+
+  test("round-trips a subagent origin, and keeps it exact", () => {
+    const decoded = codec.require(
+      legacyRun({
+        admission: {
+          schemaVersion: 1,
+          turnType: "subagent",
+          origin: SUBAGENT_ORIGIN,
+        },
+      }),
+    );
+
+    expect(decoded.admission?.origin).toEqual(SUBAGENT_ORIGIN);
+    expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+  });
+
+  test("each origin kind has its own exact fields, and cannot borrow another's", () => {
+    const withOrigin = (origin: unknown) =>
+      legacyRun({
+        admission: { schemaVersion: 1, turnType: "subagent", origin },
+      } as never);
+
+    // A subagent origin carrying a Routine's fields is not a record with a
+    // spare field; it is one this codec has never written.
+    expect(() =>
+      codec.require(
+        withOrigin({ ...SUBAGENT_ORIGIN, routineId: "morning-briefing" }),
+      ),
+    ).toThrow(/invalid admission origin fields/);
+    expect(() =>
+      codec.require(withOrigin({ kind: "subagent", taskId: "tk-1" })),
+    ).toThrow(/invalid admission origin fields/);
+    expect(() =>
+      codec.require(withOrigin({ ...SUBAGENT_ORIGIN, parentRunId: "" })),
+    ).toThrow(/invalid admission origin id/);
+    expect(() =>
+      codec.require(withOrigin({ ...ROUTINE_ORIGIN, kind: "subagent" })),
+    ).toThrow(/invalid admission origin fields/);
+  });
+
+  test("a subagent origin is part of the command identity", () => {
+    const withOrigin = botTurnCommandFingerprintV1({
+      userId: "user",
+      botId: "bot",
+      runId: "tk-1",
+      sessionId: "task:tk-1",
+      acceptedAt: "2026-09-01T00:00:00.000Z",
+      text: "do the thing",
+      turnType: "subagent",
+      origin: SUBAGENT_ORIGIN,
+    });
+
+    expect(withOrigin).toStartWith("bot-turn-command-v2:");
+    expect(withOrigin).toContain('"kind":"subagent"');
+    expect(withOrigin).toContain('"parentRunId":"run-parent"');
   });
 
   test("rejects an unknown origin kind, trigger, or extra field", () => {

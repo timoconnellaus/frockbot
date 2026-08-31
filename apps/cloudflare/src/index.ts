@@ -54,6 +54,7 @@ import {
   decodeCompositionGenerationViewV1,
   botAvatarObjectKeyV1,
   decodeBotAvatarBytesV1,
+  decodeBotIdV1,
   type BotAvatarUploadReceiptV1,
   type BotSettingsViewV1,
   type UploadBotAvatarCommandV1,
@@ -66,6 +67,7 @@ import {
   decodeRoutineRunDetailViewV1,
   decodeRoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
+import { decodeTaskListViewV1 } from "@frockbot/plugin-subagents/shared";
 import {
   decodeClientSearchRebuildReceiptV1,
   decodeSearchIndexResultsV1,
@@ -117,6 +119,7 @@ import {
   rpcDecoded,
   rpcDecodedValue,
   rpcIdentifier,
+  rpcJsonSnapshotV1,
   rpcObject,
   rpcString,
 } from "./durable-rpc.js";
@@ -222,7 +225,16 @@ type RpcBoundary<T> = {
 };
 
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
-  const id = env.BOT_STATES.idFromName(`${userId}:${botId}`);
+  // The one place a Bot Durable Object is named, and therefore the one place
+  // the name has to be beyond doubt. A Subagent Durable Object is the same
+  // class in this namespace under `<userId>:<botId>#task:<taskId>` (ADR 0017),
+  // so a `#` reaching here from a path segment would let a caller name an
+  // object the directory never minted. `decodeBotIdV1` rejects it — this
+  // restates the check where the id becomes an object rather than trusting
+  // that every route above remembered to.
+  const id = env.BOT_STATES.idFromName(
+    `${userId}:${decodeBotIdV1(botId, "bot id")}`,
+  );
   // SAFETY: Wrangler binds BOT_STATES to BotState; workers-types cannot infer its generated RPC surface.
   const rpc = env.BOT_STATES.get(id) as unknown as RpcBoundary<BotStateRpc>;
   return {
@@ -231,6 +243,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     listRoutines: (request) => rpc.listRoutines(request),
+    listTasks: (request) => rpc.listTasks(request),
     executeRoutineCommand: (request) => rpc.executeRoutineCommand(request),
     listRoutineRuns: (request) => rpc.listRoutineRuns(request),
     deliverRoutineHook: (request) => rpc.deliverRoutineHook(request),
@@ -1177,6 +1190,19 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           ? undefined
           : decodeCompositionGenerationViewV1(generation);
       },
+      listTasks: async (userId, botId) =>
+        // Snapshotted first: a cross-object answer arrives as a live stub
+        // carrying `Symbol.dispose`, and an exact-keys decoder is right to
+        // refuse that.
+        decodeTaskListViewV1(
+          rpcJsonSnapshotV1(
+            await botStateStub(env, userId, botId).listTasks({
+              schemaVersion: 1,
+              userId,
+              botId,
+            }),
+          ),
+        ),
       listRoutines: async (userId, botId) =>
         decodeRoutineListViewV1(
           await botStateStub(env, userId, botId).listRoutines({

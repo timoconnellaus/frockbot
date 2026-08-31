@@ -155,6 +155,45 @@ import {
 } from "./backend-routines.js";
 import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import {
+  TaskStore,
+  type TaskStorageV1,
+} from "@frockbot/plugin-subagents/store";
+import {
+  taskPromptDigestV1,
+  type TaskOutcomeV1,
+  type TaskRecordV1,
+} from "@frockbot/plugin-subagents/records";
+import {
+  taskContextKeyV1,
+  taskKeyV1,
+  TASK_ACTIVE_PREFIX,
+  TASK_CONTEXT_PREFIX,
+} from "@frockbot/plugin-subagents/storage-keys";
+import {
+  decodeSubagentSlotReceiptV1,
+  type SubagentSlotBinding,
+} from "@frockbot/plugin-subagents/quota";
+import {
+  subagentModelCatalogV1,
+  type SubagentModelOptionV1,
+} from "@frockbot/plugin-subagents/models";
+import type {
+  SubagentDispatchOutcomeV1,
+  SubagentDispatchRequestV1,
+  SubagentsRuntimeHostV1,
+} from "@frockbot/plugin-subagents/agent";
+import type { TaskListViewV1 } from "@frockbot/plugin-subagents/shared";
+import {
+  createBotSubagentDurableBindingV1,
+  decodeSubagentTaskContextV1,
+  subagentOutcomeForRunV1,
+  subagentTaskContextV1,
+  subagentTaskIdV1,
+  type SubagentDurableBindingV1,
+  type SubagentRunTaskRequestV1,
+  type SubagentTaskContextV1,
+} from "./backend-subagents.js";
+import {
   approvalKeyV1,
   approvalNotificationBodyV1,
   approvalNotificationIdV1,
@@ -373,6 +412,13 @@ export interface BotStateEnv {
    */
   AI?: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
+  /**
+   * The Bot Durable Object namespace, as the Subagent Durable Object namespace
+   * (ADR 0017): the same class, named `<userId>:<botId>#task:<taskId>`.
+   * Optional so a host without it still compiles — `Task` is then not offered
+   * at all, rather than offered and unable to dispatch.
+   */
+  BOT_STATES?: DurableObjectNamespace;
   COMPUTER_HOST?: Fetcher;
   /**
    * The shared secret the app Worker presents to the Computer host. Absent,
@@ -407,6 +453,12 @@ export interface ShellBotBackendHost {
   outboundFetch?: typeof fetch;
   /** Supplied by the Durable Object; defaults to the kernel implementation. */
   createAuthority?: CreateBotDurableAuthority;
+  /**
+   * Durable Object addressing for subagent dispatch (ADR 0017). Absent, and
+   * `Task` is not offered at all: a Package that cannot reach a Subagent
+   * Durable Object has no honest way to dispatch one.
+   */
+  subagents?: SubagentDurableBindingV1;
 }
 
 function optionalStoredRun(input: unknown): StoredRun | undefined {
@@ -450,6 +502,13 @@ export class ShellBotBackendContribution {
    * transaction that settles the Turn.
    */
   private readonly routineInbox: RoutineInboxStore;
+  /**
+   * The subagent task authority (ADR 0017). In a parent Bot Durable Object it
+   * holds the Bot's tasks; in a Subagent Durable Object it holds nothing,
+   * because a child never dispatches one.
+   */
+  private readonly tasks: TaskStore;
+  private readonly subagentBinding: SubagentDurableBindingV1 | undefined;
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -468,6 +527,12 @@ export class ShellBotBackendContribution {
     this.routines = routines.store;
     this.routineScheduler = routines.scheduler;
     this.routineInbox = new RoutineInboxStore(host.state.storage);
+    this.tasks = new TaskStore(host.state.storage as unknown as TaskStorageV1);
+    this.subagentBinding =
+      host.subagents ??
+      (host.env.BOT_STATES
+        ? createBotSubagentDurableBindingV1(host.env.BOT_STATES)
+        : undefined);
     const createAuthority: CreateBotDurableAuthority =
       host.createAuthority ?? ((options) => new BotDurableAuthority(options));
     this.authority = createAuthority<BotSettingsViewV1>({
@@ -2037,6 +2102,11 @@ export class ShellBotBackendContribution {
       // One admitted Turn is one run; the Turn ordinal lives in the session log.
       turnId: input.command.runId,
       sessionId: input.command.sessionId,
+      // The pin this Turn was admitted under, and the type it was admitted as.
+      // A subagent dispatched from here runs on this generation, and the model
+      // catalog it is offered is narrowed by this turn type.
+      compositionGenerationId: input.compositionGenerationId,
+      turnType: input.command.turnType ?? "chat",
     };
     const runtime = await this.agentRuntime(
       input.identity,
@@ -2547,7 +2617,46 @@ export class ShellBotBackendContribution {
       ),
       ...(await this.routineScheduler.deadlines(transaction)),
       ...expiries.filter((at) => Number.isFinite(at)),
+      // A dispatched task's 30-minute lifetime, and a child's own owed Turn,
+      // both ride the one alarm this object already has (ADR 0017): the parent
+      // reconciles a child that never reported, and the child runs the Turn it
+      // was handed on its next alarm rather than on a floating promise.
+      ...(await this.subagentDeadlines(transaction)),
     ];
+  }
+
+  /**
+   * The deadlines subagent work contributes to this object's one alarm.
+   *
+   * Two kinds, and which one an object has says which side of ADR 0017 it is
+   * on. A *parent* has task records whose `deadlineAt` is when it must go and
+   * ask what became of a child. A *child* has one task context, and while that
+   * context is `queued` its deadline is *now*: accepting a task arms the alarm,
+   * and the alarm is what runs the Turn.
+   */
+  private async subagentDeadlines(
+    transaction: DurableObjectTransaction,
+  ): Promise<number[]> {
+    const deadlines: number[] = [];
+    const active = await transaction.list<unknown>({
+      prefix: TASK_ACTIVE_PREFIX,
+    });
+    for (const key of active.keys()) {
+      const stored = await transaction.get<unknown>(
+        taskKeyV1(key.slice(TASK_ACTIVE_PREFIX.length)),
+      );
+      if (stored === undefined) continue;
+      const at = Date.parse((stored as TaskRecordV1).deadlineAt);
+      if (Number.isFinite(at)) deadlines.push(at);
+    }
+    const contexts = await transaction.list<unknown>({
+      prefix: TASK_CONTEXT_PREFIX,
+    });
+    for (const stored of contexts.values()) {
+      const context = decodeSubagentTaskContextV1(stored);
+      if (context.status === "queued") deadlines.push(Date.now());
+    }
+    return deadlines;
   }
 
   private async deferScheduledWork(
@@ -2586,6 +2695,8 @@ export class ShellBotBackendContribution {
       }
     }
     await this.settleRoutineFirings();
+    await this.runOwedSubagentTurns();
+    await this.reconcileOverdueTasks();
     await this.expireDueApprovals();
     await this.replayPendingWakeNotifications();
     // The alarm that woke this object has been consumed. Re-arm on whatever is
@@ -2629,6 +2740,346 @@ export class ShellBotBackendContribution {
       );
     });
   }
+  // -------------------------------------------------------------------------
+  // Subagents (ADR 0017). The parent Bot Durable Object is the authority; the
+  // Subagent Durable Object is an execution host with no authority of its own.
+  // -------------------------------------------------------------------------
+
+  /** The narrow User Durable Object RPC that bounds concurrent subagents per User. */
+  private subagentSlots(identity: BotIdentity): SubagentSlotBinding {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    // SAFETY: this namespace is bound to UserConfiguration; generated Worker
+    // types do not expose its RPC surface.
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      reserveSubagentSlot(input: unknown): Promise<unknown>;
+      releaseSubagentSlot(input: unknown): Promise<unknown>;
+    };
+    return {
+      reserve: async (request) =>
+        decodeSubagentSlotReceiptV1(await rpc.reserveSubagentSlot(request)),
+      release: async (request) => {
+        await rpc.releaseSubagentSlot(request);
+      },
+    };
+  }
+
+  /** The Bot's task list, as the gateway route reads it. */
+  async listTasks(identity: BotIdentity): Promise<TaskListViewV1> {
+    await this.validateIdentity(identity);
+    return this.tasks.list(identity.botId);
+  }
+
+  /**
+   * One dispatch, in the order the constitution requires.
+   *
+   * Intent before effect: the task record, the active key and the index row are
+   * durable — and the per-Bot and per-User bounds have both answered — before
+   * any Subagent Durable Object is addressed. A dispatch that dies between the
+   * two leaves a task the parent can see, ask about, and settle; it never
+   * leaves a child running with nothing to answer for it.
+   */
+  private async dispatchSubagentTask(
+    identity: BotIdentity,
+    turn: { runId: string; turnId: string; sessionId: string },
+    compositionGenerationId: string,
+    request: SubagentDispatchRequestV1,
+  ): Promise<SubagentDispatchOutcomeV1> {
+    const binding = this.subagentBinding;
+    if (!binding) {
+      return {
+        status: "refused",
+        reason:
+          "this deployment cannot address a Subagent Durable Object, so no subagent can be dispatched",
+      };
+    }
+    const taskId = subagentTaskIdV1(request.effectId);
+    const admission = await this.tasks.admit({
+      taskId,
+      type: request.type,
+      description: request.description,
+      promptDigest: await taskPromptDigestV1(request.prompt),
+      model: request.model,
+      compositionGenerationId,
+      background: request.background,
+      attachments: request.attachments,
+      // The dispatching Turn, and only the three fields that identify it: the
+      // `turn` the runtime host carries also holds the pin and the turn type,
+      // and neither belongs on the record's provenance.
+      dispatch: {
+        runId: turn.runId,
+        turnId: turn.turnId,
+        sessionId: turn.sessionId,
+      },
+      now: new Date(),
+    });
+    if (admission.status === "refused") {
+      return { status: "refused", reason: admission.reason };
+    }
+    if (admission.status === "replayed") {
+      // The same tool call, reconciled or retried: the task it already
+      // dispatched is the answer, never a second child.
+      return {
+        status: "dispatched",
+        taskId: admission.record.taskId,
+        model: admission.record.model.slug,
+      };
+    }
+    const reservation = await this.subagentSlots(identity).reserve({
+      schemaVersion: 1,
+      userId: identity.userId,
+      botId: identity.botId,
+      taskId,
+      reservedAt: admission.record.createdAt,
+    });
+    if (reservation.status === "refused") {
+      await this.tasks.settle(taskId, {
+        status: "failed",
+        settledAt: new Date().toISOString(),
+        failure: reservation.reason,
+      });
+      return { status: "refused", reason: reservation.reason };
+    }
+    const runTask: SubagentRunTaskRequestV1 = {
+      taskId,
+      type: admission.record.type,
+      parent: {
+        userId: identity.userId,
+        botId: identity.botId,
+        runId: turn.runId,
+        turnId: turn.turnId,
+        sessionId: turn.sessionId,
+      },
+      compositionGenerationId,
+      model: admission.record.model,
+      prompt: request.prompt,
+    };
+    try {
+      await binding.accept(identity, taskId, runTask);
+    } catch (error) {
+      const failure =
+        error instanceof Error ? error.message : "the subagent could not start";
+      await this.settleTask(identity, taskId, {
+        status: "failed",
+        settledAt: new Date().toISOString(),
+        failure,
+      });
+      return { status: "refused", reason: failure };
+    }
+    await this.tasks.markRunning(taskId);
+    return {
+      status: "dispatched",
+      taskId,
+      model: admission.record.model.slug,
+    };
+  }
+
+  /**
+   * Records one terminal outcome for a task and gives back what it held.
+   *
+   * The single settle point. The child calls it when its Turn ends; the
+   * parent's own alarm calls it for a child that never reported. It is
+   * idempotent on the task id, so both landing is one outcome, not two.
+   */
+  async settleTask(
+    identity: BotIdentity,
+    taskId: string,
+    outcome: TaskOutcomeV1,
+  ): Promise<{ status: "settled" | "replayed" }> {
+    await this.authority.assertIdentity(identity);
+    const settled = await this.tasks.settle(taskId, outcome);
+    if (settled.status === "settled") {
+      try {
+        await this.subagentSlots(identity).release({
+          schemaVersion: 1,
+          userId: identity.userId,
+          botId: identity.botId,
+          taskId,
+        });
+      } catch {
+        // The User's slot is a reservation, not the record. A release that
+        // could not be delivered is retried the next time this task settles or
+        // this object reconciles; it never makes a settled task look unsettled.
+      }
+    }
+    await this.ctx.storage.transaction((transaction) =>
+      this.authority.refreshRecoveryAlarm(transaction),
+    );
+    return { status: settled.status };
+  }
+
+  /**
+   * The child's door. It records the task and arms its own alarm, and it does
+   * not run the Turn: the RPC returns to a parent that is still inside the
+   * Turn that dispatched, so anything longer than a write would block it.
+   */
+  async acceptSubagentTask(
+    identity: BotIdentity,
+    request: SubagentRunTaskRequestV1,
+  ): Promise<{ childSessionId: string }> {
+    await this.authority.assertIdentity(identity);
+    const key = taskContextKeyV1(request.taskId);
+    const existing = await this.ctx.storage.get<unknown>(key);
+    if (existing !== undefined) {
+      // A retried dispatch reaches the child it already reached.
+      return {
+        childSessionId: decodeSubagentTaskContextV1(existing).sessionId,
+      };
+    }
+    const context = subagentTaskContextV1(request, new Date().toISOString());
+    await this.ctx.storage.put(key, context);
+    await this.ctx.storage.transaction((transaction) =>
+      this.authority.refreshRecoveryAlarm(transaction),
+    );
+    return { childSessionId: context.sessionId };
+  }
+
+  /** What a child holds for one task, for the parent's reconciliation. */
+  async readSubagentTaskContext(
+    taskId: string,
+  ): Promise<SubagentTaskContextV1 | undefined> {
+    const stored = await this.ctx.storage.get<unknown>(
+      taskContextKeyV1(taskId),
+    );
+    return stored === undefined
+      ? undefined
+      : decodeSubagentTaskContextV1(stored);
+  }
+
+  /**
+   * The child half of the alarm: run the one Turn this object was handed.
+   *
+   * A `subagent` Turn, on this object's own Session, admitted with the
+   * `{kind:"subagent"}` origin so the durable run says whose task it was. The
+   * task id *is* the run id, so a retried alarm is refused by the kernel's own
+   * idempotency rather than running the child twice.
+   */
+  private async runOwedSubagentTurns(): Promise<void> {
+    const identity = await this.authority.readDurableIdentity();
+    if (!identity) return;
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: TASK_CONTEXT_PREFIX,
+    });
+    for (const [key, value] of stored) {
+      let context: SubagentTaskContextV1;
+      try {
+        context = decodeSubagentTaskContextV1(value);
+      } catch {
+        continue;
+      }
+      if (context.status !== "queued") continue;
+      // A run already occupies this object; the alarm defers rather than
+      // burning the task on an error it did not have to take.
+      if (await this.authority.readActiveRunId()) return;
+      await this.ctx.storage.put(key, { ...context, status: "running" });
+      let outcome: TaskOutcomeV1;
+      try {
+        await this.authority.run({
+          ...identity,
+          runId: context.taskId,
+          sessionId: context.sessionId,
+          acceptedAt: new Date().toISOString(),
+          text: context.prompt,
+          turnType: "subagent",
+          origin: {
+            kind: "subagent",
+            taskId: context.taskId,
+            parentRunId: context.parent.runId,
+          },
+        });
+        outcome = subagentOutcomeForRunV1(
+          await this.authority.readStoredRun(context.taskId),
+          new Date().toISOString(),
+        );
+      } catch (error) {
+        outcome = subagentOutcomeForRunV1(
+          await this.authority.readStoredRun(context.taskId),
+          new Date().toISOString(),
+          error,
+        );
+      }
+      await this.ctx.storage.put(key, {
+        ...context,
+        status: "settled",
+        outcome,
+      });
+      if (this.subagentBinding) {
+        try {
+          await this.subagentBinding.settleOnParent(
+            context.parent,
+            context.taskId,
+            outcome,
+          );
+        } catch {
+          // The outcome is durable here. A parent that could not be reached is
+          // asked again when its own deadline comes due — the child is never
+          // re-dispatched, only re-read.
+        }
+      }
+    }
+  }
+
+  /**
+   * The parent half of the alarm: settle a task whose child never reported.
+   *
+   * The child is *asked*, never re-dispatched. A child that finished but could
+   * not deliver its outcome is adopted as it stands; a child that has nothing
+   * to say by its deadline is failed, because every admitted Turn must reach a
+   * durable terminal state.
+   */
+  private async reconcileOverdueTasks(): Promise<void> {
+    const identity = await this.authority.readDurableIdentity();
+    if (!identity) return;
+    const binding = this.subagentBinding;
+    const now = Date.now();
+    for (const task of await this.tasks.active()) {
+      if (Date.parse(task.deadlineAt) > now) continue;
+      let outcome: TaskOutcomeV1 | undefined;
+      if (binding) {
+        try {
+          outcome = (await binding.probe(identity, task.taskId))?.outcome;
+        } catch {
+          outcome = undefined;
+        }
+      }
+      await this.settleTask(
+        identity,
+        task.taskId,
+        outcome ?? {
+          status: "failed",
+          settledAt: new Date().toISOString(),
+          failure: `the subagent did not report before its deadline of ${task.deadlineAt}`,
+        },
+      );
+    }
+  }
+
+  /**
+   * The Subagents seam one admitted Turn runs under. `models` is read lazily,
+   * because the Turn's model binding is resolved after the runtime Packages
+   * are built and the catalog is only ever read from inside the Turn.
+   */
+  private subagentsRuntimeHost(
+    identity: BotIdentity,
+    turn: { runId: string; turnId: string; sessionId: string },
+    compositionGenerationId: string,
+    turnType: TurnTypeV1,
+    models: () => readonly SubagentModelOptionV1[],
+  ): SubagentsRuntimeHostV1 {
+    return {
+      botId: identity.botId,
+      writer: turn,
+      turnType,
+      models,
+      dispatch: (request) =>
+        this.dispatchSubagentTask(
+          identity,
+          turn,
+          compositionGenerationId,
+          request,
+        ),
+    };
+  }
+
   /**
    * The narrow User Durable Object RPC the Bot uses to reserve one authored
    * generation against the durable per-User quota (D7).
@@ -2677,7 +3128,19 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     settings: BotSettingsViewV1,
     admittedRequest?: NormalizedModelRequest,
-    turn?: { runId: string; turnId: string; sessionId: string },
+    turn?: {
+      runId: string;
+      turnId: string;
+      sessionId: string;
+      /**
+       * The generation this Turn pinned, and the type it was admitted as. A
+       * dispatched subagent runs on the generation its parent pinned, and the
+       * models it may be given are narrowed by the turn type — so both travel
+       * with the Turn rather than being resolved a second time.
+       */
+      compositionGenerationId?: string;
+      turnType?: TurnTypeV1;
+    },
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
     modelSelection: RuntimeModelSelection;
@@ -2741,6 +3204,9 @@ export class ShellBotBackendContribution {
     // The `image.model` Package setting, already checked against the enum the
     // Image Package's manifest declares.
     const configuredImageModel = packageSettings("image").model;
+    // Filled in once this Turn's model binding is resolved, below. The tool
+    // and the prompt section both read it lazily, from inside the Turn.
+    const subagentModels: SubagentModelOptionV1[] = [];
     const resolvedAgentPackages: FoundationAgentPackage[] = [
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
@@ -2838,6 +3304,20 @@ export class ShellBotBackendContribution {
         ...(turn
           ? {
               routines: createBotRoutinesHost(identity, turn, this.routines),
+            }
+          : {}),
+        // A Bot dispatches a subagent only inside an admitted Turn, whose run
+        // the task record names, and only where a Subagent Durable Object can
+        // actually be addressed (ADR 0017).
+        ...(turn && turn.compositionGenerationId && this.subagentBinding
+          ? {
+              subagents: this.subagentsRuntimeHost(
+                identity,
+                turn,
+                turn.compositionGenerationId,
+                turn.turnType ?? "chat",
+                () => subagentModels,
+              ),
             }
           : {}),
         // The durable-root sync runs only inside a Turn that uses the
@@ -3031,6 +3511,34 @@ export class ShellBotBackendContribution {
         fetch: this.outboundFetch,
       }),
     );
+    // The slugs `<available_subagent_models>` renders, and the only ones a
+    // `Task` call may name. They are the Bot's own enabled model Assignment as
+    // resolved for this Turn — never anything the Bot claimed about a model.
+    const modelAssignment = settings.assignments.find(
+      (candidate) =>
+        candidate.state === "enabled" &&
+        candidate.connectionId === binding.connection!.connectionId,
+    );
+    if (modelAssignment) {
+      const subagentBinding = {
+        assignmentId: modelAssignment.assignmentId,
+        packageId: modelAssignment.packageId,
+        capabilityId: modelAssignment.capabilityId,
+        connectionId: binding.connection.connectionId,
+        provider: binding.providerType,
+        providerModelId: effectiveModel.providerModelId,
+        ...(binding.connection.generation
+          ? { connectionGeneration: binding.connection.generation }
+          : {}),
+      };
+      subagentModels.push(
+        ...subagentModelCatalogV1({
+          assignments: [subagentBinding],
+          defaultBinding: subagentBinding,
+          turnType: turn?.turnType ?? "chat",
+        }),
+      );
+    }
     return {
       // One Package can reach a Turn as more than one Contribution — Ollama
       // Cloud is both the model provider and the `web_search` Capability — and

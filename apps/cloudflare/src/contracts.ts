@@ -71,6 +71,7 @@ import type {
   RoutineRunDetailViewV1,
   RoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
+import type { TaskListViewV1 } from "@frockbot/plugin-subagents/shared";
 import type {
   PackagePublicationReceiptV1,
   PackageRevisionHistoryV1,
@@ -628,6 +629,12 @@ export interface BotConfigurationBinding {
     userId: string;
     botId: string;
   }): Promise<RoutineListViewV1>;
+  /** The Bot's subagent tasks, answered by the parent Bot Durable Object. */
+  listTasks(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<TaskListViewV1>;
   executeRoutineCommand(request: {
     schemaVersion: 1;
     userId: string;

@@ -778,6 +778,15 @@ class MemoryConfiguration
     return this.routineStore(request.botId).list(request.botId);
   }
 
+  listTasks(request: Parameters<BotConfigurationBinding["listTasks"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      active: 0,
+      tasks: [],
+    });
+  }
+
   executeRoutineCommand(
     request: Parameters<BotConfigurationBinding["executeRoutineCommand"]>[0],
   ) {

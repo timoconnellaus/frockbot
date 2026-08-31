@@ -39,7 +39,7 @@ export interface ShellTerminalRunV1 {
   responseText?: string;
   admission?: {
     turnType?: string;
-    origin?: { kind: string; routineId: string };
+    origin?: { kind: string; routineId?: string };
   };
 }
 

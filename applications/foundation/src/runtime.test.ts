@@ -59,6 +59,7 @@ describe("foundation application", () => {
       "routines",
       "search",
       "skills",
+      "subagents",
     ]);
     expect(first.contributions).toEqual({
       backend: [
@@ -73,6 +74,7 @@ describe("foundation application", () => {
         "provider-ollama-cloud",
         "routines",
         "search",
+        "subagents",
       ],
       runtime: [
         "shell",
@@ -94,6 +96,7 @@ describe("foundation application", () => {
         "provider-ollama-cloud",
         "routines",
         "skills",
+        "subagents",
       ],
       client: [
         "ui-theme",
@@ -372,6 +375,13 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       executeRoutineInboxCommand: () =>
         Promise.reject(new Error("not used while composing")),
+      listTasks: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          botId: "bot",
+          active: 0,
+          tasks: [],
+        }),
     });
     expect(
       backend.contributions
@@ -386,6 +396,7 @@ describe("foundation application", () => {
       "routines",
       "search",
       "settings",
+      "subagents",
     ]);
     interface TestContribution {
       specifier: string;

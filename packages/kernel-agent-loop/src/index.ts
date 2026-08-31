@@ -741,6 +741,9 @@ class LoopAgent implements Agent {
       sessionId: this.session.id,
       provider: this.#options.provider,
       model: this.#options.model,
+      // The same turn type the tool catalog is trimmed to. A section that
+      // renders what a Turn may do would otherwise have to guess it.
+      turnType: this.#turnType,
     });
 
     while (true) {

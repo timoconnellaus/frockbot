@@ -54,6 +54,11 @@ import {
   type AuthoringQuotaConfigV1,
   type AuthoringQuotaReceiptV1,
 } from "@frockbot/plugin-authoring/quota";
+import {
+  releaseSubagentSlotV1,
+  reserveSubagentSlotV1,
+  type SubagentSlotReceiptV1,
+} from "@frockbot/plugin-subagents/quota";
 import { DurableWorkspaceGenerations } from "@frockbot/kernel-do";
 import {
   decodeWorkspaceGenerationRecordV1,
@@ -853,6 +858,44 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       day: request.day as string,
       sourceBytes: request.sourceBytes as number,
       retainedGenerations: request.retainedGenerations as number,
+    });
+  }
+
+  /**
+   * The per-User concurrent-subagent bound (ADR 0017).
+   *
+   * A Bot's own bound is countable in its Durable Object; a User's is not,
+   * because a User's Bots are separate objects. So the slot is held here, and
+   * the Bot's Durable Object reserves one before it dispatches and releases it
+   * when the task settles. Both halves are idempotent on `(botId, taskId)`.
+   */
+  async reserveSubagentSlot(input: unknown): Promise<SubagentSlotReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      taskId: rpcString(128),
+      reservedAt: rpcString(64),
+    });
+    return reserveSubagentSlotV1(this.ctx.storage, {
+      schemaVersion: 1,
+      userId: request.userId as string,
+      botId: request.botId as string,
+      taskId: request.taskId as string,
+      reservedAt: request.reservedAt as string,
+    });
+  }
+
+  async releaseSubagentSlot(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; status: "released"; held: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      taskId: rpcString(128),
+    });
+    return releaseSubagentSlotV1(this.ctx.storage, {
+      botId: request.botId as string,
+      taskId: request.taskId as string,
     });
   }
 

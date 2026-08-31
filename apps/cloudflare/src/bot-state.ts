@@ -91,6 +91,14 @@ import {
   decodeRoutineHookDeliveryV1,
   type RoutineHookDeliveryV1,
 } from "@frockbot/plugin-routines/hook";
+import {
+  decodeSubagentRunTaskRequestV1,
+  type SubagentRunTaskRequestV1,
+} from "@frockbot/plugin-shell/backend-subagents";
+import {
+  decodeTaskOutcomeV1,
+  type TaskOutcomeV1,
+} from "@frockbot/plugin-subagents/records";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import type { BotSkillCatalogReaderV1 } from "@frockbot/plugin-shell/backend-skills";
@@ -972,6 +980,80 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.acknowledgeNotification(request.notificationId as string);
+  }
+
+  /**
+   * The Bot's subagent tasks. Bot-scoped, so it proves directory membership the
+   * same way the other Bot RPCs do: a Bot that is not this User's is not found.
+   *
+   * This is the *parent* object's answer. A Subagent Durable Object has no
+   * route of its own and holds no task list: it holds one Session, and ADR 0017
+   * leaves every authority here.
+   */
+  async listTasks(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.listTasks(identity);
+  }
+
+  /**
+   * The Subagent Durable Object's door (ADR 0017).
+   *
+   * It records the task and arms its own alarm; the Turn runs on that alarm.
+   * The parent is still inside the Turn that dispatched when this returns, so
+   * anything longer than a write here would block it.
+   */
+  async runTask(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      request: rpcDecoded(decodeSubagentRunTaskRequestV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.acceptSubagentTask(
+      identity,
+      request.request as SubagentRunTaskRequestV1,
+    );
+  }
+
+  /** What a Subagent Durable Object holds for one task, for reconciliation. */
+  async readSubagentTask(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      taskId: rpcString(128),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.readSubagentTaskContext(request.taskId as string);
+  }
+
+  /** One terminal task outcome, recorded on the parent. Idempotent per task. */
+  async settleTask(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      taskId: rpcString(128),
+      outcome: rpcDecoded(decodeTaskOutcomeV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.settleTask(
+      identity,
+      request.taskId as string,
+      request.outcome as TaskOutcomeV1,
+    );
   }
 
   /**
