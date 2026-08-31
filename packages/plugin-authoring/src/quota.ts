@@ -83,9 +83,20 @@ export function authoringQuotaDayV1(at: Date): string {
 }
 
 /** The narrow storage surface this module needs from the User Durable Object. */
-export interface AuthoringQuotaStorage {
+export interface AuthoringQuotaTransaction {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
+}
+
+/**
+ * The User Durable Object's storage. `transaction` is required because the
+ * daily counter is a read-modify-write that spans awaits: two reservations
+ * racing at the limit would otherwise both read the same count and both admit.
+ */
+export interface AuthoringQuotaStorage extends AuthoringQuotaTransaction {
+  transaction<T>(
+    callback: (storage: AuthoringQuotaTransaction) => Promise<T>,
+  ): Promise<T>;
 }
 
 export function decodeAuthoringQuotaConfigV1(
@@ -168,55 +179,63 @@ export async function reserveAuthoringQuotaV1(
   storage: AuthoringQuotaStorage,
   request: AuthoringQuotaRequestV1,
 ): Promise<AuthoringQuotaReceiptV1> {
-  const reservationKey = authoringQuotaReservationKey(request.effectId);
-  const existing = await storage.get<AuthoringQuotaReceiptV1>(reservationKey);
-  if (existing) return existing;
+  // One transaction from the reservation lookup to the counter write: the
+  // read-modify-write spans awaits, so two concurrent reservations at the
+  // limit must not both see the same count.
+  return storage.transaction(async (transaction) => {
+    const reservationKey = authoringQuotaReservationKey(request.effectId);
+    const existing =
+      await transaction.get<AuthoringQuotaReceiptV1>(reservationKey);
+    if (existing) return existing;
 
-  const config = decodeAuthoringQuotaConfigV1(
-    await storage.get<unknown>(AUTHORING_QUOTA_CONFIG_KEY),
-  );
-  const counterKey = authoringQuotaCounterKey(request.day);
-  const used = counterValue(await storage.get<unknown>(counterKey));
+    const config = decodeAuthoringQuotaConfigV1(
+      await transaction.get<unknown>(AUTHORING_QUOTA_CONFIG_KEY),
+    );
+    const counterKey = authoringQuotaCounterKey(request.day);
+    const used = counterValue(await transaction.get<unknown>(counterKey));
 
-  let receipt: AuthoringQuotaReceiptV1;
-  if (request.sourceBytes > config.maxSourceBytes) {
-    receipt = refusal(
-      request,
-      "source-bytes",
-      `Package source is ${request.sourceBytes} bytes; this User's quota allows ${config.maxSourceBytes}`,
-      request.sourceBytes,
-      config.maxSourceBytes,
-    );
-  } else if (request.retainedGenerations >= config.retainedGenerationsPerBot) {
-    receipt = refusal(
-      request,
-      "retained-generations",
-      `this Bot retains ${request.retainedGenerations} Composition generations; this User's quota allows ${config.retainedGenerationsPerBot}`,
-      request.retainedGenerations,
-      config.retainedGenerationsPerBot,
-    );
-  } else if (used >= config.authoredPerUserPerDay) {
-    receipt = refusal(
-      request,
-      "authored-per-day",
-      `this User has authored ${used} generations on ${request.day}; the daily quota is ${config.authoredPerUserPerDay}`,
-      used,
-      config.authoredPerUserPerDay,
-    );
-  } else {
-    receipt = {
-      schemaVersion: 1,
-      status: "reserved",
-      effectId: request.effectId,
-      day: request.day,
-      used: used + 1,
-      limit: config.authoredPerUserPerDay,
-    };
-    await storage.put(counterKey, { day: request.day, count: used + 1 });
-  }
-  // Refusals are recorded too: a replayed effect must get the same answer.
-  await storage.put(reservationKey, receipt);
-  return receipt;
+    let receipt: AuthoringQuotaReceiptV1;
+    if (request.sourceBytes > config.maxSourceBytes) {
+      receipt = refusal(
+        request,
+        "source-bytes",
+        `Package source is ${request.sourceBytes} bytes; this User's quota allows ${config.maxSourceBytes}`,
+        request.sourceBytes,
+        config.maxSourceBytes,
+      );
+    } else if (
+      request.retainedGenerations >= config.retainedGenerationsPerBot
+    ) {
+      receipt = refusal(
+        request,
+        "retained-generations",
+        `this Bot retains ${request.retainedGenerations} Composition generations; this User's quota allows ${config.retainedGenerationsPerBot}`,
+        request.retainedGenerations,
+        config.retainedGenerationsPerBot,
+      );
+    } else if (used >= config.authoredPerUserPerDay) {
+      receipt = refusal(
+        request,
+        "authored-per-day",
+        `this User has authored ${used} generations on ${request.day}; the daily quota is ${config.authoredPerUserPerDay}`,
+        used,
+        config.authoredPerUserPerDay,
+      );
+    } else {
+      receipt = {
+        schemaVersion: 1,
+        status: "reserved",
+        effectId: request.effectId,
+        day: request.day,
+        used: used + 1,
+        limit: config.authoredPerUserPerDay,
+      };
+      await transaction.put(counterKey, { day: request.day, count: used + 1 });
+    }
+    // Refusals are recorded too: a replayed effect must get the same answer.
+    await transaction.put(reservationKey, receipt);
+    return receipt;
+  });
 }
 
 export function decodeAuthoringQuotaReceiptV1(

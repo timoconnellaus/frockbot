@@ -4,6 +4,7 @@ import {
   PROBE_BROKEN_SOURCE,
   PROBE_PACKAGE_SOURCE,
 } from "./bot-isolate-probe.ts";
+import { provisionBot, PROVISIONED_MODEL } from "./provision-bot.ts";
 
 function probe(name: string) {
   return env.BOT_ISOLATES.getByName(name);
@@ -230,6 +231,29 @@ describe("the isolate capability binding", () => {
     });
   });
 
+  test("a refused capability request is a declared variant, not a throw", async () => {
+    const suffix = crypto.randomUUID();
+    const stub = probe(`bad-authority-${suffix}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const botId = `bad-authority-bot-${suffix}`;
+
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId,
+      artifact,
+      tool: "ask_bad_authority",
+    });
+
+    // Bot code has a contract for this answer; it has none for a host
+    // exception, and a host exception can carry host text.
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.content)).toEqual({
+      status: "unavailable",
+      reason: "the authority request could not be recorded",
+    });
+    expect(await botState("user-1", botId).isolateDecisions()).toHaveLength(0);
+  });
+
   test("list reports only the Assignment-derived capabilities", async () => {
     const stub = probe(`list-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -254,7 +278,7 @@ describe("the isolate capability binding", () => {
     ]);
   });
 
-  test("invokeModel without a matching model Assignment is a pending decision", async () => {
+  test("invokeModel with no durable model binding is a pending decision", async () => {
     const suffix = crypto.randomUUID();
     const stub = probe(`model-denied-${suffix}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -267,8 +291,8 @@ describe("the isolate capability binding", () => {
       tool: "call_model",
       toolInput: {
         requestId: "request-1",
-        provider: "foundation",
-        model: "deterministic-v1",
+        provider: PROVISIONED_MODEL.provider,
+        model: PROVISIONED_MODEL.providerModelId,
         system: "",
         messages: [{ role: "user", content: "hello" }],
         tools: [],
@@ -283,21 +307,29 @@ describe("the isolate capability binding", () => {
     ).toHaveLength(0);
   });
 
-  test("invokeModel with a matching model Assignment streams a completion", async () => {
+  test("invokeModel for a provider the Bot's binding does not name is a pending decision", async () => {
     const suffix = crypto.randomUUID();
-    const stub = probe(`model-allowed-${suffix}`);
+    const stub = probe(`model-mismatch-${suffix}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `model-allowed-bot-${suffix}`;
-    await botState("user-1", botId).seedCompositionGeneration(
+    const userId = `model-mismatch-user-${suffix}`;
+    const botId = `model-mismatch-bot-${suffix}`;
+    await provisionBot({ userId, botId });
+    // Materializes the Bot's durable configuration in its own object, the way
+    // the first command addressed to a new Bot does.
+    await botState(userId, botId).readConfiguration({
+      schemaVersion: 1,
+      userId,
+      botId,
+    });
+    await botState(userId, botId).seedCompositionGeneration(
       await stub.generationFor(artifact),
     );
-    await botState("user-1", botId).seedBotConfiguration(
-      // SAFETY: the durable configuration shape is the Bot settings view.
-      botSettings(botId, [{ ...MODEL_ASSIGNMENT, state: "enabled" }]) as never,
-    );
 
+    // The Bot holds an enabled Ollama Cloud model Assignment. That authorizes
+    // exactly that Package's provider and exactly the model its binding names
+    // — not the first-party provider the Bot asked for here.
     const result = await stub.callTool({
-      userId: "user-1",
+      userId,
       botId,
       artifact,
       tool: "call_model",
@@ -312,6 +344,87 @@ describe("the isolate capability binding", () => {
       },
     });
 
+    expect(JSON.parse(result.content)).toMatchObject({
+      status: "pending-user-decision",
+    });
+    expect(
+      await botState(userId, botId).isolateModelRequestRecords(),
+    ).toHaveLength(0);
+  });
+
+  test("invokeModel for the assigned model but another Package's provider is a pending decision", async () => {
+    const suffix = crypto.randomUUID();
+    const stub = probe(`model-provider-${suffix}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const userId = `model-provider-user-${suffix}`;
+    const botId = `model-provider-bot-${suffix}`;
+    await provisionBot({ userId, botId });
+    // Materializes the Bot's durable configuration in its own object, the way
+    // the first command addressed to a new Bot does.
+    await botState(userId, botId).readConfiguration({
+      schemaVersion: 1,
+      userId,
+      botId,
+    });
+    await botState(userId, botId).seedCompositionGeneration(
+      await stub.generationFor(artifact),
+    );
+
+    const result = await stub.callTool({
+      userId,
+      botId,
+      artifact,
+      tool: "call_model",
+      assignments: [MODEL_ASSIGNMENT],
+      toolInput: {
+        requestId: "request-1",
+        provider: "foundation",
+        model: PROVISIONED_MODEL.providerModelId,
+        system: "",
+        messages: [{ role: "user", content: "hello" }],
+        tools: [],
+      },
+    });
+
+    expect(JSON.parse(result.content)).toMatchObject({
+      status: "pending-user-decision",
+    });
+  });
+
+  test("invokeModel with the Bot's exact assigned provider and model streams", async () => {
+    const suffix = crypto.randomUUID();
+    const stub = probe(`model-allowed-${suffix}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const userId = `model-allowed-user-${suffix}`;
+    const botId = `model-allowed-bot-${suffix}`;
+    await provisionBot({ userId, botId });
+    // Materializes the Bot's durable configuration in its own object, the way
+    // the first command addressed to a new Bot does.
+    await botState(userId, botId).readConfiguration({
+      schemaVersion: 1,
+      userId,
+      botId,
+    });
+    await botState(userId, botId).seedCompositionGeneration(
+      await stub.generationFor(artifact),
+    );
+
+    const result = await stub.callTool({
+      userId,
+      botId,
+      artifact,
+      tool: "call_model",
+      assignments: [MODEL_ASSIGNMENT],
+      toolInput: {
+        requestId: "request-1",
+        provider: PROVISIONED_MODEL.provider,
+        model: PROVISIONED_MODEL.providerModelId,
+        system: "",
+        messages: [{ role: "user", content: "hello" }],
+        tools: [],
+      },
+    });
+
     expect(result).toMatchObject({ isError: false });
     const streamed = JSON.parse(result.content) as {
       status: string;
@@ -320,10 +433,10 @@ describe("the isolate capability binding", () => {
     };
     expect(streamed.status).toBe("streaming");
     expect(streamed.requestId).toBe("request-1");
-    expect(streamed.text).toBe("Cordis runtime: hello");
+    expect(streamed.text).toBe("Ollama reply");
 
     const recorded = (await botState(
-      "user-1",
+      userId,
       botId,
     ).isolateModelRequestRecords()) as {
       requestId: string;
@@ -334,7 +447,37 @@ describe("the isolate capability binding", () => {
     expect(recorded[0]).toMatchObject({
       requestId: "request-1",
       packageId: "bot-authored",
-      capabilityId: "ollama-cloud-models",
+      capabilityId: PROVISIONED_MODEL.capabilityId,
     });
+  });
+
+  test("a new generation with the same artifact never answers under the old one", async () => {
+    const suffix = crypto.randomUUID();
+    const stub = probe(`generation-${suffix}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const botId = `generation-bot-${suffix}`;
+
+    await stub.callTool({
+      userId: "user-1",
+      botId,
+      artifact,
+      tool: "ask_authority",
+    });
+    await stub.callTool({
+      userId: "user-1",
+      botId,
+      artifact,
+      tool: "ask_authority",
+      generationCreatedAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    // The `CAPABILITIES` stub is baked into the isolate's `env`, so a cached
+    // isolate would keep recording under the generation it was first loaded
+    // for.
+    const decisions = (await botState("user-1", botId).isolateDecisions()) as {
+      generationId: string;
+    }[];
+    expect(decisions).toHaveLength(2);
+    expect(new Set(decisions.map((entry) => entry.generationId)).size).toBe(2);
   });
 });

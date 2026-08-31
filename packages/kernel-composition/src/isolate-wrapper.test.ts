@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   BOT_ISOLATE_DEADLINE_SOURCE,
+  BOT_ISOLATE_INVOCATION_SOURCE,
   BOT_ISOLATE_MAIN_MODULE,
   BOT_ISOLATE_PACKAGE_MODULE,
   BOT_ISOLATE_WRAPPER_SOURCE,
@@ -14,6 +15,27 @@ type Deadline = (work: () => unknown, deadlineMs: number) => Promise<unknown>;
 const withIsolateDeadline = new Function(
   `${BOT_ISOLATE_DEADLINE_SOURCE}\nreturn withIsolateDeadline;`,
 )() as Deadline;
+
+type DecodeInvocation = (value: unknown) => unknown;
+
+const decodeInvocation = new Function(
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeInvocation;`,
+)() as DecodeInvocation;
+
+function invocation(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1,
+    tool: "reverse_text",
+    input: { text: "a" },
+    botId: "bot-1",
+    sessionId: "user-1:bot-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    generationId: "gen-1",
+    deadlineMs: 1_000,
+    ...overrides,
+  };
+}
 
 function never(): Promise<never> {
   return new Promise(() => {});
@@ -52,6 +74,27 @@ describe("the generated wrapper's deadline", () => {
     const started = Date.now();
     await withIsolateDeadline(() => "done", 50_000);
     expect(Date.now() - started).toBeLessThan(1_000);
+  });
+});
+
+describe("the generated wrapper's invocation decoder", () => {
+  test("accepts exactly the declared invocation", () => {
+    expect(decodeInvocation(invocation())).toMatchObject({
+      tool: "reverse_text",
+    });
+  });
+
+  test("refuses an invocation carrying an undeclared field", () => {
+    expect(() =>
+      decodeInvocation(invocation({ capabilities: ["models:invoke"] })),
+    ).toThrow("isolate tool invocation has invalid fields");
+  });
+
+  test("refuses an invocation missing a declared field", () => {
+    const { turnId: _turnId, ...missing } = invocation();
+    expect(() => decodeInvocation(missing)).toThrow(
+      "isolate tool invocation has invalid fields",
+    );
   });
 });
 

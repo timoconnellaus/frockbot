@@ -84,10 +84,10 @@ import {
   createIsolateCapabilityHost,
   createR2PackageArtifactStore,
   isolateBindingDigestV1,
-  matchingModelAssignmentV1,
   type BotCapabilitiesPropsV1,
   type IsolateAssignmentV1,
   type IsolateCapabilityHost,
+  type IsolateModelBindingV1,
   type IsolateModelPath,
   type IsolateModelRequestRecordV1,
   type IsolatePendingAuthorityDecisionV1,
@@ -1432,7 +1432,10 @@ export class ShellBotBackendContribution {
             assignments: structuredClone(assignments),
           },
         }),
-      bindingDigest: await isolateBindingDigestV1(assignments),
+      bindingDigest: await isolateBindingDigestV1(
+        assignments,
+        turn.generationId,
+      ),
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
     };
   }
@@ -1466,15 +1469,27 @@ export class ShellBotBackendContribution {
       request: NormalizedModelRequest;
     },
   ): Promise<IsolateModelInvocationV1> {
-    // The Bot Durable Object's own durable configuration — no User round trip
-    // and no Connection resolution — is what decides whether the Assignment
-    // exists at all. Nothing else can widen it.
+    // The Bot Durable Object's own durable configuration is what decides
+    // whether the Assignment exists at all, and its durable model binding is
+    // what the Assignment authorizes. Nothing the Bot supplied is read.
     const settings = await this.ctx.storage.get<BotSettingsViewV1>(
       BOT_CONFIGURATION_KEY,
     );
-    const assignments = await this.isolateAssignments(
+    const projected = await this.isolateAssignments(
       settings?.assignments ?? [],
     );
+    const bound = await this.isolateModelBinding(identity, settings, projected);
+    const assignments = bound
+      ? projected.map((assignment) =>
+          assignment.assignmentId === bound.binding.assignmentId
+            ? {
+                ...assignment,
+                connectionId: bound.binding.connectionId,
+                providerModelId: bound.binding.providerModelId,
+              }
+            : assignment,
+        )
+      : projected;
     const host = this.isolateCapabilities(
       {
         botId: identity.botId,
@@ -1482,11 +1497,77 @@ export class ShellBotBackendContribution {
         generationId: input.generationId,
       },
       assignments,
-      matchingModelAssignmentV1(assignments, input.request)
-        ? this.isolateModelPath(identity, settings, input.generationId)
+      bound
+        ? {
+            binding: bound.binding,
+            path: this.isolateModelPath(
+              identity,
+              bound.runtime,
+              input.generationId,
+            ),
+          }
         : undefined,
     );
     return await host.invokeModel(input.request);
+  }
+
+  /**
+   * The Bot's one durable model binding, projected onto the isolate view. It
+   * resolves the Bot's durable `model` through the User's Connection exactly
+   * as an admitted Turn does, so an isolate model request is authorized
+   * against the same Package, Connection, and provider model a Turn would use.
+   * An unresolvable binding is no binding: the request becomes a pending
+   * decision rather than an error thrown into Bot code.
+   */
+  private async isolateModelBinding(
+    identity: BotIdentity,
+    settings: BotSettingsViewV1 | undefined,
+    assignments: readonly IsolateAssignmentV1[],
+  ): Promise<
+    | {
+        binding: IsolateModelBindingV1;
+        runtime: {
+          agentPackages: FoundationAgentPackage[];
+          modelSelection: RuntimeModelSelection;
+        };
+      }
+    | undefined
+  > {
+    if (!settings?.model) return undefined;
+    let runtime: {
+      agentPackages: FoundationAgentPackage[];
+      modelSelection: RuntimeModelSelection;
+    };
+    try {
+      runtime = await this.agentRuntime(identity, settings);
+    } catch {
+      return undefined;
+    }
+    const selection = runtime.modelSelection;
+    const connectionId = selection.connectionId;
+    if (!connectionId) return undefined;
+    const assignment = assignments.find(
+      (candidate) =>
+        candidate.kind === "model" && candidate.connectionId === connectionId,
+    );
+    if (!assignment) return undefined;
+    return {
+      runtime,
+      binding: {
+        assignmentId: assignment.assignmentId,
+        packageId: assignment.packageId,
+        capabilityId: assignment.capabilityId,
+        connectionId,
+        provider: selection.provider,
+        providerModelId: selection.model,
+        ...(selection.connectionGeneration
+          ? { connectionGeneration: selection.connectionGeneration }
+          : {}),
+        ...(selection.catalogGeneration
+          ? { catalogGeneration: selection.catalogGeneration }
+          : {}),
+      },
+    };
   }
 
   private isolateCapabilities(
@@ -1497,7 +1578,7 @@ export class ShellBotBackendContribution {
       request?: unknown;
     },
     assignments: readonly IsolateAssignmentV1[],
-    modelPath?: IsolateModelPath,
+    model?: { binding: IsolateModelBindingV1; path: IsolateModelPath },
   ): IsolateCapabilityHost {
     return createIsolateCapabilityHost({
       storage: {
@@ -1509,7 +1590,7 @@ export class ShellBotBackendContribution {
       packageId: scope.packageId,
       generationId: scope.generationId,
       assignments,
-      ...(modelPath ? { modelPath } : {}),
+      ...(model ? { modelBinding: model.binding, modelPath: model.path } : {}),
     });
   }
 
@@ -1543,13 +1624,16 @@ export class ShellBotBackendContribution {
   /**
    * Streams through the pinned Composition's mounted `ctx.llm` — the same
    * provider path a Turn uses, so whichever provider Plugin serves the request
-   * is the one that takes the credential lease. A Bot with a configured model
-   * Connection gets its provider Packages; one without gets the first-party
-   * Composition alone.
+   * is the one that takes the credential lease. The runtime is the one the
+   * durable model binding resolved to, so the Package that streams is the
+   * Package the Assignment names.
    */
   private isolateModelPath(
     identity: BotIdentity,
-    settings: BotSettingsViewV1 | undefined,
+    runtime: {
+      agentPackages: FoundationAgentPackage[];
+      modelSelection: RuntimeModelSelection;
+    },
     generationId: string,
   ): IsolateModelPath {
     const contribution = this;
@@ -1562,19 +1646,12 @@ export class ShellBotBackendContribution {
             `isolate model invocation pins unknown Composition generation "${generationId}"`,
           );
         }
-        const runtime = settings?.model
-          ? await contribution.agentRuntime(identity, settings)
-          : undefined;
         const composition = await createShellCompositionHost({
           botId: identity.botId,
           sessionId: `isolate-model:${request.requestId}`,
           sessionEvents: [],
-          ...(runtime
-            ? {
-                agentPackages: runtime.agentPackages,
-                modelSelection: runtime.modelSelection,
-              }
-            : {}),
+          agentPackages: runtime.agentPackages,
+          modelSelection: runtime.modelSelection,
         }).mount(generation, signal);
         try {
           yield* composition.root.llm.stream(request, signal);

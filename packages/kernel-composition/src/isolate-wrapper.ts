@@ -35,9 +35,30 @@ export const BOT_ISOLATE_DEADLINE_SOURCE = `function withIsolateDeadline(work, d
  * the boundary is crossed in both directions and both sides decode.
  */
 export const BOT_ISOLATE_INVOCATION_SOURCE = `var TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+var INVOCATION_KEYS = [
+  "schemaVersion",
+  "tool",
+  "input",
+  "botId",
+  "sessionId",
+  "runId",
+  "turnId",
+  "generationId",
+  "deadlineMs",
+];
 function decodeInvocation(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("isolate tool invocation must be an object");
+  }
+  // Exact keys, like the outbound twin: an invocation carrying a field this
+  // contract does not declare is not this contract's invocation.
+  if (
+    Object.keys(value).length !== INVOCATION_KEYS.length ||
+    !INVOCATION_KEYS.every(function (key) {
+      return Object.hasOwn(value, key);
+    })
+  ) {
+    throw new Error("isolate tool invocation has invalid fields");
   }
   if (value.schemaVersion !== 1) {
     throw new Error("isolate tool invocation schemaVersion is unsupported");
@@ -196,7 +217,7 @@ export default class extends WorkerEntrypoint {
 `;
 
 /** Bumped with any change to the wrapper text; folded into the loader id. */
-export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v1";
+export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v2";
 
 export const BOT_ISOLATE_MAIN_MODULE = "index.js";
 export const BOT_ISOLATE_PACKAGE_MODULE = "package.js";

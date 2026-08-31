@@ -47,7 +47,7 @@ describe("Composition generations in Workerd", () => {
     expect(await stub.storedPin("run-1")).toBe(admitted);
   });
 
-  test("a revert records a new generation the next admitted Turn pins", async () => {
+  test("a revert records a new generation the next admitted Turn activates", async () => {
     const stub = probe(`revert-${crypto.randomUUID()}`);
     const bootstrap = await stub.currentGenerationId();
     const authored = await stub.proposeGeneration("2026-09-01T00:00:00.000Z");
@@ -61,15 +61,37 @@ describe("Composition generations in Workerd", () => {
     // The target is a record: reverting to it never mutates or reactivates it.
     expect(await stub.generationStatus(bootstrap)).toBe("superseded");
     expect(await stub.generationStatus(reverted)).toBe("pending");
-    expect(await stub.currentGenerationId()).toBe(authored);
+    // The revert is pinned, so it takes effect at the next admitted Turn
+    // without anyone committing it by hand.
+    expect(await stub.currentGenerationId()).toBe(reverted);
 
     await evictDurableObject(stub);
-    await stub.commitGeneration(reverted);
     await stub.runTurn("run-2");
 
+    expect(await stub.generationStatus(reverted)).toBe("active");
+    expect(await stub.mountedGenerationId()).toBe(reverted);
     expect(await stub.currentGenerationId()).toBe(reverted);
     expect(await stub.storedPin("run-1")).toBe(authored);
     expect(await stub.storedPin("run-2")).toBe(reverted);
+  });
+
+  test("a revert that cannot mount fails closed like any other proposal", async () => {
+    const stub = probe(`revert-fails-closed-${crypto.randomUUID()}`);
+    const bootstrap = await stub.currentGenerationId();
+    const authored = await stub.proposeGeneration("2026-09-01T00:00:00.000Z");
+    await stub.commitGeneration(authored);
+
+    const reverted = await stub.revertGeneration(bootstrap);
+    await stub.breakGeneration(reverted, "mount");
+    await stub.runTurn("run-1");
+
+    // The Turn is admitted anyway, on the last known good.
+    expect(await stub.mountedGenerationId()).toBe(authored);
+    expect(await stub.generationStatus(reverted)).toBe("failed");
+    expect(await stub.storedPin("run-1")).toBe(authored);
+    expect(await stub.compositionFailures(reverted)).toMatchObject([
+      { attempt: 1, phase: "mount" },
+    ]);
   });
 
   test("refuses reverting to an unknown or already current generation", async () => {
@@ -192,6 +214,30 @@ describe("Composition fails closed in Workerd", () => {
     expect(await stub.generationStatus(later)).toBe("active");
     expect(await stub.storedPin("run-4")).toBe(later);
     expect(await stub.generationStatus(broken)).toBe("quarantined");
+  });
+
+  test("three failures of a pinned last known good quarantine it", async () => {
+    const stub = probe(`lkg-quarantine-${crypto.randomUUID()}`);
+    const lastKnownGood = await stub.currentGenerationId();
+    // The pinned generation *is* the last known good: there is nothing to fail
+    // into, so the Turn cannot be admitted — but the attempt is still counted
+    // and quarantine is still reachable.
+    await stub.breakGeneration(lastKnownGood, "mount");
+
+    for (const attempt of [1, 2, 3]) {
+      expect(await stub.runTurnFailure(`run-${attempt}`)).toContain(
+        "failed at mount",
+      );
+      expect(await stub.compositionFailures(lastKnownGood)).toHaveLength(
+        attempt,
+      );
+    }
+
+    expect(await stub.compositionQuarantine(lastKnownGood)).toMatchObject({
+      failures: 3,
+    });
+    await evictDurableObject(stub);
+    expect(await stub.compositionFailures(lastKnownGood)).toHaveLength(3);
   });
 
   test("a repaired generation activates on its next Turn and clears its count", async () => {

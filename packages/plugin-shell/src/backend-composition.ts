@@ -69,8 +69,13 @@ export interface ShellIsolateMountOptions {
    * `ctx.exports.BotCapabilities({ props })` in the Durable Object.
    */
   capabilitiesFor(member: CompositionMemberV1): BotCapabilitiesStub;
-  /** Content address of the Assignment-derived bindings; part of the loader id. */
-  bindingDigest?: string;
+  /**
+   * Content address of the Assignment-derived bindings this isolate is granted
+   * — the Assignments *and* the Composition generation whose `CAPABILITIES`
+   * stub is baked into its `env`. Required: it is what keeps a cached isolate
+   * from answering under a stale authority.
+   */
+  bindingDigest: string;
   compatibilityDate: string;
   limits?: BotIsolateLimits;
   deadlineMs?: number;
@@ -162,9 +167,7 @@ export function createShellCompositionHost(
             generationId: generation.generationId,
             capabilities: isolate.capabilitiesFor(member),
             compatibilityDate: isolate.compatibilityDate,
-            ...(isolate.bindingDigest === undefined
-              ? {}
-              : { bindingDigest: isolate.bindingDigest }),
+            bindingDigest: isolate.bindingDigest,
             ...(isolate.limits ? { limits: isolate.limits } : {}),
             ...(isolate.deadlineMs === undefined
               ? {}

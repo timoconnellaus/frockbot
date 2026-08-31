@@ -12,12 +12,26 @@ import {
 
 function storage(initial: Record<string, unknown> = {}) {
   const values = new Map<string, unknown>(Object.entries(initial));
+  // Durable Object transactions are serialized; this fake is too, so a
+  // read-modify-write that is *not* wrapped in one can interleave here exactly
+  // as it would in the object.
+  let queue: Promise<unknown> = Promise.resolve();
   const store: AuthoringQuotaStorage & { values: Map<string, unknown> } = {
     values,
     get: <T>(key: string) => Promise.resolve(values.get(key) as T | undefined),
     put: (key: string, value: unknown) => {
       values.set(key, value);
       return Promise.resolve();
+    },
+    transaction: <T>(
+      callback: (storage: AuthoringQuotaStorage) => Promise<T>,
+    ) => {
+      const run = queue.then(() => callback(store));
+      queue = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
     },
   };
   return store;
@@ -54,6 +68,37 @@ describe("the durable per-User authoring quota", () => {
     expect(store.values.get(authoringQuotaCounterKey("2026-08-31"))).toEqual({
       day: "2026-08-31",
       count: 1,
+    });
+  });
+
+  test("admits exactly one of two concurrent reservations at the limit", async () => {
+    const store = storage({
+      [AUTHORING_QUOTA_CONFIG_KEY]: {
+        ...AUTHORING_QUOTA_DEFAULTS_V1,
+        authoredPerUserPerDay: 100,
+      },
+      [authoringQuotaCounterKey("2026-08-31")]: {
+        day: "2026-08-31",
+        count: 99,
+      },
+    });
+
+    // The counter is a read-modify-write across awaits; without a transaction
+    // both reservations read 99 and both admit.
+    const [first, second] = await Promise.all([
+      reserveAuthoringQuotaV1(store, { ...REQUEST, effectId: "author-race-a" }),
+      reserveAuthoringQuotaV1(store, { ...REQUEST, effectId: "author-race-b" }),
+    ]);
+
+    expect(
+      [first.status, second.status].filter((status) => status === "reserved"),
+    ).toHaveLength(1);
+    expect(
+      [first, second].filter((receipt) => receipt.status === "refused"),
+    ).toMatchObject([{ limitName: "authored-per-day" }]);
+    expect(store.values.get(authoringQuotaCounterKey("2026-08-31"))).toEqual({
+      day: "2026-08-31",
+      count: 100,
     });
   });
 

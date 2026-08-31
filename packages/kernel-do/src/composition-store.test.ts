@@ -251,7 +251,11 @@ describe("Bot Durable Object Composition records", () => {
     expect((await store.read(bootstrapped.generationId))?.status).toBe(
       "superseded",
     );
-    expect((await store.current()).generationId).toBe(authored.generationId);
+    // The revert is pinned: the pointer names it now, so the next admitted
+    // Turn mounts and commits it. Without the pin the pointer would keep
+    // naming the generation the revert replaces and nothing would change.
+    expect((await store.current()).generationId).toBe(reverted.generationId);
+    expect((await store.read(reverted.generationId))?.status).toBe("pending");
     expect((await store.read(reverted.generationId))?.members).toEqual(
       bootstrapped.members,
     );
@@ -325,6 +329,46 @@ describe("Bot Durable Object Composition records", () => {
       }),
     ).rejects.toThrow("does not name its target");
     expect([...storage.values.keys()]).toHaveLength(4);
+  });
+
+  test("quarantine with no last known good record falls back to the bootstrap", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(
+      storage,
+      () => new Date("2026-09-05T00:00:00.000Z"),
+    );
+    const bootstrapped = await store.current();
+    const authored = await grownSuccessor(
+      bootstrapped,
+      "2026-09-01T00:00:00.000Z",
+    );
+    await store.propose(authored);
+    await store.commit(authored.generationId);
+    const broken = await successor(authored, "2026-09-02T00:00:00.000Z");
+    await store.propose(broken, { pin: true });
+    // The last known good record is gone. Without a fallback the pointer would
+    // keep naming the quarantined generation and every later Turn would throw.
+    storage.values.delete(`composition:generation:${authored.generationId}`);
+
+    await store.fail(broken.generationId, { quarantined: true });
+
+    expect((await store.current()).generationId).toBe(
+      bootstrapped.generationId,
+    );
+    expect((await store.lastKnownGood()).generationId).toBe(
+      bootstrapped.generationId,
+    );
+    expect((await store.read(broken.generationId))?.status).toBe("quarantined");
+    // The fallback is itself a recorded, visible failure.
+    const failures = [...storage.values.entries()].filter(([key]) =>
+      key.startsWith(`composition:failure:${authored.generationId}:`),
+    );
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.[1]).toMatchObject({
+      generationId: authored.generationId,
+      attempt: 1,
+      phase: "resolve",
+    });
   });
 
   test("lists generations newest first and paginates by cursor", async () => {

@@ -13,9 +13,9 @@
 // is taken.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
-  IsolateCapabilityDescriptorV1,
-  IsolateModelInvocationV1,
-  IsolatePendingDecisionV1,
+  IsolateAuthorityOutcomeV1,
+  IsolateCapabilityListOutcomeV1,
+  IsolateModelOutcomeV1,
   NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import {
@@ -26,6 +26,19 @@ import {
 } from "@frockbot/kernel-contracts";
 import type { BotCapabilitiesPropsV1 } from "@frockbot/plugin-shell/backend-isolate";
 import type { BotState } from "./bot-state.js";
+
+/**
+ * A refusal Bot code has a contract for. Every failure on this binding — an
+ * invalid request, an unavailable authority, an RPC that did not complete —
+ * becomes this one normalized variant rather than an exception carrying host
+ * text into the isolate.
+ */
+function unavailable(reason: string): {
+  status: "unavailable";
+  reason: string;
+} {
+  return { status: "unavailable", reason };
+}
 
 export type { BotCapabilitiesPropsV1 };
 
@@ -55,30 +68,38 @@ export class BotCapabilities extends WorkerEntrypoint<
    * resolved, projected onto their manifest-declared capability kind. Nothing
    * is read here, so nothing here can widen what the Bot holds.
    */
-  list(): Promise<IsolateCapabilityDescriptorV1[]> {
-    return Promise.resolve(
-      decodeIsolateCapabilityListV1(
-        this.ctx.props.assignments.map((assignment) => ({
-          capabilityId: assignment.capabilityId,
-          kind: assignment.kind,
-        })),
-      ),
-    );
+  list(): Promise<IsolateCapabilityListOutcomeV1> {
+    try {
+      return Promise.resolve(
+        decodeIsolateCapabilityListV1(
+          this.ctx.props.assignments.map((assignment) => ({
+            capabilityId: assignment.capabilityId,
+            kind: assignment.kind,
+          })),
+        ),
+      );
+    } catch {
+      return Promise.resolve(unavailable("capabilities are unavailable"));
+    }
   }
 
   /** Never a grant. A durable pending decision, recorded in the Bot's authority. */
-  async requestAuthority(request: unknown): Promise<IsolatePendingDecisionV1> {
+  async requestAuthority(request: unknown): Promise<IsolateAuthorityOutcomeV1> {
     const props = this.ctx.props;
-    return decodeIsolatePendingDecisionV1(
-      await this.rpc.isolateRequestAuthority({
-        schemaVersion: 1,
-        userId: props.userId,
-        botId: props.botId,
-        packageId: props.packageId,
-        generationId: props.generationId,
-        request: decodeIsolateAuthorityRequestV1(request),
-      }),
-    );
+    try {
+      return decodeIsolatePendingDecisionV1(
+        await this.rpc.isolateRequestAuthority({
+          schemaVersion: 1,
+          userId: props.userId,
+          botId: props.botId,
+          packageId: props.packageId,
+          generationId: props.generationId,
+          request: decodeIsolateAuthorityRequestV1(request),
+        }),
+      );
+    } catch {
+      return unavailable("the authority request could not be recorded");
+    }
   }
 
   /**
@@ -87,17 +108,21 @@ export class BotCapabilities extends WorkerEntrypoint<
    * provider path before a byte is forwarded; the events come back as an
    * NDJSON byte stream, the only stream shape workerd RPC will carry.
    */
-  async invokeModel(request: unknown): Promise<IsolateModelInvocationV1> {
+  async invokeModel(request: unknown): Promise<IsolateModelOutcomeV1> {
     const props = this.ctx.props;
-    return decodeIsolateModelInvocationV1(
-      await this.rpc.isolateInvokeModel({
-        schemaVersion: 1,
-        userId: props.userId,
-        botId: props.botId,
-        packageId: props.packageId,
-        generationId: props.generationId,
-        request: request as NormalizedModelRequest,
-      }),
-    );
+    try {
+      return decodeIsolateModelInvocationV1(
+        await this.rpc.isolateInvokeModel({
+          schemaVersion: 1,
+          userId: props.userId,
+          botId: props.botId,
+          packageId: props.packageId,
+          generationId: props.generationId,
+          request: request as NormalizedModelRequest,
+        }),
+      );
+    } catch {
+      return unavailable("the model request could not be served");
+    }
   }
 }

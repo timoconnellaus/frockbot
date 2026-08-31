@@ -252,7 +252,10 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
               assignments: structuredClone(assignments),
             },
           }),
-        bindingDigest: await isolateBindingDigestV1(assignments),
+        bindingDigest: await isolateBindingDigestV1(
+          assignments,
+          generation.generationId,
+        ),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
     });

@@ -95,12 +95,12 @@ export interface BotIsolateHostOptions {
   capabilities: BotCapabilitiesStub;
   /**
    * A content address of the Assignment-derived bindings this isolate is
-   * loaded with. It belongs in the loader id because a loader id is served
-   * from cache: the `env` a Bot isolate was first loaded with is the `env` it
-   * keeps, so a change in the Bot's Assignments must produce a new isolate or
-   * the isolate would keep answering from a revoked authority.
+   * loaded with. Required, and part of the loader id, because a loader id is
+   * served from cache: the `env` a Bot isolate was first loaded with is the
+   * `env` it keeps, so a change in the Bot's Assignments must produce a new
+   * isolate or the isolate would keep answering from a revoked authority.
    */
-  bindingDigest?: string;
+  bindingDigest: string;
   compatibilityDate: string;
   limits?: BotIsolateLimits;
   /** Per-invocation deadline; `AbortSignal` cannot cross the RPC boundary. */
@@ -124,7 +124,7 @@ export const BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS = 10_000;
  */
 export async function botIsolateModuleSetHashV1(
   artifactContentHash: string,
-  bindingDigest = "",
+  bindingDigest: string,
 ): Promise<string> {
   return sha256(
     canonicalJson({
@@ -186,7 +186,7 @@ export class BotIsolateContributionHost implements ContributionHost {
       botId: this.options.botId,
       artifactSetHash: await botIsolateModuleSetHashV1(
         artifact.contentHash,
-        this.options.bindingDigest ?? "",
+        this.options.bindingDigest,
       ),
     });
 

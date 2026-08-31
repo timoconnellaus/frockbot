@@ -356,16 +356,42 @@ export async function activateCompositionV1<Mounted extends MountedComposition>(
       await input.failures.clear(pinned.generationId);
       return { status: "activated", generation: pinned, mounted };
     } catch (error) {
-      input.signal.throwIfAborted();
-      const lastKnownGood = await input.store.lastKnownGood();
-      // Nothing better exists: the last known good *is* what failed, so there
-      // is no closed state to fail into and the Turn cannot be admitted.
-      if (lastKnownGood.generationId === pinned.generationId) throw error;
-      failureInput = compositionFailureFromErrorV1(
+      const attempted = compositionFailureFromErrorV1(
         pinned.generationId,
         error,
         now().toISOString(),
       );
+      /**
+       * Every attempt is counted before anything is rethrown: an activation
+       * that only ever throws would otherwise never reach the quarantine
+       * threshold and would leave no durable trace of why. A generation that
+       * is `active` is the one still running and is never marked failed, so
+       * only the counter and the quarantine record move for it.
+       */
+      const recordAttempt = async (): Promise<void> => {
+        const outcome = await input.failures.record(attempted);
+        if (pinned.status !== "active") {
+          await input.store.fail(pinned.generationId, {
+            quarantined: outcome.quarantined,
+          });
+        }
+      };
+      if (input.signal.aborted) {
+        // Cancellation raced the mount. The attempt still happened, so it is
+        // recorded before the abort propagates.
+        await recordAttempt();
+        input.signal.throwIfAborted();
+      }
+      const lastKnownGood = await input.store.lastKnownGood();
+      // Nothing better exists: the last known good *is* what failed, so there
+      // is no closed state to fail into and the Turn cannot be admitted. The
+      // failure is recorded and counted first, so repeated failures of a
+      // pinned last known good still quarantine it visibly.
+      if (lastKnownGood.generationId === pinned.generationId) {
+        await recordAttempt();
+        throw error;
+      }
+      failureInput = attempted;
     }
   }
 

@@ -95,6 +95,23 @@ export interface IsolatePendingDecisionV1 {
 }
 
 /**
+ * A capability call the authority could not serve. It is a declared variant,
+ * not an exception: an error thrown across the loopback binding would surface
+ * inside Bot code as an arbitrary host message, and Bot code has no contract
+ * for that. The reason is normalized and bounded.
+ */
+export interface IsolateCapabilityFailureV1 {
+  status: "unavailable";
+  reason: string;
+}
+
+export type IsolateAuthorityOutcomeV1 =
+  IsolatePendingDecisionV1 | IsolateCapabilityFailureV1;
+
+export type IsolateCapabilityListOutcomeV1 =
+  IsolateCapabilityDescriptorV1[] | IsolateCapabilityFailureV1;
+
+/**
  * D6: model invocation as an Assignment-derived binding. Events cross the RPC
  * boundary as an NDJSON byte stream — see `decodeIsolateModelEventV1`. A
  * `ReadableStream` of JavaScript objects is not transferable over workerd RPC;
@@ -107,6 +124,9 @@ export type IsolateModelInvocationV1 =
       events: ReadableStream<Uint8Array>;
     }
   | IsolatePendingDecisionV1;
+
+export type IsolateModelOutcomeV1 =
+  IsolateModelInvocationV1 | IsolateCapabilityFailureV1;
 
 /**
  * The wrapper `WorkerEntrypoint` the kernel generates. Bot code never
@@ -123,19 +143,17 @@ export interface BotIsolateEntrypoint {
  * Bot does not already hold.
  */
 export interface BotCapabilitiesStub {
-  list(): Promise<IsolateCapabilityDescriptorV1[]>;
+  list(): Promise<IsolateCapabilityListOutcomeV1>;
   /**
    * D6 addendum. The kernel records the normalized request and acquires the
    * credential lease through the existing provider path *before* forwarding.
    * Without a matching enabled model Assignment the answer is a pending
    * decision, never a grant.
    */
-  invokeModel(
-    request: NormalizedModelRequest,
-  ): Promise<IsolateModelInvocationV1>;
+  invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
   requestAuthority(
     request: IsolateAuthorityRequestV1,
-  ): Promise<IsolatePendingDecisionV1>;
+  ): Promise<IsolateAuthorityOutcomeV1>;
 }
 
 /**
@@ -474,6 +492,22 @@ export function decodeIsolatePendingDecisionV1(
   return {
     status: "pending-user-decision",
     decisionId: boundedString(value.decisionId, `${label}.decisionId`, 256),
+  };
+}
+
+/** The exact decoder for the declared failure variant. */
+export function decodeIsolateCapabilityFailureV1(
+  input: unknown,
+  label = "isolate capability failure",
+): IsolateCapabilityFailureV1 {
+  const value = record(input, label);
+  exactKeys(value, ["status", "reason"], label);
+  if (value.status !== "unavailable") {
+    throw new Error(`${label}.status must be unavailable`);
+  }
+  return {
+    status: "unavailable",
+    reason: boundedString(value.reason, `${label}.reason`, 512),
   };
 }
 

@@ -4,6 +4,7 @@
 // mutates a recorded generation, and an in-flight Turn keeps the pin it was
 // admitted under.
 import type { CompositionPinV1 } from "@frockbot/kernel-contracts";
+import { decodeCompositionFailureV1 } from "@frockbot/kernel-composition/activation";
 import {
   assertCompositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -16,6 +17,8 @@ import {
   COMPOSITION_CURRENT_KEY,
   COMPOSITION_INDEX_PREFIX,
   COMPOSITION_LAST_KNOWN_GOOD_KEY,
+  compositionFailureCountKey,
+  compositionFailureKey,
   compositionGenerationKey,
   compositionIndexKey,
 } from "./storage-keys.js";
@@ -300,6 +303,26 @@ export class DurableCompositionStore implements CompositionStore {
           writes[COMPOSITION_CURRENT_KEY] = compositionPinV1(
             decodeCompositionGenerationV1(lastKnownGood),
           );
+        } else {
+          // The last known good record is gone, so quarantine has nothing to
+          // fail into and the pointer would keep naming the quarantined
+          // generation — every later Turn would throw with nothing recorded.
+          // The bootstrap generation always exists: it is the oldest indexed
+          // one, materialized before any other. Falling back to it keeps the
+          // Bot admitting Turns, and the fallback is itself a recorded,
+          // visible failure rather than a silent repair.
+          const bootstrap = await this.bootstrapGeneration(transaction);
+          writes[COMPOSITION_CURRENT_KEY] = compositionPinV1(bootstrap);
+          writes[COMPOSITION_LAST_KNOWN_GOOD_KEY] = bootstrap.generationId;
+          Object.assign(
+            writes,
+            await this.missingLastKnownGoodFailure(
+              transaction,
+              generationId,
+              lastKnownGoodId,
+              bootstrap.generationId,
+            ),
+          );
         }
       }
       await transaction.put(writes);
@@ -310,7 +333,11 @@ export class DurableCompositionStore implements CompositionStore {
    * Reverting is itself a recorded generation: a **new** pending generation
    * whose members equal the target's, parented on the generation that is
    * current right now. The recorded target is never mutated, and the revert
-   * takes effect at the next admitted Turn like any other activation.
+   * takes effect at the next admitted Turn like any other activation — which
+   * is why it is proposed *pinned*: the pointer moves now so the next admitted
+   * Turn mounts it, verifies it, and commits it through the fail-closed path
+   * like any other proposal. Without the pin the pointer would keep naming the
+   * generation the revert replaces and the revert would never take effect.
    */
   async revert(
     toGenerationId: string,
@@ -343,7 +370,7 @@ export class DurableCompositionStore implements CompositionStore {
       members: target.members,
       status: "pending",
     });
-    await this.propose(generation);
+    await this.propose(generation, { pin: true });
     return generation;
   }
 
@@ -377,6 +404,60 @@ export class DurableCompositionStore implements CompositionStore {
     return {
       generations,
       ...(page.length === limit && last ? { cursor: last[0] } : {}),
+    };
+  }
+
+  /**
+   * The generation this Bot started on. `materialize` writes it before any
+   * other, so the oldest index entry names it and it always exists.
+   */
+  private async bootstrapGeneration(
+    transaction: DurableObjectTransaction,
+  ): Promise<CompositionGenerationV1> {
+    const oldest = await transaction.list<string>({
+      prefix: COMPOSITION_INDEX_PREFIX,
+      limit: 1,
+    });
+    const generationId = [...oldest.values()][0];
+    const stored =
+      generationId === undefined
+        ? undefined
+        : await transaction.get<unknown>(
+            compositionGenerationKey(generationId),
+          );
+    if (stored === undefined) {
+      throw new Error("bot has no bootstrap Composition generation");
+    }
+    return decodeCompositionGenerationV1(stored);
+  }
+
+  /**
+   * The durable, visible record that quarantine had no last known good to fail
+   * into. Written against the generation that was named last known good, whose
+   * record is what went missing.
+   */
+  private async missingLastKnownGoodFailure(
+    transaction: DurableObjectTransaction,
+    quarantinedId: string,
+    lastKnownGoodId: string | undefined,
+    bootstrapId: string,
+  ): Promise<Record<string, unknown>> {
+    const generationId = lastKnownGoodId ?? bootstrapId;
+    const attempt =
+      ((await transaction.get<number>(
+        compositionFailureCountKey(generationId),
+      )) ?? 0) + 1;
+    const failure = decodeCompositionFailureV1({
+      generationId,
+      attempt,
+      at: this.now().toISOString(),
+      phase: "resolve",
+      message: `composition generation "${quarantinedId}" was quarantined with no last known good record; falling back to the bootstrap generation "${bootstrapId}"`,
+      diagnostics: [`lastKnownGood:${lastKnownGoodId ?? "unrecorded"}`],
+    });
+    return {
+      [compositionFailureKey(generationId, attempt)]: failure,
+      [compositionFailureCountKey(generationId)]: attempt,
     };
   }
 

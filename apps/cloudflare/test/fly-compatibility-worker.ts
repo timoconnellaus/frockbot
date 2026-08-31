@@ -240,6 +240,15 @@ export class CompositionProbe extends DurableObject {
     return generationId;
   }
 
+  /** Breaks an already-recorded generation, as a lost artifact would. */
+  async breakGeneration(
+    generationId: string,
+    phase: CompositionFailurePhaseV1,
+  ): Promise<void> {
+    this.broken.set(generationId, phase);
+    return Promise.resolve();
+  }
+
   /** Re-pins a generation the way a Bot authoring another one would. */
   async repinGeneration(generationId: string): Promise<void> {
     const generation = await this.store.read(generationId);
@@ -337,6 +346,16 @@ export class CompositionProbe extends DurableObject {
       text: runId,
     });
     return { pinned: this.observedPin };
+  }
+
+  /** The Turn's failure, caught inside the object so no RPC rejection escapes. */
+  async runTurnFailure(runId: string): Promise<string> {
+    try {
+      await this.runTurn(runId);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    return "";
   }
 
   async storedPin(runId: string): Promise<string | undefined> {

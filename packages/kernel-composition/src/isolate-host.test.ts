@@ -91,6 +91,8 @@ function healthy(
   };
 }
 
+const BINDING_DIGEST = "c".repeat(64);
+
 function host(
   overrides: Partial<BotIsolateHostOptions> & {
     entrypoint?: Partial<BotIsolateEntrypoint>;
@@ -123,6 +125,7 @@ function host(
     turnId: "turn-1",
     generationId: "gen-1",
     capabilities: {} as BotCapabilitiesStub,
+    bindingDigest: BINDING_DIGEST,
     compatibilityDate: "2026-08-27",
     ...rest,
   };
@@ -165,12 +168,31 @@ describe("Bot isolate contribution host", () => {
     expect(code.limits).toEqual({ cpuMs: 5_000, subRequests: 5 });
   });
 
+  test("a caller that omits the binding digest does not compile", () => {
+    // @ts-expect-error the binding digest is required: an isolate loaded with
+    // no digest of its granted bindings would share a loader id across
+    // Assignments and generations.
+    void botIsolateModuleSetHashV1(CONTENT_HASH);
+    expect(true).toBe(true);
+  });
+
+  test("a different binding digest is a different loader id", async () => {
+    const { host: subject, loads } = host();
+    await subject.prepare(descriptor());
+    const other = host({ bindingDigest: "d".repeat(64) });
+    await other.host.prepare(descriptor());
+    expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
+  });
+
   test("keys the loader id on the User, the Bot and the module set", async () => {
     const { host: subject, loads } = host();
     await subject.prepare(descriptor());
     const other = host({ botId: "bot-2" });
     await other.host.prepare(descriptor());
-    const expected = await botIsolateModuleSetHashV1(CONTENT_HASH);
+    const expected = await botIsolateModuleSetHashV1(
+      CONTENT_HASH,
+      BINDING_DIGEST,
+    );
     expect(loads[0]!.loaderId).toBe(`bot-package:user-1:bot-1:${expected}`);
     expect(other.loads[0]!.loaderId).toBe(
       `bot-package:user-1:bot-2:${expected}`,

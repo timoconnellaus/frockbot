@@ -1,6 +1,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { AUTHORING_QUOTA_DEFAULTS_V1 } from "@frockbot/plugin-authoring/quota";
+import { provisionBot, PROVISIONED_MODEL } from "./provision-bot.ts";
 
 function probe(name: string) {
   return env.AUTHORING.getByName(name);
@@ -325,6 +326,7 @@ describe("a Bot authoring a Package", () => {
     const userId = `user-${id}`;
     const botId = `bot-${id}`;
     const stub = probe(`model-allowed-${id}`);
+    await provisionBot({ userId, botId });
 
     await stub.runTurn({
       runId: `run-author-${id}`,
@@ -353,16 +355,14 @@ describe("a Bot authoring a Package", () => {
     ).toMatch(/^[0-9a-f]{64}$/);
 
     // `invokeModel` goes back to the Bot's own Durable Object, which decides
-    // on its durable Assignments alone.
-    await botState(userId, botId).seedCompositionGeneration(generation);
-    await botState(userId, botId).seedBotConfiguration({
+    // on its durable Assignment and the durable model binding that Assignment
+    // carries — never on anything the adapter supplied.
+    await botState(userId, botId).readConfiguration({
       schemaVersion: 1,
+      userId,
       botId,
-      revision: 1,
-      profile: { name: "Authoring probe" },
-      notifications: { enabled: false },
-      assignments: [{ ...MODEL_ASSIGNMENT, state: "enabled" }],
-    } as never);
+    });
+    await botState(userId, botId).seedCompositionGeneration(generation);
 
     const used = await stub.runTurn({
       runId: `run-use-${id}`,
@@ -372,8 +372,8 @@ describe("a Bot authoring a Package", () => {
       assignments: [MODEL_ASSIGNMENT],
       input: {
         requestId: `request-${id}`,
-        provider: "foundation",
-        model: "deterministic-v1",
+        provider: PROVISIONED_MODEL.provider,
+        model: PROVISIONED_MODEL.providerModelId,
         system: "",
         messages: [{ role: "user", content: "hello" }],
         tools: [],
@@ -385,7 +385,7 @@ describe("a Bot authoring a Package", () => {
       text: string;
     };
     expect(streamed.status).toBe("streaming");
-    expect(streamed.text).toBe("Cordis runtime: hello");
+    expect(streamed.text).toBe("Ollama reply");
   });
 
   test("an authored model adapter with no matching Assignment gets a pending decision", async () => {

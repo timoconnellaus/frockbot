@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   decodeIsolateAuthorityRequestV1,
+  decodeIsolateCapabilityFailureV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateHealthV1,
   decodeIsolateIdentityV1,
@@ -282,6 +283,39 @@ describe("isolate model invocation v1", () => {
         events: [],
       }),
     ).toThrow(/must be a readable stream/);
+  });
+});
+
+describe("isolate capability failure v1", () => {
+  test("decodes the declared refusal", () => {
+    expect(
+      decodeIsolateCapabilityFailureV1({
+        status: "unavailable",
+        reason: "the model request could not be served",
+      }),
+    ).toEqual({
+      status: "unavailable",
+      reason: "the model request could not be served",
+    });
+  });
+
+  test("refuses another status, an undeclared field, and an unbounded reason", () => {
+    expect(() =>
+      decodeIsolateCapabilityFailureV1({ status: "denied", reason: "no" }),
+    ).toThrow(/status must be unavailable/);
+    expect(() =>
+      decodeIsolateCapabilityFailureV1({
+        status: "unavailable",
+        reason: "no",
+        detail: "provider said 401 for key sk-live-1",
+      }),
+    ).toThrow(/has invalid fields/);
+    expect(() =>
+      decodeIsolateCapabilityFailureV1({
+        status: "unavailable",
+        reason: "r".repeat(513),
+      }),
+    ).toThrow(/reason must be a bounded string/);
   });
 });
 

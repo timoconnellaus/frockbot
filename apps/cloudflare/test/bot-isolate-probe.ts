@@ -65,6 +65,7 @@ export const tools = [
   { name: "leak_probe", description: "Reports whether host state leaked in", inputSchema: {}, idempotent: true },
   { name: "reach_network", description: "Attempts egress", inputSchema: {}, idempotent: false },
   { name: "ask_authority", description: "Asks for authority it does not hold", inputSchema: {}, idempotent: false },
+  { name: "ask_bad_authority", description: "Sends a request the contract refuses", inputSchema: {}, idempotent: false },
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
   { name: "list_capabilities", description: "Lists Assignment-derived capabilities", inputSchema: {}, idempotent: true },
 ];
@@ -92,6 +93,10 @@ export async function execute(tool, input, ctx) {
     case "ask_authority":
       return JSON.stringify(
         await ctx.requestAuthority({ capabilityId: "memory:write", reason: "probe" }),
+      );
+    case "ask_bad_authority":
+      return JSON.stringify(
+        await ctx.requestAuthority({ capabilityId: 42, reason: "probe" }),
       );
     case "list_capabilities":
       return JSON.stringify(await ctx.listCapabilities());
@@ -232,6 +237,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
 
   private async generation(
     artifact?: ArtifactRefV1,
+    createdAt = "2026-08-31T00:00:00.000Z",
   ): Promise<CompositionGenerationV1> {
     const base = await bootstrapGeneration(
       [
@@ -242,7 +248,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           manifest: { id: "shell", version: "0.0.1" },
         },
       ],
-      { createdAt: "2026-08-31T00:00:00.000Z" },
+      { createdAt },
     );
     if (!artifact) return base;
     const members: CompositionMemberV1[] = [
@@ -260,7 +266,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           sessionId: "user-1:probe",
           turnId: "turn-1",
           runId: "run-1",
-          authoredAt: "2026-08-31T00:00:00.000Z",
+          authoredAt: createdAt,
         },
         artifact,
       },
@@ -268,10 +274,8 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     const artifactSetHash = await compositionArtifactSetHashV1(members);
     return {
       ...base,
-      generationId: compositionGenerationIdV1(
-        "2026-08-31T00:00:00.000Z",
-        artifactSetHash,
-      ),
+      generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+      createdAt,
       artifactSetHash,
       members,
     };
@@ -282,11 +286,16 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     botId: string;
     artifact?: ArtifactRefV1;
     assignments?: IsolateAssignmentV1[];
+    /** Varies the generation without varying the artifact. */
+    generationCreatedAt?: string;
   }): Promise<{
     composition: ShellMountedComposition;
     generation: CompositionGenerationV1;
   }> {
-    const generation = await this.generation(input.artifact);
+    const generation = await this.generation(
+      input.artifact,
+      input.generationCreatedAt,
+    );
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
     const exports = this.ctx.exports as unknown as ProbeExports;
@@ -328,7 +337,10 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
               assignments: input.assignments ?? [],
             },
           }),
-        bindingDigest: await isolateBindingDigestV1(input.assignments ?? []),
+        bindingDigest: await isolateBindingDigestV1(
+          input.assignments ?? [],
+          generation.generationId,
+        ),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
     }).mount(generation, new AbortController().signal);
@@ -338,8 +350,9 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
   /** The Composition generation this probe mounts, for the Bot Durable Object to pin. */
   async generationFor(
     artifact?: ArtifactRefV1,
+    createdAt?: string,
   ): Promise<CompositionGenerationV1> {
-    return await this.generation(artifact);
+    return await this.generation(artifact, createdAt);
   }
 
   /** Mounts, verifies, and calls one isolate tool through `ctx.tools`. */
@@ -350,6 +363,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     tool: string;
     toolInput?: unknown;
     assignments?: IsolateAssignmentV1[];
+    generationCreatedAt?: string;
   }): Promise<{ content: string; isError: boolean }> {
     const { composition, generation } = await this.mount(input);
     try {
