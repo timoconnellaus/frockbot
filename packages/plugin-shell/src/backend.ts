@@ -1860,9 +1860,21 @@ export class ShellBotBackendContribution {
     // The Bot Durable Object's own durable configuration is what decides
     // whether the Assignment exists at all, and its durable model binding is
     // what the Assignment authorizes. Nothing the Bot supplied is read.
-    const settings = await this.ctx.storage.get<BotSettingsViewV1>(
+    const stored = await this.ctx.storage.get<BotSettingsViewV1>(
       BOT_CONFIGURATION_KEY,
     );
+    // An isolate model request is authorized exactly as an admitted Turn is,
+    // so it resolves the same execution context: a Bot that follows the
+    // User's default model claims its own durable Assignment here rather than
+    // failing closed on an authority it is entitled to hold.
+    let settings = stored;
+    if (stored) {
+      try {
+        settings = (await this.resolveExecutionContext(identity)).settings;
+      } catch {
+        settings = stored;
+      }
+    }
     const projected = await this.isolateAssignments(
       settings?.assignments ?? [],
     );
@@ -2934,6 +2946,9 @@ export class ShellBotBackendContribution {
   ): Promise<BotSettingsViewV1> {
     const model = user.newBotModelTemplate;
     if (settings.model || !model) return settings;
+    // One Assignment operation at a time: a claim still reconciling owns the
+    // Bot's Assignment authority until it settles.
+    if (settings.assignmentOperations.length > 0) return settings;
     const connection = user.connections.find(
       (candidate) => candidate.connectionId === model.connectionId,
     );
