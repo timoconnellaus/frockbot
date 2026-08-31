@@ -1,9 +1,73 @@
+import type { WorkspaceRootKindV1 } from "@frockbot/kernel-contracts";
 import { type Context, Service } from "cordis";
 
-/** Persistent identity used to resolve one Bot's selected Computer. */
-export interface ComputerTarget {
+/**
+ * The provisioning key of a Computer. "One Computer serves all of a User's
+ * Bots" (ADR 0012), so a Computer is identified by its User and by nothing
+ * else. Provisioning, hibernation, the browser profile, and the Workspace are
+ * all properties of this identity.
+ */
+export interface ComputerIdentityV1 {
   userId: string;
+}
+
+/**
+ * One Bot as a tenant of its User's Computer. "each Bot receives its own
+ * directories and desktop on it, and all Bots share the User's browser
+ * profile." Separation between tenants is organizational, not a security
+ * boundary — `directory` and `display` are conventions the Computer provider
+ * Package enforces, never isolation the caller may rely on.
+ */
+export interface ComputerTenantV1 {
   botId: string;
+  /** The tenant's directory tree, relative to the Workspace root. */
+  directory?: string;
+  /** The tenant's desktop, when the provider offers one. */
+  display?: string;
+}
+
+/**
+ * One Bot addressing its User's Computer: the Computer's identity plus the
+ * tenant making the call.
+ */
+export interface ComputerTargetV1
+  extends ComputerIdentityV1, ComputerTenantV1 {}
+
+/**
+ * @deprecated The per-Bot provisioning key. A Computer is provisioned per
+ * User (`ComputerIdentityV1`); the Bot is a tenant on it (`ComputerTenantV1`).
+ * Retained so existing signatures keep compiling until the Computer slice
+ * splits `ComputerRegistry` and `ComputerProvider` along the two types.
+ */
+export type ComputerTarget = ComputerTargetV1;
+
+/**
+ * One durable root a Computer Package's Workspace layout declares: "durable
+ * roots, declared by the Computer Package's Workspace layout and by Package
+ * manifests, survive hibernation, cold start, host migration, and image
+ * rebuild; everything else on the Computer may be lost."
+ *
+ * `kind` is the kernel's `WorkspaceRootKindV1`, so the Computer Package, the
+ * Skills loader, and the Memory Package all name the same roots. `access` is
+ * how the Computer presents the root: Memory roots are `read-only` there
+ * because the Memory Package is their single writer (ADR 0013).
+ */
+export interface WorkspaceRootDeclarationV1 {
+  kind: WorkspaceRootKindV1;
+  /** Present only for `package-declared` roots; the id in the manifest. */
+  rootId?: string;
+  scope: "user" | "bot";
+  /** Absolute path on the Computer where the root is mounted. */
+  mountPath: string;
+  access: "read-write" | "read-only";
+}
+
+/** The durable roots one Computer Package declares for a User's Computer. */
+export interface WorkspaceLayoutV1 {
+  schemaVersion: 1;
+  /** The Workspace root on the Computer, e.g. `/home/box`. */
+  home: string;
+  roots: WorkspaceRootDeclarationV1[];
 }
 
 export interface ComputerAssignment {
@@ -199,6 +263,11 @@ export interface ComputerHandle {
 
 export interface ComputerProvider {
   id: string;
+  /**
+   * The durable roots this provider guarantees. Absent until the Computer
+   * slice declares one; a provider without a layout declares no durable root.
+   */
+  workspaceLayout?: WorkspaceLayoutV1;
   open(
     target: ComputerTarget,
     assignment: ComputerAssignment,

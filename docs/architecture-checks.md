@@ -21,6 +21,9 @@ source-graph linters by `bun run typecheck` and `bun run lint:ui-styles`.
 | — three consecutive failures quarantine, per generation                                                       | `apps/cloudflare/test/composition.workerd.ts`                | `three consecutive failures quarantine the generation and the fourth Turn does not attempt it`                                                              | workerd |
 | reverting a Bot-authored change restores the prior generation                                                 | `apps/cloudflare/test/composition.workerd.ts`                | `a revert records a new generation the next admitted Turn activates`                                                                                        | workerd |
 | a Skill written outside the Bot's own authority is not loaded as an instruction                               | `packages/architecture-checks/src/turn-boundaries.test.ts`   | `it.todo` — quoted verbatim; **no Skills loader exists yet**                                                                                                | Bun     |
+| — its contract half: a Workspace path rejects traversal and every other escape                                | `packages/kernel-contracts/src/workspace.test.ts`            | `rejects traversal, absolute paths, and every other escape`                                                                                                 | Bun     |
+| — its contract half: no non-instruction root is ever a Skill source                                           | `packages/kernel-contracts/src/workspace.test.ts`            | `no other root kind is ever a Skill source`, `a writer that is neither the Bot nor its User is refused`                                                     | Bun     |
+| a Workspace write into a Memory root is rejected                                                              | `packages/kernel-contracts/src/workspace.test.ts`            | `no Memory root accepts a write through the kernel-consumed interface`, `the Memory projection of a full file interface exposes no write path`              | Bun     |
 | an operation exceeding a durable per-User quota is refused and records a visible failure                      | `apps/cloudflare/test/authoring.workerd.ts`                  | `a quota breach is a visible failure, not a throw`                                                                                                          | workerd |
 | client bundles and protocols contain no secrets                                                               | `packages/architecture-checks/src/kernel-boundaries.test.ts` | `client bundles and protocols contain no secrets`                                                                                                           | Bun     |
 | core runtime code has no Electron dependency                                                                  | `packages/architecture-checks/src/kernel-boundaries.test.ts` | `core runtime code has no Electron dependency`                                                                                                              | Bun     |
@@ -52,17 +55,21 @@ step start awaiting its model request`) but never across a real workerd
   The desktop and mobile hosts have their own tests, but nothing asserts that
   both reach the same backend protocol and Agent runtime.
 - **The Memory rules.** `packages/plugin-memory/src/agent.test.ts` proves the
-  storage and recall behaviour, but none of the three constitutional Memory
-  checks has a test: Memory readable and writable with no Computer interface
-  call; a Workspace write into a Memory root rejected; conflicting Workspace
-  and object-storage writes to another durable root both surviving as
-  generations and surfaced. The durable-root sync named in ADR 0013 does not
-  exist yet.
+  storage and recall behaviour, and the row above proves the _contract_ half of
+  one of the three constitutional Memory checks: the kernel-consumed interface
+  for a Memory root has no write. The behavioural halves have no test yet:
+  Memory readable and writable with no Computer interface call; a Workspace
+  write into a Memory root rejected at runtime; conflicting Workspace and
+  object-storage writes to another durable root both surviving as generations
+  and surfaced. The durable-root sync named in ADR 0013 does not exist yet.
 - **Computer tools operate without a desktop client.** No check. The Computer
   Package's tests exercise provider routing, not the absence of a desktop
   shell.
-- **Skills.** The one `todo` above. There is no Skills loader, so there is
-  nothing to check yet; the row exists so the gap is visible rather than absent.
+- **Skills.** The one `todo` above. There is no Skills loader, so the
+  behavioural check has nothing to run against; the two contract rows below it
+  prove `isLoadableSkillSourceV1` and the path validation the loader will use,
+  and the `todo` becomes a real test in the Skills step of
+  `docs/plans/slice-2.md`.
 - **UI style contract** (`scripts/check-ui-styles.ts`) and the **kernel import
   contract** (`scripts/check-kernel-imports.ts`) remain standalone linters as
   well as tests, because `bun run typecheck` must fail on them before any test

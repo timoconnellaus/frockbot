@@ -286,6 +286,7 @@
       "name": "@frockbot/computer-core",
       "version": "0.0.1",
       "dependencies": {
+        "@frockbot/kernel-contracts": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
