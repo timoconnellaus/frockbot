@@ -44,7 +44,12 @@ export type AuthorPackageOutcomeV1 =
 
 export const AUTHORED_PACKAGE_ID = /^[a-z][a-z0-9-]{2,63}$/;
 export const AUTHORED_TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
-/** Reserved for first-party Packages; a Bot may not shadow one. */
+/**
+ * The shape of an authored id, not its authority: a Bot may not shadow a
+ * first-party or User Package, and that rule is enforced against the Bot's
+ * current Composition by the authoring host, which knows each member's
+ * provenance.
+ */
 export const AUTHORED_PACKAGE_ID_MAX_LENGTH = 64;
 
 function record(value: unknown, label: string): Record<string, unknown> {

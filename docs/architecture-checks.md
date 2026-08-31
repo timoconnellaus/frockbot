@@ -211,6 +211,34 @@ a test that failed before the fix.
 | the deployed store is built with the `owner` its Durable Object knows, so another User's root is refused before R2  | `apps/cloudflare/test/workspace.workerd.ts`            | `a store built for one User refuses another User's root`                                      | workerd |
 | shard ownership is proven through the Memory surface, on real R2 — the kernel surface refuses Memory roots outright | `apps/cloudflare/test/memory.workerd.ts`               | `a Bot writes its own shard of a shared Memory root on real R2, and another Bot's is refused` | workerd |
 
+## Package authority
+
+Rows for the two authority rules a Package manifest can ask for and must not
+receive by any path but review: the Electron main process (`trusted-main`), and
+a `packageId` a first-party or User Package already holds. All in
+`packages/architecture-checks/src/package-authority-boundaries.test.ts`.
+
+| Constitutional check                                                                                                           | File                                                                    | Test name                                                                                              | Runner |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------ |
+| a `trusted-main` desktop Contribution is declared only by a first-party workspace Package under `packages/`                    | `packages/architecture-checks/src/package-authority-boundaries.test.ts` | `a trusted-main Contribution is declared only by a first-party workspace Package`                      | Bun    |
+| — and the check bites: a `trusted-main` manifest outside `packages/`, or in a package outside the `@frockbot/` scope, is named | `packages/architecture-checks/src/package-authority-boundaries.test.ts` | `the check refuses a trusted-main manifest that is not a first-party workspace Package`                | Bun    |
+| the manifest is a declaration, not a grant: Electron main runs only the `trusted-main` plugins the shipped build imported      | `packages/architecture-checks/src/package-authority-boundaries.test.ts` | `Electron main loads a trusted-main Contribution only from its statically imported first-party map`    | Bun    |
+| self-modification never widens authority: a Bot-authored manifest declares only Bot isolate Contributions                      | `packages/architecture-checks/src/package-authority-boundaries.test.ts` | `a Bot-authored manifest declares only Bot isolate Contributions, never a desktop or trusted-main one` | Bun    |
+| — and the tool the model sees offers no field to smuggle a Contribution, host, or permission through                           | `packages/architecture-checks/src/package-authority-boundaries.test.ts` | `the package_author input carries no Contribution, host, or permission field`                          | Bun    |
+| a Bot authors only over its own Packages: a `packageId` a non-Bot-provenance member holds is refused                           | `packages/architecture-checks/src/package-authority-boundaries.test.ts` | `the authoring backend refuses a packageId a non-Bot member already holds` (source-level pin)          | Bun    |
+| — and the pin bites: a backend that drops the provenance comparison or unkeys it from `packageId` is named                     | `packages/architecture-checks/src/package-authority-boundaries.test.ts` | `the shadow-guard check refuses a backend that drops or softens the guard`                             | Bun    |
+| — its behavioural half: the refusal happens before any durable effect                                                          | `packages/plugin-shell/src/backend-authoring.test.ts`                   | the shadowing tests in that file                                                                       | Bun    |
+
+Scope of the first row. The framework operates on files in this workspace, so
+the strongest assertion it can make is over every `frockbot.json` the tree
+holds, wherever it sits: the scan is an unfiltered `**/frockbot.json` glob from
+the repo root, not a walk of `packages/`, and a `trusted-main` manifest
+anywhere else — `apps/`, `applications/`, a vendored or synthesized manifest
+checked in — fails the check. The path that no workspace file can express, a
+manifest arriving at runtime through the catalog, is closed by the third row
+instead: the Electron main map is a static import table, so an unreviewed
+Contribution has nowhere to land whatever its manifest says.
+
 ## Open
 
 Rules in `AGENTS.md` § Architecture checks that no named test proves yet. They

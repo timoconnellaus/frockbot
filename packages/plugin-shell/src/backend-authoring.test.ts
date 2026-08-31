@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import {
   bootstrapGeneration,
   compositionArtifactSetHashV1,
+  compositionGenerationIdV1,
   decodeCompositionGenerationV1,
   type CompositionGenerationV1,
+  type CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
 import type { PackageBundleResultV1 } from "@frockbot/kernel-contracts";
 import {
@@ -96,6 +98,32 @@ async function memoryComposition() {
     retainedCount: () => Promise.resolve(generations.size),
   };
   return store;
+}
+
+/** Pins a generation that adds one member to the current one. */
+async function pinMember(
+  store: Awaited<ReturnType<typeof memoryComposition>>,
+  member: CompositionMemberV1,
+) {
+  const parent = store.generations.get(store.currentId())!;
+  const members = [...parent.members, member].sort((left, right) =>
+    left.packageId.localeCompare(right.packageId),
+  );
+  const artifactSetHash = await compositionArtifactSetHashV1(members);
+  const createdAt = "2026-08-31T00:30:00.000Z";
+  await store.propose(
+    decodeCompositionGenerationV1({
+      schemaVersion: 1,
+      generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+      artifactSetHash,
+      parentGenerationId: parent.generationId,
+      createdAt,
+      origin: { kind: "user-install", userId: "user-1" },
+      members,
+      status: "active",
+    }),
+    { pin: true },
+  );
 }
 
 function countingBundler(result: (effectId: string) => PackageBundleResultV1): {
@@ -288,6 +316,66 @@ describe("a Bot authoring a Package", () => {
     expect(
       composition.generations.get(second.generationId)?.parentGenerationId,
     ).toBe(first.generationId);
+  });
+
+  test("shadowing a first-party Package is refused before any durable effect", async () => {
+    const bundler = countingBundler((effectId) => bundledResult(effectId));
+    const outcome = await host({ bundler }).author(
+      requestFor({
+        input: { ...requestFor().input, packageId: "shell" },
+      }),
+    );
+
+    expect(outcome.status).toBe("refused");
+    if (outcome.status !== "refused") throw new Error("unreachable");
+    expect(outcome.reason).toContain('"shell"');
+    expect(outcome.reason).toContain("first-party provenance");
+    const failure = storage.values.get(
+      authorshipFailureKey(outcome.failureId),
+    ) as AuthoringFailureRecordV1;
+    expect(failure).toMatchObject({
+      phase: "compose",
+      packageId: "shell",
+      botId: "bot-1",
+    });
+    // Nothing durable happened beyond the failure record.
+    expect(bundler.calls).toBe(0);
+    expect(written).toEqual([]);
+    expect(composition.generations.size).toBe(1);
+    expect(reservations).toEqual([]);
+    expect(
+      storage.values.get(authorshipIntentKey("author-0123456789abcdef")),
+    ).toBeUndefined();
+  });
+
+  test("shadowing a User-installed Package is refused too", async () => {
+    await pinMember(composition, {
+      packageId: "hello-world",
+      specifier: "@acme/hello-world",
+      version: "1.2.3",
+      manifestHash: "f".repeat(64),
+      provenance: {
+        kind: "user",
+        packageId: "hello-world",
+        version: "1.2.3",
+        userId: "user-1",
+        authoredAt: "2026-08-30T00:00:00.000Z",
+      },
+      artifact: {
+        contentHash: "a".repeat(64),
+        size: 64,
+        mediaType: "application/javascript",
+        bundlerVersion: "test-bundler@0",
+      },
+    });
+    const bundler = countingBundler((effectId) => bundledResult(effectId));
+    const outcome = await host({ bundler }).author(requestFor());
+
+    expect(outcome.status).toBe("refused");
+    if (outcome.status !== "refused") throw new Error("unreachable");
+    expect(outcome.reason).toContain("user provenance");
+    expect(bundler.calls).toBe(0);
+    expect(composition.generations.size).toBe(2);
   });
 
   test("a quota breach is a visible durable failure, not a throw", async () => {
