@@ -35,6 +35,19 @@ export interface ConnectionAuthorizationViewV1 {
   credential: CredentialDescriptorV1;
 }
 
+/**
+ * The Connection-scoped settings a Connection carries beside its credential:
+ * the values a Connection Type's manifest declares (manifest v4), such as an
+ * MCP server's URL and transport. They are configuration, never secrets — a
+ * secret reaches the keyring through `apiKey` and never through here.
+ */
+export type ConnectionSettingsV1 = Record<
+  string,
+  string | number | boolean | null
+>;
+
+export const MAX_CONNECTION_SETTINGS_V1 = 32;
+
 export interface CreateApiKeyConnectionCommandV1 {
   schemaVersion: 1;
   type: "connection/create-api-key";
@@ -43,6 +56,23 @@ export interface CreateApiKeyConnectionCommandV1 {
   connectionTypeId: string;
   label: string;
   apiKey: string;
+  settings?: ConnectionSettingsV1;
+}
+
+/**
+ * Creating a Connection of a Connection Type whose authorization kind is
+ * `none`: it has no credential at all, so there is nothing for
+ * `connection/create-api-key` to carry. Its settings are the whole of its
+ * configuration.
+ */
+export interface CreateConnectionCommandV1 {
+  schemaVersion: 1;
+  type: "connection/create";
+  commandId: string;
+  packageId: string;
+  connectionTypeId: string;
+  label: string;
+  settings?: ConnectionSettingsV1;
 }
 
 export interface RotateApiKeyConnectionCommandV1 {
@@ -85,6 +115,7 @@ export interface DisconnectConnectionCommandV1 {
 }
 
 export type ConnectionCommandV1 =
+  | CreateConnectionCommandV1
   | CreateApiKeyConnectionCommandV1
   | RotateApiKeyConnectionCommandV1
   | UpdateConnectionLabelCommandV1
@@ -137,6 +168,30 @@ function text(value: unknown, label: string, maximum: number): string {
     throw new Error(`${label} must be a non-empty string`);
   }
   return value;
+}
+
+function connectionSettings(value: unknown): ConnectionSettingsV1 {
+  const settings = record(value, "settings");
+  const entries = Object.entries(settings);
+  if (entries.length > MAX_CONNECTION_SETTINGS_V1) {
+    throw new Error("Connection settings are too many");
+  }
+  return Object.fromEntries(
+    entries.map(([key, item]) => {
+      if (!/^[a-z][a-z0-9-]{0,63}$/.test(key)) {
+        throw new Error(`Connection setting "${key}" is invalid`);
+      }
+      if (
+        item === null ||
+        typeof item === "boolean" ||
+        (typeof item === "number" && Number.isFinite(item)) ||
+        (typeof item === "string" && item.length <= 2_048)
+      ) {
+        return [key, item as string | number | boolean | null];
+      }
+      throw new Error(`Connection setting "${key}" is invalid`);
+    }),
+  );
 }
 
 function common(value: Record<string, unknown>): {
@@ -325,6 +380,26 @@ export function decodeConnectionCommandV1(input: unknown): ConnectionCommandV1 {
   const value = record(input, "Connection command");
   const base = common(value);
   switch (value.type) {
+    case "connection/create":
+      exact(value, [
+        "schemaVersion",
+        "type",
+        "commandId",
+        "packageId",
+        "connectionTypeId",
+        "label",
+        ...(Object.hasOwn(value, "settings") ? ["settings"] : []),
+      ]);
+      return {
+        ...base,
+        type: value.type,
+        packageId: text(value.packageId, "packageId", 128),
+        connectionTypeId: text(value.connectionTypeId, "connectionTypeId", 128),
+        label: text(value.label, "label", 120),
+        ...(value.settings === undefined
+          ? {}
+          : { settings: connectionSettings(value.settings) }),
+      };
     case "connection/create-api-key":
       exact(value, [
         "schemaVersion",
@@ -334,6 +409,7 @@ export function decodeConnectionCommandV1(input: unknown): ConnectionCommandV1 {
         "connectionTypeId",
         "label",
         "apiKey",
+        ...(Object.hasOwn(value, "settings") ? ["settings"] : []),
       ]);
       return {
         ...base,
@@ -342,6 +418,9 @@ export function decodeConnectionCommandV1(input: unknown): ConnectionCommandV1 {
         connectionTypeId: text(value.connectionTypeId, "connectionTypeId", 128),
         label: text(value.label, "label", 120),
         apiKey: text(value.apiKey, "apiKey", 16_384),
+        ...(value.settings === undefined
+          ? {}
+          : { settings: connectionSettings(value.settings) }),
       };
     case "connection/rotate-api-key":
       exact(value, [

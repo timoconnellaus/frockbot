@@ -36,6 +36,7 @@
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-fly-sprite": "workspace:*",
         "@frockbot/plugin-identity": "workspace:*",
+        "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-mobile-clipboard": "workspace:*",
         "@frockbot/plugin-mobile-notifications": "workspace:*",
@@ -97,6 +98,7 @@
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
+        "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
@@ -104,6 +106,7 @@
         "@frockbot/plugin-search": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
+        "@frockbot/plugin-tools": "workspace:*",
         "@frockbot/workspace-store": "workspace:*",
         "better-auth": "1.7.2",
         "cordis": "4.0.0-rc.8",
@@ -639,6 +642,23 @@
       "devDependencies": {
         "@frockbot/plugin-testkit": "workspace:*",
         "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/plugin-mcp": {
+      "name": "@frockbot/plugin-mcp",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/configuration-core": "workspace:*",
+        "@frockbot/connection-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-credentials": "workspace:*",
+        "@frockbot/plugin-settings": "workspace:*",
+        "@frockbot/plugin-tools": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.6",
         "typescript": "^7.0.2",
       },
     },
@@ -1230,6 +1250,8 @@
     "@frockbot/plugin-fly-sprite": ["@frockbot/plugin-fly-sprite@workspace:packages/plugin-fly-sprite"],
 
     "@frockbot/plugin-identity": ["@frockbot/plugin-identity@workspace:packages/plugin-identity"],
+
+    "@frockbot/plugin-mcp": ["@frockbot/plugin-mcp@workspace:packages/plugin-mcp"],
 
     "@frockbot/plugin-memory": ["@frockbot/plugin-memory@workspace:packages/plugin-memory"],
 
@@ -2853,6 +2875,8 @@
 
     "@frockbot/plugin-fly-sprite/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
+    "@frockbot/plugin-mcp/@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
+
     "@frockbot/plugin-package-publisher/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-provider-ollama-cloud/@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
@@ -3116,6 +3140,8 @@
     "@frockbot/plugin-credentials/@types/bun/bun-types": ["bun-types@1.3.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-OlFwHcnNV99r//9v5IIOgQ9Uk37gZqrNMCcqEaExdkVq3Avwqok1bJFmvGMCkCE0FqzdY8VMOZpfpR3lwI+CsQ=="],
 
     "@frockbot/plugin-flock/css-tree/mdn-data": ["mdn-data@2.0.30", "", {}, "sha512-GaqWWShW4kv/G9IEucWScBx9G1/vsFZZJUO+tD26M8J8z3Kw5RDQjaoZe03YAClgeS/SWPOcb4nkFBTEi5DUEA=="],
+
+    "@frockbot/plugin-mcp/@types/bun/bun-types": ["bun-types@1.3.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-OlFwHcnNV99r//9v5IIOgQ9Uk37gZqrNMCcqEaExdkVq3Avwqok1bJFmvGMCkCE0FqzdY8VMOZpfpR3lwI+CsQ=="],
 
     "@frockbot/plugin-provider-ollama-cloud/@types/bun/bun-types": ["bun-types@1.3.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-OlFwHcnNV99r//9v5IIOgQ9Uk37gZqrNMCcqEaExdkVq3Avwqok1bJFmvGMCkCE0FqzdY8VMOZpfpR3lwI+CsQ=="],
 
@@ -3428,6 +3454,8 @@
     "@frockbot/plugin-composio/@types/bun/bun-types/@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
 
     "@frockbot/plugin-credentials/@types/bun/bun-types/@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
+
+    "@frockbot/plugin-mcp/@types/bun/bun-types/@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
 
     "@frockbot/plugin-provider-ollama-cloud/@types/bun/bun-types/@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
 

@@ -511,6 +511,58 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     );
   }
 
+  /**
+   * An expiring lease over a Connection's credential for a tool
+   * Contribution's mount. The Package that owns the Connection is resolved
+   * from the durable projection, so a caller cannot name a Package the
+   * Connection does not belong to, and a Package whose Connections carry no
+   * credential refuses by not implementing the seam at all.
+   */
+  async leaseToolCredential(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      effectId: rpcIdentifier,
+      connectionGeneration: rpcIdentifier,
+    });
+    const connection = await (
+      await this.settingsContribution()
+    ).getConnection(request.userId as string, request.connectionId as string);
+    if (!connection) throw new Error("Connection is unavailable");
+    const contribution = await this.connectionContribution(
+      connection.packageId,
+    );
+    if (!contribution.leaseToolCredential) {
+      throw new Error("Connection Package offers no tool credential");
+    }
+    return contribution.leaseToolCredential({
+      accountId: request.userId as string,
+      connectionId: request.connectionId as string,
+      effectId: request.effectId as string,
+      connectionGeneration: request.connectionGeneration as string,
+    });
+  }
+
+  async settleToolCredential(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      effectId: rpcIdentifier,
+    });
+    const connection = await (
+      await this.settingsContribution()
+    ).getConnection(request.userId as string, request.connectionId as string);
+    if (!connection) return;
+    const contribution = await this.connectionContribution(
+      connection.packageId,
+    );
+    await contribution.settleToolCredential?.({
+      accountId: request.userId as string,
+      connectionId: request.connectionId as string,
+      effectId: request.effectId as string,
+    });
+  }
+
   async settleModelCredential(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

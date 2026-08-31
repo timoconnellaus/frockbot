@@ -42,12 +42,13 @@ describe("foundation application", () => {
       "flock",
       "fly-sprite",
       "identity",
+      "settings",
+      "mcp",
       "memory",
       "mobile-clipboard",
       "mobile-notifications",
       "package-publisher",
       "provider-foundation",
-      "settings",
       "provider-ollama-cloud",
       "routines",
       "search",
@@ -58,8 +59,9 @@ describe("foundation application", () => {
         "shell",
         "credentials",
         "flock",
-        "package-publisher",
         "settings",
+        "mcp",
+        "package-publisher",
         "provider-ollama-cloud",
         "routines",
         "search",
@@ -74,6 +76,7 @@ describe("foundation application", () => {
         "flock",
         "fly-sprite",
         "identity",
+        "mcp",
         "memory",
         "package-publisher",
         "provider-foundation",
@@ -88,8 +91,8 @@ describe("foundation application", () => {
         "clock",
         "computer",
         "flock",
-        "package-publisher",
         "settings",
+        "package-publisher",
         "routines",
         "search",
       ],
@@ -341,7 +344,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(6);
+    expect(userBackend.contributions).toHaveLength(7);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

@@ -53,7 +53,12 @@ interface StoredCommand {
   connectionId: string;
   credentialGeneration?: string;
   expectedGeneration?: string;
-  operation: ConnectionCommandV1["type"];
+  /**
+   * `connection/create` is not among them: an Ollama Cloud account is always
+   * a keyed Connection, so the keyless create command is refused on arrival
+   * and never reaches a durable record.
+   */
+  operation: Exclude<ConnectionCommandV1["type"], "connection/create">;
   label?: string;
   enabled?: boolean;
   revokeUpstream?: boolean;
@@ -731,6 +736,10 @@ export class OllamaCloudUserBackendContribution {
       );
       await this.host.storage.setAlarm(this.now() + RECOVERY_DELAY_MS);
       return admitted;
+    }
+
+    if (command.type === "connection/create") {
+      throw new Error("Ollama Cloud Connections require an API key");
     }
 
     const connection = await this.requireConnection(

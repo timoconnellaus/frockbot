@@ -1616,6 +1616,21 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         throw new Error("Connection validation failed");
       }
     },
+    async createConnection(input): Promise<void> {
+      const result = await executeRetainedApiKeyCommand(
+        ["create", input.packageId, input.connectionTypeId, input.label],
+        (commandId) => ({
+          schemaVersion: 1,
+          type: "connection/create",
+          commandId,
+          ...input,
+        }),
+      );
+      await web.value.loadPluginCatalog();
+      if (result.status !== "applied") {
+        throw new Error("Connection validation failed");
+      }
+    },
     async rotateApiKeyConnection(connectionId, apiKey): Promise<void> {
       const connection = web.value.userSettings?.connections.find(
         (candidate) => candidate.connectionId === connectionId,

@@ -180,6 +180,18 @@ export interface FrockBotWebData {
     connectionTypeId: string;
     label: string;
     apiKey: string;
+    /** Connection-scoped settings the Connection Type's manifest declares. */
+    settings?: Record<string, string | number | boolean | null>;
+  }): Promise<void>;
+  /**
+   * A Connection of a Connection Type whose authorization kind is `none`: it
+   * has no credential, so its settings are the whole of its configuration.
+   */
+  createConnection(input: {
+    packageId: string;
+    connectionTypeId: string;
+    label: string;
+    settings?: Record<string, string | number | boolean | null>;
   }): Promise<void>;
   rotateApiKeyConnection(connectionId: string, apiKey: string): Promise<void>;
   updateConnectionLabel(connectionId: string, label: string): Promise<void>;
