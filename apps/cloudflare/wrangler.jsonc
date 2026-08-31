@@ -173,6 +173,77 @@
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
       },
     },
+    // The browser end-to-end harness (`apps/cloudflare/e2e/harness.ts`) runs
+    // `src/index.ts` — the deployed Worker, unmodified — under `wrangler dev`.
+    // It cannot use `development`: that environment marks `MEMORY_FILES`,
+    // `MEMORY_INDEX` and `AI` remote, and a remote binding makes `wrangler dev`
+    // open a proxy session against the Cloudflare API, which fails without a
+    // `CLOUDFLARE_API_TOKEN` and so cannot run on a pull request.
+    //
+    // Only binding locality differs. `main`, `compatibility_date`,
+    // `compatibility_flags`, `migrations` and the Durable Object classes are
+    // the top-level production ones, and every var is the production value.
+    // `MEMORY_INDEX` and `AI` are omitted rather than faked, exactly as
+    // `vitest.integration.config.ts` omits them: miniflare simulates neither,
+    // and no production code path reads either today, so a Package that starts
+    // to read one fails loudly at that seam instead of against a stub.
+    "e2e": {
+      // This environment is never deployed. Without an empty list it would
+      // inherit the top-level custom domain and a stray `wrangler deploy --env
+      // e2e` would reassign bot.frockbot.com to it.
+      "routes": [],
+      "worker_loaders": [
+        {
+          "binding": "USER_APPLICATIONS",
+        },
+        {
+          "binding": "BOT_PACKAGES",
+        },
+      ],
+      "services": [
+        {
+          "binding": "COMPUTER_HOST",
+          "service": "frockbot-computer-host",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "APPLICATION_ARTIFACTS",
+          "bucket_name": "frockbot-application-artifacts",
+          "remote": false,
+        },
+        {
+          "binding": "MEMORY_FILES",
+          "bucket_name": "frockbot-memory-files-e2e",
+          "remote": false,
+        },
+      ],
+      "d1_databases": [
+        {
+          "binding": "AUTH_DB",
+          "database_name": "frockbot-auth-e2e",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+          "remote": false,
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "BOT_STATES",
+            "class_name": "BotState",
+          },
+          {
+            "name": "USER_CONFIGURATIONS",
+            "class_name": "UserConfiguration",
+          },
+        ],
+      },
+      "vars": {
+        "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
+      },
+    },
   },
   "observability": {
     "enabled": true,

@@ -13,7 +13,8 @@
     "test": "bun test src && bun run test:workerd",
     "test:workerd": "vitest run --config vitest.config.ts",
     "test:integration": "bun run artifact:build && vitest run --config vitest.integration.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && vue-tsc --noEmit -p tsconfig.client.json"
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && vue-tsc --noEmit -p tsconfig.client.json"
   },
   "dependencies": {
     "@better-auth/electron": "1.7.2",
@@ -50,6 +51,7 @@
     "@cloudflare/workers-types": "latest",
     "@frockbot/computer-host-protocol": "workspace:*",
     "@frockbot/plugin-fly-sprite": "workspace:*",
+    "@playwright/test": "1.62.1",
     "@types/bun": "1.4.0",
     "@vitejs/plugin-vue": "6.0.8",
     "typescript": "5.9.3",

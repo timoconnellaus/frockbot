@@ -74,6 +74,46 @@ jobs:
           ELECTRON_DISABLE_SANDBOX: "1"
         run: xvfb-run --auto-servernum bun run proof:cordis
 
+  e2e:
+    name: Browser end-to-end
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Test browser end to end
+        # A browser against `wrangler dev` running `src/index.ts` and the real
+        # built artifact. The harness builds the artifact, seeds it into the
+        # local bucket and starts a fake Ollama server on loopback, so this
+        # needs no Cloudflare credential and no provider key.
+        run: bun run --filter @frockbot/cloudflare test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            apps/cloudflare/e2e/playwright-report
+            apps/cloudflare/e2e/test-results
+          retention-days: 7
+
   deploy-marketing:
     name: Deploy marketing site
     needs: validate

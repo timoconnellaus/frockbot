@@ -68,6 +68,34 @@ authenticate — which is what lets a test prove a Connection is validated by an
 inference call rather than by a catalog read. It exports three keys: a good one,
 a revoked one (validates, then fails on a Turn), and a bad one.
 
+## `bun run test:e2e` — the browser layer
+
+`e2e/playwright.config.ts`, files `e2e/**/*.e2e.ts`. A real Chromium against
+`wrangler dev` running `src/index.ts` and the artifact the harness builds, so
+it is the only layer in which the shipped Vue client executes.
+
+`e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`, seeds
+`dist/artifacts/foundation-v1.mjs` into the local `APPLICATION_ARTIFACTS`
+bucket, starts a fake Ollama HTTP server on a loopback port, and starts
+`wrangler dev --env e2e`. That environment exists because `development` marks
+`MEMORY_FILES`, `MEMORY_INDEX` and `AI` remote, and a remote binding makes
+`wrangler dev` open a Cloudflare API session that a pull request has no
+credential for; `e2e` is the same Worker with local bindings and no Vectorize
+or Workers AI, exactly as `vitest.integration.config.ts` omits them. Every run
+gets a fresh `--persist-to` directory and the whole process tree — wrangler is
+started in its own process group — is torn down afterwards.
+
+The provider is reached through the Ollama Cloud Package's `api-base-url`
+Connection setting. `wrangler dev` has no `outboundService`, so a spec points
+its Connection at the fake server the way a User points one at a local Ollama.
+
+The file suffix is `*.e2e.ts`, not `*.spec.ts`: root `bun test` matches
+`*.spec.ts` as well as `*.test.ts`, and a Playwright spec loaded by Bun's
+runner throws.
+
+`docs/architecture-checks.md` § Browser end to end maps each spec to its seam
+and incident.
+
 ## The Computer, and what no local pool can prove
 
 There is no opt-in live Sprite probe here any more. The probe that used to sit

@@ -10,5 +10,11 @@ apps/desktop/release/
 artifacts/
 .pi/
 
+# Playwright output (apps/cloudflare/e2e)
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 # Agent worktrees
 .claude/worktrees/
