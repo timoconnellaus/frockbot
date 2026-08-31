@@ -21,6 +21,10 @@ import {
   DESKTOP_SERVICE,
   ENSURE_AGENT_SCRIPT,
   NO_SLOTS_MARKER,
+  PROVISION_MARKERS,
+  PROVISION_PHASES,
+  PROVISION_RUNNER_PREFIX,
+  PROVISION_SCRIPT,
   provisionScript,
   RUNTIME_ROOT,
   WORKSPACE_SYNC_SERVICE,
@@ -29,6 +33,7 @@ import {
   ComputerHost,
   COMPUTER_HOST_STATE_PATH,
   computerHostExecScriptV1,
+  readProvisionObservation,
 } from "./computer.ts";
 import { FakeSprite, FakeSpritesClient } from "./fake-sprites.ts";
 
@@ -47,9 +52,55 @@ function hostWith(
     baseSpriteName: "frockbot",
     digest,
     now: () => Date.parse("2026-08-31T00:00:00.000Z"),
+    // The real gap is three seconds. A test that polls a fake provisioner
+    // should not spend them.
+    provisionPollMs: 1,
     ...(concurrency ? { concurrency } : {}),
   });
 }
+
+/**
+ * What the launcher and the poll script print: whether a provisioner still
+ * holds the run lock, then the phase it last recorded.
+ */
+function report(
+  runner: "running" | "stopped",
+  phase?: {
+    index: number;
+    name: string;
+    label: string;
+    status: "running" | "complete" | "failed";
+  },
+): { stdout: string[]; exitCode: number } {
+  const lines = [`${PROVISION_RUNNER_PREFIX}${runner}\n`];
+  if (phase) {
+    lines.push(
+      `${JSON.stringify({
+        version: 1,
+        index: phase.index,
+        total: PROVISION_PHASES.length,
+        phase: phase.name,
+        label: phase.label,
+        status: phase.status,
+      })}\n`,
+    );
+  }
+  return { stdout: lines, exitCode: 0 };
+}
+
+const installing = {
+  index: 2,
+  name: "packages",
+  label: "installing the desktop packages",
+  status: "running",
+} as const;
+
+const ready = {
+  index: PROVISION_PHASES.length,
+  name: "ready",
+  label: "the Computer is ready",
+  status: "complete",
+} as const;
 
 function request(
   operation: ComputerHostOperationV1,
@@ -148,6 +199,13 @@ describe("open", () => {
   test("provisions a new Computer and adopts it thereafter", async () => {
     const client = new FakeSpritesClient();
     const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
     const response = await host.handle(request({ kind: "open" }));
     expect(response.status).toBe(200);
     const result = decodeComputerHostOpenResultV1(await response.json());
@@ -160,20 +218,223 @@ describe("open", () => {
     expect(sprite.services.has(WORKSPACE_SYNC_SERVICE)).toBe(true);
     expect(sprite.urlSettings).toEqual({ auth: "public" });
     expect(sprite.files.has(COMPUTER_HOST_STATE_PATH)).toBe(true);
+
+    // The second open adopts what the first provisioned: no launcher, no
+    // phases to report, and no Bot reinstalling its own desktop on turn two.
+    const again = decodeComputerHostOpenResultV1(
+      await (await host.handle(request({ kind: "open" }))).json(),
+    );
+    expect(again.provisioning).toBeUndefined();
+    expect(
+      sprite.commands.filter((command) => command.stdin.includes("setsid")),
+    ).toHaveLength(1);
   });
 
   test("ships the provisioning script on stdin and never on argv", async () => {
     const client = new FakeSpritesClient();
     const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [report("stopped", ready)];
+    };
     await host.handle(request({ kind: "open" }));
     const [first] = client.only().commands;
     // The regression the 431 taught: the script is thousands of bytes, and it
     // must be in the one place with no size limit.
     expect(first?.command).toBe("bash");
     expect(first?.args).toEqual(["-s"]);
-    expect(first?.stdin).toContain(provisionScript);
+    expect(first?.stdin).toContain(
+      Buffer.from(provisionScript).toString("base64"),
+    );
     expect(JSON.stringify(first?.args).length).toBeLessThan(32);
     expect(first?.stdin.length).toBeGreaterThan(3_000);
+  });
+
+  test("launches the provisioner detached and then only polls it", async () => {
+    // The defect this is the fix for: `@fly/sprites@0.1.0` gives up on a
+    // WebSocket after 45 s with no inbound message and never pings, so the
+    // exec that installs a desktop stack cannot be the exec that waits for it.
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
+    const response = await host.handle(request({ kind: "open" }));
+    expect(response.status).toBe(200);
+    const result = decodeComputerHostOpenResultV1(await response.json());
+    expect(result.provisioning?.status).toBe("complete");
+    expect(result.provisioning?.total).toBe(PROVISION_PHASES.length);
+    expect(result.provisioning?.resumed).toBe(false);
+
+    const [launch, ...rest] = client.only().commands;
+    expect(launch?.stdin).toContain("setsid nohup");
+    expect(launch?.stdin).toContain(PROVISION_SCRIPT);
+    // Every later command is short. None of them carries the document, and
+    // none of them starts anything, so none of them can be quiet for 45 s.
+    const polls = rest.filter((command) =>
+      command.stdin.includes(PROVISION_RUNNER_PREFIX),
+    );
+    expect(polls.length).toBeGreaterThan(0);
+    for (const poll of polls) {
+      expect(poll.stdin).not.toContain("setsid");
+      expect(poll.stdin.length).toBeLessThan(1_000);
+    }
+  });
+
+  test("completes a half-provisioned Computer instead of starting over", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      // The marker the earlier run left behind: phase one is done, so this
+      // run is a resume and the desktop packages are not installed twice.
+      writeFile(sprite, `${PROVISION_MARKERS}/layout`, "");
+      sprite.scripts = [
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
+    const response = await host.handle(request({ kind: "open" }));
+    expect(response.status).toBe(200);
+    const result = decodeComputerHostOpenResultV1(await response.json());
+    expect(result.provisioning?.resumed).toBe(true);
+    expect(result.provisioning?.status).toBe("complete");
+    // The document the launcher installs is the resumable one: every phase is
+    // guarded by its own marker.
+    expect(client.only().commands[0]?.stdin).toContain(
+      Buffer.from(provisionScript).toString("base64"),
+    );
+    expect(provisionScript).toContain(`[ ! -f "$MARKERS/layout" ]`);
+  });
+
+  test("restarts a provisioner that went away, from its markers", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      writeFile(sprite, `${PROVISION_MARKERS}/layout`, "");
+      sprite.scripts = [
+        // The launch, then three polls that find nobody holding the run lock:
+        // the provisioner died mid-phase, which a container restart looks
+        // exactly like.
+        report("stopped", installing),
+        report("stopped", installing),
+        report("stopped", installing),
+        // The relaunch picks it up where the markers left it.
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
+    const response = await host.handle(request({ kind: "open" }));
+    expect(response.status).toBe(200);
+    const result = decodeComputerHostOpenResultV1(await response.json());
+    expect(result.provisioning?.status).toBe("complete");
+    expect(result.provisioning?.resumed).toBe(true);
+    const launches = client
+      .only()
+      .commands.filter((command) => command.stdin.includes("setsid nohup"));
+    expect(launches).toHaveLength(2);
+  });
+
+  test("a poll that fails does not end an install running detached", async () => {
+    // "Connections to the Computer are expected to drop on every pause." The
+    // install is not on the connection, so losing one costs a poll.
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        { error: "socket hang up" },
+        { error: "socket hang up" },
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
+    const response = await host.handle(request({ kind: "open" }));
+    expect(response.status).toBe(200);
+    expect(
+      decodeComputerHostOpenResultV1(await response.json()).provisioning
+        ?.status,
+    ).toBe("complete");
+  });
+
+  test("a command that reports the same failure twice does not kill the host", async () => {
+    // Measured against a real Sprite: a WebSocket that never opened emitted
+    // `error` twice, the second landed on an emitter with no listener left,
+    // and Node took the container down — every other User's work with it.
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        {
+          error: "WebSocket closed before open: code=1006",
+          errorEmissions: 3,
+        },
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
+    const response = await host.handle(request({ kind: "open" }));
+    expect(response.status).toBe(200);
+  });
+
+  test("a Computer that stops answering is reported as unavailable", async () => {
+    const client = new FakeSpritesClient();
+    // A clock that jumps a minute per reading, so the run reaches its silence
+    // budget without the test waiting for it.
+    let clock = Date.parse("2026-08-31T00:00:00.000Z");
+    const host = new ComputerHost({
+      client,
+      baseSpriteName: "frockbot",
+      digest,
+      provisionPollMs: 1,
+      now: () => (clock += 60_000),
+    });
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        { error: "socket hang up" },
+      ];
+    };
+    const response = await host.handle(request({ kind: "open" }));
+    expect(response.status).toBe(503);
+    const failure = decodeComputerHostProblemV1(await response.json());
+    expect(failure.code).toBe("provider-unavailable");
+    expect(failure.message).toContain("installing the desktop packages (2/5)");
+  });
+
+  test("names the phase a failed provisioning run stopped in", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        report("stopped", { ...installing, status: "failed" }),
+        { stdout: ["E: Unable to fetch chromium\n"], exitCode: 0 },
+      ];
+    };
+    const response = await host.handle(request({ kind: "open" }));
+    expect(response.status).toBe(502);
+    const failure = decodeComputerHostProblemV1(await response.json());
+    expect(failure.message).toContain("installing the desktop packages (2/5)");
+    expect(failure.message).toContain("Unable to fetch chromium");
+    expect(failure.retryable).toBe(true);
+  });
+
+  test("a provisioner that vanished is reported, not waited on", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      // Nothing holds the lock and nothing ever reaches "complete".
+      sprite.scripts = [report("stopped", installing)];
+    };
+    const response = await host.handle(request({ kind: "open" }));
+    expect(response.status).toBe(502);
+    expect(
+      decodeComputerHostProblemV1(await response.json()).message,
+    ).toContain("installing the desktop packages (2/5)");
   });
 
   test("attaches the tenant through the ensure script and reports its display", async () => {
@@ -207,6 +468,44 @@ describe("open", () => {
     const problem = decodeComputerHostProblemV1(await response.json());
     expect(problem.code).toBe("conflict");
     expect(problem.retryable).toBe(true);
+  });
+});
+
+describe("provisioning reports", () => {
+  test("reads the phase and the run lock out of one report", () => {
+    const observation = readProvisionObservation(
+      `${PROVISION_RUNNER_PREFIX}running\n${JSON.stringify({
+        version: 1,
+        index: 3,
+        total: 5,
+        phase: "runtime",
+        label: "installing the Computer runtime",
+        status: "running",
+      })}\n`,
+    );
+    expect(observation).toMatchObject({
+      phase: "runtime",
+      index: 3,
+      total: 5,
+      status: "running",
+      running: true,
+    });
+  });
+
+  test("a Sprite that has never been asked reads as the starting phase", () => {
+    const observation = readProvisionObservation(
+      `${PROVISION_RUNNER_PREFIX}stopped\n`,
+    );
+    expect(observation.index).toBe(0);
+    expect(observation.status).toBe("running");
+    expect(observation.running).toBe(false);
+  });
+
+  test("an unparseable line does not become a false completion", () => {
+    const observation = readProvisionObservation(
+      `${PROVISION_RUNNER_PREFIX}running\n{ this is not json\n`,
+    );
+    expect(observation.status).toBe("running");
   });
 });
 

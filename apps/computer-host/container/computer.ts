@@ -32,7 +32,13 @@ import {
   ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
   NO_SLOTS_MARKER,
-  provisionScript,
+  PROVISION_MARKERS,
+  PROVISION_PHASES,
+  PROVISION_RUNNER_PREFIX,
+  PROVISION_STARTING_PHASE,
+  provisionLaunchScript,
+  provisionLogTailScript,
+  provisionPollScript,
   RUNTIME_ROOT,
   shellQuote,
   WORKSPACE_SYNC_SERVICE,
@@ -50,6 +56,7 @@ import {
   type ComputerHostFileEntryV1,
   type ComputerHostFileKindV1,
   type ComputerHostOpenResultV1,
+  type ComputerHostProvisioningV1,
   type ComputerHostRequestV1,
 } from "@frockbot/computer-host-protocol";
 
@@ -71,6 +78,12 @@ export interface SpriteCommandHandle {
     event: "spawn" | "error",
     listener: (...args: unknown[]) => void,
   ): unknown;
+  /**
+   * A listener that stays attached. `error` needs one, because the SDK can
+   * emit it more than once for one command and an EventEmitter with no
+   * `error` listener throws out of the event loop.
+   */
+  on(event: "error", listener: (...args: unknown[]) => void): unknown;
   wait(): Promise<number>;
   kill(signal?: string): void;
 }
@@ -150,7 +163,12 @@ export const COMPUTER_HOST_CONCURRENCY = {
 } as const;
 
 export const COMPUTER_HOST_PHASE_TIMEOUTS = {
+  /** The whole provisioning run, however many phases and restarts it takes. */
   provision: 10 * 60_000,
+  /** One short exec that launches or polls the detached provisioner. */
+  provisionStep: 60_000,
+  /** Gap between two polls. Far inside the SDK's 45-second pong window. */
+  provisionPoll: 3_000,
   service: 120_000,
   ensureAgent: 60_000,
   control: 15_000,
@@ -174,6 +192,38 @@ export const COMPUTER_HOST_PHASE_TIMEOUTS = {
 export const COMPUTER_HOST_STATE_PATH = `${RUNTIME_ROOT}/host-state.json`;
 
 const CONTROL_LEASE_SECONDS = 90;
+
+/**
+ * How many consecutive polls may find nothing holding the run lock before the
+ * host concludes the provisioner is gone.
+ *
+ * More than one, because a launch is asynchronous and a phase's last child can
+ * outlive the shell that spawned it; the lock is genuinely free for a moment
+ * either side of a phase.
+ */
+const PROVISION_STOPPED_POLLS = 3;
+
+/**
+ * How many times one `open` will restart a provisioner that has gone away.
+ *
+ * Generous, because a restart is cheap and safe: every phase is marker-guarded,
+ * so a relaunch resumes the install rather than repeating it, and the ten
+ * minute deadline is what actually bounds the run. Measured against a real
+ * Sprite, `apt-get install chromium` is heavy enough that the machine drops
+ * connections and loses its provisioner more than once or twice.
+ */
+const PROVISION_RELAUNCHES = 8;
+
+/**
+ * How long a Computer may fail to answer a poll before the run gives up.
+ *
+ * "Connections to the Computer are expected to drop on every pause; every
+ * Computer client reconnects and resumes rather than treating a dropped
+ * connection as failure." A count of failures would be exactly that mistake —
+ * a Sprite under an `apt-get` refuses several in a row — so the question is
+ * how long it has been silent, not how many times.
+ */
+const PROVISION_UNREACHABLE_MS = 120_000;
 
 export class ComputerHostError extends Error {
   // Plain fields rather than parameter properties: Node strips types in the
@@ -227,6 +277,63 @@ export function computerHostExecScriptV1(
   if (operation.cwd) lines.push(`cd ${shellQuote(operation.cwd)}`);
   lines.push(operation.script);
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * One provisioning report, as the launcher and the poll script print it.
+ *
+ * `running` is the lock, not the state file: a state line says which phase a
+ * run reached, and only the lock says whether anything is still working on it.
+ * A report with neither — a Sprite where provisioning has never been asked for
+ * — reads as the starting phase, which is what it is.
+ */
+export interface ProvisionObservation extends ComputerHostProvisioningV1 {
+  /** Whether a provisioner still holds the run lock. */
+  running: boolean;
+}
+
+/** Decodes a provisioning report. Anything unreadable reads as "starting". */
+export function readProvisionObservation(text: string): ProvisionObservation {
+  const running = text.includes(`${PROVISION_RUNNER_PREFIX}running`);
+  const base: ProvisionObservation = {
+    phase: PROVISION_STARTING_PHASE.name,
+    label: PROVISION_STARTING_PHASE.label,
+    index: 0,
+    total: PROVISION_PHASES.length,
+    status: "running",
+    resumed: false,
+    running,
+  };
+  const line = text
+    .split("\n")
+    .reverse()
+    .find((candidate) => candidate.trimStart().startsWith("{"));
+  if (!line) return base;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return base;
+  }
+  if (typeof parsed !== "object" || parsed === null) return base;
+  const value = parsed as Record<string, unknown>;
+  const status =
+    value.status === "complete" || value.status === "failed"
+      ? value.status
+      : "running";
+  return {
+    phase: typeof value.phase === "string" ? value.phase : base.phase,
+    label: typeof value.label === "string" ? value.label : base.label,
+    index: Number.isSafeInteger(value.index)
+      ? (value.index as number)
+      : base.index,
+    total: Number.isSafeInteger(value.total)
+      ? (value.total as number)
+      : base.total,
+    status,
+    resumed: false,
+    running,
+  };
 }
 
 /** Collects a command's output, stopping at the caller's declared ceiling. */
@@ -366,6 +473,7 @@ interface InFlightEffect {
 interface ComputerRecord {
   spriteName: string;
   generation: number;
+  provisioning?: ComputerHostProvisioningV1;
 }
 
 export interface ComputerHostOptions {
@@ -376,6 +484,28 @@ export interface ComputerHostOptions {
   digest: (value: string) => string;
   now?: () => number;
   concurrency?: { perContainer: number; perUser: number };
+  /** How often the host asks a detached provisioner how it is going. */
+  provisionPollMs?: number;
+  /**
+   * Told every time a provisioning run reaches a new phase.
+   *
+   * `open` answers once, at the end, so a cold Computer is minutes of quiet
+   * from outside the container. This is how the container itself is not quiet:
+   * the process log names the phase while it is happening, which is what an
+   * operator needs when an install is slow rather than broken.
+   */
+  onProvisionProgress?: (
+    spriteName: string,
+    progress: ComputerHostProvisioningV1,
+  ) => void;
+  /**
+   * Told when a provisioning run rides out a drop or restarts a provisioner.
+   *
+   * These are expected events, not failures — a Computer under an `apt-get`
+   * refuses connections — but they are the difference between "slow" and
+   * "wrong" when a cold open takes minutes.
+   */
+  onProvisionRetry?: (spriteName: string, reason: string) => void;
 }
 
 /**
@@ -391,6 +521,15 @@ export class ComputerHost {
   private readonly digest: (value: string) => string;
   private readonly now: () => number;
   private readonly concurrency: { perContainer: number; perUser: number };
+  private readonly provisionPollMs: number;
+  private readonly onProvisionProgress?: (
+    spriteName: string,
+    progress: ComputerHostProvisioningV1,
+  ) => void;
+  private readonly onProvisionRetry?: (
+    spriteName: string,
+    reason: string,
+  ) => void;
   private readonly inFlight = new Map<string, InFlightEffect>();
   /** Re-derivable cache of what this container has learned about a Computer. */
   private readonly computers = new Map<string, ComputerRecord>();
@@ -402,6 +541,14 @@ export class ComputerHost {
     this.digest = options.digest;
     this.now = options.now ?? (() => Date.now());
     this.concurrency = options.concurrency ?? COMPUTER_HOST_CONCURRENCY;
+    this.provisionPollMs =
+      options.provisionPollMs ?? COMPUTER_HOST_PHASE_TIMEOUTS.provisionPoll;
+    if (options.onProvisionProgress) {
+      this.onProvisionProgress = options.onProvisionProgress;
+    }
+    if (options.onProvisionRetry) {
+      this.onProvisionRetry = options.onProvisionRetry;
+    }
   }
 
   /** The Sprite backing this User's Computer. One per User (ADR 0012). */
@@ -606,6 +753,7 @@ export class ComputerHost {
       directory: `${DATA_ROOT}/agents/${botKey}`,
       ...(display ? { display } : {}),
       generation: record.generation,
+      ...(record.provisioning ? { provisioning: record.provisioning } : {}),
     };
     return Response.json(result);
   }
@@ -635,7 +783,11 @@ export class ComputerHost {
     if (!pending) {
       pending = this.provision(userId)
         .then((record) => {
-          this.computers.set(userId, record);
+          // The progress belongs to the run, not to the Computer: the call
+          // that provisioned it reports the phases, and every later `open`
+          // reports an adoption with nothing to say about provisioning.
+          const { provisioning: _provisioning, ...adopted } = record;
+          this.computers.set(userId, adopted);
           return record;
         })
         .finally(() => {
@@ -652,22 +804,7 @@ export class ComputerHost {
     const adopted = await this.readState(sprite);
     if (adopted) return { spriteName, generation: adopted.generation };
 
-    // The whole provisioning document on stdin. This is the path that
-    // answered 431 when the same text travelled on argv.
-    const provisioned = await this.run(
-      sprite,
-      provisionScript,
-      "provisioning",
-      COMPUTER_HOST_PHASE_TIMEOUTS.provision,
-    );
-    if (provisioned.exitCode !== 0) {
-      throw new ComputerHostError(
-        "provider-failure",
-        `Computer provisioning failed: ${provisioned.stderr.toString("utf8").slice(0, 512)}`,
-        502,
-        true,
-      );
-    }
+    const provisioning = await this.driveProvisioning(sprite);
     await withTimeout(
       settleService(
         await sprite.createService(
@@ -701,7 +838,193 @@ export class ComputerHost {
         `${JSON.stringify({ version: 1, generation })}\n`,
         { mode: 0o600 },
       );
-    return { spriteName, generation };
+    return { spriteName, generation, provisioning };
+  }
+
+  /**
+   * Provisions a Computer without ever holding a long, silent connection.
+   *
+   * `@fly/sprites@0.1.0` declares a WebSocket dead after `WS_PONG_WAIT`
+   * (45,000 ms) with no **inbound** message, and its `WS_PING_INTERVAL`
+   * (15,000 ms) timer only measures that gap — it sends nothing, and the code
+   * says why: "The server-side handles keepalive; we just track activity."
+   * `apt-get` installing a desktop stack is quiet for minutes, so the single
+   * long exec this replaces could not survive its own success (ADR 0004).
+   *
+   * So no exec here is long. One launches the provisioner detached under
+   * `setsid nohup` and returns at once; the rest are polls a few seconds
+   * apart, each of which answers immediately. The connection the SDK can kill
+   * is never the connection the work depends on, and a container that
+   * restarts mid-install rejoins the same run rather than starting another.
+   */
+  private async driveProvisioning(
+    sprite: SpriteHandle,
+  ): Promise<ComputerHostProvisioningV1> {
+    const deadline = this.now() + COMPUTER_HOST_PHASE_TIMEOUTS.provision;
+    let progress = await this.provisionStep(sprite, provisionLaunchScript);
+    // A Sprite that already carries phase markers is being *completed*: the
+    // provisioner skips what is done, so this run is a resume, not a repeat.
+    const resumed = await this.hasProvisionMarkers(sprite);
+    let announced = "";
+    const announce = (observed: ProvisionObservation): void => {
+      if (observed.phase === announced) return;
+      announced = observed.phase;
+      const { running: _running, ...reported } = observed;
+      this.onProvisionProgress?.(sprite.name, { ...reported, resumed });
+    };
+    announce(progress);
+    // The launcher backgrounds the runner and exits, so the very first polls
+    // can legitimately see a lock nobody holds yet. Only a run that is still
+    // unstarted several polls later is actually gone.
+    let stopped = 0;
+    let relaunches = 0;
+    let unreachableSince = 0;
+    let interval = this.provisionPollMs;
+
+    for (;;) {
+      if (progress.status === "complete") {
+        // `running` is the host's own liveness question and never travels: the
+        // protocol result carries the phase and nothing about the lock.
+        const { running: _running, ...reported } = progress;
+        return { ...reported, resumed };
+      }
+      if (progress.status === "failed") {
+        throw await this.provisioningFailure(sprite, progress);
+      }
+      if (this.now() >= deadline) {
+        throw new ComputerHostError(
+          "timeout",
+          `Computer provisioning exceeded ${COMPUTER_HOST_PHASE_TIMEOUTS.provision}ms during ${progress.label} (${progress.index}/${progress.total})`,
+          504,
+          true,
+        );
+      }
+
+      stopped = progress.running ? 0 : stopped + 1;
+      let script = provisionPollScript;
+      if (stopped >= PROVISION_STOPPED_POLLS) {
+        // Nothing holds the run lock and nothing has finished: the provisioner
+        // is gone — its container migrated, its Sprite paused, or it was
+        // killed mid-phase. Its phase markers are still there, so starting it
+        // again completes the install rather than repeating it. The resume
+        // happens inside this `open` rather than costing the Bot Durable
+        // Object a retry.
+        if (relaunches >= PROVISION_RELAUNCHES) {
+          throw await this.provisioningFailure(sprite, {
+            ...progress,
+            status: "failed",
+          });
+        }
+        relaunches += 1;
+        stopped = 0;
+        script = provisionLaunchScript;
+        this.onProvisionRetry?.(
+          sprite.name,
+          `no provisioner is running during ${progress.label}; restarting it from its markers (${relaunches}/${PROVISION_RELAUNCHES})`,
+        );
+      }
+
+      await delay(interval);
+      // Polls start close together, because the first phases are quick, and
+      // spread out as the install settles into `apt-get`. Every one of them is
+      // a fresh, short-lived connection, and a ten-minute install should not
+      // need two hundred of them.
+      interval = Math.min(interval * 2, this.provisionPollMs * 5);
+
+      const observed = await this.provisionStep(sprite, script).catch(
+        (error: unknown) => {
+          if (!(error instanceof ComputerHostError)) throw error;
+          this.onProvisionRetry?.(
+            sprite.name,
+            `the Computer did not answer during ${progress.label}: ${error.message}`,
+          );
+          return undefined;
+        },
+      );
+      if (observed) {
+        progress = observed;
+        announce(progress);
+        unreachableSince = 0;
+        continue;
+      }
+      // A failed poll says nothing about the install, which is running
+      // detached; only a Computer that stays silent ends the run.
+      if (unreachableSince === 0) unreachableSince = this.now();
+      if (this.now() - unreachableSince > PROVISION_UNREACHABLE_MS) {
+        throw new ComputerHostError(
+          "provider-unavailable",
+          `Computer stopped answering while ${progress.label} (${progress.index}/${progress.total})`,
+          503,
+          true,
+        );
+      }
+    }
+  }
+
+  /** One short provisioning exec, decoded into the phase it reported. */
+  private async provisionStep(
+    sprite: SpriteHandle,
+    script: string,
+  ): Promise<ProvisionObservation> {
+    const outcome = await this.run(
+      sprite,
+      script,
+      "provisioning",
+      COMPUTER_HOST_PHASE_TIMEOUTS.provisionStep,
+    );
+    const text = `${outcome.stdout.toString("utf8")}${outcome.stderr.toString("utf8")}`;
+    if (outcome.exitCode !== 0) {
+      throw new ComputerHostError(
+        "provider-failure",
+        `Computer provisioning could not be started: ${text.slice(0, 512)}`,
+        502,
+        true,
+      );
+    }
+    return readProvisionObservation(text);
+  }
+
+  /**
+   * Whether an earlier run left a completed phase behind.
+   *
+   * Only the declared phase names count. A directory listing can carry entries
+   * that are not markers, and a Computer reported as resumed when it was not
+   * would be a claim about what this run did rather than an observation.
+   */
+  private async hasProvisionMarkers(sprite: SpriteHandle): Promise<boolean> {
+    const names = new Set(PROVISION_PHASES.map((phase) => phase.name));
+    try {
+      const entries = await sprite.filesystem("/").readdir(PROVISION_MARKERS, {
+        withFileTypes: true,
+      });
+      return entries.some((entry) => names.has(entry.name));
+    } catch {
+      return false;
+    }
+  }
+
+  private async provisioningFailure(
+    sprite: SpriteHandle,
+    progress: ProvisionObservation,
+  ): Promise<ComputerHostError> {
+    let tail = "";
+    try {
+      const log = await this.run(
+        sprite,
+        provisionLogTailScript,
+        "provisioning log",
+        COMPUTER_HOST_PHASE_TIMEOUTS.provisionStep,
+      );
+      tail = log.stdout.toString("utf8").trim();
+    } catch {
+      /* the log is a courtesy; the phase is the diagnosis */
+    }
+    return new ComputerHostError(
+      "provider-failure",
+      `Computer provisioning failed during ${progress.label} (${progress.index}/${progress.total})${tail ? `: ${tail.slice(-512)}` : ""}`,
+      502,
+      true,
+    );
   }
 
   private async readState(
@@ -938,18 +1261,27 @@ export class ComputerHost {
       options.timeoutMs,
     );
 
+    // `on`, never `once`, and never removed: the SDK can emit `error` more
+    // than once for a single command — a WebSocket that fails to open reports
+    // it from the socket's own handler and again as it closes — and an
+    // EventEmitter with no `error` listener throws out of the event loop.
+    // Measured: it killed the container, and with it every other User's work
+    // in flight. The reject after the first is a no-op, so the extra
+    // emissions are absorbed rather than fatal.
+    let failCommand: (error: unknown) => void = () => {};
     const failed = new Promise<never>((_resolve, reject) => {
-      command.once("error", (...args: unknown[]) =>
-        reject(
-          new ComputerHostError(
-            "provider-unavailable",
-            `Computer command failed: ${errorText(args[0])}`,
-            503,
-            true,
-          ),
-        ),
-      );
+      failCommand = reject;
     });
+    command.on("error", (...args: unknown[]) =>
+      failCommand(
+        new ComputerHostError(
+          "provider-unavailable",
+          `Computer command failed: ${errorText(args[0])}`,
+          503,
+          true,
+        ),
+      ),
+    );
 
     const settle = async (): Promise<ComputerHostExecOutcome> => {
       await Promise.race([

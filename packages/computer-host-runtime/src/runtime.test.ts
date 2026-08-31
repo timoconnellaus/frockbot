@@ -21,6 +21,11 @@ import {
   DATA_ROOT,
   ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
+  PROVISION_LOCK,
+  PROVISION_PHASES,
+  PROVISION_SCRIPT,
+  provisionLaunchScript,
+  provisionPollScript,
   provisionScript,
   RUNTIME_ROOT,
   base64,
@@ -131,6 +136,53 @@ describe("provisioning script", () => {
     expect(provisionScript).toContain("apt-get install -y chromium xvfb");
     expect(provisionScript).toContain("playwright-core@1.55.0");
     expect(provisionScript).toContain(`chmod 600 ${RUNTIME_ROOT}/tokens`);
+  });
+
+  test("guards every phase with its own resume marker", () => {
+    // A half-provisioned Computer is completed, never started over: the phase
+    // a container restart interrupted is the phase the next run begins at.
+    for (const phase of PROVISION_PHASES) {
+      expect(provisionScript).toContain(`[ ! -f "$MARKERS/${phase.name}" ]`);
+      expect(provisionScript).toContain(`touch "$MARKERS/${phase.name}"`);
+    }
+  });
+
+  test("records the phase it is in before it begins it", () => {
+    // The progress `open` reports. Written before the work, or a phase that
+    // never finishes would never be named.
+    for (const [position, phase] of PROVISION_PHASES.entries()) {
+      expect(provisionScript).toContain(`INDEX=${position + 1}
+NAME=${phase.name}
+LABEL=${shellQuote(phase.label)}
+state running`);
+    }
+    expect(provisionScript).toContain("state complete");
+    expect(provisionScript).toContain("trap 'state failed' ERR");
+  });
+
+  test("the launcher detaches the run and the poll starts nothing", async () => {
+    // The defect in one assertion: `@fly/sprites@0.1.0` declares a WebSocket
+    // dead 45 s after the last inbound message and never pings, so the exec
+    // that installs a desktop stack must not be the exec that waits for it.
+    expect(provisionLaunchScript).toContain("setsid nohup");
+    expect(provisionLaunchScript).toContain(PROVISION_SCRIPT);
+    expect(provisionPollScript).not.toContain("setsid");
+    expect(provisionPollScript).not.toContain("apt-get");
+    // Short enough that it cannot be the thing that is quiet.
+    expect(provisionPollScript.length).toBeLessThan(1_000);
+    await expectValidShell(provisionLaunchScript);
+    await expectValidShell(provisionPollScript);
+    await expectValidShell(provisionScript);
+  });
+
+  test("the launcher probes the run lock once, before it starts anything", () => {
+    // Measured: a second probe after the launch takes the lock the
+    // provisioner is trying to take, and `flock -n` makes the provisioner
+    // die silently. One probe, and the provisioner waits rather than refusing.
+    expect(
+      provisionLaunchScript.split(`flock -n ${PROVISION_LOCK}`),
+    ).toHaveLength(2);
+    expect(provisionLaunchScript).toContain(`flock -w 30 ${PROVISION_LOCK}`);
   });
 });
 
