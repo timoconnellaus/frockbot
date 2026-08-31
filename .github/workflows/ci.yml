@@ -227,6 +227,15 @@ jobs:
           --file dist/artifacts/foundation-v1.mjs
           --remote
 
+      - name: Deploy bundler Worker
+        # The app's PACKAGE_BUNDLER service binding names this Worker, so it
+        # must exist before the app version can be created.
+        working-directory: apps/cloudflare-bundler
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bunx wrangler deploy
+
       - name: Deploy Worker
         working-directory: apps/cloudflare
         env:
