@@ -17,6 +17,7 @@ import type {
   PackageSettingValueV1,
   ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
+import auditManifest from "@frockbot/plugin-audit/manifest";
 import authManifest from "@frockbot/plugin-auth/manifest";
 import botTemplateManifest from "@frockbot/plugin-bot-template/manifest";
 import {
@@ -240,6 +241,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-shell", shellManifest],
   ["@frockbot/plugin-skills", skillsManifest],
   ["@frockbot/plugin-search", searchManifest],
+  ["@frockbot/plugin-audit", auditManifest],
   ["@frockbot/plugin-settings", settingsManifest],
   ["@frockbot/plugin-routines", routinesManifest],
 ]);

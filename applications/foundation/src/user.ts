@@ -1,5 +1,14 @@
 import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
 import {
+  createAuditUserBackendPlugin,
+  type AuditUserBackendContribution,
+  type AuditUserBackendHost,
+} from "@frockbot/plugin-audit/user";
+import {
+  decodeMcpConnectionSettingsV1,
+  mcpServerSlugV1,
+} from "@frockbot/plugin-mcp/agent";
+import {
   createCredentialUserBackendPlugin,
   type CredentialStorage,
   type CredentialUserBackendContribution,
@@ -109,6 +118,11 @@ export interface MountedFoundationUserBackend {
    * are rebuildable from the Bots' own stored runs.
    */
   search: SearchUserBackendContribution;
+  /**
+   * The User's audit table (parity register rows 30 and 30b). Like `search` it
+   * is a projection: every row is rebuildable from the Bots' own stored runs.
+   */
+  audit: AuditUserBackendContribution;
   dispose(): Promise<void>;
 }
 
@@ -163,6 +177,17 @@ export async function createFoundationUserBackendContributions(
       projectBotRows: SearchUserBackendHost["projectBotRows"];
       maxRows?: number;
     };
+    /**
+     * The audit seams the adapter owns: the same SQL storage, and one page of
+     * a Bot's projected entries read from that Bot's Durable Object.
+     */
+    audit: {
+      sql: AuditUserBackendHost["sql"];
+      projectBotEntries: AuditUserBackendHost["projectBotEntries"];
+      readHostJournalEffectIds?: AuditUserBackendHost["readHostJournalEffectIds"];
+      maxRows?: number;
+      maxAgeMs?: number;
+    };
   },
 ): Promise<MountedFoundationUserBackend> {
   let settings: UserSettingsBackendContribution | undefined;
@@ -173,6 +198,7 @@ export async function createFoundationUserBackendContributions(
   let botTemplate: BotTemplateUserBackendContribution | undefined;
   let publisher: PackagePublisherUserContribution | undefined;
   let search: SearchUserBackendContribution | undefined;
+  let audit: AuditUserBackendContribution | undefined;
   const connections = new Map<
     string,
     FoundationConnectionUserBackendContribution
@@ -189,6 +215,7 @@ export async function createFoundationUserBackendContributions(
         | BotTemplateUserBackendContribution
         | PackagePublisherUserContribution
         | SearchUserBackendContribution
+        | AuditUserBackendContribution
       >,
     ) => Plugin
   >([
@@ -360,6 +387,52 @@ export async function createFoundationUserBackendContributions(
         ),
     ],
     [
+      "@frockbot/plugin-audit/user",
+      (lifecycle) =>
+        createAuditUserBackendPlugin(
+          {
+            ...host.audit,
+            readDirectory: async () => {
+              if (!flock) {
+                throw new Error("Flock User Contribution is unavailable");
+              }
+              const directory = await flock.listBots();
+              return { botIds: directory.bots.map((bot) => bot.botId) };
+            },
+            // `mcp__<slug>__<tool>` names the Connection's slug; the host
+            // lives in that Connection's settings, which this object owns. The
+            // classifier stays pure and answers `remote:<slug>`; the one
+            // resolution to `remote:<host>` happens here, on the single path
+            // both projection and rebuild take, so the two cannot drift.
+            readMcpHosts: async () => {
+              const hosts = new Map<string, string>();
+              if (!settings) return hosts;
+              const snapshot = await settings.readSnapshot(host.storage);
+              for (const connection of snapshot.connections) {
+                if (connection.packageId !== "mcp") continue;
+                try {
+                  const url = new URL(
+                    decodeMcpConnectionSettingsV1(connection.settings).url,
+                  );
+                  hosts.set(mcpServerSlugV1(connection), url.host);
+                } catch {
+                  // A Connection whose settings this build cannot decode
+                  // leaves its slug unresolved, which is a less specific row
+                  // rather than a wrong one.
+                }
+              }
+              return hosts;
+            },
+          },
+          {
+            mount(value: AuditUserBackendContribution) {
+              audit = value;
+              return lifecycle.mount(value);
+            },
+          },
+        ),
+    ],
+    [
       "@frockbot/plugin-flock/user",
       (lifecycle) =>
         createFlockUserBackendPlugin(
@@ -454,6 +527,7 @@ export async function createFoundationUserBackendContributions(
     | BotTemplateUserBackendContribution
     | PackagePublisherUserContribution
     | SearchUserBackendContribution
+    | AuditUserBackendContribution
   >(plan, {
     backendHost: "user",
     resolve: (specifier, lifecycle) => {
@@ -472,11 +546,12 @@ export async function createFoundationUserBackendContributions(
     !flock ||
     !botTemplate ||
     !publisher ||
-    !search
+    !search ||
+    !audit
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Bot Templates, Search, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Bot Templates, Search, Audit, and Package Publisher User Contributions",
     );
   }
   return {
@@ -488,6 +563,7 @@ export async function createFoundationUserBackendContributions(
     botTemplate,
     publisher,
     search,
+    audit,
     dispose: mounted.dispose,
   };
 }

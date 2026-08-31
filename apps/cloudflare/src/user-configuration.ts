@@ -64,6 +64,15 @@ import {
 } from "@frockbot/plugin-search";
 import type { BotSearchRpc } from "./search.js";
 import {
+  AUDIT_KINDS_V1,
+  AUDIT_MAX_ENTRY_PAGE_V1,
+  AUDIT_MAX_RESULTS_V1,
+  type AuditEntryV1,
+  type AuditIndexStateV1,
+  type AuditRebuildReceiptV1,
+} from "@frockbot/plugin-audit";
+import type { BotAuditRpc } from "./audit.js";
+import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
@@ -182,6 +191,32 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
               ) as unknown as BotSearchRpc;
               return rpc
                 .projectSearchRows({
+                  schemaVersion: 1,
+                  userId,
+                  botId,
+                  ...(cursor === undefined ? {} : { cursor }),
+                })
+                .then(rpcJsonSnapshotV1);
+            },
+          },
+          // The audit table (parity register rows 30 and 30b). Same object,
+          // same SQL storage, same discipline as the transcript index: every
+          // row is a projection of the Bots' own durable session events, and
+          // `rebuildAuditIndex` reads them back from that authority.
+          audit: {
+            sql: this.ctx.storage.sql,
+            projectBotEntries: (botId, cursor) => {
+              const userId = this.identity;
+              if (!userId) {
+                throw new Error(
+                  "this User Durable Object has no proven identity to rebuild for",
+                );
+              }
+              const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+              // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+              const rpc = this.env.BOT_STATES.get(id) as unknown as BotAuditRpc;
+              return rpc
+                .projectAuditEntries({
                   schemaVersion: 1,
                   userId,
                   botId,
@@ -1006,6 +1041,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     for (const lifecycle of lifecycles.lifecycles) {
       if (lifecycle.status === "archived") {
         contributions.search.purge(lifecycle.botId);
+        contributions.audit.purgeAuditForBot(lifecycle.botId);
       }
     }
   }
@@ -1051,6 +1087,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     // brings every one of them back from the Bot's own stored runs.
     if (command.type === "bot/archive" && receipt.status === "applied") {
       (await this.searchContribution()).purge(command.botId);
+      (await this.auditContribution()).purgeAuditForBot(command.botId);
     }
     return receipt;
   }
@@ -1394,6 +1431,122 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           visibility: found.share.visibility,
           document: found.document,
         };
+  }
+
+  private async auditContribution(): Promise<
+    MountedFoundationUserBackend["audit"]
+  > {
+    return (await this.contributions()).audit;
+  }
+
+  /**
+   * Audit entries for one settled Turn, from the Bot Durable Object that owns
+   * it.
+   *
+   * Idempotent on `(botId, runId, occurrenceId)`, which is what makes the Bot
+   * object's outbox safe: it delivers at least once, and a redelivery inserts
+   * nothing.
+   */
+  async indexAuditEntries(input: unknown): Promise<{ indexed: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      entries: rpcDecodedValue,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    const botId = request.botId as string;
+    if (!(await (await this.flockContribution()).hasBot(botId))) {
+      throw new Error(`Bot "${botId}" is not registered to this User`);
+    }
+    if (!Array.isArray(request.entries)) {
+      throw new Error("RPC request.entries must be an array");
+    }
+    if (request.entries.length > AUDIT_MAX_ENTRY_PAGE_V1) {
+      throw new Error("RPC request.entries exceeds its bound");
+    }
+    // A Bot audits its own effects and no other's.
+    const foreign = request.entries.find(
+      (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        (entry as { botId?: unknown }).botId !== botId,
+    );
+    if (foreign) {
+      throw new Error("audit entries name another Bot");
+    }
+    return (await this.auditContribution()).indexAuditEntries(request.entries);
+  }
+
+  /**
+   * Throws the audit table away and re-projects it from the Bots' own stored
+   * runs. The receipt names the discrepancy count, never a silent gap.
+   */
+  async rebuildAuditIndex(input: unknown): Promise<AuditRebuildReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.auditContribution()).rebuildAuditIndex();
+  }
+
+  /**
+   * One filtered, paged answer out of this User's audit table.
+   *
+   * User-scoped by construction: there is no cross-User store to reach into,
+   * and the object refuses any RPC naming a User it is not.
+   */
+  async readAuditEntries(input: unknown): Promise<{
+    schemaVersion: 1;
+    entries: AuditEntryV1[];
+    nextCursor?: string;
+    total: number;
+    indexState: AuditIndexStateV1;
+  }> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier },
+      {
+        botId: rpcBotId,
+        kind: rpcEnum(AUDIT_KINDS_V1),
+        target: rpcString(160),
+        before: rpcString(64),
+        limit: rpcInteger({ minimum: 1, maximum: AUDIT_MAX_RESULTS_V1 }),
+      },
+    );
+    await this.assertFlockIdentity(request.userId as string);
+    const contribution = await this.auditContribution();
+    const page = contribution.query({
+      ...(request.botId === undefined
+        ? {}
+        : { botId: request.botId as string }),
+      ...(request.kind === undefined ? {} : { kind: request.kind as string }),
+      ...(request.target === undefined
+        ? {}
+        : { target: request.target as string }),
+      ...(request.before === undefined
+        ? {}
+        : { before: request.before as string }),
+      ...(request.limit === undefined
+        ? {}
+        : { limit: request.limit as number }),
+    });
+    return {
+      schemaVersion: 1,
+      entries: page.entries,
+      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+      total: page.total,
+      indexState: contribution.state(),
+    };
+  }
+
+  /** Every entry of one Bot leaves the table. Archiving a Bot calls this. */
+  async purgeAuditForBot(input: unknown): Promise<{ removed: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.auditContribution()).purgeAuditForBot(
+      request.botId as string,
+    );
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {

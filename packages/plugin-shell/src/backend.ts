@@ -3640,6 +3640,60 @@ export class ShellBotBackendContribution {
     return projectClientRunLookupV1(await this.authority.readRun(query.runId));
   }
 
+  /**
+   * One page of settled runs as their durable session events, newest first.
+   *
+   * The client projection is not enough for every reader: it drops
+   * `call.input`, so a projection that has to identify *what* a tool was asked
+   * to do — an audit digest, say — cannot be built from it. This is the same
+   * runs, unprojected, offered as the narrow shape such a reader needs and
+   * nothing wider: the events, the run id, its admission time, its status. No
+   * Composition snapshot, no fingerprint, no configuration.
+   *
+   * Settled runs only. An in-flight run's events can still change, and a
+   * projection built from them would not be reproducible.
+   */
+  async listRunEventPage(cursor?: string): Promise<{
+    schemaVersion: 1;
+    runs: Array<{
+      runId: string;
+      acceptedAt: string;
+      status: StoredRunStatus;
+      events: SessionEvent[];
+    }>;
+    nextCursor?: string;
+  }> {
+    const candidates = await this.authority.listRunIndex({
+      limit: CLIENT_RUN_PAGE_LIMIT + 1,
+      ...(cursor ? { before: cursor } : {}),
+    });
+    const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
+    const runs: Array<{
+      runId: string;
+      acceptedAt: string;
+      status: StoredRunStatus;
+      events: SessionEvent[];
+    }> = [];
+    for (const candidate of available) {
+      const stored = await this.authority.readStoredRun(candidate.runId);
+      if (!stored) continue;
+      runs.push({
+        runId: stored.runId,
+        acceptedAt: stored.acceptedAt,
+        status: stored.status,
+        events: stored.events,
+      });
+    }
+    const oldest = available.at(-1)?.cursor;
+    return {
+      schemaVersion: 1,
+      runs,
+      ...(candidates.length > CLIENT_RUN_PAGE_LIMIT && oldest
+        ? { nextCursor: oldest }
+        : {}),
+    };
+  }
+
   async fenceRunAdmission(
     identity: BotIdentity,
     input: unknown,
