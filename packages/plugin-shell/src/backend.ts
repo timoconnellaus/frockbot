@@ -2599,6 +2599,30 @@ export class ShellBotBackendContribution {
           this.authorizeAdmittedAssignedEffect(identity, assignment)
       : (assignment: BotSettingsViewV1["assignments"][number]) =>
           this.authorizeAssignedEffect(identity, assignment);
+    // The Package-level settings this User holds, resolved against the manifest
+    // of the Composition this Turn is pinned to. They come from the same `user`
+    // read the rest of this Composition uses, so a value the User changed is
+    // picked up when the next Turn resolves its Composition and never inside
+    // one already running.
+    const packageSettings = (
+      packageId: string,
+    ): Record<string, string | number | boolean> => {
+      const installation = user.packages.find(
+        (candidate) => candidate.packageId === packageId,
+      );
+      const declared = application.packages.find(
+        (candidate) =>
+          candidate.id === packageId &&
+          candidate.version === installation?.version,
+      );
+      return resolvePackageSettingValuesV1(
+        declared?.manifest.configuration?.settings ?? [],
+        installation?.values,
+      );
+    };
+    // The `image.model` Package setting, already checked against the enum the
+    // Image Package's manifest declares.
+    const configuredImageModel = packageSettings("image").model;
     const resolvedAgentPackages: FoundationAgentPackage[] = [
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
@@ -2629,7 +2653,16 @@ export class ShellBotBackendContribution {
         // A Bot generates an image only inside an admitted Turn, whose Session
         // and Turn the Workspace write names as its writer.
         ...(turn
-          ? { image: createBotImageHost(identity, turn, this.env) }
+          ? {
+              image: createBotImageHost(
+                identity,
+                turn,
+                this.env,
+                typeof configuredImageModel === "string"
+                  ? configuredImageModel
+                  : undefined,
+              ),
+            }
           : {}),
         // A Bot changes its own identity, or adds a Bot to its User's flock,
         // only inside an admitted Turn whose Session and Turn the write names.
@@ -2715,25 +2748,7 @@ export class ShellBotBackendContribution {
           userId: identity.userId,
           readSecret,
           authorizeConnection: authorizeAssignedConnection,
-          // The Package-level settings this User holds, resolved against the
-          // manifest of the Composition this Turn is pinned to. They come from
-          // the same `user` read the rest of this Composition uses, so a value
-          // the User changed is picked up when the next Turn resolves its
-          // Composition and never inside one already running.
-          packageSettings: (packageId) => {
-            const installation = user.packages.find(
-              (candidate) => candidate.packageId === packageId,
-            );
-            const declared = application.packages.find(
-              (candidate) =>
-                candidate.id === packageId &&
-                candidate.version === installation?.version,
-            );
-            return resolvePackageSettingValuesV1(
-              declared?.manifest.configuration?.settings ?? [],
-              installation?.values,
-            );
-          },
+          packageSettings,
           // Assigned Contributions reach the network through the same
           // outbound seam the model provider uses, so a deployment that stubs
           // it stubs every one of them.
