@@ -209,7 +209,7 @@ const PROVISION_STOPPED_POLLS = 3;
  * Generous, because a restart is cheap and safe: every phase is marker-guarded,
  * so a relaunch resumes the install rather than repeating it, and the ten
  * minute deadline is what actually bounds the run. Measured against a real
- * Sprite, `apt-get install chromium` is heavy enough that the machine drops
+ * Sprite, the desktop install is heavy enough that the machine drops
  * connections and loses its provisioner more than once or twice.
  */
 const PROVISION_RELAUNCHES = 8;

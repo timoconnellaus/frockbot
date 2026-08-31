@@ -37,6 +37,78 @@ export const BOUNDED_LOG_HEAD_BYTES = 131_072;
 /** Bytes kept from its tail. Together, GrokBot's 256 KiB cap. */
 export const BOUNDED_LOG_TAIL_BYTES = 131_072;
 export const ENSURE_AGENT_SCRIPT = `${RUNTIME_ROOT}/ensure-agent.sh`;
+/** Where Playwright keeps the browser builds it downloads for this Computer. */
+export const BROWSERS_ROOT = `${RUNTIME_ROOT}/browsers`;
+/**
+ * The one path that runs the Computer's browser.
+ *
+ * It is a symlink rather than a package because Ubuntu's `chromium` is a snap
+ * transitional package (ADR 0004): installing it drags in `snapd` and
+ * `systemd` and never finished inside the ten-minute bound. The browser is
+ * Playwright's own Chromium build instead — a self-contained tarball from
+ * Playwright's CDN, no package manager involved — and this symlink is what
+ * keeps `start-desktop.sh` free of the version in its directory name.
+ */
+export const CHROMIUM_PATH = `${HOME_ROOT}/bin/chromium`;
+/** Pinned with `playwright-core`, because the driver and the build must agree. */
+export const PLAYWRIGHT_VERSION = "1.55.0";
+/**
+ * The Playwright build the Computer downloads, named for a release Playwright
+ * knows rather than the one the Sprite actually runs.
+ *
+ * Playwright resolves a browser build from the host distribution and refuses
+ * anything it has no build for: on the Sprite base image it answers "Playwright
+ * does not support chromium on ubuntu26.04-x64" and installs nothing. This is
+ * the newest release it does have a build for, and that build was verified
+ * running headful under Xvfb on a real Sprite with CDP answering.
+ */
+export const PLAYWRIGHT_PLATFORM = "ubuntu24.04-x64";
+
+/**
+ * Everything the Computer's desktop needs from the distribution, and nothing
+ * that merely recommends itself.
+ *
+ * `chromium` is deliberately absent. On the Sprite base image (Ubuntu 25.10)
+ * it is a snap transitional package: installing it pulls `snapd` and
+ * `systemd` and, measured on 2026-09-01, had not finished after 25 minutes.
+ * The browser arrives in the `browser` phase instead, as Playwright's own
+ * self-contained Chromium build. What is left here is the display (`xvfb`),
+ * the window manager (`fluxbox`), the VNC server (`x11vnc`), the viewer's
+ * static assets and proxy (`novnc`, `websockify`), `xdpyinfo` (`x11-utils`)
+ * for the desktop script's readiness wait, `scrot` for `computer_screenshot`,
+ * and the shared libraries that
+ * Chromium build links against — those are named explicitly because
+ * `--no-install-recommends` is what keeps `python3-numpy`, `liblapack3`,
+ * `poppler-data`, and a font collection out of a cold Computer.
+ */
+export const DESKTOP_PACKAGES = [
+  "xvfb",
+  "fluxbox",
+  "x11vnc",
+  "novnc",
+  "websockify",
+  "x11-utils",
+  "xauth",
+  "scrot",
+  "ca-certificates",
+  "util-linux",
+  "libnss3",
+  "libnspr4",
+  "libatk1.0-0t64",
+  "libatk-bridge2.0-0t64",
+  "libcups2t64",
+  "libdrm2",
+  "libxkbcommon0",
+  "libxcomposite1",
+  "libxdamage1",
+  "libxfixes3",
+  "libxrandr2",
+  "libgbm1",
+  "libpango-1.0-0",
+  "libcairo2",
+  "libasound2t64",
+  "libatspi2.0-0",
+] as const;
 export const LEASE_MAX_AGE_SECONDS = 90;
 /**
  * How long a tenant's slot is held after the provider last opened or ran
@@ -75,7 +147,7 @@ rm -f "/tmp/.X$DISPLAY_NUMBER-lock" "/tmp/.X11-unix/X$DISPLAY_NUMBER"
 Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp &
 for _ in $(seq 1 100); do xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break; sleep 0.1; done
 fluxbox >"$BOT/fluxbox.log" 2>&1 &
-chromium --no-sandbox --disable-dev-shm-usage --disable-gpu --user-data-dir="${HOME_ROOT}/chrome-profile" --remote-debugging-address=127.0.0.1 --remote-debugging-port="$CDP_PORT" --start-maximized about:blank >"$BOT/chromium.log" 2>&1 &
+${CHROMIUM_PATH} --no-sandbox --disable-dev-shm-usage --disable-gpu --user-data-dir="${HOME_ROOT}/chrome-profile" --remote-debugging-address=127.0.0.1 --remote-debugging-port="$CDP_PORT" --start-maximized about:blank >"$BOT/chromium.log" 2>&1 &
 x11vnc -display "$DISPLAY" -forever -shared -rfbport "$VNC_PORT" -passwd "$(cat "$BOT/vnc-password")" >"$BOT/x11vnc.log" 2>&1 &
 VNC_PID=$!
 wait "$VNC_PID"
@@ -362,6 +434,56 @@ export const PROVISION_MARKERS = `${PROVISION_ROOT}/phases`;
 export const PROVISION_RUNNER_PREFIX = "frockbot-provision-runner:";
 
 /**
+ * The Sprite's own management socket, and the task that holds it awake.
+ *
+ * A detached provisioner does not keep its Sprite running. Sprites define
+ * activity as "a command running, a session producing output, an open TCP
+ * connection to its URL, a service handling traffic" — a `setsid nohup`
+ * background process is none of those, so the platform is free to pause the
+ * VM while `apt-get` is mid-download and resume it when the host's next poll
+ * arrives. Measured on 2026-09-01 against a disposable Sprite: with nothing
+ * holding it up, the Sprite's own clock advanced ~4 minutes while ~25 minutes
+ * of wall time passed, so provisioning ran at roughly a seventh of its speed
+ * and no package list could have fitted inside the ten-minute bound.
+ *
+ * The documented hold is the Tasks API on `/.sprite/api.sock`: "Register a
+ * task; the Sprite stays up. Delete it (or let it expire); the Sprite is free
+ * to pause again." The task is registered with a short expiry and refreshed
+ * from a child process, so a provisioner that dies without cleaning up stops
+ * paying for the Sprite within the expiry rather than pinning it awake.
+ *
+ * @see https://docs.sprites.dev/keeping-sprites-running/
+ */
+export const SPRITE_API_SOCKET = "/.sprite/api.sock";
+/** The name the provisioner's keepalive task holds. */
+export const PROVISION_TASK = "frockbot-provision";
+/** Short enough that a crashed provisioner releases the Sprite on its own. */
+export const PROVISION_TASK_EXPIRY = "5m";
+/** Four refreshes inside one expiry, the interval the Sprites docs recommend. */
+export const PROVISION_TASK_REFRESH_SECONDS = 60;
+
+/**
+ * PATH repair, run before anything in the provisioning document shells out.
+ *
+ * `/.sprite/bin/node` (and `npm`, and `npx`) is not the binary: it is a bash
+ * shim that sources `nvm.sh`, activates the default toolchain, and re-execs.
+ * Its last resort for locating the real binary is `command -v node`, which in
+ * a non-login shell resolves to the shim itself — so it re-execs itself for
+ * ever. Measured on a real Sprite: a detached `node --version` forked
+ * endlessly and never returned, which would have hung the browser phase the
+ * way `apt-get` hung the packages phase.
+ *
+ * The real toolchain directories are declared, one per line, in
+ * `/etc/profile.d/languages_paths`. Putting them on PATH first means every
+ * `node` and `npm` in this document is a binary rather than a shim, and the
+ * document keeps working unchanged if the file is ever absent.
+ */
+export const provisionPathPreamble = `if [ -r /etc/profile.d/languages_paths ]; then
+  PATH="$(tr '\\n' ':' < /etc/profile.d/languages_paths)$PATH"
+  export PATH
+fi`;
+
+/**
  * The phases of provisioning a Computer, in order.
  *
  * They are declared rather than inlined because they are three things at
@@ -385,10 +507,16 @@ chmod 600 ${RUNTIME_ROOT}/tokens`,
   {
     name: "packages",
     label: "installing the desktop packages",
-    body: `if ! command -v Xvfb >/dev/null || ! command -v chromium >/dev/null || ! command -v websockify >/dev/null || ! command -v scrot >/dev/null; then
+    body: `if ! command -v Xvfb >/dev/null || ! command -v x11vnc >/dev/null || ! command -v websockify >/dev/null || ! command -v scrot >/dev/null; then
   if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
+  # The base image ships a populated /var/lib/apt/lists, but a stale one: on
+  # 2026-09-01 installing straight from it failed with 404s on superseded
+  # libheif .debs that security.ubuntu.com no longer carries. The refresh is
+  # not the expense it looked like — measured at 6 s once the Sprite is held
+  # awake, against the 262 s recorded in ADR 0004 for the same command on a
+  # Sprite the platform kept pausing underneath it.
   $SUDO apt-get update
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y chromium xvfb fluxbox x11vnc novnc websockify x11-utils ca-certificates util-linux scrot
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${DESKTOP_PACKAGES.join(" ")}
 fi`,
   },
   {
@@ -405,9 +533,30 @@ chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRI
   },
   {
     name: "browser",
-    label: "installing the browser driver",
+    label: "installing the browser",
     body: `if [ ! -d ${RUNTIME_ROOT}/node_modules/playwright-core ]; then
-  npm install --prefix ${RUNTIME_ROOT} --no-audit --no-fund playwright-core@1.55.0
+  npm install --prefix ${RUNTIME_ROOT} --no-audit --no-fund playwright-core@${PLAYWRIGHT_VERSION}
+fi
+if [ ! -x ${CHROMIUM_PATH} ]; then
+  # Playwright's own build, from Playwright's CDN, unpacked into the runtime
+  # root: a real ELF binary with its libraries beside it, no package manager
+  # and no snap involved. The driver that talks to it over CDP is the
+  # \`playwright-core\` above, so the two are pinned to the same version.
+  # PLAYWRIGHT_HOST_PLATFORM_OVERRIDE, because Playwright ${PLAYWRIGHT_VERSION} refuses
+  # the Sprite base image outright: "Playwright does not support chromium on
+  # ubuntu26.04-x64". It has no build named for that release and will not
+  # guess. The build named for the newest release it does know runs on it —
+  # proved on a real Sprite, headful under Xvfb with CDP answering — so this
+  # names that build rather than leaving the phase to fail.
+  PLAYWRIGHT_BROWSERS_PATH=${BROWSERS_ROOT} PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=${PLAYWRIGHT_PLATFORM} node ${RUNTIME_ROOT}/node_modules/playwright-core/cli.js install chromium
+  CHROMIUM_BUILD=$(ls -d ${BROWSERS_ROOT}/chromium-*/chrome-linux*/chrome 2>/dev/null | head -1)
+  if [ -z "$CHROMIUM_BUILD" ]; then
+    echo "playwright installed no chromium build under ${BROWSERS_ROOT}" >&2
+    exit 1
+  fi
+  # A symlink, so the version in the build's directory name stays out of
+  # start-desktop.sh and an upgrade is one relink rather than a script change.
+  ln -sfn "$CHROMIUM_BUILD" ${CHROMIUM_PATH}
 fi`,
   },
   {
@@ -454,9 +603,31 @@ function provisionStateLine(
  * phase records where it has got to before it begins. `set -E` is what makes
  * the `ERR` trap fire from inside a function or a subshell, so a failure is
  * recorded rather than merely exiting.
+ *
+ * Before any of that it does the two things that make a detached run on a
+ * Sprite possible at all: it holds the Sprite awake with a Tasks-API task
+ * (see `SPRITE_API_SOCKET` — without it the platform pauses the VM under a
+ * background `apt-get`), and it puts the real toolchain on PATH (see
+ * `provisionPathPreamble` — without it `node` is a shim that re-execs itself
+ * for ever). Both releases are on an `EXIT` trap, so a provisioner that fails
+ * hands the Sprite back rather than pinning it awake.
  */
 export const provisionScript = `#!/usr/bin/env bash
 set -eEu
+${provisionPathPreamble}
+sprite_task() {
+  curl -sS --max-time 10 --unix-socket ${SPRITE_API_SOCKET} "$@" >/dev/null 2>&1 || true
+}
+sprite_task -H 'Content-Type: application/json' -X POST http://sprite/v1/tasks -d '{"name":"${PROVISION_TASK}","expire":"${PROVISION_TASK_EXPIRY}"}'
+while sleep ${PROVISION_TASK_REFRESH_SECONDS}; do
+  curl -sS --max-time 10 --unix-socket ${SPRITE_API_SOCKET} -H 'Content-Type: application/json' -X PUT http://sprite/v1/tasks/${PROVISION_TASK} -d '{"expire":"${PROVISION_TASK_EXPIRY}"}' >/dev/null 2>&1 || exit 0
+done &
+KEEPALIVE=$!
+release() {
+  kill "$KEEPALIVE" 2>/dev/null || true
+  sprite_task -X DELETE http://sprite/v1/tasks/${PROVISION_TASK}
+}
+trap release EXIT
 MARKERS=${PROVISION_MARKERS}
 STATE=${PROVISION_STATE}
 mkdir -p "$MARKERS"
