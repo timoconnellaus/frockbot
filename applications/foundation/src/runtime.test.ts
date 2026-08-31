@@ -47,6 +47,7 @@ describe("foundation application", () => {
       "provider-foundation",
       "settings",
       "provider-ollama-cloud",
+      "skills",
     ]);
     expect(first.contributions).toEqual({
       backend: [
@@ -67,6 +68,7 @@ describe("foundation application", () => {
         "memory",
         "provider-foundation",
         "provider-ollama-cloud",
+        "skills",
       ],
       client: [
         "ui-theme",
@@ -294,6 +296,28 @@ describe("foundation application", () => {
       "@frockbot/plugin-computer",
     ]);
     expect(requestedSecrets).toEqual(["SPRITES_TOKEN"]);
+
+    // The Skills Package mounts only for a Turn whose instruction root the
+    // host can read, and then it leads the hosted runtime packages.
+    expect(
+      createFoundationHostedRuntimePackages(plan, {
+        userId: "user-1",
+        readSecret: () => undefined,
+        skills: {
+          owner: { userId: "user-1", botId: "bot-1" },
+          reads: {
+            read: () => Promise.resolve({ status: "not-found", reason: "n/a" }),
+            stat: () => Promise.resolve({ status: "not-found", reason: "n/a" }),
+            list: () => Promise.resolve({ status: "ok", entries: [] }),
+          },
+        },
+      }).map((pkg) => pkg.specifier),
+    ).toEqual([
+      "@frockbot/plugin-skills",
+      "@frockbot/plugin-credentials",
+      "@frockbot/plugin-fly-sprite",
+      "@frockbot/plugin-computer",
+    ]);
 
     const assignment = {
       assignmentId: "unavailable-assignment",

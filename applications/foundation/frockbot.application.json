@@ -27,6 +27,11 @@
       "grants": ["packages:author"]
     },
     {
+      "specifier": "@frockbot/plugin-skills",
+      "version": "0.0.1",
+      "grants": ["skills:author"]
+    },
+    {
       "specifier": "@frockbot/plugin-echo",
       "version": "0.0.1",
       "grants": []

@@ -42,6 +42,7 @@
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
+        "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/plugin-ui-theme": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
@@ -247,6 +248,7 @@
         "@frockbot/plugin-prompt": "workspace:*",
         "@frockbot/plugin-provider-foundation": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
+        "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
@@ -734,6 +736,7 @@
         "@frockbot/kernel-do": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
+        "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "cordis": "4.0.0-rc.8",
         "vue": "3.5.41",
@@ -746,6 +749,19 @@
         "typescript": "5.9.3",
         "vite": "8.2.2",
         "vue-tsc": "3.3.10",
+      },
+    },
+    "packages/plugin-skills": {
+      "name": "@frockbot/plugin-skills",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-agent-loop": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
       },
     },
     "packages/plugin-testkit": {
@@ -1111,6 +1127,8 @@
     "@frockbot/plugin-settings": ["@frockbot/plugin-settings@workspace:packages/plugin-settings"],
 
     "@frockbot/plugin-shell": ["@frockbot/plugin-shell@workspace:packages/plugin-shell"],
+
+    "@frockbot/plugin-skills": ["@frockbot/plugin-skills@workspace:packages/plugin-skills"],
 
     "@frockbot/plugin-testkit": ["@frockbot/plugin-testkit@workspace:packages/plugin-testkit"],
 

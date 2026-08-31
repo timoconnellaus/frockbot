@@ -93,6 +93,11 @@ const createSettingsGatewayPlugin = (
   }
 ).plugin;
 import shellManifest from "@frockbot/plugin-shell/manifest";
+import skillsManifest from "@frockbot/plugin-skills/manifest";
+import {
+  createSkillsRuntimePlugin,
+  type SkillsRuntimeHostV1,
+} from "@frockbot/plugin-skills/agent";
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
 
@@ -118,6 +123,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-desktop-directory-picker", directoryPickerManifest],
   ["@frockbot/plugin-desktop-notifications", notificationsManifest],
   ["@frockbot/plugin-shell", shellManifest],
+  ["@frockbot/plugin-skills", skillsManifest],
   ["@frockbot/plugin-settings", settingsManifest],
 ]);
 
@@ -342,9 +348,19 @@ export function createFoundationHostedRuntimePackages(
      * whose run and session its provenance can name.
      */
     authoring?: PackageAuthoringHost;
+    /**
+     * The Skills seam, supplied by the Bot Durable Object for one admitted
+     * Turn. Absent outside a Turn, and outside one whose Workspace reads are
+     * available, and the Skills Package is then not mounted: a Turn with no
+     * readable instruction root loads no instructions rather than guessing.
+     */
+    skills?: SkillsRuntimeHostV1;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
+    ...(host.skills
+      ? [runtimePackage(plan, "skills", createSkillsRuntimePlugin(host.skills))]
+      : []),
     ...(host.authoring
       ? [
           runtimePackage(
@@ -466,6 +482,8 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Computer providers require host authority and are added only by a capable runtime.
   // Authoring mounts only for an admitted Turn, which supplies its host.
   runtimeIds.delete("authoring");
+  // Skills mount only for a Turn whose instruction root the host can read.
+  runtimeIds.delete("skills");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

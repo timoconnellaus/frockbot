@@ -74,6 +74,7 @@ import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
 } from "./backend-authoring.js";
+import { createBotSkillsHost } from "./backend-skills.js";
 import {
   decodeAuthoringQuotaReceiptV1,
   type AuthoringQuotaBinding,
@@ -1826,6 +1827,9 @@ export class ShellBotBackendContribution {
         // A Bot authors a Package only inside an admitted Turn, whose run and
         // session the artifact provenance names.
         ...(turn ? { authoring: this.authoringHost(identity, turn) } : {}),
+        ...(turn
+          ? { skills: createBotSkillsHost(identity, turn, this.env) }
+          : {}),
       }),
       ...(await createFoundationAssignedRuntimePackages(
         application,

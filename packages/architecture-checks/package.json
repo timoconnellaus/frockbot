@@ -19,6 +19,7 @@
     "@frockbot/plugin-prompt": "workspace:*",
     "@frockbot/plugin-provider-foundation": "workspace:*",
     "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
+    "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-tools": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
     "cordis": "4.0.0-rc.8"
