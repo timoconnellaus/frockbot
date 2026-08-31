@@ -4,6 +4,8 @@ import {
   clientSurfaceRegistryKey,
   type ClientPlugin,
 } from "@frockbot/client-core";
+import BotInfoSurface from "./BotInfoSurface.vue";
+import BotInfoTrigger from "./BotInfoTrigger.vue";
 import BotSettingsSurface from "./BotSettingsSurface.vue";
 import BotSettingsTrigger from "./BotSettingsTrigger.vue";
 import PluginsSurface from "./PluginsSurface.vue";
@@ -18,6 +20,14 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       id: "bot-settings",
       title: "Bot settings",
       component: BotSettingsSurface,
+      placement: "panel",
+    }),
+    // The per-Bot info pane takes the right panel the same way Bot settings
+    // does, so the conversation stays beside it.
+    surfaces.register({
+      id: "bot-info",
+      title: "Bot info",
+      component: BotInfoSurface,
       placement: "panel",
     }),
     surfaces.register({
@@ -39,6 +49,11 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       slot: "frockbot.user-profile",
       order: 10,
       component: UserProfileTrigger,
+    }),
+    ctx.slot({
+      slot: "frockbot.bot-actions",
+      order: 5,
+      component: BotInfoTrigger,
     }),
     ctx.slot({
       slot: "frockbot.bot-actions",

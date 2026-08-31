@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { UiButton, UiIcon } from "@frockbot/client-ui";
+import { UiAnchor, UiButton, UiIcon } from "@frockbot/client-ui";
 import type { ConnectionView } from "@frockbot/configuration-core";
 import {
   frockBotWebDataKey,
@@ -7,11 +7,14 @@ import {
   type CatalogIndexEntryV1,
   type PluginCatalogItem,
 } from "@frockbot/plugin-shell/shared";
+import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, onMounted, ref } from "vue";
 
 const providedWeb = inject(frockBotWebDataKey);
 if (!providedWeb) throw new Error("shell client data was not provided");
 const web = providedWeb;
+// Packages are User-scoped, so the catalog's link names no Bot.
+const packagesLink = settingsLinkV1({ anchor: "user-packages" });
 const search = ref("");
 const expandedPackageId = ref<string>();
 const apiKeyPackageId = ref<string>();
@@ -455,9 +458,16 @@ async function disconnect(connectionId: string): Promise<void> {
         aria-label="Search Plugins"
       />
     </label>
-    <p class="plugin-intro">
-      Add secure connections and capabilities to your Bots.
-    </p>
+    <UiAnchor
+      anchor="user-packages"
+      label="Packages"
+      :href="packagesLink"
+      class="plugin-anchor"
+    >
+      <p class="plugin-intro">
+        Add secure connections and capabilities to your Bots.
+      </p>
+    </UiAnchor>
     <div class="plugin-grid">
       <article
         v-for="item in filteredCatalog"
@@ -972,6 +982,10 @@ async function disconnect(connectionId: string): Promise<void> {
 </template>
 
 <style scoped>
+.plugin-anchor {
+  padding-right: var(--frock-control-sm);
+}
+
 .plugins-surface {
   padding: 24px;
 }

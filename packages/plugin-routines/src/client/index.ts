@@ -18,6 +18,7 @@ import {
 } from "../shared.js";
 import RoutineInboxBadge from "./RoutineInboxBadge.vue";
 import RoutinesSection from "./RoutinesSection.vue";
+import RoutinesSummary from "./RoutinesSummary.vue";
 import {
   routinesStateKey,
   type RoutineFormSubmissionV1,
@@ -274,6 +275,13 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
       slot: "frockbot.header-actions",
       order: 20,
       component: RoutineInboxBadge,
+    }),
+    // The info pane gets the glance; the section above stays the place a
+    // Routine is written.
+    ctx.slot({
+      slot: "frockbot.bot-info-sections",
+      order: 10,
+      component: RoutinesSummary,
     }),
   ];
 };

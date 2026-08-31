@@ -3,8 +3,9 @@
 // Routine. It renders durable state and submits versioned commands; it decides
 // nothing — "Next run" is the moment the scheduler has actually armed an alarm
 // on, sent down with the Routine, and blank when there is none to promise.
-import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
+import { UiAnchor, UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, reactive, ref, watch } from "vue";
 import type { RoutineViewV1 } from "../shared.js";
 import { routinesStateKey } from "./state.js";
@@ -18,6 +19,10 @@ const web = providedWeb;
 const routines = providedState;
 
 const botId = computed(() => web.value.activeBotId);
+// The section is deep-linkable: an error message or a send payload may cite it.
+const anchorHref = computed(() =>
+  settingsLinkV1({ anchor: "bot-routines", botId: botId.value }),
+);
 const formOpen = ref(false);
 const openLog = ref<string>();
 const copied = ref(false);
@@ -139,7 +144,13 @@ async function toggleLog(routineId: string): Promise<void> {
 </script>
 
 <template>
-  <section class="routines">
+  <UiAnchor
+    as="section"
+    anchor="bot-routines"
+    label="Routines"
+    :href="anchorHref"
+    class="routines"
+  >
     <header class="routines__header">
       <span class="routines__icon" aria-hidden="true"
         ><UiIcon name="history"
@@ -375,7 +386,7 @@ async function toggleLog(routineId: string): Promise<void> {
         <UiButton type="button" @click="formOpen = false">Cancel</UiButton>
       </div>
     </div>
-  </section>
+  </UiAnchor>
 </template>
 
 <style scoped>

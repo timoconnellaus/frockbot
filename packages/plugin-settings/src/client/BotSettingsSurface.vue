@@ -1,8 +1,24 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
-import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
+import {
+  UiAnchor,
+  UiButton,
+  UiField,
+  UiIcon,
+  UI_ANCHOR_EVENT,
+  type UiAnchorEvent,
+} from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
-import { computed, inject, onMounted, reactive, ref } from "vue";
+import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
+import {
+  computed,
+  inject,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import {
   assignmentHasPendingOperation,
   projectAssignmentOperations,
@@ -27,6 +43,33 @@ if (!providedSurfaces || !providedWeb) {
 }
 const surfaces = providedSurfaces;
 const web = providedWeb;
+
+/*
+ * Every row below is deep-linkable. The scheme and the anchor table live in
+ * `@frockbot/plugin-shell/settings-links`, so a Bot citing a row and the panel
+ * rendering it read the same list — a link nobody registered does not resolve,
+ * and a row nobody linked has no link to copy.
+ */
+function link(anchor: string): string {
+  return settingsLinkV1({ anchor, botId: web.value.activeBotId });
+}
+
+/*
+ * Model and Assignments live under the Advanced disclosure, and a collapsed
+ * `details` cannot be scrolled to. A link into either opens it first; the User
+ * can still close it, and the `toggle` handler keeps their choice.
+ */
+const ADVANCED_ANCHORS = new Set(["bot-model", "bot-capabilities"]);
+const advancedOpen = ref(false);
+
+function openAdvancedFor(anchor: string): void {
+  if (ADVANCED_ANCHORS.has(anchor)) advancedOpen.value = true;
+}
+
+function onAnchorAnnounced(event: Event): void {
+  openAdvancedFor((event as UiAnchorEvent).detail);
+}
+
 const name = ref("");
 const label = ref("");
 const description = ref("");
@@ -167,32 +210,60 @@ const defaultModelName = computed(
 );
 const overriding = computed(() => Boolean(web.value.botSettings?.model));
 
-onMounted(async () => {
-  await Promise.all([
-    web.value.loadPluginCatalog(),
-    web.value.loadBotSettings(),
-    web.value.loadUserSettings(),
-  ]);
-  const settings = web.value.botSettings;
-  if (!settings) return;
-  name.value = settings.profile.name;
-  label.value = settings.profile.label ?? "";
-  description.value = settings.profile.description ?? "";
-  title.value = settings.profile.title ?? "";
-  hiddenFromSidebar.value = settings.profile.hiddenFromSidebar === true;
-  notifications.value = settings.notifications.enabled;
-  modelMode.value = settings.model ? "custom" : "default";
-  selectedModel.value = encodeModelSelection(settings.model);
-  exactConnectionId.value =
-    settings.model?.connectionId ??
-    readyConnections.value[0]?.connectionId ??
-    "";
-  exactProviderModelId.value = settings.model?.providerModelId ?? "";
-  useExactModel.value = Boolean(
-    settings.model &&
-    !modelOptions.value.some((model) => model.value === selectedModel.value),
-  );
+onMounted(() => {
+  window.addEventListener(UI_ANCHOR_EVENT, onAnchorAnnounced);
+  openAdvancedFor(decodeURIComponent(window.location.hash.replace(/^#/u, "")));
+  void web.value.loadPluginCatalog();
+  void web.value.loadBotSettings();
+  void web.value.loadUserSettings();
 });
+
+/*
+ * The form fills itself from whichever Bot's durable settings arrive, rather
+ * than from whatever had loaded by the time this panel mounted. A deep link
+ * opens the panel before the Flock has selected a Bot, and a User can switch
+ * Bots with the panel open; both used to leave the fields on screen belonging
+ * to nobody.
+ */
+const hydratedBotId = ref<string>();
+
+watch(
+  () => web.value.botSettings,
+  (settings) => {
+    if (!settings || hydratedBotId.value === settings.botId) return;
+    hydratedBotId.value = settings.botId;
+    name.value = settings.profile.name;
+    label.value = settings.profile.label ?? "";
+    description.value = settings.profile.description ?? "";
+    title.value = settings.profile.title ?? "";
+    hiddenFromSidebar.value = settings.profile.hiddenFromSidebar === true;
+    notifications.value = settings.notifications.enabled;
+    modelMode.value = settings.model ? "custom" : "default";
+    selectedModel.value = encodeModelSelection(settings.model);
+    exactConnectionId.value =
+      settings.model?.connectionId ??
+      readyConnections.value[0]?.connectionId ??
+      "";
+    exactProviderModelId.value = settings.model?.providerModelId ?? "";
+    useExactModel.value = Boolean(
+      settings.model &&
+      !modelOptions.value.some((model) => model.value === selectedModel.value),
+    );
+  },
+  { immediate: true },
+);
+
+// The Connections may land after the Bot did; an empty exact-model Connection
+// takes the first ready one the moment there is one.
+watch(readyConnections, (connections) => {
+  if (!exactConnectionId.value && connections[0]) {
+    exactConnectionId.value = connections[0].connectionId;
+  }
+});
+
+onBeforeUnmount(() =>
+  window.removeEventListener(UI_ANCHOR_EVENT, onAnchorAnnounced),
+);
 
 async function saveModel(): Promise<void> {
   if (modelMode.value === "default") {
@@ -314,67 +385,120 @@ async function unassign(
         </p>
       </div>
     </div>
-    <div class="avatar-actions">
-      <input
-        ref="avatarInput"
-        class="avatar-picker"
-        type="file"
-        :accept="BOT_AVATAR_ACCEPT"
-        @change="chooseAvatar"
-      />
-      <UiButton
-        type="button"
-        :disabled="avatarBusy"
-        @click="avatarInput?.click()"
-      >
-        {{ avatar ? "Replace avatar" : "Upload avatar" }}
-      </UiButton>
-      <UiButton
-        v-if="avatar"
-        type="button"
-        variant="danger"
-        :disabled="avatarBusy"
-        @click="clearAvatar"
-      >
-        Use the sheep
-      </UiButton>
-    </div>
-    <UiField label="Name">
-      <input v-model="name" maxlength="100" required />
-    </UiField>
-    <UiField label="Title" hint="optional">
-      <input
-        v-model="title"
-        maxlength="120"
-        placeholder="Chief of staff, night-shift researcher"
-      />
-    </UiField>
-    <UiField label="Label" hint="optional">
-      <input
-        v-model="label"
-        maxlength="120"
-        placeholder="Research, marketing, admin"
-      />
-    </UiField>
-    <UiField label="Description">
-      <textarea v-model="description" maxlength="10000" rows="7" />
-    </UiField>
-    <label class="notification-setting">
-      <span>
-        <strong>Notifications</strong>
-        <small>Get notified when this Bot finishes or needs input.</small>
-      </span>
-      <input v-model="notifications" type="checkbox" />
-    </label>
-    <label class="notification-setting">
-      <span>
-        <strong>Hidden from sidebar</strong>
-        <small>Keeps this Bot out of the list without archiving it.</small>
-      </span>
-      <input v-model="hiddenFromSidebar" type="checkbox" />
-    </label>
+    <UiAnchor
+      anchor="bot-avatar"
+      label="Avatar"
+      :href="link('bot-avatar')"
+      class="settings-row"
+    >
+      <div class="avatar-actions">
+        <input
+          ref="avatarInput"
+          class="avatar-picker"
+          type="file"
+          :accept="BOT_AVATAR_ACCEPT"
+          @change="chooseAvatar"
+        />
+        <UiButton
+          type="button"
+          :disabled="avatarBusy"
+          @click="avatarInput?.click()"
+        >
+          {{ avatar ? "Replace avatar" : "Upload avatar" }}
+        </UiButton>
+        <UiButton
+          v-if="avatar"
+          type="button"
+          variant="danger"
+          :disabled="avatarBusy"
+          @click="clearAvatar"
+        >
+          Use the sheep
+        </UiButton>
+      </div>
+    </UiAnchor>
+    <UiAnchor
+      anchor="bot-name"
+      label="Name"
+      :href="link('bot-name')"
+      class="settings-row"
+    >
+      <UiField label="Name">
+        <input v-model="name" maxlength="100" required />
+      </UiField>
+    </UiAnchor>
+    <UiAnchor
+      anchor="bot-title"
+      label="Title"
+      :href="link('bot-title')"
+      class="settings-row"
+    >
+      <UiField label="Title" hint="optional">
+        <input
+          v-model="title"
+          maxlength="120"
+          placeholder="Chief of staff, night-shift researcher"
+        />
+      </UiField>
+    </UiAnchor>
+    <UiAnchor
+      anchor="bot-label"
+      label="Label"
+      :href="link('bot-label')"
+      class="settings-row"
+    >
+      <UiField label="Label" hint="optional">
+        <input
+          v-model="label"
+          maxlength="120"
+          placeholder="Research, marketing, admin"
+        />
+      </UiField>
+    </UiAnchor>
+    <UiAnchor
+      anchor="bot-description"
+      label="Description"
+      :href="link('bot-description')"
+      class="settings-row"
+    >
+      <UiField label="Description">
+        <textarea v-model="description" maxlength="10000" rows="7" />
+      </UiField>
+    </UiAnchor>
+    <UiAnchor
+      anchor="bot-notifications"
+      label="Notifications"
+      :href="link('bot-notifications')"
+      class="settings-row"
+    >
+      <label class="notification-setting">
+        <span>
+          <strong>Notifications</strong>
+          <small>Get notified when this Bot finishes or needs input.</small>
+        </span>
+        <input v-model="notifications" type="checkbox" />
+      </label>
+    </UiAnchor>
+    <UiAnchor
+      anchor="bot-hidden-from-sidebar"
+      label="Hidden from sidebar"
+      :href="link('bot-hidden-from-sidebar')"
+      class="settings-row"
+    >
+      <label class="notification-setting">
+        <span>
+          <strong>Hidden from sidebar</strong>
+          <small>Keeps this Bot out of the list without archiving it.</small>
+        </span>
+        <input v-model="hiddenFromSidebar" type="checkbox" />
+      </label>
+    </UiAnchor>
     <p v-if="overriding" class="model-note">Overrides default model</p>
-    <details class="advanced">
+    <details
+      class="advanced"
+      :open="advancedOpen"
+      @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open"
+    >
       <summary>
         <span>Advanced</span>
         <span class="advanced__marker" aria-hidden="true"
@@ -382,17 +506,24 @@ async function unassign(
         /></span>
       </summary>
       <div class="advanced__body">
-        <fieldset class="model-mode">
-          <legend>Model</legend>
-          <label>
-            <input v-model="modelMode" type="radio" value="default" />
-            <span>Use default model ({{ defaultModelName }})</span>
-          </label>
-          <label>
-            <input v-model="modelMode" type="radio" value="custom" />
-            <span>Custom model</span>
-          </label>
-        </fieldset>
+        <UiAnchor
+          anchor="bot-model"
+          label="Model"
+          :href="link('bot-model')"
+          class="settings-row"
+        >
+          <fieldset class="model-mode">
+            <legend>Model</legend>
+            <label>
+              <input v-model="modelMode" type="radio" value="default" />
+              <span>Use default model ({{ defaultModelName }})</span>
+            </label>
+            <label>
+              <input v-model="modelMode" type="radio" value="custom" />
+              <span>Custom model</span>
+            </label>
+          </fieldset>
+        </UiAnchor>
         <template v-if="modelMode === 'custom'">
           <label class="exact-model-setting">
             <span>
@@ -435,139 +566,147 @@ async function unassign(
             </select>
           </UiField>
         </template>
-        <section class="assignment-settings">
-          <div>
-            <strong>Capability Assignments</strong>
-            <p>
-              Grant this Bot an installed Capability and required Connection.
-            </p>
-          </div>
-          <article
-            v-for="item in capabilityItems"
-            :key="item.key"
-            class="assignment-card"
-          >
+        <UiAnchor
+          anchor="bot-capabilities"
+          label="Capability Assignments"
+          :href="link('bot-capabilities')"
+          class="settings-row"
+        >
+          <section class="assignment-settings">
             <div>
-              <strong
-                >{{ item.pkg.displayName }} · {{ item.capability.id }}</strong
-              >
-              <small v-if="item.pending">
-                {{ item.pending.kind }} · {{ item.pending.state }}
-              </small>
-              <small v-else-if="item.existing">
-                {{ item.existing.state }}
-              </small>
-              <small v-else>Not assigned</small>
+              <strong>Capability Assignments</strong>
+              <p>
+                Grant this Bot an installed Capability and required Connection.
+              </p>
             </div>
-            <select
-              v-if="item.capability.connectionTypes.length > 0"
-              v-model="selectedConnections[item.key]"
-              :disabled="Boolean(item.pending)"
-              :aria-label="`Connection for ${item.capability.id}`"
+            <article
+              v-for="item in capabilityItems"
+              :key="item.key"
+              class="assignment-card"
             >
-              <option value="">Choose a ready Connection</option>
-              <option
-                v-for="connection in item.connections"
-                :key="connection.connectionId"
-                :value="connection.connectionId"
+              <div>
+                <strong
+                  >{{ item.pkg.displayName }} · {{ item.capability.id }}</strong
+                >
+                <small v-if="item.pending">
+                  {{ item.pending.kind }} · {{ item.pending.state }}
+                </small>
+                <small v-else-if="item.existing">
+                  {{ item.existing.state }}
+                </small>
+                <small v-else>Not assigned</small>
+              </div>
+              <select
+                v-if="item.capability.connectionTypes.length > 0"
+                v-model="selectedConnections[item.key]"
+                :disabled="Boolean(item.pending)"
+                :aria-label="`Connection for ${item.capability.id}`"
               >
-                {{ connection.displayName }}
-              </option>
-            </select>
-            <div class="assignment-actions">
-              <UiButton
-                v-if="!item.existing"
-                type="button"
-                :disabled="
-                  Boolean(item.pending) ||
-                  assignmentBusy === item.key ||
-                  (item.capability.connectionTypes.length > 0 &&
-                    !selectedConnections[item.key])
-                "
-                @click="assign(item)"
-              >
-                Assign
-              </UiButton>
-              <template v-else>
+                <option value="">Choose a ready Connection</option>
+                <option
+                  v-for="connection in item.connections"
+                  :key="connection.connectionId"
+                  :value="connection.connectionId"
+                >
+                  {{ connection.displayName }}
+                </option>
+              </select>
+              <div class="assignment-actions">
                 <UiButton
+                  v-if="!item.existing"
                   type="button"
                   :disabled="
-                    Boolean(item.pending) || assignmentBusy === item.key
+                    Boolean(item.pending) ||
+                    assignmentBusy === item.key ||
+                    (item.capability.connectionTypes.length > 0 &&
+                      !selectedConnections[item.key])
                   "
-                  @click="replace(item)"
+                  @click="assign(item)"
                 >
-                  Replace
+                  Assign
                 </UiButton>
+                <template v-else>
+                  <UiButton
+                    type="button"
+                    :disabled="
+                      Boolean(item.pending) || assignmentBusy === item.key
+                    "
+                    @click="replace(item)"
+                  >
+                    Replace
+                  </UiButton>
+                  <UiButton
+                    type="button"
+                    variant="danger"
+                    :disabled="
+                      Boolean(item.pending) || assignmentBusy === item.key
+                    "
+                    @click="unassign(item)"
+                  >
+                    Unassign
+                  </UiButton>
+                </template>
+              </div>
+            </article>
+            <article
+              v-for="operation in assignmentOperations"
+              :key="`operation:${operation.commandId}`"
+              class="assignment-card"
+              data-assignment-operation
+            >
+              <div>
+                <strong>
+                  {{ operation.target?.packageId ?? "Unavailable Package" }} ·
+                  {{ operation.target?.capabilityId ?? operation.assignmentId }}
+                </strong>
+                <small>{{ operation.kind }} · {{ operation.state }}</small>
+              </div>
+            </article>
+            <article
+              v-for="assignment in orphanAssignments"
+              :key="assignment.assignmentId"
+              class="assignment-card"
+            >
+              <div>
+                <strong
+                  >{{ assignment.packageId }} ·
+                  {{ assignment.capabilityId }}</strong
+                >
+                <small
+                  >{{ assignment.state }} · no longer available in the
+                  catalog</small
+                >
+              </div>
+              <div class="assignment-actions">
                 <UiButton
                   type="button"
                   variant="danger"
                   :disabled="
-                    Boolean(item.pending) || assignmentBusy === item.key
+                    assignmentBusy === assignment.assignmentId ||
+                    assignmentOperationPending(assignment.assignmentId)
                   "
-                  @click="unassign(item)"
+                  @click="
+                    unassignAssignment(
+                      assignment.assignmentId,
+                      assignment.assignmentId,
+                    )
+                  "
                 >
                   Unassign
                 </UiButton>
-              </template>
-            </div>
-          </article>
-          <article
-            v-for="operation in assignmentOperations"
-            :key="`operation:${operation.commandId}`"
-            class="assignment-card"
-            data-assignment-operation
-          >
-            <div>
-              <strong>
-                {{ operation.target?.packageId ?? "Unavailable Package" }} ·
-                {{ operation.target?.capabilityId ?? operation.assignmentId }}
-              </strong>
-              <small>{{ operation.kind }} · {{ operation.state }}</small>
-            </div>
-          </article>
-          <article
-            v-for="assignment in orphanAssignments"
-            :key="assignment.assignmentId"
-            class="assignment-card"
-          >
-            <div>
-              <strong
-                >{{ assignment.packageId }} ·
-                {{ assignment.capabilityId }}</strong
-              >
-              <small
-                >{{ assignment.state }} · no longer available in the
-                catalog</small
-              >
-            </div>
-            <div class="assignment-actions">
-              <UiButton
-                type="button"
-                variant="danger"
-                :disabled="
-                  assignmentBusy === assignment.assignmentId ||
-                  assignmentOperationPending(assignment.assignmentId)
-                "
-                @click="
-                  unassignAssignment(
-                    assignment.assignmentId,
-                    assignment.assignmentId,
-                  )
-                "
-              >
-                Unassign
-              </UiButton>
-            </div>
-          </article>
-          <p
-            v-if="
-              capabilityItems.length === 0 && orphanAssignments.length === 0
-            "
-            class="assignment-empty"
-          >
-            No assignable Capabilities are available in the production catalog.
-          </p>
-        </section>
+              </div>
+            </article>
+            <p
+              v-if="
+                capabilityItems.length === 0 && orphanAssignments.length === 0
+              "
+              class="assignment-empty"
+            >
+              No assignable Capabilities are available in the production
+              catalog.
+            </p>
+          </section>
+        </UiAnchor>
       </div>
     </details>
     <k-slot name="frockbot.bot-settings-sections" />
@@ -583,6 +722,17 @@ async function unassign(
 </template>
 
 <style scoped>
+/*
+ * A deep-linkable row. The anchor floats its copy control in the top-right
+ * corner, so every row keeps that corner clear.
+ */
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: var(--frock-control-sm);
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;
