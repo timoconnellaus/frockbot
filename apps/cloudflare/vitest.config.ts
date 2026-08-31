@@ -39,6 +39,9 @@ export default defineConfig({
           COMPUTER_HOST_CLIENT: "ComputerHostClientProbe",
           FLY_COMPATIBILITY: "FlyCompatibilityProbe",
           SEARCH_SPIKE: { className: "SearchSpikeProbe", useSQLite: true },
+          // The audit table on real SQLite, at a size the unit fake cannot
+          // honestly stand in for.
+          AUDIT_PROBE: { className: "AuditProbe", useSQLite: true },
           // The User Durable Object is in `new_sqlite_classes` in
           // `wrangler.jsonc`, so it has SQL storage in production; miniflare
           // needs that said explicitly or the transcript index has nowhere to

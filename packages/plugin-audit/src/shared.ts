@@ -153,6 +153,12 @@ export interface AuditRebuildReceiptV1 {
   bots: number;
   indexState: AuditIndexStateV1;
   /**
+   * Entries whose outcome the durable event log does not know — a `tool/call`
+   * with no matching `tool/result`. Always real, because it is derived from
+   * the same events the table is.
+   */
+  unknownOutcomes: number;
+  /**
    * Effects the Computer host's own journal reported that no durable session
    * event accounts for. The host is non-authoritative (`AGENTS.md`
    * § Computer and Workspace), so such an effect is *counted and named*, never
@@ -437,5 +443,181 @@ export function decodeAuditEntryPageV1(input: unknown): AuditEntryPageV1 {
             "audit entry page",
           ),
         }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The query, and what the client is answered with.
+// ---------------------------------------------------------------------------
+
+/** One filtered, paged request for a User's audit entries. */
+export interface AuditQueryV1 {
+  schemaVersion: 1;
+  botId?: string;
+  kind?: AuditKindV1;
+  target?: string;
+  /** Opaque page cursor from a previous answer's `page.nextCursor`. */
+  before?: string;
+  limit?: number;
+}
+
+export interface ClientAuditPageV1 {
+  schemaVersion: 1;
+  entries: AuditEntryV1[];
+  /** The same page shape the transcript index answers with. */
+  page: { truncated: boolean; nextCursor?: string };
+  /** How many entries match the filters, before paging. */
+  total: number;
+  indexState: AuditIndexStateV1;
+}
+
+export function decodeAuditQueryV1(input: unknown): AuditQueryV1 {
+  const query = record(input, "audit query");
+  exactKeys(
+    query,
+    ["schemaVersion", "botId", "kind", "target", "before", "limit"],
+    "audit query",
+  );
+  if (query.schemaVersion !== 1) {
+    throw new AuditDecodeError("audit query.schemaVersion must be 1");
+  }
+  if (query.kind !== undefined) auditKind(query.kind, "audit query");
+  if (query.target !== undefined) {
+    const target = text(query, "target", MAX_TARGET_LENGTH, "audit query");
+    if (!isAuditTargetV1(target)) {
+      throw new AuditDecodeError("audit query.target is invalid");
+    }
+  }
+  if (
+    query.limit !== undefined &&
+    (!Number.isSafeInteger(query.limit) ||
+      (query.limit as number) < 1 ||
+      (query.limit as number) > AUDIT_MAX_RESULTS_V1)
+  ) {
+    throw new AuditDecodeError("audit query.limit must be a bounded integer");
+  }
+  return {
+    schemaVersion: 1,
+    ...(query.botId === undefined
+      ? {}
+      : { botId: identifier(query, "botId", "audit query") }),
+    ...(query.kind === undefined ? {} : { kind: query.kind as AuditKindV1 }),
+    ...(query.target === undefined ? {} : { target: query.target as string }),
+    ...(query.before === undefined
+      ? {}
+      : {
+          before: text(
+            query,
+            "before",
+            AUDIT_MAX_CURSOR_LENGTH_V1,
+            "audit query",
+          ),
+        }),
+    ...(query.limit === undefined ? {} : { limit: query.limit as number }),
+  };
+}
+
+export function decodeClientAuditPageV1(input: unknown): ClientAuditPageV1 {
+  const answer = record(input, "audit page");
+  exactKeys(
+    answer,
+    ["schemaVersion", "entries", "page", "total", "indexState"],
+    "audit page",
+  );
+  if (answer.schemaVersion !== 1) {
+    throw new AuditDecodeError("audit page.schemaVersion must be 1");
+  }
+  if (!Array.isArray(answer.entries)) {
+    throw new AuditDecodeError("audit page.entries must be an array");
+  }
+  if (answer.entries.length > AUDIT_MAX_RESULTS_V1) {
+    throw new AuditDecodeError("audit page.entries exceeds its bound");
+  }
+  const page = record(answer.page, "audit page.page");
+  exactKeys(page, ["truncated", "nextCursor"], "audit page.page");
+  if (typeof page.truncated !== "boolean") {
+    throw new AuditDecodeError("audit page.page.truncated must be a boolean");
+  }
+  if (
+    !Number.isSafeInteger(answer.total) ||
+    (answer.total as number) < answer.entries.length
+  ) {
+    throw new AuditDecodeError("audit page.total is invalid");
+  }
+  if (
+    answer.indexState !== "ready" &&
+    answer.indexState !== "rebuilding" &&
+    answer.indexState !== "truncated"
+  ) {
+    throw new AuditDecodeError("audit page.indexState is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    entries: answer.entries.map(decodeAuditEntryV1),
+    page: {
+      truncated: page.truncated,
+      ...(page.nextCursor === undefined
+        ? {}
+        : {
+            nextCursor: text(
+              page,
+              "nextCursor",
+              AUDIT_MAX_CURSOR_LENGTH_V1,
+              "audit page.page",
+            ),
+          }),
+    },
+    total: answer.total as number,
+    indexState: answer.indexState,
+  };
+}
+
+export function decodeAuditRebuildReceiptV1(
+  input: unknown,
+): AuditRebuildReceiptV1 {
+  const receipt = record(input, "audit rebuild receipt");
+  exactKeys(
+    receipt,
+    [
+      "schemaVersion",
+      "status",
+      "entries",
+      "bots",
+      "indexState",
+      "unknownOutcomes",
+      "hostJournalDiscrepancies",
+    ],
+    "audit rebuild receipt",
+  );
+  if (receipt.schemaVersion !== 1 || receipt.status !== "rebuilt") {
+    throw new AuditDecodeError("audit rebuild receipt is invalid");
+  }
+  for (const key of [
+    "entries",
+    "bots",
+    "unknownOutcomes",
+    "hostJournalDiscrepancies",
+  ] as const) {
+    if (!Number.isSafeInteger(receipt[key]) || (receipt[key] as number) < 0) {
+      throw new AuditDecodeError(
+        `audit rebuild receipt.${key} must be a non-negative integer`,
+      );
+    }
+  }
+  if (
+    receipt.indexState !== "ready" &&
+    receipt.indexState !== "rebuilding" &&
+    receipt.indexState !== "truncated"
+  ) {
+    throw new AuditDecodeError("audit rebuild receipt.indexState is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    status: "rebuilt",
+    entries: receipt.entries as number,
+    bots: receipt.bots as number,
+    indexState: receipt.indexState,
+    unknownOutcomes: receipt.unknownOutcomes as number,
+    hostJournalDiscrepancies: receipt.hostJournalDiscrepancies as number,
   };
 }

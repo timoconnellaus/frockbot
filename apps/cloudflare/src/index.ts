@@ -64,6 +64,11 @@ import {
   type SearchQueryV1,
 } from "@frockbot/plugin-search";
 import {
+  decodeAuditRebuildReceiptV1,
+  decodeClientAuditPageV1,
+  type AuditQueryV1,
+} from "@frockbot/plugin-audit";
+import {
   decodeMcpLifecycleReceiptV1,
   decodeMcpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
@@ -316,6 +321,21 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
 interface UserSearchRpc {
   searchTranscripts(input: unknown): Promise<unknown>;
   rebuildSearchIndex(input: unknown): Promise<unknown>;
+}
+
+/**
+ * The User Durable Object's audit RPCs. Narrow and separate for the same
+ * reason the transcript index's are.
+ */
+interface UserAuditRpc {
+  readAuditEntries(input: unknown): Promise<unknown>;
+  rebuildAuditIndex(input: unknown): Promise<unknown>;
+}
+
+function userAuditStub(env: Env, userId: string): UserAuditRpc {
+  const id = env.USER_CONFIGURATIONS.idFromName(userId);
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Audit RPC surface.
+  return env.USER_CONFIGURATIONS.get(id) as unknown as UserAuditRpc;
 }
 
 function userSearchStub(env: Env, userId: string): UserSearchRpc {
@@ -913,6 +933,29 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         decodeClientSearchRebuildReceiptV1(
           rpcJsonSnapshot(
             await userSearchStub(env, userId).rebuildSearchIndex({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
+      readAudit: async (userId: string, query: AuditQueryV1) =>
+        decodeClientAuditPageV1(
+          rpcJsonSnapshot(
+            await userAuditStub(env, userId).readAuditEntries({
+              schemaVersion: 1,
+              userId,
+              ...(query.botId === undefined ? {} : { botId: query.botId }),
+              ...(query.kind === undefined ? {} : { kind: query.kind }),
+              ...(query.target === undefined ? {} : { target: query.target }),
+              ...(query.before === undefined ? {} : { before: query.before }),
+              ...(query.limit === undefined ? {} : { limit: query.limit }),
+            }),
+          ),
+        ),
+      rebuildAuditIndex: async (userId: string) =>
+        decodeAuditRebuildReceiptV1(
+          rpcJsonSnapshot(
+            await userAuditStub(env, userId).rebuildAuditIndex({
               schemaVersion: 1,
               userId,
             }),
