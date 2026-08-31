@@ -24,6 +24,7 @@ import {
   type McpToolDeclarationV1,
   type McpTransportV1,
 } from "./mcp-client.js";
+import { mcpAuthorizationRequiredV1 } from "./oauth.js";
 import { decodeOutboundMcpUrlV1 } from "./ssrf.js";
 import {
   mcpAssignmentResolutionKeyV1,
@@ -311,6 +312,32 @@ export async function createConfiguredMcpRuntimeContribution(
       serverSlug: mcpServerSlugV1(connection),
       serverLabel: connection.displayName,
       tools,
+      // A server that revokes a token mid-Turn answers the *call* with a 401,
+      // not the mount. Without this the Bot would see one failed tool result
+      // and the User would see a healthy server: the durable record has to
+      // learn about it from wherever it happens.
+      onCallFailure: async (error) => {
+        if (!mcpAuthorizationRequiredV1(error)) return;
+        try {
+          await config.onOutcome?.({
+            connectionId,
+            ...(lifecycle.serverEpoch === undefined
+              ? {}
+              : { serverEpoch: lifecycle.serverEpoch }),
+            state: "needs-auth",
+            failure: {
+              code: "unauthorized",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "MCP server requires authorization",
+            },
+          });
+        } catch {
+          // Best effort from inside a Turn: a User Durable Object that cannot
+          // be reached must not turn a failed tool call into a failed Turn.
+        }
+      },
       ...(lifecycle.instructions
         ? { instructions: lifecycle.instructions }
         : {}),
@@ -433,6 +460,11 @@ export function createMcpToolPlugin(config: {
    * is the only place a User can prove the model was told.
    */
   instructions?: string;
+  /**
+   * Where a mid-Turn failure goes durably. Called for every failed call; the
+   * caller decides which ones are worth recording.
+   */
+  onCallFailure?(error: unknown): Promise<void> | void;
 }): Plugin.Function {
   const plugin: Plugin.Function = (ctx: Context) => {
     const disposers = config.tools.map((declaration) => {
@@ -453,6 +485,7 @@ export function createMcpToolPlugin(config: {
             );
             return { content: result.content, isError: result.isError };
           } catch (error) {
+            await config.onCallFailure?.(error);
             return {
               content:
                 error instanceof Error ? error.message : "MCP tool call failed",

@@ -393,8 +393,24 @@ export interface McpRestartCommandV1 {
   serverId: string;
 }
 
+/**
+ * GrokBot's `AuthenticateMcpServer`, as the constitution requires it to be: a
+ * Bot records a durable pending decision for its User and receives no link, no
+ * token and no grant. Chat-only, because an automation Turn has no User in
+ * front of it to decide.
+ */
+export interface McpRequestAuthorizationCommandV1 {
+  schemaVersion: 1;
+  type: "mcp/request-authorization";
+  commandId: string;
+  serverId: string;
+}
+
 export type McpLifecycleCommandV1 =
-  McpAddServerCommandV1 | McpSetInstructionsCommandV1 | McpRestartCommandV1;
+  | McpAddServerCommandV1
+  | McpSetInstructionsCommandV1
+  | McpRestartCommandV1
+  | McpRequestAuthorizationCommandV1;
 
 export function decodeMcpLifecycleCommandV1(
   input: unknown,
@@ -484,6 +500,19 @@ export function decodeMcpLifecycleCommandV1(
       return {
         schemaVersion: 1,
         type: "mcp/restart",
+        commandId,
+        serverId: text(value.serverId, "serverId", 128),
+      };
+    }
+    case "mcp/request-authorization": {
+      exact(
+        value,
+        ["schemaVersion", "type", "commandId", "serverId"],
+        "mcp/request-authorization",
+      );
+      return {
+        schemaVersion: 1,
+        type: "mcp/request-authorization",
         commandId,
         serverId: text(value.serverId, "serverId", 128),
       };
@@ -660,6 +689,31 @@ export function mcpConnectionMetadataV1(
       ? { protocolVersion: server.protocolVersion }
       : {}),
     ...(server.instructions ? { instructions: server.instructions } : {}),
+  };
+}
+
+/**
+ * The Connection-level projection of a server that needs authorizing.
+ *
+ * The record in the User Durable Object is the authority; this is the small,
+ * URL-free shape a client draws a connect card from. There is no redirect in
+ * it and there never will be: a Bot may write this, and only an authenticated
+ * User action mints a link.
+ */
+export function mcpPendingAuthorizationV1(
+  server: McpServerRecordV1,
+  at: string,
+): {
+  reason: string;
+  since: string;
+  connectionId: string;
+  label: string;
+} {
+  return {
+    reason: "needs-auth",
+    since: at,
+    connectionId: server.serverId,
+    label: server.label,
   };
 }
 

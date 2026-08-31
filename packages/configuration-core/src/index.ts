@@ -169,6 +169,27 @@ export interface PackageInstallationView {
   values?: Record<string, JsonValue>;
 }
 
+/**
+ * A durable pending decision for the User: this Connection needs authorizing
+ * before it will do anything again.
+ *
+ * It carries **no URL**, and that is the whole design. A Bot may write one —
+ * `mcp_authenticate_server` does, and so does a mount that met a 401 — but a
+ * redirect is minted only by an authenticated User action. A single-use
+ * ten-minute link stored in a projection every client reads, and replayed into
+ * every transcript, would outlive the decision it belonged to and would let a
+ * Bot hand its User a link it authored. The card is drawn from this record and
+ * the link is authored when the User presses it.
+ */
+export interface PendingAuthorizationV1 {
+  /** Why it is pending, in the Package's own vocabulary (`needs-auth`). */
+  reason: string;
+  /** When it became pending, ISO-8601. */
+  since: string;
+  connectionId: string;
+  label: string;
+}
+
 export interface ConnectionView {
   connectionId: string;
   packageId: string;
@@ -189,6 +210,8 @@ export interface ConnectionView {
   settings?: Record<string, JsonValue>;
   safeMetadata: Record<string, JsonValue>;
   failure?: string;
+  /** Set while this Connection is waiting on a User authorization. */
+  pendingAuthorization?: PendingAuthorizationV1;
 }
 
 export interface StartConnectionCommandV1 {
@@ -1632,6 +1655,7 @@ function connectionView(value: unknown): ConnectionView {
       "authorization",
       "modelCatalog",
       "settings",
+      "pendingAuthorization",
     ],
   );
   const states: ConnectionView["state"][] = [
@@ -1691,6 +1715,38 @@ function connectionView(value: unknown): ConnectionView {
       ]),
     ),
     failure: optionalText(connection.failure, "failure", 2_000),
+    ...(connection.pendingAuthorization === undefined
+      ? {}
+      : {
+          pendingAuthorization: decodePendingAuthorizationV1(
+            connection.pendingAuthorization,
+          ),
+        }),
+  };
+}
+
+/**
+ * The pending decision, decoded strictly — and refused outright if it carries
+ * anything that looks like a redirect. The rule that a Bot never hands its
+ * User a link it authored is worth an assertion rather than a convention.
+ */
+export function decodePendingAuthorizationV1(
+  input: unknown,
+): PendingAuthorizationV1 {
+  const value = exactRecord(input, "pendingAuthorization", [
+    "reason",
+    "since",
+    "connectionId",
+    "label",
+  ]);
+  return {
+    reason: text(value.reason, "pendingAuthorization.reason", 64),
+    since: text(value.since, "pendingAuthorization.since", 64),
+    connectionId: identifier(
+      value.connectionId,
+      "pendingAuthorization.connectionId",
+    ),
+    label: text(value.label, "pendingAuthorization.label", 200),
   };
 }
 

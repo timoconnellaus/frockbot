@@ -4,6 +4,7 @@ import {
   assertCatalogEntryMatchesIndexV1,
   catalogContentHashV1,
   catalogEntryKeyV1,
+  catalogSetupFieldKeyV1,
   catalogIndexKeyV1,
   CATALOG_POINTER_KEY_V1,
   decodeCatalogEntryDocumentV1,
@@ -316,5 +317,25 @@ describe("entry against index", () => {
         indexEntry(),
       ),
     ).toThrow("does not match its index row");
+  });
+});
+
+describe("a Catalog entry's setup fields", () => {
+  test("map to the values key an install records the answer under", () => {
+    // A setup field is a bare JSON Schema with no identifier, so the key an
+    // install records the answer under is derived from the title — in one
+    // place, because the form that collects it and anything that reads the
+    // install back have to agree.
+    expect(catalogSetupFieldKeyV1({ title: "Region" }, 0)).toBe("region");
+    expect(catalogSetupFieldKeyV1({ title: "Base URL" }, 1)).toBe("base-url");
+    expect(catalogSetupFieldKeyV1({ title: "  " }, 2)).toBe("setup-2");
+    expect(catalogSetupFieldKeyV1({}, 3)).toBe("setup-3");
+  });
+
+  test("give a stable key, so an answer survives a reopened form", () => {
+    const field = { title: "Workspace ID" };
+    expect(catalogSetupFieldKeyV1(field, 0)).toBe(
+      catalogSetupFieldKeyV1(field, 5),
+    );
   });
 });

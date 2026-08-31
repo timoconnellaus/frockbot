@@ -11,6 +11,7 @@ import {
   type CatalogIndexEntryV1,
   type PluginCatalogItem,
 } from "@frockbot/plugin-shell/shared";
+import { catalogSetupFieldKeyV1 } from "@frockbot/catalog-core";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, onMounted, ref } from "vue";
 
@@ -38,6 +39,132 @@ const mcpLabel = ref("");
 const mcpUrl = ref("");
 const mcpTransport = ref<"streamable-http" | "sse">("streamable-http");
 const mcpApiKey = ref("");
+/**
+ * How the custom server authenticates. `oauth` is not a third field on the
+ * same form but a different command: it starts an authorization the host
+ * authors a redirect for, rather than creating a Connection from a secret the
+ * User pasted.
+ */
+const mcpAuthMode = ref<"none" | "key" | "oauth">("none");
+const mcpScope = ref("");
+const mcpClientId = ref("");
+
+/**
+ * The connect cards. Drawn from the Connection projection — which carries no
+ * URL — so a card can be shown by anything that can read Connections,
+ * including a transcript replayed months later, while the redirect is authored
+ * only when the User presses *Reconnect*.
+ */
+const pendingAuthorizations = computed(() =>
+  (web.value.userSettings?.connections ?? []).filter(
+    (connection) =>
+      connection.pendingAuthorization !== undefined &&
+      connection.state !== "revoked",
+  ),
+);
+const reconnectingConnectionId = ref<string>();
+
+/**
+ * Guided install: the `setupFields` an entry declares, as the User fills them
+ * in. Keyed by entry so opening a second entry does not inherit the first
+ * one's answers.
+ */
+const setupValues = ref<Record<string, string>>({});
+const setupValuesFor = ref<string>();
+const installingCatalogId = ref<string>();
+
+/**
+ * The entry's setup fields, paired with the `values` key each answer is
+ * recorded under. A Catalog setup field is a bare JSON Schema with no
+ * identifier, so the key is derived — in `catalog-core`, so the form and
+ * anything that reads the install back agree on it.
+ */
+function setupFieldsOf(entry: CatalogEntryV1 | undefined): Array<{
+  key: string;
+  title: string;
+  description?: string;
+  maxLength?: number;
+}> {
+  return (entry?.setupFields ?? []).map((field, index) => ({
+    key: catalogSetupFieldKeyV1(field, index),
+    title: field.title ?? catalogSetupFieldKeyV1(field, index),
+    ...(field.description ? { description: field.description } : {}),
+    ...(field.maxLength === undefined ? {} : { maxLength: field.maxLength }),
+  }));
+}
+
+/** Whether an entry's servers ask for OAuth, which is what earns a connect step. */
+function entryUsesOAuth(entry: CatalogEntryV1 | undefined): boolean {
+  return (entry?.servers ?? []).some((server) => server.auth === "oauth");
+}
+
+function beginSetup(entry: CatalogEntryV1): void {
+  setupValuesFor.value = entry.catalogId;
+  setupValues.value = Object.fromEntries(
+    setupFieldsOf(entry).map((field) => [field.key, ""]),
+  );
+}
+
+/**
+ * Install with the values the form collected, then — for an entry whose
+ * servers speak OAuth — hand the User straight to the authorization. Two
+ * durable steps, in that order: the Package is installed before anything asks
+ * to be authorized against it.
+ */
+async function installWithSetupValues(
+  index: CatalogIndexEntryV1,
+  entry: CatalogEntryV1,
+): Promise<void> {
+  installingCatalogId.value = index.catalogId;
+  try {
+    const values = Object.fromEntries(
+      Object.entries(setupValues.value)
+        .map(([key, value]) => [key, value.trim()] as const)
+        .filter(([, value]) => value.length > 0),
+    );
+    await web.value.installCatalogPackage(index, values);
+    setupValuesFor.value = undefined;
+    setupValues.value = {};
+    const server = (entry.servers ?? []).find(
+      (candidate) => candidate.auth === "oauth",
+    );
+    if (server) {
+      await connectCatalogServer(entry.displayName, server.url);
+    }
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not install the Package";
+  } finally {
+    installingCatalogId.value = undefined;
+  }
+}
+
+/** One catalog-named OAuth server, connected through the host-authored path. */
+async function connectCatalogServer(label: string, url: string): Promise<void> {
+  const redirect = await web.value.startMcpAuthorization({
+    label,
+    settings: { url, transport: "streamable-http" },
+  });
+  if (redirect) await web.value.openConnectionAuthorization(redirect);
+}
+
+/**
+ * *Reconnect*: the authenticated command that mints a fresh redirect, with
+ * fresh PKCE and a fresh signed state. Nothing was stored waiting for this —
+ * the card only ever said that a decision was pending.
+ */
+async function reconnect(connectionId: string): Promise<void> {
+  reconnectingConnectionId.value = connectionId;
+  try {
+    const redirect = await web.value.startMcpAuthorization({ connectionId });
+    if (redirect) await web.value.openConnectionAuthorization(redirect);
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not reconnect";
+  } finally {
+    reconnectingConnectionId.value = undefined;
+  }
+}
 /**
  * The endpoint root of an Ollama Cloud Connection, declared by that Connection
  * Type as `api-base-url` (manifest v4). It is the only Connection Type the
@@ -380,11 +507,15 @@ function beginMcpConnection(): void {
   mcpUrl.value = "";
   mcpTransport.value = "streamable-http";
   mcpApiKey.value = "";
+  mcpAuthMode.value = "none";
+  mcpScope.value = "";
+  mcpClientId.value = "";
 }
 
 function cancelMcpConnection(): void {
   mcpFormOpen.value = false;
   mcpApiKey.value = "";
+  mcpAuthMode.value = "none";
 }
 
 async function addMcpServer(): Promise<void> {
@@ -393,6 +524,24 @@ async function addMcpServer(): Promise<void> {
     transport: mcpTransport.value,
   };
   try {
+    if (mcpAuthMode.value === "oauth") {
+      // No secret is collected and none is stored: the server is discovered,
+      // a client is registered, and the redirect is authored by the host.
+      const redirect = await web.value.startMcpAuthorization({
+        label: mcpLabel.value,
+        settings: {
+          ...settings,
+          ...(mcpScope.value.trim() ? { scope: mcpScope.value.trim() } : {}),
+          ...(mcpClientId.value.trim()
+            ? { "client-id": mcpClientId.value.trim() }
+            : {}),
+        },
+      });
+      cancelMcpConnection();
+      expandedPackageId.value = undefined;
+      if (redirect) await web.value.openConnectionAuthorization(redirect);
+      return;
+    }
     if (mcpApiKey.value) {
       await web.value.createApiKeyConnection({
         packageId: MCP_PACKAGE_ID,
@@ -572,6 +721,37 @@ async function disconnect(connectionId: string): Promise<void> {
         Add secure connections and capabilities to your Bots.
       </p>
     </UiAnchor>
+    <section
+      v-if="pendingAuthorizations.length"
+      class="connect-cards"
+      aria-label="Connections that need your authorization"
+    >
+      <article
+        v-for="connection in pendingAuthorizations"
+        :key="connection.connectionId"
+        class="connect-card"
+      >
+        <div class="connect-card-copy">
+          <strong>{{ connection.pendingAuthorization?.label }}</strong>
+          <span>
+            Needs your authorization. Only you can complete it — FrockBot
+            creates the sign-in link when you press Reconnect, and nothing is
+            stored waiting for it.
+          </span>
+        </div>
+        <UiButton
+          variant="primary"
+          :disabled="reconnectingConnectionId === connection.connectionId"
+          @click="reconnect(connection.connectionId)"
+        >
+          {{
+            reconnectingConnectionId === connection.connectionId
+              ? "Opening…"
+              : "Reconnect"
+          }}
+        </UiButton>
+      </article>
+    </section>
     <div class="plugin-grid">
       <article
         v-for="item in filteredCatalog"
@@ -887,16 +1067,45 @@ async function disconnect(connectionId: string): Promise<void> {
             </select>
           </label>
           <label>
-            <span>API key (optional)</span>
+            <span>Authentication</span>
+            <select v-model="mcpAuthMode">
+              <option value="none">None (public server)</option>
+              <option value="key">API key</option>
+              <option value="oauth">OAuth</option>
+            </select>
+          </label>
+          <label v-if="mcpAuthMode === 'key'">
+            <span>API key</span>
             <input
               v-model="mcpApiKey"
               type="password"
               autocomplete="new-password"
             />
           </label>
+          <template v-if="mcpAuthMode === 'oauth'">
+            <label>
+              <span>Scope (optional)</span>
+              <input v-model="mcpScope" maxlength="1024" autocomplete="off" />
+            </label>
+            <label>
+              <span>Client ID (optional)</span>
+              <input v-model="mcpClientId" maxlength="512" autocomplete="off" />
+            </label>
+            <p class="api-key-hint">
+              Leave both empty for a server that registers clients itself, which
+              is what most do. FrockBot registers as a public client; a server
+              that issues a client secret is refused, because a secret would
+              have to live in this Connection's settings. You will be sent to
+              the server to sign in, and no token ever reaches this page.
+            </p>
+          </template>
           <div class="api-key-actions">
             <UiButton @click="cancelMcpConnection">Cancel</UiButton>
-            <UiButton type="submit" variant="primary">Add server</UiButton>
+            <UiButton type="submit" variant="primary">
+              {{
+                mcpAuthMode === "oauth" ? "Continue to sign in" : "Add server"
+              }}
+            </UiButton>
           </div>
         </form>
 
@@ -1107,6 +1316,53 @@ async function disconnect(connectionId: string): Promise<void> {
                     </UiButton>
                   </div>
                 </div>
+                <form
+                  v-else-if="
+                    setupValuesFor === entry.catalogId && openCatalogEntry
+                  "
+                  class="api-key-form"
+                  @submit.prevent="
+                    installWithSetupValues(entry, openCatalogEntry)
+                  "
+                >
+                  <label
+                    v-for="field in setupFieldsOf(openCatalogEntry)"
+                    :key="field.key"
+                  >
+                    <span>{{ field.title }}</span>
+                    <input
+                      v-model="setupValues[field.key]"
+                      autocomplete="off"
+                      :maxlength="field.maxLength ?? 2048"
+                    />
+                    <span v-if="field.description" class="api-key-hint">
+                      {{ field.description }}
+                    </span>
+                  </label>
+                  <p
+                    v-if="entryUsesOAuth(openCatalogEntry)"
+                    class="api-key-hint"
+                  >
+                    After installing, you will be sent to the connector to sign
+                    in. FrockBot records the request; only you can complete it.
+                  </p>
+                  <div class="api-key-actions">
+                    <UiButton @click="setupValuesFor = undefined">
+                      Cancel
+                    </UiButton>
+                    <UiButton
+                      type="submit"
+                      variant="primary"
+                      :disabled="installingCatalogId === entry.catalogId"
+                    >
+                      {{
+                        installingCatalogId === entry.catalogId
+                          ? "Installing…"
+                          : "Install and connect"
+                      }}
+                    </UiButton>
+                  </div>
+                </form>
                 <div v-else class="account-actions">
                   <UiButton
                     v-if="isPackageInstalled(entry.packageId)"
@@ -1114,6 +1370,17 @@ async function disconnect(connectionId: string): Promise<void> {
                     @click="uninstallingPackageId = entry.packageId"
                   >
                     Uninstall
+                  </UiButton>
+                  <UiButton
+                    v-else-if="
+                      openCatalogEntry &&
+                      (setupFieldsOf(openCatalogEntry).length > 0 ||
+                        entryUsesOAuth(openCatalogEntry))
+                    "
+                    variant="primary"
+                    @click="beginSetup(openCatalogEntry)"
+                  >
+                    Set up
                   </UiButton>
                   <UiButton
                     v-else
@@ -1145,6 +1412,36 @@ async function disconnect(connectionId: string): Promise<void> {
 </template>
 
 <style scoped>
+.connect-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.connect-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-card);
+  background: var(--frock-surface-raised);
+  padding: 0.75rem 1rem;
+}
+
+.connect-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--frock-text);
+  font-size: var(--frock-text-sm);
+  line-height: var(--frock-leading-normal);
+}
+
+.connect-card-copy span {
+  color: var(--frock-text-muted);
+}
+
 .plugin-anchor {
   padding-right: var(--frock-control-sm);
 }
