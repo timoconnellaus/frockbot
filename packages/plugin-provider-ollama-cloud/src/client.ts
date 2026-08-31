@@ -108,7 +108,10 @@ export class OllamaCloudClient {
       /\/$/,
       "",
     );
-    this.fetcher = config.fetch ?? fetch;
+    // Workerd rejects a detached global `fetch` ("Illegal invocation"), so the
+    // default fetcher forwards through a closure rather than aliasing it.
+    this.fetcher =
+      config.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   private async request(

@@ -1,9 +1,9 @@
-import type {
-  LlmMessage,
-  LlmProvider,
-  LlmStreamEvent,
-  NormalizedModelRequest,
-} from "@frockbot/agent-core";
+import {
+  type LlmMessage,
+  type LlmProvider,
+  type LlmStreamEvent,
+  type NormalizedModelRequest,
+} from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
 export type JsonValue =
@@ -194,7 +194,12 @@ export class OpenAICompatibleProvider implements LlmProvider {
     request: NormalizedModelRequest,
     signal: AbortSignal,
   ): AsyncIterable<LlmStreamEvent> {
-    const fetcher = this.config.fetch ?? fetch;
+    // Workerd rejects a detached global `fetch` ("Illegal invocation"), so the
+    // default fetcher forwards through a closure rather than aliasing it.
+    const fetcher =
+      this.config.fetch ??
+      ((input: RequestInfo | URL, init?: RequestInit) =>
+        globalThis.fetch(input, init));
     const headers: Record<string, string> = {
       "content-type": "application/json",
       ...this.config.headers,
