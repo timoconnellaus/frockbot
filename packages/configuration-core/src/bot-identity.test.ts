@@ -146,6 +146,47 @@ describe("bot/set-profile", () => {
     });
   });
 
+  test("carries the Bot writer, and refuses one aimed at another Bot", () => {
+    const command = {
+      schemaVersion: 1,
+      type: "bot/set-profile",
+      commandId: "command-1",
+      botId: "primary",
+      expectedRevision: 3,
+      namedBy: "bot",
+      profile: { name: "Atlas" },
+    } as const;
+    const writer = {
+      kind: "bot",
+      botId: "primary",
+      sessionId: "user-1:primary",
+      turnId: "turn-4",
+    } as const;
+    expect(decodeConfigurationCommandV1({ ...command, writer })).toEqual({
+      ...command,
+      writer,
+    });
+    // A Bot writes only its own profile, so the writer must name the target.
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...command,
+        writer: { ...writer, botId: "other" },
+      }),
+    ).toThrow("writer.botId is invalid");
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...command,
+        writer: { ...writer, kind: "user" },
+      }),
+    ).toThrow("writer.kind is invalid");
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...command,
+        writer: { ...writer, runId: "run-1" },
+      }),
+    ).toThrow("writer has invalid fields");
+  });
+
   test("refuses an empty patch and an unknown patch field", () => {
     const command = {
       schemaVersion: 1,

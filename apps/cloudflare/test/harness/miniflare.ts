@@ -91,7 +91,70 @@ function bearerKey(request: Request): string {
  * authenticate. Reproducing that asymmetry is what lets a test prove the
  * Connection is validated by an inference call and not by a catalog read.
  */
-export function ollamaCloudStub(request: Request): Response {
+/**
+ * The marker a test puts in a user message to make the stubbed model answer
+ * with a tool call instead of prose. The rest of the message is
+ * `<tool name>:<JSON arguments>`.
+ *
+ * The stub is shared by every test in the run and cannot be reconfigured per
+ * test, so the trigger travels on the wire with the request it belongs to.
+ */
+export const TOOL_CALL_TRIGGER = "frockbot-test-tool-call:";
+
+interface WireMessage {
+  role?: unknown;
+  content?: unknown;
+}
+
+/** The scripted tool call one request asks for, when it asks for one. */
+function scriptedToolCall(
+  body: unknown,
+): { name: string; arguments: string } | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return undefined;
+  // A tool result must fall through to prose, or the loop would call the same
+  // tool forever and exhaust its step budget.
+  const last = messages.at(-1) as WireMessage | undefined;
+  if (last?.role === "tool") return undefined;
+  const user = [...(messages as WireMessage[])]
+    .reverse()
+    .find((message) => message.role === "user");
+  const content = typeof user?.content === "string" ? user.content : "";
+  if (!content.startsWith(TOOL_CALL_TRIGGER)) return undefined;
+  const request = content.slice(TOOL_CALL_TRIGGER.length);
+  const separator = request.indexOf(":");
+  if (separator < 1) return undefined;
+  return {
+    name: request.slice(0, separator),
+    arguments: request.slice(separator + 1),
+  };
+}
+
+function toolCallStream(call: { name: string; arguments: string }): Response {
+  const event = {
+    choices: [
+      {
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              id: "call-1",
+              function: { name: call.name, arguments: call.arguments },
+            },
+          ],
+        },
+        finish_reason: "tool_calls",
+      },
+    ],
+  };
+  return new Response(
+    `data: ${JSON.stringify(event)}\n\n` + "data: [DONE]\n\n",
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.origin !== "https://ollama.com") {
     return new Response("outbound request is not allowed in tests", {
@@ -129,6 +192,14 @@ export function ollamaCloudStub(request: Request): Response {
         headers: { "content-type": "application/json" },
       });
     }
+    let body: unknown;
+    try {
+      body = await request.clone().json();
+    } catch {
+      body = undefined;
+    }
+    const call = scriptedToolCall(body);
+    if (call) return toolCallStream(call);
     return new Response(
       'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
         'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +

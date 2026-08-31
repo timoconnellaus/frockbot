@@ -53,6 +53,7 @@ import {
   type RevertCompositionCommandV1,
   type ConnectionDependencyRequirementV1,
   type BotExecutionPlanV1,
+  type BotSelfWriterV1,
   type BotSettingsViewV1,
   type CapabilityAssignmentView,
   type ModelAssignment,
@@ -105,6 +106,14 @@ import {
   createR2AuthoringArtifactStore,
 } from "./backend-authoring.js";
 import { createBotComputerSyncHost } from "./backend-computer.js";
+import {
+  decodeDirectoryViewV1,
+  decodeFlockReceiptV1,
+  type BotDirectoryViewV1,
+  type CreateBotCommandV1,
+  type FlockReceiptV1,
+} from "@frockbot/plugin-flock/shared";
+import { createBotSelfManagementHost } from "./backend-flock.js";
 import { createBotMemoryHost } from "./backend-memory.js";
 import { createBotSkillsHost } from "./backend-skills.js";
 import {
@@ -335,6 +344,8 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
     initial: {
       name: string;
+      /** The persona the Bot's profile is seeded with, when its creator gave one. */
+      description?: string;
       model?: BotSettingsViewV1["model"];
       modelBinding?: {
         assignment: BotSettingsViewV1["assignments"][number];
@@ -357,7 +368,12 @@ export class ShellBotBackendContribution {
       if (existing) return existing;
       const settings = {
         ...this.initialBotSettings(identity.botId, initial.model),
-        profile: { name: initial.name },
+        profile: {
+          name: initial.name,
+          ...(initial.description === undefined
+            ? {}
+            : { description: initial.description }),
+        },
         assignments: initial.modelBinding
           ? [structuredClone(initial.modelBinding.assignment)]
           : [],
@@ -806,10 +822,18 @@ export class ShellBotBackendContribution {
       // A rename is durable history, not a settings side effect: the Session
       // records it so the conversation shows who renamed the Bot and when.
       if (next.profile.name !== current.profile.name) {
+        const namedBy = next.profile.namedBy ?? "user";
         await this.appendRenameAnnouncement(transaction, {
           from: current.profile.name,
           to: next.profile.name,
-          namedBy: next.profile.namedBy ?? "user",
+          namedBy,
+          // The writer travels only with a Bot's own rename: a User edit is
+          // already attributed to the authenticated principal that made it.
+          ...(namedBy === "bot" &&
+          command.type === "bot/set-profile" &&
+          command.writer
+            ? { writer: command.writer }
+            : {}),
         });
       }
       await this.refreshRecoveryAlarm(transaction);
@@ -830,7 +854,12 @@ export class ShellBotBackendContribution {
       list<T>(options: { prefix: string }): Promise<Map<string, T>>;
       delete(keys: string[]): Promise<number>;
     },
-    rename: { from: string; to: string; namedBy: "user" | "bot" },
+    rename: {
+      from: string;
+      to: string;
+      namedBy: "user" | "bot";
+      writer?: BotSelfWriterV1;
+    },
   ): Promise<void> {
     const seq =
       ((await transaction.get<number>(BOT_ANNOUNCEMENT_SEQUENCE_KEY)) ?? -1) +
@@ -842,6 +871,7 @@ export class ShellBotBackendContribution {
       from: rename.from,
       to: rename.to,
       namedBy: rename.namedBy,
+      ...(rename.writer ? { writer: rename.writer } : {}),
     };
     await transaction.put({
       [botAnnouncementKey(seq)]: event,
@@ -2324,6 +2354,21 @@ export class ShellBotBackendContribution {
         ...(turn
           ? { memory: createBotMemoryHost(identity, turn, this.env) }
           : {}),
+        // A Bot changes its own identity, or adds a Bot to its User's flock,
+        // only inside an admitted Turn whose Session and Turn the write names.
+        ...(turn
+          ? {
+              botSelfManagement: createBotSelfManagementHost(identity, turn, {
+                readSettings: (target) => this.getSettings(target),
+                executeConfiguration: (target, command) =>
+                  this.executeConfigurationCommand(target, command),
+                listBots: (userId) =>
+                  this.userConfiguration(identity).listBots(userId),
+                createBot: (userId, command) =>
+                  this.userConfiguration(identity).createBot(userId, command),
+              }),
+            }
+          : {}),
         // The durable-root sync runs only inside a Turn that uses the
         // Computer. It attributes nothing: a file a shell wrote there reaches
         // object storage with an unattributed writer.
@@ -2892,6 +2937,11 @@ export class ShellBotBackendContribution {
       packageId: string,
       effectId: string,
     ): Promise<void>;
+    listBots(userId: string): Promise<BotDirectoryViewV1>;
+    createBot(
+      userId: string,
+      command: CreateBotCommandV1,
+    ): Promise<FlockReceiptV1>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
@@ -2918,6 +2968,8 @@ export class ShellBotBackendContribution {
       compensateConnectionDependency(input: unknown): Promise<boolean>;
       leaseModelCredential(input: unknown): Promise<unknown>;
       settleModelCredential(input: unknown): Promise<void>;
+      listBots(input: unknown): Promise<unknown>;
+      createBot(input: unknown): Promise<unknown>;
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
@@ -2929,6 +2981,14 @@ export class ShellBotBackendContribution {
         rpc.rollbackPackage({ schemaVersion: 1, userId, command }),
       getConnection: (userId, connectionId) =>
         rpc.getConnection({ schemaVersion: 1, userId, connectionId }),
+      // Flock state crosses a Durable Object seam, so it decodes on arrival
+      // rather than being trusted in the shape RPC happened to return.
+      listBots: async (userId) =>
+        decodeDirectoryViewV1(await rpc.listBots({ schemaVersion: 1, userId })),
+      createBot: async (userId, command) =>
+        decodeFlockReceiptV1(
+          await rpc.createBot({ schemaVersion: 1, userId, command }),
+        ),
       executeConnectionDependency: (input) =>
         rpc.executeConnectionDependency(input),
       claimConnectionDependency: (

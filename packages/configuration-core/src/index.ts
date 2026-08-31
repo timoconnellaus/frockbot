@@ -39,6 +39,23 @@ export interface BotAuthority extends UserPrincipal {
  */
 export type BotNameProvenanceV1 = "user" | "bot";
 
+/**
+ * The Bot that made a durable Bot-scoped write, and the admitted Turn it made
+ * it in. `namedBy` says *which kind* of writer changed a name; this says
+ * *which* Bot, in which Session and Turn, so a self-management write is
+ * reconstructable from durable state alone rather than only from the fact that
+ * something Bot-shaped touched it.
+ *
+ * It is optional everywhere it appears: a record written by a User carries no
+ * Bot writer, and a record written before this existed still decodes.
+ */
+export interface BotSelfWriterV1 {
+  kind: "bot";
+  botId: string;
+  sessionId: string;
+  turnId: string;
+}
+
 /** The content types an uploaded Bot avatar may carry. */
 export const BOT_AVATAR_CONTENT_TYPES = [
   "image/png",
@@ -261,6 +278,11 @@ export type ConfigurationCommandV1 =
       type: "bot/set-profile";
       botId: string;
       namedBy?: BotNameProvenanceV1;
+      /**
+       * The Bot and Turn that wrote this patch, when a Bot wrote it. A User
+       * edit carries none: the authenticated principal is already the writer.
+       */
+      writer?: BotSelfWriterV1;
       profile: BotProfilePatchV1;
     })
   | (CommandMetaV1 & {
@@ -819,6 +841,32 @@ function nameProvenance(value: unknown, label: string): BotNameProvenanceV1 {
   return value;
 }
 
+/**
+ * The exact Bot writer DTO. It crosses the Bot Durable Object seam and the
+ * session event log, so — like every other cross-runtime value — it decodes
+ * exactly once, here, with no extra fields tolerated.
+ */
+export function decodeBotSelfWriterV1(
+  value: unknown,
+  label = "writer",
+): BotSelfWriterV1 {
+  const writer = exactRecord(value, label, [
+    "kind",
+    "botId",
+    "sessionId",
+    "turnId",
+  ]);
+  if (writer.kind !== "bot") {
+    throw new ConfigurationDecodeError(`${label}.kind is invalid`);
+  }
+  return {
+    kind: "bot",
+    botId: decodeBotIdV1(writer.botId, `${label}.botId`),
+    sessionId: text(writer.sessionId, `${label}.sessionId`, 256),
+    turnId: text(writer.turnId, `${label}.turnId`, 128),
+  };
+}
+
 function flag(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
     throw new ConfigurationDecodeError(`${label} must be a boolean`);
@@ -1127,14 +1175,30 @@ export function decodeConfigurationCommandV1(
       };
     }
     case "bot/set-profile": {
-      const command = exactCommand(input, ["botId", "profile"], ["namedBy"]);
+      const command = exactCommand(
+        input,
+        ["botId", "profile"],
+        ["namedBy", "writer"],
+      );
+      const botId = identifier(command.botId, "botId");
+      const writer =
+        command.writer === undefined
+          ? undefined
+          : decodeBotSelfWriterV1(command.writer);
+      // A Bot writes only its own profile. The command names the target twice,
+      // so the seam refuses a writer aimed at anything but itself rather than
+      // recording a provenance the authority never granted.
+      if (writer && writer.botId !== botId) {
+        throw new ConfigurationDecodeError("writer.botId is invalid");
+      }
       return {
         ...commandMeta(command),
         type: "bot/set-profile",
-        botId: identifier(command.botId, "botId"),
+        botId,
         ...(command.namedBy === undefined
           ? {}
           : { namedBy: nameProvenance(command.namedBy, "namedBy") }),
+        ...(writer ? { writer } : {}),
         profile: botProfilePatch(command.profile),
       };
     }

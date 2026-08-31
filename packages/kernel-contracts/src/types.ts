@@ -414,6 +414,18 @@ export interface SessionEventMap {
     from: string;
     to: string;
     namedBy: "user" | "bot";
+    /**
+     * The Bot and admitted Turn that wrote the name, when a Bot wrote it.
+     * `namedBy` says which kind of writer; this names the exact one, so a
+     * self-rename is attributable from the log alone. Absent on a User rename
+     * and on every announcement recorded before it existed.
+     */
+    writer?: {
+      kind: "bot";
+      botId: string;
+      sessionId: string;
+      turnId: string;
+    };
   };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   /**
@@ -1073,14 +1085,50 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       }
       break;
     }
-    case "bot/renamed":
-      requireEventKeys(event, keys("from", "to", "namedBy"), "session event");
+    case "bot/renamed": {
+      requireEventKeys(
+        event,
+        keys(
+          "from",
+          "to",
+          "namedBy",
+          ...(Object.hasOwn(event, "writer") ? ["writer"] : []),
+        ),
+        "session event",
+      );
       eventString(event.from, "session event.from");
       eventString(event.to, "session event.to");
       if (event.namedBy !== "user" && event.namedBy !== "bot") {
         throw new Error("session event.namedBy is invalid");
       }
+      if (event.writer !== undefined) {
+        const writer = event.writer;
+        if (
+          typeof writer !== "object" ||
+          writer === null ||
+          Array.isArray(writer)
+        ) {
+          throw new Error("session event.writer is invalid");
+        }
+        const fields = writer as Record<string, unknown>;
+        requireEventKeys(
+          fields,
+          ["kind", "botId", "sessionId", "turnId"],
+          "session event.writer",
+        );
+        if (fields.kind !== "bot") {
+          throw new Error("session event.writer.kind is invalid");
+        }
+        eventString(fields.botId, "session event.writer.botId");
+        eventString(fields.sessionId, "session event.writer.sessionId");
+        eventString(fields.turnId, "session event.writer.turnId");
+        // Only a Bot writer exists, so a `user` provenance can never carry one.
+        if (event.namedBy !== "bot") {
+          throw new Error("session event.writer is invalid");
+        }
+      }
       break;
+    }
     case "step/end":
       requireEventKeys(event, keys("turn", "step", "outcome"), "session event");
       turn();

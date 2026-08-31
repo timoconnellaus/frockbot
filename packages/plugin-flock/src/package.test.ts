@@ -7,6 +7,6 @@ import packageJson from "../package.json" with { type: "json" };
 test("Flock satisfies built-in Package conventions", () => {
   expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
     name: "@frockbot/plugin-flock",
-    contributionKinds: ["backend", "client"],
+    contributionKinds: ["backend", "runtime", "client"],
   });
 });

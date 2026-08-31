@@ -215,6 +215,11 @@ export class BotState extends DurableObject<BotStateEnv> {
                         { userId, botId: registration.botId },
                         {
                           name: registration.initialName,
+                          ...(registration.initialDescription === undefined
+                            ? {}
+                            : {
+                                description: registration.initialDescription,
+                              }),
                           model: registration.initialModel,
                           modelBinding: registration.initialModelBinding,
                         },

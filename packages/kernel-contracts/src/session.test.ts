@@ -532,6 +532,35 @@ describe("SessionStore", () => {
     );
   });
 
+  test("carries the Bot and Turn that renamed the Bot, when one did", () => {
+    const writer = {
+      kind: "bot" as const,
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      turnId: "turn-4",
+    };
+    const renamed = {
+      type: "bot/renamed" as const,
+      seq: 4,
+      timestamp,
+      from: "Housework",
+      to: "Atlas",
+      namedBy: "bot" as const,
+      writer,
+    };
+    expect(decodeSessionEvent(structuredClone(renamed))).toEqual(renamed);
+    // Only a Bot writer exists, so a User rename can never carry one.
+    expect(() => decodeSessionEvent({ ...renamed, namedBy: "user" })).toThrow(
+      "session event.writer is invalid",
+    );
+    expect(() =>
+      decodeSessionEvent({ ...renamed, writer: { ...writer, kind: "user" } }),
+    ).toThrow("session event.writer.kind is invalid");
+    expect(() =>
+      decodeSessionEvent({ ...renamed, writer: { ...writer, extra: 1 } }),
+    ).toThrow("session event.writer has invalid fields");
+  });
+
   test("composes a failure message from a turn outcome and its reason", () => {
     expect(turnFailureMessage("model-error", "provider said no")).toBe(
       "Bot turn ended with outcome model-error: provider said no",

@@ -71,6 +71,7 @@ async function setProfile(
   expectedRevision: number,
   profile: Record<string, unknown>,
   namedBy?: "user" | "bot",
+  writer?: Record<string, unknown>,
 ): Promise<void> {
   await contribution.executeConfiguration({
     schemaVersion: 1,
@@ -83,6 +84,7 @@ async function setProfile(
       botId: identity.botId,
       expectedRevision,
       ...(namedBy ? { namedBy } : {}),
+      ...(writer ? { writer } : {}),
       profile,
     },
   });
@@ -132,6 +134,33 @@ describe("bot/set-profile", () => {
       to: "Atlas",
       namedBy: "bot",
     });
+  });
+
+  test("a Bot's self-rename carries its writer into the announcement", async () => {
+    const storage = new MemoryStorage();
+    const contribution = contributionOn(storage);
+    const writer = {
+      kind: "bot",
+      botId: identity.botId,
+      sessionId: "user-1:primary",
+      turnId: "turn-4",
+    };
+    await contribution.materializeSettings(identity, { name: "Housework" });
+    await setProfile(
+      contribution,
+      "rename-1",
+      0,
+      { name: "Atlas" },
+      "bot",
+      writer,
+    );
+    // A User edit that happens to carry no writer still announces as before.
+    await setProfile(contribution, "rename-2", 1, { name: "Housework" });
+
+    const announcements = await contribution.listAnnouncements();
+    expect(announcements[0]).toMatchObject({ namedBy: "bot", writer });
+    expect(announcements[1]).toMatchObject({ namedBy: "user" });
+    expect(announcements[1]).not.toHaveProperty("writer");
   });
 
   test("announces a User rename by default and never for an unchanged name", async () => {
