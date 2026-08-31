@@ -22,15 +22,17 @@
       "binding": "BOT_PACKAGES",
     },
   ],
-  // Package bundling runs outside the Durable Object, in a Worker with no
-  // outbound bindings of its own (plan Step 3 / decision D4).
+  // One array: a second "services" key would silently replace this one, and
+  // the app would deploy with PACKAGE_BUNDLER unbound.
   "services": [
+    // Package bundling runs outside the Durable Object, in a Worker with no
+    // outbound bindings of its own (plan Step 3 / decision D4).
     {
       "binding": "PACKAGE_BUNDLER",
       "service": "frockbot-cloudflare-bundler",
     },
-  ],
-  "services": [
+    // The shared Computer host (ADR 0004). It holds SPRITES_TOKEN and the
+    // Sprites SDK; this Worker sends only an opaque credential reference.
     {
       "binding": "COMPUTER_HOST",
       "service": "frockbot-computer-host",
@@ -105,8 +107,6 @@
           "binding": "PACKAGE_BUNDLER",
           "service": "frockbot-cloudflare-bundler",
         },
-      ],
-      "services": [
         {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",

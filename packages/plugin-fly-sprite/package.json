@@ -26,6 +26,7 @@
     "@cordisjs/plugin-webui": "0.8.2",
     "@fly/sprites": "0.1.0",
     "@frockbot/computer-core": "workspace:*",
+    "@frockbot/computer-host-runtime": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-computer": "workspace:*",
     "cordis": "4.0.0-rc.8"

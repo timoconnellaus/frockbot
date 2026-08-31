@@ -1,0 +1,13 @@
+# The container image for `apps/computer-host` is built with the repository
+# root as its context, because the image needs
+# `packages/computer-host-{protocol,runtime}` alongside `apps/computer-host`.
+# Everything else stays out of the context.
+*
+!apps/computer-host
+!packages/computer-host-protocol
+!packages/computer-host-runtime
+**/node_modules
+**/dist
+**/out
+**/.wrangler
+**/.dev.vars

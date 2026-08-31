@@ -1,5 +1,5 @@
 {
-  "name": "@frockbot/fly-host-prototype",
+  "name": "@frockbot/computer-host",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -7,33 +7,36 @@
     "entry": [
       "src/index.ts",
       "container/server.ts",
-      "live-smoke.ts",
-      "src/**/*.test.ts"
+      "live-test.ts",
+      "src/**/*.test.ts",
+      "container/**/*.test.ts"
     ],
     "project": [
       "src/**/*.ts",
       "container/**/*.ts",
-      "live-smoke.ts"
+      "live-test.ts"
     ]
   },
   "scripts": {
-    "container:start": "node --experimental-strip-types container/server.ts",
+    "build": "wrangler deploy --dry-run --env=\"\" --outdir dist",
+    "container:start": "node container/server.ts",
     "dev": "wrangler dev --port 8790",
     "test": "bun test src container",
-    "test:live": "bun run live-smoke.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "test:live": "bun run live-test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p container/tsconfig.json"
   },
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
     "@fly/sprites": "0.1.0",
     "@frockbot/computer-core": "workspace:*",
-    "@frockbot/plugin-fly-sprite": "workspace:*",
+    "@frockbot/computer-host-protocol": "workspace:*",
+    "@frockbot/computer-host-runtime": "workspace:*",
     "ws": "8.21.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
-    "@types/bun": "1.3.6",
-    "@types/node": "22.19.3",
+    "@types/bun": "1.4.0",
+    "@types/node": "26.2.0",
     "@types/ws": "8.18.1",
     "typescript": "5.9.3",
     "wrangler": "latest"

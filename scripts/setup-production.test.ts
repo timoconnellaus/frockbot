@@ -171,7 +171,7 @@ describe("production setup", () => {
       (step) => step.name === "Validate deployment configuration",
     );
     const computerHost = deploymentSteps.find(
-      (step) => step.name === "Deploy shared Computer host",
+      (step) => step.name === "Deploy computer host",
     );
     const deploy = deploymentSteps.find(
       (step) => step.name === "Deploy Worker",
@@ -183,6 +183,23 @@ describe("production setup", () => {
     );
     expect(computerHost?.env?.SPRITES_TOKEN).toBe(
       "${{ secrets.SPRITES_TOKEN }}",
+    );
+    // The shared Computer host holds the Sprites token and re-checks the
+    // service token; both are its secrets and neither is the app Worker's.
+    expect(computerHost?.env?.COMPUTER_HOST_TOKEN).toBe(
+      "${{ secrets.COMPUTER_HOST_TOKEN }}",
+    );
+    expect(validation?.env?.COMPUTER_HOST_TOKEN).toBe(
+      "${{ secrets.COMPUTER_HOST_TOKEN }}",
+    );
+    // The host must be current before the app version that binds to it
+    // (ADR 0004, two-Worker deploy ordering).
+    const order = deploymentSteps.map((step) => step.name);
+    expect(order.indexOf("Deploy computer host")).toBeGreaterThan(
+      order.indexOf("Deploy bundler Worker"),
+    );
+    expect(order.indexOf("Deploy computer host")).toBeLessThan(
+      order.indexOf("Deploy Worker"),
     );
     expect(deploy?.env?.SPRITES_TOKEN).toBe("${{ secrets.SPRITES_TOKEN }}");
     expect(validation?.env?.CREDENTIAL_KEYRING).toBe(
@@ -203,6 +220,7 @@ describe("production setup", () => {
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       SPRITES_TOKEN: "sprites-production",
+      COMPUTER_HOST_TOKEN: "computer-host-production",
       CREDENTIAL_KEYRING:
         '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
     };
@@ -279,9 +297,18 @@ exit 1
       },
     );
     expect(hostExecution.exitCode).toBe(0);
-    expect(await Bun.file(capture).text()).toContain(
-      'SPRITES_TOKEN="sprites-production"',
-    );
+    const hostSecrets = JSON.parse(await Bun.file(capture).text()) as Record<
+      string,
+      string
+    >;
+    expect(hostSecrets.SPRITES_TOKEN).toBe("sprites-production");
+    expect(hostSecrets.COMPUTER_HOST_TOKEN).toBe("computer-host-production");
+    // The Sprites token belongs to the host and to the app Worker's provider
+    // gate; nothing else the host holds reaches anywhere else.
+    expect(Object.keys(hostSecrets).sort()).toEqual([
+      "COMPUTER_HOST_TOKEN",
+      "SPRITES_TOKEN",
+    ]);
 
     const execution = Bun.spawnSync(["bash", "-c", deploy?.run ?? ""], {
       cwd: directory,
