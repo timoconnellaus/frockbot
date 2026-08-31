@@ -7,6 +7,7 @@ import {
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
   createFoundationRuntimeApplication,
+  isUserInstallablePackageV1,
 } from "./runtime.js";
 import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
 
@@ -62,6 +63,7 @@ describe("foundation application", () => {
         "routines",
       ],
       runtime: [
+        "shell",
         "authoring",
         "clock",
         "computer",
@@ -182,13 +184,65 @@ describe("foundation application", () => {
 
     // Memory is absent: like Skills, it mounts only for a Turn whose Memory
     // roots the host can reach, so it is never a default runtime package.
-    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(4);
+    expect(application.packages.map((pkg) => pkg.manifest)).toHaveLength(5);
     expect(application.packages.map((pkg) => pkg.specifier)).toEqual([
+      // The Shell contributes the user-facing send tool and the parent
+      // hand-off, and needs no host to do it.
+      "@frockbot/plugin-shell",
       "@frockbot/plugin-clock",
       "@frockbot/plugin-echo",
       "@frockbot/plugin-identity",
       "@frockbot/plugin-provider-foundation",
     ]);
+  });
+
+  test("offers every Package a User can install, and not the shell", async () => {
+    const plan = await compileFoundationApplication();
+    const listed = plan.packages
+      .filter((pkg) => isUserInstallablePackageV1(pkg.manifest))
+      .map((pkg) => pkg.id);
+
+    // The application mounts its own shell: the User never chose it, cannot
+    // uninstall it, and assigns nothing from it.
+    expect(listed).not.toContain("shell");
+    // Everything the Plugins surface can install or assign today survives —
+    // including Flock and Routines, whose only Capability is a tool that takes
+    // no Connection, which is the shape a tool Package has.
+    for (const packageId of [
+      "flock",
+      "routines",
+      "provider-ollama-cloud",
+      "package-publisher",
+      "settings",
+      "clock",
+      "memory",
+    ]) {
+      expect(listed).toContain(packageId);
+    }
+    // Exactly one Package is held back, so the rule is not quietly hiding
+    // anything else.
+    expect(
+      plan.packages.map((pkg) => pkg.id).filter((id) => !listed.includes(id)),
+    ).toEqual(["shell"]);
+  });
+
+  test("keys installability on the application root slot, not on Connections", () => {
+    const client = (slots: string[]) => ({
+      contributions: {
+        client: { mounts: slots.map((slot) => ({ slot })) },
+      },
+    });
+
+    // A tool Package with no client Contribution at all, which is what a
+    // connection-less tool Package looks like.
+    expect(isUserInstallablePackageV1({ contributions: {} })).toBe(true);
+    expect(isUserInstallablePackageV1(client([]))).toBe(true);
+    expect(isUserInstallablePackageV1(client(["frockbot.sidebar-bots"]))).toBe(
+      true,
+    );
+    expect(isUserInstallablePackageV1(client(["authenticated-root"]))).toBe(
+      false,
+    );
   });
 
   test("resolves trusted desktop code only from the compiled declaration", async () => {

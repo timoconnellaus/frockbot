@@ -173,6 +173,62 @@ describe("application manifest protocol", () => {
         ],
       }),
     ).toEqual([]);
+    // A tool Package a User installs and assigns with no credential at all:
+    // one Capability, no Connection Type. It stays in the catalog, because
+    // needing no Connection is not the same as offering nothing.
+    expect(
+      decodePluginCatalog({
+        ...emptyManifest,
+        packages: [
+          {
+            id: "web",
+            displayName: "Web",
+            version: "0.0.1",
+            contributions: ["runtime"],
+            configuration: {
+              settings: [],
+              connectionTypes: [],
+              capabilities: [
+                { id: "web-fetch", kind: "tool", connectionTypes: [] },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        packageId: "web",
+        capabilities: [{ id: "web-fetch", kind: "tool", connectionTypes: [] }],
+        connectionTypes: [],
+      }),
+    ]);
+    // The same Package with a turn-type admission ceiling: manifest v4 is what
+    // the catalog wraps the served configuration as, so the field decodes.
+    expect(
+      decodePluginCatalog({
+        ...emptyManifest,
+        packages: [
+          {
+            id: "web",
+            displayName: "Web",
+            version: "0.0.1",
+            contributions: ["runtime"],
+            configuration: {
+              settings: [],
+              connectionTypes: [],
+              capabilities: [
+                {
+                  id: "web-fetch",
+                  kind: "tool",
+                  connectionTypes: [],
+                  admission: { turnTypes: ["chat", "automation"] },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toHaveLength(1);
     for (const manifest of [
       { packages: [] },
       { ...emptyManifest, schemaVersion: 2 },
@@ -904,6 +960,7 @@ describe("detached Turn projection", () => {
         text: "Keep working",
         status: "completed",
         tools: [],
+        sends: [],
       },
       {
         id: "local-assistant",
@@ -912,6 +969,7 @@ describe("detached Turn projection", () => {
         text: "Request stopped locally.",
         status: "aborted",
         tools: [],
+        sends: [],
       },
     ];
 
@@ -981,6 +1039,7 @@ describe("active durable Turn projection", () => {
           text: "Keep going",
           status: "completed",
           tools: [],
+          sends: [],
         },
         {
           id: "local-assistant",
@@ -989,6 +1048,7 @@ describe("active durable Turn projection", () => {
           text: "Request stopped locally.",
           status: "aborted",
           tools: [],
+          sends: [],
         },
       ],
     };
@@ -1012,6 +1072,51 @@ describe("active durable Turn projection", () => {
     expect(state.activeRun).toBeUndefined();
     expect(state.messages).toHaveLength(2);
     expect(state.messages[1]).toMatchObject({ text: "", status: "streaming" });
+  });
+
+  test("projects sends, and says so rather than throwing on one it cannot draw", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-send",
+          input: "Book it",
+          status: "completed",
+          responseText: "",
+          events: [
+            { type: "send/to-user", payload: { type: "text", text: "On it." } },
+            {
+              type: "send/to-user",
+              payload: {
+                type: "widget",
+                widget: { prompt: "Which day?", options: ["Tue"] },
+              },
+            },
+            // A payload shape this bundle does not know, exactly as a client
+            // older than the Bot would receive one.
+            { type: "send/to-user", payload: { type: "hologram" } },
+          ],
+        },
+      ],
+    );
+
+    expect(state.messages[1]?.sends).toEqual([
+      { kind: "payload", payload: { type: "text", text: "On it." } },
+      {
+        kind: "payload",
+        payload: {
+          type: "widget",
+          widget: { prompt: "Which day?", options: ["Tue"] },
+        },
+      },
+      { kind: "unsupported" },
+    ]);
   });
 
   test("streams running text without a banner and clears busy state", () => {

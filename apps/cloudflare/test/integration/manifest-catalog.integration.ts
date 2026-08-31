@@ -62,5 +62,18 @@ describe("the live application manifest decodes with the client's decoder", () =
     expect(withConfiguration.map((pkg) => pkg.id)).toContain(
       "provider-ollama-cloud",
     );
+
+    // A Package whose only Capability is a tool that takes no Connection is
+    // still something a User installs and assigns, so it stays in the catalog.
+    const flock = catalog.find((item) => item.packageId === "flock");
+    expect(flock?.capabilities.map((capability) => capability.id)).toContain(
+      "bot-self-management",
+    );
+    expect(flock?.connectionTypes).toEqual([]);
+
+    // The application's own shell is mounted unconditionally and was never
+    // installed, so the producer keeps it out of the catalog entirely.
+    expect(body.packages.map((pkg) => pkg.id)).not.toContain("shell");
+    expect(catalog.map((item) => item.packageId)).not.toContain("shell");
   });
 });

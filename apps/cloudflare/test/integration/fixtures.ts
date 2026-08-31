@@ -13,6 +13,12 @@ import {
 
 export { OLLAMA_BAD_API_KEY, OLLAMA_GOOD_API_KEY };
 export { OLLAMA_REVOKED_API_KEY } from "../harness/miniflare.ts";
+/**
+ * The prompt that makes the stubbed model call exact tools — one entry per
+ * call it should make in one response. The stub owns the wire shape; a test
+ * only has to name the tools and their input.
+ */
+export { toolCallTriggerPrompt } from "../harness/miniflare.ts";
 
 /** Matches `DEFAULT_APPLICATION_HASH` in the integration config. */
 export const APPLICATION_HASH = "foundation-v1";

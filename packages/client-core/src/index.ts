@@ -35,6 +35,14 @@ export interface ClientTurnEvent {
   content?: string;
   isError?: boolean;
   omittedInteractions?: number;
+  /**
+   * A `send/to-user` payload, carried untyped because the client core holds no
+   * product shapes. The Package that owns the send surface decodes it with the
+   * versioned decoder in kernel-contracts before drawing it.
+   */
+  payload?: unknown;
+  /** A `wake/parent` hand-off message. */
+  message?: string;
 }
 
 export interface ClientNotificationIntent {
@@ -220,6 +228,10 @@ function decodeTurnEvent(value: unknown): ClientTurnEvent {
       throw new Error("turn event.isError must be a boolean");
     }
     decoded.isError = event.isError;
+  }
+  if (event.payload !== undefined) decoded.payload = event.payload;
+  if (event.message !== undefined) {
+    decoded.message = responseString(event, "message", "turn event");
   }
   return decoded;
 }

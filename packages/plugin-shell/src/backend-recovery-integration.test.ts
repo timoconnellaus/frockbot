@@ -619,7 +619,7 @@ describe("Bot recovery", () => {
       schemaVersion: 1,
       runs: [
         expect.objectContaining({
-          schemaVersion: 1,
+          schemaVersion: 2,
           runId: "run-1",
           status: "completed",
           outcome: { type: "completed", text: "Durable reply" },
@@ -713,7 +713,7 @@ describe("Bot recovery", () => {
       schemaVersion: 1,
       runs: [
         expect.objectContaining({
-          schemaVersion: 1,
+          schemaVersion: 2,
           runId: "run-lost-marker",
           status: "reconciliation-required",
           recovery: expect.objectContaining({ action: "resume" }),

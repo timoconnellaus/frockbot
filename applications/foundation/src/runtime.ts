@@ -137,6 +137,7 @@ import {
   createMemoryRuntimePlugin,
   type MemoryRuntimeHostV1,
 } from "@frockbot/plugin-memory/agent";
+import shellAgentPlugin from "@frockbot/plugin-shell/agent";
 import shellManifest from "@frockbot/plugin-shell/manifest";
 import skillsManifest from "@frockbot/plugin-skills/manifest";
 import {
@@ -179,6 +180,8 @@ const runtimeContributions = new Map([
   ["@frockbot/plugin-provider-foundation/runtime", foundationProviderPlugin],
   ["@frockbot/plugin-echo/agent", echoRuntimePlugin],
   ["@frockbot/plugin-clock/agent", clockRuntimePlugin],
+  // The Shell's user-facing send tool and parent hand-off; it needs no host.
+  ["@frockbot/plugin-shell/agent", shellAgentPlugin],
 ]);
 
 type AssignedRuntimeContributionFactory = (config: {
@@ -230,6 +233,34 @@ const applicationSource: ApplicationSource = {
   schemaVersion: 1,
   packages: applicationJson.packages,
 };
+
+/**
+ * The client slot the authenticated application root is mounted into. The
+ * Package that mounts it *is* the hosted product UI — every other client
+ * Package mounts into a slot that one provides.
+ */
+export const APPLICATION_ROOT_SLOT_V1 = "authenticated-root";
+
+/**
+ * Whether a Package belongs in the catalog a User installs from.
+ *
+ * The application mounts its own shell unconditionally: the User never chose
+ * it, cannot uninstall it, and assigns nothing from it, so listing it beside
+ * the Packages they can install would offer a choice that does not exist. The
+ * rule is the manifest's own: a Package that mounts
+ * {@link APPLICATION_ROOT_SLOT_V1} is the application root itself.
+ *
+ * Everything else stays installable, including a Package whose only
+ * Capabilities are tools that take no Connection — a tool Package a User
+ * installs and assigns without any credential is exactly that shape.
+ */
+export function isUserInstallablePackageV1(manifest: {
+  contributions: { client?: { mounts: Array<{ slot: string }> } };
+}): boolean {
+  return !(manifest.contributions.client?.mounts ?? []).some(
+    (mount) => mount.slot === APPLICATION_ROOT_SLOT_V1,
+  );
+}
 
 export interface FoundationRuntimeApplication {
   plan: ApplicationPlan;

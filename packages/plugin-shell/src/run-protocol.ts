@@ -1,4 +1,8 @@
-import { type SessionEvent } from "@frockbot/kernel-contracts";
+import {
+  decodeSendToUserPayloadV1,
+  type SendToUserPayloadV1,
+  type SessionEvent,
+} from "@frockbot/kernel-contracts";
 import { isPublicIdentifier } from "@frockbot/configuration-core";
 import type {
   ClientNotificationIntent,
@@ -71,6 +75,24 @@ export type ClientRunEventV1 =
       callId: string;
       content: string;
       isError: boolean;
+    }
+  /**
+   * A user-facing send, projected so the client can draw the payload. The
+   * Turn's derived text carries only what the model wrote as an assistant
+   * message, and a widget-ended Turn writes none, so the payload has to reach
+   * the client here or not at all.
+   */
+  | {
+      type: "send/to-user";
+      payload: SendToUserPayloadV1;
+    }
+  /**
+   * A child Turn's hand-off to its parent. Projected because it is durable
+   * history of that Turn; delivering it into the parent is a later slice.
+   */
+  | {
+      type: "wake/parent";
+      message: string;
     };
 
 export type ClientRunOutcomeV1 =
@@ -83,8 +105,13 @@ export interface ClientRunRecoveryV1 {
   message: string;
 }
 
+/**
+ * The run projection. Version 2 adds `send/to-user` and `wake/parent` to
+ * `events`; a version 1 body is a version 2 body that carries neither, so the
+ * decoder accepts both and the projection emits 2.
+ */
 export interface ClientRunV1 {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   runId: string;
   admittedAt: string;
   input: string;
@@ -248,17 +275,27 @@ function isTerminalRunStatus(status: ClientRunStatusV1): boolean {
 type ClientToolCallV1 = Extract<ClientRunEventV1, { type: "tool/call" }>;
 type ClientToolResultV1 = Extract<ClientRunEventV1, { type: "tool/result" }>;
 
-interface ToolInteractionV1 {
-  call: ClientToolCallV1;
-  result?: ClientToolResultV1;
+/**
+ * One indivisible run of projected events, in the order the durable log wrote
+ * them. A tool interaction is its call and its result together — truncation
+ * never splits one — and a send or a hand-off is a unit of its own.
+ *
+ * `droppable` is false only for a tool call still waiting on its result: the
+ * client draws it as running work, so dropping it would show a Turn as idle
+ * while it is not.
+ */
+interface ProjectionUnitV1 {
+  events: ClientRunEventV1[];
+  droppable: boolean;
 }
 
-function toolInteractions(
+function projectionUnits(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
-): ToolInteractionV1[] {
-  const interactions: ToolInteractionV1[] = [];
-  const byOccurrence = new Map<string, ToolInteractionV1>();
+): ProjectionUnitV1[] {
+  const units: ProjectionUnitV1[] = [];
+  const byOccurrence = new Map<string, ProjectionUnitV1>();
+  let callCount = 0;
   for (const event of events) {
     if (event.type === "tool/call") {
       if (byOccurrence.has(event.occurrenceId)) {
@@ -266,106 +303,101 @@ function toolInteractions(
           `tool occurrence "${event.occurrenceId}" has duplicate intent`,
         );
       }
-      const alias = `tool-${interactions.length + 1}`;
-      const interaction: ToolInteractionV1 = {
+      callCount += 1;
+      const call: ClientToolCallV1 = {
+        type: "tool/call",
         call: {
-          type: "tool/call",
-          call: {
-            id: alias,
-            name: truncateWireString(event.name, MAX_EVENT_NAME_BYTES),
-          },
+          id: `tool-${callCount}`,
+          name: truncateWireString(event.name, MAX_EVENT_NAME_BYTES),
         },
       };
-      interactions.push(interaction);
-      byOccurrence.set(event.occurrenceId, interaction);
+      const unit: ProjectionUnitV1 = { events: [call], droppable: false };
+      units.push(unit);
+      byOccurrence.set(event.occurrenceId, unit);
     } else if (event.type === "tool/result") {
-      const interaction = byOccurrence.get(event.occurrenceId);
-      if (!interaction) {
+      const unit = byOccurrence.get(event.occurrenceId);
+      if (!unit) {
         throw new Error(
           `tool result has no matching occurrence "${event.occurrenceId}"`,
         );
       }
-      if (interaction.result) {
+      if (unit.droppable) {
         throw new Error(
           `tool occurrence "${event.occurrenceId}" has duplicate results`,
         );
       }
-      interaction.result = {
+      const call = unit.events[0] as ClientToolCallV1;
+      const result: ClientToolResultV1 = {
         type: "tool/result",
-        callId: interaction.call.call.id,
+        callId: call.call.id,
         content: truncateWireString(event.content, MAX_EVENT_CONTENT_BYTES),
         isError: event.isError,
       };
+      unit.events.push(result);
+      unit.droppable = true;
+    } else if (event.type === "send/to-user") {
+      units.push({
+        events: [{ type: "send/to-user", payload: event.payload }],
+        droppable: true,
+      });
+    } else if (event.type === "wake/parent") {
+      units.push({
+        events: [
+          {
+            type: "wake/parent",
+            message: truncateWireString(event.message, MAX_EVENT_CONTENT_BYTES),
+          },
+        ],
+        droppable: true,
+      });
     }
   }
   if (isTerminalRunStatus(status)) {
-    const orphaned = interactions.find((interaction) => !interaction.result);
+    const orphaned = units.find((unit) => !unit.droppable);
     if (orphaned) {
+      const call = orphaned.events[0] as ClientToolCallV1;
       throw new Error(
-        `terminal run has no result for tool call "${orphaned.call.call.id}"`,
+        `terminal run has no result for tool call "${call.call.id}"`,
       );
     }
   }
-  return interactions;
+  return units;
 }
 
 function visibleEvents(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
 ): ClientRunEventV1[] {
-  const interactions = toolInteractions(events, status);
-  const completed = interactions.filter(
-    (
-      interaction,
-    ): interaction is ToolInteractionV1 & {
-      result: ClientToolResultV1;
-    } => Boolean(interaction.result),
-  );
-  const pending = interactions.filter((interaction) => !interaction.result);
-  const projectedSize = completed.length * 2 + pending.length;
-  const completeProjection = [
-    ...completed.flatMap((interaction) => [
-      interaction.call,
-      interaction.result,
-    ]),
-    ...pending.map((interaction) => interaction.call),
-  ];
+  const units = projectionUnits(events, status);
+  const complete = units.flatMap((unit) => unit.events);
   if (
-    projectedSize <= MAX_VISIBLE_EVENTS &&
-    wireBytes(completeProjection) <= MAX_VISIBLE_EVENT_BYTES
+    complete.length <= MAX_VISIBLE_EVENTS &&
+    wireBytes(complete) <= MAX_VISIBLE_EVENT_BYTES
   ) {
-    return completeProjection;
+    return complete;
   }
-  if (pending.length >= MAX_VISIBLE_EVENTS) {
-    throw new Error("run has too many pending tool interactions to project");
-  }
-  let retainedCompletedCount = Math.min(
-    completed.length,
-    Math.floor((MAX_VISIBLE_EVENTS - 1 - pending.length) / 2),
-  );
-  let omittedInteractions = completed.length - retainedCompletedCount;
-  const buildProjection = (): ClientRunEventV1[] => {
-    const retainedCompleted =
-      retainedCompletedCount === 0
-        ? []
-        : completed.slice(-retainedCompletedCount);
-    return [
-      { type: "run/events-truncated", omittedInteractions },
-      ...retainedCompleted.flatMap((interaction) => [
-        interaction.call,
-        interaction.result,
-      ]),
-      ...pending.map((interaction) => interaction.call),
-    ];
-  };
+  // Oldest first: truncation drops history, never the newest thing the User is
+  // waiting on. `omittedInteractions` counts dropped units, so a dropped send
+  // is as visible in the marker as a dropped tool interaction.
+  let retained = units;
+  let omittedInteractions = 0;
+  const buildProjection = (): ClientRunEventV1[] => [
+    { type: "run/events-truncated", omittedInteractions },
+    ...retained.flatMap((unit) => unit.events),
+  ];
   let projection = buildProjection();
   while (
-    retainedCompletedCount > 0 &&
+    projection.length > MAX_VISIBLE_EVENTS ||
     wireBytes(projection) > MAX_VISIBLE_EVENT_BYTES
   ) {
-    retainedCompletedCount -= 1;
+    const index = retained.findIndex((unit) => unit.droppable);
+    if (index < 0) break;
+    retained = [...retained.slice(0, index), ...retained.slice(index + 1)];
     omittedInteractions += 1;
     projection = buildProjection();
+  }
+  if (projection.length > MAX_VISIBLE_EVENTS) {
+    throw new Error("run has too many pending tool interactions to project");
   }
   if (wireBytes(projection) > MAX_VISIBLE_EVENT_BYTES) {
     throw new Error("pending tool interactions exceed the wire byte limit");
@@ -411,7 +443,9 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
         } satisfies ClientRunRecoveryV1)
       : undefined;
   return {
-    schemaVersion: 1,
+    // Version 2: the projection may now carry `send/to-user` and
+    // `wake/parent`. A client pinned to 1 keeps decoding a stored list.
+    schemaVersion: 2,
     runId: truncate(run.runId, MAX_RUN_ID_LENGTH),
     admittedAt: truncate(run.acceptedAt, MAX_TIMESTAMP_LENGTH),
     input: truncateWireString(run.input, MAX_INPUT_BYTES),
@@ -643,6 +677,25 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
       isError: event.isError,
     };
   }
+  if (event.type === "send/to-user") {
+    exactKeys(event, ["type", "payload"], "run event");
+    return {
+      type: "send/to-user",
+      payload: decodeSendToUserPayloadV1(event.payload, "run event.payload"),
+    };
+  }
+  if (event.type === "wake/parent") {
+    exactKeys(event, ["type", "message"], "run event");
+    return {
+      type: "wake/parent",
+      message: wireString(
+        event,
+        "message",
+        MAX_EVENT_CONTENT_BYTES,
+        "run event",
+      ),
+    };
+  }
   throw new Error("run event.type is invalid");
 }
 
@@ -661,6 +714,12 @@ function decodeEvents(
   const callIds = new Set<string>();
   while (index < events.length) {
     const call = events[index];
+    // A send and a hand-off stand alone: they pair with nothing, so the
+    // call/result walk steps straight over them.
+    if (call?.type === "send/to-user" || call?.type === "wake/parent") {
+      index += 1;
+      continue;
+    }
     if (call?.type !== "tool/call") {
       throw new Error("run tool result has no matching call");
     }
@@ -761,7 +820,11 @@ function decodeRun(value: unknown): ClientRun {
     ],
     "run",
   );
-  if (run.schemaVersion !== 1) throw new Error("run.schemaVersion is invalid");
+  // 1 and 2 differ only by the event types a version 2 body may carry, and a
+  // version 1 body carries a subset of them, so one walk decodes both.
+  if (run.schemaVersion !== 1 && run.schemaVersion !== 2) {
+    throw new Error("run.schemaVersion is invalid");
+  }
   let runId: string;
   try {
     runId = decodeRunIdV1(string(run, "runId", MAX_RUN_ID_LENGTH, "run"));

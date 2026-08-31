@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "id": "shell",
   "displayName": "FrockBot Shell",
   "version": "0.0.1",
@@ -16,6 +16,9 @@
         "host": "bot"
       }
     ],
+    "runtime": {
+      "entry": "./agent"
+    },
     "client": {
       "entry": "./client",
       "mounts": [
@@ -36,5 +39,27 @@
       ]
     }
   },
-  "permissions": ["agent:turn"]
+  "permissions": ["agent:turn"],
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [],
+    "capabilities": [
+      {
+        "id": "user-voice",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": {
+          "turnTypes": ["chat"]
+        }
+      },
+      {
+        "id": "parent-handoff",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": {
+          "turnTypes": ["automation", "subagent"]
+        }
+      }
+    ]
+  }
 }
