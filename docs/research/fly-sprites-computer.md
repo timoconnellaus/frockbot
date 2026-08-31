@@ -117,7 +117,7 @@ The first-party Sprites documentation does not describe a built-in graphical des
 
 ## Configuration
 
-Production configuration uses `SPRITES_TOKEN`, matching the current SDK README; alternate spellings are not part of the hosted contract, though the `sprite` CLI itself reads `SPRITE_TOKEN` if anything ever shells out to it. `FROCKBOT_SPRITE_NAME` overrides the base name from which stable Bot and User storage Sprite names are derived. Standalone agent-runtime development may also set `FROCKBOT_COMPUTER_PROVIDER=fly-sprite`, `FROCKBOT_BOT_ID`, `FROCKBOT_AGENT_ID`, and `FROCKBOT_SESSION_ID`; hosted identity comes from durable backend authority instead of these process variables.
+Production configuration uses `SPRITES_TOKEN`, matching the current SDK README; alternate spellings are not part of the hosted contract, though the `sprite` CLI itself reads `SPRITE_TOKEN` if anything ever shells out to it. `FROCKBOT_SPRITE_NAME` overrides the base name from which the User's one stable Sprite name is derived; since [ADR 0012](../adr/0012-one-computer-per-user.md) there is one Sprite per User and no separate User storage Sprite. Standalone agent-runtime development may also set `FROCKBOT_COMPUTER_PROVIDER=fly-sprite`, `FROCKBOT_BOT_ID`, `FROCKBOT_AGENT_ID`, and `FROCKBOT_SESSION_ID`; hosted identity comes from durable backend authority instead of these process variables.
 
 ## Verification limits
 

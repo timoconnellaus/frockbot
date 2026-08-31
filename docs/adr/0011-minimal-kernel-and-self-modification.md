@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Minimal kernel with Bot self-modification in loaded isolates
@@ -12,6 +12,25 @@ FrockBot will reduce its non-Package code to a three-part kernel — Durable Obj
 - **Bot-authored code runs in the kernel isolate:** simplest to compose, but gives untrusted code the kernel's bindings, secrets, and other Bots' state.
 - **Approval before every activation:** safest, but removes the autonomy that makes self-modification useful; DeepSeek Harness activates host-side dynamic Packages immediately and pi reloads on request, and neither is worse for it.
 - **Loaded isolate with capability bindings, immediate activation, fail-closed composition, User revert:** chosen. It matches the platform's own security seam (`globalOutbound: null`, RPC capabilities), keeps the Agent loop independent of the Computer, and gives the User a durable audit and undo rather than a gate.
+
+## Status
+
+Implemented, which is why this ADR is `accepted` rather than `proposed`. The plan that carries it,
+[`docs/plans/kernel-and-isolate.md`](../plans/kernel-and-isolate.md), records itself as implemented, and the decision's
+load-bearing claims each have a named check in [`docs/architecture-checks.md`](../architecture-checks.md):
+
+- the three-part kernel exists as `packages/kernel-contracts`, `packages/kernel-agent-loop`, `packages/kernel-composition`
+  and `packages/kernel-do`, and the tool and model registries left it as the `plugin-tools` and `plugin-models` Packages;
+  `scripts/check-kernel-imports.ts` is a standalone linter as well as a test, so `bun run typecheck` fails on a kernel that
+  imports a Package;
+- a non-first-party Package loads through Worker Loader with `globalOutbound` disabled and only Assignment-derived bindings
+  (`apps/cloudflare/test/bot-isolate.workerd.ts`), and an authority-widening request becomes a durable pending User decision
+  rather than a widening;
+- activation fails closed and quarantines a generation that fails three consecutive times
+  (`packages/kernel-composition/src/activation.ts`), and a revert records a new generation the next admitted Turn activates
+  (`apps/cloudflare/test/composition.workerd.ts`);
+- authoring is bounded by durable per-User quota, and a breach is a visible failure rather than a throw
+  (`apps/cloudflare/test/authoring.workerd.ts`).
 
 ## Consequences
 
