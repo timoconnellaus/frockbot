@@ -2198,6 +2198,48 @@ export class OllamaCloudUserBackendContribution {
     );
   }
 
+  /**
+   * Lease this Connection's key for a *tool* effect — today the
+   * `ollama-cloud-web-search` Capability. It is the model lease minus the
+   * model: `/api/web_search` resolves nothing and bills no inference, so there
+   * is no catalog to reconcile and no discovery lease to settle.
+   *
+   * The authority check is the same one the model path runs, and the lease is
+   * keyed by the tool call's durable `effectId`, so a Turn resumed after
+   * eviction replays the same lease rather than minting a second one.
+   */
+  async leaseToolCredential(input: {
+    accountId: string;
+    connectionId: string;
+    effectId: string;
+    connectionGeneration: string;
+  }): Promise<CredentialLeaseV1> {
+    await this.host.credentials.expireLeases();
+    const replay = await this.host.credentials.replayLease({
+      accountId: input.accountId,
+      connectionId: input.connectionId,
+      packageId: PACKAGE_ID,
+      effectId: input.effectId,
+    });
+    if (replay) return replay;
+    return this.host.storage.transaction(
+      async (storage: UserSettingsTransaction & CredentialTransaction) => {
+        await this.requireModelAuthority(input, storage);
+        return this.host.credentials.lease(
+          {
+            accountId: input.accountId,
+            connectionId: input.connectionId,
+            packageId: PACKAGE_ID,
+            effectId: input.effectId,
+            expiresAt: new Date(this.now() + MODEL_LEASE_MS).toISOString(),
+            expectedGeneration: input.connectionGeneration,
+          },
+          storage,
+        );
+      },
+    );
+  }
+
   private async requireModelAuthority(
     input: {
       accountId: string;
@@ -2226,6 +2268,19 @@ export class OllamaCloudUserBackendContribution {
       throw new Error("Connection changed before model authorization");
     }
     return connection;
+  }
+
+  /**
+   * Settle a tool effect's lease. Unlike the model path there is no `resolve:`
+   * companion lease and no stored model resolution, because a tool effect
+   * resolves no model.
+   */
+  async settleToolCredential(input: {
+    accountId: string;
+    connectionId: string;
+    effectId: string;
+  }): Promise<void> {
+    await this.host.credentials.settle({ ...input, packageId: PACKAGE_ID });
   }
 
   async settleModelCredential(input: {

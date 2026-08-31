@@ -561,7 +561,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 44  | Custom (non-marketplace) stdio MCP servers, which cannot ship in a template                                                      | `user-beeper`, `user-beeper-desktop`                                                                                                                            | §2.10            | `connection-core` (stdio refused: needs a Computer pipe)                | not started |
 | 45  | Per-Bot connector credential store                                                                                               | `connector-secrets/<agent-uuid>/`                                                                                                                               | §10              | `plugin-credentials`                                                    | partial     |
 | 46  | Repo work delegated to a cloud coding agent; repos never cloned onto the computer                                                | `CloudAgent`                                                                                                                                                    | §2.17, §14       | new Package                                                             | not started |
-| 47  | Web search, web fetch and image generation as first-class tools                                                                  | `WebSearch`, `WebFetch`, `GenerateImage`                                                                                                                        | §17              | tool Packages                                                           | not started |
+| 47  | Web search, web fetch and image generation as first-class tools                                                                  | `WebSearch`, `WebFetch`, `GenerateImage`                                                                                                                        | §17              | `plugin-web` + `plugin-provider-ollama-cloud`                           | partial     |
 | 48  | **Registered machine** — registry of the user's own machines with live connected state                                           | `ListMachines` → `{machineId, label, connected}`                                                                                                                | §2.16            | new `plugin-user-machine`                                               | not started |
 | 49  | Shell/Read/AwaitShell targeted at a machine by id with local-exec approval; copy files both ways                                 | `machineId`; `CopyToBox`/`CopyFromBox`                                                                                                                          | §2.16, §2A       | `plugin-user-machine`                                                   | not started |
 | 50  | **UI** — settings tabs with per-row deep links the agent may cite but never invent                                               | `grokbot://app/v1/settings?id=<anchor>`                                                                                                                         | §2A              | `plugin-settings`                                                       | partial     |
@@ -780,6 +780,31 @@ the rows whose status the code moved:
   (ADR 0008 publication writes artifacts, not Catalog rows), and no agent-side
   `SearchPlugins`/`GetPlugin` tools — the Catalog is reachable from the hosted
   Plugins surface only.
+
+- **47** — two of the three tools exist. `web_search` is a Connection-backed
+  Capability of `plugin-provider-ollama-cloud` (`src/web-search.ts`,
+  `POST {apiBaseUrl}/api/web_search`, the same key and the same resolved
+  endpoint root as chat) and `web_fetch` is the new `plugin-web` Package
+  (`src/agent.ts`, `src/ssrf.ts`). Both are work tools on all four turn types,
+  both declare `idempotent: true`, and both emit stable JSON into `tool/result`
+  rather than prose. **`GenerateImage` is not built.**
+
+  **No schema parity is claimed, and none is possible.** Row 47 cites §17,
+  which is not in this document: no input schema, bound, or error shape was
+  ever measured for any of the three. FrockBot's contracts are its own, defined
+  from first principles — the web-search DTO and its `WebSearchV1` interface
+  live in `@frockbot/plugin-web/contract` so a second provider can satisfy them
+  with no kernel diff, and `web_fetch`'s bounds (https only, ≤ 3 re-validated
+  redirects, a content-type allow list, a 1 MiB streamed read and ≤ 32 KiB of
+  extracted text) are FrockBot's outbound policy, not a copy of GrokBot's.
+
+  `plugin-web/src/ssrf.ts` is also the single outbound classifier
+  `plugin-mcp` holds a User-named server URL to, replacing the duplicate copy
+  that Package shipped with a note asking for exactly this merge.
+
+  One known limitation, recorded rather than papered over: workerd exposes no
+  resolve-then-connect hook, so host classification is exact for IP literals
+  and known-internal name shapes and **best-effort against DNS rebinding**.
 
 ## Open questions for GrokBot
 

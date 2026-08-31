@@ -70,6 +70,7 @@ import {
 import {
   createFoundationAssignedRuntimePackages,
   createFoundationHostedRuntimePackages,
+  mergeFoundationRuntimePackagesV1,
   type PackagePublisherAgentHost,
 } from "@frockbot/application-foundation/runtime";
 import {
@@ -2748,7 +2749,10 @@ export class ShellBotBackendContribution {
       }),
     );
     return {
-      agentPackages,
+      // One Package can reach a Turn as more than one Contribution — Ollama
+      // Cloud is both the model provider and the `web_search` Capability — and
+      // the runtime resolves one Plugin per Contribution specifier.
+      agentPackages: mergeFoundationRuntimePackagesV1(agentPackages),
       modelSelection: {
         provider: binding.providerType,
         model: effectiveModel.providerModelId,

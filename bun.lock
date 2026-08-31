@@ -49,6 +49,7 @@
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/plugin-ui-theme": "workspace:*",
+        "@frockbot/plugin-web": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -657,6 +658,7 @@
         "@frockbot/plugin-credentials": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
+        "@frockbot/plugin-web": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
@@ -776,10 +778,12 @@
         "@frockbot/plugin-credentials": "workspace:*",
         "@frockbot/plugin-models": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
+        "@frockbot/plugin-web": "workspace:*",
         "@frockbot/provider-openai-compatible": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
       "devDependencies": {
+        "@frockbot/plugin-tools": "workspace:*",
         "@types/bun": "1.3.6",
         "typescript": "^7.0.2",
       },
@@ -934,6 +938,19 @@
         "@types/node": "26.2.0",
         "typescript": "5.9.3",
         "vite": "8.2.2",
+      },
+    },
+    "packages/plugin-web": {
+      "name": "@frockbot/plugin-web",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-contracts": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@frockbot/plugin-tools": "workspace:*",
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
       },
     },
     "packages/protocol": {
@@ -1286,6 +1303,8 @@
     "@frockbot/plugin-tools": ["@frockbot/plugin-tools@workspace:packages/plugin-tools"],
 
     "@frockbot/plugin-ui-theme": ["@frockbot/plugin-ui-theme@workspace:packages/plugin-ui-theme"],
+
+    "@frockbot/plugin-web": ["@frockbot/plugin-web@workspace:packages/plugin-web"],
 
     "@frockbot/protocol": ["@frockbot/protocol@workspace:packages/protocol"],
 
