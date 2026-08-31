@@ -17,7 +17,7 @@
 // `outboundService` knob, so the Worker's outbound `fetch` is the machine's,
 // and a test must not depend on https://ollama.com. Instead this harness runs
 // a fake Ollama HTTP server on a loopback port and each spec points its
-// Connection at it through the Package's own `apiBaseUrl` Connection setting —
+// Connection at it through the Package's own `api-base-url` Connection setting —
 // a shipped product feature (Ollama-compatible endpoints, local Ollama), not a
 // test-only branch.
 import { spawn, type ChildProcess } from "node:child_process";

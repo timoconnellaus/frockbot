@@ -18,7 +18,7 @@ import {
 } from "@playwright/test";
 
 export interface E2EOptions {
-  /** The fake Ollama server the harness started, for `apiBaseUrl`. */
+  /** The fake Ollama server the harness started, for `api-base-url`. */
   ollamaBaseUrl: string;
 }
 

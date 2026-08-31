@@ -368,7 +368,7 @@ on a loopback port, and tears the whole tree down afterwards; every run uses a f
 into the next. Authentication is the development identity (`?as_user=`), and
 each spec takes a fresh random User, so the layer needs no secret.
 
-The provider is reached through the Package's own `apiBaseUrl` Connection
+The provider is reached through the Package's own `api-base-url` Connection
 setting rather than through a test-only branch: `wrangler dev` has no
 `outboundService`, and pointing a Connection at a local Ollama is a shipped
 feature.
