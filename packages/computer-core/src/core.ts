@@ -288,16 +288,32 @@ export interface ComputerDirectory {
 export interface ComputerWorkspace extends WorkspaceFilesV1 {
   readonly layout: WorkspaceLayoutV1;
   /**
-   * SEAM — ADR 0013 / `docs/plans/slice-2.md` Step 3.
+   * RETIRED — ADR 0013 / `docs/plans/slice-2.md` Step 3b.
    *
-   * The Memory Package's single-writer path to Memory roots. Today it writes
-   * the Workspace directly through this surface; when the durable-root R2 sync
-   * of Step 3 lands, the Memory Package writes object storage instead and this
-   * property is deleted along with the Computer-side Memory write path. It
-   * refuses every non-Memory root, exactly as the surface above refuses every
-   * Memory root, so the two never overlap and there is no flag to flip.
+   * @deprecated The Computer-side Memory write path is gone. Memory roots come
+   * from object storage through the durable-root sync and are presented
+   * read-only on the Computer, so this seam answers `refused` to every call. It
+   * remains only so the Memory Package's replacement can land in a separate
+   * change; delete the property once nothing names it.
    */
   readonly memoryWriter: WorkspaceFilesV1;
+}
+
+/**
+ * A `WorkspaceFilesV1` that refuses everything, as a declared outcome rather
+ * than a throw. It is how a retired seam stays type-compatible while writing
+ * nothing: the Computer host is non-authoritative, so "this surface does not
+ * serve you" is an ordinary answer its callers already handle.
+ */
+export function refusedWorkspaceFilesV1(reason: string): WorkspaceFilesV1 {
+  const refused = () => Promise.resolve({ status: "refused" as const, reason });
+  return {
+    read: refused,
+    list: refused,
+    stat: refused,
+    write: refused,
+    delete: refused,
+  };
 }
 
 type WorkspaceOutcomeFailure = { status: string; reason: string };

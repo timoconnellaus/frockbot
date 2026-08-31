@@ -3,6 +3,15 @@ import { APIError, SpritesClient } from "@fly/sprites";
 import { ComputerError } from "@frockbot/computer-core";
 
 const DESKTOP_SERVICE = "frockbot-viewer-gateway";
+/**
+ * The durable-root sync's on-Sprite half (ADR 0013), declared as a service so
+ * the Sprite runtime brings it back after a cold pause: "Only
+ * Computer-provider-declared services may be reattached; other processes are
+ * assumed dead after a cold pause." It holds no credential and makes no
+ * network call — it watches the durable roots and bumps a change signal, and
+ * the sync agent that reads object storage runs in the backend.
+ */
+export const WORKSPACE_SYNC_SERVICE = "frockbot-workspace-sync";
 const HOME_ROOT = "/home/box";
 const DATA_ROOT = `${HOME_ROOT}/agent-data`;
 const RUNTIME_ROOT = `${HOME_ROOT}/.frockbot`;
@@ -169,6 +178,25 @@ console.log(JSON.stringify({ url: page.url(), title: await page.title(), snapsho
 await browser.close();
 `;
 
+const syncWatchScript = `#!/usr/bin/env bash
+set -eu
+DATA=${DATA_ROOT}
+STATE=${RUNTIME_ROOT}/sync
+mkdir -p "$STATE"
+SIGNAL="$STATE/signal"
+STAMP="$STATE/.stamp"
+[ -f "$SIGNAL" ] || printf '0\n' > "$SIGNAL"
+[ -f "$STAMP" ] || touch "$STAMP"
+while true; do
+  CHANGED=$(find "$DATA" -type f -newer "$STAMP" ! -path "*/.frockbot-sync/*" ! -path "*/.frockbot-locks/*" -print -quit 2>/dev/null || true)
+  if [ -n "$CHANGED" ]; then
+    touch "$STAMP"
+    printf '%s\n' "$(( $(cat "$SIGNAL" 2>/dev/null || echo 0) + 1 ))" > "$SIGNAL"
+  fi
+  sleep 5
+done
+`;
+
 const gatewayScript = `#!/usr/bin/env bash
 set -eu
 exec websockify --web=/usr/share/novnc --token-plugin TokenFile --token-source=${RUNTIME_ROOT}/tokens 6080
@@ -187,7 +215,7 @@ function installFile(path: string, content: string): string {
 }
 
 const provisionScript = `set -eu
-mkdir -p ${RUNTIME_ROOT} ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT}
+mkdir -p ${RUNTIME_ROOT} ${RUNTIME_ROOT}/sync ${BOTS_ROOT} ${DATA_ROOT}/agents ${DATA_ROOT}/user-memory ${DATA_ROOT}/user-packages ${HOME_ROOT}/bin ${HOME_ROOT}/reference ${HOME_ROOT}/chrome-profile ${WORKSPACES_ROOT}
 if ! command -v Xvfb >/dev/null || ! command -v chromium >/dev/null || ! command -v websockify >/dev/null; then
   if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
   $SUDO apt-get update >/tmp/frockbot-provision.log 2>&1
@@ -201,7 +229,8 @@ ${installFile(ENSURE_AGENT_SCRIPT, ensureAgentScript)}
 ${installFile(CONTROL_SCRIPT, controlScript)}
 ${installFile(`${RUNTIME_ROOT}/browser.mjs`, browserHelper)}
 ${installFile(`${RUNTIME_ROOT}/start-gateway.sh`, gatewayScript)}
-chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh
+${installFile(`${RUNTIME_ROOT}/watch-workspace.sh`, syncWatchScript)}
+chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh
 if [ ! -d ${RUNTIME_ROOT}/node_modules/playwright-core ]; then
   npm install --prefix ${RUNTIME_ROOT} --no-audit --no-fund playwright-core@1.55.0 >>/tmp/frockbot-provision.log 2>&1
 fi
@@ -704,6 +733,12 @@ export class FlySpriteComputer {
       "30s",
     );
     await settleService(stream, "Desktop gateway", signal);
+    // The durable-root sync's watcher is a declared service, so a cold pause
+    // ends with it running again rather than with a silently stopped process.
+    const sync = await sprite.createService(WORKSPACE_SYNC_SERVICE, {
+      cmd: `${RUNTIME_ROOT}/watch-workspace.sh`,
+    });
+    await settleService(sync, "Workspace sync watcher", signal);
     await sprite.updateURLSettings({ auth: "public" });
     return sprite;
   }
@@ -820,6 +855,7 @@ export class FlySpriteComputer {
         `${DATA_ROOT}/agents/${layout.key}/skills`,
         `${DATA_ROOT}/user-memory`,
         `${DATA_ROOT}/user-packages`,
+        `${RUNTIME_ROOT}/sync`,
       ],
       { signal, timeout: 15_000, maxBuffer: MAX_OUTPUT },
     );

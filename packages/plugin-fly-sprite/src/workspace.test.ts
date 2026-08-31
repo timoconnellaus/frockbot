@@ -324,32 +324,45 @@ describe("Fly Workspace files", () => {
     }
   });
 
-  // The named Step-3 seam: the Memory Package is the single writer of Memory
-  // roots, and writes nothing else.
-  test("the Memory seam writes Memory roots and refuses every other root", async () => {
+  // ADR 0013 / `docs/plans/slice-2.md` Step 3b: the Computer-side Memory
+  // writer is retired. The Memory Package writes object storage and the
+  // durable-root sync presents Memory roots read-only here, so the seam
+  // refuses every call rather than offering a second write path.
+  test("the retired Memory seam refuses every write", async () => {
     const { workspace } = await openWorkspace();
 
+    for (const root of [botMemoryRoot, userMemoryRoot, skillsRoot]) {
+      expect(
+        await workspace.memoryWriter.write({
+          path: { root, path: "profile.md" },
+          bytes: new TextEncoder().encode("fact"),
+          writer: BOT_WRITER,
+          expectedGenerationId: null,
+        }),
+      ).toMatchObject({ status: "refused" });
+    }
+  });
+
+  // A Memory root the sync materialized is readable through the kernel
+  // surface: read-only, not invisible.
+  test("reads a Memory root the sync materialized, and refuses to write it", async () => {
+    const { client, workspace } = await openWorkspace();
+    client.sprite.files.set(
+      `/home/box/agent-data/agents/${computerBotKey(BOT)}/memory/profile.md`,
+      { bytes: new TextEncoder().encode("fact") },
+    );
+
     expect(
-      await workspace.memoryWriter.write({
-        path: { root: botMemoryRoot, path: "profile.md" },
-        bytes: new TextEncoder().encode("fact"),
-        writer: BOT_WRITER,
-        expectedGenerationId: null,
-      }),
+      await workspace.read({ root: botMemoryRoot, path: "profile.md" }),
     ).toMatchObject({ status: "ok" });
     expect(
-      await workspace.memoryWriter.write({
-        path: { root: skillsRoot, path: "SKILL.md" },
-        bytes: new TextEncoder().encode("x"),
+      await workspace.write({
+        path: { root: botMemoryRoot, path: "profile.md" },
+        bytes: new TextEncoder().encode("other"),
         writer: BOT_WRITER,
         expectedGenerationId: null,
       }),
     ).toMatchObject({ status: "refused" });
-    // The Memory root written through the seam is readable through the
-    // kernel surface: read-only, not invisible.
-    expect(
-      await workspace.read({ root: botMemoryRoot, path: "profile.md" }),
-    ).toMatchObject({ status: "ok" });
   });
 
   // Constitution — Computer and Workspace: "a Bot's instruction root and Bot

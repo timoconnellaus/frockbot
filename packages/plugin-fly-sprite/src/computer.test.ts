@@ -282,14 +282,17 @@ describe("Fly Sprite computer", () => {
       name: "frockbot-viewer-gateway",
       httpPort: 6080,
     });
-    expect(client.sprite.services).toHaveLength(3);
-    expect(client.sprite.services[1]?.name).toStartWith("frockbot-desktop-");
+    // The durable-root sync's watcher is declared beside the gateway, because
+    // "Only Computer-provider-declared services may be reattached."
+    expect(client.sprite.services[1]?.name).toBe("frockbot-workspace-sync");
+    expect(client.sprite.services).toHaveLength(4);
     expect(client.sprite.services[2]?.name).toStartWith("frockbot-desktop-");
-    expect(client.sprite.services[1]?.name).not.toBe(
-      client.sprite.services[2]?.name,
+    expect(client.sprite.services[3]?.name).toStartWith("frockbot-desktop-");
+    expect(client.sprite.services[2]?.name).not.toBe(
+      client.sprite.services[3]?.name,
     );
-    expect(client.sprite.services[1]?.name.length).toBeLessThanOrEqual(63);
     expect(client.sprite.services[2]?.name.length).toBeLessThanOrEqual(63);
+    expect(client.sprite.services[3]?.name.length).toBeLessThanOrEqual(63);
     expect(client.sprite.auth).toBe("public");
     expect(general.botKey).not.toBe(health.botKey);
     expect(general.viewerUrl).toContain("/vnc.html#");

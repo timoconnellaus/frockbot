@@ -27,6 +27,7 @@
 import { createHash } from "node:crypto";
 import {
   ComputerError,
+  refusedWorkspaceFilesV1,
   workspaceMountPathV1,
   type ComputerWorkspace,
   type WorkspaceLayoutV1,
@@ -55,10 +56,19 @@ import {
 import type { FlySpriteAgentComputer } from "./computer.js";
 
 /** Where a root records the generation of each file beneath it. */
-const GENERATIONS_DIR = ".frockbot-generations";
+export const WORKSPACE_GENERATIONS_DIR = ".frockbot-generations";
+/** Where the durable-root sync keeps its own per-root bookkeeping. */
+export const WORKSPACE_SYNC_DIR = ".frockbot-sync";
+/** Where a removal is recorded, under `WORKSPACE_SYNC_DIR`. */
+export const SYNC_TOMBSTONES_DIR = "tombstones";
+/** Where a losing write is preserved on the Computer, under `WORKSPACE_SYNC_DIR`. */
+export const SYNC_CONFLICTS_DIR = "conflicts";
+const GENERATIONS_DIR = WORKSPACE_GENERATIONS_DIR;
 const LOCKS_DIR = ".frockbot-locks";
-const EMPTY_SHA256 =
+/** The sha-256 of no bytes; a deletion tombstone's content address. */
+export const WORKSPACE_EMPTY_SHA256 =
   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+const EMPTY_SHA256 = WORKSPACE_EMPTY_SHA256;
 const DEFAULT_LIST_LIMIT = 100;
 
 function shellQuote(value: string): string {
@@ -387,7 +397,7 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       'mkdir -p "$ROOT"',
       "INDEX=0",
       "EMITTED=0",
-      `find "$ROOT" -type f ! -path "$ROOT/${LOCKS_DIR}/*" ! -path "$ROOT/${GENERATIONS_DIR}/*" -print0 | sort -z | while IFS= read -r -d "" FILE; do`,
+      `find "$ROOT" -type f ! -path "$ROOT/${LOCKS_DIR}/*" ! -path "$ROOT/${GENERATIONS_DIR}/*" ! -path "$ROOT/${WORKSPACE_SYNC_DIR}/*" -print0 | sort -z | while IFS= read -r -d "" FILE; do`,
       '  REL=${FILE#"$ROOT"/}',
       '  if [ -n "$PREFIX" ]; then case "$REL" in "$PREFIX"|"$PREFIX"/*) ;; *) continue ;; esac; fi',
       '  if [ "$INDEX" -lt "$OFFSET" ]; then INDEX=$((INDEX + 1)); continue; fi',
@@ -524,7 +534,8 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       `REL=${shellQuote(relative)}`,
       'TARGET="$ROOT/$REL"',
       `META="$ROOT/${GENERATIONS_DIR}/$REL"`,
-      `mkdir -p "$ROOT/${LOCKS_DIR}"`,
+      `GRAVE="$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_TOMBSTONES_DIR}/$REL"`,
+      `mkdir -p "$ROOT/${LOCKS_DIR}" "$(dirname "$META")"`,
       'LOCK=$(printf %s "$REL" | sha256sum | cut -d" " -f1)',
       `exec 9>"$ROOT/${LOCKS_DIR}/$LOCK"`,
       "flock -x 9",
@@ -532,7 +543,19 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       "CURRENT=__UNRECORDED__",
       'if [ -f "$META" ]; then CURRENT=$(sed -n 1p "$META"); fi',
       `if [ "$CURRENT" != ${shellQuote(request.expectedGenerationId)} ]; then echo __CONFLICT__; exit 0; fi`,
+      // A delete leaves a durable tombstone on the Computer: the removal is
+      // recorded with the generation it superseded and the writer that
+      // performed it, so "this file is gone, deliberately, and here is who
+      // removed it" survives the removal, and the durable-root sync carries it
+      // to object storage instead of reading the absence as a file that never
+      // existed. Its first line is the superseded generation id, which is what
+      // a conditional delete against the store must present.
+      `mkdir -p "$(dirname "$GRAVE")"`,
       'rm -f "$TARGET" "$META"',
+      'GTMP=$(mktemp "${GRAVE}.XXXXXX")',
+      `printf %s ${shellQuote(Buffer.from(`${request.expectedGenerationId}\n${JSON.stringify(tombstone)}`).toString("base64"))} | base64 -d > "$GTMP"`,
+      'chmod 600 "$GTMP"',
+      'mv "$GTMP" "$GRAVE"',
       "echo __DELETED__",
     ].join("\n");
     const output = await this.run(script);
@@ -552,12 +575,18 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
 
 /**
  * The Fly Computer's Workspace: the kernel-consumed surface, which refuses
- * every Memory root, plus the named Step-3 seam the Memory Package writes
- * through until the durable-root R2 sync of ADR 0013 exists.
+ * every Memory root.
+ *
+ * There is no Computer-side Memory writer any more. The Memory Package writes
+ * object storage, and the durable-root sync (`./sync.ts`) materializes Memory
+ * roots here read-only, so `memoryWriter` is a retired seam that refuses every
+ * call rather than a second write path.
  */
 export class FlyComputerWorkspace implements ComputerWorkspace {
   private readonly files: FlyWorkspaceFiles;
-  readonly memoryWriter: WorkspaceFilesV1;
+  readonly memoryWriter: WorkspaceFilesV1 = refusedWorkspaceFilesV1(
+    "The Computer-side Memory writer is retired; the Memory Package writes object storage and the durable-root sync presents Memory roots read-only",
+  );
 
   constructor(
     readonly layout: WorkspaceLayoutV1,
@@ -567,11 +596,6 @@ export class FlyComputerWorkspace implements ComputerWorkspace {
       ...options,
       layout,
       surface: "kernel",
-    });
-    this.memoryWriter = new FlyWorkspaceFiles({
-      ...options,
-      layout,
-      surface: "memory",
     });
   }
 

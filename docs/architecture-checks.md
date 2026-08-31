@@ -95,6 +95,31 @@ Durable Object (`packages/kernel-do/src/workspace-generations.ts`), and the
 | — its runtime half: a Bot writes only its own shard, and a listing with no shard merges every Bot's                     | `packages/workspace-store/src/store.test.ts`           | `shared Memory tiers are sharded per writing Bot` (5 tests)                               | Bun     |
 | a Workspace write into a Memory root is rejected — **object-storage half**                                              | `packages/workspace-store/src/store.test.ts`           | `the kernel surface refuses every Memory root and the Memory surface refuses every other` | Bun     |
 
+## Sync
+
+Rows for `docs/plans/slice-2.md` Step 3b — the Computer-side durable-root sync
+of [ADR 0013](adr/0013-bidirectional-memory-sync.md)
+(`packages/plugin-fly-sprite/src/sync.ts`) and the on-Sprite watcher service it
+drives (`WORKSPACE_SYNC_SERVICE` in `packages/plugin-fly-sprite/src/computer.ts`).
+
+| Constitutional check                                                                                                      | File                                               | Test name                                                                                 | Runner |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ |
+| conflicting Workspace and object-storage writes to a non-Memory durable root both survive as generations and are surfaced | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a Computer write and a store write to one path both survive, one as a surfaced conflict` | Bun    |
+| the Workspace presents Memory roots read-only through the durable-root sync                                               | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a Memory file changed on the Computer is never pushed and is restored`                   | Bun    |
+| — its removal half: a Memory file removed on the Computer is restored, never deleted in the store                         | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a Memory file removed on the Computer is restored, never deleted in the store`           | Bun    |
+| — its store half: the sync surface reads every root and writes no Memory root                                             | `packages/workspace-store/src/store.test.ts`       | `the sync surface reads every root and writes no Memory root`                             | Bun    |
+| durable roots survive cold start: an empty disk is repopulated from object storage                                        | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a cold start with an empty disk repopulates every declared root`                         | Bun    |
+| a Skill written through the store reaches the Bot's instruction root with the writer the store recorded                   | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a Skill written through the store appears under the instruction root with its writer`    | Bun    |
+| every write to a durable root records its writer — including a file a shell wrote, attributed or `unattributed`           | `packages/plugin-fly-sprite/src/sync.test.ts`      | `pushes a shell-written file with the writer the session recorded`                        | Bun    |
+| — a shell-written file with no session is `unattributed`, and never loadable as an instruction                            | `packages/plugin-fly-sprite/src/sync.test.ts`      | `pushes a shell-written file with no session as unattributed, never loadable`             | Bun    |
+| — its store half: only the sync surface may mirror an `unattributed` file                                                 | `packages/workspace-store/src/store.test.ts`       | `the sync surface mirrors an unattributed file, and no other surface may`                 | Bun    |
+| a delete is recorded on both sides and never a silent overwrite                                                           | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a delete in the store becomes a recorded removal on the Computer`                        | Bun    |
+| — the other direction, with the tombstone writer recorded in the ledger                                                   | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a removal on the Computer becomes a delete in the store, recorded`                       | Bun    |
+| recovery never silently duplicates a Computer effect: a push interrupted mid-flight resumes                               | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a push interrupted by a pause resumes without writing a second generation`               | Bun    |
+| connections drop on every pause; a Computer client resumes rather than treating a drop as failure                         | `packages/plugin-fly-sprite/src/sync.test.ts`      | `a paused Sprite answers unavailable and the next run completes the sync`                 | Bun    |
+| only Computer-provider-declared services may be reattached                                                                | `packages/plugin-fly-sprite/src/sync.test.ts`      | `is declared as a provider service so a cold pause brings it back`                        | Bun    |
+| — its retired counterpart: the Computer-side Memory write seam refuses every call                                         | `packages/plugin-fly-sprite/src/workspace.test.ts` | `the retired Memory seam refuses every write`                                             | Bun    |
+
 ## Open
 
 Rules in `AGENTS.md` § Architecture checks that no named test proves yet. They
@@ -121,12 +146,10 @@ step start awaiting its model request`) but never across a real workerd
   storage and recall behaviour, and the row above proves the _contract_ half of
   one of the three constitutional Memory checks: the kernel-consumed interface
   for a Memory root has no write. The runtime rejection now has a row under
-  **Computer** above. Two behavioural halves still have no test: Memory
-  readable and writable with no Computer interface call, and conflicting
-  Workspace and object-storage writes to another durable root both surviving
-  as generations and surfaced. The durable-root sync named in ADR 0013 does
-  not exist yet, so the Memory Package still writes Memory roots through the
-  Computer's named `memoryWriter` seam rather than object storage.
+  **Computer** above, and conflicting Workspace and object-storage writes to
+  another durable root now have rows under **Sync**. One behavioural half
+  still has no test: Memory readable and writable with no Computer interface
+  call, which the Memory Package's own step owns.
 - **Computer tools operate without a desktop client.** No check. The Computer
   Package's tests exercise provider routing, not the absence of a desktop
   shell.
@@ -141,10 +164,20 @@ step start awaiting its model request`) but never across a real workerd
   User's Durable Object "the generation records of User Memory roots", but the
   only ledger wired today is the Bot object's, so a shared Memory root written
   from two Bots would record its generations in two places. Nothing writes a
-  shared root in production yet — the Memory Package still writes the
-  Computer's `memoryWriter` seam — so the disagreement is latent, and the
+  shared root in production yet, so the disagreement is latent, and the
   Memory step closes it by routing shared roots to the User object through the
   same `WorkspaceGenerationsV1` interface.
+- **The sync is proven but not yet wired.** The **Sync** rows above prove the
+  agent against the in-memory bucket, the Durable Object ledger double, and the
+  Sprite mocks, but no production caller constructs it yet: the Bot's Durable
+  Object still has to run it on wake and on the watcher's change signal, and to
+  supply the `WorkspaceSyncEffectsV1` implementation that records a push intent
+  in the Durable Object as well as in the Workspace. Until then, a durable-root
+  file written on the Computer becomes durable only when something calls the
+  sync.
+- **`ComputerWorkspace.memoryWriter` is retired, not deleted.** It refuses
+  every call, and `apps/agent-runtime` still names it while the Memory
+  Package's own step lands; the property goes when nothing does.
 - **UI style contract** (`scripts/check-ui-styles.ts`) and the **kernel import
   contract** (`scripts/check-kernel-imports.ts`) remain standalone linters as
   well as tests, because `bun run typecheck` must fail on them before any test
