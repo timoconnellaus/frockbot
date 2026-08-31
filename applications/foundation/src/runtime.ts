@@ -105,7 +105,10 @@ import foundationProviderPlugin, {
   FOUNDATION_PROVIDER,
 } from "@frockbot/plugin-provider-foundation/runtime";
 import ollamaCloudManifest from "@frockbot/plugin-provider-ollama-cloud/manifest";
-import { createOllamaCloudRuntimePlugin } from "@frockbot/plugin-provider-ollama-cloud/runtime";
+import {
+  createOllamaCloudRuntimePlugin,
+  ollamaChatBaseUrl,
+} from "@frockbot/plugin-provider-ollama-cloud/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 // The Routines gateway Contribution carries the Bot-scoped Routine routes.
 import {
@@ -246,6 +249,11 @@ interface ModelRuntimeContributionConfig {
   ): Promise<CredentialLeaseV1>;
   settleCredential(effectId: string): Promise<void>;
   fetch?: typeof fetch;
+  /**
+   * Endpoint root carried on the Connection's settings bag, when its User
+   * pointed the Connection at something other than the Package default.
+   */
+  apiBaseUrl?: string;
 }
 
 interface ModelRuntimeContributionFactory {
@@ -261,10 +269,11 @@ const modelRuntimeContributionFactories = new Map<
     "@frockbot/plugin-provider-ollama-cloud/runtime",
     {
       providerType: "ollama-cloud",
-      create: (config) =>
+      create: ({ apiBaseUrl, ...config }) =>
         createOllamaCloudRuntimePlugin({
           ...config,
           packageId: "provider-ollama-cloud",
+          chatBaseUrl: ollamaChatBaseUrl(apiBaseUrl),
         } as Parameters<typeof createOllamaCloudRuntimePlugin>[0]),
     },
   ],
@@ -780,6 +789,11 @@ export function createFoundationModelRuntimePackage(
     plugin: factory.create({
       ...host,
       connectionId: binding.connection.connectionId,
+      // Every inbound value is decoded at its seam: the provider Package
+      // validates the endpoint root before it composes a request URL.
+      ...(typeof binding.connection.settings?.["api-base-url"] === "string"
+        ? { apiBaseUrl: binding.connection.settings["api-base-url"] }
+        : {}),
     }),
   };
 }

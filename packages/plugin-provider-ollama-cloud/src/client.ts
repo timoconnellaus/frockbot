@@ -10,8 +10,58 @@ export type OllamaFetch = (
 ) => Promise<Response>;
 
 export interface OllamaCloudClientConfig {
+  /**
+   * Endpoint root, without the `/api` or `/v1` path segment: the Package
+   * default `https://ollama.com`, an Ollama-compatible host, or a local
+   * Ollama server such as `http://127.0.0.1:11434`.
+   */
   apiBaseUrl?: string;
   fetch?: OllamaFetch;
+}
+
+/** The endpoint every Connection uses until its User points it elsewhere. */
+export const DEFAULT_OLLAMA_API_BASE_URL = "https://ollama.com";
+
+const MAX_API_BASE_URL_LENGTH = 2048;
+
+/**
+ * Decode a User-supplied Ollama endpoint root at its seam.
+ *
+ * An endpoint is an absolute `http:` or `https:` URL with no credentials, no
+ * query, and no fragment. The trailing slash is stripped so `${root}/api/tags`
+ * and `${root}/v1` compose without a doubled separator.
+ */
+export function decodeOllamaApiBaseUrl(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    value.length > MAX_API_BASE_URL_LENGTH
+  ) {
+    throw new Error(
+      "Ollama endpoint must be an absolute http or https URL, for example https://ollama.com",
+    );
+  }
+  const candidate = value.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(
+      `Ollama endpoint "${candidate}" is not an absolute http or https URL`,
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      `Ollama endpoint "${candidate}" must use http or https, not ${parsed.protocol.replace(":", "")}`,
+    );
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("Ollama endpoint must not carry credentials");
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error("Ollama endpoint must not carry a query or fragment");
+  }
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
 }
 
 const MAX_CATALOG_RESPONSE_BYTES = 512 * 1024;
@@ -143,10 +193,9 @@ export class OllamaCloudClient {
   private readonly fetcher: OllamaFetch;
 
   constructor(config: OllamaCloudClientConfig = {}) {
-    this.apiBaseUrl = (config.apiBaseUrl ?? "https://ollama.com/api").replace(
-      /\/$/,
-      "",
-    );
+    this.apiBaseUrl = `${decodeOllamaApiBaseUrl(
+      config.apiBaseUrl ?? DEFAULT_OLLAMA_API_BASE_URL,
+    )}/api`;
     // Workerd rejects a detached global `fetch` ("Illegal invocation"), so the
     // default fetcher forwards through a closure rather than aliasing it.
     this.fetcher =
