@@ -118,6 +118,11 @@ import {
   type FlockReceiptV1,
 } from "@frockbot/plugin-flock/shared";
 import { createBotSelfManagementHost } from "./backend-flock.js";
+import {
+  decodeTemplateShareReceiptV1,
+  type TemplateCommandV1,
+  type TemplateShareReceiptV1,
+} from "@frockbot/plugin-bot-template/shared";
 import { createBotMemoryHost } from "./backend-memory.js";
 import { createBotImageHost } from "./backend-image.js";
 import {
@@ -128,6 +133,7 @@ import {
 } from "./backend-skills.js";
 import {
   loadFullSkillCatalogV1,
+  loadSkillCatalogV1,
   skillRefForLoadedSkillV1,
 } from "@frockbot/plugin-skills/catalog";
 import {
@@ -1823,6 +1829,52 @@ export class ShellBotBackendContribution {
   }
 
   /**
+   * The Bot's own instruction root, bodies included.
+   *
+   * `listSkills` above is deliberately body-free: the composer's popover needs
+   * names, and a body it does not need is a body it should not carry. This is
+   * the other read — the one an export needs — and it is narrower in exactly
+   * the way that matters: it calls `loadSkillCatalogV1`, which walks *only*
+   * the Bot's own instruction root, so the managed set and the plugin-borne
+   * index are not merely filtered out afterwards, they are never loaded. A
+   * candidate the authority predicate refuses is not here either, and a Skill
+   * whose body could not be read is absent rather than half-present.
+   *
+   * A Skill with no well-formed slug is dropped: the importing Bot needs a
+   * directory name to write it under, and inventing one from a path that means
+   * something only in this deployment would be a fallback, which the register
+   * forbids.
+   */
+  async listOwnSkillDocuments(identity: BotIdentity): Promise<
+    {
+      slug: string;
+      name: string;
+      description?: string;
+      body: string;
+    }[]
+  > {
+    await this.validateIdentity(identity);
+    const reads = createBotSkillsReads(this.env);
+    if (!reads) return [];
+    const catalog = await loadSkillCatalogV1(reads, {
+      userId: identity.userId,
+      botId: identity.botId,
+    });
+    return catalog.skills.flatMap((skill) =>
+      skill.ref
+        ? [
+            {
+              slug: skill.ref.slug,
+              name: skill.name,
+              ...(skill.description ? { description: skill.description } : {}),
+              body: skill.body,
+            },
+          ]
+        : [],
+    );
+  }
+
+  /**
    * Durably records Stop intent and an idempotency receipt before signalling
    * the resident Agent. The acknowledged projection reports the run's current
    * durable state and never claims terminal cancellation.
@@ -2689,6 +2741,29 @@ export class ShellBotBackendContribution {
                   userConfiguration.readMcpServers(identity.userId),
                 execute: (command: unknown) =>
                   userConfiguration.executeMcpCommand(identity.userId, command),
+              },
+            }
+          : {}),
+        // A Bot packs itself into a template only inside an admitted Turn, and
+        // only through its User's own staging command: the seam it is handed
+        // has no way to publish, so the Bot cannot.
+        ...(turn
+          ? {
+              botTemplate: {
+                owner: {
+                  userId: identity.userId,
+                  botId: identity.botId,
+                },
+                stageTemplate: (input: { commandId: string; botId: string }) =>
+                  this.userConfiguration(identity).executeTemplateCommand(
+                    identity.userId,
+                    {
+                      schemaVersion: 1,
+                      type: "template/stage",
+                      commandId: input.commandId,
+                      botId: input.botId,
+                    },
+                  ),
               },
             }
           : {}),
@@ -3669,6 +3744,10 @@ export class ShellBotBackendContribution {
       userId: string,
       command: CreateBotCommandV1,
     ): Promise<FlockReceiptV1>;
+    executeTemplateCommand(
+      userId: string,
+      command: TemplateCommandV1,
+    ): Promise<TemplateShareReceiptV1>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
@@ -3702,6 +3781,7 @@ export class ShellBotBackendContribution {
       recordMcpMountOutcome(input: unknown): Promise<void>;
       listBots(input: unknown): Promise<unknown>;
       createBot(input: unknown): Promise<unknown>;
+      executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
@@ -3720,6 +3800,14 @@ export class ShellBotBackendContribution {
       createBot: async (userId, command) =>
         decodeFlockReceiptV1(
           await rpc.createBot({ schemaVersion: 1, userId, command }),
+        ),
+      executeTemplateCommand: async (userId, command) =>
+        decodeTemplateShareReceiptV1(
+          await rpc.executeTemplateCommand({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
         ),
       executeConnectionDependency: (input) =>
         rpc.executeConnectionDependency(input),

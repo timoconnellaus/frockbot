@@ -55,6 +55,7 @@
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/kernel-do": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
+    "@frockbot/plugin-bot-template": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-image": "workspace:*",
     "@frockbot/plugin-mcp": "workspace:*",

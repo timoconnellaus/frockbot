@@ -717,6 +717,19 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.listSkills(identity);
   }
 
+  /**
+   * This Bot's own instruction root, bodies included, for a template export.
+   *
+   * Read-only, and no wider than what the Turn loader already loads: the
+   * managed set and the plugin-borne index are never walked, and a candidate
+   * the authority predicate refuses is absent here too.
+   */
+  async listOwnSkillDocuments(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    return shell.listOwnSkillDocuments(identity);
+  }
+
   async stopRun(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

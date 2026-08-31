@@ -26,6 +26,7 @@
     "@frockbot/kernel-composition": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
+    "@frockbot/plugin-bot-template": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
     "@frockbot/plugin-computer": "workspace:*",
     "@frockbot/plugin-credentials": "workspace:*",
@@ -51,6 +52,7 @@
     "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-ui-theme": "workspace:*",
     "@frockbot/plugin-web": "workspace:*",
+    "@frockbot/template-core": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {

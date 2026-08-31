@@ -67,6 +67,15 @@ import {
   decodeMcpLifecycleReceiptV1,
   decodeMcpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
+import {
+  decodeTemplateShareListViewV1,
+  decodeTemplateShareReceiptV1,
+  type TemplateCommandV1,
+} from "@frockbot/plugin-bot-template/shared";
+import {
+  parseTemplateShareIdV1,
+  type TemplateVisibilityV1,
+} from "@frockbot/template-core";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -291,6 +300,9 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     publishPackage: (request) => rpc.publishPackage(request),
     rollbackPackage: (request) => rpc.rollbackPackage(request),
     activeApplicationHash: (request) => rpc.activeApplicationHash(request),
+    listTemplateShares: (request) => rpc.listTemplateShares(request),
+    executeTemplateCommand: (request) => rpc.executeTemplateCommand(request),
+    resolveTemplateShare: (request) => rpc.resolveTemplateShare(request),
   };
 }
 
@@ -766,6 +778,52 @@ async function uploadBotAvatar(
   };
 }
 
+/**
+ * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
+ *
+ * The share id names its owner, so the route needs no index and no lookup
+ * table: it derives the one User Durable Object that could answer, and that
+ * object refuses a `private` or revoked share exactly as it refuses one it has
+ * never heard of. A malformed id is `undefined` here, so it is a 404 at the
+ * route rather than an error a prober could tell apart.
+ */
+async function readPublishedTemplate(
+  env: Env,
+  shareId: string,
+): Promise<
+  | { hash: string; visibility: TemplateVisibilityV1; document: string }
+  | undefined
+> {
+  let ownerId: string;
+  try {
+    ownerId = parseTemplateShareIdV1(shareId).ownerId;
+  } catch {
+    return undefined;
+  }
+  const answered = await userConfigurationStub(
+    env,
+    ownerId,
+  ).resolveTemplateShare({ schemaVersion: 1, shareId });
+  // A share that is missing, private, or revoked all answer the same way, and
+  // that answer is not a JSON value, so it is checked before the snapshot.
+  if (answered === undefined || answered === null) return undefined;
+  const found = rpcJsonSnapshot(answered);
+  if (!found || typeof found !== "object") return undefined;
+  const value = found as Record<string, unknown>;
+  if (
+    typeof value.hash !== "string" ||
+    typeof value.document !== "string" ||
+    (value.visibility !== "link" && value.visibility !== "public")
+  ) {
+    return undefined;
+  }
+  return {
+    hash: value.hash,
+    visibility: value.visibility,
+    document: value.document,
+  };
+}
+
 interface RuntimeExports {
   UserBotState(options: { props: UserScopedProps }): RpcBoundary<UserBotState>;
 }
@@ -775,6 +833,30 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
   (application, env: Env) =>
     createFoundationBackendContributions(application, {
       backendHost: "gateway",
+      listTemplateShares: async (userId: string) =>
+        decodeTemplateShareListViewV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).listTemplateShares({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
+      executeTemplateCommand: async (
+        userId: string,
+        command: TemplateCommandV1,
+      ) =>
+        decodeTemplateShareReceiptV1(
+          rpcJsonSnapshot(
+            await userConfigurationStub(env, userId).executeTemplateCommand({
+              schemaVersion: 1,
+              userId,
+              command,
+            }),
+          ),
+        ),
+      readPublishedTemplate: (shareId: string) =>
+        readPublishedTemplate(env, shareId),
       listBots: async (userId) =>
         decodeDirectoryViewV1(
           rpcJsonSnapshot(

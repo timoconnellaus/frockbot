@@ -45,6 +45,12 @@ import type {
   UpdateSheepCommandV1,
 } from "@frockbot/plugin-flock/shared";
 import type {
+  TemplateCommandV1,
+  TemplateShareListViewV1,
+  TemplateShareReceiptV1,
+} from "@frockbot/plugin-bot-template/shared";
+import type { TemplateVisibilityV1 } from "@frockbot/template-core";
+import type {
   RoutineCommandReceiptV1,
   RoutineCommandV1,
   RoutineInboxCommandV1,
@@ -500,6 +506,29 @@ export interface UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<string | undefined>;
+  listTemplateShares(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<TemplateShareListViewV1>;
+  executeTemplateCommand(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: TemplateCommandV1;
+  }): Promise<TemplateShareReceiptV1>;
+  /**
+   * Unauthenticated by design: the share id is the capability, and the User
+   * Durable Object answers only for a `link` or `public` share it has not had
+   * revoked. Everything else is `undefined`, which the route serves as 404.
+   */
+  resolveTemplateShare(request: { schemaVersion: 1; shareId: string }): Promise<
+    | {
+        schemaVersion: 1;
+        hash: string;
+        visibility: TemplateVisibilityV1;
+        document: string;
+      }
+    | undefined
+  >;
 }
 
 export interface BotConfigurationBinding {

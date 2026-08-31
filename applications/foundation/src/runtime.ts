@@ -18,6 +18,18 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
 import authManifest from "@frockbot/plugin-auth/manifest";
+import botTemplateManifest from "@frockbot/plugin-bot-template/manifest";
+import {
+  createBotTemplateRuntimePlugin,
+  type BotTemplateRuntimeHostV1,
+} from "@frockbot/plugin-bot-template/agent";
+export type { BotTemplateRuntimeHostV1 } from "@frockbot/plugin-bot-template/agent";
+import {
+  createBotTemplateBackendContribution,
+  type BotTemplateGatewayHostV1,
+} from "@frockbot/plugin-bot-template/backend";
+const createBotTemplateGatewayPlugin =
+  createBotTemplateBackendContribution.plugin;
 import authoringManifest from "@frockbot/plugin-authoring/manifest";
 import {
   createAuthoringRuntimePlugin,
@@ -204,6 +216,7 @@ export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-ui-theme", uiThemeManifest],
   ["@frockbot/plugin-auth", authManifest],
+  ["@frockbot/plugin-bot-template", botTemplateManifest],
   ["@frockbot/plugin-authoring", authoringManifest],
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
@@ -483,7 +496,8 @@ export interface MountedFoundationBackend<T> {
 /** Mount every declared backend Contribution into one owned Cordis root. */
 export type FoundationGatewayHost = {
   backendHost: "gateway";
-} & FlockGatewayHost &
+} & BotTemplateGatewayHostV1 &
+  FlockGatewayHost &
   McpGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
@@ -538,6 +552,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-mcp/backend"
         ) {
           plugin = createMcpGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-bot-template/backend"
+        ) {
+          plugin = createBotTemplateGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-settings/backend"
@@ -767,6 +786,13 @@ export function createFoundationHostedRuntimePackages(
      * outside a Turn, and the tools are then not offered at all.
      */
     mcp?: McpLifecycleToolHostV1;
+    /**
+     * The Bot Template seam, supplied by the Bot Durable Object for one
+     * admitted Turn. Absent outside a Turn, and the export tool is then not
+     * registered at all: staging a template runs through the User's own
+     * command path, and a Turn with no such path cannot reach it.
+     */
+    botTemplate?: BotTemplateRuntimeHostV1;
     packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationAssignedRuntimePackage[] {
@@ -780,6 +806,15 @@ export function createFoundationHostedRuntimePackages(
             plan,
             "flock",
             createFlockRuntimePlugin(host.botSelfManagement),
+          ),
+        ]
+      : []),
+    ...(host.botTemplate
+      ? [
+          runtimePackage(
+            plan,
+            "bot-template",
+            createBotTemplateRuntimePlugin(host.botTemplate),
           ),
         ]
       : []),
@@ -1074,6 +1109,10 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // self-management host; the Flock's other Contributions are backend and
   // client, and neither runs here.
   runtimeIds.delete("flock");
+  // A Bot packs itself into a template only inside an admitted Turn, which
+  // supplies the staging host; the Package's other Contributions are backend
+  // and client, and neither runs here.
+  runtimeIds.delete("bot-template");
   // Routines mount only for a Turn, so a Routine write records the Session and
   // Turn that produced it.
   runtimeIds.delete("routines");

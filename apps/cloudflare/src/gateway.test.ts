@@ -627,6 +627,15 @@ class MemoryConfiguration
   activeApplicationHash(): Promise<undefined> {
     return Promise.resolve(undefined);
   }
+  listTemplateShares() {
+    return Promise.resolve({ schemaVersion: 1 as const, shares: [] });
+  }
+  executeTemplateCommand(): never {
+    throw new Error("template commands are not exercised here");
+  }
+  resolveTemplateShare(): Promise<undefined> {
+    return Promise.resolve(undefined);
+  }
   readSheep(request: Parameters<BotConfigurationBinding["readSheep"]>[0]) {
     return Promise.resolve({
       schemaVersion: 1 as const,
