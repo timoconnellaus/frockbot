@@ -160,8 +160,8 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
 .profile-menu-hint,
 .profile-menu-error {
   margin: 5px 10px;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: var(--frock-text-xs);
+  line-height: var(--frock-leading-snug);
 }
 
 .profile-menu-hint {
