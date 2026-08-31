@@ -167,6 +167,10 @@ import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
+import channelsManifest from "@frockbot/plugin-channels/manifest";
+import { createChannelsRuntimePlugin } from "@frockbot/plugin-channels/agent";
+import type { ChannelsRuntimeHostV1 } from "@frockbot/plugin-channels/agent-host";
+export type { ChannelsRuntimeHostV1 } from "@frockbot/plugin-channels/agent-host";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 // The Routines gateway Contribution carries the Bot-scoped Routine routes.
 import {
@@ -307,6 +311,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-routines", routinesManifest],
   ["@frockbot/plugin-subagents", subagentsManifest],
   ["@frockbot/plugin-user-machine", userMachineManifest],
+  ["@frockbot/plugin-channels", channelsManifest],
 ]);
 
 const runtimeContributions = new Map([
@@ -839,6 +844,13 @@ export function createFoundationHostedRuntimePackages(
      */
     subagents?: SubagentsRuntimeHostV1;
     /**
+     * The Channels seam, supplied by the Bot Durable Object for one admitted
+     * Turn. Absent outside a Turn, and the Channels Package is then not
+     * mounted: a Bot posts to a Channel only inside a Turn whose Session and
+     * Turn the message's provenance can name.
+     */
+    channels?: ChannelsRuntimeHostV1;
+    /**
      * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside one whose
      * durable roots are reachable in object storage — the Computer provider
@@ -933,6 +945,15 @@ export function createFoundationHostedRuntimePackages(
             plan,
             "subagents",
             createSubagentsRuntimePlugin(host.subagents),
+          ),
+        ]
+      : []),
+    ...(host.channels
+      ? [
+          runtimePackage(
+            plan,
+            "channels",
+            createChannelsRuntimePlugin(host.channels),
           ),
         ]
       : []),
@@ -1219,6 +1240,10 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Subagents mount only for a Turn, so a dispatched task names the run that
   // dispatched it and the Subagent Durable Object it reaches is addressable.
   runtimeIds.delete("subagents");
+  // Channels mount only for a Turn, so a posted message records the Session and
+  // Turn that produced it — and so the tools are absent where there is no Turn
+  // to attribute them to.
+  runtimeIds.delete("channels");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

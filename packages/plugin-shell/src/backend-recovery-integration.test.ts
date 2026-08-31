@@ -146,6 +146,16 @@ describe("Bot recovery", () => {
     let settlementFailures = 0;
     const rpc = {
       readConfiguration: () => Promise.resolve(structuredClone(userSettings)),
+      // The Channels seam. A Turn renders the teammate and channel prompt
+      // sections from these, and a Bot with neither renders both as empty.
+      listChannels: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          botId: "primary",
+          channels: [],
+        }),
+      listBots: () =>
+        Promise.resolve({ schemaVersion: 1 as const, revision: 0, bots: [] }),
       getConnection: () =>
         Promise.resolve(structuredClone(userSettings.connections[0])),
       executeConnectionDependency: (request: { action: string }) => {

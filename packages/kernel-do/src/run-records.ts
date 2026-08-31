@@ -33,12 +33,31 @@ export interface StoredEffectAdmission {
   outcome: StoredEffectAdmissionOutcome;
 }
 
+/** How a Turn that no person started came to be started. */
+export type StoredRunTriggerV1 = "cron" | "webhook" | "integration" | "manual";
+
 /** A Turn a Routine's firing produced. */
 export interface StoredRunRoutineOriginV1 {
   kind: "routine";
   routineId: string;
   fireId: string;
-  trigger: "cron" | "webhook" | "integration" | "manual";
+  trigger: StoredRunTriggerV1;
+}
+
+/**
+ * A Turn one Channel message produced.
+ *
+ * `fireId` is the message. It is the run this object admits the Turn under, so
+ * a redelivery of the same message is refused by the kernel's own Turn
+ * idempotency instead of running the Bot twice. The Channel's own record — its
+ * membership, its message log, the delivery this settles — lives in the User
+ * Durable Object and never here.
+ */
+export interface StoredRunChannelOriginV1 {
+  kind: "channel";
+  channelId: string;
+  fireId: string;
+  trigger: StoredRunTriggerV1;
 }
 
 /**
@@ -57,10 +76,16 @@ export interface StoredRunSubagentOriginV1 {
 
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
-  StoredRunRoutineOriginV1 | StoredRunSubagentOriginV1;
+  | StoredRunRoutineOriginV1
+  | StoredRunChannelOriginV1
+  | StoredRunSubagentOriginV1;
 
-const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunRoutineOriginV1["trigger"][] =
-  ["cron", "webhook", "integration", "manual"];
+const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
+  "cron",
+  "webhook",
+  "integration",
+  "manual",
+];
 
 /**
  * The turn type an admitted run was accepted as, and what produced it,
@@ -220,12 +245,15 @@ function decodeStoredRunOrigin(
       parentRunId: candidate.parentRunId,
     };
   }
-  if (candidate.kind !== "routine") {
+  if (candidate.kind !== "routine" && candidate.kind !== "channel") {
     throw new Error(`run "${runId}" has an invalid admission origin kind`);
   }
+  // The producer's own id field, so a Routine origin and a Channel origin are
+  // each exact rather than a union that would accept either name on either.
+  const owner = candidate.kind === "routine" ? "routineId" : "channelId";
   requireExactOriginFields(
     candidate,
-    ["kind", "routineId", "fireId", "trigger"],
+    ["kind", owner, "fireId", "trigger"],
     runId,
   );
   const trigger = STORED_RUN_ORIGIN_TRIGGERS.find(
@@ -235,17 +263,24 @@ function decodeStoredRunOrigin(
     throw new Error(`run "${runId}" has an invalid admission origin trigger`);
   }
   if (
-    !boundedString(candidate.routineId, 256) ||
+    !boundedString(candidate[owner], 256) ||
     !boundedString(candidate.fireId, 256)
   ) {
     throw new Error(`run "${runId}" has an invalid admission origin id`);
   }
-  return {
-    kind: "routine",
-    routineId: candidate.routineId,
-    fireId: candidate.fireId,
-    trigger,
-  };
+  return candidate.kind === "routine"
+    ? {
+        kind: "routine",
+        routineId: candidate.routineId as string,
+        fireId: candidate.fireId as string,
+        trigger,
+      }
+    : {
+        kind: "channel",
+        channelId: candidate.channelId as string,
+        fireId: candidate.fireId as string,
+        trigger,
+      };
 }
 
 function decodeStoredRunAdmission(

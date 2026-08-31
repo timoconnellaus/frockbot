@@ -99,6 +99,11 @@ import {
   decodeTaskOutcomeV1,
   type TaskOutcomeV1,
 } from "@frockbot/plugin-subagents/records";
+import {
+  decodeChannelInputV1,
+  type ChannelInputV1,
+} from "@frockbot/plugin-channels/shared";
+import { channelRunIdV1 } from "@frockbot/plugin-shell/backend-channels";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import type { BotSkillCatalogReaderV1 } from "@frockbot/plugin-shell/backend-skills";
@@ -1115,6 +1120,41 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     return shell.deliverRoutineHook(request.delivery as RoutineHookDeliveryV1);
+  }
+
+  /**
+   * One Channel message, handed over by the User Durable Object's fan-out.
+   *
+   * The Bot writes it down and answers; the `channel` Turn it owes is admitted
+   * when this object's one active run frees. Directory membership is proved the
+   * way every other Bot RPC proves it — the caller is this User's own Channel
+   * authority, and a Bot that is not this User's is not found.
+   */
+  async deliverChannelInput(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      delivery: rpcDecoded(decodeChannelInputV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const delivery = request.delivery as ChannelInputV1;
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    if (delivery.botId !== identity.botId) {
+      throw new Error("Channel delivery does not match Bot authority");
+    }
+    const accepted = await shell.deliverChannelInput(identity, delivery);
+    return {
+      schemaVersion: 1 as const,
+      messageId: delivery.messageId,
+      status: accepted.status,
+      // Derived from the message id, so the User Durable Object can record
+      // which run the delivery is owed to before the Turn has started.
+      runId: channelRunIdV1(delivery.messageId),
+    };
   }
 
   /** One Routine's bounded run log, newest first. */

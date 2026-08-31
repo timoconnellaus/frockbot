@@ -6,6 +6,8 @@ import {
 } from "@frockbot/application-foundation/runtime";
 import {
   type CompositionPinV1,
+  freshTurnMessagesV1,
+  type LlmMessage,
   type PersistSessionEvents,
   type SessionEvent,
   SessionStore,
@@ -134,6 +136,16 @@ export interface FoundationRuntimeOptions {
   composition?: CompositionPinV1;
   /** The turn type this root's Agent is mounted on; defaults to `chat`. */
   turnType?: TurnTypeV1;
+  /**
+   * The history a non-chat Turn's model request carries instead of the Bot's
+   * own transcript — the fresh-history mode a `channel` Turn runs in, whose
+   * messages the Channel Package supplies from the Channel's own log.
+   *
+   * It replaces whatever narrowing the mounted Packages agreed on, because the
+   * plugin that applies it is mounted after every Package and therefore has
+   * the last word. Absent, and nothing changes for any Turn.
+   */
+  freshTurnHistory?: readonly LlmMessage[];
 }
 
 /** The first-party generation a runtime with no durable Composition starts on. */
@@ -516,6 +528,34 @@ export async function createFoundationRuntime(
   }
   const composition =
     options.composition ?? (await bootstrapCompositionPin(application));
+  // Fresh-history mode. The handler is `prepend`ed, so it sits outermost in the
+  // `agent/request` chain and has the last word on what the request carries —
+  // the Package narrowings it wraps are exactly what a `channel` Turn must not
+  // be given. It recomputes the Turn's own messages from the session rather
+  // than trusting the narrowed list it wrapped, so it depends on no Package.
+  const freshHistory = options.freshTurnHistory;
+  if (freshHistory) {
+    const history = freshHistory.map((message) => structuredClone(message));
+    const freshHistoryPlugin: Plugin.Function = (ctx) => {
+      const dispose = ctx.on(
+        "agent/request",
+        async (agent, _request, _signal, next) => {
+          const proposed = await next();
+          return {
+            ...proposed,
+            messages: freshTurnMessagesV1({
+              events: agent.session.events,
+              messages: agent.session.deriveMessages(),
+              history,
+            }),
+          };
+        },
+        { prepend: true },
+      );
+      return () => void dispose();
+    };
+    await root.plugin(freshHistoryPlugin);
+  }
   await root.plugin(AgentLoop, { maxSteps: 8, composition });
 
   const selection = options.modelSelection;

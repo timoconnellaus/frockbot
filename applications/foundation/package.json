@@ -28,6 +28,7 @@
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-bot-template": "workspace:*",
+    "@frockbot/plugin-channels": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
     "@frockbot/plugin-computer": "workspace:*",
     "@frockbot/plugin-credentials": "workspace:*",

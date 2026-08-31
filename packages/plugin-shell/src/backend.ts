@@ -153,6 +153,24 @@ import {
   routineTurnCommandV1,
   settledRoutineOriginV1,
 } from "./backend-routines.js";
+import {
+  channelPendingKeyV1,
+  channelTurnCommandV1,
+  channelTurnHistoryV1,
+  createBotChannelsHost,
+  decodeChannelInputV1,
+  settledChannelOriginV1,
+  CHANNEL_PENDING_PREFIX,
+  type ChannelInputV1,
+} from "./backend-channels.js";
+import {
+  decodeChannelCommandReceiptV1,
+  decodeChannelListViewV1,
+  type ChannelCommandReceiptV1,
+  type ChannelCommandV1,
+  type ChannelListViewV1,
+} from "@frockbot/plugin-channels/shared";
+import type { ChannelWriterV1 } from "@frockbot/plugin-channels/records";
 import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import {
   TaskStore,
@@ -2108,11 +2126,25 @@ export class ShellBotBackendContribution {
       compositionGenerationId: input.compositionGenerationId,
       turnType: input.command.turnType ?? "chat",
     };
+    // The message this Turn is answering, when it is a `channel` Turn. It is
+    // read back off durable storage rather than carried in the command, so a
+    // Turn recovered after an eviction is given exactly the history the
+    // evicted one had.
+    const channelInput = await this.channelInputForCommand(input.command);
     const runtime = await this.agentRuntime(
       input.identity,
       settings,
       input.admittedRequest,
       turn,
+      channelInput
+        ? {
+            turnType: "channel",
+            origin: {
+              channelId: channelInput.channelId,
+              hop: channelInput.hop,
+            },
+          }
+        : { turnType: input.command.turnType ?? "chat" },
     );
     const promptParts = [
       `You are ${settings.profile.name}.`,
@@ -2143,6 +2175,18 @@ export class ShellBotBackendContribution {
           // The turn type the run was admitted as; recovery reads it back from
           // the durable record, so a resumed Turn mounts the same catalog.
           turnType: input.command.turnType ?? "chat",
+          // Fresh history. A `channel` Turn replays no personal transcript;
+          // the Channel's own recent messages are its whole model context, and
+          // they are never written to this Bot's durable log.
+          ...(channelInput
+            ? {
+                freshHistory: channelTurnHistoryV1({
+                  history: channelInput.history,
+                  messageId: channelInput.messageId,
+                  selfBotId: input.identity.botId,
+                }),
+              }
+            : {}),
           // Durable Stop fences every provider and tool effect immediately
           // before it is used, in the Bot Durable Object's own transaction.
           admitEffect: (effect) =>
@@ -2611,6 +2655,13 @@ export class ShellBotBackendContribution {
       if (approval.decision !== "pending") continue;
       expiries.push(Date.parse(approval.expiresAt));
     }
+    // A queued Channel input is owed a Turn now, not later. It rides the one
+    // alarm this object already has rather than inventing a second clock, and
+    // asking for the present is how a queue that must not wait says so.
+    const channels = await transaction.list<unknown>({
+      prefix: CHANNEL_PENDING_PREFIX,
+      limit: 1,
+    });
     return [
       ...[...sagas.values()].map(
         (stored) => requireStoredAssignmentSaga(stored).deadlineAt,
@@ -2622,6 +2673,7 @@ export class ShellBotBackendContribution {
       // reconciles a child that never reported, and the child runs the Turn it
       // was handed on its next alarm rather than on a floating promise.
       ...(await this.subagentDeadlines(transaction)),
+      ...(channels.size > 0 ? [Date.now()] : []),
     ];
   }
 
@@ -2697,6 +2749,7 @@ export class ShellBotBackendContribution {
     await this.settleRoutineFirings();
     await this.runOwedSubagentTurns();
     await this.reconcileOverdueTasks();
+    await this.settleChannelDeliveries();
     await this.expireDueApprovals();
     await this.replayPendingWakeNotifications();
     // The alarm that woke this object has been consumed. Re-arm on whatever is
@@ -2704,6 +2757,117 @@ export class ShellBotBackendContribution {
     await this.ctx.storage.transaction((transaction) =>
       this.authority.refreshRecoveryAlarm(transaction),
     );
+  }
+
+  /**
+   * Take one delivered Channel message.
+   *
+   * The whole of the contract is: write it down, arm the alarm, and return.
+   * The User Durable Object's fan-out is a retry loop, and this has to be safe
+   * to call twice for the same message — it is, because the key is the message
+   * id, and because the Turn it eventually produces is keyed by the message id
+   * too.
+   *
+   * Nothing runs here, deliberately. Admitting the Turn inside the RPC would
+   * hold the sender's Turn open for the whole of whatever the recipient decides
+   * to do, and a reply from that recipient would re-enter the User Durable
+   * Object that is still waiting on this call. The alarm this arms is due
+   * immediately, so an idle Bot answers at once and a busy one answers when its
+   * one active run frees.
+   */
+  async deliverChannelInput(
+    identity: BotIdentity,
+    input: ChannelInputV1,
+  ): Promise<{ status: "queued" | "duplicate" }> {
+    // A Channel message can be the first thing that ever addresses a Bot, and a
+    // Bot that does not know which User it belongs to cannot admit a Turn. This
+    // pins the identity the same way an admitted Turn would, and refuses a
+    // delivery that names a different one.
+    await this.authority.assertIdentity(identity);
+    const key = channelPendingKeyV1(input.messageId);
+    const queued = await this.ctx.storage.transaction(async (transaction) => {
+      const existing = await transaction.get<unknown>(key);
+      if (existing !== undefined) return false;
+      await transaction.put(key, input);
+      return true;
+    });
+    // Armed after the input is committed, not beside it: the deadline is
+    // computed by listing what is owed, and a listing inside the transaction
+    // that is still writing the input would be asking about a debt that does
+    // not exist yet.
+    await this.ctx.storage.transaction((transaction) =>
+      this.authority.refreshRecoveryAlarm(transaction),
+    );
+    return { status: queued ? "queued" : "duplicate" };
+  }
+
+  /** The queued Channel inputs this Bot owes a Turn, oldest first. */
+  private async pendingChannelInputs(): Promise<
+    Array<{ key: string; input: ChannelInputV1 }>
+  > {
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: CHANNEL_PENDING_PREFIX,
+    });
+    return [...stored.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => ({ key, input: decodeChannelInputV1(value) }));
+  }
+
+  /**
+   * The queued input one admitted `channel` Turn is answering.
+   *
+   * Read off the durable record by the message id the run's origin names, so a
+   * resumed or recovered Turn reconstructs the same request rather than
+   * running on a history that has moved on.
+   */
+  private async channelInputForCommand(command: {
+    turnType?: TurnTypeV1;
+    origin?: { kind: string; fireId?: string };
+  }): Promise<ChannelInputV1 | undefined> {
+    if ((command.turnType ?? "chat") !== "channel") return undefined;
+    const messageId = command.origin?.fireId;
+    if (!messageId || command.origin?.kind !== "channel") return undefined;
+    const stored = await this.ctx.storage.get<unknown>(
+      channelPendingKeyV1(messageId),
+    );
+    return stored === undefined ? undefined : decodeChannelInputV1(stored);
+  }
+
+  /**
+   * Admit a `channel` Turn for every message this Bot has been handed.
+   *
+   * `authority.run` is a direct call inside the Durable Object — no HTTP path
+   * and no RPC reaches it — and the run id is derived from the message id, so
+   * a redelivery is refused by the kernel's own idempotency rather than run
+   * twice. The queue entry is dropped once the Turn has reached a durable
+   * terminal, whatever that terminal was: a message that cannot be answered is
+   * a recorded failed run, not a debt this object retries for ever.
+   */
+  private async settleChannelDeliveries(): Promise<void> {
+    const identity = await this.authority.readDurableIdentity();
+    if (!identity) return;
+    for (const pending of await this.pendingChannelInputs()) {
+      // One run at a time. A durable active run outlives an eviction, so this
+      // is re-read on every iteration rather than once at the top.
+      if (await this.authority.readActiveRunId()) return;
+      try {
+        await this.authority.run(
+          channelTurnCommandV1(
+            identity,
+            pending.input,
+            new Date().toISOString(),
+          ),
+        );
+      } catch (error) {
+        // The run record is the authority for what happened; this object's job
+        // is only to stop owing the message. A failure is already durable.
+        console.error(
+          "Channel message settled without a completed Turn",
+          error instanceof Error ? error.message : "unknown failure",
+        );
+      }
+      await this.ctx.storage.delete(pending.key);
+    }
   }
 
   /**
@@ -3141,6 +3305,16 @@ export class ShellBotBackendContribution {
       compositionGenerationId?: string;
       turnType?: TurnTypeV1;
     },
+    /**
+     * What this Turn is, as the Contributions that care need it. The Channels
+     * Package trims its prompt sections by turn type and derives the hop of
+     * anything the Turn posts from the message that woke it, and neither is
+     * something the model may choose.
+     */
+    turnContext?: {
+      turnType?: TurnTypeV1;
+      origin?: { channelId: string; hop: number };
+    },
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
     modelSelection: RuntimeModelSelection;
@@ -3317,6 +3491,39 @@ export class ShellBotBackendContribution {
                 turn.compositionGenerationId,
                 turn.turnType ?? "chat",
                 () => subagentModels,
+              ),
+            }
+          : {}),
+        // A Bot posts to a Channel only inside a Turn, so the message's writer
+        // can name the Session and Turn that produced it. The records are the
+        // User Durable Object's, so the seam this Package is handed is that
+        // object's own command path and nothing wider.
+        ...(turn
+          ? {
+              channels: createBotChannelsHost(
+                identity,
+                turn,
+                {
+                  execute: (command, writer) =>
+                    userConfiguration.executeChannelCommand(
+                      identity.userId,
+                      command,
+                      writer,
+                    ),
+                  list: (botId) =>
+                    userConfiguration.listChannels(identity.userId, botId),
+                  directory: async () =>
+                    (
+                      await userConfiguration.listBots(identity.userId)
+                    ).bots.map((bot) => ({
+                      botId: bot.botId,
+                      name: bot.initialName,
+                      ...(bot.initialDescription === undefined
+                        ? {}
+                        : { description: bot.initialDescription }),
+                    })),
+                },
+                turnContext ?? {},
               ),
             }
           : {}),
@@ -4469,6 +4676,12 @@ export class ShellBotBackendContribution {
       userId: string,
       command: TemplateCommandV1,
     ): Promise<TemplateShareReceiptV1>;
+    executeChannelCommand(
+      userId: string,
+      command: ChannelCommandV1,
+      writer: ChannelWriterV1,
+    ): Promise<ChannelCommandReceiptV1>;
+    listChannels(userId: string, botId: string): Promise<ChannelListViewV1>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
@@ -4503,6 +4716,8 @@ export class ShellBotBackendContribution {
       listBots(input: unknown): Promise<unknown>;
       createBot(input: unknown): Promise<unknown>;
       executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
+      executeChannelCommand(input: unknown): Promise<unknown>;
+      listChannels(input: unknown): Promise<unknown>;
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
@@ -4529,6 +4744,21 @@ export class ShellBotBackendContribution {
             userId,
             command,
           }),
+        ),
+      // Channel state crosses a Durable Object seam, so it decodes on arrival
+      // rather than being trusted in the shape RPC happened to return.
+      executeChannelCommand: async (userId, command, writer) =>
+        decodeChannelCommandReceiptV1(
+          await rpc.executeChannelCommand({
+            schemaVersion: 1,
+            userId,
+            command,
+            writer,
+          }),
+        ),
+      listChannels: async (userId, botId) =>
+        decodeChannelListViewV1(
+          await rpc.listChannels({ schemaVersion: 1, userId, botId }),
         ),
       executeConnectionDependency: (input) =>
         rpc.executeConnectionDependency(input),

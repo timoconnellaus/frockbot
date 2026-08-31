@@ -87,6 +87,7 @@ export { BotIsolateProbe } from "./bot-isolate-probe.ts";
 export { AuthoringProbe } from "./authoring-probe.ts";
 export { SearchSpikeProbe } from "./search-probe.ts";
 export { AuditProbe } from "./audit-probe.ts";
+export { ChannelStoreProbe } from "./channel-store-probe.ts";
 export { ComputerHostClientProbe } from "./computer-host-probe.ts";
 
 /**

@@ -90,6 +90,21 @@ import {
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
 import { decodeMcpMountOutcomeV1 } from "@frockbot/plugin-mcp/records";
+import {
+  channelHistoryForV1,
+  ChannelStore,
+} from "@frockbot/plugin-channels/store";
+import {
+  decodeChannelCommandV1,
+  type ChannelCommandReceiptV1,
+  type ChannelCommandV1,
+  type ChannelInputV1,
+} from "@frockbot/plugin-channels/shared";
+import {
+  CHANNEL_HISTORY_LIMIT,
+  decodeChannelWriterV1,
+  type ChannelWriterV1,
+} from "@frockbot/plugin-channels/records";
 import type {
   McpAuthorizationCompletionRequestV1,
   McpAuthorizationStartRequestV1,
@@ -2058,6 +2073,137 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return (await this.machineContribution()).readResult(
       request.commandId as string,
     );
+  }
+
+  /**
+   * The Channels authority for this User. One store per object, over the same
+   * Durable Object storage every other User-scoped record lives in.
+   *
+   * "The User's Durable Object is the authority for everything User-scoped": a
+   * group Channel spans this User's Bots, so its record, its membership, its
+   * canonical message log and its rate bucket are here. What is *not* here is
+   * any Bot's participation — that is a `channel` Turn in the Bot's own Durable
+   * Object, and this object enqueues it without ever running one.
+   */
+  private readonly channels = new ChannelStore(this.ctx.storage);
+
+  /** Every Channel one of this User's Bots is a member of. */
+  async listChannels(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return this.channels.list(request.botId as string);
+  }
+
+  /** One Channel's recent messages, oldest first. */
+  async readChannelThread(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      channelId: rpcIdentifier,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return this.channels.thread(request.channelId as string);
+  }
+
+  /**
+   * One Channel command, applied durably, then fanned out.
+   *
+   * The two halves are deliberately separate. `execute` writes the message and
+   * one `ChannelDeliveryV1` per recipient in a single transaction and returns;
+   * only then does this object tell the recipients, one Bot Durable Object at a
+   * time. A fan-out that fails leaves the debt written down, so the retry is
+   * free — and an acknowledgement is never given for something that is not
+   * already durable.
+   */
+  async executeChannelCommand(input: unknown): Promise<unknown> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeChannelCommandV1),
+      writer: rpcDecoded(decodeChannelWriterV1),
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    const command = request.command as ChannelCommandV1;
+    const receipt = await this.channels.execute(
+      command,
+      request.writer as ChannelWriterV1,
+    );
+    if (receipt.status === "posted") {
+      await this.fanOutChannelMessage(userId, receipt);
+    }
+    return receipt;
+  }
+
+  /**
+   * Hand one recorded message to every Bot that is owed it.
+   *
+   * Member order, and the sender is not in it: `ChannelStore` removed it, so
+   * "a Bot never receives its own post" is a property of the record rather than
+   * of this loop remembering to skip one. A recipient that cannot be reached
+   * keeps its `pending` delivery and is told on a later attempt; a recipient
+   * that takes the message has its delivery marked, which is what makes a
+   * redelivery visible rather than merely harmless.
+   */
+  private async fanOutChannelMessage(
+    userId: string,
+    receipt: Extract<ChannelCommandReceiptV1, { status: "posted" }>,
+  ): Promise<void> {
+    const thread = await this.channels.thread(receipt.channel.channelId);
+    const history = channelHistoryForV1(thread, CHANNEL_HISTORY_LIMIT);
+    for (const botId of receipt.recipients) {
+      const delivery: ChannelInputV1 = {
+        schemaVersion: 1,
+        channelId: receipt.channel.channelId,
+        channelName: receipt.channel.name,
+        messageId: receipt.message.messageId,
+        botId,
+        text: receipt.message.text,
+        hop: receipt.message.hop,
+        at: receipt.message.at,
+        history,
+        ...(receipt.message.senderBotId === undefined
+          ? {}
+          : { senderBotId: receipt.message.senderBotId }),
+        ...(receipt.message.senderPeer === undefined
+          ? {}
+          : { senderPeer: receipt.message.senderPeer }),
+      };
+      const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+      // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not
+      // represented by workers-types.
+      const rpc = this.env.BOT_STATES.get(id) as unknown as {
+        deliverChannelInput(input: unknown): Promise<{ runId?: unknown }>;
+      };
+      try {
+        const accepted = await rpc.deliverChannelInput({
+          schemaVersion: 1,
+          userId,
+          botId,
+          delivery,
+        });
+        // The Bot Durable Object wrote the input down before it answered, and
+        // the run it will admit is derived from the message id, so the run is
+        // already determined even though the Turn has not started. Recording it
+        // here is what turns a redelivery from "harmless" into "visible".
+        if (typeof accepted?.runId === "string") {
+          await this.channels.markAdmitted(
+            receipt.message.messageId,
+            botId,
+            accepted.runId,
+          );
+        }
+      } catch (error) {
+        // The delivery record stays `pending`, which is the durable statement
+        // that this Bot has not been told. Nothing is lost and nothing is
+        // acknowledged that did not happen.
+        console.error(
+          `Channel fan-out to Bot "${botId}" failed`,
+          error instanceof Error ? error.message : "unknown failure",
+        );
+      }
+    }
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {
