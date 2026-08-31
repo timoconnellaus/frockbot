@@ -22,6 +22,11 @@
       "grants": []
     },
     {
+      "specifier": "@frockbot/plugin-authoring",
+      "version": "0.0.1",
+      "grants": ["packages:author"]
+    },
+    {
       "specifier": "@frockbot/plugin-echo",
       "version": "0.0.1",
       "grants": []

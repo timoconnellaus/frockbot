@@ -86,6 +86,36 @@ export function rpcEnum<const T extends readonly string[]>(
   };
 }
 
+export function rpcInteger(
+  minimum = 0,
+  maximum = Number.MAX_SAFE_INTEGER,
+): RpcValueDecoder {
+  return (value, label) => {
+    if (
+      !Number.isSafeInteger(value) ||
+      (value as number) < minimum ||
+      (value as number) > maximum
+    ) {
+      throw new Error(`${label} must be an integer`);
+    }
+    return value;
+  };
+}
+
+export function rpcPattern(pattern: RegExp, maximum = 256): RpcValueDecoder {
+  return (value, label) => {
+    if (
+      typeof value !== "string" ||
+      value.length === 0 ||
+      value.length > maximum ||
+      !pattern.test(value)
+    ) {
+      throw new Error(`${label} is invalid`);
+    }
+    return value;
+  };
+}
+
 export const rpcBoolean: RpcValueDecoder = (value, label) => {
   if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`);
   return value;

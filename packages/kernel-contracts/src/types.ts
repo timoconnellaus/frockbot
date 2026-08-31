@@ -174,6 +174,27 @@ export interface SessionEventMap {
     isError: boolean;
     status: "completed" | "interrupted";
   };
+  /**
+   * The Bot recorded the intent to author a Package, before the bundler ran.
+   * Constitution, Durable effects: intent is recorded before the effect.
+   */
+  "package/author-intent": {
+    turn: number;
+    step: number;
+    effectId: string;
+    packageId: string;
+    sourceHash: string;
+  };
+  /** The authored artifact and the pending Composition generation it produced. */
+  "package/authored": {
+    turn: number;
+    step: number;
+    effectId: string;
+    packageId: string;
+    version: string;
+    contentHash: string;
+    generationId: string;
+  };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   "turn/end": { turn: number; outcome: TurnOutcome };
   "session/disposed": { disposedAt: string };
@@ -522,6 +543,40 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       if (event.status !== "completed" && event.status !== "interrupted") {
         throw new Error("session event.status is invalid");
       }
+      break;
+    case "package/author-intent":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "effectId", "packageId", "sourceHash"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.sourceHash, "session event.sourceHash");
+      break;
+    case "package/authored":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "packageId",
+          "version",
+          "contentHash",
+          "generationId",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.version, "session event.version");
+      eventString(event.contentHash, "session event.contentHash");
+      eventString(event.generationId, "session event.generationId");
       break;
     case "step/end":
       requireEventKeys(event, keys("turn", "step", "outcome"), "session event");

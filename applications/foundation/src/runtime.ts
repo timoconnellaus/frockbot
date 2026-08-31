@@ -17,6 +17,11 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
 import authManifest from "@frockbot/plugin-auth/manifest";
+import authoringManifest from "@frockbot/plugin-authoring/manifest";
+import {
+  createAuthoringRuntimePlugin,
+  type PackageAuthoringHost,
+} from "@frockbot/plugin-authoring/agent";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
@@ -96,6 +101,7 @@ export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-ui-theme", uiThemeManifest],
   ["@frockbot/plugin-auth", authManifest],
+  ["@frockbot/plugin-authoring", authoringManifest],
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
   ["@frockbot/plugin-credentials", credentialsManifest],
@@ -329,9 +335,25 @@ export function createFoundationHostedRuntimePackages(
   host: {
     userId: string;
     readSecret(name: string): string | undefined;
+    /**
+     * The Package authoring seam, supplied by the Bot Durable Object for one
+     * admitted Turn. Absent outside a Turn, and the Authoring Package is then
+     * not mounted at all: a Bot cannot author a Package except inside a Turn
+     * whose run and session its provenance can name.
+     */
+    authoring?: PackageAuthoringHost;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
+    ...(host.authoring
+      ? [
+          runtimePackage(
+            plan,
+            "authoring",
+            createAuthoringRuntimePlugin(host.authoring),
+          ),
+        ]
+      : []),
     runtimePackage(
       plan,
       "credentials",
@@ -442,6 +464,8 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   const plan = await compileFoundationApplication();
   const runtimeIds = new Set(plan.contributions.runtime);
   // Computer providers require host authority and are added only by a capable runtime.
+  // Authoring mounts only for an admitted Turn, which supplies its host.
+  runtimeIds.delete("authoring");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

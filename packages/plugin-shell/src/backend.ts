@@ -52,6 +52,15 @@ import {
   type ShellIsolateMountOptions,
 } from "./backend-composition.js";
 import {
+  createPackageAuthoringHost,
+  createR2AuthoringArtifactStore,
+} from "./backend-authoring.js";
+import {
+  decodeAuthoringQuotaReceiptV1,
+  type AuthoringQuotaBinding,
+  type PackageAuthoringHost,
+} from "@frockbot/plugin-authoring";
+import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   createIsolateCapabilityHost,
   createR2PackageArtifactStore,
@@ -68,6 +77,7 @@ import type {
   BotCapabilitiesStub,
   IsolateModelInvocationV1,
   IsolatePendingDecisionV1,
+  PackageBundlerBinding,
 } from "@frockbot/kernel-contracts";
 import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
 import { executeBotTurn } from "./backend-runner.js";
@@ -144,6 +154,11 @@ export interface BotStateEnv {
   BOT_PACKAGES?: BotIsolateLoader;
   /** Immutable, content-addressed Package artifacts, read hash-verified. */
   APPLICATION_ARTIFACTS?: R2Bucket;
+  /**
+   * The Package bundler service (plan Step 3/D4). Optional so a host without
+   * Bot authoring still compiles; `package_author` then refuses visibly.
+   */
+  PACKAGE_BUNDLER?: PackageBundlerBinding;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   USER_CONFIGURATIONS: DurableObjectNamespace;
@@ -1250,10 +1265,17 @@ export class ShellBotBackendContribution {
     input: BotTurnExecutionInput<BotSettingsViewV1>,
   ): Promise<BotTurnCompletion> {
     const settings = input.configurationSnapshot;
+    const turn = {
+      runId: input.command.runId,
+      // One admitted Turn is one run; the Turn ordinal lives in the session log.
+      turnId: input.command.runId,
+      sessionId: input.command.sessionId,
+    };
     const runtime = await this.agentRuntime(
       input.identity,
       settings,
       input.admittedRequest,
+      turn,
     );
     const promptParts = [
       `You are ${settings.profile.name}.`,
@@ -1290,6 +1312,13 @@ export class ShellBotBackendContribution {
     const controller = new AbortController();
     const composition = await host.mount(generation, controller.signal);
     await composition.verify(controller.signal);
+    // Activation takes effect at the next admitted Turn: a generation a Bot
+    // authored earlier is pinned here, and committing it once it has mounted
+    // and verified is what makes it active and supersedes its parent.
+    // Fail-closed rollback and quarantine are Step 6.
+    if (generation.status === "pending") {
+      await this.authority.composition.commit(generation.generationId);
+    }
     return executeBotTurn({
       command: input.command,
       previousEvents: input.previousEvents,
@@ -1565,10 +1594,55 @@ export class ShellBotBackendContribution {
       }
     }
   }
+  /**
+   * The narrow User Durable Object RPC the Bot uses to reserve one authored
+   * generation against the durable per-User quota (D7).
+   */
+  private authoringQuota(identity: BotIdentity): AuthoringQuotaBinding {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    // SAFETY: this namespace is bound to UserConfiguration; generated Worker
+    // types do not expose its RPC surface.
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      reserveAuthoringQuota(input: unknown): Promise<unknown>;
+    };
+    return {
+      reserve: async (request) =>
+        decodeAuthoringQuotaReceiptV1(await rpc.reserveAuthoringQuota(request)),
+    };
+  }
+
+  /** The authoring seam one admitted Turn runs under. */
+  private authoringHost(
+    identity: BotIdentity,
+    turn: { runId: string; turnId: string },
+  ): PackageAuthoringHost {
+    const artifacts = this.env.APPLICATION_ARTIFACTS;
+    return createPackageAuthoringHost({
+      storage: {
+        get: (key) => this.ctx.storage.get(key),
+        put: (entries) => this.ctx.storage.put(entries),
+      },
+      composition: this.authority.composition,
+      ...(this.env.PACKAGE_BUNDLER
+        ? { bundler: this.env.PACKAGE_BUNDLER }
+        : {}),
+      ...(artifacts
+        ? { artifacts: createR2AuthoringArtifactStore(artifacts) }
+        : {}),
+      quota: this.authoringQuota(identity),
+      userId: identity.userId,
+      botId: identity.botId,
+      runId: turn.runId,
+      turnId: turn.turnId,
+      compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+    });
+  }
+
   private async agentRuntime(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
     admittedRequest?: NormalizedModelRequest,
+    turn?: { runId: string; turnId: string; sessionId: string },
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
     modelSelection: RuntimeModelSelection;
@@ -1612,6 +1686,9 @@ export class ShellBotBackendContribution {
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
         readSecret,
+        // A Bot authors a Package only inside an admitted Turn, whose run and
+        // session the artifact provenance names.
+        ...(turn ? { authoring: this.authoringHost(identity, turn) } : {}),
       }),
       ...(await createFoundationAssignedRuntimePackages(
         application,

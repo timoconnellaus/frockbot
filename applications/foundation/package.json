@@ -23,6 +23,7 @@
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
+    "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-catalog": "workspace:*",
     "@frockbot/plugin-clock": "workspace:*",
     "@frockbot/plugin-computer": "workspace:*",

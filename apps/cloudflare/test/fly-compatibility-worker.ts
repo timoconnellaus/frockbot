@@ -37,6 +37,7 @@ export interface FlyMountResult {
 
 export { BotCapabilities } from "../src/bot-capabilities.ts";
 export { BotIsolateProbe } from "./bot-isolate-probe.ts";
+export { AuthoringProbe } from "./authoring-probe.ts";
 
 export class WorkerdBotState extends BotState {
   /** Seeds the durable Bot configuration the isolate capability path reads. */

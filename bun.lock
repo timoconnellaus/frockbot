@@ -24,6 +24,7 @@
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
+        "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-clock": "workspace:*",
         "@frockbot/plugin-computer": "workspace:*",
@@ -86,6 +87,7 @@
         "@frockbot/kernel-composition": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/kernel-do": "workspace:*",
+        "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
@@ -427,6 +429,18 @@
         "vue-tsc": "3.3.10",
       },
     },
+    "packages/plugin-authoring": {
+      "name": "@frockbot/plugin-authoring",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-contracts": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-catalog": {
       "name": "@frockbot/plugin-catalog",
       "version": "0.0.1",
@@ -738,6 +752,7 @@
         "@frockbot/kernel-composition": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/kernel-do": "workspace:*",
+        "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-catalog": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/protocol": "workspace:*",
@@ -1078,6 +1093,8 @@
     "@frockbot/mobile-core": ["@frockbot/mobile-core@workspace:packages/mobile-core"],
 
     "@frockbot/plugin-auth": ["@frockbot/plugin-auth@workspace:packages/plugin-auth"],
+
+    "@frockbot/plugin-authoring": ["@frockbot/plugin-authoring@workspace:packages/plugin-authoring"],
 
     "@frockbot/plugin-catalog": ["@frockbot/plugin-catalog@workspace:packages/plugin-catalog"],
 

@@ -30,6 +30,7 @@ describe("foundation application", () => {
       "ui-theme",
       "auth",
       "shell",
+      "authoring",
       "clock",
       "computer",
       "credentials",
@@ -56,6 +57,7 @@ describe("foundation application", () => {
         "provider-ollama-cloud",
       ],
       runtime: [
+        "authoring",
         "clock",
         "computer",
         "credentials",

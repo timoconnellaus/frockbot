@@ -240,6 +240,26 @@ describe("SessionStore", () => {
         text: "Hi",
         toolCalls: [],
       },
+      // Self-modification is a durable effect the log reconstructs: the intent
+      // is recorded before the bundler runs, the outcome after it.
+      {
+        type: "package/author-intent",
+        turn: 1,
+        step: 1,
+        effectId: "author-0123456789abcdef",
+        packageId: "weather-lookup",
+        sourceHash: "c".repeat(64),
+      },
+      {
+        type: "package/authored",
+        turn: 1,
+        step: 1,
+        effectId: "author-0123456789abcdef",
+        packageId: "weather-lookup",
+        version: "0.0.1",
+        contentHash: "d".repeat(64),
+        generationId: "2026-08-31T01:00:00.000Z:fedcba9876543210",
+      },
       { type: "step/end", turn: 1, step: 1, outcome: "completed" },
       { type: "turn/end", turn: 1, outcome: "completed" },
     ]);
@@ -264,6 +284,32 @@ describe("SessionStore", () => {
       generationId: "2026-08-31T00:00:00.000Z:0123456789abcdef",
       artifactSetHash: "a".repeat(64),
     });
+    const authored = session.events.find(
+      (event) => event.type === "package/authored",
+    );
+    expect(
+      authored?.type === "package/authored"
+        ? {
+            effectId: authored.effectId,
+            packageId: authored.packageId,
+            version: authored.version,
+            generationId: authored.generationId,
+          }
+        : undefined,
+    ).toEqual({
+      effectId: "author-0123456789abcdef",
+      packageId: "weather-lookup",
+      version: "0.0.1",
+      generationId: "2026-08-31T01:00:00.000Z:fedcba9876543210",
+    });
+    // The authoring events belong to the pinned generation, not the one they
+    // produced: activation is at the next admitted Turn.
+    expect(
+      authored?.type === "package/authored"
+        ? authored.generationId ===
+            (pin?.type === "composition/pinned" ? pin.generationId : "")
+        : undefined,
+    ).toBe(false);
     expect(
       session.events.map((event) => decodeSessionEvent(structuredClone(event))),
     ).toEqual([...session.events]);

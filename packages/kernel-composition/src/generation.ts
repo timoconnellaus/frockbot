@@ -69,7 +69,15 @@ export interface CompositionGenerationV1 {
 export interface CompositionStore {
   current(): Promise<CompositionGenerationV1>;
   lastKnownGood(): Promise<CompositionGenerationV1>;
-  propose(generation: CompositionGenerationV1): Promise<void>;
+  /**
+   * Records a new generation. `pin` advances `composition:current` to it, so
+   * the next admitted Turn pins the proposal; the generation stays `pending`
+   * until it mounts and is committed.
+   */
+  propose(
+    generation: CompositionGenerationV1,
+    options?: { pin?: boolean },
+  ): Promise<void>;
   commit(generationId: string): Promise<void>;
   list(query: {
     limit: number;

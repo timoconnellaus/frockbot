@@ -140,7 +140,10 @@ export class DurableCompositionStore implements CompositionStore {
     return this.require(generationId);
   }
 
-  async propose(generation: CompositionGenerationV1): Promise<void> {
+  async propose(
+    generation: CompositionGenerationV1,
+    options: { pin?: boolean } = {},
+  ): Promise<void> {
     const proposed = decodeCompositionGenerationV1(generation);
     if (proposed.status !== "pending") {
       throw new Error(
@@ -160,8 +163,22 @@ export class DurableCompositionStore implements CompositionStore {
         [key]: proposed,
         [compositionIndexKey(proposed.createdAt, proposed.generationId)]:
           proposed.generationId,
+        // Activation takes effect at the next admitted Turn: the pointer moves
+        // now, the status stays pending until that Turn mounts and commits it.
+        ...(options.pin
+          ? { [COMPOSITION_CURRENT_KEY]: compositionPinV1(proposed) }
+          : {}),
       });
     });
+  }
+
+  /** How many generations this Bot retains; the per-User retention quota reads it. */
+  async retainedCount(): Promise<number> {
+    await this.materialize();
+    const entries = await this.ctx.storage.list<string>({
+      prefix: COMPOSITION_INDEX_PREFIX,
+    });
+    return entries.size;
   }
 
   /** Activates a proposed generation and supersedes the one it replaces. */
@@ -198,17 +215,30 @@ export class DurableCompositionStore implements CompositionStore {
         [COMPOSITION_CURRENT_KEY]: compositionPinV1(active),
         [COMPOSITION_LAST_KNOWN_GOOD_KEY]: generationId,
       };
+      // The generation being committed may already be the pointer — a proposal
+      // pinned for the next Turn is. Superseding its parent is what records
+      // that a re-authored Package replaced the member set before it.
+      const supersede = new Set<string>();
       if (previous && previous.generationId !== generationId) {
+        supersede.add(previous.generationId);
+      }
+      if (
+        generation.parentGenerationId &&
+        generation.parentGenerationId !== generationId
+      ) {
+        supersede.add(generation.parentGenerationId);
+      }
+      for (const supersededId of supersede) {
         const storedPrevious = await transaction.get<unknown>(
-          compositionGenerationKey(previous.generationId),
+          compositionGenerationKey(supersededId),
         );
-        if (storedPrevious !== undefined) {
-          writes[compositionGenerationKey(previous.generationId)] =
-            decodeCompositionGenerationV1({
-              ...decodeCompositionGenerationV1(storedPrevious),
-              status: "superseded",
-            });
+        if (storedPrevious === undefined) continue;
+        const decoded = decodeCompositionGenerationV1(storedPrevious);
+        if (decoded.status !== "active" && decoded.status !== "pending") {
+          continue;
         }
+        writes[compositionGenerationKey(supersededId)] =
+          decodeCompositionGenerationV1({ ...decoded, status: "superseded" });
       }
       await transaction.put(writes);
     });

@@ -43,6 +43,7 @@ export default defineConfig({
         },
         r2Buckets: ["APPLICATION_ARTIFACTS"],
         durableObjects: {
+          AUTHORING: "AuthoringProbe",
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",

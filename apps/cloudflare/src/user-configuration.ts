@@ -17,10 +17,20 @@ import {
 } from "@frockbot/configuration-core";
 import { decodeCreateBotCommandV1 } from "@frockbot/plugin-flock/shared";
 import {
+  AUTHORING_QUOTA_CONFIG_KEY,
+  AUTHORING_QUOTA_DAY,
+  decodeAuthoringQuotaConfigV1,
+  reserveAuthoringQuotaV1,
+  type AuthoringQuotaConfigV1,
+  type AuthoringQuotaReceiptV1,
+} from "@frockbot/plugin-authoring/quota";
+import {
   decodeRpcEnvelopeV1,
   rpcBotId,
   rpcDecoded,
   rpcIdentifier,
+  rpcInteger,
+  rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
 
@@ -224,6 +234,55 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       connectionId: request.connectionId as string,
       effectId: request.effectId as string,
     });
+  }
+
+  /**
+   * D7. The User Durable Object is the authority for User-scoped quotas: the
+   * Bot's Durable Object reserves one authored-generation unit here before it
+   * records an authorship intent. Reservation is idempotent on `effectId`, so
+   * a resumed Turn does not consume a second unit, and a breach is a refusal
+   * receipt rather than a throw — the Bot records the visible failure.
+   */
+  async reserveAuthoringQuota(
+    input: unknown,
+  ): Promise<AuthoringQuotaReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      effectId: rpcString(200),
+      day: rpcPattern(AUTHORING_QUOTA_DAY, 10),
+      sourceBytes: rpcInteger(0, 64 * 1024 * 1024),
+      retainedGenerations: rpcInteger(0, 1_000_000),
+    });
+    return reserveAuthoringQuotaV1(this.ctx.storage, {
+      schemaVersion: 1,
+      userId: request.userId as string,
+      botId: request.botId as string,
+      effectId: request.effectId as string,
+      day: request.day as string,
+      sourceBytes: request.sourceBytes as number,
+      retainedGenerations: request.retainedGenerations as number,
+    });
+  }
+
+  /** The durable per-User authoring quota configuration; defaults when unset. */
+  async readAuthoringQuota(input: unknown): Promise<AuthoringQuotaConfigV1> {
+    decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    return decodeAuthoringQuotaConfigV1(
+      await this.ctx.storage.get<unknown>(AUTHORING_QUOTA_CONFIG_KEY),
+    );
+  }
+
+  async configureAuthoringQuota(
+    input: unknown,
+  ): Promise<AuthoringQuotaConfigV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      quota: rpcDecoded(decodeAuthoringQuotaConfigV1),
+    });
+    const quota = request.quota as AuthoringQuotaConfigV1;
+    await this.ctx.storage.put(AUTHORING_QUOTA_CONFIG_KEY, quota);
+    return quota;
   }
 
   async alarm() {

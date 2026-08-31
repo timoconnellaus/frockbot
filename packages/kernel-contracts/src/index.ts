@@ -1,3 +1,4 @@
+export * from "./authoring.js";
 export * from "./isolate.js";
 export * from "./model-invocation.js";
 export * from "./prompt-assembly.js";
