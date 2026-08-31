@@ -7,12 +7,14 @@
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
     "./catalog": "./src/catalog.ts",
+    "./frockbot.json": "./frockbot.json",
+    "./managed": "./src/managed.ts",
     "./manifest": "./src/manifest.ts",
+    "./package.json": "./package.json",
+    "./plugin-index": "./src/plugin-index.ts",
     "./quota": "./src/quota.ts",
     "./skill-md": "./src/skill-md.ts",
-    "./testing": "./src/testing.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
+    "./testing": "./src/testing.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"

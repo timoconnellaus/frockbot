@@ -263,7 +263,7 @@ describe("the Skills loader", () => {
     );
     expect(rendered).toContain("<agent_skills>");
     expect(rendered).toContain(
-      '<skill name="Daily standup" path="skills/standup/SKILL.md">Use this when assembling the &lt;weekday&gt; standup.</skill>',
+      '<skill name="Daily standup" source="bot" ref="bot/standup" path="skills/standup/SKILL.md" by="your User">Use this when assembling the &lt;weekday&gt; standup.</skill>',
     );
     expect(rendered).toContain("Mentioning a Skill is not running it.");
     // Progressive disclosure: the body is never in the prompt.

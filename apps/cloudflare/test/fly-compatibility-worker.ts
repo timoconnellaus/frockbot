@@ -34,6 +34,12 @@ import {
   MemoryProjection,
 } from "@frockbot/plugin-memory/agent";
 import { createBotMemoryHost } from "@frockbot/plugin-shell/backend-memory";
+import {
+  createBotPluginSkillsSource,
+  createBotSkillCatalogReader,
+  createBotSkillsReads,
+} from "@frockbot/plugin-shell/backend-skills";
+import { loadFullSkillCatalogV1 } from "@frockbot/plugin-skills/catalog";
 import { createBotComputerSyncHost } from "@frockbot/plugin-shell/backend-computer";
 import {
   createWorkspaceRootSyncV1,
@@ -652,6 +658,80 @@ export class WorkerdBotState extends BotState {
       kind: effect.kind,
       path: effect.path,
     }));
+  }
+
+  /**
+   * The production Skill catalog this Bot would inject, assembled inside the
+   * Durable Object over the real Workspace bucket, the real Package Catalog
+   * bucket, and the User Durable Object's real settings.
+   *
+   * A probe rather than a Turn because the claim is about the *catalog*: which
+   * sources it draws from, at which pinned generations, and what an uninstall
+   * removes. The Turn-level claim — that the catalog is injected under the
+   * Composition the Turn pinned — is the integration suite's, where a real
+   * Turn records `composition/pinned` and `skill/injected` together.
+   */
+  async skillCatalogProbe(identity: {
+    userId: string;
+    botId: string;
+  }): Promise<{
+    compositionGenerationId: string;
+    skills: Array<{ ref?: string; path: string; generationId: string }>;
+    refusals: Array<{ path: string; reason: string }>;
+  }> {
+    this.bindSurfaces(identity);
+    const reads = createBotSkillsReads(this.backendEnv);
+    if (!reads) throw new Error("no Workspace bucket is bound");
+    // SAFETY: the generated stub type for `readConfiguration` is too deep for
+    // the compiler to instantiate here; this names the one field it reads.
+    const configuration = this.env.USER_CONFIGURATIONS.getByName(
+      identity.userId,
+    ) as unknown as {
+      readConfiguration(input: unknown): Promise<{
+        packages: Array<{
+          packageId: string;
+          state: "installed" | "disabled" | "failed";
+          catalogId?: string;
+          catalogGeneration?: string;
+        }>;
+      }>;
+    };
+    const user = await configuration.readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
+    const pluginSkills = createBotPluginSkillsSource(
+      user.packages,
+      createBotSkillCatalogReader(this.backendEnv),
+    );
+    const catalog = await loadFullSkillCatalogV1(reads, identity, {
+      ...(pluginSkills ? { pluginSkills } : {}),
+    });
+    const generations = (await this.listCompositionGenerations({
+      schemaVersion: 1,
+      userId: identity.userId,
+      botId: identity.botId,
+      query: { limit: 1 },
+    })) as { currentGenerationId: string };
+    return {
+      compositionGenerationId: generations.currentGenerationId,
+      skills: catalog.skills.map((skill) => ({
+        ...(skill.ref
+          ? {
+              ref:
+                skill.ref.source === "plugin"
+                  ? `plugin/${skill.ref.packageId}/${skill.ref.slug}`
+                  : `${skill.ref.source}/${skill.ref.slug}`,
+            }
+          : {}),
+        path: skill.path,
+        generationId: skill.generationId,
+      })),
+      refusals: catalog.refusals.map((refusal) => ({
+        path: refusal.path,
+        reason: `${refusal.kind}: ${refusal.reason}`,
+      })),
+    };
   }
 
   async durableSessionEvents(): Promise<SessionEvent[]> {

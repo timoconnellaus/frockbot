@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  MAX_CATALOG_SKILL_BODY_BYTES_V1,
   assertCatalogEntryMatchesIndexV1,
   catalogContentHashV1,
   catalogEntryKeyV1,
@@ -156,12 +157,44 @@ describe("catalog entry decoding", () => {
         setupFields: [
           { type: "string", title: "Region", minLength: 2, maxLength: 8 },
         ],
-        skills: [{ name: "forecast", description: "Ask for a forecast." }],
+        skills: [
+          {
+            name: "forecast",
+            description: "Ask for a forecast.",
+            body: "1. Ask the region.",
+          },
+        ],
       }),
     );
     expect(entry.servers[0]?.transport).toBe("streamable-http");
     expect(entry.setupFields[0]?.title).toBe("Region");
     expect(entry.skills[0]?.name).toBe("forecast");
+    // The body lives in the entry document, at the pinned generation: a
+    // plugin-borne Skill is indexed there and copied nowhere.
+    expect(entry.skills[0]?.body).toBe("1. Ask the region.");
+  });
+
+  test("bounds a Skill body and refuses an unknown Skill field", () => {
+    expect(() =>
+      decodeCatalogEntryV1(
+        entryDetail({
+          skills: [
+            {
+              name: "forecast",
+              body: "x".repeat(MAX_CATALOG_SKILL_BODY_BYTES_V1 + 1),
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/catalog skill body is invalid/u);
+    // A field GrokBot's own plugin index carries and a Catalog entry must not:
+    // a body is data, a file path is a claim about some host's disk.
+    const withFilePath = entryDetail();
+    (withFilePath.skills as unknown[]).push({
+      name: "forecast",
+      filePath: "plugins/cache/forecast/SKILL.md",
+    });
+    expect(() => decodeCatalogEntryV1(withFilePath)).toThrow(/unknown field/u);
   });
 
   test("rejects an unknown transport", () => {

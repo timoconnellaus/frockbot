@@ -68,10 +68,18 @@ describe("the Skill catalog", () => {
     const injected = session.events.find(
       (event) => event.type === "skill/injected",
     );
+    // Ordering is the catalog's: the Bot's own Skills, then the managed set
+    // this Package compiles in. Nothing else is installed in this fixture.
     expect(injected).toMatchObject({
       type: "skill/injected",
       turn: 4,
-      skills: [{ path: "skills/kept/SKILL.md", name: "kept" }],
+      skills: [
+        { path: "skills/kept/SKILL.md", name: "kept" },
+        { path: "managed/add-connector/SKILL.md" },
+        { path: "managed/export-bot-template/SKILL.md" },
+        { path: "managed/import-bot-template/SKILL.md" },
+        { path: "managed/learn-from-demonstration/SKILL.md" },
+      ],
     });
     expect(
       injected?.type === "skill/injected" ? injected.refusals : [],
@@ -170,9 +178,12 @@ describe("the skill_write tool", () => {
     // The Skill it wrote is loadable on the next Turn, by its own authority.
     const catalog = new SkillCatalog(OWNER, workspace);
     await catalog.refresh(5, session);
-    expect(catalog.current().skills.map((skill) => skill.name)).toEqual([
-      "Daily standup",
-    ]);
+    expect(
+      catalog
+        .current()
+        .skills.filter((skill) => skill.ref?.source === "bot")
+        .map((skill) => skill.name),
+    ).toEqual(["Daily standup"]);
     await dispose();
   });
 

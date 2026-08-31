@@ -29,7 +29,7 @@ import type {
   WorkspaceReadsV1,
   WorkspaceWriteRequestV1,
 } from "@frockbot/kernel-contracts";
-import { formatSkillRefV1 } from "@frockbot/kernel-contracts";
+import { formatSkillRefV1, parseSkillRefV1 } from "@frockbot/kernel-contracts";
 // Merges the Agent loop's event declarations into the cordis Context type.
 import type {} from "@frockbot/kernel-agent-loop/agent";
 import type { Plugin } from "cordis";
@@ -38,13 +38,14 @@ import {
   countSkillDocumentsV1,
   emptySkillCatalogV1,
   type InvokedSkillV1,
-  loadSkillCatalogV1,
+  loadFullSkillCatalogV1,
   renderInvokedSkillsPromptV1,
   renderSkillCatalogPromptV1,
   resolveSkillRefV1,
   type SkillCatalogV1,
   type SkillOwnerV1,
 } from "./catalog.js";
+import type { PluginSkillsSourceV1 } from "./plugin-index.js";
 import {
   checkSkillQuotaV1,
   SKILL_QUOTA_DEFAULTS_V1,
@@ -78,6 +79,12 @@ export interface SkillsRuntimeHostV1 {
   files?: WorkspaceFilesV1;
   writer?: SkillWriterIdentityV1;
   quota?: SkillQuotaConfigV1;
+  /**
+   * The index over the User's installed Catalog entries. Absent when the
+   * deployment has no Catalog, and the Turn then carries no plugin-borne
+   * Skills — which is the true answer, not a failure.
+   */
+  pluginSkills?: PluginSkillsSourceV1;
 }
 
 export async function sha256HexV1(text: string): Promise<string> {
@@ -132,15 +139,21 @@ export type SkillInvocationOutcomeV1 =
 export class SkillCatalog {
   #owner: SkillOwnerV1;
   #reads: WorkspaceReadsV1;
+  #pluginSkills: PluginSkillsSourceV1 | undefined;
   #catalog: SkillCatalogV1;
   #turn: number | undefined;
   #invoked: InvokedSkillV1[] = [];
   #invokedTurn: number | undefined;
   #step: { turn: number; step: number } | undefined;
 
-  constructor(owner: SkillOwnerV1, reads: WorkspaceReadsV1) {
+  constructor(
+    owner: SkillOwnerV1,
+    reads: WorkspaceReadsV1,
+    pluginSkills?: PluginSkillsSourceV1,
+  ) {
     this.#owner = owner;
     this.#reads = reads;
+    this.#pluginSkills = pluginSkills;
     this.#catalog = emptySkillCatalogV1(owner);
   }
 
@@ -154,7 +167,9 @@ export class SkillCatalog {
 
   /** Loads the Turn's Skills and records the injection in the session log. */
   async refresh(turn: number, session: Session): Promise<SkillCatalogV1> {
-    this.#catalog = await loadSkillCatalogV1(this.#reads, this.#owner);
+    this.#catalog = await loadFullSkillCatalogV1(this.#reads, this.#owner, {
+      ...(this.#pluginSkills ? { pluginSkills: this.#pluginSkills } : {}),
+    });
     this.#turn = turn;
     session.append({
       type: "skill/injected",
@@ -253,7 +268,7 @@ const SKILL_LOAD_INPUT_SCHEMA = {
     path: {
       type: "string",
       description:
-        "The Skill's path exactly as listed in <agent_skills>, for example skills/daily-standup/SKILL.md.",
+        "The Skill's ref exactly as listed in <agent_skills> — bot/daily-standup, managed/add-connector, or plugin/<packageId>/<slug>. The path listed beside it is also accepted.",
     },
   },
   required: ["path"],
@@ -278,6 +293,12 @@ const SKILL_WRITE_INPUT_SCHEMA = {
       description:
         "Optional directory slug, lowercase letters, digits and hyphens. Derived from the name when omitted. Reuse a slug to supersede that Skill.",
     },
+    scope: {
+      type: "string",
+      enum: ["bot"],
+      description:
+        "Where the Skill is written. Only your own instruction root (bot) is writable; managed and plugin Skills are not editable this way.",
+    },
   },
   required: ["name", "description", "body"],
   additionalProperties: false,
@@ -286,11 +307,46 @@ const SKILL_WRITE_INPUT_SCHEMA = {
 /** C0 controls, DEL, and the C1 range: never valid in a frontmatter scalar. */
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
+/**
+ * Where a `skill_write` lands.
+ *
+ * All four sources are named so a refusal can be specific about *why* the
+ * other three are not writable, rather than reading as an unknown-field error.
+ * `bot` is the only one this Package can write: `user` needs the User-global
+ * instruction root, and `managed` and `plugin` are not durable-root files at
+ * all — one is bytes of a first-party artifact, the other an index over a
+ * pinned Catalog generation, and neither has a write path to route to.
+ */
+export type SkillWriteScopeV1 = "bot" | "user" | "managed" | "plugin";
+
+const SKILL_WRITE_SCOPES: readonly SkillWriteScopeV1[] = [
+  "bot",
+  "user",
+  "managed",
+  "plugin",
+];
+
+/** Why a scope other than `bot` is refused. GrokBot's own wording for managed. */
+export function skillWriteScopeRefusalV1(
+  scope: SkillWriteScopeV1,
+): string | undefined {
+  switch (scope) {
+    case "bot":
+      return undefined;
+    case "managed":
+    case "plugin":
+      return "managed skills are not editable this way";
+    case "user":
+      return "User-global Skills have no instruction root yet; write this Skill to your own root instead";
+  }
+}
+
 interface SkillWriteInputV1 {
   name: string;
   description: string;
   body: string;
   slug?: string;
+  scope?: SkillWriteScopeV1;
 }
 
 function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
@@ -298,7 +354,7 @@ function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
     throw new Error("skill_write input must be an object");
   }
   const value = input as Record<string, unknown>;
-  const allowed = ["name", "description", "body", "slug"];
+  const allowed = ["name", "description", "body", "slug", "scope"];
   if (!Object.keys(value).every((key) => allowed.includes(key))) {
     throw new Error("skill_write input has unknown fields");
   }
@@ -332,6 +388,13 @@ function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
     }
     decoded.slug = value.slug;
   }
+  if (value.scope !== undefined) {
+    const scope = SKILL_WRITE_SCOPES.find(
+      (candidate) => candidate === value.scope,
+    );
+    if (!scope) throw new Error("skill_write scope is invalid");
+    decoded.scope = scope;
+  }
   return decoded;
 }
 
@@ -347,22 +410,32 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
       typeof input === "object" &&
       typeof (input as { path?: unknown }).path === "string",
     execute: (input: unknown) => {
-      const path = String((input as { path: string }).path).trim();
-      const skill = catalog
-        .current()
-        .skills.find((candidate) => candidate.path === path);
+      const named = String((input as { path: string }).path).trim();
+      const loaded = catalog.current().skills;
+      // A ref first, then the path. Both are printed in `<agent_skills>`, and
+      // a ref is the only form that names a managed or plugin Skill, since
+      // neither is a file under any root the Bot could path into.
+      const ref = parseSkillRefV1(named);
+      const skill =
+        (ref
+          ? loaded.find(
+              (candidate) =>
+                candidate.ref !== undefined &&
+                formatSkillRefV1(candidate.ref) === formatSkillRefV1(ref),
+            )
+          : undefined) ?? loaded.find((candidate) => candidate.path === named);
       if (!skill) {
         // A candidate refused as an instruction is not readable here either:
         // `skill_load` discloses only what this Turn actually loaded.
         return Promise.resolve({
-          content: `No Skill "${path}" is loaded for this Turn. Use only the paths listed in <agent_skills>.`,
+          content: `No Skill "${named}" is loaded for this Turn. Use only the refs listed in <agent_skills>.`,
           isError: true,
         });
       }
       return Promise.resolve({
         content: [
           `# ${skill.name}`,
-          `Path: ${skill.path} (generation ${skill.generationId})`,
+          `${skill.ref ? `Ref: ${formatSkillRefV1(skill.ref)}\n` : ""}Path: ${skill.path} (generation ${skill.generationId})`,
           "",
           skill.body,
         ].join("\n"),
@@ -405,6 +478,8 @@ export function createSkillWriteTool(
           error instanceof Error ? error.message : String(error),
         );
       }
+      const refusal = skillWriteScopeRefusalV1(decoded.scope ?? "bot");
+      if (refusal) return writeRefusal(refusal);
       const slug = decoded.slug ?? skillSlugFromNameV1(decoded.name);
       if (!slug) {
         return writeRefusal(
@@ -527,7 +602,7 @@ export function createSkillsRuntimePlugin(
   host: SkillsRuntimeHostV1,
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) => {
-    const catalog = new SkillCatalog(host.owner, host.reads);
+    const catalog = new SkillCatalog(host.owner, host.reads, host.pluginSkills);
     const disposers: Array<() => void> = [];
     disposers.push(
       ctx.systemPrompt.register({

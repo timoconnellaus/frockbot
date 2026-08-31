@@ -106,6 +106,7 @@
         "@frockbot/plugin-search": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
+        "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
         "@frockbot/workspace-store": "workspace:*",
         "better-auth": "1.7.2",
