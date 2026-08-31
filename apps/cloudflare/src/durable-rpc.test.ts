@@ -120,6 +120,39 @@ describe("Durable Object RPC boundaries", () => {
     ).toHaveLength(257);
   });
 
+  test("refuses a turn type or origin carried over the Bot run RPC", () => {
+    // Only an in-Durable-Object producer may admit a Turn as anything but
+    // chat, so the RPC that crosses from the gateway accepts neither field.
+    const command = {
+      runId: "run-1",
+      sessionId: "user-1:bot-1",
+      acceptedAt: "2026-08-29T00:00:00.000Z",
+      text: "hello",
+    };
+
+    for (const extra of [
+      { turnType: "automation" },
+      { turnType: "chat" },
+      {
+        origin: {
+          kind: "routine",
+          routineId: "r",
+          fireId: "f",
+          trigger: "cron",
+        },
+      },
+    ]) {
+      expect(() =>
+        decodeBotRunRpcV1({
+          schemaVersion: 1,
+          userId: "user-1",
+          botId: "bot-1",
+          command: { ...command, ...extra },
+        }),
+      ).toThrow(/RPC request.command/);
+    }
+  });
+
   test("rejects version-skewed Bot runs before Agent admission", () => {
     const admitted: unknown[] = [];
     const admit = (input: unknown) => admitted.push(decodeBotRunRpcV1(input));

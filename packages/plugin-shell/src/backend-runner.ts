@@ -6,6 +6,7 @@ import {
   type PersistSessionEvents,
   type SessionEvent,
   turnFailureMessage,
+  type TurnTypeV1,
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
 import type { ShellMountedComposition } from "./backend-composition.js";
@@ -178,6 +179,7 @@ export interface ResidentTurnRuntime {
     admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
     resume?: boolean;
     text: string;
+    turnType: TurnTypeV1;
   }): Promise<AgentHandle>;
 }
 
@@ -211,6 +213,7 @@ export async function executeResidentBotTurn(
       admitEffect,
       resume,
       text: command.text,
+      turnType: command.turnType ?? "chat",
     });
     return settleBotTurn(handle, command, previousEvents);
   } catch (error) {

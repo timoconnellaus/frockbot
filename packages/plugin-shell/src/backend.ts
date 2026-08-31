@@ -1754,6 +1754,9 @@ export class ShellBotBackendContribution {
           agentPackages: runtime.agentPackages,
           modelSelection: runtime.modelSelection,
           systemPromptSection: promptParts.join("\n\n"),
+          // The turn type the run was admitted as; recovery reads it back from
+          // the durable record, so a resumed Turn mounts the same catalog.
+          turnType: input.command.turnType ?? "chat",
           // Durable Stop fences every provider and tool effect immediately
           // before it is used, in the Bot Durable Object's own transaction.
           admitEffect: (effect) =>

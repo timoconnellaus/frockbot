@@ -9,6 +9,7 @@ import {
   type PersistSessionEvents,
   type SessionEvent,
   SessionStore,
+  type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 import {
   type AgentEffectAdmission,
@@ -81,6 +82,8 @@ export interface FoundationResidentExecution {
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   resume?: boolean;
   text: string;
+  /** Absent ⇒ `chat`. The resident Agent is created on this turn type. */
+  turnType?: TurnTypeV1;
 }
 
 /** Narrow cancellation request bound to one exact resident run. */
@@ -126,6 +129,8 @@ export interface FoundationRuntimeOptions {
   modelSelection?: RuntimeModelSelection;
   /** The Composition generation this root is pinned to; defaults to bootstrap. */
   composition?: CompositionPinV1;
+  /** The turn type this root's Agent is mounted on; defaults to `chat`. */
+  turnType?: TurnTypeV1;
 }
 
 /** The first-party generation a runtime with no durable Composition starts on. */
@@ -234,6 +239,7 @@ export async function createFoundationResidentRuntime(
   let dynamicFibers: Fiber[] = [];
   let agent: AgentHandle | undefined;
   let sessionId: string | undefined;
+  let residentTurnType: TurnTypeV1 = "chat";
   let activeRunId: string | undefined;
   let activePersist: PersistSessionEvents | undefined;
   let activeEffectAdmission:
@@ -320,6 +326,12 @@ export async function createFoundationResidentRuntime(
           if (sessionId !== execution.sessionId) {
             throw new Error("resident Bot runtime session identity changed");
           }
+          // The Agent's catalog is trimmed at construction, so a resident one
+          // cannot serve a second turn type; a producer of another type mounts
+          // its own root rather than silently reusing this catalog.
+          if ((execution.turnType ?? "chat") !== residentTurnType) {
+            throw new Error("resident Bot runtime turn type changed");
+          }
           const current = agent.agent.session.events;
           if (
             current.length !== execution.previousEvents.length ||
@@ -337,6 +349,7 @@ export async function createFoundationResidentRuntime(
           activeEffectAdmission = execution.admitEffect;
         } else {
           sessionId = execution.sessionId;
+          residentTurnType = execution.turnType ?? "chat";
           activePersist = execution.persistSessionEvents;
           activeEffectAdmission = execution.admitEffect;
           const sessionStore = root.sessions as SessionStore & {
@@ -362,6 +375,7 @@ export async function createFoundationResidentRuntime(
               sessionId: execution.sessionId,
               provider: FOUNDATION_PROVIDER,
               model: FOUNDATION_MODEL,
+              ...(execution.turnType ? { turnType: execution.turnType } : {}),
               admitEffect: (effect) => {
                 const admit = activeEffectAdmission;
                 return admit ? admit(effect) : Promise.resolve(false);
@@ -508,6 +522,7 @@ export async function createFoundationRuntime(
     provider,
     model,
     admitEffect: options.admitEffect,
+    ...(options.turnType ? { turnType: options.turnType } : {}),
     ...(selection?.connectionId
       ? {
           modelBinding: {
