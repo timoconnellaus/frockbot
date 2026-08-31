@@ -161,6 +161,7 @@ packages/
   plugin-flock/     Durable Bot directory and composable sheep identity Package
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
   plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
+  plugin-package-publisher/ Durable User application publication and rollback
   plugin-settings/  Plugin-owned Bot, Package, and User settings surfaces
   plugin-shell/     Hosted application geometry and surface presenter
   plugin-ui-theme/  Global semantic tokens for hosted client Contributions
@@ -174,7 +175,9 @@ docs/
 
 ## Cloudflare vertical slice
 
-The Cloudflare application builds one immutable Dynamic Worker artifact containing both the user-facing UI and Cordis agent runtime. The gateway loads it as `userId:applicationHash`; bot run state is stored through a user-scoped capability backed by one Durable Object per bot.
+The Cloudflare application builds an immutable Dynamic Worker artifact containing the user-facing UI and gateway routes. The gateway loads the User's active `userId:applicationHash`; the Dynamic Worker forwards authoritative Bot execution through a user-scoped capability backed by one Durable Object per Bot. Bots can publish content-hashed application artifacts through the Package Publisher Contribution, and the User Durable Object retains durable revision and rollback state.
+
+Every Bot has `list_setup_revisions`, `publish_setup`, and `rollback_setup` tools. The editable setup is the Git repository at `/home/box/setup` in its Sprite. After the Bot commits and tests a change, `publish_setup` archives Git `HEAD`, reads `dist/application.mjs`, and submits the check results; failed checks block publication, and the backend independently loads and health-checks the exact module before activation. File editing and choice of Sprite editor remain outside this Contribution. The hosted **Revisions** surface lists history and can roll every Bot back to an earlier shared application revision.
 
 ```bash
 bun run --filter @frockbot/cloudflare test

@@ -29,6 +29,7 @@
     "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
+    "@frockbot/plugin-package-publisher": "workspace:*",
     "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",

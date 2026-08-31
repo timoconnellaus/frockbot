@@ -44,6 +44,7 @@ describe("foundation application", () => {
       "memory",
       "mobile-clipboard",
       "mobile-notifications",
+      "package-publisher",
       "provider-foundation",
       "settings",
       "provider-ollama-cloud",
@@ -54,6 +55,7 @@ describe("foundation application", () => {
         "shell",
         "credentials",
         "flock",
+        "package-publisher",
         "settings",
         "provider-ollama-cloud",
       ],
@@ -66,6 +68,7 @@ describe("foundation application", () => {
         "fly-sprite",
         "identity",
         "memory",
+        "package-publisher",
         "provider-foundation",
         "provider-ollama-cloud",
         "skills",
@@ -77,6 +80,7 @@ describe("foundation application", () => {
         "clock",
         "computer",
         "flock",
+        "package-publisher",
         "settings",
       ],
       desktop: [
@@ -230,12 +234,15 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       revertComposition: () =>
         Promise.reject(new Error("not used while composing")),
+      read: () =>
+        Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
+      rollback: () => Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions
         .map((contribution) => contribution.packageId)
         .sort(),
-    ).toEqual(["flock", "settings"]);
+    ).toEqual(["flock", "package-publisher", "settings"]);
     interface TestContribution {
       specifier: string;
       executeConfiguration?(): void;
@@ -254,7 +261,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(4);
+    expect(userBackend.contributions).toHaveLength(5);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
@@ -290,9 +297,16 @@ describe("foundation application", () => {
           requestedSecrets.push(name);
           return undefined;
         },
+        packagePublisher: {
+          read: () =>
+            Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
+          publish: () => Promise.reject(new Error("not used while composing")),
+          rollback: () => Promise.reject(new Error("not used while composing")),
+        },
       }).map((pkg) => pkg.specifier),
     ).toEqual([
       "@frockbot/plugin-credentials",
+      "@frockbot/plugin-package-publisher",
       "@frockbot/plugin-fly-sprite",
       "@frockbot/plugin-computer",
     ]);
@@ -312,10 +326,17 @@ describe("foundation application", () => {
             list: () => Promise.resolve({ status: "ok", entries: [] }),
           },
         },
+        packagePublisher: {
+          read: () =>
+            Promise.resolve({ schemaVersion: 1, revision: 0, revisions: [] }),
+          publish: () => Promise.reject(new Error("not used while composing")),
+          rollback: () => Promise.reject(new Error("not used while composing")),
+        },
       }).map((pkg) => pkg.specifier),
     ).toEqual([
       "@frockbot/plugin-skills",
       "@frockbot/plugin-credentials",
+      "@frockbot/plugin-package-publisher",
       "@frockbot/plugin-fly-sprite",
       "@frockbot/plugin-computer",
     ]);

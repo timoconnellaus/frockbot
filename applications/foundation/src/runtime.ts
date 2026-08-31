@@ -72,6 +72,18 @@ import identityManifest from "@frockbot/plugin-identity/manifest";
 import memoryManifest from "@frockbot/plugin-memory/manifest";
 import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
 import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
+import packagePublisherManifest from "@frockbot/plugin-package-publisher/manifest";
+import {
+  createPackagePublisherAgentPlugin,
+  type PackagePublisherAgentHost,
+} from "@frockbot/plugin-package-publisher/agent";
+export type { PackagePublisherAgentHost } from "@frockbot/plugin-package-publisher/agent";
+import {
+  createPackagePublisherBackendContribution,
+  type PackagePublisherGatewayHost,
+} from "@frockbot/plugin-package-publisher/backend"; // built-in publication Contribution
+const createPackagePublisherGatewayPlugin =
+  createPackagePublisherBackendContribution.plugin;
 import foundationProviderManifest from "@frockbot/plugin-provider-foundation/manifest";
 import foundationProviderPlugin, {
   FOUNDATION_MODEL,
@@ -122,6 +134,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
+  ["@frockbot/plugin-package-publisher", packagePublisherManifest],
   ["@frockbot/plugin-clock", clockManifest],
   ["@frockbot/plugin-computer", computerManifest],
   ["@frockbot/plugin-desktop-clipboard", clipboardManifest],
@@ -245,7 +258,8 @@ export interface MountedFoundationBackend<T> {
 export type FoundationGatewayHost = {
   backendHost: "gateway";
 } & FlockGatewayHost &
-  SettingsGatewayHost;
+  SettingsGatewayHost &
+  PackagePublisherGatewayHost;
 
 export async function createFoundationBackendContributions(
   plan: ApplicationPlan,
@@ -291,6 +305,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-settings/backend"
         ) {
           plugin = createSettingsGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-package-publisher/backend"
+        ) {
+          plugin = createPackagePublisherGatewayPlugin(host, lifecycle);
         } else if (host.backendHost === "gateway") {
           throw new Error(
             `unknown foundation backend contribution: ${specifier}`,
@@ -376,6 +395,7 @@ export function createFoundationHostedRuntimePackages(
      * backs.
      */
     computerSync?: ComputerSyncHostV1;
+    packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
@@ -398,6 +418,14 @@ export function createFoundationHostedRuntimePackages(
       plan,
       "credentials",
       createCredentialRuntimePlugin({ readSecret: host.readSecret }),
+    ),
+    runtimePackage(
+      plan,
+      "package-publisher",
+      createPackagePublisherAgentPlugin(host.packagePublisher, {
+        userId: host.userId,
+        defaultProviderId: "fly-sprite",
+      }),
     ),
     runtimePackage(
       plan,
@@ -514,6 +542,8 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");
+  // Package publication is mounted with the current User's durable host.
+  runtimeIds.delete("package-publisher");
   // Assigned provider Packages mount only after durable Connections resolve.
   runtimeIds.delete("composio");
   runtimeIds.delete("provider-ollama-cloud");

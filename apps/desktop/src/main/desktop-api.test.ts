@@ -18,6 +18,13 @@ describe("desktop hosted protocol", () => {
       { schemaVersion: 1, path: "/app-manifest", method: "GET" },
       { schemaVersion: 1, path: "/api/identity", method: "GET" },
       { schemaVersion: 1, path: "/api/settings", method: "POST", body: "{}" },
+      { schemaVersion: 1, path: "/api/package-revisions", method: "GET" },
+      {
+        schemaVersion: 1,
+        path: "/api/package-revisions/rollback",
+        method: "POST",
+        body: "{}",
+      },
       { schemaVersion: 1, path: "/api/bots", method: "POST", body: "{}" },
       { schemaVersion: 1, path: "/api/bots/primary/settings", method: "GET" },
       { schemaVersion: 1, path: "/api/bots/primary/sheep", method: "GET" },

@@ -9,6 +9,12 @@ import {
   type FlockUserBackendContribution,
 } from "@frockbot/plugin-flock/user";
 import {
+  createPackagePublisherUserPlugin,
+  type PackagePublisherUserContribution,
+  type PackagePublisherUserHost,
+} from "@frockbot/plugin-package-publisher/user";
+export type { PackagePublisherUserHost } from "@frockbot/plugin-package-publisher/user";
+import {
   createOllamaCloudUserBackendPlugin,
   type OllamaCloudUserBackendContribution,
 } from "@frockbot/plugin-provider-ollama-cloud/user";
@@ -50,6 +56,7 @@ export interface MountedFoundationUserBackend {
   credentials: CredentialUserBackendContribution;
   connections: ReadonlyMap<string, FoundationConnectionUserBackendContribution>;
   flock: FlockUserBackendContribution;
+  publisher: PackagePublisherUserContribution;
   dispose(): Promise<void>;
 }
 
@@ -62,12 +69,18 @@ export async function createFoundationUserBackendContributions(
         setAlarm(scheduledTime: number | Date): Promise<void>;
       };
     readSecret(name: "CREDENTIAL_KEYRING"): string | undefined;
+    /**
+     * The publication seam: the User Durable Object's own object storage and
+     * Worker Loader, which the adapter owns and this application never names.
+     */
+    packagePublisher: PackagePublisherUserHost;
   },
 ): Promise<MountedFoundationUserBackend> {
   let settings: UserSettingsBackendContribution | undefined;
   let credentials: CredentialUserBackendContribution | undefined;
   let ollama: OllamaCloudUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
+  let publisher: PackagePublisherUserContribution | undefined;
   const connections = new Map<
     string,
     FoundationConnectionUserBackendContribution
@@ -80,6 +93,7 @@ export async function createFoundationUserBackendContributions(
         | CredentialUserBackendContribution
         | OllamaCloudUserBackendContribution
         | FlockUserBackendContribution
+        | PackagePublisherUserContribution
       >,
     ) => Plugin
   >([
@@ -147,6 +161,16 @@ export async function createFoundationUserBackendContributions(
           },
         );
       },
+    ],
+    [
+      "@frockbot/plugin-package-publisher/user",
+      (lifecycle) =>
+        createPackagePublisherUserPlugin(host.packagePublisher, {
+          mount(value: PackagePublisherUserContribution) {
+            publisher = value;
+            return lifecycle.mount(value);
+          },
+        }),
     ],
     [
       "@frockbot/plugin-flock/user",
@@ -237,6 +261,7 @@ export async function createFoundationUserBackendContributions(
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
     | FlockUserBackendContribution
+    | PackagePublisherUserContribution
   >(plan, {
     backendHost: "user",
     resolve: (specifier, lifecycle) => {
@@ -247,10 +272,10 @@ export async function createFoundationUserBackendContributions(
       return factory(lifecycle);
     },
   });
-  if (!settings || !credentials || !ollama || !flock) {
+  if (!settings || !credentials || !ollama || !flock || !publisher) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, and Flock User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Flock, and Package Publisher User Contributions",
     );
   }
   return {
@@ -258,6 +283,7 @@ export async function createFoundationUserBackendContributions(
     credentials,
     connections,
     flock,
+    publisher,
     dispose: mounted.dispose,
   };
 }

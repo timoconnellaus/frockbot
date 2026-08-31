@@ -35,6 +35,12 @@ import {
 } from "@frockbot/kernel-contracts";
 import type { MemoryProjectV1 } from "@frockbot/plugin-memory/agent";
 import {
+  decodePublishPackageCommandV1,
+  decodeRollbackPackageCommandV1,
+} from "@frockbot/plugin-package-publisher/shared";
+import type { WorkerLoader } from "./contracts.js";
+import { createPackagePublicationHost } from "./package-publication.js";
+import {
   decodeRpcEnvelopeV1,
   rpcBotId,
   rpcDecoded,
@@ -64,6 +70,10 @@ interface UserConfigurationEnv {
    * that the `userId` an RPC carries is the one it *is*.
    */
   USER_CONFIGURATIONS: DurableObjectNamespace;
+  /** Immutable published application source and artifact bytes. */
+  APPLICATION_ARTIFACTS: R2Bucket;
+  /** The loader that health-checks a candidate artifact before activation. */
+  USER_APPLICATIONS: WorkerLoader;
 }
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
@@ -75,6 +85,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         createFoundationUserBackendContributions(plan, {
           storage: this.ctx.storage,
           readSecret: () => this.env.CREDENTIAL_KEYRING,
+          packagePublisher: createPackagePublicationHost(
+            this.env,
+            this.ctx.storage,
+          ),
         }),
       );
     }
@@ -149,6 +163,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     MountedFoundationUserBackend["flock"]
   > {
     return (await this.contributions()).flock;
+  }
+
+  private async publisherContribution(): Promise<
+    MountedFoundationUserBackend["publisher"]
+  > {
+    return (await this.contributions()).publisher;
   }
 
   async readConfiguration(input: unknown) {
@@ -626,12 +646,19 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return { status: "ok", joined: await this.membership(botId) };
   }
 
+  /**
+   * One durable alarm serves every User-scoped owner of one. Cloudflare gives
+   * a Durable Object a single alarm, so credential lease expiry, Connection
+   * recovery, and publication recovery all run on every firing rather than
+   * one of them silently displacing the others' schedule.
+   */
   async alarm() {
     const contributions = await this.contributions();
     await contributions.credentials.expireLeases();
     for (const contribution of contributions.connections.values()) {
       await contribution.alarm?.();
     }
+    await contributions.publisher.recover();
   }
 
   async listBots(input: unknown) {
@@ -686,6 +713,42 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       request.userId as string,
       request.packageId as string,
     );
+  }
+
+  async readPackageRevisions(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.publisherContribution()).read();
+  }
+
+  async publishPackage(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodePublishPackageCommandV1),
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    return (await this.publisherContribution()).publish(
+      userId,
+      request.command as ReturnType<typeof decodePublishPackageCommandV1>,
+    );
+  }
+
+  async rollbackPackage(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeRollbackPackageCommandV1),
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.publisherContribution()).rollback(
+      request.command as ReturnType<typeof decodeRollbackPackageCommandV1>,
+    );
+  }
+
+  async activeApplicationHash(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.publisherContribution()).activeApplicationHash();
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {

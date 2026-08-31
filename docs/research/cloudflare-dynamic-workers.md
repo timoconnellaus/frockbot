@@ -71,18 +71,9 @@ Bindings provide a capability-oriented security seam. FrockBot can block direct 
 10. **Add a runtime artifact pipeline.** Resolve allowed package versions, verify provenance/integrity and permissions, bundle the exact agent contributions, store the artifact (for example in R2), and derive a runtime hash. Runtime activation should be transactional: persist the desired hash, load and health-check the new facet, then commit or roll back.
 11. **Keep Computers out of Dynamic Workers.** FrockBot defines a Computer as a filesystem/process/browser environment. That remains a separate sandbox or remote execution service exposed through a narrow capability; a Dynamic Worker is not a replacement for it.
 
-## Implemented vertical slice
+## Implemented system
 
-`apps/cloudflare` now provides:
-
-- a Wrangler-configured Gateway Worker with Worker Loader, R2, and Durable Object bindings;
-- immutable `userId:applicationHash` selection and R2-backed application artifacts;
-- a bundled Dynamic Worker artifact that serves its own HTML/JavaScript UI and runs the Cordis foundation agent plus clock contribution;
-- `globalOutbound: null` and a user-scoped bot-state capability;
-- one SQLite-backed Durable Object identity per user and bot;
-- local tests proving UI and agent routing through the same user application, shared deployment identity across a user's bots, cross-user separation, and bot-state isolation.
-
-This is not yet the production durability/security endpoint. The slice durably accepts a run before invoking the agent and stores the resulting event batch afterward. A later slice must make session appends asynchronous and transactional so every `model/request` and side-effecting `tool/call` is committed before the external operation. Production authentication, streaming/WebSockets, credential brokerage, arbitrary package building, deployment promotion, and Tail Worker wiring also remain open.
+The implementation has evolved beyond this research snapshot. See [FrockBot Architecture](../architecture.md) for the authoritative current system shape, including Bot Durable Object Agent ownership and User application publication.
 
 ## Dynamic Workflows
 

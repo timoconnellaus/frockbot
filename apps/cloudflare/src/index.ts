@@ -187,6 +187,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),
+    readPackageRevisions: (request) => rpc.readPackageRevisions(request),
+    publishPackage: (request) => rpc.publishPackage(request),
+    rollbackPackage: (request) => rpc.rollbackPackage(request),
+    activeApplicationHash: (request) => rpc.activeApplicationHash(request),
   };
 }
 
@@ -470,6 +474,17 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             command,
           }),
         ),
+      read: (userId) =>
+        userConfigurationStub(env, userId).readPackageRevisions({
+          schemaVersion: 1,
+          userId,
+        }),
+      rollback: (userId, command) =>
+        userConfigurationStub(env, userId).rollbackPackage({
+          schemaVersion: 1,
+          userId,
+          command,
+        }),
     }),
 );
 
@@ -483,7 +498,11 @@ export default {
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
       auth: gatewayAuth(env),
-      applicationHashFor: () => Promise.resolve(env.DEFAULT_APPLICATION_HASH),
+      applicationHashFor: async (userId) =>
+        (await userConfigurationStub(env, userId).activeApplicationHash({
+          schemaVersion: 1,
+          userId,
+        })) ?? env.DEFAULT_APPLICATION_HASH,
       botStateFor: (userId) =>
         runtimeExports.UserBotState({ props: { userId } }),
       userConfigurationFor: (userId): UserConfigurationBinding =>
