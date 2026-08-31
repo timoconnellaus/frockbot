@@ -978,12 +978,15 @@ if [ -z "$KEY" ]; then
   record tenant-display pass "no Bot key was named, so no desktop was checked"
 elif [ -z "$SLOT" ]; then
   record tenant-display pass "Bot \\"$KEY\\" holds no desktop slot; its exec and file surfaces need no screen"
-elif [ ! -e "/tmp/.X$((100 + SLOT))-lock" ]; then
-  record tenant-display fail "Bot \\"$KEY\\" holds slot $SLOT but no X server owns display :$((100 + SLOT))"
 elif (exec 3<>/dev/tcp/127.0.0.1/$((9222 + SLOT))) 2>/dev/null; then
   record tenant-display pass "Bot \\"$KEY\\" is on display :$((100 + SLOT)) with CDP on $((9222 + SLOT))"
+elif [ ! -e "/tmp/.X$((100 + SLOT))-lock" ]; then
+  # A slot is reserved at attach; the desktop starts when somebody asks to see
+  # it. An exec-only tenant never holds an X lock, so this is a healthy state
+  # and not a missing screen.
+  record tenant-display pass "Bot \\"$KEY\\" holds slot $SLOT with no desktop running, which its exec and file surfaces do not need"
 else
-  record tenant-display fail "Bot \\"$KEY\\" is on display :$((100 + SLOT)) but nothing answers CDP on $((9222 + SLOT))"
+  record tenant-display fail "Bot \\"$KEY\\" has an X server on display :$((100 + SLOT)) but nothing answers CDP on $((9222 + SLOT)); its desktop is only half up"
 fi
 if [ -x ${CHROMIUM_PATH} ]; then
   record browser pass "the browser is installed at ${CHROMIUM_PATH} ($(readlink -f ${CHROMIUM_PATH} 2>/dev/null || echo unresolved))"
@@ -1111,7 +1114,7 @@ ${COMPUTER_GUI_SHELL_COMMANDS.map((name) =>
 ).join("\n")}
 chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${BOUNDED_LOG_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh
 chmod 755 ${DOCTOR_SCRIPT} ${CHROME_LAUNCHER} ${COMPUTER_GUI_SHELL_COMMANDS.map(
-      (name) => `${BIN_ROOT}/${name}`,
+      (name) => `${SHIMS_ROOT}/${name}`,
     ).join(" ")}`,
   },
   {

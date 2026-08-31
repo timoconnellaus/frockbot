@@ -143,6 +143,20 @@ describe("runtime files", () => {
     expect(installs).toHaveLength(COMPUTER_RUNTIME_FILES.length);
   });
 
+  test("every declared file is also made executable where it lands", () => {
+    // Found live: the shims moved to their own directory and the `chmod` that
+    // follows them kept the old path, so provisioning failed at phase 3 with
+    // "cannot access /home/box/bin/xdotool". An install and a mode are one
+    // fact about a file, and this is what keeps them from drifting apart.
+    const modes = provisionScript
+      .split("\n")
+      .filter((line) => line.startsWith("chmod "))
+      .join(" ");
+    for (const file of COMPUTER_RUNTIME_FILES) {
+      expect(modes, file.path).toContain(` ${file.path}`);
+    }
+  });
+
   test("the control and ensure scripts are installed where the provider calls them", () => {
     const paths = COMPUTER_RUNTIME_FILES.map((file) => file.path);
     expect(paths).toContain(CONTROL_SCRIPT);
