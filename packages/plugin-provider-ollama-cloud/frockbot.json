@@ -20,7 +20,20 @@
     "network:ollama-cloud"
   ],
   "configuration": {
-    "settings": [],
+    "settings": [
+      {
+        "id": "web-search-max-results",
+        "schemaVersion": 1,
+        "scopes": ["user"],
+        "schema": {
+          "type": "integer",
+          "title": "Web search results",
+          "description": "The most results web_search returns, whatever the model asks for. Absent means the tool's own default of 5.",
+          "minimum": 1,
+          "maximum": 10
+        }
+      }
+    ],
     "connectionTypes": [
       {
         "id": "ollama-cloud-account",

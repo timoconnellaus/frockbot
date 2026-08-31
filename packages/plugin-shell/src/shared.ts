@@ -20,6 +20,7 @@ import type {
   SkillRefV1,
 } from "@frockbot/kernel-contracts";
 import type { McpServerStatusViewV1 } from "@frockbot/plugin-mcp/records";
+import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { InjectionKey, Ref } from "vue";
 
@@ -105,6 +106,12 @@ export interface PluginCatalogItem {
     authorizationKind: "none" | "api-key" | "ambient-native" | "grant";
     capabilities: string[];
   }>;
+  /**
+   * The Package-level settings this Package declares at User scope — the form
+   * the Plugins surface generates for it. Connection-scoped settings are not
+   * here: they belong to one Connection and are edited with it.
+   */
+  settings: PackageSettingDefinition[];
 }
 
 export interface FrockBotWebData {
@@ -198,6 +205,14 @@ export interface FrockBotWebData {
   /** Refreshes {@link FrockBotWebData.skillCatalog} for the active Bot. */
   loadSkillCatalog(): Promise<void>;
   installPackage(packageId: string, version: string): Promise<void>;
+  /**
+   * A partial update of one installed Package's setting values. Only the ids
+   * it carries change; the rest keep the values they had.
+   */
+  savePackageSettings(
+    packageId: string,
+    values: Record<string, string | number | boolean>,
+  ): Promise<void>;
   installCatalogPackage(entry: CatalogIndexEntryV1): Promise<void>;
   uninstallPackage(packageId: string): Promise<void>;
   startConnection(

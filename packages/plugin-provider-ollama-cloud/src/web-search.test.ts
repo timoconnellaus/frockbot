@@ -77,6 +77,7 @@ function toolContext(effectId = "effect-1"): ToolExecutionContext {
 async function mount(options: {
   respond: (recorded: Recorded) => Response;
   apiBaseUrl?: string;
+  maxResults?: number;
 }) {
   const recorded: Recorded[] = [];
   const leased: string[] = [];
@@ -92,6 +93,9 @@ async function mount(options: {
     ...(options.apiBaseUrl === undefined
       ? {}
       : { apiBaseUrl: options.apiBaseUrl }),
+    ...(options.maxResults === undefined
+      ? {}
+      : { maxResults: options.maxResults }),
     leaseCredential: (effectId) => {
       leased.push(effectId);
       return Promise.resolve(lease(effectId));
@@ -198,6 +202,53 @@ describe("the Ollama Cloud web_search Capability", () => {
     expect(
       (JSON.parse(result.content) as { results: unknown[] }).results.length,
     ).toBe(2);
+    await root.fiber.dispose();
+  });
+
+  test("caps the request at the Package-level setting the User chose", async () => {
+    const { root, recorded } = await mount({
+      maxResults: 2,
+      respond: () =>
+        Response.json({
+          results: Array.from({ length: 8 }, (_value, index) => ({
+            title: `r${index}`,
+            url: `https://example.test/${index}`,
+            content: "x",
+          })),
+        }),
+    });
+    const prepared = await root.tools.prepare(
+      {
+        id: "c",
+        name: "web_search",
+        // The model asks for the contract's maximum; the User's ceiling wins.
+        input: { query: "q", max_results: 10 },
+      },
+      toolContext(),
+    );
+    if (prepared.kind !== "ready") throw new Error("not ready");
+    const result = await root.tools.executePrepared(prepared, toolContext());
+    // The ceiling is applied before the provider is asked, so the extra
+    // results are never fetched, let alone recorded on the Turn.
+    expect(JSON.parse(String(recorded[0]?.init?.body)).max_results).toBe(2);
+    expect(
+      (JSON.parse(result.content) as { results: unknown[] }).results.length,
+    ).toBe(2);
+    await root.fiber.dispose();
+  });
+
+  test("leaves a request already under the ceiling alone", async () => {
+    const { root, recorded } = await mount({
+      maxResults: 8,
+      respond: () => Response.json({ results: [] }),
+    });
+    const prepared = await root.tools.prepare(
+      { id: "c", name: "web_search", input: { query: "q", max_results: 3 } },
+      toolContext(),
+    );
+    if (prepared.kind !== "ready") throw new Error("not ready");
+    await root.tools.executePrepared(prepared, toolContext());
+    expect(JSON.parse(String(recorded[0]?.init?.body)).max_results).toBe(3);
     await root.fiber.dispose();
   });
 

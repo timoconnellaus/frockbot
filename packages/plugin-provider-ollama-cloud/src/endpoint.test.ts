@@ -177,13 +177,25 @@ const createCommand = (
 describe("Ollama endpoint contract", () => {
   test("declares the Connection-scoped endpoint setting in its manifest", () => {
     // The endpoint belongs to the Connection, so the Connection Type declares
-    // it (manifest v4) and the Package's own settings stay empty. The kernel's
-    // own suite proves every first-party manifest decodes; this asserts what
-    // this one declares.
+    // it (manifest v4) rather than the Package. The kernel's own suite proves
+    // every first-party manifest decodes; this asserts what this one declares.
     expect(manifest.schemaVersion).toBe(4);
-    expect(manifest.configuration.settings).toEqual([]);
     expect(manifest.configuration.connectionTypes[0]?.settings).toMatchObject([
       { id: "api-base-url", schemaVersion: 1, schema: { type: "string" } },
+    ]);
+  });
+
+  test("declares the search ceiling as a User-level Package setting", () => {
+    // The ceiling belongs to the User, not to one Connection: it is the same
+    // answer whichever account the search runs through, so it is Package-level
+    // and every Connection of this Package obeys it.
+    expect(manifest.configuration.settings).toMatchObject([
+      {
+        id: "web-search-max-results",
+        schemaVersion: 1,
+        scopes: ["user"],
+        schema: { type: "integer", minimum: 1, maximum: 10 },
+      },
     ]);
   });
 

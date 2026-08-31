@@ -155,6 +155,12 @@ export interface OllamaWebSearchRuntimeConfig {
   packageId: "provider-ollama-cloud";
   /** The endpoint root carried on the Connection's own settings bag. */
   apiBaseUrl?: string;
+  /**
+   * The Package-level `web-search-max-results` setting: the User's ceiling on
+   * how many results one search returns, whatever the model asked for. Absent
+   * leaves the model's own request — bounded by the contract — untouched.
+   */
+  maxResults?: number;
   leaseCredential(
     effectId: string,
     expectedGeneration?: string,
@@ -177,11 +183,22 @@ class ConnectionBackedWebSearch implements WebSearchV1 {
     private readonly client: OllamaCloudWebSearchClient,
   ) {}
 
+  /** The request, capped by the Package-level setting when the User set one. */
+  private bound(request: WebSearchRequestV1): WebSearchRequestV1 {
+    const ceiling = this.config.maxResults;
+    if (ceiling === undefined || request.maxResults <= ceiling) return request;
+    return { ...request, maxResults: ceiling };
+  }
+
   async search(
     request: WebSearchRequestV1,
     execution: WebSearchExecutionV1,
   ): Promise<WebSearchResponseV1> {
     const effectId = execution.effectId;
+    // The User's ceiling is applied before the provider is asked, so a model
+    // that requests more than the User allows never causes the extra results
+    // to be fetched, let alone recorded on the Turn.
+    const bounded = this.bound(request);
     const lease = await this.config.leaseCredential(
       effectId,
       this.config.connectionGeneration,
@@ -201,7 +218,7 @@ class ConnectionBackedWebSearch implements WebSearchV1 {
         packageId: this.config.packageId,
         lease,
       });
-      return await this.client.search(apiKey, request, execution.signal);
+      return await this.client.search(apiKey, bounded, execution.signal);
     } finally {
       await this.config.settleCredential(effectId).catch(() => undefined);
     }
@@ -246,6 +263,8 @@ export function createConfiguredOllamaWebSearchRuntimeContribution(config: {
   connectionId: string;
   connectionGeneration: string;
   apiBaseUrl?: string;
+  /** `web-search-max-results`, when this User set it on the Package. */
+  maxResults?: number;
   leaseCredential(
     effectId: string,
     expectedGeneration?: string,
@@ -269,6 +288,9 @@ export function createConfiguredOllamaWebSearchRuntimeContribution(config: {
     ...(config.apiBaseUrl === undefined
       ? {}
       : { apiBaseUrl: config.apiBaseUrl }),
+    ...(config.maxResults === undefined
+      ? {}
+      : { maxResults: config.maxResults }),
     leaseCredential: config.leaseCredential,
     settleCredential: config.settleCredential,
     ...(config.fetch ? { fetch: config.fetch } : {}),

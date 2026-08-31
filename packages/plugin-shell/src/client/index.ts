@@ -635,6 +635,12 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         version: candidate.version,
         capabilities: decodedCapabilities,
         connectionTypes: decodedConnections,
+        // User-scoped settings only: a `bot`-scoped one is not the Plugins
+        // surface's to edit, and a Connection-scoped one is edited with its
+        // Connection.
+        settings: (decoded.configuration?.settings ?? []).filter((setting) =>
+          setting.scopes.includes("user"),
+        ),
       },
     ];
   });
@@ -1604,6 +1610,27 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         packageId,
       });
       await web.value.loadPluginCatalog();
+      if (receipt.status === "rejected") throw new Error(receipt.failure);
+    },
+    async savePackageSettings(
+      packageId: string,
+      values: Record<string, string | number | boolean>,
+    ): Promise<void> {
+      const settings = web.value.userSettings;
+      if (!settings || !ctx.transport.executeConfiguration) {
+        throw new Error("Plugins are unavailable");
+      }
+      const receipt = await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: crypto.randomUUID(),
+        expectedRevision: settings.revision,
+        packageId,
+        values,
+      });
+      // The values are projected onto the installation row, so the surface
+      // re-reads the User settings it renders the form from.
+      await web.value.loadUserSettings();
       if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
     async installPackage(packageId: string, version: string): Promise<void> {

@@ -340,8 +340,22 @@ export function createGateway(dependencies: GatewayDependencies) {
           ),
         );
       } catch (error) {
-        if (error instanceof ConfigurationDecodeError) {
-          return jsonError(400, error.message);
+        if (
+          error instanceof ConfigurationDecodeError ||
+          // The same refusal, raised inside the User Durable Object: only the
+          // authority knows which settings the installed version of a Package
+          // declares, so a value it refuses is still the client's bad request
+          // and not a fault of ours. The class does not survive RPC; the name
+          // does, exactly as `BotNotFoundError` below relies on.
+          (typeof error === "object" &&
+            error !== null &&
+            "name" in error &&
+            error.name === "ConfigurationDecodeError")
+        ) {
+          return jsonError(
+            400,
+            error instanceof Error ? error.message : "configuration refused",
+          );
         }
         if (
           typeof error === "object" &&

@@ -42,8 +42,44 @@ function contribution(storage = new MemoryStorage()) {
     availablePackages: [
       { packageId: "flock", version: "0.0.1" },
       { packageId: "settings", version: "0.0.1" },
-      { packageId: "provider-ollama-cloud", version: "0.0.1" },
+      {
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        settings: [
+          {
+            id: "web-search-max-results",
+            schemaVersion: 1,
+            scopes: ["user"],
+            schema: { type: "integer", minimum: 1, maximum: 10 },
+          },
+          {
+            id: "label",
+            schemaVersion: 1,
+            scopes: ["user"],
+            schema: { type: "string", maxLength: 16 },
+          },
+        ],
+      },
     ],
+  });
+}
+
+/** Install the Ollama Package, so a settings command has a row to write to. */
+async function installOllama(
+  settings: ReturnType<typeof contribution>,
+  userId: string,
+): Promise<void> {
+  await settings.executeConfiguration({
+    schemaVersion: 1,
+    userId,
+    command: {
+      schemaVersion: 1,
+      type: "user/install-package",
+      commandId: `install-${userId}`,
+      expectedRevision: 0,
+      packageId: "provider-ollama-cloud",
+      version: "0.0.1",
+    },
   });
 }
 
@@ -935,5 +971,241 @@ describe("uninstall", () => {
         },
       }),
     ).rejects.toThrow('Package "flock" is not installed');
+  });
+});
+
+describe("Package-level setting values", () => {
+  test("applies a partial update and leaves the settings it does not name", async () => {
+    const storage = new MemoryStorage();
+    const settings = contribution(storage);
+    await installOllama(settings, "user-1");
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-both",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        values: { "web-search-max-results": 2, label: "work" },
+      },
+    });
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-one",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+        values: { "web-search-max-results": 5 },
+      },
+    });
+
+    const view = await settings.read("user-1");
+    // The projection the client reads *is* the store: one bag, one shape.
+    expect(view.packages[0]).toMatchObject({
+      packageId: "provider-ollama-cloud",
+      values: { "web-search-max-results": 5, label: "work" },
+    });
+  });
+
+  test("a replayed command id returns its receipt without applying twice", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+    const command = {
+      schemaVersion: 1 as const,
+      type: "user/set-package-settings" as const,
+      commandId: "set-once",
+      expectedRevision: 1,
+      packageId: "provider-ollama-cloud",
+      values: { "web-search-max-results": 4 },
+    };
+
+    const first = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command,
+    });
+    const replay = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command,
+    });
+
+    expect(replay).toEqual(first);
+    expect((await settings.read("user-1")).revision).toBe(2);
+  });
+
+  test("a reused command id carrying different values is refused", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-once",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        values: { "web-search-max-results": 4 },
+      },
+    });
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-settings",
+          commandId: "set-once",
+          expectedRevision: 1,
+          packageId: "provider-ollama-cloud",
+          values: { "web-search-max-results": 6 },
+        },
+      }),
+    ).rejects.toThrow(/reused for a different command/);
+  });
+
+  test("refuses a value the Package's declared schema does not allow", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-settings",
+          commandId: "set-out-of-range",
+          expectedRevision: 1,
+          packageId: "provider-ollama-cloud",
+          values: { "web-search-max-results": 99 },
+        },
+      }),
+    ).rejects.toThrow(/is above 10/);
+    expect((await settings.read("user-1")).packages[0]?.values).toBeUndefined();
+  });
+
+  test("refuses a setting the Package does not declare", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-settings",
+          commandId: "set-unknown",
+          expectedRevision: 1,
+          packageId: "provider-ollama-cloud",
+          values: { "not-a-setting": "x" },
+        },
+      }),
+    ).rejects.toThrow(/not declared by this Package/);
+  });
+
+  test("refuses settings for a Package that is not installed", async () => {
+    const settings = contribution();
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-settings",
+          commandId: "set-uninstalled",
+          expectedRevision: 0,
+          packageId: "provider-ollama-cloud",
+          values: { "web-search-max-results": 2 },
+        },
+      }),
+    ).rejects.toThrow(/is not installed/);
+  });
+
+  test("uninstalling drops the values, and reinstalling starts clean", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-before-uninstall",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        values: { "web-search-max-results": 2 },
+      },
+    });
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/uninstall-package",
+        commandId: "uninstall",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+      },
+    });
+    expect((await settings.read("user-1")).packages).toEqual([]);
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "reinstall",
+        expectedRevision: 3,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+      },
+    });
+    expect((await settings.read("user-1")).packages[0]?.values).toBeUndefined();
+  });
+
+  test("a reinstall over a configured Package carries its values forward", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-kept",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        values: { label: "work" },
+      },
+    });
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "reinstall-same-version",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+      },
+    });
+
+    expect((await settings.read("user-1")).packages[0]?.values).toEqual({
+      label: "work",
+    });
   });
 });
