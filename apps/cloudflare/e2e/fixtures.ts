@@ -61,9 +61,14 @@ export const test = base.extend<E2EOptions & E2EFixtures>({
       problems.push({ kind: "pageerror", text: error.message });
     });
     page.on("requestfailed", (request) => {
+      const failure = request.failure()?.errorText ?? "failed";
+      // `requestfailed` also fires for a request somebody cancelled, and the
+      // client is a poller: closing the page or navigating away aborts whatever
+      // poll is in flight. An abort is not a transport failure the product owns.
+      if (failure === "net::ERR_ABORTED") return;
       problems.push({
         kind: "requestfailed",
-        text: `${request.url()}: ${request.failure()?.errorText ?? "failed"}`,
+        text: `${request.url()}: ${failure}`,
       });
     });
     page.on("response", (response) => {
@@ -260,17 +265,33 @@ export async function provisionThroughUi(
   ).toBeEnabled();
 }
 
-/** Send a message and wait for the Turn to settle. */
+/**
+ * Send a message and wait for the Turn to settle.
+ *
+ * Generous on time by design. The first Turn of a run is the coldest path in
+ * the product — the gateway loads the application isolate, the Bot Durable
+ * Object starts, its Composition mounts — and on a CI runner that is several
+ * times slower than a laptop. The composer keeps the draft until the
+ * submission is accepted, so an empty composer, and not a click that returned,
+ * is the signal that the Turn was admitted.
+ */
 export async function sendMessage(page: Page, text: string): Promise<void> {
   const composer = page.getByRole("textbox", { name: "Message", exact: true });
+  const send = page.getByRole("button", { name: "Send message" });
   await composer.fill(text);
   await expect(composer).toHaveValue(text);
-  await page.getByRole("button", { name: "Send message" }).click();
+  await send.click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+  // The Turn is durable now, so the message is in the thread the client reads
+  // back rather than only in the composer that submitted it.
+  await expect(page.locator("main").getByText(text)).toBeVisible({
+    timeout: 120_000,
+  });
   // There is no SSE: the client POSTs the Turn and polls the run. A settled
   // Turn is one with no stop control left on screen.
   await expect(
     page.getByRole("button", { name: "Stop generating" }),
-  ).toHaveCount(0, { timeout: 60_000 });
+  ).toHaveCount(0, { timeout: 120_000 });
 }
 
 /** Point the fake provider at a chat mode; `unauthorized` revokes the key. */

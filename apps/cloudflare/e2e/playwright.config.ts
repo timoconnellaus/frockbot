@@ -49,8 +49,12 @@ export default defineConfig<E2EOptions>({
   // A single retry in CI distinguishes a real regression from a flaky
   // start-up; locally a failure should stay failed.
   retries: process.env.CI ? 1 : 0,
-  timeout: 90_000,
-  expect: { timeout: 20_000 },
+  // A CI runner is several times slower than a laptop, and the paths here are
+  // the product's coldest: an application isolate load, a Durable Object start,
+  // a Composition mount. The budget is for that, not for hiding a hang — a
+  // genuinely stuck run still fails, just later.
+  timeout: 240_000,
+  expect: { timeout: 30_000 },
   outputDir: "test-results",
   reporter: process.env.CI
     ? [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]]
