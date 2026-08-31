@@ -679,6 +679,60 @@ describe("foundation Cordis runtime", () => {
     ).toStartWith("current_time: ");
   });
 
+  test("keeps a manifest-bounded tool out of a chat Turn's model request", async () => {
+    const runtime = await createFoundationRuntime(undefined, {
+      admitEffect: allowEffect,
+    });
+    runtimes.push(runtime);
+    // The producer is the Composition host: a Capability whose manifest admits
+    // only automation turns registers its tools under that ceiling.
+    runtime.root.tools.register(
+      {
+        name: "wake_parent",
+        description: "Hands off to the parent conversation.",
+        inputSchema: { type: "object", properties: {} },
+        idempotent: false,
+        execute: () =>
+          Promise.resolve({ content: "handed off", isError: false }),
+      },
+      { admissionCeiling: ["automation"] },
+    );
+
+    runtime.agent.agent.send("hello");
+    await runtime.agent.agent.whenIdle();
+
+    const request = runtime.agent.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    const offered =
+      request?.type === "model/request"
+        ? request.request.tools.map((tool) => tool.name)
+        : [];
+    expect(offered).not.toContain("wake_parent");
+    expect(
+      runtime.root.tools
+        .schemas({ turnType: "automation" })
+        .map((tool) => tool.name),
+    ).toContain("wake_parent");
+  });
+
+  test("mounts the Agent on the turn type the root was created with", async () => {
+    const runtime = await createFoundationRuntime(undefined, {
+      admitEffect: allowEffect,
+      turnType: "automation",
+    });
+    runtimes.push(runtime);
+
+    runtime.agent.agent.send("hello");
+    await runtime.agent.agent.whenIdle();
+
+    expect(
+      runtime.agent.agent.session.events.find(
+        (event) => event.type === "turn/admission",
+      ),
+    ).toMatchObject({ turnType: "automation" });
+  });
+
   test("loads generic Computer tools and the Fly provider without a token at startup", async () => {
     const runtime = await createRuntime();
 

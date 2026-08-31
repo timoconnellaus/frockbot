@@ -26,6 +26,7 @@ import {
   type ToolExecutionContext,
   type ToolExecutionResult,
   type ToolRegistration,
+  type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 import { CompositionMountFailureError } from "./activation.ts";
 import { canonicalJson, sha256 } from "./compiler.ts";
@@ -36,7 +37,7 @@ import type {
   PackageDescriptor,
   PreparedContribution,
 } from "./index.ts";
-import { decodeFrockBotManifest } from "./manifest.ts";
+import { decodeFrockBotManifest, type FrockBotManifest } from "./manifest.ts";
 import {
   BOT_ISOLATE_MAIN_MODULE,
   BOT_ISOLATE_WRAPPER_SOURCE,
@@ -134,6 +135,34 @@ export async function botIsolateModuleSetHashV1(
       bindingDigest,
     }),
   );
+}
+
+/**
+ * The durable ceiling a manifest puts on the turn types a Package's tools may
+ * be admitted onto (manifest v4, `CapabilityDefinition.admission`). It is the
+ * union over the Package's tool Capabilities, because a tool descriptor names
+ * no Capability: a Package bounds its tools only when every tool Capability it
+ * declares bounds them. Absent means the manifest set no bound.
+ */
+export function botIsolateAdmissionCeilingV1(
+  manifest: FrockBotManifest,
+): readonly TurnTypeV1[] | undefined {
+  const capabilities = (manifest.configuration?.capabilities ?? []).filter(
+    (capability) => capability.kind === "tool",
+  );
+  if (
+    capabilities.length === 0 ||
+    capabilities.some((capability) => capability.admission === undefined)
+  ) {
+    return undefined;
+  }
+  const turnTypes = new Set<TurnTypeV1>();
+  for (const capability of capabilities) {
+    for (const turnType of capability.admission?.turnTypes ?? []) {
+      turnTypes.add(turnType);
+    }
+  }
+  return [...turnTypes];
 }
 
 /**
@@ -237,10 +266,14 @@ export class BotIsolateContributionHost implements ContributionHost {
     return {
       kind: this.kind,
       commit: (): Promise<ActiveContribution> => {
+        // The manifest ceiling is applied at registration, so the catalog the
+        // model is offered and the call the loop admits cannot disagree.
+        const admissionCeiling = botIsolateAdmissionCeilingV1(pkg.manifest);
         for (const descriptor of health.tools) {
           registered.push(
             this.options.tools.register(
               this.definition(packageId, entrypoint, descriptor),
+              admissionCeiling ? { admissionCeiling } : undefined,
             ),
           );
         }

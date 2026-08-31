@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
   BotCapabilitiesStub,
+  TurnTypeV1,
   BotIsolateEntrypoint,
   IsolateToolInvocationV1,
   ToolDefinition,
@@ -8,6 +9,7 @@ import type {
 } from "@frockbot/kernel-contracts";
 import type { PackageDescriptor } from "./index.ts";
 import {
+  botIsolateAdmissionCeilingV1,
   BotIsolateContributionHost,
   botIsolateModuleSetHashV1,
   raceDeadline,
@@ -100,6 +102,7 @@ function host(
 ) {
   const loads: RecordedLoad[] = [];
   const registered: ToolDefinition[] = [];
+  const ceilings: (readonly TurnTypeV1[] | undefined)[] = [];
   const { entrypoint, ...rest } = overrides;
   const options: BotIsolateHostOptions = {
     loader: fakeIsolate(
@@ -110,8 +113,9 @@ function host(
       loadPackageArtifact: () => Promise.resolve("export const tools = [];"),
     },
     tools: {
-      register: (definition) => {
+      register: (definition, registration) => {
         registered.push(definition);
+        ceilings.push(registration?.admissionCeiling);
         return () => {
           const index = registered.indexOf(definition);
           if (index >= 0) registered.splice(index, 1);
@@ -133,6 +137,7 @@ function host(
     host: new BotIsolateContributionHost(options),
     loads,
     registered,
+    ceilings,
   };
 }
 
@@ -331,5 +336,88 @@ describe("the Durable Object side of the deadline", () => {
     await expect(raceDeadline(() => Promise.resolve(1), 0)).rejects.toThrow(
       /out of range/,
     );
+  });
+});
+
+describe("the manifest bounds the turn types an isolate's tools reach", () => {
+  const bounded = (capabilities: unknown[]) =>
+    decodeFrockBotManifest({
+      schemaVersion: 4,
+      id: "bot-authored",
+      displayName: "Bot authored",
+      version: "0.0.1",
+      compatibility: { frockbot: "^0.0.1" },
+      dependencies: {},
+      contributions: { runtime: { entry: "./runtime.js" } },
+      permissions: [],
+      configuration: { capabilities },
+    });
+
+  test("reads the ceiling from the Capabilities that contribute tools", () => {
+    expect(botIsolateAdmissionCeilingV1(manifest())).toBeUndefined();
+    expect(
+      botIsolateAdmissionCeilingV1(
+        bounded([
+          {
+            id: "automation-only",
+            kind: "tool",
+            connectionTypes: [],
+            admission: { turnTypes: ["automation"] },
+          },
+        ]),
+      ),
+    ).toEqual(["automation"]);
+    // A model Capability says nothing about which turns a tool reaches.
+    expect(
+      botIsolateAdmissionCeilingV1(
+        bounded([{ id: "models", kind: "model", connectionTypes: [] }]),
+      ),
+    ).toBeUndefined();
+    // One unbounded tool Capability leaves the Package's tools unbounded.
+    expect(
+      botIsolateAdmissionCeilingV1(
+        bounded([
+          {
+            id: "automation-only",
+            kind: "tool",
+            connectionTypes: [],
+            admission: { turnTypes: ["automation"] },
+          },
+          { id: "work", kind: "tool", connectionTypes: [] },
+        ]),
+      ),
+    ).toBeUndefined();
+  });
+
+  test("passes the ceiling to the registry at registration", async () => {
+    const { host: subject, ceilings } = host({
+      entrypoint: { health: () => Promise.resolve(healthy()) },
+    });
+
+    const prepared = await subject.prepare({
+      ...descriptor(),
+      manifest: bounded([
+        {
+          id: "automation-only",
+          kind: "tool",
+          connectionTypes: [],
+          admission: { turnTypes: ["automation"] },
+        },
+      ]),
+    });
+    await prepared!.commit();
+
+    expect(ceilings).toEqual([["automation"]]);
+  });
+
+  test("registers with no ceiling when the manifest declares none", async () => {
+    const { host: subject, ceilings } = host({
+      entrypoint: { health: () => Promise.resolve(healthy()) },
+    });
+
+    const prepared = await subject.prepare(descriptor());
+    await prepared!.commit();
+
+    expect(ceilings).toEqual([undefined]);
   });
 });

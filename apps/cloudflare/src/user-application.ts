@@ -461,6 +461,11 @@ export function createUserApplication() {
 
     try {
       return Response.json(
+        // Every Turn a client asks for is admitted as `chat`. The turn type is
+        // never carried here: `decodeClientTurnCommandV1` accepts exact keys,
+        // and the Bot Durable Object's run RPC accepts exact keys too, so a
+        // client cannot name one, and an absent turn type means `chat`. Only an
+        // in-Durable-Object producer may admit another type.
         await env.BOT_STATE.run({
           schemaVersion: 1,
           botId,

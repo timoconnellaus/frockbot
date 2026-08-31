@@ -254,6 +254,79 @@ describe("user application Bot seam", () => {
     expect(authorityChecks).toBe(0);
   });
 
+  test("admits every hosted Turn as chat and forwards no client turn type", async () => {
+    const forwarded: Record<string, unknown>[] = [];
+    const result: BotTurnResult = {
+      schemaVersion: 1,
+      runId: "run-1",
+      text: "ok",
+      events: [],
+    };
+    const botState = {
+      run: (_botId: string, command: Record<string, unknown>) => {
+        forwarded.push(command);
+        return Promise.resolve(result);
+      },
+    } as unknown as BotStateBinding;
+    const env: UserApplicationEnv = {
+      BOT_STATE: rpcBindingFor(botState),
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const fetchUserApplication = createUserApplication();
+
+    // A client naming a turn type or an origin is refused outright.
+    for (const body of [
+      {
+        schemaVersion: 1,
+        commandId: "run-1",
+        text: "hi",
+        turnType: "automation",
+      },
+      { schemaVersion: 1, commandId: "run-1", text: "hi", turnType: "chat" },
+      {
+        schemaVersion: 1,
+        commandId: "run-1",
+        text: "hi",
+        origin: {
+          kind: "routine",
+          routineId: "r",
+          fireId: "f",
+          trigger: "cron",
+        },
+      },
+    ]) {
+      const rejected = await fetchUserApplication(
+        new Request("https://frockbot.test/api/bots/primary/turns", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        env,
+      );
+      expect(rejected.status).toBe(400);
+    }
+    expect(forwarded).toEqual([]);
+
+    const response = await fetchUserApplication(
+      new Request("https://frockbot.test/api/bots/primary/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          commandId: "run-1",
+          text: "hi",
+        }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    // Absent means chat: the HTTP path never carries the field at all.
+    expect(forwarded).toHaveLength(1);
+    expect(Object.hasOwn(forwarded[0]!, "turnType")).toBe(false);
+    expect(Object.hasOwn(forwarded[0]!, "origin")).toBe(false);
+  });
+
   test("rejects unversioned, future, and inexact hosted Turn commands", async () => {
     let calls = 0;
     const botState = {

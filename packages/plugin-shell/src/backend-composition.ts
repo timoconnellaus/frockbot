@@ -35,6 +35,7 @@ import {
   type BotCapabilitiesStub,
   type PersistSessionEvents,
   type SessionEvent,
+  type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 
 /** The bootstrap generation for a compiled first-party application. */
@@ -95,6 +96,11 @@ export interface ShellCompositionMountOptions {
    * runtime only presents the exact effect identity.
    */
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
+  /**
+   * The turn type the admitted Turn runs on; the mounted Agent trims its tool
+   * catalog to it. Absent ⇒ `chat`.
+   */
+  turnType?: TurnTypeV1;
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
 }
@@ -142,6 +148,7 @@ export function createShellCompositionHost(
         agentPackages: options.agentPackages,
         modelSelection: options.modelSelection,
         systemPromptSection: options.systemPromptSection,
+        ...(options.turnType ? { turnType: options.turnType } : {}),
       });
 
       const isolateMembers = generation.members.filter(

@@ -1,6 +1,8 @@
 import {
   decodeSessionEvent,
+  decodeTurnTypeV1,
   type SessionEvent,
+  type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 
 /**
@@ -29,6 +31,35 @@ export interface StoredEffectAdmission {
   outcome: StoredEffectAdmissionOutcome;
 }
 
+/** What produced a Turn, when it was not a person speaking to the Bot. */
+export interface StoredRunOriginV1 {
+  kind: "routine";
+  routineId: string;
+  fireId: string;
+  trigger: "cron" | "webhook" | "integration" | "manual";
+}
+
+const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunOriginV1["trigger"][] = [
+  "cron",
+  "webhook",
+  "integration",
+  "manual",
+];
+
+/**
+ * The turn type an admitted run was accepted as, and what produced it,
+ * recorded so recovery after eviction re-mounts the same catalog and the firing
+ * stays attributable. Absent means `chat` with no recorded origin: it is
+ * written only for a Turn that has one, so a record admitted before turn
+ * admission existed and a chat record written after it are byte-for-byte the
+ * same.
+ */
+export interface StoredRunAdmissionV1 {
+  schemaVersion: 1;
+  turnType: TurnTypeV1;
+  origin?: StoredRunOriginV1;
+}
+
 export type StoredRunPhase =
   "admitted" | "executing" | "reconciliation-required";
 
@@ -50,6 +81,35 @@ export interface StoredRunV1<Snapshot = unknown> {
   compositionGenerationId: string;
   configurationSnapshot: Snapshot;
   previousEventCount: number;
+  /** Absent ⇒ the run was admitted as a `chat` Turn. */
+  admission?: StoredRunAdmissionV1;
+}
+
+/** The turn type a stored run re-mounts on. */
+export function storedRunTurnTypeV1(run: {
+  admission?: StoredRunAdmissionV1;
+}): TurnTypeV1 {
+  return run.admission?.turnType ?? "chat";
+}
+
+/**
+ * The `admission` field a Turn records — nothing at all for a chat Turn with
+ * no recorded origin, so no stored bytes change for the Turn every producer
+ * writes today.
+ */
+export function storedRunAdmissionV1(
+  turnType: TurnTypeV1 | undefined,
+  origin?: StoredRunOriginV1,
+): { admission?: StoredRunAdmissionV1 } {
+  const admitted = turnType ?? "chat";
+  if (admitted === "chat" && origin === undefined) return {};
+  return {
+    admission: {
+      schemaVersion: 1,
+      turnType: admitted,
+      ...(origin ? { origin } : {}),
+    },
+  };
 }
 
 const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
@@ -82,6 +142,7 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "responseText",
   "failure",
   "stopRequestedAt",
+  "admission",
 ] as const;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -95,6 +156,80 @@ function boundedString(
     (allowEmpty || value.length > 0) &&
     UTF8_ENCODER.encode(value).byteLength <= maximum
   );
+}
+
+function decodeStoredRunOrigin(
+  value: unknown,
+  runId: string,
+): StoredRunOriginV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`run "${runId}" has invalid admission origin`);
+  }
+  const candidate = value as Record<PropertyKey, unknown>;
+  const fields = ["kind", "routineId", "fireId", "trigger"];
+  const ownKeys = Reflect.ownKeys(candidate);
+  if (
+    ownKeys.length !== fields.length ||
+    Object.keys(candidate).length !== fields.length ||
+    !fields.every((key) => Object.hasOwn(candidate, key))
+  ) {
+    throw new Error(`run "${runId}" has invalid admission origin fields`);
+  }
+  if (candidate.kind !== "routine") {
+    throw new Error(`run "${runId}" has an invalid admission origin kind`);
+  }
+  const trigger = STORED_RUN_ORIGIN_TRIGGERS.find(
+    (value) => value === candidate.trigger,
+  );
+  if (!trigger) {
+    throw new Error(`run "${runId}" has an invalid admission origin trigger`);
+  }
+  if (
+    !boundedString(candidate.routineId, 256) ||
+    !boundedString(candidate.fireId, 256)
+  ) {
+    throw new Error(`run "${runId}" has an invalid admission origin id`);
+  }
+  return {
+    kind: "routine",
+    routineId: candidate.routineId,
+    fireId: candidate.fireId,
+    trigger,
+  };
+}
+
+function decodeStoredRunAdmission(
+  value: unknown,
+  runId: string,
+): StoredRunAdmissionV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`run "${runId}" has invalid admission`);
+  }
+  const candidate = value as Record<PropertyKey, unknown>;
+  const allowed = new Set(["schemaVersion", "turnType", "origin"]);
+  const ownKeys = Reflect.ownKeys(candidate);
+  if (
+    ownKeys.length !== Object.keys(candidate).length ||
+    ownKeys.some((key) => typeof key !== "string" || !allowed.has(key)) ||
+    !Object.hasOwn(candidate, "schemaVersion") ||
+    !Object.hasOwn(candidate, "turnType") ||
+    candidate.schemaVersion !== 1
+  ) {
+    throw new Error(`run "${runId}" has invalid admission fields`);
+  }
+  let turnType: TurnTypeV1;
+  try {
+    turnType = decodeTurnTypeV1(candidate.turnType);
+  } catch {
+    throw new Error(`run "${runId}" has an invalid admission turn type`);
+  }
+  return {
+    schemaVersion: 1,
+    turnType,
+    ...(candidate.origin === undefined
+      ? {}
+      : { origin: decodeStoredRunOrigin(candidate.origin, runId) }),
+  };
 }
 
 function decodeStoredRunEvents(value: unknown): SessionEvent[] {
@@ -289,6 +424,9 @@ function requireStoredRunRecordV1<Snapshot>(
     ...(candidate.stopRequestedAt === undefined
       ? {}
       : { stopRequestedAt: candidate.stopRequestedAt as string }),
+    ...(candidate.admission === undefined
+      ? {}
+      : { admission: decodeStoredRunAdmission(candidate.admission, runId) }),
   };
 }
 
@@ -297,11 +435,39 @@ export interface BotTurnCommand {
   sessionId: string;
   acceptedAt: string;
   text: string;
+  /**
+   * Absent ⇒ `chat`. Only an in-Durable-Object producer may name another type;
+   * the HTTP Turn path always admits `chat`.
+   */
+  turnType?: TurnTypeV1;
+  /**
+   * What produced this Turn. In-Durable-Object producers only; the HTTP Turn
+   * path never forwards it.
+   */
+  origin?: StoredRunOriginV1;
 }
 
+/**
+ * A chat command keeps the exact v1 fingerprint bytes, so idempotency records
+ * written before turn admission existed still match the same command after
+ * deploy. Only a Turn carrying a turn type or an origin — neither of which any
+ * producer could have written before — emits v2, where both are part of the
+ * identity of the command.
+ */
 export function botTurnCommandFingerprintV1(
   command: BotTurnCommand & { userId: string; botId: string },
 ): string {
+  const turnType = command.turnType ?? "chat";
+  if (turnType !== "chat" || command.origin !== undefined) {
+    return `bot-turn-command-v2:${JSON.stringify({
+      userId: command.userId,
+      botId: command.botId,
+      sessionId: command.sessionId,
+      text: command.text,
+      turnType,
+      ...(command.origin ? { origin: command.origin } : {}),
+    })}`;
+  }
   return `bot-turn-command-v1:${JSON.stringify({
     userId: command.userId,
     botId: command.botId,
