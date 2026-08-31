@@ -72,6 +72,10 @@ import {
   decodeRoutineCommandV1,
   type RoutineCommandV1,
 } from "@frockbot/plugin-routines/shared";
+import {
+  decodeRoutineHookDeliveryV1,
+  type RoutineHookDeliveryV1,
+} from "@frockbot/plugin-routines/hook";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import type { BotSkillCatalogReaderV1 } from "@frockbot/plugin-shell/backend-skills";
@@ -765,6 +769,30 @@ export class BotState extends DurableObject<BotStateEnv> {
       identity,
       request.command as RoutineCommandV1,
     );
+  }
+
+  /**
+   * One webhook delivery, forwarded by the gateway after it verified the key's
+   * signature. The Bot re-checks the key against its own durable record: the
+   * edge proved the token was minted by this deployment, not that it is still
+   * this Routine's key.
+   *
+   * Directory membership is deliberately *not* proved here. The caller is an
+   * external system with no session; the key is the whole credential, and it
+   * names the User the token was minted for.
+   */
+  async deliverRoutineHook(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      delivery: rpcDecoded(decodeRoutineHookDeliveryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.deliverRoutineHook(request.delivery as RoutineHookDeliveryV1);
   }
 
   /** One Routine's bounded run log, newest first. */

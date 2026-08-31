@@ -526,8 +526,8 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 13c | The rendered Memory block is frozen per compaction epoch and reused, with an env-var escape hatch                                | `resolveFrozenMemoryPrompt`, `compactionEpoch`, `SAND_DISABLE_MEMORY_FREEZE=1`                                                                                  | §4.1b            | `plugin-memory` + kernel session log                                    | declined    |
 | 13d | Distinct on-disk and injected fact formats; `[note]`/`[episode]` as a prefix on the fact text                                    | disk `- (YYYY-MM-DD) …` vs injected `- (learned YYYY-MM-DD) …`                                                                                                  | §4.1b            | `plugin-memory`                                                         | partial     |
 | 14  | Exactly what memory was injected is recorded per turn; memory mutated only through one tool                                      | `store.db kv.*PromptSnapshot`; `update_state` (advisory — files stay writable)                                                                                  | §2.5             | kernel session log                                                      | landed      |
-| 15  | **Routines** — per-Bot definition file (name, prompt, trigger, enabled, provenance, timestamps) and durable run log              | `automations/<slug>/{automation.json,runs.json}`                                                                                                                | §2.6             | new `plugin-routines`                                                   | partial     |
-| 16  | Cron triggers with timezone and `@daily` shorthands; inbound webhook with its own signing-key store                              | `trigger.type=cron`/`webhook`; `webhook-keys.json`                                                                                                              | §2.6             | `plugin-routines`                                                       | partial     |
+| 15  | **Routines** — per-Bot definition file (name, prompt, trigger, enabled, provenance, timestamps) and durable run log              | `automations/<slug>/{automation.json,runs.json}`                                                                                                                | §2.6             | new `plugin-routines`                                                   | landed      |
+| 16  | Cron triggers with timezone and `@daily` shorthands; inbound webhook with its own signing-key store                              | `trigger.type=cron`/`webhook`; `webhook-keys.json`                                                                                                              | §2.6             | `plugin-routines`                                                       | landed      |
 | 17  | Integration triggers (slack, github, origin, teams, linear, sentry, pagerduty), `group`, manual run                              | typed trigger schemas; `runs.json trigger:"manual"`                                                                                                             | §2.6             | per-integration Packages                                                | partial     |
 | 18  | A firing runs as a fresh subagent turn under the same Bot id; runs of _different_ Bots overlap, same-routine runs are sequential | "fresh subagent with the same work capabilities as the parent"; overlapping `runs.json` windows, no lock found                                                  | §2.7, §3.1       | kernel Turn admission                                                   | partial     |
 | 19  | A routine run cannot speak to the user, lands silently in a parent inbox; pause/resume/delete/edit with a card                   | `automation_completion_inbox`; `update_state routine`                                                                                                           | §2.5, §2.7       | `plugin-routines`                                                       | partial     |
@@ -658,25 +658,32 @@ the rows whose status the code moved:
   (`renderMemoryFactLineV1` vs `renderInjectedFactLineV1` in
   `plugin-memory/src/facts.ts`), but `[episode]` is documented only: nothing
   writes, parses or recognises it, and the tier enum has no `episode`.
-- **15** — the record and the run log are landed and the log now fills.
-  `RoutineRecordV1` in the Bot Durable Object (`plugin-routines/src/records.ts`,
-  keys in `storage-keys.ts`) carries name, prompt, schedule XOR webhook trigger,
-  timezone, `enabled`, the writer of the creating and the latest write, the
-  timestamps and `lastRunAt`; `RoutineScheduler` (`scheduler.ts`) fires it on the
-  Bot Durable Object's one alarm and writes a `RoutineRunEntryV1` on the firing
-  and again on its settlement, with the status taken from the durable run. What
-  is missing is the webhook door: a `trigger: webhook` Routine has no delivery
-  route and no key store, so it fires only through `run_now`. Row 16 is
-  correspondingly partial.
-- **16** — cron is landed in full: five-field expressions evaluated in an IANA
-  zone by `croner`, the `CRON_TZ=` prefix, the `@hourly`/`@daily`/`@weekly`/
-  `@monthly` aliases and `@every <duration>`, all validated at write time and
-  evaluated by the scheduler (`plugin-routines/src/cron.ts`, tested across two
-  daylight-saving boundaries). The inbound webhook and its signing-key store are
-  not built.
-- **17** — only `manual` is landed, as `routine/run` and the tool's `run_now`
-  action: the firing is enqueued durably and drained by the alarm, and the run
-  log records `trigger: "manual"`. No integration trigger and no `group` exists.
+- **15** — landed. `RoutineRecordV1` in the Bot Durable Object
+  (`plugin-routines/src/records.ts`, keys in `storage-keys.ts`) carries name,
+  prompt, schedule XOR webhook trigger, timezone, `enabled`, the writer of the
+  creating and the latest write, the timestamps and `lastRunAt`;
+  `RoutineScheduler` (`scheduler.ts`) fires it on the Bot Durable Object's one
+  alarm and writes a `RoutineRunEntryV1` on the firing and again on its
+  settlement, with the status taken from the durable run. A webhook Routine
+  reaches the same log through the delivery door (`hook.ts`, `backend.ts`).
+  GrokBot keeps the definition in a per-Bot file and the key in a separate
+  mode-600 store; FrockBot keeps both in the Bot Durable Object, and the key
+  only as a digest.
+- **16** — landed. Cron: five-field expressions evaluated in an IANA zone by
+  `croner`, the `CRON_TZ=` prefix, the `@hourly`/`@daily`/`@weekly`/`@monthly`
+  aliases and `@every <duration>`, validated at write time and evaluated by the
+  scheduler (`plugin-routines/src/cron.ts`, tested across two daylight-saving
+  boundaries). Webhook: `POST /api/bots/:botId/routines/:routineId/hook` on the
+  gateway's pre-auth `publicRoute`, whose key is a self-describing token signed
+  with `ROUTINE_HOOK_SECRET` and verified in constant time before any Durable
+  Object is addressed, then re-checked against the authoritative
+  `routine-key:<routineId>` digest and version inside the Bot. GrokBot's
+  `webhook-keys.json` becomes that durable digest record: minted on create,
+  rotatable, revocable, and never readable twice.
+- **17** — `manual` and `webhook` are landed; `manual` as `routine/run` and the
+  tool's `run_now` action, `webhook` as the delivery door. Both enqueue a
+  durable firing that the alarm drains, and the run log records which. No
+  integration trigger (slack, github, …) and no `group` exists.
 - **18** — a firing is an admitted Turn of the same Bot with
   `turnType: "automation"` and a recorded `origin`, run from inside the Bot
   Durable Object, and same-Routine firings are strictly sequential behind the
@@ -689,8 +696,9 @@ the rows whose status the code moved:
   end: as versioned Bot commands with durable fingerprinted receipts
   (`plugin-routines/src/store.ts`), as the `routine_manage` tool the Bot calls on
   any turn type (`agent.ts`), and as `RoutinesSection.vue` in the Bot settings
-  surface, where "next run" is now the moment the scheduler armed an alarm on and
-  a firing appears in the per-Routine run log. What is missing is the silent half
+  surface, where "next run" is now the moment the scheduler armed an alarm on, a
+  firing appears in the per-Routine run log, and a webhook Routine's delivery URL
+  and key are shown once with rotate and revoke beside them. What is missing is the silent half
   of the row: an automation Turn is not yet hidden from the visible transcript —
   it appears in `GET /api/bots/:id/turns` today — and there is no completion
   inbox, no pending wake, and no confirmation card.

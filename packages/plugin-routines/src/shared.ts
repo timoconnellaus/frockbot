@@ -41,6 +41,14 @@ export type {
   RoutineWriterV1,
 } from "./records.js";
 
+/**
+ * The one path a webhook delivery is made to. It is built here so the route
+ * that answers it and the receipt that advertises it cannot drift apart.
+ */
+export function routineHookPathV1(botId: string, routineId: string): string {
+  return `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}/hook`;
+}
+
 /** Most Routines one listing carries. */
 export const ROUTINE_LIST_MAX = 100;
 /** Most run-log entries one listing carries. */
@@ -75,6 +83,11 @@ export interface RoutineViewV1 {
    * nothing else.
    */
   nextRunAt?: string;
+  /**
+   * Whether a webhook key is live, and which version. Never the key, and never
+   * its digest: the UI needs to say "a key exists", not to re-read one.
+   */
+  hookKeyVersion?: number;
 }
 
 export interface RoutineListViewV1 {
@@ -145,7 +158,14 @@ export type RoutineCommandV1 =
    * caller may itself be a Turn in flight, and a Routine is never run in
    * parallel with anything. The alarm drains it.
    */
-  | (RoutineCommandMetaV1 & { type: "routine/run"; routineId: string });
+  | (RoutineCommandMetaV1 & { type: "routine/run"; routineId: string })
+  /**
+   * Mint a fresh webhook key, retiring the one before it. The plaintext key
+   * comes back once, on the receipt, and is never stored or listed.
+   */
+  | (RoutineCommandMetaV1 & { type: "routine/rotate-key"; routineId: string })
+  /** Retire the webhook key without minting another. Deliveries then 401. */
+  | (RoutineCommandMetaV1 & { type: "routine/revoke-key"; routineId: string });
 
 export type RoutineCommandTypeV1 = RoutineCommandV1["type"];
 
@@ -156,7 +176,26 @@ export const ROUTINE_COMMAND_TYPES: readonly RoutineCommandTypeV1[] = [
   "routine/resume",
   "routine/delete",
   "routine/run",
+  "routine/rotate-key",
+  "routine/revoke-key",
 ];
+
+/**
+ * A freshly minted webhook key, handed back exactly once.
+ *
+ * It is on the receipt the caller receives and not on the receipt the Bot
+ * stores: a key that could be re-read from durable state would not be a secret,
+ * and a replayed command id therefore answers without one.
+ */
+export interface RoutineHookMintV1 {
+  schemaVersion: 1;
+  routineId: string;
+  keyVersion: number;
+  /** The plaintext key. Shown once; the Bot keeps only its digest. */
+  token: string;
+  /** The path the key is presented against, for the client to make a URL of. */
+  path: string;
+}
 
 export type RoutineCommandReceiptV1 =
   | {
@@ -164,6 +203,7 @@ export type RoutineCommandReceiptV1 =
       commandId: string;
       status: "applied";
       routine: RoutineViewV1;
+      hook?: RoutineHookMintV1;
     }
   | {
       schemaVersion: 1;
@@ -361,6 +401,13 @@ export function decodeRoutineCommandV1(value: unknown): RoutineCommandV1 {
   };
 }
 
+function hookKeyVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    throw new RoutineDecodeError("Routine view hookKeyVersion is invalid");
+  }
+  return value as number;
+}
+
 function decodeRoutineWriterViewV1(
   value: unknown,
   label: string,
@@ -396,7 +443,7 @@ export function decodeRoutineViewV1(value: unknown): RoutineViewV1 {
       "createdAt",
       "updatedAt",
     ],
-    ["schedule", "trigger", "lastRunAt", "nextRunAt"],
+    ["schedule", "trigger", "lastRunAt", "nextRunAt", "hookKeyVersion"],
     "Routine view",
   );
   if (candidate.schemaVersion !== 1) {
@@ -452,6 +499,9 @@ export function decodeRoutineViewV1(value: unknown): RoutineViewV1 {
       : {
           nextRunAt: routineTimestamp(candidate.nextRunAt, "Routine nextRunAt"),
         }),
+    ...(candidate.hookKeyVersion === undefined
+      ? {}
+      : { hookKeyVersion: hookKeyVersion(candidate.hookKeyVersion) }),
   };
   requireScheduleXorTriggerV1(view);
   return view;
@@ -563,6 +613,28 @@ export function decodeRoutineRunListViewV1(
   };
 }
 
+export function decodeRoutineHookMintV1(value: unknown): RoutineHookMintV1 {
+  const candidate = record(value, "Routine hook mint");
+  routineExactKeys(
+    candidate,
+    ["schemaVersion", "routineId", "keyVersion", "token", "path"],
+    [],
+    "Routine hook mint",
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new RoutineDecodeError(
+      "Routine hook mint schemaVersion is unsupported",
+    );
+  }
+  return {
+    schemaVersion: 1,
+    routineId: commandIdentifier(candidate.routineId, "Routine id"),
+    keyVersion: hookKeyVersion(candidate.keyVersion),
+    token: routineText(candidate.token, 2_048, "Routine hook token"),
+    path: routineText(candidate.path, 512, "Routine hook path"),
+  };
+}
+
 export function decodeRoutineCommandReceiptV1(
   value: unknown,
 ): RoutineCommandReceiptV1 {
@@ -607,7 +679,7 @@ export function decodeRoutineCommandReceiptV1(
   routineExactKeys(
     candidate,
     ["schemaVersion", "commandId", "status", "routine"],
-    [],
+    ["hook"],
     "Routine command receipt",
   );
   return {
@@ -615,5 +687,8 @@ export function decodeRoutineCommandReceiptV1(
     commandId: commandIdentifier(candidate.commandId, "Routine commandId"),
     status: "applied",
     routine: decodeRoutineViewV1(candidate.routine),
+    ...(candidate.hook === undefined
+      ? {}
+      : { hook: decodeRoutineHookMintV1(candidate.hook) }),
   };
 }

@@ -102,6 +102,9 @@ export default defineConfig({
           // Computer looks like from here.
           SPRITES_TOKEN: "configured",
           COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
+          // A fixed signing secret, so a test can mint the key it presents and
+          // forge one that must be refused.
+          ROUTINE_HOOK_SECRET: "workerd-routine-hook-secret-0123456789abcdef",
         },
         // Deliberately absent, and why:
         //

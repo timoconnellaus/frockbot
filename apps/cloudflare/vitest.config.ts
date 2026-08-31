@@ -55,6 +55,8 @@ export default defineConfig({
           SPRITES_TOKEN: "",
           COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
           COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
+          // A fixed signing secret, so a test can mint the key it presents.
+          ROUTINE_HOOK_SECRET: "workerd-routine-hook-secret-0123456789abcdef",
           // A leak canary: a Bot isolate must never see a host binding.
           SECRET_TOKEN: "host-only-secret",
         },

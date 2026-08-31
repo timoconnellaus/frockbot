@@ -25,8 +25,14 @@ import {
 } from "@frockbot/plugin-routines/firing";
 import {
   RoutineStore,
+  type RoutineHookMinterV1,
   type RoutineStorageV1,
 } from "@frockbot/plugin-routines/store";
+import {
+  mintRoutineHookTokenV1,
+  routineHookDigestV1,
+} from "@frockbot/plugin-routines/hook";
+import { routineHookPathV1 } from "@frockbot/plugin-routines/shared";
 import type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
 
 /** The Bot and User whose Routines a caller may reach. */
@@ -50,14 +56,57 @@ export interface BotRoutinesTurn {
  * `DurableObjectState.storage` already satisfies `RoutineStorageV1`; naming the
  * narrow seam here is what keeps the Package testable without a Durable Object.
  */
-export function createBotRoutines(storage: RoutineStorageV1): {
+export function createBotRoutines(
+  storage: RoutineStorageV1,
+  hookKeys?: RoutineHookMinterV1,
+): {
   store: RoutineStore;
   scheduler: RoutineScheduler;
 } {
   const scheduler = new RoutineScheduler(storage);
   return {
     scheduler,
-    store: new RoutineStore(storage, { firings: scheduler }),
+    store: new RoutineStore(storage, {
+      firings: scheduler,
+      ...(hookKeys ? { hookKeys } : {}),
+    }),
+  };
+}
+
+/**
+ * The webhook key minter for one Bot.
+ *
+ * The token is derived from the Worker secret and the Routine's identity, so it
+ * is reproducible and never stored; what the Bot keeps is its digest. Without
+ * the secret there is no minter at all, and a webhook Routine is refused with
+ * that reason rather than given a key that cannot be verified.
+ */
+export function createBotRoutineHookMinter(
+  identity: () => Promise<BotRoutinesIdentity | undefined>,
+  secret: string | undefined,
+): RoutineHookMinterV1 | undefined {
+  if (!secret) return undefined;
+  return {
+    async mint({ routineId, keyVersion }) {
+      // The Bot's durable identity, not a constructor argument: a Durable
+      // Object learns who it is from its own storage, and a key that named the
+      // wrong Bot would verify at the edge against an object that never holds it.
+      const owner = await identity();
+      if (!owner) {
+        throw new Error("this Bot has no durable identity to key a webhook to");
+      }
+      const token = await mintRoutineHookTokenV1(secret, {
+        u: owner.userId,
+        b: owner.botId,
+        r: routineId,
+        v: keyVersion,
+      });
+      return {
+        token,
+        digest: await routineHookDigestV1(token),
+        path: routineHookPathV1(owner.botId, routineId),
+      };
+    },
   };
 }
 

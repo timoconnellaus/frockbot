@@ -196,6 +196,7 @@ jobs:
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
           COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
+          ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
         shell: bash
         run: |
           missing=()
@@ -209,7 +210,8 @@ jobs:
             GOOGLE_CLIENT_SECRET \
             SPRITES_TOKEN \
             COMPUTER_HOST_TOKEN \
-            CREDENTIAL_KEYRING; do
+            CREDENTIAL_KEYRING \
+            ROUTINE_HOOK_SECRET; do
             if [[ -z "${!name}" ]]; then missing+=("$name"); fi
           done
 
@@ -359,6 +361,7 @@ jobs:
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
           COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
+          ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"
@@ -377,6 +380,7 @@ jobs:
             'SPRITES_TOKEN',
             'COMPUTER_HOST_TOKEN',
             'CREDENTIAL_KEYRING',
+            'ROUTINE_HOOK_SECRET',
           ];
           console.log(
             JSON.stringify(

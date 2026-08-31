@@ -35,14 +35,21 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
     }
     return ctx.transport.hostedRequest(path, method, body);
   };
-  const post = async (botId: string, command: unknown): Promise<void> => {
-    decodeRoutineCommandReceiptV1(
+  const post = async (botId: string, command: unknown) => {
+    const receipt = decodeRoutineCommandReceiptV1(
       await request(
         `/api/bots/${encodeURIComponent(botId)}/routines`,
         "POST",
         JSON.stringify(command),
       ),
     );
+    // A minted key is on this receipt and on nothing else — no listing returns
+    // it and no second request can. It is held only for as long as the section
+    // is open.
+    if (receipt.status === "applied" && receipt.hook) {
+      state.value.mintedHook = receipt.hook;
+    }
+    return receipt;
   };
   const state = ref<RoutinesClientState>({
     routines: [],
@@ -115,6 +122,44 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
         await state.value.load(botId);
       } catch (error) {
         state.value.error = message(error, "Could not change the Routine");
+      } finally {
+        state.value.busy = false;
+      }
+    },
+    dismissHook() {
+      state.value.mintedHook = undefined;
+    },
+    async rotateKey(botId: string, routineId: string) {
+      state.value.busy = true;
+      try {
+        await post(botId, {
+          schemaVersion: 1,
+          type: "routine/rotate-key",
+          commandId: crypto.randomUUID(),
+          botId,
+          routineId,
+        });
+        await state.value.load(botId);
+      } catch (error) {
+        state.value.error = message(error, "Could not mint a webhook key");
+      } finally {
+        state.value.busy = false;
+      }
+    },
+    async revokeKey(botId: string, routineId: string) {
+      state.value.busy = true;
+      try {
+        state.value.mintedHook = undefined;
+        await post(botId, {
+          schemaVersion: 1,
+          type: "routine/revoke-key",
+          commandId: crypto.randomUUID(),
+          botId,
+          routineId,
+        });
+        await state.value.load(botId);
+      } catch (error) {
+        state.value.error = message(error, "Could not revoke the webhook key");
       } finally {
         state.value.busy = false;
       }

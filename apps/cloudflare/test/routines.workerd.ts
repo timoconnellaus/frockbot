@@ -15,6 +15,12 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
+import {
+  mintRoutineHookTokenV1,
+  routineDeliveryIdV1,
+  routineHookDigestV1,
+  verifyRoutineHookTokenV1,
+} from "@frockbot/plugin-routines/hook";
 import { provisionBot } from "./provision-bot.ts";
 
 function bot(userId: string, botId: string) {
@@ -483,5 +489,130 @@ describe("the Routine scheduler on the Bot Durable Object's one alarm", () => {
         origin: { routineId: "brief", trigger: "manual" },
       },
     });
+  });
+});
+
+describe("the webhook door against a real Bot Durable Object", () => {
+  async function webhookBot(label: string) {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `routines-${label}-${suffix}`,
+      botId: `routines-${label}-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const receipt = (await routines(
+      identity.userId,
+      identity.botId,
+    ).executeRoutineCommand({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        type: "routine/create",
+        commandId: `create-${suffix}`,
+        botId: identity.botId,
+        routineId: "brief",
+        name: "Delivered brief",
+        prompt: "Summarize the payload.",
+        trigger: { kind: "webhook" },
+        timezone: "UTC",
+      },
+    })) as unknown as { hook?: { token: string; keyVersion: number } };
+    expect(receipt.hook?.keyVersion).toBe(1);
+    return { identity, token: receipt.hook!.token };
+  }
+
+  async function deliver(
+    identity: { userId: string; botId: string },
+    token: string,
+    body: string,
+  ) {
+    const claims = await verifyRoutineHookTokenV1(
+      env.ROUTINE_HOOK_SECRET,
+      token,
+    );
+    // SAFETY: the generated stub type for the Bot RPCs is too deep for the
+    // compiler to instantiate here; this names the one method the test calls.
+    return (
+      bot(identity.userId, identity.botId) as unknown as {
+        deliverRoutineHook(input: unknown): Promise<{
+          status: string;
+          fireId: string;
+        }>;
+      }
+    ).deliverRoutineHook({
+      schemaVersion: 1,
+      ...identity,
+      delivery: {
+        routineId: claims.r,
+        keyVersion: claims.v,
+        digest: await routineHookDigestV1(token),
+        deliveryId: await routineDeliveryIdV1(claims.r, body),
+        body,
+        contentType: "application/json",
+      },
+    });
+  }
+
+  async function fireRecords(identity: { userId: string; botId: string }) {
+    return runInDurableObject(
+      bot(identity.userId, identity.botId),
+      async (_instance, state) => [
+        ...(
+          await state.storage.list<unknown>({ prefix: "routine-queue:" })
+        ).values(),
+        ...(
+          await state.storage.list<unknown>({ prefix: "routine-fire:" })
+        ).values(),
+      ],
+    );
+  }
+
+  test("a bad key writes no firing at all", async () => {
+    const { identity, token } = await webhookBot("badkey");
+    // A token minted under a different secret: a perfectly formed key that
+    // this deployment never issued.
+    const forged = await mintRoutineHookTokenV1(
+      "a-different-signing-secret-entirely",
+      { u: identity.userId, b: identity.botId, r: "brief", v: 1 },
+    );
+    expect(forged).not.toBe(token);
+    await expect(deliver(identity, forged, "{}")).rejects.toThrow();
+    expect(await fireRecords(identity)).toEqual([]);
+
+    // And a valid signature at the wrong key version is refused too.
+    const wrongVersion = await mintRoutineHookTokenV1(env.ROUTINE_HOOK_SECRET, {
+      u: identity.userId,
+      b: identity.botId,
+      r: "brief",
+      v: 2,
+    });
+    await expect(deliver(identity, wrongVersion, "{}")).rejects.toThrow();
+    expect(await fireRecords(identity)).toEqual([]);
+  });
+
+  test("a good key makes one firing, and the same delivery twice still makes one", async () => {
+    const { identity, token } = await webhookBot("goodkey");
+
+    const first = await deliver(identity, token, '{"event":"push"}');
+    expect(first.status).toBe("accepted");
+    const replay = await deliver(identity, token, '{"event":"push"}');
+    expect(replay).toEqual({ status: "duplicate", fireId: first.fireId });
+    expect(await fireRecords(identity)).toHaveLength(1);
+
+    // It survives eviction, because the firing is a durable record.
+    await evictDurableObject(bot(identity.userId, identity.botId));
+    await runDurableObjectAlarm(bot(identity.userId, identity.botId));
+
+    const runs = await storedRuns(identity);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      status: "completed",
+      admission: {
+        turnType: "automation",
+        origin: { routineId: "brief", trigger: "webhook" },
+      },
+    });
+    expect(runs[0]!.runId).toBe(first.fireId);
   });
 });

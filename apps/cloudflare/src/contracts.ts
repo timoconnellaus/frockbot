@@ -503,6 +503,19 @@ export interface BotConfigurationBinding {
     botId: string;
     command: RoutineCommandV1;
   }): Promise<RoutineCommandReceiptV1>;
+  deliverRoutineHook(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    delivery: {
+      routineId: string;
+      keyVersion: number;
+      digest: string;
+      deliveryId: string;
+      body: string;
+      contentType?: string | null;
+    };
+  }): Promise<{ status: "accepted" | "duplicate"; fireId: string }>;
   listRoutineRuns(request: {
     schemaVersion: 1;
     userId: string;

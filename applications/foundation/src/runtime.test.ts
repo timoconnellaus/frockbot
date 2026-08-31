@@ -324,6 +324,8 @@ describe("foundation application", () => {
       listRoutines: () => Promise.reject(new Error("not used while composing")),
       executeRoutineCommand: () =>
         Promise.reject(new Error("not used while composing")),
+      deliverRoutineHook: () =>
+        Promise.reject(new Error("not used while composing")),
       listRoutineRuns: () =>
         Promise.reject(new Error("not used while composing")),
     });

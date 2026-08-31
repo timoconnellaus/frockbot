@@ -319,6 +319,15 @@ exit 0
     expect(deploy?.env?.CREDENTIAL_KEYRING).toBe(
       "${{ secrets.CREDENTIAL_KEYRING }}",
     );
+    // Every Routine webhook key is signed with it, so a deploy that forgot it
+    // would leave the door verifying nothing.
+    expect(validation?.env?.ROUTINE_HOOK_SECRET).toBe(
+      "${{ secrets.ROUTINE_HOOK_SECRET }}",
+    );
+    expect(deploy?.env?.ROUTINE_HOOK_SECRET).toBe(
+      "${{ secrets.ROUTINE_HOOK_SECRET }}",
+    );
+    expect(deploy?.run).toContain("'ROUTINE_HOOK_SECRET'");
 
     const productionEnvironment = {
       ...process.env,
@@ -334,6 +343,8 @@ exit 0
       COMPUTER_HOST_TOKEN: "computer-host-production",
       CREDENTIAL_KEYRING:
         '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
+      ROUTINE_HOOK_SECRET:
+        "5c1b7b0e5b0b4d1a9e6f3c2d8a7b6e5f4d3c2b1a0f9e8d7c6b5a4938271605f4",
     };
     const validConfiguration = Bun.spawnSync(
       ["bash", "-c", validation?.run ?? ""],
@@ -352,6 +363,19 @@ exit 0
     expect(missingSprites.exitCode).toBe(1);
     expect(missingSprites.stderr.toString()).toContain(
       "Missing production configuration: SPRITES_TOKEN",
+    );
+
+    const missingHookSecret = Bun.spawnSync(
+      ["bash", "-c", validation?.run ?? ""],
+      {
+        env: { ...productionEnvironment, ROUTINE_HOOK_SECRET: "" },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    expect(missingHookSecret.exitCode).toBe(1);
+    expect(missingHookSecret.stderr.toString()).toContain(
+      "Missing production configuration: ROUTINE_HOOK_SECRET",
     );
 
     for (const invalidKeyring of [

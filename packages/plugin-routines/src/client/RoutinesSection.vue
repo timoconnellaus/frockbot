@@ -20,6 +20,7 @@ const routines = providedState;
 const botId = computed(() => web.value.activeBotId);
 const formOpen = ref(false);
 const openLog = ref<string>();
+const copied = ref(false);
 const form = reactive({
   routineId: undefined as string | undefined,
   name: "",
@@ -39,6 +40,31 @@ watch(
   },
   { immediate: true },
 );
+
+/**
+ * The delivery URL, composed here because the browser is the only place that
+ * knows the origin the caller will use. The key is appended as the bearer token
+ * the route reads, and it is on screen once: nothing can fetch it again.
+ */
+function hookUrl(): string {
+  const mint = routines.value.mintedHook;
+  if (!mint) return "";
+  return `${window.location.origin}${mint.path}`;
+}
+
+async function copyHook(): Promise<void> {
+  const mint = routines.value.mintedHook;
+  if (!mint) return;
+  try {
+    await navigator.clipboard.writeText(
+      `curl -X POST ${hookUrl()} -H "Authorization: Bearer ${mint.token}" -d '{}'`,
+    );
+    copied.value = true;
+  } catch {
+    // Clipboard access can be refused; the key is on screen either way.
+    copied.value = false;
+  }
+}
 
 function summary(routine: RoutineViewV1): string {
   return routine.schedule
@@ -144,10 +170,42 @@ async function toggleLog(routineId: string): Promise<void> {
           {{ routine.enabled ? "Enabled" : "Paused" }}
         </span>
       </div>
+      <div
+        v-if="routines.mintedHook?.routineId === routine.routineId"
+        class="routine-hook"
+      >
+        <strong
+          >Webhook key, version {{ routines.mintedHook.keyVersion }}</strong
+        >
+        <small>
+          This is the only time it is shown. Copy it now; rotating is the only
+          way to see a key again.
+        </small>
+        <code>{{ hookUrl() }}</code>
+        <code class="routine-hook__token">{{ routines.mintedHook.token }}</code>
+        <div class="routine-card__actions">
+          <UiButton type="button" variant="primary" @click="copyHook">
+            {{ copied ? "Copied" : "Copy webhook URL" }}
+          </UiButton>
+          <UiButton type="button" @click="routines.dismissHook()">
+            Done
+          </UiButton>
+        </div>
+      </div>
       <dl class="routine-card__facts">
         <div>
           <dt>Next run</dt>
           <dd>{{ routine.nextRunAt ?? "—" }}</dd>
+        </div>
+        <div v-if="routine.trigger">
+          <dt>Webhook key</dt>
+          <dd>
+            {{
+              routine.hookKeyVersion
+                ? `version ${routine.hookKeyVersion}`
+                : "none"
+            }}
+          </dd>
         </div>
         <div>
           <dt>Last run</dt>
@@ -182,6 +240,22 @@ async function toggleLog(routineId: string): Promise<void> {
           @click="botId && routines.runNow(botId, routine.routineId)"
         >
           Run now
+        </UiButton>
+        <UiButton
+          v-if="routine.trigger"
+          type="button"
+          :disabled="routines.busy"
+          @click="botId && routines.rotateKey(botId, routine.routineId)"
+        >
+          {{ routine.hookKeyVersion ? "Rotate key" : "Mint key" }}
+        </UiButton>
+        <UiButton
+          v-if="routine.trigger && routine.hookKeyVersion"
+          type="button"
+          :disabled="routines.busy"
+          @click="botId && routines.revokeKey(botId, routine.routineId)"
+        >
+          Revoke key
         </UiButton>
         <UiButton type="button" @click="toggleLog(routine.routineId)">
           {{ openLog === routine.routineId ? "Hide runs" : "Run log" }}
@@ -246,7 +320,7 @@ async function toggleLog(routineId: string): Promise<void> {
         />
       </UiField>
       <p v-else class="routines__note">
-        The delivery URL and its key are minted when webhook delivery ships.
+        A delivery key is minted when the Routine is saved, and shown once.
       </p>
       <UiField label="Time zone">
         <input
@@ -384,6 +458,32 @@ async function toggleLog(routineId: string): Promise<void> {
   margin: 0;
   color: var(--frock-text);
   font-size: var(--frock-text-sm);
+}
+
+.routine-hook {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-card);
+  padding: 10px;
+  background: var(--frock-surface);
+}
+
+.routine-hook strong {
+  color: var(--frock-text);
+  font-size: var(--frock-text-sm);
+  font-weight: 600;
+}
+
+.routine-hook code {
+  overflow-wrap: anywhere;
+  color: var(--frock-text);
+  font-size: var(--frock-text-sm);
+}
+
+.routine-hook__token {
+  color: var(--frock-text-muted);
 }
 
 .routine-card__actions {

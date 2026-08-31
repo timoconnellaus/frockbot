@@ -1,5 +1,6 @@
 export * from "./cron.js";
 export * from "./firing.js";
+export * from "./hook.js";
 export * from "./records.js";
 export * from "./scheduler.js";
 export * from "./shared.js";
