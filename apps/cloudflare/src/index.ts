@@ -43,6 +43,11 @@ import {
   decodeRoutineListViewV1,
   decodeRoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
+import {
+  decodeClientSearchRebuildReceiptV1,
+  decodeSearchIndexResultsV1,
+  type SearchQueryV1,
+} from "@frockbot/plugin-search";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -241,6 +246,24 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     rollbackPackage: (request) => rpc.rollbackPackage(request),
     activeApplicationHash: (request) => rpc.activeApplicationHash(request),
   };
+}
+
+/**
+ * The User Durable Object's transcript-index RPCs.
+ *
+ * Narrow and separate from `UserConfigurationBinding`: search is one Package's
+ * Contribution, and the generic configuration binding every gateway adapter
+ * implements has no business growing a method for it.
+ */
+interface UserSearchRpc {
+  searchTranscripts(input: unknown): Promise<unknown>;
+  rebuildSearchIndex(input: unknown): Promise<unknown>;
+}
+
+function userSearchStub(env: Env, userId: string): UserSearchRpc {
+  const id = env.USER_CONFIGURATIONS.idFromName(userId);
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Search RPC surface.
+  return env.USER_CONFIGURATIONS.get(id) as unknown as UserSearchRpc;
 }
 
 function decodeUserBotRunLookupRpcV1(input: unknown): {
@@ -632,6 +655,25 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           ),
         ),
       listBotIdentities: (userId: string) => listBotIdentities(env, userId),
+      searchTranscripts: async (userId: string, query: SearchQueryV1) =>
+        decodeSearchIndexResultsV1(
+          rpcJsonSnapshot(
+            await userSearchStub(env, userId).searchTranscripts({
+              schemaVersion: 1,
+              userId,
+              query,
+            }),
+          ),
+        ),
+      rebuildSearchIndex: async (userId: string) =>
+        decodeClientSearchRebuildReceiptV1(
+          rpcJsonSnapshot(
+            await userSearchStub(env, userId).rebuildSearchIndex({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
       readBotAvatar: (userId: string, botId: string) =>
         readBotAvatar(env, userId, botId),
       uploadBotAvatar: (

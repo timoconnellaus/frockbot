@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   boundSearchBodyV1,
+  decodeClientSearchRebuildReceiptV1,
+  decodeClientSearchResultsV1,
   decodeSearchQueryV1,
   decodeSearchRowPageV1,
   decodeSearchRowV1,
@@ -113,5 +115,102 @@ describe("deep links", () => {
   test("name the Bot and the turn anchor", () => {
     expect(searchDeepLinkV1("bot a", "run-1")).toBe("/?bot=bot%20a#turn-run-1");
     expect(searchTurnAnchorV1("run-1")).toBe("turn-run-1");
+  });
+});
+
+describe("client search results decoding", () => {
+  const RESULTS = {
+    schemaVersion: 1 as const,
+    query: "gym",
+    groups: [
+      {
+        botId: "bot-a",
+        botName: "Site foreman",
+        archived: false,
+        hidden: true,
+        avatarUrl: "/api/bots/bot-a/avatar?v=abc",
+        hits: [
+          {
+            runId: "run-1",
+            kind: "user" as const,
+            at: "2026-08-31T00:00:00.000Z",
+            snippet: "the gym build",
+            deepLink: "/?bot=bot-a#turn-run-1",
+          },
+        ],
+        totalHits: 1,
+      },
+    ],
+    page: { truncated: true, nextCursor: "p50" },
+    indexState: "ready" as const,
+  };
+
+  test("round-trips an exact page", () => {
+    expect(decodeClientSearchResultsV1(structuredClone(RESULTS))).toEqual(
+      RESULTS,
+    );
+  });
+
+  test("refuses an unexpected key anywhere in the page", () => {
+    expect(() =>
+      decodeClientSearchResultsV1({ ...RESULTS, userId: "user-1" }),
+    ).toThrow("not allowed");
+    expect(() =>
+      decodeClientSearchResultsV1({
+        ...RESULTS,
+        groups: [{ ...RESULTS.groups[0]!, botKey: "x" }],
+      }),
+    ).toThrow("not allowed");
+    expect(() =>
+      decodeClientSearchResultsV1({
+        ...RESULTS,
+        groups: [
+          {
+            ...RESULTS.groups[0]!,
+            hits: [{ ...RESULTS.groups[0]!.hits[0]!, body: "raw" }],
+          },
+        ],
+      }),
+    ).toThrow("not allowed");
+  });
+
+  test("refuses a totalHits that under-counts the hits it carries", () => {
+    expect(() =>
+      decodeClientSearchResultsV1({
+        ...RESULTS,
+        groups: [{ ...RESULTS.groups[0]!, totalHits: 0 }],
+      }),
+    ).toThrow("totalHits is invalid");
+  });
+
+  test("refuses an invalid index state", () => {
+    expect(() =>
+      decodeClientSearchResultsV1({ ...RESULTS, indexState: "stale" }),
+    ).toThrow("indexState is invalid");
+  });
+});
+
+describe("client rebuild receipt decoding", () => {
+  const RECEIPT = {
+    schemaVersion: 1 as const,
+    status: "rebuilt" as const,
+    indexedRows: 12,
+    bots: 3,
+    indexState: "ready" as const,
+  };
+
+  test("round-trips an exact receipt", () => {
+    expect(
+      decodeClientSearchRebuildReceiptV1(structuredClone(RECEIPT)),
+    ).toEqual(RECEIPT);
+  });
+
+  test("refuses a negative count and an unknown status", () => {
+    expect(() =>
+      decodeClientSearchRebuildReceiptV1({ ...RECEIPT, indexedRows: -1 }),
+    ).toThrow("non-negative integer");
+    expect(() =>
+      decodeClientSearchRebuildReceiptV1({ ...RECEIPT, status: "queued" }),
+    ).toThrow("status is invalid");
   });
 });

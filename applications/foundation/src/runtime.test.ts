@@ -91,6 +91,7 @@ describe("foundation application", () => {
         "package-publisher",
         "settings",
         "routines",
+        "search",
       ],
       desktop: [
         "auth",
@@ -291,6 +292,10 @@ describe("foundation application", () => {
       updateSheep: () => Promise.reject(new Error("not used while composing")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
+      searchTranscripts: () =>
+        Promise.reject(new Error("not used while composing")),
+      rebuildSearchIndex: () =>
+        Promise.reject(new Error("not used while composing")),
       readBotAvatar: () => Promise.resolve(undefined),
       uploadBotAvatar: () =>
         Promise.reject(new Error("not used while composing")),
@@ -317,7 +322,7 @@ describe("foundation application", () => {
       backend.contributions
         .map((contribution) => contribution.packageId)
         .sort(),
-    ).toEqual(["flock", "package-publisher", "routines", "settings"]);
+    ).toEqual(["flock", "package-publisher", "routines", "search", "settings"]);
     interface TestContribution {
       specifier: string;
       executeConfiguration?(): void;
