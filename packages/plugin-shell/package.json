@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
     "./backend": "./src/backend.ts",
     "./backend-authoring": "./src/backend-authoring.ts",
     "./backend-composition": "./src/backend-composition.ts",
@@ -58,6 +59,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
+    "@frockbot/plugin-tools": "workspace:*",
     "@types/bun": "1.3.6",
     "@types/node": "26.2.0",
     "@vitejs/plugin-vue": "6.0.8",

@@ -1,3 +1,8 @@
+import {
+  decodeSendToUserPayloadV1,
+  type SendToUserPayloadV1,
+} from "./send-to-user.js";
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -192,6 +197,31 @@ export interface SessionEventMap {
    * they replay as `chat`.
    */
   "turn/admission": { turn: number; turnType: TurnTypeV1 };
+  /**
+   * A user-facing send, recorded on the step whose tool call produced it.
+   * Row 57b: one send tool carries every typed payload, so the log holds the
+   * payload rather than a per-payload event, and the client projection reads
+   * it back. `occurrenceId` is the tool occurrence the send belongs to, which
+   * is what makes a replayed Turn produce exactly one of these per call.
+   */
+  "send/to-user": {
+    turn: number;
+    step: number;
+    occurrenceId: string;
+    payload: SendToUserPayloadV1;
+  };
+  /**
+   * A child Turn's hand-off to its parent — the same Bot's user-visible
+   * conversation (row 40, §2.13). Recorded here so the hand-off is durable on
+   * the child's own log; delivering it to the parent is a later slice, and
+   * nothing reads this event yet.
+   */
+  "wake/parent": {
+    turn: number;
+    step: number;
+    occurrenceId: string;
+    message: string;
+  };
   "step/start": { turn: number; step: number };
   "user/message": {
     turn: number;
@@ -710,6 +740,28 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       requireEventKeys(event, keys("turn", "turnType"), "session event");
       turn();
       decodeTurnTypeV1(event.turnType, "session event.turnType");
+      break;
+    case "send/to-user":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "occurrenceId", "payload"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.occurrenceId, "session event.occurrenceId");
+      decodeSendToUserPayloadV1(event.payload, "session event.payload");
+      break;
+    case "wake/parent":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "occurrenceId", "message"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.occurrenceId, "session event.occurrenceId");
+      eventString(event.message, "session event.message");
       break;
     case "step/start":
       requireEventKeys(event, keys("turn", "step"), "session event");

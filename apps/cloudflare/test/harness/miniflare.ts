@@ -94,55 +94,74 @@ function bearerKey(request: Request): string {
 /**
  * The marker a test puts in a user message to make the stubbed model answer
  * with a tool call instead of prose. The rest of the message is
- * `<tool name>:<JSON arguments>`.
+ * `<tool name>:<JSON arguments>`, and a message may carry one such line per
+ * call it wants in the response — which is how a Turn that calls two tools in
+ * one step is reproduced.
  *
  * The stub is shared by every test in the run and cannot be reconfigured per
  * test, so the trigger travels on the wire with the request it belongs to.
  */
 export const TOOL_CALL_TRIGGER = "frockbot-test-tool-call:";
 
+/** Builds the trigger message for one or more scripted calls. */
+export function toolCallTriggerPrompt(
+  ...calls: Array<[name: string, input?: unknown]>
+): string {
+  return calls
+    .map(
+      ([name, input]) =>
+        `${TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input ?? {})}`,
+    )
+    .join("\n");
+}
+
 interface WireMessage {
   role?: unknown;
   content?: unknown;
 }
 
-/** The scripted tool call one request asks for, when it asks for one. */
-function scriptedToolCall(
+/** The scripted tool calls one request asks for, empty when it asks for none. */
+function scriptedToolCalls(
   body: unknown,
-): { name: string; arguments: string } | undefined {
-  if (!body || typeof body !== "object") return undefined;
+): Array<{ name: string; arguments: string }> {
+  if (!body || typeof body !== "object") return [];
   const messages = (body as { messages?: unknown }).messages;
-  if (!Array.isArray(messages)) return undefined;
+  if (!Array.isArray(messages)) return [];
   // A tool result must fall through to prose, or the loop would call the same
   // tool forever and exhaust its step budget.
   const last = messages.at(-1) as WireMessage | undefined;
-  if (last?.role === "tool") return undefined;
+  if (last?.role === "tool") return [];
   const user = [...(messages as WireMessage[])]
     .reverse()
     .find((message) => message.role === "user");
   const content = typeof user?.content === "string" ? user.content : "";
-  if (!content.startsWith(TOOL_CALL_TRIGGER)) return undefined;
-  const request = content.slice(TOOL_CALL_TRIGGER.length);
-  const separator = request.indexOf(":");
-  if (separator < 1) return undefined;
-  return {
-    name: request.slice(0, separator),
-    arguments: request.slice(separator + 1),
-  };
+  if (!content.startsWith(TOOL_CALL_TRIGGER)) return [];
+  const calls: Array<{ name: string; arguments: string }> = [];
+  for (const line of content.split("\n")) {
+    if (!line.startsWith(TOOL_CALL_TRIGGER)) return [];
+    const request = line.slice(TOOL_CALL_TRIGGER.length);
+    const separator = request.indexOf(":");
+    if (separator < 1) return [];
+    calls.push({
+      name: request.slice(0, separator),
+      arguments: request.slice(separator + 1),
+    });
+  }
+  return calls;
 }
 
-function toolCallStream(call: { name: string; arguments: string }): Response {
+function toolCallStream(
+  calls: ReadonlyArray<{ name: string; arguments: string }>,
+): Response {
   const event = {
     choices: [
       {
         delta: {
-          tool_calls: [
-            {
-              index: 0,
-              id: "call-1",
-              function: { name: call.name, arguments: call.arguments },
-            },
-          ],
+          tool_calls: calls.map((call, index) => ({
+            index,
+            id: `call-${index + 1}`,
+            function: { name: call.name, arguments: call.arguments },
+          })),
         },
         finish_reason: "tool_calls",
       },
@@ -198,8 +217,8 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     } catch {
       body = undefined;
     }
-    const call = scriptedToolCall(body);
-    if (call) return toolCallStream(call);
+    const calls = scriptedToolCalls(body);
+    if (calls.length > 0) return toolCallStream(calls);
     return new Response(
       'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
         'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +

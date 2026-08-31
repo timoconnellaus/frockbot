@@ -1,4 +1,7 @@
-import { createFoundationRuntimeApplication } from "@frockbot/application-foundation/runtime";
+import {
+  createFoundationRuntimeApplication,
+  isUserInstallablePackageV1,
+} from "@frockbot/application-foundation/runtime";
 import {
   decodeBotIdV1,
   isApplicationDeploymentHash,
@@ -178,18 +181,24 @@ export function createUserApplication() {
         schemaVersion: 1,
         deployment: env.DEPLOYMENT,
         applicationHash: compiled.plan.applicationHash,
-        packages: compiled.plan.packages.map((pkg) => ({
-          id: pkg.id,
-          displayName: pkg.manifest.displayName,
-          version: pkg.version,
-          contributions: [
-            ...(pkg.manifest.contributions.backend ? ["backend"] : []),
-            ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
-            ...(pkg.manifest.contributions.client ? ["client"] : []),
-            ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
-          ],
-          configuration: pkg.manifest.configuration,
-        })),
+        // The catalog is what a User can install. The application's own shell
+        // is mounted unconditionally and was never installed, so it is not
+        // offered as a choice; everything else stays listed, including a
+        // Package whose only Capabilities are tools that need no Connection.
+        packages: compiled.plan.packages
+          .filter((pkg) => isUserInstallablePackageV1(pkg.manifest))
+          .map((pkg) => ({
+            id: pkg.id,
+            displayName: pkg.manifest.displayName,
+            version: pkg.version,
+            contributions: [
+              ...(pkg.manifest.contributions.backend ? ["backend"] : []),
+              ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
+              ...(pkg.manifest.contributions.client ? ["client"] : []),
+              ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
+            ],
+            configuration: pkg.manifest.configuration,
+          })),
       });
     }
 

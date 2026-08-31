@@ -162,6 +162,8 @@ assistant/chunk
 assistant/message
 tool/call
 tool/result
+send/to-user
+wake/parent
 step/end
 turn/end
 session/disposed
@@ -280,6 +282,16 @@ The command fingerprint follows the same rule. A chat Turn with no origin keeps 
 Only an in-Durable-Object producer may admit anything but a chat Turn. The hosted Turn path admits `chat` and cannot do otherwise: `decodeClientTurnCommandV1` accepts exact keys, and the Bot Durable Object's run RPC accepts exact keys too, so neither a client nor the gateway can name a turn type or an origin, and absence means `chat`.
 
 The manifest ceiling reaches the registry where the Composition registers a Package's tools. `BotIsolateContributionHost` reads it from the mounted Package's manifest — the union over its `kind: "tool"` Capabilities, because a tool descriptor names no Capability, so a Package bounds its tools only when every tool Capability it declares bounds them — and passes it as `ToolRegistration.register`'s `admissionCeiling`. A manifest that declares no bound registers none, which is every Package shipped today.
+
+### The Bot's voice to its User
+
+Row 57b of the parity register: GrokBot has exactly one user-facing send tool, and it carries a typed payload rather than a family of tools. FrockBot ships it as `send_to_user`, with `send_message` as the legacy execution alias GrokBot keeps, both admitted on `chat` turns only. Row 40: `wake_parent` takes one required `message` — a complete hand-off — is admitted on `automation` and `subagent` turns only, and always ends the Turn. Both are contributed by the Shell Package's runtime Contribution, which already owns the run DTO and the WebUI, so a send crosses no Package seam.
+
+`SendToUserPayloadV1` is declared and decoded in `@frockbot/kernel-contracts`, on the `memory/injected` and `skill/injected` precedent: contracts carry the versioned shape that reaches durable state, the Package carries every scrap of behaviour. It is a union of `text`, `attachment`, `widget`, `secret-request`, and `agent-card`, each strictly decoded and bounded, and the widget is the one shape read from a primary source — `{ prompt, helpText?, options[1..6], allowCustom?, dismissOnMoveOn? }`. Every send is recorded as `send/to-user { turn, step, occurrenceId, payload }` and every hand-off as `wake/parent { turn, step, occurrenceId, message }`, so both are durable history of the Turn that produced them.
+
+Row 57c — a widget ends the turn — is the `endsTurn` boolean below and nothing more: `send_to_user` sets it only for a `widget` payload, `wake_parent` sets it always, and the loop never inspects why. The parent inbox that consumes `wake/parent` is a later slice; today the event is recorded and read by nothing.
+
+`ClientRunEventV1` projects both events in the order the log wrote them, and `ClientRunV1.schemaVersion` moves to 2 to say so; the decoder accepts 1 and 2, because a version 1 body is a version 2 body that carries neither. Truncation drops whole units oldest first and never splits a tool call from its result. A widget-ended Turn writes no assistant message at all, so the derived Turn text falls back to the last `text` payload the Turn sent; every other payload leaves the text empty and reaches the client through the projected event. The hosted client draws `text` as an assistant-side bubble, `widget` as a read-only card of prompt, help text, and options, and `attachment` as a link, and says "This client cannot display that message" for anything else — a run has to render on a client older than the Bot that produced it, so an unknown payload is a line in the conversation and never an exception. Answering a widget queues an ordinary chat Turn and is not built yet.
 
 ### Ending a Turn from a tool
 

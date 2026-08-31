@@ -1,0 +1,298 @@
+// The Shell's runtime Contribution: what it admits, what it records, and what
+// ends a Turn.
+import { describe, expect, test } from "bun:test";
+import {
+  SessionStore,
+  type Session,
+  type ToolCall,
+  type ToolExecutionContext,
+  type TurnTypeV1,
+} from "@frockbot/kernel-contracts";
+import { ToolRegistry } from "@frockbot/plugin-tools";
+import { Context } from "cordis";
+import {
+  shellAdmissionCeilingV1,
+  shellAgentPlugin,
+  PARENT_HANDOFF_CAPABILITY_V1,
+  SEND_MESSAGE_ALIAS_V1,
+  SEND_TO_USER_TOOL_V1,
+  USER_VOICE_CAPABILITY_V1,
+  WAKE_PARENT_TOOL_V1,
+} from "./agent.ts";
+
+const SESSION_ID = "user-1:bot-1";
+
+interface Mounted {
+  root: Context;
+  session: Session;
+  dispose(): Promise<void>;
+}
+
+async function mount(): Promise<Mounted> {
+  const root = new Context();
+  await root.plugin(SessionStore);
+  await root.plugin(ToolRegistry);
+  const session = root.sessions.create(SESSION_ID);
+  session.appendBatch([
+    { type: "turn/start", turn: 4 },
+    { type: "step/start", turn: 4, step: 2 },
+  ]);
+  await root.plugin(shellAgentPlugin);
+  return { root, session, dispose: () => root.fiber.dispose() };
+}
+
+function contextFor(turnType: TurnTypeV1): ToolExecutionContext {
+  return {
+    botId: "bot-1",
+    agentId: "bot-1",
+    sessionId: SESSION_ID,
+    compositionGenerationId: "2026-08-31T00:00:00.000Z:0123456789abcdef",
+    turnType,
+    effectId: "tool:4:2:0",
+    signal: new AbortController().signal,
+  };
+}
+
+function call(name: string, input: unknown): ToolCall {
+  return { id: "call-1", name, input };
+}
+
+/** Runs a tool the way the loop does: prepare, then execute what it admits. */
+async function invoke(
+  mounted: Mounted,
+  turnType: TurnTypeV1,
+  toolCall: ToolCall,
+) {
+  const context = contextFor(turnType);
+  const preparation = await mounted.root.tools.prepare(toolCall, context);
+  if (preparation.kind === "denied") return preparation.result;
+  return mounted.root.tools.executePrepared(preparation, context);
+}
+
+describe("the Shell's tool admission", () => {
+  test("offers the send tool and its alias on chat turns only", async () => {
+    const mounted = await mount();
+    try {
+      const chat = mounted.root.tools
+        .schemas({ turnType: "chat" })
+        .map((tool) => tool.name);
+      const automation = mounted.root.tools
+        .schemas({ turnType: "automation" })
+        .map((tool) => tool.name);
+      const subagent = mounted.root.tools
+        .schemas({ turnType: "subagent" })
+        .map((tool) => tool.name);
+
+      expect(chat).toContain(SEND_TO_USER_TOOL_V1);
+      expect(chat).toContain(SEND_MESSAGE_ALIAS_V1);
+      expect(chat).not.toContain(WAKE_PARENT_TOOL_V1);
+      expect(automation).toEqual([WAKE_PARENT_TOOL_V1]);
+      expect(subagent).toEqual([WAKE_PARENT_TOOL_V1]);
+      // Row 57: no user-facing tool exists on a channel turn either, and
+      // nothing hands off from one.
+      expect(mounted.root.tools.schemas({ turnType: "channel" })).toEqual([]);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("denies a hallucinated wake_parent on a chat turn", async () => {
+    const mounted = await mount();
+    try {
+      const result = await invoke(
+        mounted,
+        "chat",
+        call(WAKE_PARENT_TOOL_V1, { message: "done" }),
+      );
+
+      expect(result).toEqual({
+        content: `Tool is not available on a chat turn: ${WAKE_PARENT_TOOL_V1}`,
+        isError: true,
+      });
+      expect(
+        mounted.session.events.some((event) => event.type === "wake/parent"),
+      ).toBe(false);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("denies send_to_user and its alias on an automation turn", async () => {
+    const mounted = await mount();
+    try {
+      for (const name of [SEND_TO_USER_TOOL_V1, SEND_MESSAGE_ALIAS_V1]) {
+        const result = await invoke(
+          mounted,
+          "automation",
+          call(name, { payload: { type: "text", text: "hi" } }),
+        );
+
+        expect(result).toEqual({
+          content: `Tool is not available on a automation turn: ${name}`,
+          isError: true,
+        });
+      }
+      expect(
+        mounted.session.events.some((event) => event.type === "send/to-user"),
+      ).toBe(false);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("bounds each tool by the turn types its manifest Capability declares", () => {
+    expect(shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1)).toEqual(["chat"]);
+    expect(shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1)).toEqual([
+      "automation",
+      "subagent",
+    ]);
+    expect(shellAdmissionCeilingV1("not-a-capability")).toBeUndefined();
+  });
+});
+
+describe("send_to_user", () => {
+  test("records a text send and leaves the Turn running", async () => {
+    const mounted = await mount();
+    try {
+      const result = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          payload: { type: "text", text: "Booked for Tuesday." },
+        }),
+      );
+
+      expect(result.isError).toBe(false);
+      expect(result.endsTurn).toBeUndefined();
+      expect(
+        mounted.session.events.find((event) => event.type === "send/to-user"),
+      ).toMatchObject({
+        turn: 4,
+        step: 2,
+        occurrenceId: "tool:4:2:0",
+        payload: { type: "text", text: "Booked for Tuesday." },
+      });
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("ends the Turn on a widget payload, and only on a widget", async () => {
+    const mounted = await mount();
+    try {
+      const widget = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          payload: {
+            type: "widget",
+            widget: { prompt: "Which day?", options: ["Tue", "Thu"] },
+          },
+        }),
+      );
+      const attachment = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          payload: { type: "attachment", url: "https://files.example/a.pdf" },
+        }),
+      );
+
+      expect(widget.endsTurn).toBe(true);
+      expect(attachment.endsTurn).toBeUndefined();
+      expect(
+        mounted.session.events
+          .filter((event) => event.type === "send/to-user")
+          .map((event) =>
+            event.type === "send/to-user" ? event.payload.type : undefined,
+          ),
+      ).toEqual(["widget", "attachment"]);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("refuses a malformed payload without recording anything", async () => {
+    const mounted = await mount();
+    try {
+      const result = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, { payload: { type: "shout", text: "hi" } }),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain("send_to_user.payload.type is invalid");
+      expect(result.endsTurn).toBeUndefined();
+      expect(
+        mounted.session.events.some((event) => event.type === "send/to-user"),
+      ).toBe(false);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("records the alias under its own name and the same event", async () => {
+    const mounted = await mount();
+    try {
+      const result = await invoke(
+        mounted,
+        "chat",
+        call(SEND_MESSAGE_ALIAS_V1, {
+          payload: { type: "text", text: "Legacy." },
+        }),
+      );
+
+      expect(result.isError).toBe(false);
+      expect(
+        mounted.session.events.find((event) => event.type === "send/to-user"),
+      ).toMatchObject({ payload: { type: "text", text: "Legacy." } });
+    } finally {
+      await mounted.dispose();
+    }
+  });
+});
+
+describe("wake_parent", () => {
+  test("records the hand-off and always ends the Turn", async () => {
+    const mounted = await mount();
+    try {
+      const result = await invoke(
+        mounted,
+        "automation",
+        call(WAKE_PARENT_TOOL_V1, { message: "The invoice is paid." }),
+      );
+
+      expect(result).toMatchObject({ isError: false, endsTurn: true });
+      expect(
+        mounted.session.events.find((event) => event.type === "wake/parent"),
+      ).toMatchObject({
+        turn: 4,
+        step: 2,
+        occurrenceId: "tool:4:2:0",
+        message: "The invoice is paid.",
+      });
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("refuses an empty hand-off rather than ending the Turn on nothing", async () => {
+    const mounted = await mount();
+    try {
+      const result = await invoke(
+        mounted,
+        "subagent",
+        call(WAKE_PARENT_TOOL_V1, { message: "   " }),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.endsTurn).toBeUndefined();
+      expect(
+        mounted.session.events.some((event) => event.type === "wake/parent"),
+      ).toBe(false);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+});

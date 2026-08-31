@@ -13,6 +13,7 @@ import {
   type WebChatMessage,
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
+import SendPayloadView from "./SendPayloadView.vue";
 
 const injectedWeb = inject(frockBotWebDataKey);
 if (!injectedWeb) throw new Error("shell client data was not provided");
@@ -67,7 +68,13 @@ const canSend = computed(
 function isVisible(message: WebChatMessage): boolean {
   if (message.role === "user") return message.text.length > 0;
   if (message.role === "system") return message.text.length > 0;
-  return message.text.length > 0 || message.status === "streaming";
+  // A Turn the Bot ended with a widget writes no assistant text at all, so a
+  // send is on its own enough to draw the line.
+  return (
+    message.text.length > 0 ||
+    message.sends.length > 0 ||
+    message.status === "streaming"
+  );
 }
 /*
  * System lines happen between Turns, so the thread orders by when each line
@@ -277,6 +284,18 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               </div>
               <div v-if="message.text" class="message-bubble">
                 <UiMarkdown :text="message.text" />
+              </div>
+              <!--
+                Sends sit beside the derived text rather than inside it: each
+                payload is its own block, and a widget-ended Turn has no text
+                bubble at all.
+              -->
+              <div v-if="message.sends.length > 0" class="message-sends">
+                <SendPayloadView
+                  v-for="(send, sendIndex) in message.sends"
+                  :key="sendIndex"
+                  :send="send"
+                />
               </div>
             </template>
             <div v-else class="message-bubble">{{ message.text }}</div>

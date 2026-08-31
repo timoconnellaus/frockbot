@@ -1,0 +1,298 @@
+// The Shell's runtime Contribution: the Bot's voice to its User, and a child
+// Turn's hand-off to its parent.
+//
+// Two tools, and no authority of its own:
+//
+//  1. `send_to_user` (legacy alias `send_message`) — parity register row 57b.
+//     One tool carrying the typed payload union, admitted on chat turns only,
+//     recording each send as `send/to-user` on the durable log. Row 57c: a
+//     `widget` payload ends the Turn, and no other payload does.
+//  2. `wake_parent` — row 40 / §2.13. One required `message`, a complete
+//     hand-off, admitted on automation and subagent turns only, and always
+//     ending the Turn. Delivering the hand-off into the parent's next
+//     conversational Turn is a later slice; this records it durably.
+//
+// It lives in `plugin-shell` because the Shell already owns the run DTO and
+// the WebUI that renders a send, so there is no cross-Package seam to cross.
+// Nothing here reaches the kernel: admission is a declaration the tool
+// registry enforces, and `endsTurn` is a boolean the Agent loop carries.
+import {
+  decodeSendToUserPayloadV1,
+  decodeTurnTypeV1,
+  type SendToUserPayloadV1,
+  type Session,
+  type ToolDefinition,
+  type ToolExecutionContext,
+  type ToolExecutionResult,
+  type TurnTypeV1,
+} from "@frockbot/kernel-contracts";
+// Merges the Agent loop's event declarations into the cordis Context type.
+import type {} from "@frockbot/kernel-agent-loop/agent";
+import type { Plugin } from "cordis";
+import manifest from "../frockbot.json" with { type: "json" };
+
+export const SEND_TO_USER_TOOL_V1 = "send_to_user";
+/** `SAND_LEGACY_SEND_MESSAGE_TOOL_NAME`: an alias, not a second tool. */
+export const SEND_MESSAGE_ALIAS_V1 = "send_message";
+export const WAKE_PARENT_TOOL_V1 = "wake_parent";
+
+/** The manifest Capability each tool is contributed under. */
+export const USER_VOICE_CAPABILITY_V1 = "user-voice";
+export const PARENT_HANDOFF_CAPABILITY_V1 = "parent-handoff";
+
+/**
+ * The durable ceiling the Shell's own manifest puts on a Capability, read back
+ * out of the manifest rather than restated here. A registration that drifts
+ * from the manifest is narrowed to the manifest, so the two cannot disagree
+ * about what a turn type admits.
+ */
+export function shellAdmissionCeilingV1(
+  capabilityId: string,
+): readonly TurnTypeV1[] | undefined {
+  const capabilities = (
+    manifest as {
+      configuration?: {
+        capabilities?: Array<{
+          id: string;
+          admission?: { turnTypes: string[] };
+        }>;
+      };
+    }
+  ).configuration?.capabilities;
+  const capability = capabilities?.find(
+    (candidate) => candidate.id === capabilityId,
+  );
+  const turnTypes = capability?.admission?.turnTypes;
+  if (!turnTypes) return undefined;
+  return turnTypes.map((turnType) =>
+    decodeTurnTypeV1(turnType, `shell capability "${capabilityId}" admission`),
+  );
+}
+
+function refusal(reason: string): ToolExecutionResult {
+  return { content: reason, isError: true };
+}
+
+/**
+ * The open step a Shell event belongs to. The session log is the
+ * reconstruction surface, so a send without its turn and step would not
+ * replay in place.
+ */
+function openStepPositionV1(
+  session: Session,
+  tool: string,
+): { turn: number; step: number } {
+  const started = session.events.findLast(
+    (event) => event.type === "step/start",
+  );
+  const ended = session.events.findLast((event) => event.type === "step/end");
+  if (started?.type !== "step/start") {
+    throw new Error(`${tool} has no open step to record against`);
+  }
+  if (
+    ended?.type === "step/end" &&
+    ended.turn === started.turn &&
+    ended.step === started.step
+  ) {
+    throw new Error(`${tool} has no open step to record against`);
+  }
+  return { turn: started.turn, step: started.step };
+}
+
+/** What a recorded send tells the model it did. */
+function sendAcknowledgement(payload: SendToUserPayloadV1): string {
+  switch (payload.type) {
+    case "text":
+      return "Sent to the user.";
+    case "attachment":
+      return "Attachment sent to the user.";
+    case "widget":
+      return "Question sent to the user. This Turn is over; their answer arrives as a new Turn.";
+    case "secret-request":
+      return "Secret request sent to the user.";
+    case "agent-card":
+      return "Agent card sent to the user.";
+  }
+}
+
+const SEND_TO_USER_DESCRIPTION = [
+  "Speak to the user. This is the only way to say anything the user sees.",
+  "The payload is one of:",
+  '{"type":"text","text":"…"}',
+  '{"type":"attachment","url":"https://…","name":"…","mediaType":"…"}',
+  '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
+  '{"type":"secret-request","prompt":"…","secretName":"…"}',
+  '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
+  "A widget asks the user a question with 1 to 6 options and ends your Turn;",
+  "their answer arrives as a new Turn. Every other payload leaves the Turn running.",
+].join(" ");
+
+const SEND_TO_USER_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    payload: {
+      type: "object",
+      description: "One typed send payload, as described by this tool.",
+    },
+  },
+  required: ["payload"],
+  additionalProperties: false,
+} as const;
+
+function createSendToUserTool(
+  name: string,
+  sessions: { get(sessionId: string): Session | undefined },
+): ToolDefinition {
+  return {
+    name,
+    description: SEND_TO_USER_DESCRIPTION,
+    inputSchema: structuredClone(SEND_TO_USER_INPUT_SCHEMA) as Record<
+      string,
+      unknown
+    >,
+    admission: { turnTypes: ["chat"] },
+    validate: (input: unknown) =>
+      typeof input === "object" && input !== null && !Array.isArray(input),
+    execute: async (
+      input: unknown,
+      context: ToolExecutionContext,
+    ): Promise<ToolExecutionResult> => {
+      const record = input as Record<string, unknown>;
+      let payload: SendToUserPayloadV1;
+      try {
+        payload = decodeSendToUserPayloadV1(record.payload, `${name}.payload`);
+      } catch (error) {
+        return refusal(
+          `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const session = sessions.get(context.sessionId);
+      if (!session) {
+        return refusal(
+          `${name} was refused: session "${context.sessionId}" is unavailable, so the send cannot be recorded`,
+        );
+      }
+      let position: { turn: number; step: number };
+      try {
+        position = openStepPositionV1(session, name);
+      } catch (error) {
+        return refusal(
+          `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      session.append({
+        type: "send/to-user",
+        ...position,
+        occurrenceId: context.effectId,
+        payload,
+      });
+      await session.flush();
+      return {
+        content: sendAcknowledgement(payload),
+        isError: false,
+        // Row 57c: a widget ends the Turn, and only a widget does. The
+        // decision is per result, so the same tool leaves a text send running.
+        ...(payload.type === "widget" ? { endsTurn: true } : {}),
+      };
+    },
+  };
+}
+
+function createWakeParentTool(sessions: {
+  get(sessionId: string): Session | undefined;
+}): ToolDefinition {
+  return {
+    name: WAKE_PARENT_TOOL_V1,
+    description:
+      "Hand off to your parent conversation and end this Turn. `message` must be a complete hand-off: the parent sees only what you write here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "The complete hand-off the parent Turn receives.",
+        },
+      },
+      required: ["message"],
+      additionalProperties: false,
+    },
+    admission: { turnTypes: ["automation", "subagent"] },
+    validate: (input: unknown) =>
+      typeof input === "object" && input !== null && !Array.isArray(input),
+    execute: async (
+      input: unknown,
+      context: ToolExecutionContext,
+    ): Promise<ToolExecutionResult> => {
+      const message = (input as Record<string, unknown>).message;
+      if (typeof message !== "string" || message.trim().length === 0) {
+        return refusal(
+          `${WAKE_PARENT_TOOL_V1} was refused: message must be a non-empty string`,
+        );
+      }
+      if (message.length > WAKE_PARENT_MESSAGE_LIMIT_V1) {
+        return refusal(
+          `${WAKE_PARENT_TOOL_V1} was refused: message exceeds ${WAKE_PARENT_MESSAGE_LIMIT_V1} characters`,
+        );
+      }
+      const session = sessions.get(context.sessionId);
+      if (!session) {
+        return refusal(
+          `${WAKE_PARENT_TOOL_V1} was refused: session "${context.sessionId}" is unavailable, so the hand-off cannot be recorded`,
+        );
+      }
+      let position: { turn: number; step: number };
+      try {
+        position = openStepPositionV1(session, WAKE_PARENT_TOOL_V1);
+      } catch (error) {
+        return refusal(
+          `${WAKE_PARENT_TOOL_V1} was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      session.append({
+        type: "wake/parent",
+        ...position,
+        occurrenceId: context.effectId,
+        message,
+      });
+      await session.flush();
+      // §2.13: calling it ends the turn, whatever the parent later does with it.
+      return {
+        content: "Handed off to the parent conversation. This Turn is over.",
+        isError: false,
+        endsTurn: true,
+      };
+    },
+  };
+}
+
+export const WAKE_PARENT_MESSAGE_LIMIT_V1 = 32_000;
+
+/**
+ * The Shell's runtime Contribution. Registers the user-facing send tool, its
+ * legacy alias, and the parent hand-off, each bounded by the turn types its
+ * manifest Capability declares.
+ */
+export const shellAgentPlugin: Plugin.Function = (ctx) => {
+  const userVoice = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1);
+  const parentHandoff = shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1);
+  const disposers = [
+    ctx.tools.register(
+      createSendToUserTool(SEND_TO_USER_TOOL_V1, ctx.sessions),
+      userVoice ? { admissionCeiling: userVoice } : undefined,
+    ),
+    ctx.tools.register(
+      createSendToUserTool(SEND_MESSAGE_ALIAS_V1, ctx.sessions),
+      userVoice ? { admissionCeiling: userVoice } : undefined,
+    ),
+    ctx.tools.register(
+      createWakeParentTool(ctx.sessions),
+      parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
+    ),
+  ];
+  return () => {
+    for (const dispose of disposers.toReversed()) dispose();
+  };
+};
+shellAgentPlugin.inject = ["tools", "sessions"];
+
+export default shellAgentPlugin;

@@ -15,6 +15,7 @@ import type {
   CatalogEntryV1,
   CatalogIndexEntryV1,
 } from "@frockbot/catalog-core";
+import type { SendToUserPayloadV1 } from "@frockbot/kernel-contracts";
 import type { InjectionKey, Ref } from "vue";
 
 export type { CatalogEntryV1, CatalogIndexEntryV1 };
@@ -27,6 +28,15 @@ export interface WebToolActivity {
   status: "running" | "completed" | "failed";
   text?: string;
 }
+
+/**
+ * One user-facing send, as the thread draws it. An `unsupported` entry is a
+ * payload this client cannot draw — a newer payload shape, or a malformed one.
+ * The thread says so rather than throwing, because a Turn's history has to
+ * render on a client older than the Bot that produced it.
+ */
+export type WebSendPayload =
+  { kind: "payload"; payload: SendToUserPayloadV1 } | { kind: "unsupported" };
 
 export interface WebChatMessage {
   id: string;
@@ -47,6 +57,8 @@ export interface WebChatMessage {
     | "interrupted"
     | "reconciliation-required";
   tools: WebToolActivity[];
+  /** The typed payloads this Turn sent to the user, oldest first. */
+  sends: WebSendPayload[];
 }
 
 export interface WebActiveRun {

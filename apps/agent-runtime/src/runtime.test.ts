@@ -685,10 +685,12 @@ describe("foundation Cordis runtime", () => {
     });
     runtimes.push(runtime);
     // The producer is the Composition host: a Capability whose manifest admits
-    // only automation turns registers its tools under that ceiling.
+    // only automation turns registers its tools under that ceiling. The name
+    // is a probe rather than a shipped tool, so the assertion stays about the
+    // ceiling and not about what any Package happens to contribute.
     runtime.root.tools.register(
       {
-        name: "wake_parent",
+        name: "automation_only_probe",
         description: "Hands off to the parent conversation.",
         inputSchema: { type: "object", properties: {} },
         idempotent: false,
@@ -708,12 +710,12 @@ describe("foundation Cordis runtime", () => {
       request?.type === "model/request"
         ? request.request.tools.map((tool) => tool.name)
         : [];
-    expect(offered).not.toContain("wake_parent");
+    expect(offered).not.toContain("automation_only_probe");
     expect(
       runtime.root.tools
         .schemas({ turnType: "automation" })
         .map((tool) => tool.name),
-    ).toContain("wake_parent");
+    ).toContain("automation_only_probe");
   });
 
   test("mounts the Agent on the turn type the root was created with", async () => {

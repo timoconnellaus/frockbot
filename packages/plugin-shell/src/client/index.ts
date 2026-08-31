@@ -17,6 +17,7 @@ import type {
   ConnectionCommandV1,
 } from "@frockbot/connection-core";
 import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
+import { decodeSendToUserPayloadV1 } from "@frockbot/kernel-contracts";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import { decodeBotAvatarUploadReceiptV1 } from "@frockbot/configuration-core";
 import type {
@@ -45,6 +46,7 @@ import {
   type SendPromptResult,
   type WebActiveRun,
   type WebChatMessage,
+  type WebSendPayload,
   type WebToolActivity,
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
@@ -71,6 +73,28 @@ function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {
     }
   }
   return [...tools.values()];
+}
+
+/**
+ * The Turn's sends, decoded for the thread. A payload this client cannot
+ * decode becomes an `unsupported` entry: a run has to render on a client older
+ * than the Bot that produced it, so an unknown shape is a line in the
+ * conversation and never an exception.
+ */
+function sendsFrom(events: ClientTurnEvent[]): WebSendPayload[] {
+  const sends: WebSendPayload[] = [];
+  for (const event of events) {
+    if (event.type !== "send/to-user") continue;
+    try {
+      sends.push({
+        kind: "payload",
+        payload: decodeSendToUserPayloadV1(event.payload),
+      });
+    } catch {
+      sends.push({ kind: "unsupported" });
+    }
+  }
+  return sends;
 }
 
 type DurableRunProjectionState = Pick<
@@ -132,6 +156,7 @@ function assistantMessage(
       text: run.responseText ?? "",
       status: "streaming",
       tools: toolsFrom(run.events),
+      sends: sendsFrom(run.events),
     };
   }
   if (run.status === "reconciliation-required") {
@@ -145,6 +170,7 @@ function assistantMessage(
         "Provider reconciliation is required before this Turn can continue.",
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
+      sends: sendsFrom(run.events),
     };
   }
   if (run.status === "cancelled") {
@@ -155,6 +181,7 @@ function assistantMessage(
       text: run.failure ?? "Stopped by an authenticated Stop command.",
       status: "aborted",
       tools: toolsFrom(run.events),
+      sends: sendsFrom(run.events),
     };
   }
   return {
@@ -167,6 +194,7 @@ function assistantMessage(
         : (run.responseText ?? notification?.body ?? ""),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),
+    sends: sendsFrom(run.events),
   };
 }
 
@@ -188,6 +216,7 @@ export function projectAnnouncements(
       at: announcement.at,
       status: "completed",
       tools: [],
+      sends: [],
     };
     const index = messages.findIndex(
       (candidate) => candidate.id === announcement.announcementId,
@@ -225,6 +254,7 @@ export function projectDurableRuns(
         ...(run.admittedAt ? { at: run.admittedAt } : {}),
         status: "completed",
         tools: [],
+        sends: [],
       });
     }
     const assistant = assistantMessage(run, notification);
@@ -562,7 +592,9 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
       }),
     );
     // A Package with neither a Connection Type nor a Capability contributes
-    // nothing the Plugins surface can install or assign.
+    // nothing the Plugins surface can install or assign. A Capability that
+    // takes no Connection still counts: a tool Package a User installs and
+    // assigns without any credential is exactly that shape.
     if (connectionTypes.length === 0 && decodedCapabilities.length === 0) {
       return [];
     }
@@ -1683,6 +1715,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           text,
           status: "completed",
           tools: [],
+          sends: [],
         },
         {
           id: crypto.randomUUID(),
@@ -1691,6 +1724,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           text: "",
           status: "streaming",
           tools: [],
+          sends: [],
         },
       );
       const requestController = new AbortController();
@@ -1724,6 +1758,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           text: result.text,
           status: "completed",
           tools: toolsFrom(result.events),
+          sends: sendsFrom(result.events),
         });
         try {
           await deliverNotifications(botId, generation);
@@ -1755,6 +1790,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             : "Confirming whether this Turn was admitted.",
           status: "interrupted",
           tools: [],
+          sends: [],
         });
         if (aborted) {
           web.value.error = undefined;
@@ -1782,6 +1818,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             text: "Turn was not admitted.",
             status: "error",
             tools: [],
+            sends: [],
           });
           web.value.error = "Turn was not admitted";
           return { accepted: false, error: "Turn was not admitted" };

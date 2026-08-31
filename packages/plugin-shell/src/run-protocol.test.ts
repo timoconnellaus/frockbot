@@ -577,7 +577,7 @@ describe("client run protocol v1", () => {
       schemaVersion: 1,
       runs: [
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
           runId: "run-1",
           admittedAt: timestamp,
           input: "continue",
@@ -785,6 +785,125 @@ describe("client run protocol v1", () => {
       type: "run/events-truncated",
       omittedInteractions: 2,
     });
+  });
+
+  test("projects sends and hand-offs in the order the log wrote them", () => {
+    const [call, result] = toolEvents(1) as [SessionEvent, SessionEvent];
+    const projected = projectClientRunV1(
+      storedRun([
+        event({
+          type: "send/to-user",
+          seq: 10,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:send",
+          payload: { type: "text", text: "On it." },
+        }),
+        call,
+        result,
+        event({
+          type: "send/to-user",
+          seq: 13,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:widget",
+          payload: {
+            type: "widget",
+            widget: { prompt: "Which day?", options: ["Tue", "Thu"] },
+          },
+        }),
+        event({
+          type: "wake/parent",
+          seq: 14,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:wake",
+          message: "Paid.",
+        }),
+      ]),
+    );
+
+    // Version 2 is what carries the two new event types; a client pinned to 1
+    // still decodes the body it produces.
+    expect(projected.schemaVersion).toBe(2);
+    expect(projected.events).toEqual([
+      { type: "send/to-user", payload: { type: "text", text: "On it." } },
+      { type: "tool/call", call: { id: "tool-1", name: "lookup" } },
+      {
+        type: "tool/result",
+        callId: "tool-1",
+        content: "result-0",
+        isError: false,
+      },
+      {
+        type: "send/to-user",
+        payload: {
+          type: "widget",
+          widget: { prompt: "Which day?", options: ["Tue", "Thu"] },
+        },
+      },
+      { type: "wake/parent", message: "Paid." },
+    ]);
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      })[0]?.events,
+    ).toEqual(projected.events);
+  });
+
+  test("truncates sends alongside tool interactions, oldest first", () => {
+    const sends = Array.from({ length: 600 }, (_, index) =>
+      event({
+        type: "send/to-user" as const,
+        seq: index,
+        timestamp,
+        turn: 1,
+        step: 1,
+        occurrenceId: `tool:1:1:${index}`,
+        payload: { type: "text" as const, text: `send-${index}` },
+      }),
+    );
+
+    const projected = projectClientRunV1(storedRun(sends));
+
+    expect(projected.events).toHaveLength(512);
+    expect(projected.events[0]).toEqual({
+      type: "run/events-truncated",
+      omittedInteractions: 89,
+    });
+    // The newest send survives: truncation drops history, never the latest
+    // thing the User is looking at.
+    expect(projected.events.at(-1)).toEqual({
+      type: "send/to-user",
+      payload: { type: "text", text: "send-599" },
+    });
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      })[0]?.events,
+    ).toHaveLength(512);
+  });
+
+  test("refuses a projected send whose payload it cannot decode", () => {
+    expect(() =>
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [
+          {
+            ...projectClientRunV1(storedRun([])),
+            events: [{ type: "send/to-user", payload: { type: "sms" } }],
+          },
+        ],
+        page: { truncated: false },
+      }),
+    ).toThrow("run event.payload.type is invalid");
   });
 
   test("rejects orphaned tool history at projection", () => {
