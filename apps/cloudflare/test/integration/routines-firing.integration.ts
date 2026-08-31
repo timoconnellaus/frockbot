@@ -133,7 +133,11 @@ async function fireRoutine(
     }),
   );
   await makeDue(userId, botId);
-  expect(await runDurableObjectAlarm(botStub(userId, botId))).toBe(true);
+  // A nudge, never a claim: on a slow runner the object's own scheduled alarm
+  // can arrive before this drive does, and the drive then finds nothing pending
+  // and answers `false` for a firing that has already happened. What the firing
+  // did is read from durable state, below.
+  await runDurableObjectAlarm(botStub(userId, botId));
   return settledRoutineFiringV1<StoredRunProbe>(userId, botId);
 }
 

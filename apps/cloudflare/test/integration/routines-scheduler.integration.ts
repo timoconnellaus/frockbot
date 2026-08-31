@@ -96,8 +96,11 @@ describe("a Routine firing, from the command to the admitted Turn", () => {
 
     await makeDue(userId, botId);
     // The object wakes itself: the alarm was armed by the command that created
-    // the Routine, and nothing outside the Bot asks it to fire.
-    expect(await runDurableObjectAlarm(botStub(userId, botId))).toBe(true);
+    // the Routine, and nothing outside the Bot asks it to fire. Driving that
+    // alarm here is a nudge and not a claim — on a slow runner the object's own
+    // scheduled delivery arrives first and this drive finds nothing pending —
+    // so the boolean is ignored and the firing is read from durable state.
+    await runDurableObjectAlarm(botStub(userId, botId));
 
     // The firing is read once it has settled, never the instant the alarm
     // returns: the run record exists from admission onwards, so a read that

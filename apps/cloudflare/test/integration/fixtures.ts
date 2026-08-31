@@ -87,6 +87,12 @@ interface RoutineFiringProbeV1 {
  * occurrence has already moved past its `dueAt`, and an alarm arriving while a
  * firing is in flight only defers — so the poll doubles as the drain for a
  * firing that was minted but has not been run yet.
+ *
+ * The drive is a nudge and its answer means nothing: `false` only says this
+ * call found no alarm pending, which is what a slow runner produces when the
+ * object's own scheduled delivery arrived first and already ran the firing. No
+ * test should assert on it. Durable state is the single source of truth for
+ * whether a Routine fired, and this is the only thing that reads it.
  */
 export async function settledRoutineFiringV1<
   Run extends RoutineFiringProbeV1 = RoutineFiringProbeV1,
