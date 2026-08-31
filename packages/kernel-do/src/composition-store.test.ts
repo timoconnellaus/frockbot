@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   bootstrapGeneration,
+  compositionArtifactSetHashV1,
+  compositionGenerationIdV1,
   type CompositionGenerationV1,
+  type CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
 import {
   BotDurableAuthority,
@@ -95,11 +98,61 @@ async function successor(
   };
 }
 
-function createStore(storage: MemoryStorage) {
+function createStore(storage: MemoryStorage, now?: () => Date) {
   return new DurableCompositionStore({
     state: { storage } as unknown as DurableObjectState,
     bootstrap: () => bootstrap("2026-08-31T00:00:00.000Z"),
+    ...(now ? { now } : {}),
   });
+}
+
+const authoredMember: CompositionMemberV1 = {
+  packageId: "bot-authored-greeter",
+  specifier: "bot:greeter",
+  version: "0.0.1",
+  manifestHash: "a".repeat(64),
+  provenance: {
+    kind: "bot",
+    packageId: "bot-authored-greeter",
+    version: "0.0.1",
+    botId: "primary",
+    sessionId: "user-1:primary",
+    turnId: "turn-1",
+    runId: "run-1",
+    authoredAt: "2026-08-31T12:00:00.000Z",
+  },
+  artifact: {
+    contentHash: "b".repeat(64),
+    size: 512,
+    mediaType: "application/javascript",
+    bundlerVersion: "worker-bundler@0.2.3",
+  },
+};
+
+/** A successor that actually changes the member set, so a revert is visible. */
+async function grownSuccessor(
+  parent: CompositionGenerationV1,
+  createdAt: string,
+): Promise<CompositionGenerationV1> {
+  const members = [...parent.members, authoredMember].sort((left, right) =>
+    left.packageId.localeCompare(right.packageId),
+  );
+  const artifactSetHash = await compositionArtifactSetHashV1(members);
+  return {
+    schemaVersion: 1,
+    generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+    artifactSetHash,
+    parentGenerationId: parent.generationId,
+    createdAt,
+    origin: {
+      kind: "bot-authored",
+      runId: "run-1",
+      sessionId: "user-1:primary",
+      turnId: "turn-1",
+    },
+    members,
+    status: "pending",
+  };
 }
 
 describe("Bot Durable Object Composition records", () => {
@@ -161,6 +214,117 @@ describe("Bot Durable Object Composition records", () => {
     ).rejects.toThrow("mismatched artifact set hash");
     await store.propose(next);
     await expect(store.propose(next)).rejects.toThrow("already exists");
+  });
+
+  test("reverting records a new pending generation with the target's members", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(
+      storage,
+      () => new Date("2026-09-05T00:00:00.000Z"),
+    );
+    const bootstrapped = await store.current();
+    const authored = await grownSuccessor(
+      bootstrapped,
+      "2026-09-01T00:00:00.000Z",
+    );
+    await store.propose(authored);
+    await store.commit(authored.generationId);
+
+    const reverted = await store.revert(bootstrapped.generationId, {
+      kind: "revert",
+      revertsTo: bootstrapped.generationId,
+      userId: "user-1",
+    });
+
+    expect(reverted.generationId).not.toBe(bootstrapped.generationId);
+    expect(reverted.status).toBe("pending");
+    expect(reverted.parentGenerationId).toBe(authored.generationId);
+    expect(reverted.members).toEqual(bootstrapped.members);
+    expect(reverted.artifactSetHash).toBe(bootstrapped.artifactSetHash);
+    expect(reverted.createdAt).toBe("2026-09-05T00:00:00.000Z");
+    expect(reverted.origin).toEqual({
+      kind: "revert",
+      revertsTo: bootstrapped.generationId,
+      userId: "user-1",
+    });
+    // The reverted-to generation is a record: reverting never mutates it.
+    expect((await store.read(bootstrapped.generationId))?.status).toBe(
+      "superseded",
+    );
+    expect((await store.current()).generationId).toBe(authored.generationId);
+    expect((await store.read(reverted.generationId))?.members).toEqual(
+      bootstrapped.members,
+    );
+  });
+
+  test("the reverted generation activates only when it is committed", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(
+      storage,
+      () => new Date("2026-09-05T00:00:00.000Z"),
+    );
+    const bootstrapped = await store.current();
+    const authored = await grownSuccessor(
+      bootstrapped,
+      "2026-09-01T00:00:00.000Z",
+    );
+    await store.propose(authored);
+    await store.commit(authored.generationId);
+
+    const reverted = await store.revert(bootstrapped.generationId, {
+      kind: "revert",
+      revertsTo: bootstrapped.generationId,
+      userId: "user-1",
+    });
+    await store.commit(reverted.generationId);
+
+    const current = await store.current();
+    expect(current.generationId).toBe(reverted.generationId);
+    expect(current.members).toEqual(bootstrapped.members);
+    expect((await store.read(authored.generationId))?.status).toBe(
+      "superseded",
+    );
+    expect(
+      (await store.list({ limit: 10 })).generations.map(
+        (entry) => entry.generationId,
+      ),
+    ).toEqual([
+      reverted.generationId,
+      authored.generationId,
+      bootstrapped.generationId,
+    ]);
+  });
+
+  test("refuses an unknown target and the generation that is already current", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(
+      storage,
+      () => new Date("2026-09-05T00:00:00.000Z"),
+    );
+    const bootstrapped = await store.current();
+
+    await expect(
+      store.revert("missing", {
+        kind: "revert",
+        revertsTo: "missing",
+        userId: "user-1",
+      }),
+    ).rejects.toThrow('composition generation "missing" is unknown');
+    await expect(
+      store.revert(bootstrapped.generationId, {
+        kind: "revert",
+        revertsTo: bootstrapped.generationId,
+        userId: "user-1",
+      }),
+    ).rejects.toThrow("is already current");
+    await expect(
+      store.revert(bootstrapped.generationId, {
+        kind: "revert",
+        revertsTo: "some-other-generation",
+        userId: "user-1",
+      }),
+    ).rejects.toThrow("does not name its target");
+    expect([...storage.values.keys()]).toHaveLength(4);
   });
 
   test("lists generations newest first and paginates by cursor", async () => {

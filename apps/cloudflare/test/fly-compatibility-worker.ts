@@ -174,6 +174,30 @@ export class CompositionProbe extends DurableObject {
     await this.store.commit(generationId);
   }
 
+  /** Reverting is itself a recorded generation, pending until it is committed. */
+  async revertGeneration(toGenerationId: string): Promise<string> {
+    const reverted = await this.store.revert(toGenerationId, {
+      kind: "revert",
+      revertsTo: toGenerationId,
+      userId: "user-1",
+    });
+    return reverted.generationId;
+  }
+
+  /** The refusal message, caught inside the object so no RPC rejection escapes. */
+  async revertRefusal(toGenerationId: string): Promise<string> {
+    try {
+      await this.revertGeneration(toGenerationId);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    return "";
+  }
+
+  async generationStatus(generationId: string): Promise<string | undefined> {
+    return (await this.store.read(generationId))?.status;
+  }
+
   async commitDuringNextTurn(createdAt: string): Promise<void> {
     this.commitDuringTurn = createdAt;
   }

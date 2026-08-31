@@ -497,7 +497,65 @@ class MemoryConfiguration
       revision: request.command.expectedRevision + 1,
     });
   }
+  private compositionGeneration(
+    botId: string,
+    generationId: string,
+    isCurrent: boolean,
+  ) {
+    return {
+      schemaVersion: 1 as const,
+      botId,
+      generationId,
+      createdAt: "2026-08-31T00:00:00.000Z",
+      status: (isCurrent ? "active" : "superseded") as "active" | "superseded",
+      origin: { kind: "bootstrap" as const },
+      isCurrent,
+      members: [],
+    };
+  }
+  listCompositionGenerations(
+    request: Parameters<
+      BotConfigurationBinding["listCompositionGenerations"]
+    >[0],
+  ) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      currentGenerationId: COMPOSITION_GENERATION_ID,
+      generations: [
+        this.compositionGeneration(
+          request.botId,
+          COMPOSITION_GENERATION_ID,
+          true,
+        ),
+      ],
+    });
+  }
+  getCompositionGeneration(
+    request: Parameters<BotConfigurationBinding["getCompositionGeneration"]>[0],
+  ) {
+    return Promise.resolve(
+      request.generationId === COMPOSITION_GENERATION_ID
+        ? this.compositionGeneration(request.botId, request.generationId, true)
+        : undefined,
+    );
+  }
+  revertComposition(
+    request: Parameters<BotConfigurationBinding["revertComposition"]>[0],
+  ) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      status: "applied" as const,
+      generationId: COMPOSITION_REVERTED_GENERATION_ID,
+      currentGenerationId: request.command.expectedGenerationId,
+    });
+  }
 }
+
+const COMPOSITION_GENERATION_ID = "2026-08-31T00:00:00.000Z:0123456789abcdef";
+const COMPOSITION_REVERTED_GENERATION_ID =
+  "2026-09-01T00:00:00.000Z:0123456789abcdef";
 
 class MemoryConnections implements ConnectionBinding {
   completed: Array<{ connectionId: string; connectedAccountId: string }> = [];
@@ -615,6 +673,39 @@ function createTestGateway(
           return configuration.executeConnection({
             schemaVersion: 1,
             userId,
+            command,
+          });
+        },
+        listCompositionGenerations: (userId, botId, query) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.listCompositionGenerations({
+            schemaVersion: 1,
+            userId,
+            botId,
+            query,
+          });
+        },
+        getCompositionGeneration: (userId, botId, generationId) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.getCompositionGeneration({
+            schemaVersion: 1,
+            userId,
+            botId,
+            generationId,
+          });
+        },
+        revertComposition: (userId, botId, command) => {
+          const configuration =
+            configurations.get(userId) ?? new MemoryConfiguration();
+          configurations.set(userId, configuration);
+          return configuration.revertComposition({
+            schemaVersion: 1,
+            userId,
+            botId,
             command,
           });
         },

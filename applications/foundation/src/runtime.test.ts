@@ -221,6 +221,12 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       lookupConnectionCommand: () =>
         Promise.reject(new Error("not used while composing")),
+      listCompositionGenerations: () =>
+        Promise.reject(new Error("not used while composing")),
+      getCompositionGeneration: () =>
+        Promise.reject(new Error("not used while composing")),
+      revertComposition: () =>
+        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions

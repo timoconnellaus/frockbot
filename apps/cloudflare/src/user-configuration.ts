@@ -251,8 +251,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       botId: rpcBotId,
       effectId: rpcString(200),
       day: rpcPattern(AUTHORING_QUOTA_DAY, 10),
-      sourceBytes: rpcInteger(0, 64 * 1024 * 1024),
-      retainedGenerations: rpcInteger(0, 1_000_000),
+      sourceBytes: rpcInteger({ minimum: 0, maximum: 64 * 1024 * 1024 }),
+      retainedGenerations: rpcInteger({ minimum: 0, maximum: 1_000_000 }),
     });
     return reserveAuthoringQuotaV1(this.ctx.storage, {
       schemaVersion: 1,

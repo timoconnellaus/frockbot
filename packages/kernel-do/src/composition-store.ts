@@ -6,7 +6,9 @@
 import type { CompositionPinV1 } from "@frockbot/kernel-contracts";
 import {
   assertCompositionArtifactSetHashV1,
+  compositionGenerationIdV1,
   type CompositionGenerationV1,
+  type CompositionOriginV1,
   type CompositionStore,
   decodeCompositionGenerationV1,
 } from "@frockbot/kernel-composition/generation";
@@ -57,6 +59,8 @@ export interface DurableCompositionStoreOptions {
   state: DurableObjectState;
   /** Builds the first-party generation a Bot starts on. Supplied by the Package. */
   bootstrap(): Promise<CompositionGenerationV1>;
+  /** Injected clock; the revert generation is stamped with it. */
+  now?(): Date;
 }
 
 /**
@@ -67,10 +71,12 @@ export interface DurableCompositionStoreOptions {
 export class DurableCompositionStore implements CompositionStore {
   private readonly ctx: DurableObjectState;
   private readonly buildBootstrap: () => Promise<CompositionGenerationV1>;
+  private readonly now: () => Date;
 
   constructor(options: DurableCompositionStoreOptions) {
     this.ctx = options.state;
     this.buildBootstrap = options.bootstrap;
+    this.now = options.now ?? (() => new Date());
   }
 
   /**
@@ -242,6 +248,47 @@ export class DurableCompositionStore implements CompositionStore {
       }
       await transaction.put(writes);
     });
+  }
+
+  /**
+   * Reverting is itself a recorded generation: a **new** pending generation
+   * whose members equal the target's, parented on the generation that is
+   * current right now. The recorded target is never mutated, and the revert
+   * takes effect at the next admitted Turn like any other activation.
+   */
+  async revert(
+    toGenerationId: string,
+    origin: Extract<CompositionOriginV1, { kind: "revert" }>,
+  ): Promise<CompositionGenerationV1> {
+    if (origin.kind !== "revert" || origin.revertsTo !== toGenerationId) {
+      throw new Error("composition revert origin does not name its target");
+    }
+    const current = await this.current();
+    if (toGenerationId === current.generationId) {
+      throw new Error(
+        `composition generation "${toGenerationId}" is already current`,
+      );
+    }
+    const target = await this.read(toGenerationId);
+    if (!target) {
+      throw new Error(`composition generation "${toGenerationId}" is unknown`);
+    }
+    const createdAt = this.now().toISOString();
+    const generation = decodeCompositionGenerationV1({
+      schemaVersion: 1,
+      generationId: compositionGenerationIdV1(
+        createdAt,
+        target.artifactSetHash,
+      ),
+      artifactSetHash: target.artifactSetHash,
+      parentGenerationId: current.generationId,
+      createdAt,
+      origin,
+      members: target.members,
+      status: "pending",
+    });
+    await this.propose(generation);
+    return generation;
   }
 
   /** Newest first; `cursor` continues from the previous page. */

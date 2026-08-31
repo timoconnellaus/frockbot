@@ -79,6 +79,11 @@ export interface CompositionStore {
     options?: { pin?: boolean },
   ): Promise<void>;
   commit(generationId: string): Promise<void>;
+  /** Records a revert as a new pending generation; never mutates the target. */
+  revert(
+    toGenerationId: string,
+    origin: Extract<CompositionOriginV1, { kind: "revert" }>,
+  ): Promise<CompositionGenerationV1>;
   list(query: {
     limit: number;
     cursor?: string;

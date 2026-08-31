@@ -17,6 +17,11 @@ import {
   type ClientRunListQueryV1,
   type ClientRunListV1,
 } from "@frockbot/plugin-shell/run-protocol";
+import {
+  decodeCompositionCommandReceiptV1,
+  decodeCompositionGenerationListViewV1,
+  decodeCompositionGenerationViewV1,
+} from "@frockbot/configuration-core";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -120,6 +125,11 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     updateSheep: (request) => rpc.updateSheep(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
+    listCompositionGenerations: (request) =>
+      rpc.listCompositionGenerations(request),
+    getCompositionGeneration: (request) =>
+      rpc.getCompositionGeneration(request),
+    revertComposition: (request) => rpc.revertComposition(request),
     run: (command) =>
       rpc.run({
         schemaVersion: 1,
@@ -418,6 +428,39 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           packageId,
           commandId,
         }),
+      listCompositionGenerations: async (userId, botId, query) =>
+        decodeCompositionGenerationListViewV1(
+          await botStateStub(env, userId, botId).listCompositionGenerations({
+            schemaVersion: 1,
+            userId,
+            botId,
+            query,
+          }),
+        ),
+      getCompositionGeneration: async (userId, botId, generationId) => {
+        const generation = await botStateStub(
+          env,
+          userId,
+          botId,
+        ).getCompositionGeneration({
+          schemaVersion: 1,
+          userId,
+          botId,
+          generationId,
+        });
+        return generation === undefined
+          ? undefined
+          : decodeCompositionGenerationViewV1(generation);
+      },
+      revertComposition: async (userId, botId, command) =>
+        decodeCompositionCommandReceiptV1(
+          await botStateStub(env, userId, botId).revertComposition({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        ),
       updateSheep: async (userId, botId, command) =>
         decodeFlockReceiptV1(
           await botStateStub(env, userId, botId).updateSheep({

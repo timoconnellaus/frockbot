@@ -4,6 +4,12 @@ import {
   clientSurfaceRegistryKey,
   type ClientPlugin,
 } from "@frockbot/client-core";
+import { ref } from "vue";
+import {
+  compositionWebDataKey,
+  createCompositionWebData,
+  type CompositionWebData,
+} from "./composition-state.js";
 import BotSettingsSurface from "./BotSettingsSurface.vue";
 import BotSettingsTrigger from "./BotSettingsTrigger.vue";
 import PluginsSurface from "./PluginsSurface.vue";
@@ -13,7 +19,25 @@ import UserSettingsSurface from "./UserSettingsSurface.vue";
 
 export const settingsClientPlugin: ClientPlugin = (ctx) => {
   const surfaces = ctx.inject(clientSurfaceRegistryKey);
+  // The Composition surface reads Bot Durable Object records over the hosted
+  // protocol; a shell without it simply reports the surface unavailable.
+  const composition = ref<CompositionWebData>(
+    undefined as unknown as CompositionWebData,
+  );
+  composition.value = createCompositionWebData(composition, {
+    ...(ctx.transport.hostedRequest
+      ? { request: ctx.transport.hostedRequest.bind(ctx.transport) }
+      : {}),
+    ...(ctx.transport.readAuthenticatedUserId
+      ? {
+          readAuthenticatedUserId: ctx.transport.readAuthenticatedUserId.bind(
+            ctx.transport,
+          ),
+        }
+      : {}),
+  });
   return [
+    ctx.provide(compositionWebDataKey, composition),
     surfaces.register({
       id: "bot-settings",
       title: "Bot settings",

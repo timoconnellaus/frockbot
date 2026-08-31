@@ -7,6 +7,7 @@ import {
   isModelConnectionEligible,
   resolveBotSettingsModel,
 } from "./bot-settings.js";
+import CompositionSection from "./CompositionSection.vue";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
 const providedWeb = inject(frockBotWebDataKey);
@@ -196,6 +197,7 @@ async function save(): Promise<void> {
         {{ saving ? "Saving…" : "Save settings" }}
       </UiButton>
     </div>
+    <CompositionSection />
   </form>
 </template>
 
