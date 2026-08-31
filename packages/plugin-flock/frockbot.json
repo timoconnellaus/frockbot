@@ -11,6 +11,7 @@
       { "entry": "./user", "host": "user" },
       { "entry": "./bot", "host": "bot" }
     ],
+    "runtime": { "entry": "./agent" },
     "client": {
       "entry": "./client",
       "mounts": [
@@ -21,5 +22,12 @@
       "outlets": []
     }
   },
-  "permissions": []
+  "permissions": ["bot:self-manage"],
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [],
+    "capabilities": [
+      { "id": "bot-self-management", "kind": "tool", "connectionTypes": [] }
+    ]
+  }
 }

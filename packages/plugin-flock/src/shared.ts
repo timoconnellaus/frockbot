@@ -2,12 +2,15 @@
 import {
   decodeBotAvatarV1,
   decodeBotIdV1,
+  decodeBotSelfWriterV1,
   isPublicIdentifier,
   type BotAvatarV1,
   type BotNameProvenanceV1,
+  type BotSelfWriterV1,
   type CapabilityAssignmentView,
   type ModelAssignment,
 } from "@frockbot/configuration-core";
+export type { BotSelfWriterV1 } from "@frockbot/configuration-core";
 export {
   BOT_AVATAR_CONTENT_TYPES,
   BOT_AVATAR_MAX_BYTES,
@@ -44,8 +47,20 @@ export interface BotRegistrationV1 {
   botId: string;
   registeredAt: string;
   initialName: string;
+  /**
+   * The persona the Bot is materialized with. GrokBot's `CreateAgent` takes a
+   * `description` that becomes the new agent's profile, and the seed is the
+   * only place a creator can put it: the Bot's own profile lives in the Bot
+   * Durable Object, which no other Bot may write.
+   */
+  initialDescription?: string;
   initialModel?: ModelAssignment;
   initialModelBinding?: InitialModelBindingV1;
+  /**
+   * The Bot and Turn that created this Bot, when a Bot created it. Absent for
+   * a User-created Bot and for every registration written before this existed.
+   */
+  createdBy?: BotSelfWriterV1;
   sheep: SheepRecipeV1;
 }
 export interface BotMembershipViewV1 {
@@ -94,6 +109,10 @@ export interface CreateBotCommandV1 {
   expectedRevision: number;
   botId: string;
   name: string;
+  /** The new Bot's persona, materialized into its profile. */
+  description?: string;
+  /** The Bot and Turn issuing this command, when a Bot issues it. */
+  createdBy?: BotSelfWriterV1;
   sheep?: SheepRecipeV1;
 }
 export interface UpdateSheepCommandV1 {
@@ -225,6 +244,18 @@ function botIdentifier(value: unknown): string {
     throw new FlockDecodeError("botId is invalid");
   }
 }
+/** An optional Bot writer, decoded once at this seam and never re-shaped. */
+function botWriter(value: unknown, label: string): BotSelfWriterV1 | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return decodeBotSelfWriterV1(value, label);
+  } catch (error) {
+    throw new FlockDecodeError(
+      error instanceof Error ? error.message : `${label} is invalid`,
+    );
+  }
+}
+
 function boundedText(value: unknown, label: string, maximum: number): string {
   if (
     typeof value !== "string" ||
@@ -326,17 +357,27 @@ export function decodeCreateBotCommandV1(input: unknown): CreateBotCommandV1 {
   exact(
     value,
     ["schemaVersion", "type", "commandId", "expectedRevision", "botId", "name"],
-    ["sheep"],
+    ["description", "createdBy", "sheep"],
   );
   if (value.schemaVersion !== 1 || value.type !== "bot/create")
     throw new FlockDecodeError("unsupported create Bot command");
+  const botId = botIdentifier(value.botId);
+  const createdBy = botWriter(value.createdBy, "createdBy");
+  // The creator names itself; a Bot may not claim the new Bot wrote its own
+  // registration, and it may not attribute the create to some third Bot.
+  if (createdBy && createdBy.botId === botId)
+    throw new FlockDecodeError("createdBy is invalid");
   return {
     schemaVersion: 1,
     type: "bot/create",
     commandId: identifier(value.commandId, "commandId"),
     expectedRevision: revision(value.expectedRevision),
-    botId: botIdentifier(value.botId),
+    botId,
     name: boundedText(value.name, "name", 100),
+    ...(value.description === undefined
+      ? {}
+      : { description: boundedText(value.description, "description", 10_000) }),
+    ...(createdBy ? { createdBy } : {}),
     sheep:
       value.sheep === undefined ? undefined : decodeSheepRecipeV1(value.sheep),
   };
@@ -371,7 +412,7 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "sheep"],
-    ["initialModel", "initialModelBinding"],
+    ["initialDescription", "initialModel", "initialModelBinding", "createdBy"],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
@@ -390,13 +431,27 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   ) {
     throw new FlockDecodeError("initial model binding is invalid");
   }
+  const botId = botIdentifier(bot.botId);
+  const createdBy = botWriter(bot.createdBy, "createdBy");
+  if (createdBy && createdBy.botId === botId)
+    throw new FlockDecodeError("createdBy is invalid");
   return {
     schemaVersion: 1,
-    botId: botIdentifier(bot.botId),
+    botId,
     registeredAt: boundedText(bot.registeredAt, "registeredAt", 64),
     initialName: boundedText(bot.initialName, "initialName", 100),
+    ...(bot.initialDescription === undefined
+      ? {}
+      : {
+          initialDescription: boundedText(
+            bot.initialDescription,
+            "initialDescription",
+            10_000,
+          ),
+        }),
     initialModel,
     initialModelBinding: binding,
+    ...(createdBy ? { createdBy } : {}),
     sheep: decodeSheepRecipeV1(bot.sheep),
   };
 }

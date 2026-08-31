@@ -65,6 +65,7 @@ describe("foundation application", () => {
         "computer",
         "credentials",
         "echo",
+        "flock",
         "fly-sprite",
         "identity",
         "memory",

@@ -56,6 +56,11 @@ import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent
 import type { ComputerSyncHostV1 } from "@frockbot/computer-core";
 // Flock contributes lifecycle routes and durable User/Bot state.
 import flockManifest from "@frockbot/plugin-flock/manifest";
+import {
+  createFlockRuntimePlugin,
+  type FlockSelfRuntimeHostV1,
+} from "@frockbot/plugin-flock/agent";
+export type { FlockSelfRuntimeHostV1 } from "@frockbot/plugin-flock/agent";
 // Gateway Flock behavior is resolved as a lifecycle-owned Plugin.
 import {
   createFlockBackendContribution,
@@ -445,10 +450,27 @@ export function createFoundationHostedRuntimePackages(
      * backs.
      */
     computerSync?: ComputerSyncHostV1;
+    /**
+     * The Bot self-management seam, supplied by the Bot Durable Object for one
+     * admitted Turn. Absent outside a Turn, and the Flock runtime Contribution
+     * is then not mounted: a Bot changes its own identity, or adds a Bot to
+     * its User's flock, only inside a Turn whose Session and Turn the write
+     * can name.
+     */
+    botSelfManagement?: FlockSelfRuntimeHostV1;
     packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationAssignedRuntimePackage[] {
   return [
+    ...(host.botSelfManagement
+      ? [
+          runtimePackage(
+            plan,
+            "flock",
+            createFlockRuntimePlugin(host.botSelfManagement),
+          ),
+        ]
+      : []),
     ...(host.skills
       ? [runtimePackage(plan, "skills", createSkillsRuntimePlugin(host.skills))]
       : []),
@@ -582,6 +604,10 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("skills");
   // Memory mounts only for a Turn whose Memory roots the host can reach.
   runtimeIds.delete("memory");
+  // A Bot changes itself only inside an admitted Turn, which supplies the
+  // self-management host; the Flock's other Contributions are backend and
+  // client, and neither runs here.
+  runtimeIds.delete("flock");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

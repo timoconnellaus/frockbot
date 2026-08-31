@@ -64,7 +64,7 @@
     {
       "specifier": "@frockbot/plugin-flock",
       "version": "0.0.1",
-      "grants": []
+      "grants": ["bot:self-manage"]
     },
     {
       "specifier": "@frockbot/plugin-clock",

@@ -508,7 +508,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | #   | Capability                                                                                                                       | GrokBot mechanism                                                                                                                                               | Evidence         | FrockBot Package (proposed)                  | Status      |
 | --- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------- | ----------- |
 | 1   | **Bot model** — identity record: name, description, title, avatar shape/colour, `namedBy`                                        | `agents/<id>/profile.json`                                                                                                                                      | §2.18            | `plugin-flock`                               | landed      |
-| 2   | Create and edit a Bot from inside a Bot; only provided fields change; no delete tool                                             | `CreateAgent{name, description?}`, `UpdateAgent{agent_id, …}`                                                                                                   | §2.12            | `plugin-flock`                               | not started |
+| 2   | Create and edit a Bot from inside a Bot; only provided fields change; no delete tool                                             | `CreateAgent{name, description?}`, `UpdateAgent{agent_id, …}`                                                                                                   | §2.12            | `plugin-flock`                               | landed      |
 | 3   | Bot deletion is a user-only permanent UI action; no archive, no hide                                                             | sidebar right-click → Delete, removes transcript                                                                                                                | §2A              | `plugin-flock` + settings UI                 | divergent   |
 | 4   | Per-Bot settings: `hidden_from_sidebar` (still reachable by palette), `notify_on_updates`                                        | `update_state settings set` → `settings.json`                                                                                                                   | §2.18            | `plugin-settings`                            | landed      |
 | 5   | Per-Bot avatar set from a file on disk or cleared; self-rename announced, provenance recorded                                    | `update_state avatar`; `profile.json.namedBy`                                                                                                                   | §2.2, §2.18      | `plugin-flock`                               | partial     |
@@ -590,6 +590,27 @@ it injected instead. The reasoning is in `docs/plans/slice-2.md` Step 3.
 **Status `partial`** means some of the row exists at HEAD. What is missing, for
 the rows whose status the code moved:
 
+- **2** — landed. `bot_update` and `bot_create` are runtime tools the Flock
+  Package contributes (`plugin-flock/src/agent.ts`), mounted only for an
+  admitted Turn whose Session and Turn the write can name
+  (`plugin-shell/src/backend-flock.ts`). `bot_update` is a true partial update:
+  it takes `name`, `description`, `title`, `hidden_from_sidebar` and
+  `notify_on_updates`, changes only the fields the call carries, and writes
+  nothing at all when the durable record already holds them. A self-rename goes
+  through `bot/set-profile` with `namedBy: "bot"` and a `writer` naming the Bot,
+  Session and Turn, so the `bot/renamed` announcement carries its provenance.
+  **There is no delete tool**, matching GrokBot: `bot_update` cannot archive,
+  restore or remove anything, and no third tool does.
+
+  Two deliberate narrowings. GrokBot's `UpdateAgent` cannot _clear_ a field;
+  FrockBot's can, with the empty string, because `bot/set-profile` already
+  defines that and refusing it would leave a Bot able to set a title it could
+  never take back. And `bot_create` takes no `model`: giving the new Bot the
+  caller's model would mean writing a `bot/select-model` and a Capability
+  Assignment onto another Bot, and "self-modification never widens authority" —
+  the new Bot is registered exactly as the sidebar registers one, with no
+  Assignments and no model of its own, and follows its User's default model.
+
 - **3** — **`divergent`, deliberately.** FrockBot ships reversible archive and
   restore (`bot/archive`, `bot/restore` in `plugin-flock/src/shared.ts`, the
   saga in `user.ts` and `bot.ts`, ADR 0006) where GrokBot has a permanent
@@ -598,6 +619,12 @@ the rows whose status the code moved:
   `hidden_from_sidebar` (row 4) only takes it out of the list. Nothing deletes a
   Bot, so this row will not reach `landed` without a decision to add permanent
   deletion.
+
+  The half of the row that _is_ matched is the tool surface (row 2): archive and
+  restore are User commands over the Flock's HTTP routes and its client, and no
+  Bot-callable tool reaches either. A Bot may hide itself and rename itself; it
+  cannot archive itself, restore itself, or remove any Bot.
+
 - **4** — landed, with one shape difference: GrokBot keeps a hidden Bot
   reachable through a command palette, and FrockBot has no palette, so the Flock
   sidebar grows a "Show N hidden" group instead (`FlockSidebar.vue`). The
@@ -608,10 +635,20 @@ the rows whose status the code moved:
   to 5 MB is set through `POST /api/bots/:id/avatar`, served back from
   `GET /api/bots/:id/avatar`, and cleared by setting the avatar back to the
   sheep; the provenance is recorded in `BotProfile.namedBy` and a rename appends
-  a durable `bot/renamed` Session event the WebUI renders as a system line. What
-  is missing is the _self_-rename: a Bot cannot call the command yet, because no
-  agent tool reaches it. `bot/set-profile` already accepts `namedBy: "bot"` for
-  the slice that adds one (row 2).
+  a durable `bot/renamed` Session event the WebUI renders as a system line. The
+  self-rename is landed too: `bot_update` (row 2) issues the command with
+  `namedBy: "bot"` and a `writer` naming the Bot, Session and Turn, and the
+  `bot/renamed` event carries both.
+
+  What is still missing is the _file_ half. GrokBot's `update_state avatar` takes
+  a path on the box; FrockBot's avatar arrives as bytes over
+  `POST /api/bots/:id/avatar`, which only a client can call, so a Bot cannot set
+  its own avatar from a file it wrote on its Computer. **TODO:** that needs a
+  Computer-dependent read — the Bot names a path, the Computer provider reads the
+  bytes and hands them to the same content-addressed upload — and it is therefore
+  blocked on the Computer rows (23–28) being exercised against a live Sprite. It
+  is deliberately out of scope for the self-management slice, whose tools
+  function while the Computer is hibernated.
 
 - **9** — the note tier is accepted and stored (`[note] ` prefix into the
   monthly log, `plugin-memory/src/agent.ts`), and dedupe-on-write and

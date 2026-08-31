@@ -190,8 +190,16 @@ export class FlockUserBackendContribution {
           botId: command.botId,
           registeredAt: (this.host.now?.() ?? new Date()).toISOString(),
           initialName: command.name,
+          ...(command.description === undefined
+            ? {}
+            : { initialDescription: command.description }),
           initialModel: undefined,
           initialModelBinding: undefined,
+          // The creator is durable history: a Bot the Flock made on another
+          // Bot's behalf says so in the registration seed itself.
+          ...(command.createdBy
+            ? { createdBy: structuredClone(command.createdBy) }
+            : {}),
           sheep: structuredClone(
             command.sheep ?? randomSheepRecipeV1(this.host.random),
           ),
