@@ -439,13 +439,14 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   return value.packages.flatMap((candidate) => {
     if (
       !isRecord(candidate) ||
-      !hasExactFields(candidate, [
-        "id",
-        "displayName",
-        "version",
-        "contributions",
-        "configuration",
-      ]) ||
+      // A Package that declares no configuration is serialised without the
+      // key (JSON drops an undefined field), so the key is owned but optional.
+      !hasExactFields(
+        candidate,
+        Object.hasOwn(candidate, "configuration")
+          ? ["id", "displayName", "version", "contributions", "configuration"]
+          : ["id", "displayName", "version", "contributions"],
+      ) ||
       typeof candidate.id !== "string" ||
       typeof candidate.displayName !== "string" ||
       typeof candidate.version !== "string" ||

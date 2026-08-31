@@ -149,6 +149,20 @@ describe("application manifest protocol", () => {
         ],
       }),
     ]);
+    // A Package without configuration arrives without the key.
+    expect(
+      decodePluginCatalog({
+        ...emptyManifest,
+        packages: [
+          {
+            id: "ui-theme",
+            displayName: "Theme",
+            version: "0.0.1",
+            contributions: ["client"],
+          },
+        ],
+      }),
+    ).toEqual([]);
     for (const manifest of [
       { packages: [] },
       { ...emptyManifest, schemaVersion: 2 },
