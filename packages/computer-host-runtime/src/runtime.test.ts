@@ -26,6 +26,8 @@ import {
   PROVISION_SCRIPT,
   provisionLaunchScript,
   provisionPollScript,
+  BOUNDED_LOG_SCRIPT,
+  BOUNDED_LOG_HEAD_BYTES,
   provisionScript,
   RUNTIME_ROOT,
   base64,
@@ -257,6 +259,7 @@ describe("installed shell scripts", () => {
       `${RUNTIME_ROOT}/start-desktop.sh`,
       ENSURE_AGENT_SCRIPT,
       CONTROL_SCRIPT,
+      BOUNDED_LOG_SCRIPT,
       `${RUNTIME_ROOT}/start-gateway.sh`,
     ]) {
       await expectValidShell(installedScript(provisionScript, path));
@@ -495,4 +498,50 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+describe("the background-process logger", () => {
+  /**
+   * A process that outlives its Turn can write for hours. The cap is what
+   * keeps its log from becoming an unbounded write to a disk the User pays
+   * for, and keeping both ends is what keeps the log useful: a long job says
+   * what it set out to do at the start and what went wrong at the end.
+   */
+  test("keeps the head and the tail and drops the middle", async () => {
+    const installed = installedScript(provisionScript, BOUNDED_LOG_SCRIPT);
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-log-"));
+    const scriptPath = join(directory, "bounded-log.sh");
+    await writeFile(scriptPath, installed);
+    await chmod(scriptPath, 0o700);
+    const out = join(directory, "log");
+
+    // Small caps, so the test writes kilobytes rather than megabytes and the
+    // trimming path runs many times rather than never.
+    const input = Array.from(
+      { length: 500 },
+      (_, index) => `line-${String(index).padStart(4, "0")}\n`,
+    ).join("");
+    const child = Bun.spawn([scriptPath, out, "200", "200"], {
+      stdin: new TextEncoder().encode(input),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(await child.exited, await new Response(child.stderr).text()).toBe(0);
+
+    const head = await readFile(`${out}.head`, "utf8");
+    const tail = await readFile(`${out}.tail`, "utf8");
+    expect(head).toContain("line-0000");
+    expect(head.length).toBeLessThan(400);
+    expect(tail).toContain("line-0499");
+    expect(tail.length).toBeLessThanOrEqual(400);
+    // The middle really is gone: neither half holds it.
+    expect(head + tail).not.toContain("line-0250");
+  });
+
+  test("declares a 256 KiB cap by default", () => {
+    expect(BOUNDED_LOG_HEAD_BYTES * 2).toBe(262_144);
+    expect(installedScript(provisionScript, BOUNDED_LOG_SCRIPT)).toContain(
+      `HEAD_BYTES=${"${2:-"}${BOUNDED_LOG_HEAD_BYTES}}`,
+    );
+  });
 });

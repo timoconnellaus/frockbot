@@ -315,6 +315,55 @@ export interface ComputerBrowser {
   ): Promise<ComputerBrowserState>;
 }
 
+/** What the Computer says about one background process right now. */
+export interface ComputerBackgroundStateV1 {
+  /** True while the Computer still holds a live process for the pid. */
+  alive: boolean;
+  /** The exit code the process recorded, when it recorded one. */
+  exitCode?: number;
+  /** The bounded head-and-tail of its log. */
+  logTail: string;
+}
+
+export interface ComputerBackgroundLaunchV1 {
+  processId: string;
+  command: string;
+}
+
+export interface ComputerBackgroundLaunchedV1 {
+  pid: number;
+  logPath: string;
+  /** The Computer's provisioning generation the launch happened under. */
+  generation: number;
+  cwd: string;
+}
+
+/**
+ * Processes that outlive the Turn that started them.
+ *
+ * Deliberately narrow: launch, look, read, end. Nothing here keeps a Computer
+ * awake — "The Computer wakes only when a Bot uses it" — so a process whose
+ * Computer hibernated is answered `unknown` by the caller that holds its
+ * record, never reported as running.
+ */
+export interface ComputerBackgroundProcessesV1 {
+  launch(
+    request: ComputerBackgroundLaunchV1,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerBackgroundLaunchedV1>;
+  inspect(
+    processId: string,
+    options?: ComputerOperationOptions & { tailBytes?: number },
+  ): Promise<ComputerBackgroundStateV1>;
+  /** Ends the process group: TERM, then KILL after a grace. */
+  stop(
+    processId: string,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerBackgroundStateV1>;
+  /** The Computer's provisioning generation, as the host last reported it. */
+  generation(options?: ComputerOperationOptions): Promise<number>;
+}
+
 /** One capture of the Bot's own desktop on its Computer. */
 export interface ComputerScreenshotV1 {
   bytes: Uint8Array;
@@ -473,6 +522,7 @@ export interface ComputerHandle {
   exec?: ComputerExec;
   browser?: ComputerBrowser;
   screenshot?: ComputerScreenshotCapabilityV1;
+  processes?: ComputerBackgroundProcessesV1;
   viewer?: ComputerViewer;
   control?: ComputerControl;
   close(): Promise<void>;
@@ -541,8 +591,16 @@ function guardedHandle(
   handle: ComputerHandle,
   assertCurrent: () => void,
 ): ComputerHandle {
-  const { workspace, sync, exec, browser, screenshot, viewer, control } =
-    handle;
+  const {
+    workspace,
+    sync,
+    exec,
+    browser,
+    screenshot,
+    processes,
+    viewer,
+    control,
+  } = handle;
   return {
     assignment: handle.assignment,
     identity: handle.identity,
@@ -580,6 +638,26 @@ function guardedHandle(
       ? {
           capture: (options) =>
             guardedOperation(assertCurrent, () => screenshot.capture(options)),
+        }
+      : undefined,
+    processes: processes
+      ? {
+          launch: (request, options) =>
+            guardedOperation(assertCurrent, () =>
+              processes.launch(request, options),
+            ),
+          inspect: (processId, options) =>
+            guardedOperation(assertCurrent, () =>
+              processes.inspect(processId, options),
+            ),
+          stop: (processId, options) =>
+            guardedOperation(assertCurrent, () =>
+              processes.stop(processId, options),
+            ),
+          generation: (options) =>
+            guardedOperation(assertCurrent, () =>
+              processes.generation(options),
+            ),
         }
       : undefined,
     viewer: viewer

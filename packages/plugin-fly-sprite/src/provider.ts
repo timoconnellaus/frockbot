@@ -351,6 +351,39 @@ function handle(
         };
       },
     },
+    processes: {
+      launch: async (request, options) => {
+        const launched = await computer.launchProcess(
+          request.processId,
+          request.command,
+          options?.signal ?? new AbortController().signal,
+        );
+        return {
+          pid: launched.pid,
+          logPath: launched.logPath,
+          cwd: launched.cwd,
+          // The generation the launch happened under, which is what a later
+          // check compares against to decide whether this is the same
+          // Computer at all.
+          generation: computer.generation ?? 0,
+        };
+      },
+      inspect: (processId, options) =>
+        computer.inspectProcess(
+          processId,
+          options?.signal ?? new AbortController().signal,
+          options?.tailBytes,
+        ),
+      stop: (processId, options) =>
+        computer.stopProcess(
+          processId,
+          options?.signal ?? new AbortController().signal,
+        ),
+      // Asked of the host every time, never read from the cached open: a
+      // process's whole reconciliation question is whether the Computer
+      // answering now is the one it was launched on.
+      generation: (options) => computer.currentGeneration(options?.signal),
+    },
     browser: {
       perform: async (action, options) =>
         browserState(

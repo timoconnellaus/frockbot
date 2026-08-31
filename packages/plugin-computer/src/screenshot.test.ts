@@ -13,32 +13,11 @@ import {
   computerBotPathKeyV1,
   type ComputerHandle,
   type ComputerProvider,
-  type ComputerWorkspace,
-  type WorkspaceLayoutV1,
 } from "@frockbot/computer-core";
 import { createPluginHarness } from "@frockbot/plugin-testkit";
-import {
-  SessionStore,
-  type WorkspaceEntryV1,
-  type WorkspaceGenerationV1,
-  type WorkspacePathV1,
-  type WorkspaceRootV1,
-  type WorkspaceWriterV1,
-} from "@frockbot/kernel-contracts";
+import { SessionStore } from "@frockbot/kernel-contracts";
 import { createComputerAgentPlugin, pngDimensionsV1 } from "./agent.js";
-
-const LAYOUT: WorkspaceLayoutV1 = {
-  schemaVersion: 1,
-  home: "/home/box",
-  roots: [
-    {
-      kind: "package-declared",
-      scope: "user",
-      mountPath: "/home/box/agent-data/user-packages/{package}/{root}",
-      access: "read-write",
-    },
-  ],
-};
+import { FakeWorkspace } from "./workspace-fixture.js";
 
 /** A 4x3 PNG: a real signature and a real IHDR, and nothing after it. */
 function png(width = 4, height = 3): Uint8Array {
@@ -48,88 +27,6 @@ function png(width = 4, height = 3): Uint8Array {
   view.setUint32(16, width);
   view.setUint32(20, height);
   return bytes;
-}
-
-/** An in-memory `ComputerWorkspace` that records every write it admitted. */
-class FakeWorkspace implements ComputerWorkspace {
-  readonly layout = LAYOUT;
-  readonly files = new Map<
-    string,
-    { bytes: Uint8Array; generation: WorkspaceGenerationV1 }
-  >();
-  readonly deleted: string[] = [];
-  private sequence = 0;
-
-  private key(path: WorkspacePathV1): string {
-    return path.path;
-  }
-
-  read(path: WorkspacePathV1) {
-    const held = this.files.get(this.key(path));
-    return Promise.resolve(
-      held
-        ? {
-            status: "ok" as const,
-            file: { path, generation: held.generation, bytes: held.bytes },
-          }
-        : { status: "not-found" as const, reason: "no such file" },
-    );
-  }
-
-  stat(path: WorkspacePathV1) {
-    const held = this.files.get(this.key(path));
-    return Promise.resolve(
-      held
-        ? {
-            status: "ok" as const,
-            entry: { path, generation: held.generation },
-          }
-        : { status: "not-found" as const, reason: "no such file" },
-    );
-  }
-
-  list(request: { root: WorkspaceRootV1; prefix?: string }) {
-    const entries: WorkspaceEntryV1[] = [...this.files.entries()]
-      .filter(([path]) => !request.prefix || path.startsWith(request.prefix))
-      .map(([path, held]) => ({
-        path: { root: request.root, path },
-        generation: held.generation,
-      }));
-    return Promise.resolve({ status: "ok" as const, entries });
-  }
-
-  write(request: {
-    path: WorkspacePathV1;
-    bytes: Uint8Array;
-    writer: WorkspaceWriterV1;
-  }) {
-    this.sequence += 1;
-    const generation: WorkspaceGenerationV1 = {
-      schemaVersion: 1,
-      generationId: `gen-${this.sequence}`,
-      // A stand-in digest with the shape the decoders require.
-      contentHash: this.sequence.toString(16).padStart(64, "a"),
-      size: request.bytes.byteLength,
-      writer: request.writer,
-      writtenAt: new Date(1_700_000_000_000 + this.sequence).toISOString(),
-    };
-    this.files.set(this.key(request.path), {
-      bytes: request.bytes,
-      generation,
-    });
-    return Promise.resolve({ status: "ok" as const, generation });
-  }
-
-  delete(request: { path: WorkspacePathV1 }) {
-    const held = this.files.get(this.key(request.path));
-    this.deleted.push(request.path.path);
-    this.files.delete(this.key(request.path));
-    return Promise.resolve(
-      held
-        ? { status: "ok" as const, generation: held.generation }
-        : { status: "not-found" as const, reason: "no such file" },
-    );
-  }
 }
 
 function providerWith(

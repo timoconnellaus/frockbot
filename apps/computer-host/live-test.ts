@@ -513,6 +513,65 @@ try {
     `its IHDR declares ${shotBytes.readUInt32BE(16)}x${shotBytes.readUInt32BE(20)}`,
   );
 
+  // --- a background process that outlives its exec -------------------------
+  // What no fake can answer: whether `setsid nohup` really detaches a command
+  // from the exec that started it. The exec returns as soon as the pid file
+  // exists; the process must still be there afterwards, and must still be
+  // there after the container restart below, because a background process
+  // belongs to the Computer and not to the connection that started it.
+  const processId = `live-${runId}`;
+  const processDir = `${RUNTIME_ROOT}/live-processes/${processId}`;
+  const launch = decodeComputerHostExecResultV1(
+    await expectOk(
+      await call(COMPUTER_HOST_ROUTES.exec, {
+        kind: "exec",
+        script: [
+          "set -eu",
+          `DIR=${processDir}`,
+          'mkdir -p "$DIR"',
+          `setsid nohup bash -c 'for i in $(seq 1 600); do printf "tick-%s\\n" "$i"; sleep 1; done > "${processDir}/log"; printf "0\\n" > "${processDir}/exit"' >/dev/null 2>&1 &`,
+          'printf "%s\\n" "$!" > "$DIR/pid"',
+          'printf "pid=%s\\n" "$(cat "$DIR/pid")"',
+        ].join("\n"),
+        timeoutMs: 60_000,
+        maxOutputBytes: 8 * 1_024,
+        stream: false,
+      }),
+      "exec background launch",
+    ),
+  );
+  const backgroundPid = Number(
+    /pid=(\d+)/.exec(
+      Buffer.from(launch.stdoutBase64, "base64").toString(),
+    )?.[1],
+  );
+  check(
+    launch.exitCode === 0 &&
+      Number.isSafeInteger(backgroundPid) &&
+      backgroundPid > 0,
+    `a background launch returns immediately with pid ${String(backgroundPid)}`,
+  );
+  const stillAlive = decodeComputerHostExecResultV1(
+    await expectOk(
+      await call(COMPUTER_HOST_ROUTES.exec, {
+        kind: "exec",
+        script: [
+          `printf 'alive=%s\\n' "$(kill -0 ${backgroundPid} 2>/dev/null && echo 1 || echo 0)"`,
+          `printf 'log=%s\\n' "$(head -c 32 ${processDir}/log 2>/dev/null | tr -d '\\n')"`,
+        ].join("\n"),
+        timeoutMs: 30_000,
+        maxOutputBytes: 4_096,
+        stream: false,
+      }),
+      "exec background check",
+    ),
+  );
+  const aliveReport = Buffer.from(stillAlive.stdoutBase64, "base64").toString();
+  check(
+    aliveReport.includes("alive=1"),
+    `the process outlived the exec that started it — ${aliveReport.trim().replace(/\n/g, " | ")}`,
+  );
+
   // --- reconstruction -----------------------------------------------------
   // The container is restarted, so its in-memory record of this Computer is
   // gone. A fresh SpritesClient inside it must re-derive everything from the
@@ -560,6 +619,50 @@ try {
   check(
     Buffer.from(afterRestart.bytesBase64, "base64").toString() === contents,
     "the file written before the restart is still readable after it",
+  );
+
+  // --- the background process across the restart ---------------------------
+  // The container restarted; the Sprite did not. A process belongs to the
+  // Computer, so it is still running — and stopping it reaches the whole group
+  // rather than the shell that owns the pipeline.
+  const afterRestartProcess = decodeComputerHostExecResultV1(
+    await expectOk(
+      await call(COMPUTER_HOST_ROUTES.exec, {
+        kind: "exec",
+        script: `printf 'alive=%s\\n' "$(kill -0 ${backgroundPid} 2>/dev/null && echo 1 || echo 0)"`,
+        timeoutMs: 30_000,
+        maxOutputBytes: 4_096,
+        stream: false,
+      }),
+      "exec background check after restart",
+    ),
+  );
+  check(
+    Buffer.from(afterRestartProcess.stdoutBase64, "base64")
+      .toString()
+      .includes("alive=1"),
+    "the background process survived the container restart",
+  );
+  const stopped = decodeComputerHostExecResultV1(
+    await expectOk(
+      await call(COMPUTER_HOST_ROUTES.exec, {
+        kind: "exec",
+        script: [
+          `kill -TERM -${backgroundPid} 2>/dev/null || kill -TERM ${backgroundPid} 2>/dev/null || true`,
+          `for _ in $(seq 1 50); do kill -0 ${backgroundPid} 2>/dev/null || break; sleep 0.1; done`,
+          `if kill -0 ${backgroundPid} 2>/dev/null; then kill -KILL -${backgroundPid} 2>/dev/null || kill -KILL ${backgroundPid} 2>/dev/null || true; sleep 0.5; fi`,
+          `printf 'alive=%s\\n' "$(kill -0 ${backgroundPid} 2>/dev/null && echo 1 || echo 0)"`,
+        ].join("\n"),
+        timeoutMs: 60_000,
+        maxOutputBytes: 4_096,
+        stream: false,
+      }),
+      "exec background stop",
+    ),
+  );
+  check(
+    Buffer.from(stopped.stdoutBase64, "base64").toString().includes("alive=0"),
+    "TERM escalated to KILL ends the process group",
   );
 
   // --- authorization ------------------------------------------------------
