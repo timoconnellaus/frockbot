@@ -11,6 +11,8 @@ import {
   isPublicIdentifier,
 } from "@frockbot/configuration-core";
 import type {
+  CatalogGatewayDocument,
+  CatalogGatewayStore,
   GatewayDependencies,
   UserApplicationIdentity,
   WorkerCode,
@@ -46,6 +48,92 @@ function decodeBotPathSegment(value: string): string {
     return decodeBotIdV1(botId);
   } catch {
     throw new ConfigurationDecodeError("invalid bot id");
+  }
+}
+
+const CATALOG_INDEX_PATH = "/catalog/v1/index";
+const CATALOG_ENTRY_PREFIX = "/catalog/v1/entry/";
+
+/**
+ * A Catalog generation is immutable, so an explicitly pinned read can be cached
+ * for as long as anything caches anything. The live read follows a pointer that
+ * moves on every publish, so it is revalidated: the `etag` is the index's
+ * content hash, which is exactly what a pinned reader compares.
+ */
+function catalogCacheControl(pinned: boolean): string {
+  return pinned
+    ? "private, max-age=31536000, immutable"
+    : "private, max-age=60, must-revalidate";
+}
+
+function catalogDocumentResponse(
+  request: Request,
+  found: CatalogGatewayDocument,
+  pinned: boolean,
+): Response {
+  const etag = `"${found.hash}"`;
+  const headers = {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": catalogCacheControl(pinned),
+    etag,
+    "x-frockbot-catalog-generation": found.generation,
+    "x-content-type-options": "nosniff",
+  };
+  if (request.headers.get("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers });
+  }
+  return new Response(found.document, { headers });
+}
+
+/**
+ * `GET /catalog/v1/index` and `GET /catalog/v1/entry/:id`, authenticated and
+ * read-only. The browser and the Bot Durable Object both read the Catalog
+ * through these, so the bucket stays behind the gateway and there is exactly
+ * one place a Catalog document is verified before anyone sees it.
+ */
+async function routeCatalog(
+  catalog: CatalogGatewayStore | undefined,
+  request: Request,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return jsonError(405, "method not allowed");
+  }
+  if (!catalog) {
+    return jsonError(503, "Package Catalog is not configured");
+  }
+  const parameters = [...url.searchParams.keys()];
+  if (
+    parameters.some((key) => key !== "generation") ||
+    url.searchParams.getAll("generation").length > 1
+  ) {
+    return jsonError(400, "catalog query is invalid");
+  }
+  const generation = url.searchParams.get("generation") ?? undefined;
+  try {
+    if (url.pathname === CATALOG_INDEX_PATH) {
+      const found = await catalog.readIndexDocument(generation);
+      if (!found) return jsonError(404, "catalog generation was not found");
+      return catalogDocumentResponse(request, found, generation !== undefined);
+    }
+    let catalogId: string;
+    try {
+      catalogId = decodeURIComponent(
+        url.pathname.slice(CATALOG_ENTRY_PREFIX.length),
+      );
+    } catch {
+      return jsonError(400, "invalid catalog entry id");
+    }
+    const found = await catalog.readEntryDocument(catalogId, generation);
+    if (!found) return jsonError(404, "catalog entry was not found");
+    return catalogDocumentResponse(request, found, generation !== undefined);
+  } catch (error) {
+    // A generation that fails verification is a broken publish, and it is
+    // reported as one rather than served with a caveat.
+    return jsonError(
+      502,
+      error instanceof Error ? error.message : "catalog read failed",
+    );
   }
 }
 
@@ -148,6 +236,13 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (!userId) return jsonError(401, "authentication required");
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId });
+    }
+
+    if (
+      url.pathname === CATALOG_INDEX_PATH ||
+      url.pathname.startsWith(CATALOG_ENTRY_PREFIX)
+    ) {
+      return routeCatalog(dependencies.catalog, request, url);
     }
 
     for (const contribution of dependencies.backendContributions ?? []) {

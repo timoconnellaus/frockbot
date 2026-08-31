@@ -49,6 +49,7 @@ import {
 } from "@frockbot/plugin-package-publisher/shared";
 import type { WorkerLoader } from "./contracts.js";
 import { createPackagePublicationHost } from "./package-publication.js";
+import { R2PackageCatalog } from "./package-catalog.js";
 import {
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -85,6 +86,13 @@ interface UserConfigurationEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
   /** The loader that health-checks a candidate artifact before activation. */
   USER_APPLICATIONS: WorkerLoader;
+  /**
+   * The remote Package Catalog, read-only. The User Durable Object pins one
+   * generation from it and validates every Catalog install against that pin.
+   * Optional: a deployment without a Catalog installs compiled-in Packages
+   * exactly as before.
+   */
+  PACKAGE_CATALOG?: R2Bucket;
 }
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
@@ -100,6 +108,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             this.env,
             this.ctx.storage,
           ),
+          ...(this.env.PACKAGE_CATALOG
+            ? { catalog: new R2PackageCatalog(this.env.PACKAGE_CATALOG) }
+            : {}),
           commandBotLifecycle: async (userId, command) => {
             const id = this.env.BOT_STATES.idFromName(
               `${userId}:${command.botId}`,

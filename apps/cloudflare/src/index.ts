@@ -67,6 +67,7 @@ import {
   rpcString,
 } from "./durable-rpc.js";
 import { createImmutablePlanRequestFactory } from "./immutable-application.js";
+import { R2PackageCatalog } from "./package-catalog.js";
 import { UserConfiguration } from "./user-configuration.js";
 
 export { BotCapabilities } from "./bot-capabilities.js";
@@ -83,6 +84,12 @@ interface Env {
   // its authorship intent (plan Step 3, decision D4).
   PACKAGE_BUNDLER: BundlerBinding;
   MEMORY_FILES: R2Bucket;
+  /**
+   * The remote Package Catalog. Optional so a deployment without one still
+   * boots: `/catalog/v1/*` then reports the Catalog as unconfigured rather
+   * than the Worker failing to construct.
+   */
+  PACKAGE_CATALOG?: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   BOT_STATES: DurableObjectNamespace<BotState>;
@@ -760,6 +767,9 @@ export default {
         userConfigurationStub(env, userId),
       botConfigurationFor: (userId, botId): BotConfigurationBinding =>
         botStateStub(env, userId, botId),
+      ...(env.PACKAGE_CATALOG
+        ? { catalog: new R2PackageCatalog(env.PACKAGE_CATALOG) }
+        : {}),
       backendContributions: [...mountedBackend.contributions],
       allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",

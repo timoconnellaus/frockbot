@@ -21,6 +21,7 @@ import {
 } from "@frockbot/plugin-provider-ollama-cloud/user";
 import {
   createUserSettingsBackendPlugin,
+  type UserPackageCatalogHost,
   type UserSettingsBackendContribution,
   type UserSettingsStorage,
 } from "@frockbot/plugin-settings/user";
@@ -83,6 +84,12 @@ export async function createFoundationUserBackendContributions(
      */
     commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
     readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
+    /**
+     * The remote Package Catalog. Absent when the deployment publishes none,
+     * which leaves Package availability exactly as it was: the compiled-in
+     * plan.
+     */
+    catalog?: UserPackageCatalogHost;
   },
 ): Promise<MountedFoundationUserBackend> {
   let settings: UserSettingsBackendContribution | undefined;
@@ -116,6 +123,7 @@ export async function createFoundationUserBackendContributions(
               packageId: pkg.id,
               version: pkg.version,
             })),
+            ...(host.catalog ? { catalog: host.catalog } : {}),
           },
           {
             mount(value: UserSettingsBackendContribution) {

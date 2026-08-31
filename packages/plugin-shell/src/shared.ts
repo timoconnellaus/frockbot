@@ -11,7 +11,13 @@ import type {
   ModelAssignment,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import type {
+  CatalogEntryV1,
+  CatalogIndexEntryV1,
+} from "@frockbot/catalog-core";
 import type { InjectionKey, Ref } from "vue";
+
+export type { CatalogEntryV1, CatalogIndexEntryV1 };
 
 export type WebConnection = "starting" | "ready" | "disconnected" | "error";
 
@@ -94,6 +100,15 @@ export interface FrockBotWebData {
   botSettings?: BotSettingsViewV1;
   userSettings?: UserSettingsViewV1;
   pluginCatalog: PluginCatalogItem[];
+  /**
+   * The remote Catalog index, read through `/catalog/v1/index`. Separate from
+   * `pluginCatalog`, which projects the compiled-in application manifest: the
+   * two answer different questions — what this deployment can execute, and what
+   * the Catalog offers to install.
+   */
+  packageCatalog: CatalogIndexEntryV1[];
+  /** The generation `packageCatalog` was read from; every install names it. */
+  packageCatalogGeneration?: string;
   settingsError?: string;
   selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
@@ -125,7 +140,12 @@ export interface FrockBotWebData {
   /** The model every Bot uses unless it overrides it. */
   saveDefaultModel(model: ModelAssignment | undefined): Promise<void>;
   loadPluginCatalog(): Promise<void>;
+  loadPackageCatalog(): Promise<void>;
+  /** One entry detail, for the panel a User opens before installing. */
+  loadCatalogEntry(catalogId: string): Promise<CatalogEntryV1 | undefined>;
   installPackage(packageId: string, version: string): Promise<void>;
+  installCatalogPackage(entry: CatalogIndexEntryV1): Promise<void>;
+  uninstallPackage(packageId: string): Promise<void>;
   startConnection(
     packageId: string,
     connectionTypeId: string,
