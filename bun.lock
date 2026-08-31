@@ -42,6 +42,7 @@
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-foundation": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
+        "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
@@ -97,6 +98,7 @@
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
+        "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/workspace-store": "workspace:*",
@@ -764,6 +766,29 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/plugin-routines": {
+      "name": "@frockbot/plugin-routines",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/client-core": "workspace:*",
+        "@frockbot/client-ui": "workspace:*",
+        "@frockbot/configuration-core": "workspace:*",
+        "@frockbot/kernel-agent-loop": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-shell": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+        "croner": "10.0.1",
+        "vue": "3.5.41",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "@types/node": "26.2.0",
+        "@vitejs/plugin-vue": "6.0.8",
+        "typescript": "5.9.3",
+        "vite": "8.2.2",
+        "vue-tsc": "3.3.10",
+      },
+    },
     "packages/plugin-settings": {
       "name": "@frockbot/plugin-settings",
       "version": "0.0.1",
@@ -805,6 +830,7 @@
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
+        "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -1202,6 +1228,8 @@
     "@frockbot/plugin-provider-foundation": ["@frockbot/plugin-provider-foundation@workspace:packages/plugin-provider-foundation"],
 
     "@frockbot/plugin-provider-ollama-cloud": ["@frockbot/plugin-provider-ollama-cloud@workspace:packages/plugin-provider-ollama-cloud"],
+
+    "@frockbot/plugin-routines": ["@frockbot/plugin-routines@workspace:packages/plugin-routines"],
 
     "@frockbot/plugin-settings": ["@frockbot/plugin-settings@workspace:packages/plugin-settings"],
 
@@ -1876,6 +1904,8 @@
     "cosmokit": ["cosmokit@1.8.1", "", {}, "sha512-PDBv4l90xZKrUsZ0vtoycgZpO/j4iFsqJXrAxsyBDsnQRI7ZMJXIjgDJsKNjd5L8jnVnnlrDCdhkFbTncgCVjQ=="],
 
     "crc": ["crc@3.8.0", "", { "dependencies": { "buffer": "^5.1.0" } }, "sha512-iX3mfgcTMIq3ZKLIsVFAbv7+Mc10kxabAGQb8HvjA1o3T1PIYprbakQ65d3I+2HGHt6nSKkM9PYjgoJO2KcFBQ=="],
+
+    "croner": ["croner@10.0.1", "", {}, "sha512-ixNtAJndqh173VQ4KodSdJEI6nuioBWI0V1ITNKhZZsO0pEMoDxz539T4FTTbSZ/xIOSuDnzxLVRqBVSvPNE2g=="],
 
     "cross-dirname": ["cross-dirname@0.1.0", "", {}, "sha512-+R08/oI0nl3vfPcqftZRpytksBXDzOUveBq/NBVx0sUp1axwzPQrKinNx5yd5sxPu8j1wIy8AfnVQ+5eFdha6Q=="],
 
@@ -2810,6 +2840,8 @@
     "@frockbot/plugin-package-publisher/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-provider-ollama-cloud/@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
+
+    "@frockbot/plugin-routines/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-settings/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

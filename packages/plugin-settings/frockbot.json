@@ -21,7 +21,10 @@
         { "slot": "frockbot.user-profile", "order": 10 },
         { "slot": "frockbot.bot-actions", "order": 10 }
       ],
-      "outlets": ["frockbot.user-settings-sections"]
+      "outlets": [
+        "frockbot.user-settings-sections",
+        "frockbot.bot-settings-sections"
+      ]
     }
   },
   "permissions": []

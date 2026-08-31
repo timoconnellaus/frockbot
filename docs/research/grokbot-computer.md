@@ -526,11 +526,11 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 13c | The rendered Memory block is frozen per compaction epoch and reused, with an env-var escape hatch                                | `resolveFrozenMemoryPrompt`, `compactionEpoch`, `SAND_DISABLE_MEMORY_FREEZE=1`                                                                                  | §4.1b            | `plugin-memory` + kernel session log         | declined    |
 | 13d | Distinct on-disk and injected fact formats; `[note]`/`[episode]` as a prefix on the fact text                                    | disk `- (YYYY-MM-DD) …` vs injected `- (learned YYYY-MM-DD) …`                                                                                                  | §4.1b            | `plugin-memory`                              | partial     |
 | 14  | Exactly what memory was injected is recorded per turn; memory mutated only through one tool                                      | `store.db kv.*PromptSnapshot`; `update_state` (advisory — files stay writable)                                                                                  | §2.5             | kernel session log                           | landed      |
-| 15  | **Routines** — per-Bot definition file (name, prompt, trigger, enabled, provenance, timestamps) and durable run log              | `automations/<slug>/{automation.json,runs.json}`                                                                                                                | §2.6             | new `plugin-routines`                        | not started |
+| 15  | **Routines** — per-Bot definition file (name, prompt, trigger, enabled, provenance, timestamps) and durable run log              | `automations/<slug>/{automation.json,runs.json}`                                                                                                                | §2.6             | new `plugin-routines`                        | partial     |
 | 16  | Cron triggers with timezone and `@daily` shorthands; inbound webhook with its own signing-key store                              | `trigger.type=cron`/`webhook`; `webhook-keys.json`                                                                                                              | §2.6             | `plugin-routines`                            | not started |
 | 17  | Integration triggers (slack, github, origin, teams, linear, sentry, pagerduty), `group`, manual run                              | typed trigger schemas; `runs.json trigger:"manual"`                                                                                                             | §2.6             | per-integration Packages                     | not started |
 | 18  | A firing runs as a fresh subagent turn under the same Bot id; runs of _different_ Bots overlap, same-routine runs are sequential | "fresh subagent with the same work capabilities as the parent"; overlapping `runs.json` windows, no lock found                                                  | §2.7, §3.1       | kernel Turn admission                        | not started |
-| 19  | A routine run cannot speak to the user, lands silently in a parent inbox; pause/resume/delete/edit with a card                   | `automation_completion_inbox`; `update_state routine`                                                                                                           | §2.5, §2.7       | `plugin-routines`                            | not started |
+| 19  | A routine run cannot speak to the user, lands silently in a parent inbox; pause/resume/delete/edit with a card                   | `automation_completion_inbox`; `update_state routine`                                                                                                           | §2.5, §2.7       | `plugin-routines`                            | partial     |
 | 19b | A run finishing against a sleeping parent queues a pending wake the host replays, rather than dropping the result                | `host-pending-wakes.json` `kind:"subagent"`, `quietOrigin.automation`, `automationRunUuid`                                                                      | §3.2             | kernel Turn admission                        | not started |
 | 20  | **Skills** — folder + `SKILL.md`, frontmatter `name`/`description`, markdown body, Bot-authorable                                | `workflows/<slug>/SKILL.md`; `update_state skill write`                                                                                                         | §2.2, §2.8       | new `plugin-skills`                          | landed      |
 | 21  | User skills global across a user's Bots; managed skills read-only; plugin-borne skills indexed not copied                        | `workflows/`; `managed-skills/`; `plugin-skills/cache.json`                                                                                                     | §2.9             | `plugin-skills`                              | not started |
@@ -659,6 +659,24 @@ the rows whose status the code moved:
   (`renderMemoryFactLineV1` vs `renderInjectedFactLineV1` in
   `plugin-memory/src/facts.ts`), but `[episode]` is documented only: nothing
   writes, parses or recognises it, and the tier enum has no `episode`.
+- **15** — the durable definition is landed: `RoutineRecordV1` in the Bot
+  Durable Object (`plugin-routines/src/records.ts`, keys in `storage-keys.ts`)
+  carries name, prompt, schedule XOR webhook trigger, timezone, `enabled`, the
+  writer of the creating and the latest write, and the timestamps, and a bounded
+  50-entry `RoutineRunEntryV1` log sits beside it with the row's five statuses.
+  What is missing is everything that would put an entry in that log: there is no
+  scheduler, no alarm, no cron _evaluation_ (only the syntax and timezone check
+  a write must pass), no webhook route and no key store, so a Routine is
+  recorded and never fires. Rows 16, 17 and 18 stay `not started` for that
+  reason.
+- **19** — create, update, pause, resume and delete are landed end to end: as
+  versioned Bot commands with durable fingerprinted receipts
+  (`plugin-routines/src/store.ts`), as the `routine_manage` tool the Bot calls on
+  any turn type (`agent.ts`), and as `RoutinesSection.vue` in the Bot settings
+  surface. What is missing is the run half of the row: nothing fires, so there
+  is no completion inbox, no pending wake, no silent landing in a parent
+  conversation, and no confirmation card. "Next run" is blank in the UI for the
+  same reason.
 - **22** — the `<agent_skills>` catalog of path + description is injected once
   per Turn and bodies are disclosed on demand through `skill_load`
   (`plugin-skills/src/catalog.ts`, `agent.ts`), but there is no `/` or `@`

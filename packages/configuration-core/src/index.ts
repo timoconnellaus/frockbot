@@ -355,11 +355,28 @@ function canonicalFingerprintValue(value: unknown): string {
   throw new Error("Configuration command fingerprint value is not JSON");
 }
 
+/**
+ * The idempotency fingerprint of any command, under a caller-chosen namespace.
+ *
+ * One canonicalization serves every command family so a replayed idempotency
+ * key is compared the same way everywhere, and the namespace keeps two families
+ * from ever producing the same bytes for different meanings.
+ */
+export function canonicalCommandFingerprintV1(
+  namespace: string,
+  command: unknown,
+): string {
+  return `${namespace}:${canonicalFingerprintValue(command)}`;
+}
+
 export function configurationCommandFingerprintV1(
   command: ConfigurationCommandV1,
 ): string {
   const { commandId: _commandId, ...semanticCommand } = command;
-  return `configuration-command-v1:${canonicalFingerprintValue(semanticCommand)}`;
+  return canonicalCommandFingerprintV1(
+    "configuration-command-v1",
+    semanticCommand,
+  );
 }
 
 export interface UserConfigurationReadRpcV1 {

@@ -53,6 +53,8 @@ import type {
   WorkerCode,
   WorkerLoader,
 } from "./contracts.js";
+import { RoutineStore } from "@frockbot/plugin-routines/store";
+import { createMemoryRoutineStorageV1 } from "@frockbot/plugin-routines/testing";
 import { executeResidentBotTurn } from "./bot-runner.js";
 import { applicationDeploymentId, createGateway } from "./gateway.js";
 import { createUserApplication } from "./user-application.js";
@@ -649,6 +651,42 @@ class MemoryConfiguration
       generationId: COMPOSITION_REVERTED_GENERATION_ID,
       currentGenerationId: request.command.expectedGenerationId,
     });
+  }
+
+  // Routines are Bot Durable Object state; this fake stands in for that object
+  // with the Package's own store over in-memory storage, so the gateway is
+  // exercised against the real command semantics rather than a stub.
+  private readonly routines = new Map<string, RoutineStore>();
+
+  private routineStore(botId: string): RoutineStore {
+    const existing = this.routines.get(botId);
+    if (existing) return existing;
+    const created = new RoutineStore(createMemoryRoutineStorageV1());
+    this.routines.set(botId, created);
+    return created;
+  }
+
+  listRoutines(
+    request: Parameters<BotConfigurationBinding["listRoutines"]>[0],
+  ) {
+    return this.routineStore(request.botId).list(request.botId);
+  }
+
+  executeRoutineCommand(
+    request: Parameters<BotConfigurationBinding["executeRoutineCommand"]>[0],
+  ) {
+    return this.routineStore(request.botId).execute(request.command, {
+      kind: "user",
+    });
+  }
+
+  listRoutineRuns(
+    request: Parameters<BotConfigurationBinding["listRoutineRuns"]>[0],
+  ) {
+    return this.routineStore(request.botId).listRuns(
+      request.botId,
+      request.routineId,
+    );
   }
 }
 

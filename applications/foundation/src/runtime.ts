@@ -100,6 +100,25 @@ import foundationProviderPlugin, {
 } from "@frockbot/plugin-provider-foundation/runtime";
 import ollamaCloudManifest from "@frockbot/plugin-provider-ollama-cloud/manifest";
 import { createOllamaCloudRuntimePlugin } from "@frockbot/plugin-provider-ollama-cloud/runtime";
+import routinesManifest from "@frockbot/plugin-routines/manifest";
+// The Routines gateway Contribution carries the Bot-scoped Routine routes.
+import {
+  createRoutinesBackendContribution,
+  type RoutinesGatewayHost,
+} from "@frockbot/plugin-routines/backend";
+const createRoutinesGatewayPlugin = (
+  createRoutinesBackendContribution as typeof createRoutinesBackendContribution & {
+    plugin(
+      host: RoutinesGatewayHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
+import {
+  createRoutinesRuntimePlugin,
+  type RoutinesRuntimeHostV1,
+} from "@frockbot/plugin-routines/agent";
+export type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
 import settingsManifest from "@frockbot/plugin-settings/manifest";
 // Provider-neutral Connection transport is owned by the Settings gateway Contribution.
 import {
@@ -152,6 +171,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-shell", shellManifest],
   ["@frockbot/plugin-skills", skillsManifest],
   ["@frockbot/plugin-settings", settingsManifest],
+  ["@frockbot/plugin-routines", routinesManifest],
 ]);
 
 const runtimeContributions = new Map([
@@ -268,6 +288,7 @@ export type FoundationGatewayHost = {
   backendHost: "gateway";
 } & FlockGatewayHost &
   SettingsGatewayHost &
+  RoutinesGatewayHost &
   PackagePublisherGatewayHost;
 
 export async function createFoundationBackendContributions(
@@ -318,6 +339,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-settings/backend"
         ) {
           plugin = createSettingsGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-routines/backend"
+        ) {
+          plugin = createRoutinesGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-package-publisher/backend"
@@ -442,6 +468,13 @@ export function createFoundationHostedRuntimePackages(
      */
     memory?: MemoryRuntimeHostV1;
     /**
+     * The Routines seam, supplied by the Bot Durable Object for one admitted
+     * Turn. Absent outside a Turn, and the Routines Package is then not
+     * mounted: a Bot writes a Routine only inside a Turn whose Session and Turn
+     * its provenance can name.
+     */
+    routines?: RoutinesRuntimeHostV1;
+    /**
      * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside one whose
      * durable roots are reachable in object storage — the Computer provider
@@ -476,6 +509,15 @@ export function createFoundationHostedRuntimePackages(
       : []),
     ...(host.memory
       ? [runtimePackage(plan, "memory", createMemoryRuntimePlugin(host.memory))]
+      : []),
+    ...(host.routines
+      ? [
+          runtimePackage(
+            plan,
+            "routines",
+            createRoutinesRuntimePlugin(host.routines),
+          ),
+        ]
       : []),
     ...(host.authoring
       ? [
@@ -608,6 +650,9 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // self-management host; the Flock's other Contributions are backend and
   // client, and neither runs here.
   runtimeIds.delete("flock");
+  // Routines mount only for a Turn, so a Routine write records the Session and
+  // Turn that produced it.
+  runtimeIds.delete("routines");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

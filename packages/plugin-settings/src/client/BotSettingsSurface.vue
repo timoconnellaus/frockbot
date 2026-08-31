@@ -570,6 +570,7 @@ async function unassign(
         </section>
       </div>
     </details>
+    <k-slot name="frockbot.bot-settings-sections" />
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
     </p>

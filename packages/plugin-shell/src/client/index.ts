@@ -534,7 +534,10 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
       throw new Error("Application Package metadata is invalid");
     }
     const decoded = decodeFrockBotManifest({
-      schemaVersion: 3,
+      // v4, so a Capability carrying an admission ceiling decodes here too.
+      // The ceiling is durable manifest state the Plugins surface does not
+      // render; refusing the manifest over it would hide the whole Package.
+      schemaVersion: 4,
       id: candidate.id,
       displayName: candidate.displayName,
       version: candidate.version,

@@ -40,6 +40,12 @@ import type {
   UpdateSheepCommandV1,
 } from "@frockbot/plugin-flock/shared";
 import type {
+  RoutineCommandReceiptV1,
+  RoutineCommandV1,
+  RoutineListViewV1,
+  RoutineRunListViewV1,
+} from "@frockbot/plugin-routines/shared";
+import type {
   PackagePublicationReceiptV1,
   PackageRevisionHistoryV1,
   PublishPackageCommandV1,
@@ -459,6 +465,23 @@ export interface BotConfigurationBinding {
     botId: string;
     command: RevertCompositionCommandV1;
   }): Promise<CompositionCommandReceiptV1>;
+  listRoutines(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<RoutineListViewV1>;
+  executeRoutineCommand(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: RoutineCommandV1;
+  }): Promise<RoutineCommandReceiptV1>;
+  listRoutineRuns(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    routineId: string;
+  }): Promise<RoutineRunListViewV1>;
 }
 
 export interface GatewayDependencies {

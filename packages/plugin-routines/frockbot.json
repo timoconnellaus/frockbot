@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 4,
+  "id": "routines",
+  "displayName": "Routines",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "shell": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
+  },
+  "contributions": {
+    "backend": [{ "entry": "./backend", "host": "gateway" }],
+    "runtime": { "entry": "./agent" },
+    "client": {
+      "entry": "./client",
+      "mounts": [{ "slot": "frockbot.bot-settings-sections", "order": 10 }],
+      "outlets": []
+    }
+  },
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [],
+    "capabilities": [
+      {
+        "id": "routine-tools",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent", "channel"]
+        }
+      }
+    ]
+  },
+  "permissions": ["routines:read", "routines:write"]
+}
