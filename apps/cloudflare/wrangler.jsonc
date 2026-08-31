@@ -200,7 +200,15 @@
           "binding": "BOT_PACKAGES",
         },
       ],
+      // Declared as production declares them. Neither Worker runs beside the
+      // harness, so both report "not connected"; no spec authors a Package or
+      // uses a Computer, and a binding that is declared but unreachable is what
+      // production looks like when a dependency is down.
       "services": [
+        {
+          "binding": "PACKAGE_BUNDLER",
+          "service": "frockbot-cloudflare-bundler",
+        },
         {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
