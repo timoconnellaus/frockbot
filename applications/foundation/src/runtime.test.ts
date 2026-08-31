@@ -31,8 +31,10 @@ describe("foundation application", () => {
     expect(first.applicationHash).toBe(second.applicationHash);
     expect(first.packages.map((pkg) => pkg.id)).toEqual([
       "ui-theme",
-      "auth",
       "shell",
+      "flock",
+      "audit",
+      "auth",
       "authoring",
       "settings",
       "bot-template",
@@ -43,7 +45,6 @@ describe("foundation application", () => {
       "desktop-directory-picker",
       "desktop-notifications",
       "echo",
-      "flock",
       "fly-sprite",
       "identity",
       "image",
@@ -62,10 +63,11 @@ describe("foundation application", () => {
     expect(first.contributions).toEqual({
       backend: [
         "shell",
+        "flock",
+        "audit",
         "settings",
         "bot-template",
         "credentials",
-        "flock",
         "mcp",
         "package-publisher",
         "provider-ollama-cloud",
@@ -74,13 +76,13 @@ describe("foundation application", () => {
       ],
       runtime: [
         "shell",
+        "flock",
         "authoring",
         "bot-template",
         "clock",
         "computer",
         "credentials",
         "echo",
-        "flock",
         "fly-sprite",
         "identity",
         "image",
@@ -95,13 +97,13 @@ describe("foundation application", () => {
       ],
       client: [
         "ui-theme",
-        "auth",
         "shell",
+        "flock",
+        "auth",
         "settings",
         "bot-template",
         "clock",
         "computer",
-        "flock",
         "package-publisher",
         "routines",
         "search",
@@ -394,7 +396,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(8);
+    expect(userBackend.contributions).toHaveLength(9);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

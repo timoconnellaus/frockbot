@@ -1,18 +1,19 @@
 {
-  "name": "@frockbot/plugin-memory",
+  "name": "@frockbot/plugin-audit",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./src/agent.ts",
+    "./bot": "./src/bot.ts",
+    "./classify": "./src/classify.ts",
+    "./frockbot.json": "./frockbot.json",
     "./manifest": "./src/manifest.ts",
-    "./projects": "./src/projects.ts",
-    "./roots": "./src/roots.ts",
+    "./package.json": "./package.json",
+    "./shared": "./src/shared.ts",
     "./store": "./src/store.ts",
     "./testing": "./src/testing.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
+    "./user": "./src/user.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"
@@ -22,10 +23,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/secret-shapes": "workspace:*",
-    "@frockbot/workspace-store": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
@@ -38,6 +37,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
-    "directory": "packages/plugin-memory"
+    "directory": "packages/plugin-audit"
   }
 }

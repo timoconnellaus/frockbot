@@ -106,6 +106,16 @@ import {
   type UserSearchRpc,
 } from "./search.js";
 import {
+  AuditOutboxV1,
+  auditEntriesFromStoredRunV1,
+  type AuditSinkV1,
+} from "@frockbot/plugin-audit";
+import {
+  createBotAuditEntryPageV1,
+  createUserAuditSinkV1,
+  type UserAuditRpc,
+} from "./audit.js";
+import {
   createRoutedWorkspaceGenerationsV1,
   createUserMemoryProjectsV1,
   createUserWorkspaceGenerationsV1,
@@ -163,6 +173,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     WORKSPACE_SYNC_GENERATIONS?: WorkspaceGenerationsV1;
     /** The User-scoped transcript index a settled Turn projects into. */
     SEARCH_SINK?: SearchSinkV1;
+    /** The User-scoped audit table this object's outbox drains into. */
+    AUDIT_SINK?: AuditSinkV1;
   };
   /** The identity the Workspace and Memory surfaces above were built for. */
   private surfacesFor: string | undefined;
@@ -438,6 +450,13 @@ export class BotState extends DurableObject<BotStateEnv> {
       rpc as unknown as UserSearchRpc,
       identity,
     );
+    // The audit table is User-scoped too, and reached the same way — but
+    // through a durable outbox rather than fire-and-forget, because
+    // completeness is the parity item (register row 30b).
+    this.backendEnv.AUDIT_SINK = createUserAuditSinkV1(
+      rpc as unknown as UserAuditRpc,
+      identity,
+    );
     this.surfacesFor = key;
   }
 
@@ -602,7 +621,93 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     const turn = await shell.run({ ...identity, ...request.command });
     await this.projectSettledRun(shell, identity, request.command.runId);
+    await this.projectSettledAudit(shell, identity, request.command.runId);
     return turn;
+  }
+
+  /** This object's bounded, durable audit outbox. */
+  private auditOutbox(): AuditOutboxV1 {
+    return new AuditOutboxV1(this.ctx.storage);
+  }
+
+  /**
+   * Queues one settled run's audit entries and drains what is pending.
+   *
+   * Queue first, deliver second, and never the other way round: the entries
+   * are durable in this object before the User object is asked for anything,
+   * so a User object that is away, slow, or mid-eviction costs a retry rather
+   * than a gap. Whatever a drain leaves behind is picked up by the next
+   * settlement or by the alarm this object already has.
+   */
+  private async projectSettledAudit(
+    shell: ShellBotBackendContribution,
+    identity: { userId: string; botId: string },
+    runId: string,
+  ): Promise<void> {
+    const sink = this.backendEnv.AUDIT_SINK;
+    if (!sink) return;
+    const outbox = this.auditOutbox();
+    try {
+      const lookup = await shell.lookupRun({ schemaVersion: 1, runId });
+      if (lookup.state !== "not-admitted") {
+        const stored = await shell.listRunEventPage();
+        const run = stored.runs.find((candidate) => candidate.runId === runId);
+        if (run) {
+          await outbox.append(
+            await auditEntriesFromStoredRunV1(identity.botId, run),
+          );
+        }
+      }
+    } catch {
+      // A projection this object could not build is a gap a rebuild closes;
+      // it is never a reason for an admitted Turn to look as if it failed.
+    }
+    await this.drainAuditOutbox();
+  }
+
+  /**
+   * Hands whatever is pending to the User Durable Object.
+   *
+   * The failure is swallowed *here* and not inside the outbox: the outbox
+   * throws so that nothing is cleared that was not delivered, and this call
+   * site swallows so that a derived projection never decides whether a Turn
+   * settled.
+   */
+  private async drainAuditOutbox(): Promise<void> {
+    const sink = this.backendEnv.AUDIT_SINK;
+    if (!sink) return;
+    try {
+      await this.auditOutbox().drain(sink);
+    } catch {
+      // Still pending, still durable, still visible as `pending` in the
+      // outbox state the Activity surface reads.
+    }
+  }
+
+  /**
+   * One page of this Bot's audit entries, projected from its own stored runs.
+   *
+   * The durable session events rather than the client projection: the client
+   * projection drops `call.input`, and the argument digest needs the exact
+   * arguments.
+   */
+  async projectAuditEntries(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier, botId: rpcBotId },
+      { cursor: rpcString(512) },
+    );
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const cursor = request.cursor as string | undefined;
+    return createBotAuditEntryPageV1(
+      identity.botId,
+      await shell.listRunEventPage(cursor),
+    );
   }
 
   /**
@@ -1061,5 +1166,9 @@ export class BotState extends DurableObject<BotStateEnv> {
 
   async alarm(): Promise<void> {
     await (await this.contribution()).alarm();
+    // The alarm the Bot already has is also the audit outbox's second chance:
+    // entries a settlement could not deliver leave on the next firing rather
+    // than waiting for the Bot to be spoken to again.
+    await this.drainAuditOutbox();
   }
 }

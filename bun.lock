@@ -24,6 +24,7 @@
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-composition": "workspace:*",
+        "@frockbot/plugin-audit": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
@@ -99,6 +100,7 @@
         "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/kernel-do": "workspace:*",
         "@frockbot/mobile": "workspace:*",
+        "@frockbot/plugin-audit": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
@@ -443,6 +445,19 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/plugin-audit": {
+      "name": "@frockbot/plugin-audit",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/secret-shapes": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-auth": {
       "name": "@frockbot/plugin-auth",
       "version": "0.0.1",
@@ -717,6 +732,7 @@
       "dependencies": {
         "@frockbot/kernel-agent-loop": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/secret-shapes": "workspace:*",
         "@frockbot/workspace-store": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
@@ -1024,6 +1040,14 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/secret-shapes": {
+      "name": "@frockbot/secret-shapes",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/template-core": {
       "name": "@frockbot/template-core",
       "version": "0.0.1",
@@ -1301,6 +1325,8 @@
 
     "@frockbot/mobile-core": ["@frockbot/mobile-core@workspace:packages/mobile-core"],
 
+    "@frockbot/plugin-audit": ["@frockbot/plugin-audit@workspace:packages/plugin-audit"],
+
     "@frockbot/plugin-auth": ["@frockbot/plugin-auth@workspace:packages/plugin-auth"],
 
     "@frockbot/plugin-authoring": ["@frockbot/plugin-authoring@workspace:packages/plugin-authoring"],
@@ -1370,6 +1396,8 @@
     "@frockbot/protocol": ["@frockbot/protocol@workspace:packages/protocol"],
 
     "@frockbot/provider-openai-compatible": ["@frockbot/provider-openai-compatible@workspace:packages/provider-openai-compatible"],
+
+    "@frockbot/secret-shapes": ["@frockbot/secret-shapes@workspace:packages/secret-shapes"],
 
     "@frockbot/template-core": ["@frockbot/template-core@workspace:packages/template-core"],
 
