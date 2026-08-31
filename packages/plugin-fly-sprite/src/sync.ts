@@ -53,14 +53,25 @@
 //     Computer-side delete leaves `.frockbot-sync/tombstones/<rel>` naming the
 //     generation it superseded; a store-side delete removes the file on the
 //     Computer and leaves the same record. Neither side ever reads an absence
-//     as "a file I never had" and silently re-creates it.
+//     as "a file I never had" and silently re-creates it. A tombstone is a
+//     file in an ordinary directory a shell can write, so a Computer-side
+//     removal carries no writer at all: it is pushed as an unattributed
+//     delete, and only on a non-Memory root, where the store accepts one. The
+//     generation it names is still the conditional delete's precondition, so a
+//     removal the store has moved past is refused and surfaced.
 //
-// **Writer attribution.** A file the sync finds with no sidecar was written by
-// a shell on the Computer, so nothing recorded who wrote it. It is pushed with
-// the writer the Computer session recorded for that tenant when there is one —
-// the tenant's Bot, during that Bot's Turn — and `{ kind: "unattributed" }`
-// otherwise. The Skills loader refuses `unattributed`, so the file is durable
-// data and never an instruction.
+// **Writer attribution.** A file the sync finds with no valid sidecar was
+// written by a shell on the Computer, so nothing recorded who wrote it, and it
+// is pushed as `{ kind: "unattributed" }`. That is the constitution's own
+// sentence — "A file that reaches a durable root without passing through the
+// Workspace file surface (a shell write on the Computer) is mirrored to object
+// storage by the sync with an unattributed writer" — and it is also the only
+// honest answer: one Computer serves all of a User's Bots, so the sync cannot
+// know which Bot's process wrote a file, and the Turn that happens to be
+// running is a coincidence rather than evidence. A Bot that means to author a
+// Skill writes it through the Workspace file surface, which records real
+// provenance. The Skills loader refuses `unattributed`, so a shell-written
+// file is durable data and never an instruction.
 //
 // **Effect identifiers.** "A mutation ... records intent and an effect
 // identifier in the Bot's Durable Object and in the Workspace before it runs,
@@ -88,7 +99,6 @@ import {
   type WorkspaceRootV1,
   type WorkspaceSyncEffectsV1,
   type WorkspaceSyncEffectV1,
-  type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
 import type { FlySpriteAgentComputer } from "./computer.js";
 import {
@@ -133,13 +143,20 @@ export interface ComputerSyncEntryV1 {
 
 /**
  * A file the Computer no longer holds, and the durable evidence of that: the
- * generation the removal superseded, and the tombstone generation naming who
- * removed it when the removal went through the Workspace file surface.
+ * generation the removal superseded.
+ *
+ * There is deliberately no writer here. A tombstone is a file in an ordinary
+ * directory on the Computer, so a shell can write one — copying the superseded
+ * generation id straight out of the sidecar beside it — naming any writer it
+ * likes. A generation sidecar survives that because the bytes it describes are
+ * the proof, and a removal has no bytes; so a Computer-side removal records no
+ * writer, and the sync does not carry a claim it cannot check. What
+ * `supersedes` buys instead is the conditional delete: a removal that does not
+ * name the generation the store holds is refused and surfaced as a conflict.
  */
 export interface ComputerSyncRemovalV1 {
   path: string;
   supersedes?: string;
-  tombstone?: WorkspaceGenerationV1;
 }
 
 export interface ComputerSyncScanV1 {
@@ -261,11 +278,6 @@ export interface WorkspaceRootSyncOptionsV1 {
   computer: ComputerSyncSurfaceV1;
   /** The declared durable roots this Computer serves. */
   roots: WorkspaceRootV1[];
-  /**
-   * The writer the Computer session recorded for the tenant, used for files a
-   * shell wrote. Absent, or answering `undefined`, means `unattributed`.
-   */
-  sessionWriter?: (root: WorkspaceRootV1) => WorkspaceWriterV1 | undefined;
   /** Where a push records its intent; the Workspace sidecar when absent. */
   effects?: WorkspaceSyncEffectsV1;
   /**
@@ -438,10 +450,6 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     );
   }
 
-  private writerFor(root: WorkspaceRootV1): WorkspaceWriterV1 {
-    return this.options.sessionWriter?.(root) ?? { kind: "unattributed" };
-  }
-
   private async listStore(
     root: WorkspaceRootV1,
   ): Promise<
@@ -513,7 +521,9 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       outcome = await this.options.store.write({
         path: { root, path: entry.path },
         bytes: bytes.bytes,
-        writer: this.writerFor(root),
+        // Nothing on the Computer recorded who wrote these bytes, so nothing
+        // here may claim one. See **Writer attribution** above.
+        writer: { kind: "unattributed" },
         expectedGenerationId: expected,
       });
     } catch (error) {
@@ -528,7 +538,6 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       return "held";
     }
     if (outcome.status === "ok") {
-      await this.effects.settle(effect);
       const sidecar = await this.options.computer.materialize(
         root,
         entry.path,
@@ -536,9 +545,15 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
         outcome.generation,
       );
       if (sidecar.status !== "ok") {
+        // The intent stays unsettled on purpose. The store took the bytes but
+        // the Computer has no sidecar for them, so the next run would see an
+        // unrecorded file and push it again against `null` — a conflict the
+        // store would be right to raise and nobody caused. Leaving the intent
+        // is what makes that next run adopt the generation instead.
         report.failures.push({ ...sidecar, root, path: entry.path });
         return "held";
       }
+      await this.effects.settle(effect);
       report.pushed.push(entry.path);
       return "pushed";
     }
@@ -639,7 +654,9 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     try {
       outcome = await this.options.store.delete({
         path: { root, path: removal.path },
-        writer: removal.tombstone?.writer ?? this.writerFor(root),
+        // Nothing on the Computer can prove who removed the file; see
+        // `ComputerSyncRemovalV1`.
+        writer: { kind: "unattributed" },
         expectedGenerationId: expected,
       });
     } catch (error) {
@@ -911,13 +928,13 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
         continue;
       }
       if (tag === "T") {
+        // Only the superseded generation id is read. The record's own writer
+        // is not: see `ComputerSyncRemovalV1`.
         const text = Buffer.from(second.trim(), "base64").toString("utf8");
         const supersedes = text.slice(0, text.indexOf("\n")).trim();
-        const tombstone = this.decodeMeta(second.trim());
         removed.set(relative, {
           path: relative,
           ...(supersedes && supersedes !== "null" ? { supersedes } : {}),
-          ...(tombstone ? { tombstone } : {}),
         });
         continue;
       }

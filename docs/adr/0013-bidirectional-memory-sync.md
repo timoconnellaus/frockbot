@@ -62,7 +62,8 @@ store's conditional write decides it; a loser is preserved by the store under
 its conflict key, kept on the Computer under `.frockbot-sync/conflicts/`, and
 returned in the sync report. A store generation the Computer has not got is
 materialized at its mount path with its sidecar, so `generationOf` there
-answers with the writer the store recorded rather than `unattributed`. Memory
+answers with the writer the store recorded rather than `unattributed` — for as
+long as the bytes still match that sidecar. Memory
 roots are pull-only: a Memory file changed or removed on the Computer is never
 pushed, it is restored. A delete on either side becomes a recorded removal on
 the other: a Computer-side delete leaves `.frockbot-sync/tombstones/<rel>`
@@ -70,9 +71,23 @@ naming the generation it superseded, and a store-side delete removes the file
 and leaves the same record, so neither side ever reads an absence as a file it
 never had.
 
-**Writer attribution and effects.** A file with no sidecar is pushed with the
-writer the Computer session recorded for that tenant — the tenant's Bot, during
-that Bot's Turn — and `{ kind: "unattributed" }` otherwise. The `"sync"`
+**Writer attribution and effects.** A file with no valid sidecar is pushed as
+`{ kind: "unattributed" }`, and so is a removal the Computer recorded. This is
+the constitution's own sentence — "A file that reaches a durable root without
+passing through the Workspace file surface (a shell write on the Computer) is
+mirrored to object storage by the sync with an unattributed writer" — and it is
+also the only claim the sync can support: one Computer serves all of a User's
+Bots, so the sync cannot know which Bot's process wrote a file, and the Turn
+that happens to be running is a coincidence rather than evidence. A Bot that
+means to author a Skill writes it through `skill_write`, which goes through the
+Workspace file surface and records real provenance. A sidecar is believed only
+while it still describes the bytes beside it: the recorded `contentHash` is
+what a write going around the surface cannot forge without producing the bytes,
+so a file whose sidecar is stale or invented is `unattributed` too, and the
+previous writer's authority does not survive a shell overwrite. A tombstone has
+no bytes to prove anything, so a Computer-side removal carries no writer at
+all; the generation it names is still the conditional delete's precondition, so
+a removal the store has moved past is refused and surfaced. The `"sync"`
 surface is the only one that accepts an `unattributed` writer, and never on a
 Memory root: the alternative is losing a durable-root file at the next image
 rebuild, and the mirrored file carries no authority, because

@@ -505,7 +505,6 @@ export class WorkerdBotState extends BotState {
       ],
       ...(host.effects ? { effects: host.effects } : {}),
       ...(host.generations ? { generations: host.generations } : {}),
-      ...(host.writer ? { sessionWriter: () => host.writer } : {}),
     });
     const report = await sync.sync();
     const root = report.roots[0];

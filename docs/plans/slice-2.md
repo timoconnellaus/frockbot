@@ -118,9 +118,11 @@ attributed to the User whose Computer it is, which was a claim the Computer
 could not support and a hole in the instruction boundary — the User is a writer
 whose Skills _are_ loadable, so any Bot with a shell could drop a `SKILL.md`
 into another Bot's instruction root and have it loaded. `unattributed` is a
-reader's answer only: a `write` or a `delete` that names it is refused. Closing
-the gap properly — recording a writer for every file however it arrives — is
-the Computer-side sync agent's job under ADR 0013.
+reader's answer only: a `write` or a `delete` that names it is refused. The
+Computer-side sync agent of ADR 0013 carries the file to object storage rather
+than closing the gap: it mirrors it with the same `unattributed` writer, which
+is what the constitution requires of "a file that reaches a durable root
+without passing through the Workspace file surface".
 
 **Tests that gate.** Two Bots of one User resolve to one Computer and one
 provider Sprite; each tenant sees its own directory and display; a Bot reads
@@ -439,9 +441,11 @@ generations })`, the reconciliation itself, over two seams:
   roots and bumps a change signal.
 - A durable Computer-side tombstone. `FlyWorkspaceFiles.delete` now records
   `.frockbot-sync/tombstones/<rel>`, holding the generation the removal
-  superseded and the writer that performed it, instead of deleting the sidecar
-  and leaving the removal unaccountable. A shell `rm` is detected the same way,
-  by a sidecar with no file.
+  superseded, instead of deleting the sidecar and leaving the removal
+  unaccountable. A shell `rm` is detected the same way, by a sidecar with no
+  file. The record is a file a shell can write too, so the sync reads only the
+  generation it supersedes — the conditional delete's precondition — and pushes
+  every Computer-side removal as an unattributed delete.
 - Effect identifiers on every push: intent recorded before the write, against a
   deterministic effect id, in the Bot's Durable Object through
   `WorkspaceSyncEffectsV1` where one is injected and in the Workspace otherwise.
@@ -453,9 +457,15 @@ generations })`, the reconciliation itself, over two seams:
 - The Computer-side Memory writer is retired, because the Memory Package writes
   object storage and the sync presents Memory roots read-only. Step 3c deleted
   the property outright: there is no deprecated stub to call.
-- Shell-written files are no longer merely visible-but-unattributed on the
-  Computer: they become durable generations in object storage, attributed to
-  the tenant's Bot when the session recorded one and `unattributed` otherwise.
+- Shell-written files are no longer merely visible on the Computer: they become
+  durable generations in object storage, with the `unattributed` writer the
+  constitution names for anything that reaches a durable root without passing
+  through the Workspace file surface. The sync attributes nothing to a Bot: one
+  Computer serves all of a User's Bots, so it cannot know whose process wrote a
+  file, and a Bot that means to author a Skill writes it through `skill_write`.
+  A sidecar is believed only while its `contentHash` still describes the bytes,
+  so a shell overwrite of a Skill written through the surface reads back as
+  `unattributed` and is not loaded.
 - The Computer side now has a durable tombstone, so a removal is recorded on
   both sides rather than inferred from an absence.
 
@@ -500,7 +510,9 @@ intent-then-settle shape the Bot's authoring effects use rather than a parallel
 store. `apps/cloudflare/src/bot-state.ts` binds it beside a third Workspace
 surface, `WORKSPACE_SYNC_FILES` (`surface: "sync"`), and
 `packages/plugin-shell/src/backend-computer.ts` hands both to the provider for
-one admitted Turn, with that Turn's Bot as the writer of anything a shell wrote.
+one admitted Turn. It hands over no writer: a file a shell wrote reaches object
+storage `unattributed`, because no host can say which of the User's Bots wrote
+it.
 
 **Outcomes, not errors.** A sync that could not run appends `computer/sync` to
 the session event log with `status: "unavailable"` and what it moved, and the

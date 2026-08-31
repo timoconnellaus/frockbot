@@ -179,10 +179,6 @@ class FlySpriteComputerSync implements ComputerSyncV1 {
       store: host.store,
       ...(host.effects ? { effects: host.effects } : {}),
       ...(host.generations ? { generations: host.generations } : {}),
-      // A file a shell wrote records no writer of its own. It is attributed to
-      // the Bot whose Turn has the Computer open, and `unattributed` when
-      // there is none: data either way, never an instruction.
-      ...(host.writer ? { sessionWriter: () => host.writer } : {}),
     });
   }
 

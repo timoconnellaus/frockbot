@@ -30,6 +30,7 @@ import {
   declaredWorkspaceRootsV1,
   type WorkspaceSyncReportV1,
 } from "./sync.ts";
+import { WORKSPACE_EMPTY_SHA256 } from "./workspace.ts";
 
 const USER = "owner";
 const BOT = "health";
@@ -84,6 +85,8 @@ class FakeSyncSprite implements SpriteHandle {
   readonly services: string[] = [];
   /** Set to fail every storage call, as a paused Sprite does. */
   paused = false;
+  /** Drops the next sidecar write, as a pause between store and Computer does. */
+  dropNextMaterialize = false;
 
   execFileHTTP(
     file: string,
@@ -133,8 +136,13 @@ class FakeSyncSprite implements SpriteHandle {
     const relative = quoted(shell, "REL");
     if (shell.includes('printf "F\\t')) return this.scan(root ?? "");
     if (root && relative) {
-      if (shell.includes("__SYNCED__"))
+      if (shell.includes("__SYNCED__")) {
+        if (this.dropNextMaterialize) {
+          this.dropNextMaterialize = false;
+          return "";
+        }
         return this.materialize(root, relative, shell);
+      }
       if (shell.includes("__REMOVED__"))
         return this.remove(root, relative, shell);
       if (shell.includes("__FORGOTTEN__")) return this.forget(root, relative);
@@ -293,7 +301,6 @@ interface Harness {
 
 function harness(
   options: {
-    sessionWriter?: WorkspaceWriterV1;
     store?: (files: WorkspaceFilesV1) => WorkspaceFilesV1;
   } = {},
 ): Harness {
@@ -329,9 +336,6 @@ function harness(
     store: options.store ? options.store(store) : store,
     generations,
     roots,
-    ...(options.sessionWriter
-      ? { sessionWriter: () => options.sessionWriter }
-      : {}),
   });
   return {
     sprite,
@@ -343,6 +347,27 @@ function harness(
     agent,
     sync: () => agent.sync(),
   };
+}
+
+/**
+ * Removes a file the way the Workspace file surface's `delete` does — the file
+ * and its sidecar gone, a tombstone record left behind whose first line is the
+ * generation the removal superseded. A shell can write exactly this too, which
+ * is the point of the tests that use it.
+ */
+function shellTombstone(
+  sprite: FakeSyncSprite,
+  mount: string,
+  relative: string,
+  supersedes: string,
+  tombstone: WorkspaceGenerationV1,
+): void {
+  sprite.files.delete(`${mount}/${relative}`);
+  sprite.files.delete(`${mount}/.frockbot-generations/${relative}`);
+  sprite.files.set(
+    `${mount}/.frockbot-sync/tombstones/${relative}`,
+    encoder.encode(`${supersedes}\n${JSON.stringify(tombstone)}`),
+  );
 }
 
 async function writeToStore(
@@ -485,12 +510,13 @@ describe("the durable-root sync, store to Computer", () => {
 });
 
 describe("the durable-root sync, Computer to store", () => {
-  // Constitution — Computer and Workspace: a file a shell wrote has no
-  // recorded writer, and `docs/plans/slice-2.md` Step 1 leaves closing that
-  // gap to this sync: the file becomes durable, attributed to the tenant's Bot
-  // when the session recorded one.
-  test("pushes a shell-written file with the writer the session recorded", async () => {
-    const { sprite, store, sync } = harness({ sessionWriter: BOT_WRITER });
+  // Constitution — Computer and Workspace: "A file that reaches a durable root
+  // without passing through the Workspace file surface (a shell write on the
+  // Computer) is mirrored to object storage by the sync with an unattributed
+  // writer: it is data, readable and durable, never an instruction and never
+  // accepted as a writer on a later write."
+  test("pushes a shell-written file as unattributed, never loadable", async () => {
+    const { sprite, store, sync } = harness();
     sprite.shellWrite(MOUNTS.skills, "shell/SKILL.md", "# from a shell");
 
     const report = await sync();
@@ -502,42 +528,24 @@ describe("the durable-root sync, Computer to store", () => {
     });
     if (read.status !== "ok") throw new Error(read.reason);
     expect(decoder.decode(read.file.bytes)).toBe("# from a shell");
-    expect(read.file.generation.writer).toEqual(BOT_WRITER);
-    // The sidecar now records the store's generation, so the file is not
-    // pushed a second time.
-    expect((await sync()).roots[0]?.pushed).toEqual([]);
-  });
-
-  // The same file with no session to attribute it to: `unattributed` is the
-  // truth, and the Skills loader refuses it.
-  test("pushes a shell-written file with no session as unattributed, never loadable", async () => {
-    const { sprite, store, sync } = harness();
-    sprite.shellWrite(MOUNTS.skills, "orphan/SKILL.md", "# nobody");
-
-    await sync();
-
-    const read = await store.read({
-      root: skillsRoot,
-      path: "orphan/SKILL.md",
-    });
-    if (read.status !== "ok") throw new Error(read.reason);
     expect(read.file.generation.writer).toEqual({ kind: "unattributed" });
     expect(
       isLoadableSkillSourceV1(
         {
-          path: { root: skillsRoot, path: "orphan/SKILL.md" },
+          path: { root: skillsRoot, path: "shell/SKILL.md" },
           writer: read.file.generation.writer,
           generation: read.file.generation,
         },
         { botId: BOT, userId: USER },
       ),
     ).toBe(false);
+    // The sidecar now records the store's generation, so the file is not
+    // pushed a second time.
+    expect((await sync()).roots[0]?.pushed).toEqual([]);
   });
 
   test("a removal on the Computer becomes a delete in the store, recorded", async () => {
-    const { sprite, store, generations, sync } = harness({
-      sessionWriter: USER_WRITER,
-    });
+    const { sprite, store, generations, sync } = harness();
     await writeToStore(store, skillsRoot, "notes.md", "keep", USER_WRITER);
     await sync();
 
@@ -548,14 +556,86 @@ describe("the durable-root sync, Computer to store", () => {
     expect(
       (await store.read({ root: skillsRoot, path: "notes.md" })).status,
     ).toBe("not-found");
+    // A shell removed it, so nothing recorded who did: the removal is durable
+    // and unattributed, never attributed to the Bot whose Turn happened to be
+    // running.
     expect(
       generations
         .tombstones()
         .map((entry) => [entry.path, entry.generation.writer]),
-    ).toEqual([["notes.md", USER_WRITER]]);
+    ).toEqual([["notes.md", { kind: "unattributed" }]]);
     // The removal is settled on both sides; nothing resurrects the file.
     expect((await sync()).failures).toEqual([]);
     expect(sprite.files.has(`${MOUNTS.skills}/notes.md`)).toBe(false);
+  });
+
+  // A tombstone lives in an ordinary directory on the Computer, so a shell can
+  // write one naming any writer it likes, copying the superseded generation id
+  // out of the sidecar beside it. A removal therefore reaches the store with no
+  // writer at all — the constitution's answer for anything that did not pass
+  // through the Workspace file surface — and only on a non-Memory root.
+  test("pushes a Computer-side tombstone's removal as an unattributed delete", async () => {
+    const { sprite, store, generations, sync } = harness();
+    const generation = await writeToStore(
+      store,
+      skillsRoot,
+      "notes.md",
+      "keep",
+      BOT_WRITER,
+    );
+    await sync();
+
+    // The record a shell can write, and the record the Workspace file surface
+    // writes, are the same bytes in the same place; this is both.
+    shellTombstone(sprite, MOUNTS.skills, "notes.md", generation.generationId, {
+      schemaVersion: 1,
+      generationId: `${generation.generationId}-tombstone`,
+      contentHash: WORKSPACE_EMPTY_SHA256,
+      size: 0,
+      writer: USER_WRITER,
+      writtenAt: new Date(1_700_000_000_000).toISOString(),
+    });
+    const report = await sync();
+
+    expect(report.roots[0]?.removedInStore).toEqual(["notes.md"]);
+    expect(
+      generations
+        .tombstones()
+        .map((entry) => [entry.path, entry.generation.writer]),
+    ).toEqual([["notes.md", { kind: "unattributed" }]]);
+  });
+
+  // The generation the tombstone names is still load-bearing: it is the
+  // conditional delete's precondition, so a removal the store has moved past is
+  // refused and surfaced rather than applied.
+  test("refuses a removal that supersedes a generation the store no longer holds", async () => {
+    const { sprite, store, sync } = harness();
+    const generation = await writeToStore(
+      store,
+      skillsRoot,
+      "notes.md",
+      "keep",
+      BOT_WRITER,
+    );
+    await sync();
+
+    shellTombstone(sprite, MOUNTS.skills, "notes.md", "1700000000000-forged", {
+      schemaVersion: 1,
+      generationId: "1700000000000-forged",
+      contentHash: WORKSPACE_EMPTY_SHA256,
+      size: 0,
+      writer: USER_WRITER,
+      writtenAt: new Date(1_700_000_000_000).toISOString(),
+    });
+    const report = await sync();
+
+    expect(report.roots[0]?.removedInStore).toEqual([]);
+    expect(report.conflicts.map((entry) => entry.path)).toEqual(["notes.md"]);
+    const read = await store.read({ root: skillsRoot, path: "notes.md" });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.generation.generationId).toBe(generation.generationId);
+    // The file the store still holds is restored on the Computer.
+    expect(sprite.text(`${MOUNTS.skills}/notes.md`)).toBe("keep");
   });
 });
 
@@ -564,9 +644,7 @@ describe("the durable-root sync, conflicts", () => {
   // writer has not seen is preserved as a conflicting generation and surfaced,
   // never merged or dropped"; ADR 0013 requires this proven before it ships.
   test("a Computer write and a store write to one path both survive, one as a surfaced conflict", async () => {
-    const { sprite, store, generations, bucket, sync } = harness({
-      sessionWriter: USER_WRITER,
-    });
+    const { sprite, store, generations, bucket, sync } = harness();
     const first = await writeToStore(
       store,
       skillsRoot,
@@ -624,9 +702,7 @@ describe("the durable-root sync, Memory roots", () => {
   // roots ... the Workspace presents Memory roots read-only through the
   // durable-root sync."
   test("a Memory file changed on the Computer is never pushed and is restored", async () => {
-    const { sprite, memory, store, sync } = harness({
-      sessionWriter: BOT_WRITER,
-    });
+    const { sprite, memory, store, sync } = harness();
     const generation = await writeToStore(
       memory,
       botMemoryRoot,
@@ -690,7 +766,6 @@ describe("the durable-root sync, pauses", () => {
   test("a push interrupted by a pause resumes without writing a second generation", async () => {
     let dropAfterWrite = true;
     const { sprite, store, generations, bucket, sync } = harness({
-      sessionWriter: USER_WRITER,
       // The write lands and the answer never arrives: the Sprite paused, and
       // the connection carrying the outcome dropped.
       store: (files) => ({
@@ -733,7 +808,40 @@ describe("the durable-root sync, pauses", () => {
     expect(sprite.keys("/home/box/.frockbot/sync/effects/")).toHaveLength(0);
     const stat = await store.stat({ root: skillsRoot, path: "notes.md" });
     if (stat.status !== "ok") throw new Error(stat.reason);
-    expect(stat.entry.generation.writer).toEqual(USER_WRITER);
+    expect(stat.entry.generation.writer).toEqual({ kind: "unattributed" });
+  });
+
+  // § Durable effects: "Recovery never silently duplicates ... effects." The
+  // push is not done when the store answers: the Computer still has no sidecar
+  // for the bytes it holds. Settling the intent there would leave the next run
+  // pushing the same file against `null` and colliding with the generation it
+  // had itself just written — a conflict nobody caused.
+  test("a push interrupted before its sidecar produces one generation and no conflict", async () => {
+    const { sprite, store, generations, bucket, sync } = harness();
+    sprite.shellWrite(MOUNTS.skills, "notes.md", "half sent");
+    // The store takes the bytes; the Sprite pauses before the sidecar lands.
+    sprite.dropNextMaterialize = true;
+
+    const interrupted = await sync();
+    expect(interrupted.failures.map((entry) => entry.status)).toEqual([
+      "unavailable",
+    ]);
+    expect(interrupted.conflicts).toEqual([]);
+    expect(sprite.keys("/home/box/.frockbot/sync/effects/")).toHaveLength(1);
+
+    const resumed = await sync();
+
+    expect(resumed.conflicts).toEqual([]);
+    expect(resumed.failures).toEqual([]);
+    expect(resumed.roots[0]?.adopted).toEqual(["notes.md"]);
+    expect(
+      bucket.keys().filter((key) => key.includes("notes.md")),
+    ).toHaveLength(1);
+    expect(await generations.conflicts(skillsRoot, "notes.md")).toEqual([]);
+    expect(sprite.keys("/home/box/.frockbot/sync/effects/")).toHaveLength(0);
+    const stat = await store.stat({ root: skillsRoot, path: "notes.md" });
+    if (stat.status !== "ok") throw new Error(stat.reason);
+    expect(stat.entry.generation.writer).toEqual({ kind: "unattributed" });
   });
 
   // "every Computer client reconnects and resumes rather than treating a
@@ -852,7 +960,6 @@ describe("the durable-root sync on the Computer handle", () => {
       },
       effects: effects.effects,
       generations,
-      writer: BOT_WRITER,
     });
     const open = () =>
       provider.open(
@@ -904,11 +1011,19 @@ describe("the durable-root sync on the Computer handle", () => {
     expect(stored).toMatchObject({ status: "ok" });
     if (stored.status === "ok") {
       expect(decoder.decode(stored.file.bytes)).toBe("written by a shell");
-      // The Turn's Bot is the writer of a file nothing else attributed.
-      expect(stored.file.generation.writer).toMatchObject({
-        kind: "bot",
-        botId: BOT,
-      });
+      // A Turn was open, and it is still not evidence: one Computer serves all
+      // of a User's Bots, so nothing here knows which process wrote the file.
+      expect(stored.file.generation.writer).toEqual({ kind: "unattributed" });
+      expect(
+        isLoadableSkillSourceV1(
+          {
+            path: { root: skillsRoot, path: "notes.md" },
+            writer: stored.file.generation.writer,
+            generation: stored.file.generation,
+          },
+          { botId: BOT, userId: USER },
+        ),
+      ).toBe(false);
     }
   });
 

@@ -90,9 +90,39 @@ if [ ! -s "$BOT/slot" ]; then
     [ "$USED" = false ] && break
     SLOT=$((SLOT + 1))
   done
-  [ "$SLOT" -lt 100 ] || { echo "no desktop slots available" >&2; exit 75; }
+  if [ "$SLOT" -ge 100 ]; then
+    # A slot is a display number, not durable state: it is the Xvfb, VNC, and
+    # CDP port triple a tenant's desktop uses while it has one. A tenant that
+    # never comes back would otherwise hold one for ever, and the hundred and
+    # first Bot of a User could never open a desktop, so the allocation is
+    # bounded rather than permanent: reclaim the least recently ensured slot
+    # whose X display is not locked, and let its tenant allocate again on its
+    # next use. Its viewer token goes with it, or that token would address
+    # another Bot's screen.
+    VICTIM=""
+    for FILE in $(ls -1tr "$ROOT"/bots/*/slot 2>/dev/null); do
+      CANDIDATE=$(cat "$FILE")
+      [ -e "/tmp/.X$((100 + CANDIDATE))-lock" ] && continue
+      VICTIM="$FILE"
+      SLOT="$CANDIDATE"
+      break
+    done
+    [ -n "$VICTIM" ] || { echo "no desktop slots available" >&2; exit 75; }
+    VICTIM_BOT=$(dirname "$VICTIM")
+    if [ -s "$VICTIM_BOT/viewer-token" ]; then
+      VICTIM_TOKEN=$(cat "$VICTIM_BOT/viewer-token")
+      VTMP=$(mktemp "$ROOT/tokens.XXXXXX")
+      grep -v "^$VICTIM_TOKEN:" "$ROOT/tokens" > "$VTMP" || true
+      chmod 600 "$VTMP"
+      mv "$VTMP" "$ROOT/tokens"
+    fi
+    rm -f "$VICTIM" "$VICTIM_BOT/cdp-port"
+  fi
   printf '%s\n' "$SLOT" > "$BOT/slot"
 fi
+# Marks this tenant as the most recent holder of its slot, which is the order
+# the reclaim above walks.
+touch "$BOT/slot"
 SLOT=$(cat "$BOT/slot")
 printf '%s\n' "$((9222 + SLOT))" > "$BOT/cdp-port"
 if [ ! -s "$BOT/vnc-password" ]; then
