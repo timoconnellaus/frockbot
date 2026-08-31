@@ -73,7 +73,7 @@ onMounted(() => state.value.load());
 .publisher-surface header p,
 .empty-revisions {
   color: var(--frock-text-muted);
-  font-size: 13px;
+  font-size: var(--frock-text-base);
   line-height: 1.5;
 }
 
@@ -106,17 +106,17 @@ onMounted(() => state.value.load());
 .revision-card code {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
 }
 
 .active-revision {
   color: var(--frock-success);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
   font-weight: 700;
 }
 
 .publisher-error {
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 </style>

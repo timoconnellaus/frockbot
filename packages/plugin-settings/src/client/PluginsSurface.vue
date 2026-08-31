@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { UiButton } from "@frockbot/client-ui";
+import { UiButton, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onMounted, ref } from "vue";
 
@@ -175,7 +175,7 @@ async function disconnect(connectionId: string): Promise<void> {
 <template>
   <div class="plugins-surface">
     <label class="plugin-search">
-      <span aria-hidden="true">⌕</span>
+      <UiIcon name="search" />
       <input
         v-model="search"
         placeholder="Search Plugins"
@@ -402,9 +402,9 @@ async function disconnect(connectionId: string): Promise<void> {
   background: var(--frock-surface-raised);
 }
 
-.plugin-search span {
-  color: var(--frock-action-primary);
-  font-size: 18px;
+.plugin-search:focus-within {
+  border-color: var(--frock-border-focus);
+  box-shadow: 0 0 0 3px var(--frock-focus-ring);
 }
 
 .plugin-search input {
@@ -417,8 +417,9 @@ async function disconnect(connectionId: string): Promise<void> {
 
 .plugin-intro,
 .plugin-empty {
+  margin: 14px 0 0;
   color: var(--frock-text-muted);
-  font-size: 13px;
+  font-size: var(--frock-text-base);
 }
 
 .plugin-grid {
@@ -438,6 +439,19 @@ async function disconnect(connectionId: string): Promise<void> {
   border-radius: var(--frock-radius-card);
   background: var(--frock-surface-raised);
   box-shadow: var(--frock-shadow-card);
+  transition:
+    transform var(--frock-motion-fast),
+    box-shadow var(--frock-motion-fast);
+}
+
+.plugin-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--frock-shadow-control);
+}
+
+.plugin-card-copy strong {
+  font-size: var(--frock-text-md);
+  font-weight: 600;
 }
 
 .plugin-logo {
@@ -471,7 +485,7 @@ async function disconnect(connectionId: string): Promise<void> {
 
 .api-key-form span {
   color: var(--frock-text-muted);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
 }
 
 .api-key-form input,
@@ -495,12 +509,12 @@ async function disconnect(connectionId: string): Promise<void> {
 .plugin-card-copy small {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .plugin-connected {
   color: var(--frock-success);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
   font-weight: 700;
 }
 
@@ -510,7 +524,7 @@ async function disconnect(connectionId: string): Promise<void> {
 
 .connected-accounts h3 {
   font-family: var(--frock-font-display);
-  font-size: 15px;
+  font-size: var(--frock-text-lg);
 }
 
 .connected-account {
@@ -543,18 +557,18 @@ async function disconnect(connectionId: string): Promise<void> {
 .connected-account small {
   margin-top: 3px;
   color: var(--frock-text-muted);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
   text-transform: capitalize;
 }
 
 .connection-failure {
   margin: 6px 0 0;
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .settings-error {
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 </style>

@@ -11,5 +11,5 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "vite.config.ts", "capacitor.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "*.ts"]
 }

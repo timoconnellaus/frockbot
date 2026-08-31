@@ -4,6 +4,7 @@ import {
   toolCallOccurrences,
   validateSettledToolOccurrenceJournal,
   validateToolOccurrenceJournal,
+  turnFailureMessage,
 } from "@frockbot/kernel-contracts";
 import { BotTurnExecutionError } from "./turn-errors.js";
 import type { StoredRunCodecV1, StoredRunV1 } from "./run-records.js";
@@ -87,7 +88,7 @@ export function planBotRunRecovery<Snapshot>(
     if (terminalTurn.outcome !== "completed") {
       return {
         kind: "fail",
-        failure: `Bot turn ended with outcome ${terminalTurn.outcome}`,
+        failure: turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
       };
     }
     return {

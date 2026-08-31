@@ -98,6 +98,15 @@ describe("application manifest protocol", () => {
 
   test("requires the exact owned manifest response", () => {
     expect(decodePluginCatalog(emptyManifest)).toEqual([]);
+    // The artifact the gateway loaded and the plan it compiled are hashed
+    // separately, so a hosted manifest always carries two different digests.
+    expect(
+      decodePluginCatalog({
+        ...emptyManifest,
+        deployment: { userId: "user-1", applicationHash: "sha256-of-bytes" },
+        applicationHash: "sha256-of-plan",
+      }),
+    ).toEqual([]);
     expect(
       decodePluginCatalog({
         ...emptyManifest,
@@ -147,6 +156,20 @@ describe("application manifest protocol", () => {
         ],
       }),
     ]);
+    // A Package without configuration arrives without the key.
+    expect(
+      decodePluginCatalog({
+        ...emptyManifest,
+        packages: [
+          {
+            id: "ui-theme",
+            displayName: "Theme",
+            version: "0.0.1",
+            contributions: ["client"],
+          },
+        ],
+      }),
+    ).toEqual([]);
     for (const manifest of [
       { packages: [] },
       { ...emptyManifest, schemaVersion: 2 },

@@ -102,16 +102,21 @@ async function save(): Promise<void> {
   margin: 0;
 }
 
+.profile-intro strong {
+  font-size: var(--frock-text-lg);
+  font-weight: 600;
+}
+
 .profile-intro p {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 12px;
+  font-size: var(--frock-text-base);
 }
 
 .settings-error {
   margin: 0;
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .settings-actions {

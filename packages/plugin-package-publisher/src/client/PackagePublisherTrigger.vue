@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+import { UiIcon } from "@frockbot/client-ui";
 import { inject } from "vue";
 
 const surfaces = inject(clientSurfaceRegistryKey);
@@ -12,7 +13,8 @@ if (!surfaces) throw new Error("client surface registry was not provided");
     type="button"
     @click="surfaces.open('package-publisher')"
   >
-    <span aria-hidden="true">↺</span>Revisions
+    <span class="publisher-trigger__icon"><UiIcon name="history" /></span>
+    Revisions
   </button>
 </template>
 
@@ -20,30 +22,37 @@ if (!surfaces) throw new Error("client surface registry was not provided");
 .publisher-trigger {
   display: flex;
   width: 100%;
-  height: 42px;
+  height: 40px;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   padding: 0 8px;
-  border-top: 1px solid var(--frock-border);
-  color: var(--frock-text-muted);
+  border-radius: var(--frock-radius-control);
+  color: var(--frock-text);
   background: transparent;
-  font-size: 13px;
+  font-size: var(--frock-text-md);
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--frock-motion-fast);
 }
 
 .publisher-trigger:hover {
-  color: var(--frock-text);
-  background: var(--frock-surface);
+  background: var(--frock-fill-hover);
 }
 
-.publisher-trigger span {
+.publisher-trigger:active {
+  background: var(--frock-fill-pressed);
+}
+
+.publisher-trigger__icon {
   display: grid;
-  width: 26px;
-  height: 26px;
+  width: var(--frock-avatar-sm);
+  height: var(--frock-avatar-sm);
+  flex: 0 0 auto;
   place-items: center;
   border-radius: 8px;
   color: var(--frock-action-primary);
   background: var(--frock-surface);
+  box-shadow: inset 0 0 0 1px var(--frock-border);
 }
 </style>

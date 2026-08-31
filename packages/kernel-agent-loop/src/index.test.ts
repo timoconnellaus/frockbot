@@ -2521,4 +2521,84 @@ describe("AgentLoop", () => {
       outcome: "completed",
     });
   });
+  test("carries the provider failure reason on a model-error turn/end", async () => {
+    const provider: LlmProvider = {
+      id: "provider-rejects",
+      async *stream() {
+        throw new LlmEffectNotStartedError(
+          "Ollama Cloud responded 401: invalid api key",
+        );
+      },
+    };
+    const root = await mountRuntime(provider);
+    const handle = await root.agents.create({
+      botId: "reason-bot",
+      sessionId: "provider-rejects",
+      provider: "provider-rejects",
+      model: "test-model",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Say hello.");
+    await handle.agent.whenIdle();
+
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      turn: 1,
+      outcome: "model-error",
+      reason: "Ollama Cloud responded 401: invalid api key",
+    });
+  });
+
+  test("bounds a turn/end reason to what the session event contract accepts", async () => {
+    const provider: LlmProvider = {
+      id: "provider-verbose-failure",
+      async *stream() {
+        throw new LlmEffectNotStartedError("x".repeat(900));
+      },
+    };
+    const root = await mountRuntime(provider);
+    const handle = await root.agents.create({
+      botId: "reason-bot",
+      sessionId: "provider-verbose-failure",
+      provider: "provider-verbose-failure",
+      model: "test-model",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Say hello.");
+    await handle.agent.whenIdle();
+
+    const end = handle.agent.session.events.at(-1);
+    expect(end?.type).toBe("turn/end");
+    expect(end?.type === "turn/end" ? end.reason : undefined).toBe(
+      "x".repeat(500),
+    );
+    expect(() => decodeSessionEvent(end)).not.toThrow();
+  });
+
+  test("omits a reason from a completed turn/end", async () => {
+    const provider: LlmProvider = {
+      id: "provider-completes",
+      async *stream() {
+        yield { type: "text-delta", text: "Hello." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider);
+    const handle = await root.agents.create({
+      botId: "reason-bot",
+      sessionId: "provider-completes",
+      provider: "provider-completes",
+      model: "test-model",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Say hello.");
+    await handle.agent.whenIdle();
+
+    const end = handle.agent.session.events.at(-1);
+    expect(end).toMatchObject({ type: "turn/end", outcome: "completed" });
+    expect(end && Object.hasOwn(end, "reason")).toBe(false);
+  });
 });

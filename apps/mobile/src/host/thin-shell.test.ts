@@ -22,6 +22,7 @@ test("Capacitor navigates directly to the configured hosted WebUI", async () => 
   expect(await process.exited).toBe(0);
   expect(JSON.parse(await new Response(process.stdout).text())).toEqual({
     server: {
+      androidScheme: "frockbot",
       url: "https://app.example.com",
       cleartext: false,
     },

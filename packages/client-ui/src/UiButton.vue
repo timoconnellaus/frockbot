@@ -28,12 +28,18 @@ withDefaults(
   border-radius: var(--frock-radius-control);
   color: var(--frock-text);
   background: transparent;
+  font-size: var(--frock-text-base);
   font-weight: 700;
   cursor: pointer;
   transition:
     background-color var(--frock-motion-fast),
     border-color var(--frock-motion-fast),
-    color var(--frock-motion-fast);
+    color var(--frock-motion-fast),
+    transform var(--frock-motion-fast);
+}
+
+.ui-button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .ui-button--primary {

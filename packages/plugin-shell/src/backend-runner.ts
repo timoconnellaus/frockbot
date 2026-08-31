@@ -5,6 +5,7 @@ import type {
 import {
   type PersistSessionEvents,
   type SessionEvent,
+  turnFailureMessage,
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
 import type { ShellMountedComposition } from "./backend-composition.js";
@@ -99,7 +100,7 @@ function settleBotTurn(
   }
   if (terminalTurn.outcome !== "completed") {
     throw new BotTurnExecutionError(
-      `Bot turn ended with outcome ${terminalTurn.outcome}`,
+      turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
       appendedSessionEvents(previousEvents, events),
     );
   }

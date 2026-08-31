@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
+import { planBotRunRecovery } from "./backend-recovery.js";
 import {
   createClientRunStopReceiptV1,
   decodeClientNotificationAcknowledgementCommandV1,
@@ -940,5 +941,35 @@ describe("client run protocol v1", () => {
       toolCalls: [{ id: providerId }, { id: providerId }],
     });
     expect(JSON.stringify(projected)).not.toContain(providerId);
+  });
+  test("surfaces a failed Turn's reason as the client run failure", () => {
+    const events = [
+      event({ type: "turn/start", seq: 0, timestamp, turn: 1 }),
+      event({
+        type: "turn/end",
+        seq: 1,
+        timestamp,
+        turn: 1,
+        outcome: "model-error",
+        reason: "Ollama Cloud responded 401: invalid api key",
+      }),
+    ];
+    const plan = planBotRunRecovery(storedRun(events, "running"), events);
+    if (plan.kind !== "fail")
+      throw new Error("expected a failed recovery plan");
+
+    const lookup = projectClientRunLookupV1({
+      ...storedRun(events, "failed"),
+      events,
+      failure: plan.failure,
+    });
+    expect(decodeClientRunLookupV1(structuredClone(lookup))).toMatchObject({
+      state: "terminal",
+      run: {
+        status: "failed",
+        failure:
+          "Bot turn ended with outcome model-error: Ollama Cloud responded 401: invalid api key",
+      },
+    });
   });
 });

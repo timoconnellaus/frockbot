@@ -290,18 +290,14 @@ exit 1
       stderr: "pipe",
     });
     expect(execution.exitCode).toBe(0);
-    const forwarded = Object.fromEntries(
-      (await Bun.file(capture).text())
-        .trim()
-        .split("\n")
-        .map((line) => {
-          const separator = line.indexOf("=");
-          return [
-            line.slice(0, separator),
-            JSON.parse(line.slice(separator + 1)),
-          ];
-        }),
-    );
+    // Wrangler parses the secrets file as JSON before it tries dotenv, and
+    // dotenv would keep the backslash escapes inside a double-quoted value —
+    // a keyring forwarded that way reached production mangled. So the file
+    // must be one JSON object, read exactly as Wrangler reads it.
+    const forwarded = JSON.parse(await Bun.file(capture).text()) as Record<
+      string,
+      string
+    >;
     expect(forwarded.SPRITES_TOKEN).toBe("sprites-production");
     expect(forwarded.CREDENTIAL_KEYRING).toBe(
       productionEnvironment.CREDENTIAL_KEYRING,

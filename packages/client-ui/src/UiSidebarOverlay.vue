@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import UiIconButton from "./UiIconButton.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -48,14 +49,12 @@ onBeforeUnmount(() => restoreFocus?.focus());
     >
       <header class="ui-sidebar-overlay__header">
         <h2 id="ui-sidebar-overlay-title">{{ title }}</h2>
-        <button
+        <UiIconButton
           data-surface-close
-          type="button"
-          aria-label="Close panel"
+          icon="close"
+          label="Close panel"
           @click="emit('close')"
-        >
-          ×
-        </button>
+        />
       </header>
       <div class="ui-sidebar-overlay__content">
         <slot />
@@ -81,9 +80,9 @@ onBeforeUnmount(() => restoreFocus?.focus());
 
 .ui-sidebar-overlay__header {
   display: grid;
-  min-height: 64px;
+  min-height: var(--frock-titlebar-height);
   flex: 0 0 auto;
-  grid-template-columns: minmax(0, 1fr) 40px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
   padding: 0 18px 0 24px;
@@ -91,28 +90,14 @@ onBeforeUnmount(() => restoreFocus?.focus());
 }
 
 .ui-sidebar-overlay__header h2 {
+  overflow: hidden;
   margin: 0;
   font-family: var(--frock-font-display);
-  font-size: var(--frock-font-title);
-  letter-spacing: -0.035em;
-}
-
-.ui-sidebar-overlay__header button {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  padding: 0;
-  border-radius: 50%;
-  color: var(--frock-text-muted);
-  background: transparent;
-  font-size: 24px;
-  cursor: pointer;
-}
-
-.ui-sidebar-overlay__header button:hover {
-  color: var(--frock-text);
-  background: var(--frock-surface-subtle);
+  font-size: var(--frock-text-2xl);
+  font-weight: 400;
+  letter-spacing: var(--frock-tracking-display);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .ui-sidebar-overlay__content {

@@ -434,9 +434,18 @@ export function createUserApplication() {
           error instanceof Error ? error.message : "invalid run page",
         );
       }
-      return Response.json(
-        await env.BOT_STATE.listRuns({ schemaVersion: 1, botId, query }),
-      );
+      try {
+        return Response.json(
+          await env.BOT_STATE.listRuns({ schemaVersion: 1, botId, query }),
+        );
+      } catch (error) {
+        // A stored run the current codec refuses is a visible failure with
+        // its reason, never a crash of the whole application Worker.
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "run list failed",
+        );
+      }
     }
     if (request.method !== "POST") return jsonError(405, "method not allowed");
 

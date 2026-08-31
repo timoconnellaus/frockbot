@@ -1,6 +1,6 @@
 .clock-card {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   padding: 14px 0;
   border-top: 1px solid var(--frock-border);
   color: var(--frock-text);
@@ -8,41 +8,46 @@
 
 .clock-heading {
   display: flex;
+  min-height: var(--frock-control-sm);
   align-items: center;
   justify-content: space-between;
-  font-size: 14px;
-}
-
-.clock-heading button {
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--frock-border);
-  border-radius: 8px;
+  margin-bottom: 4px;
   color: var(--frock-text-muted);
-  background: var(--frock-surface);
-  cursor: pointer;
+  font-size: var(--frock-text-xs);
+  font-weight: 700;
+  letter-spacing: var(--frock-tracking-eyebrow);
+  text-transform: uppercase;
 }
 
-.clock-heading button:disabled {
-  opacity: 0.45;
+.clock-refreshing {
+  animation: clock-spin 0.8s linear infinite;
+}
+
+@keyframes clock-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .clock-card time {
-  font-size: 14px;
-  line-height: 1.4;
+  font-size: var(--frock-text-lg);
+  font-weight: 600;
+  line-height: var(--frock-leading-tight);
 }
 
 .clock-card small {
   color: var(--frock-text-muted);
-  font-size: 12px;
+  font-size: var(--frock-text-base);
 }
 
 .clock-card code {
   justify-self: start;
-  padding: 3px 6px;
+  margin-top: 6px;
+  padding: 3px 7px;
   border: 1px solid var(--frock-success-border);
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--frock-success);
   background: var(--frock-success-surface);
-  font-size: 12px;
+  font-family: var(--frock-font-mono);
+  font-size: var(--frock-text-sm);
 }

@@ -446,7 +446,10 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
     typeof value.applicationHash !== "string" ||
     value.applicationHash.length === 0 ||
     value.applicationHash.length > 256 ||
-    value.deployment.applicationHash !== value.applicationHash ||
+    // `deployment.applicationHash` names the artifact bytes the gateway
+    // loaded; `applicationHash` is the compiled plan's digest. They differ
+    // by construction, so each is checked on its own and never against
+    // the other.
     !Array.isArray(value.packages) ||
     value.packages.length > 256
   ) {
@@ -455,13 +458,14 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
   return value.packages.flatMap((candidate) => {
     if (
       !isRecord(candidate) ||
-      !hasExactFields(candidate, [
-        "id",
-        "displayName",
-        "version",
-        "contributions",
-        "configuration",
-      ]) ||
+      // A Package that declares no configuration is serialised without the
+      // key (JSON drops an undefined field), so the key is owned but optional.
+      !hasExactFields(
+        candidate,
+        Object.hasOwn(candidate, "configuration")
+          ? ["id", "displayName", "version", "contributions", "configuration"]
+          : ["id", "displayName", "version", "contributions"],
+      ) ||
       typeof candidate.id !== "string" ||
       typeof candidate.displayName !== "string" ||
       typeof candidate.version !== "string" ||

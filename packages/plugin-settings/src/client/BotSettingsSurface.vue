@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
-import { UiButton, UiField } from "@frockbot/client-ui";
+import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onMounted, reactive, ref } from "vue";
 import {
@@ -249,7 +249,9 @@ async function unassign(
 <template>
   <form class="settings-form" @submit.prevent="save">
     <div class="settings-intro">
-      <span class="settings-avatar" aria-hidden="true">⌁</span>
+      <span class="settings-avatar" aria-hidden="true"
+        ><UiIcon name="sparkle" size="lg"
+      /></span>
       <div>
         <strong>Shape this Bot</strong>
         <p>
@@ -492,7 +494,6 @@ async function unassign(
   border-radius: 16px;
   color: var(--frock-action-secondary-text);
   background: var(--frock-surface-accent);
-  font-size: 23px;
 }
 
 .settings-intro strong,
@@ -502,13 +503,18 @@ async function unassign(
   margin: 0;
 }
 
+.settings-intro strong {
+  font-size: var(--frock-text-lg);
+  font-weight: 600;
+}
+
 .settings-intro p,
 .assignment-settings p,
 .assignment-card small {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: var(--frock-text-base);
+  line-height: var(--frock-leading-normal);
 }
 
 .assignment-settings {
@@ -558,11 +564,16 @@ async function unassign(
   display: block;
 }
 
+.notification-setting strong {
+  font-size: var(--frock-text-md);
+  font-weight: 600;
+}
+
 .exact-model-setting small,
 .notification-setting small {
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
 }
 
 .exact-model-setting input,
@@ -575,7 +586,7 @@ async function unassign(
 .settings-error {
   margin: 0;
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .settings-actions {

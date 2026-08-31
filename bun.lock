@@ -431,6 +431,7 @@
       "dependencies": {
         "@cordisjs/plugin-webui": "0.8.2",
         "@frockbot/client-core": "workspace:*",
+        "@frockbot/client-ui": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "cordis": "4.0.0-rc.8",
         "vue": "3.5.41",
@@ -554,6 +555,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@frockbot/client-core": "workspace:*",
+        "@frockbot/client-ui": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "cordis": "4.0.0-rc.8",

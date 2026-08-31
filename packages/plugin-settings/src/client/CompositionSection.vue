@@ -197,7 +197,7 @@ async function revert(generationId: string): Promise<void> {
 .composition-header h3 {
   margin: 0;
   font-family: var(--frock-font-display);
-  font-size: 15px;
+  font-size: var(--frock-text-lg);
 }
 
 .composition-header small,
@@ -205,7 +205,7 @@ async function revert(generationId: string): Promise<void> {
   display: block;
   margin-top: 4px;
   color: var(--frock-text-muted);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .composition-list {
@@ -243,7 +243,7 @@ async function revert(generationId: string): Promise<void> {
 .composition-copy small {
   margin-top: 3px;
   color: var(--frock-text-muted);
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
 }
 
 .composition-member {
@@ -259,13 +259,13 @@ async function revert(generationId: string): Promise<void> {
 
 .composition-current {
   color: var(--frock-success);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
   font-weight: 700;
 }
 
 .composition-pending {
   color: var(--frock-text-muted);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .composition-confirm,
@@ -280,14 +280,14 @@ async function revert(generationId: string): Promise<void> {
   gap: 8px;
   padding-top: 10px;
   color: var(--frock-text-muted);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 
 .composition-diff {
   width: 100%;
   margin-top: 10px;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: var(--frock-text-sm);
 }
 
 .composition-diff caption {
@@ -314,6 +314,6 @@ async function revert(generationId: string): Promise<void> {
 
 .settings-error {
   color: var(--frock-danger-text);
-  font-size: 12px;
+  font-size: var(--frock-text-sm);
 }
 </style>
