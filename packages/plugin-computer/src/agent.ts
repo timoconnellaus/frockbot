@@ -31,6 +31,7 @@ import {
   type SessionStore,
   type ToolAttachmentV1,
   type ToolDefinition,
+  type ToolExecutionContext,
   type WorkspacePathV1,
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
@@ -38,6 +39,7 @@ import {
 import {
   computerBotPathKeyV1,
   ComputerError,
+  type ComputerBackgroundStateV1,
   type ComputerBrowserAction,
   type ComputerHandle,
   computerSyncSummaryV1,
@@ -47,6 +49,20 @@ import {
 // Merges the Agent loop's event declarations into the cordis Context type.
 import type {} from "@frockbot/kernel-agent-loop/agent";
 import type { Plugin } from "cordis";
+import {
+  computerProcessStatusV1,
+  COMPUTER_PROCESS_COMMAND_MAX,
+  isComputerProcessIdV1,
+  type ComputerProcessRecordV1,
+  type ComputerProcessStatusV1,
+} from "./process-records.js";
+import {
+  ComputerProcessLimitError,
+  ComputerProcessStore,
+  type ComputerProcessStorageV1,
+} from "./process-store.js";
+
+export type { ComputerProcessStorageV1 };
 
 /**
  * The Session and Turn a durable Workspace write records as its writer.
@@ -66,6 +82,14 @@ export interface ComputerAgentPluginConfig {
   defaultProviderId: string;
   idempotentEffects?: boolean;
   writer?: ComputerWriterIdentityV1;
+  /**
+   * The Bot Durable Object storage a background process's record is written
+   * to. Absent, and `computer_exec{background:true}` and the three process
+   * tools are not offered at all: "record durable execution intent before
+   * invoking an external side effect", and with nowhere to record it there is
+   * no honest way to launch one.
+   */
+  processes?: ComputerProcessStorageV1;
 }
 
 /** The Package-declared durable root screenshots are written to. */
@@ -101,6 +125,7 @@ function base64Of(bytes: Uint8Array): string {
 
 interface ExecInput {
   command: string;
+  background: boolean;
 }
 
 function record(input: unknown): Record<string, unknown> | undefined {
@@ -116,7 +141,21 @@ function decodeExec(input: unknown): ExecInput | undefined {
   const command = value?.command;
   if (typeof command !== "string" || !command.trim()) return undefined;
   if (command.length > MAX_EXEC_COMMAND_LENGTH) return undefined;
-  return { command };
+  const background = value?.background;
+  if (background !== undefined && typeof background !== "boolean") {
+    return undefined;
+  }
+  return { command, background: background === true };
+}
+
+/** The durable root a finished process's log tail is mirrored into. */
+export const COMPUTER_PROCESSES_ROOT_ID = "processes";
+/** Log bytes mirrored into the durable root on a completion. */
+export const COMPUTER_PROCESS_MIRROR_BYTES = 64_000;
+
+function decodeProcessId(input: unknown): string | undefined {
+  const value = record(input)?.processId;
+  return isComputerProcessIdV1(value) ? value : undefined;
 }
 
 function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
@@ -354,6 +393,11 @@ export function createComputerAgentPlugin(
     // and the Bot attaches to it as a tenant.
     const identity = { userId };
     const turnSync = new ComputerTurnSync(ctx.sessions);
+    // The Turn ordinal a `computer/process` event is recorded under. The
+    // Agent loop knows it; a tool context does not, so it is caught where the
+    // loop already announces it.
+    let currentTurn = 1;
+    const turnOf = (_context: ToolExecutionContext): number => currentTurn;
     const attach = async (botId: string, signal: AbortSignal) => {
       if (!ctx.computers.assignment(identity)) {
         ctx.computers.assign(identity, defaultProviderId);
@@ -378,12 +422,20 @@ export function createComputerAgentPlugin(
     const execTool: ToolDefinition = {
       name: "computer_exec",
       idempotent: config.idempotentEffects === true,
-      description:
+      description: [
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
+        "With background:true the command keeps running after this call returns and after this Turn ends, and you get a processId to check later.",
+        "A background process runs only while the Computer is awake. Nothing keeps it awake for you: if the Computer hibernates first, the outcome is reported as unknown, with whatever log was durable at the time.",
+      ].join(" "),
       inputSchema: {
         type: "object",
         properties: {
           command: { type: "string", maxLength: MAX_EXEC_COMMAND_LENGTH },
+          background: {
+            type: "boolean",
+            description:
+              "Start the command and return a processId instead of waiting for it.",
+          },
         },
         required: ["command"],
         additionalProperties: false,
@@ -396,6 +448,15 @@ export function createComputerAgentPlugin(
             content: `A command of at most ${MAX_EXEC_COMMAND_LENGTH} characters is required`,
             isError: true,
           };
+        if (decoded.background) {
+          return processes
+            ? launchBackground(decoded.command, context)
+            : {
+                content:
+                  "A background process is recorded before it is launched; this runtime has nowhere durable to record it",
+                isError: true,
+              };
+        }
         try {
           return await useComputer(
             await open(context.botId, context.sessionId, context.signal),
@@ -430,6 +491,302 @@ export function createComputerAgentPlugin(
     };
 
     const writer = config.writer;
+    const processes = config.processes
+      ? new ComputerProcessStore(config.processes)
+      : undefined;
+
+    /** Appends one `computer/process` line to the durable session log. */
+    const noteProcess = async (
+      sessionId: string,
+      turn: number,
+      note: {
+        processId: string;
+        action: "launch" | "check" | "logs" | "stop";
+        status: ComputerProcessStatusV1;
+        exitCode?: number;
+      },
+    ): Promise<void> => {
+      const session = ctx.sessions.get(sessionId);
+      if (!session || session.disposed) return;
+      session.append({
+        type: "computer/process",
+        turn: Math.max(1, turn),
+        ...note,
+      });
+      await session.flush();
+    };
+
+    /**
+     * Mirrors a finished process's log tail into the Package-declared
+     * `processes` root.
+     *
+     * Without it an image rebuild erases the only evidence a long job ever
+     * ran, which is an unobservable failure state. Written through the
+     * Workspace, so the Bot is recorded as its writer; best effort, because a
+     * process outcome that was read is never withheld because the mirror
+     * could not be written.
+     */
+    const mirrorLog = async (
+      computer: ComputerHandle,
+      context: ToolExecutionContext,
+      record: ComputerProcessRecordV1,
+      status: ComputerProcessStatusV1,
+      logTail: string,
+    ): Promise<void> => {
+      if (!writer || !computer.workspace) return;
+      if (status !== "exited" && status !== "unknown") return;
+      const botKey = computerBotPathKeyV1(context.botId);
+      const body = [
+        `# ${record.processId}`,
+        `command: ${record.command}`,
+        `started: ${record.startedAt}`,
+        `status: ${status}`,
+        ...(record.exitCode === undefined
+          ? []
+          : [`exit: ${String(record.exitCode)}`]),
+        "",
+        logTail.slice(-COMPUTER_PROCESS_MIRROR_BYTES),
+      ].join("\n");
+      const existing = await computer.workspace.stat({
+        root: {
+          kind: "package-declared",
+          userId,
+          packageId: "computer",
+          rootId: COMPUTER_PROCESSES_ROOT_ID,
+        },
+        path: `${botKey}/${record.processId}.log`,
+      });
+      await computer.workspace.write({
+        path: {
+          root: {
+            kind: "package-declared",
+            userId,
+            packageId: "computer",
+            rootId: COMPUTER_PROCESSES_ROOT_ID,
+          },
+          path: `${botKey}/${record.processId}.log`,
+        },
+        bytes: new TextEncoder().encode(body),
+        writer: {
+          kind: "bot",
+          botId: context.botId,
+          sessionId: writer.sessionId,
+          turnId: writer.turnId,
+          runId: writer.runId,
+        },
+        expectedGenerationId:
+          existing.status === "ok"
+            ? existing.entry.generation.generationId
+            : null,
+        mediaType: "text/plain",
+      });
+    };
+
+    /**
+     * Launches a command that outlives the Turn.
+     *
+     * The record is written *before* the launch, carrying the effect id: an
+     * interrupted launch leaves an intent to reconcile rather than a process
+     * nothing remembers, and a recovery reads its outcome instead of starting
+     * a second one.
+     */
+    const launchBackground = async (
+      command: string,
+      context: ToolExecutionContext,
+    ) => {
+      if (!processes || !writer) {
+        return {
+          content:
+            "A background process is recorded before it is launched; this runtime has nowhere durable to record it",
+          isError: true,
+        };
+      }
+      const store = processes;
+      try {
+        return await useComputer(
+          await open(context.botId, context.sessionId, context.signal),
+          async (computer) => {
+            if (!computer.processes) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer does not support background processes",
+              );
+            }
+            const processId = `p-${context.effectId.replaceAll(/[^a-zA-Z0-9._-]/g, "-")}`;
+            const generation = await computer.processes.generation({
+              signal: context.signal,
+            });
+            const intent: ComputerProcessRecordV1 = {
+              schemaVersion: 1,
+              processId,
+              botId: context.botId,
+              sessionId: context.sessionId,
+              turnId: writer.turnId,
+              command,
+              cwd: "",
+              startedAt: new Date().toISOString(),
+              status: "starting",
+              generation,
+              effectId: context.effectId,
+              logPath: "",
+            };
+            await store.record({ ...intent, cwd: "/", logPath: "/" });
+            const launched = await computer.processes.launch(
+              { processId, command },
+              { signal: context.signal, effectId: context.effectId },
+            );
+            const running: ComputerProcessRecordV1 = {
+              ...intent,
+              status: "running",
+              generation: launched.generation || generation,
+              cwd: launched.cwd,
+              logPath: launched.logPath,
+              pid: launched.pid,
+            };
+            await store.update(running);
+            await noteProcess(context.sessionId, turnOf(context), {
+              processId,
+              action: "launch",
+              status: "running",
+            });
+            return {
+              content: JSON.stringify({
+                processId,
+                pid: launched.pid,
+                status: "running",
+                command,
+                cwd: launched.cwd,
+                startedAt: running.startedAt,
+                note: "This process runs while the Computer is awake and outlives this Turn. Nothing keeps the Computer awake for it; if it hibernates first, computer_process_check answers unknown.",
+              }),
+              isError: false,
+            };
+          },
+        );
+      } catch (error) {
+        if (error instanceof ComputerProcessLimitError) {
+          return { content: error.message, isError: true };
+        }
+        return failure(error);
+      }
+    };
+
+    /**
+     * Reads one process's outcome and records it. The reconciliation rule —
+     * a moved generation means the process is gone, never running — lives in
+     * `computerProcessStatusV1`, so no caller here can decide it differently.
+     */
+    const settle = async (
+      context: ToolExecutionContext,
+      processId: string,
+      action: "check" | "logs" | "stop",
+      tailBytes?: number,
+    ) => {
+      if (!processes) {
+        return {
+          content: "This runtime holds no background process records",
+          isError: true,
+        };
+      }
+      const store = processes;
+      const held = await store.read(processId);
+      if (!held || held.botId !== context.botId) {
+        return {
+          content: `No background process "${processId}" is recorded for this Bot`,
+          isError: true,
+        };
+      }
+      try {
+        return await useComputer(
+          await open(context.botId, context.sessionId, context.signal),
+          async (computer) => {
+            if (!computer.processes) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer does not support background processes",
+              );
+            }
+            const currentGeneration = await computer.processes.generation({
+              signal: context.signal,
+            });
+            let observed: ComputerBackgroundStateV1;
+            if (action === "stop") {
+              observed = await computer.processes.stop(processId, {
+                signal: context.signal,
+                effectId: context.effectId,
+              });
+            } else {
+              observed = await computer.processes.inspect(processId, {
+                signal: context.signal,
+                ...(tailBytes === undefined ? {} : { tailBytes }),
+              });
+            }
+            const settled = computerProcessStatusV1({
+              recorded: held,
+              currentGeneration,
+              observed,
+            });
+            const next: ComputerProcessRecordV1 = {
+              ...held,
+              status: settled.status,
+              ...(settled.exitCode === undefined
+                ? {}
+                : { exitCode: settled.exitCode }),
+            };
+            await store.update(next);
+            await noteProcess(context.sessionId, turnOf(context), {
+              processId,
+              action,
+              status: settled.status,
+              ...(settled.exitCode === undefined
+                ? {}
+                : { exitCode: settled.exitCode }),
+            });
+            // The evidence outlives the Computer only if it leaves it.
+            try {
+              await mirrorLog(
+                computer,
+                context,
+                next,
+                settled.status,
+                observed.logTail,
+              );
+            } catch {
+              // A mirror that could not be written never withholds an outcome
+              // that was read.
+            }
+            if (action === "logs") {
+              return {
+                content: observed.logTail || "(no output yet)",
+                isError: false,
+              };
+            }
+            return {
+              content: JSON.stringify({
+                processId,
+                status: settled.status,
+                ...(settled.exitCode === undefined
+                  ? {}
+                  : { exitCode: settled.exitCode }),
+                command: held.command,
+                startedAt: held.startedAt,
+                ...(held.pid === undefined ? {} : { pid: held.pid }),
+                logTail: observed.logTail.slice(-4_000),
+                ...(settled.status === "unknown"
+                  ? {
+                      note: "The Computer this process was launched on is not the one answering now, or its process is gone with no recorded exit. It is not running; treat its outcome as unknown.",
+                    }
+                  : {}),
+              }),
+              isError: false,
+            };
+          },
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    };
+
     let captureSequence = 0;
 
     /**
@@ -563,6 +920,88 @@ export function createComputerAgentPlugin(
       },
     };
 
+    /**
+     * The three background-process tools.
+     *
+     * `check` and `logs` declare their turn types explicitly — every one of
+     * them — because a Routine must be able to collect the outcome of a job a
+     * chat Turn started, and that has to stay true if this Package ever gains
+     * a manifest ceiling that narrows the default. `stop` is left undeclared,
+     * exactly like `computer_exec`, so ending a process is admitted wherever
+     * starting one is. None of them ends a Turn, and none of them keeps a
+     * Computer awake.
+     */
+    const processCheckTool: ToolDefinition = {
+      name: "computer_process_check",
+      idempotent: true,
+      admission: { turnTypes: ["chat", "automation", "subagent", "channel"] },
+      description:
+        "Read the status of a background process started with computer_exec{background:true}. Answers running, exited with its code, or unknown when the Computer that held it is gone.",
+      inputSchema: {
+        type: "object",
+        properties: { processId: { type: "string" } },
+        required: ["processId"],
+        additionalProperties: false,
+      },
+      validate: (input) => decodeProcessId(input) !== undefined,
+      execute: async (input, context) => {
+        const processId = decodeProcessId(input);
+        if (!processId)
+          return { content: "A processId is required", isError: true };
+        return settle(context, processId, "check");
+      },
+    };
+
+    const processLogsTool: ToolDefinition = {
+      name: "computer_process_logs",
+      idempotent: true,
+      admission: { turnTypes: ["chat", "automation", "subagent", "channel"] },
+      description:
+        "Read the bounded log of a background process. The log keeps its first and last 128 KiB; the middle of a very long run is dropped.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          processId: { type: "string" },
+          tailBytes: { type: "number", minimum: 1, maximum: 64_000 },
+        },
+        required: ["processId"],
+        additionalProperties: false,
+      },
+      validate: (input) => decodeProcessId(input) !== undefined,
+      execute: async (input, context) => {
+        const processId = decodeProcessId(input);
+        if (!processId)
+          return { content: "A processId is required", isError: true };
+        const tailBytes = record(input)?.tailBytes;
+        return settle(
+          context,
+          processId,
+          "logs",
+          typeof tailBytes === "number" ? tailBytes : undefined,
+        );
+      },
+    };
+
+    const processStopTool: ToolDefinition = {
+      name: "computer_process_stop",
+      idempotent: config.idempotentEffects === true,
+      description:
+        "End a background process. Its process group is signalled TERM and then KILL after a grace period.",
+      inputSchema: {
+        type: "object",
+        properties: { processId: { type: "string" } },
+        required: ["processId"],
+        additionalProperties: false,
+      },
+      validate: (input) => decodeProcessId(input) !== undefined,
+      execute: async (input, context) => {
+        const processId = decodeProcessId(input);
+        if (!processId)
+          return { content: "A processId is required", isError: true };
+        return settle(context, processId, "stop");
+      },
+    };
+
     const browserTool: ToolDefinition = {
       name: "computer_browser",
       idempotent: config.idempotentEffects === true,
@@ -621,10 +1060,18 @@ export function createComputerAgentPlugin(
     return [
       ctx.tools.register(execTool),
       ...(writer ? [ctx.tools.register(screenshotTool)] : []),
+      ...(processes && writer
+        ? [
+            ctx.tools.register(processCheckTool),
+            ctx.tools.register(processLogsTool),
+            ctx.tools.register(processStopTool),
+          ]
+        : []),
       ctx.tools.register(browserTool),
       // A Turn's first step is where the Turn's sync state begins; a Turn that
       // never touches the Computer never syncs and never wakes one.
       ctx.on("agent/pre-step", (_agent, _inputs, turn, _step, next) => {
+        currentTurn = turn;
         turnSync.beginTurn(turn);
         return next();
       }),
@@ -657,6 +1104,7 @@ export function createComputerAgentPlugin(
             "You share a persistent Linux Computer with your User's other Bots. You have your own directories and desktop on it; the browser profile is shared.",
             "Use computer_exec to inspect the filesystem before claiming that a path or file exists.",
             "Use computer_screenshot to see your own desktop; each capture is filed in your durable screenshots root.",
+            "For a job that outlasts this Turn, use computer_exec with background:true and check it later with computer_process_check. Do not poll it in a loop.",
             "Never invent a directory listing.",
           ].join("\n"),
       }),

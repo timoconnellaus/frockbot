@@ -2677,6 +2677,9 @@ export class ShellBotBackendContribution {
                 turnId: turn.turnId,
                 runId: turn.runId,
               },
+              // A background process is Bot-scoped durable state, so its
+              // record lives in this Bot's own Durable Object storage.
+              computerProcesses: this.ctx.storage,
             }
           : {}),
         // The Computer host, when this deployment has one. Both halves or

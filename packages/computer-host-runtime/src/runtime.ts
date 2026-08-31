@@ -31,6 +31,11 @@ export const RUNTIME_ROOT = `${HOME_ROOT}/.frockbot`;
 export const BOTS_ROOT = `${RUNTIME_ROOT}/bots`;
 export const WORKSPACES_ROOT = "/workspaces";
 export const CONTROL_SCRIPT = `${RUNTIME_ROOT}/control.sh`;
+export const BOUNDED_LOG_SCRIPT = `${RUNTIME_ROOT}/bounded-log.sh`;
+/** Bytes kept from the head of a background process's log. */
+export const BOUNDED_LOG_HEAD_BYTES = 131_072;
+/** Bytes kept from its tail. Together, GrokBot's 256 KiB cap. */
+export const BOUNDED_LOG_TAIL_BYTES = 131_072;
 export const ENSURE_AGENT_SCRIPT = `${RUNTIME_ROOT}/ensure-agent.sh`;
 export const LEASE_MAX_AGE_SECONDS = 90;
 /**
@@ -174,6 +179,50 @@ grep -v "^$TOKEN:" "$ROOT/tokens" > "$TMP" || true
 printf '%s: 127.0.0.1:%s\n' "$TOKEN" "$((5900 + SLOT))" >> "$TMP"
 chmod 600 "$TMP"
 mv "$TMP" "$ROOT/tokens"
+`;
+
+/**
+ * A background process's log, capped at 256 KiB — the head and the tail, with
+ * the middle dropped.
+ *
+ * GrokBot's `box-bounded-log.mjs` keeps both ends for the same reason: a job
+ * that runs for an hour says what it set out to do at the start and what went
+ * wrong at the end, and the middle is the part nobody reads. A cap is not
+ * optional here — a process outlives its Turn, and an uncapped log on a
+ * Computer is an unbounded write to a disk the User pays for.
+ *
+ * The two halves are separate files. Composing them at read time is what makes
+ * the tail trimmable without ever rewriting the head, so a long-running
+ * process costs one bounded trim per 128 KiB rather than a rewrite per line.
+ */
+export const boundedLogScript = `#!/usr/bin/env bash
+set -eu
+OUT="$1"
+HEAD_BYTES=\${2:-${BOUNDED_LOG_HEAD_BYTES}}
+TAIL_BYTES=\${3:-${BOUNDED_LOG_TAIL_BYTES}}
+: > "$OUT.head"
+: > "$OUT.tail"
+HEAD_WRITTEN=0
+TAIL_WRITTEN=0
+while IFS= read -r LINE || [ -n "$LINE" ]; do
+  SIZE=$((\${#LINE} + 1))
+  if [ "$HEAD_WRITTEN" -lt "$HEAD_BYTES" ]; then
+    printf '%s\\n' "$LINE" >> "$OUT.head"
+    HEAD_WRITTEN=$((HEAD_WRITTEN + SIZE))
+  else
+    printf '%s\\n' "$LINE" >> "$OUT.tail"
+    TAIL_WRITTEN=$((TAIL_WRITTEN + SIZE))
+    # Counted in the shell rather than measured with stat: a subprocess per
+    # line would make the logger cost more than the job it is logging.
+    # Trimming at twice the cap keeps the work amortized — one trim per
+    # TAIL_BYTES written, never one per line.
+    if [ "$TAIL_WRITTEN" -gt $((TAIL_BYTES * 2)) ]; then
+      tail -c "$TAIL_BYTES" "$OUT.tail" > "$OUT.tail.tmp"
+      mv "$OUT.tail.tmp" "$OUT.tail"
+      TAIL_WRITTEN="$TAIL_BYTES"
+    fi
+  fi
+done
 `;
 
 export const controlScript = `#!/usr/bin/env bash
@@ -348,10 +397,11 @@ fi`,
     body: `${installFile(`${RUNTIME_ROOT}/start-desktop.sh`, startDesktopScript)}
 ${installFile(ENSURE_AGENT_SCRIPT, ensureAgentScript)}
 ${installFile(CONTROL_SCRIPT, controlScript)}
+${installFile(BOUNDED_LOG_SCRIPT, boundedLogScript)}
 ${installFile(`${RUNTIME_ROOT}/browser.mjs`, browserHelper)}
 ${installFile(`${RUNTIME_ROOT}/start-gateway.sh`, gatewayScript)}
 ${installFile(`${RUNTIME_ROOT}/watch-workspace.sh`, syncWatchScript)}
-chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh`,
+chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${BOUNDED_LOG_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh`,
   },
   {
     name: "browser",
@@ -529,6 +579,7 @@ export const COMPUTER_RUNTIME_FILES: readonly {
   },
   { path: ENSURE_AGENT_SCRIPT, content: ensureAgentScript, mode: 0o700 },
   { path: CONTROL_SCRIPT, content: controlScript, mode: 0o700 },
+  { path: BOUNDED_LOG_SCRIPT, content: boundedLogScript, mode: 0o700 },
   { path: `${RUNTIME_ROOT}/browser.mjs`, content: browserHelper, mode: 0o700 },
   {
     path: `${RUNTIME_ROOT}/start-gateway.sh`,

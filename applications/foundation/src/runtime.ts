@@ -37,7 +37,10 @@ export interface BackendRouteContribution {
 }
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
-import { createComputerAgentPlugin } from "@frockbot/plugin-computer/agent";
+import {
+  createComputerAgentPlugin,
+  type ComputerProcessStorageV1,
+} from "@frockbot/plugin-computer/agent";
 import {
   createSharedComputerProviderPlugin,
   type SharedComputerHostClient,
@@ -723,6 +726,14 @@ export function createFoundationHostedRuntimePackages(
      */
     computerWriter?: { sessionId: string; turnId: string; runId: string };
     /**
+     * The Bot Durable Object storage a background process's record is written
+     * to, supplied for one admitted Turn. Absent, and `computer_exec` offers
+     * no `background` and the three process tools are not mounted: intent is
+     * recorded before an effect, and with nowhere to record it there is no
+     * honest way to launch a process that outlives its Turn.
+     */
+    computerProcesses?: ComputerProcessStorageV1;
+    /**
      * The Bot self-management seam, supplied by the Bot Durable Object for one
      * admitted Turn. Absent outside a Turn, and the Flock runtime Contribution
      * is then not mounted: a Bot changes its own identity, or adds a Bot to
@@ -801,6 +812,9 @@ export function createFoundationHostedRuntimePackages(
         userId: host.userId,
         defaultProviderId: "fly-sprite",
         ...(host.computerWriter ? { writer: host.computerWriter } : {}),
+        ...(host.computerProcesses
+          ? { processes: host.computerProcesses }
+          : {}),
       }),
     ),
   ];

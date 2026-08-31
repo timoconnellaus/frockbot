@@ -1111,6 +1111,99 @@ export class FlyCompatibilityProbe extends DurableObject<FlyCompatibilityEnv> {
     }
   }
 
+  /**
+   * A background process, driven through the provider-neutral interface.
+   *
+   * The probe holds the record the Bot Durable Object would hold, so the
+   * reconciliation rule is exercised where it actually runs: launch, check,
+   * then a generation bump proving a moved Computer answers `unknown` rather
+   * than `running`, then stop.
+   */
+  async backgroundProcess(input: {
+    botId: string;
+    command: string;
+    action: "launch" | "check" | "stop";
+    processId?: string;
+  }): Promise<{
+    ok: boolean;
+    processId?: string;
+    pid?: number;
+    status?: string;
+    exitCode?: number;
+    logTail?: string;
+    message?: string;
+  }> {
+    this.root ??= await this.createRoot("frockbot-workerd-compatibility");
+    const identity = { userId: "workerd" };
+    this.root.computers.assign(identity, "fly-sprite");
+    const computer = await this.root.computers.open(identity, {
+      botId: input.botId,
+    });
+    try {
+      const processes = computer.processes!;
+      if (input.action === "launch") {
+        const processId = input.processId ?? "p-probe";
+        // Intent before effect, in real Durable Object storage.
+        const generation = await processes.generation();
+        await this.ctx.storage.put(`process:${processId}`, {
+          processId,
+          generation,
+          status: "starting",
+        });
+        const launched = await processes.launch({
+          processId,
+          command: input.command,
+        });
+        await this.ctx.storage.put(`process:${processId}`, {
+          processId,
+          generation: launched.generation,
+          status: "running",
+        });
+        return { ok: true, processId, pid: launched.pid };
+      }
+      const processId = input.processId!;
+      const held = (await this.ctx.storage.get(`process:${processId}`)) as
+        { generation: number; status: string } | undefined;
+      if (!held) return { ok: false, message: "no such process record" };
+      const generation = await processes.generation();
+      const observed =
+        input.action === "stop"
+          ? await processes.stop(processId)
+          : await processes.inspect(processId);
+      const status =
+        generation !== held.generation
+          ? observed.exitCode === undefined
+            ? "unknown"
+            : "exited"
+          : observed.exitCode !== undefined
+            ? "exited"
+            : observed.alive
+              ? "running"
+              : "unknown";
+      await this.ctx.storage.put(`process:${processId}`, {
+        processId,
+        generation: held.generation,
+        status,
+      });
+      return {
+        ok: true,
+        processId,
+        status,
+        ...(observed.exitCode === undefined
+          ? {}
+          : { exitCode: observed.exitCode }),
+        logTail: observed.logTail,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      await computer.close();
+    }
+  }
+
   async mountProvider(): Promise<FlyMountResult> {
     this.root ??= await this.createRoot("frockbot-workerd-compatibility");
     const identity = { userId: "workerd" };

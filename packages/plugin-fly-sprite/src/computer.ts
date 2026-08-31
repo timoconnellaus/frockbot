@@ -8,6 +8,7 @@ import type {
 } from "@frockbot/computer-host-protocol";
 import {
   BOTS_ROOT,
+  BOUNDED_LOG_SCRIPT,
   CONTROL_SCRIPT,
   DATA_ROOT,
   HOME_ROOT,
@@ -38,6 +39,12 @@ const MAX_STORAGE_OUTPUT = 500_000;
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 /** Largest screenshot this provider will carry back off a Computer. */
 export const SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024;
+/** Log bytes a single read carries back from a background process. */
+export const PROCESS_LOG_DEFAULT_TAIL_BYTES = 8_192;
+export const PROCESS_LOG_MAX_TAIL_BYTES = 64_000;
+/** How long a stopped process is given to handle TERM before KILL. */
+export const PROCESS_STOP_GRACE_SECONDS = 5;
+const PROCESS_MARKER = "__FROCKBOT_PROCESS__";
 
 /** Deadlines this provider asks the host for, per phase. */
 const TIMEOUTS = {
@@ -114,6 +121,20 @@ export interface SpriteScreenshotV1 {
   /** Where the capture sat on the Computer before it was read back. */
   path: string;
   capturedAt: string;
+}
+
+/** What a background launch left on the Computer. */
+export interface SpriteProcessLaunchV1 {
+  pid: number;
+  logPath: string;
+  cwd: string;
+}
+
+/** What the Computer says about one background process right now. */
+export interface SpriteProcessStateV1 {
+  alive: boolean;
+  exitCode?: number;
+  logTail: string;
 }
 
 export interface SpriteAgentExecResult {
@@ -298,6 +319,54 @@ export class FlySpriteAgentComputer {
   /** Captures this tenant's own desktop. */
   screenshot(signal: AbortSignal): Promise<SpriteScreenshotV1> {
     return this.computer.screenshotForAgent(this.layout, signal);
+  }
+
+  launchProcess(
+    processId: string,
+    command: string,
+    signal: AbortSignal,
+  ): Promise<SpriteProcessLaunchV1> {
+    return this.computer.launchProcessForAgent(
+      this.layout,
+      processId,
+      command,
+      signal,
+    );
+  }
+
+  inspectProcess(
+    processId: string,
+    signal: AbortSignal,
+    tailBytes?: number,
+  ): Promise<SpriteProcessStateV1> {
+    return this.computer.inspectProcessForAgent(
+      this.layout,
+      processId,
+      signal,
+      tailBytes,
+    );
+  }
+
+  stopProcess(
+    processId: string,
+    signal: AbortSignal,
+  ): Promise<SpriteProcessStateV1> {
+    return this.computer.stopProcessForAgent(this.layout, processId, signal);
+  }
+
+  /** The Computer's provisioning generation, once it has been opened. */
+  get generation(): number | undefined {
+    return this.computer.generationForTenant(this.layout.key);
+  }
+
+  /** The generation the Computer is on now, asked of the host. */
+  currentGeneration(signal?: AbortSignal): Promise<number> {
+    return this.computer.currentGenerationForAgent(this.layout, signal);
+  }
+
+  /** This tenant's working directory on the Computer. */
+  get workingDirectory(): string {
+    return this.layout.workspaceDir;
   }
 
   /** Opens a viewer session on this tenant's desktop. */
@@ -605,6 +674,202 @@ export class FlySpriteComputer {
     };
   }
 
+  /**
+   * Starts a command that outlives its Turn.
+   *
+   * `setsid` makes the command a process group leader, which is what lets a
+   * later `stop` end the whole tree with one signal rather than orphaning the
+   * children of a shell pipeline. `nohup` detaches it from the exec's own
+   * terminal, so the process survives the connection closing — and connections
+   * to a Computer are expected to drop on every pause.
+   *
+   * The launch returns as soon as the pid file exists. Nothing here keeps the
+   * Computer awake: a process is a thing running on a Computer while it is
+   * awake, not a reason for it to stay that way.
+   */
+  async launchProcessForAgent(
+    layout: AgentLayout,
+    processId: string,
+    command: string,
+    signal: AbortSignal,
+  ): Promise<SpriteProcessLaunchV1> {
+    const host = await this.readyHost(layout, signal);
+    const directory = this.processDirectory(layout, processId);
+    const script = [
+      this.agentControlGuard(layout),
+      ...this.tenantEnvironment(layout),
+      `DIR=${shellQuote(directory)}`,
+      'mkdir -p "$DIR"',
+      `printf %s ${shellQuote(command)} > "$DIR/command"`,
+      // One `bash -c` holding the pipeline, so `$!` is the group leader and
+      // the exit code recorded is the command's own, not the logger's.
+      `setsid nohup bash -c ${shellQuote(
+        [
+          `bash -c ${shellQuote(command)} 2>&1 | ${BOUNDED_LOG_SCRIPT} "${directory}/log"`,
+          `printf '%s\\n' "\${PIPESTATUS[0]}" > "${directory}/exit"`,
+        ].join("\n"),
+      )} >/dev/null 2>&1 &`,
+      `printf '%s\\n' "$!" > "$DIR/pid"`,
+      `printf '%s%s\\n' ${shellQuote(PROCESS_MARKER)} "$(cat "$DIR/pid")"`,
+    ].join("\n");
+    const outcome = await this.execute(
+      host,
+      script,
+      { signal, timeoutMs: TIMEOUTS.control, maxOutputBytes: MAX_OUTPUT },
+      "Sprite background launch failed",
+    );
+    const pid = Number(
+      new RegExp(`${PROCESS_MARKER}(\\d+)`).exec(
+        outputText(outcome.stdout),
+      )?.[1],
+    );
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      throw new ComputerError(
+        "provider-unavailable",
+        "The Computer started no background process",
+      );
+    }
+    return { pid, logPath: `${directory}/log`, cwd: layout.workspaceDir };
+  }
+
+  /**
+   * Reads a process's outcome. It never restarts anything: recovery reads an
+   * outcome rather than repeating an effect.
+   */
+  async inspectProcessForAgent(
+    layout: AgentLayout,
+    processId: string,
+    signal: AbortSignal,
+    tailBytes?: number,
+  ): Promise<SpriteProcessStateV1> {
+    const host = await this.readyHost(layout, signal);
+    return this.readProcess(host, layout, processId, signal, tailBytes);
+  }
+
+  /**
+   * Ends the process group: TERM, a grace, then KILL.
+   *
+   * The negative pid is the point — a background command is usually a shell
+   * pipeline, and signalling only the leader leaves its children running with
+   * nothing recording them.
+   */
+  async stopProcessForAgent(
+    layout: AgentLayout,
+    processId: string,
+    signal: AbortSignal,
+  ): Promise<SpriteProcessStateV1> {
+    const host = await this.readyHost(layout, signal);
+    const directory = this.processDirectory(layout, processId);
+    const script = [
+      this.agentControlGuard(layout),
+      ...this.tenantEnvironment(layout),
+      `DIR=${shellQuote(directory)}`,
+      'PID=$(cat "$DIR/pid" 2>/dev/null || echo 0)',
+      'if [ "$PID" -gt 0 ]; then',
+      '  kill -TERM -"$PID" 2>/dev/null || kill -TERM "$PID" 2>/dev/null || true',
+      `  for _ in $(seq 1 ${PROCESS_STOP_GRACE_SECONDS * 10}); do`,
+      '    kill -0 "$PID" 2>/dev/null || break',
+      "    sleep 0.1",
+      "  done",
+      '  if kill -0 "$PID" 2>/dev/null; then',
+      '    kill -KILL -"$PID" 2>/dev/null || kill -KILL "$PID" 2>/dev/null || true',
+      "  fi",
+      "fi",
+      // A stop that had to signal leaves no exit file of its own, so one is
+      // written here: an ended process must not read back as `unknown`.
+      '[ -f "$DIR/exit" ] || printf \'143\\n\' > "$DIR/exit"',
+    ].join("\n");
+    await this.execute(
+      host,
+      script,
+      {
+        signal,
+        timeoutMs: (PROCESS_STOP_GRACE_SECONDS + 10) * 1_000,
+        maxOutputBytes: MAX_OUTPUT,
+      },
+      "Sprite background stop failed",
+    );
+    return this.readProcess(host, layout, processId, signal);
+  }
+
+  /**
+   * Asks the host what generation this Computer is on *now*.
+   *
+   * Deliberately not the cached answer from `ensureAgent`: the cached one is
+   * the generation this provider instance opened under, and the whole question
+   * a background process asks is whether the Computer answering today is the
+   * Computer it was launched on. A reprovision between the two is exactly the
+   * case that must not read back as `running`.
+   */
+  async currentGenerationForAgent(
+    layout: AgentLayout,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    const host = await this.readyHost(layout, signal);
+    const opened = await host.open({ signal, timeoutMs: TIMEOUTS.open });
+    this.generations.set(layout.key, opened.generation);
+    if (opened.display) this.displays.set(layout.key, opened.display);
+    return opened.generation;
+  }
+
+  private processDirectory(layout: AgentLayout, processId: string): string {
+    return `${BOTS_ROOT}/${layout.key}/processes/${processId}`;
+  }
+
+  /**
+   * One read of a process's directory: liveness, exit code, and the bounded
+   * log the logger keeps in two halves.
+   */
+  private async readProcess(
+    host: ComputerHostSurfaceV1,
+    layout: AgentLayout,
+    processId: string,
+    signal: AbortSignal,
+    tailBytes = PROCESS_LOG_DEFAULT_TAIL_BYTES,
+  ): Promise<SpriteProcessStateV1> {
+    const bounded = Math.max(
+      1,
+      Math.min(tailBytes, PROCESS_LOG_MAX_TAIL_BYTES),
+    );
+    const directory = this.processDirectory(layout, processId);
+    // No human-control guard, and deliberately: reading a process's outcome is
+    // not the Bot acting on the Computer, and a Routine collecting the result
+    // of a long job must not be blocked because a human is holding the screen.
+    // The stamp still runs, because a tenant with a running process is a live
+    // tenant and its display slot must not be reclaimed under it.
+    const script = [
+      this.tenantStamp(layout),
+      `DIR=${shellQuote(directory)}`,
+      'PID=$(cat "$DIR/pid" 2>/dev/null || echo 0)',
+      `printf '%salive=%s\\n' ${shellQuote(PROCESS_MARKER)} "$(kill -0 "$PID" 2>/dev/null && echo 1 || echo 0)"`,
+      `if [ -f "$DIR/exit" ]; then printf '%sexit=%s\\n' ${shellQuote(PROCESS_MARKER)} "$(cat "$DIR/exit")"; fi`,
+      `printf '%slog\\n' ${shellQuote(PROCESS_MARKER)}`,
+      `if [ -s "$DIR/log.head" ]; then head -c ${bounded} "$DIR/log.head"; fi`,
+      `if [ -s "$DIR/log.tail" ]; then printf '\\n… earlier output dropped …\\n'; tail -c ${bounded} "$DIR/log.tail"; fi`,
+    ].join("\n");
+    const outcome = await this.execute(
+      host,
+      script,
+      {
+        signal,
+        timeoutMs: TIMEOUTS.control,
+        maxOutputBytes: PROCESS_LOG_MAX_TAIL_BYTES * 4,
+      },
+      "Sprite background read failed",
+    );
+    const raw = outputText(outcome.stdout);
+    const alive = new RegExp(`${PROCESS_MARKER}alive=1`).test(raw);
+    const exit = new RegExp(`${PROCESS_MARKER}exit=(-?\\d+)`).exec(raw);
+    const logIndex = raw.indexOf(`${PROCESS_MARKER}log\n`);
+    const logTail =
+      logIndex < 0 ? "" : raw.slice(logIndex + `${PROCESS_MARKER}log\n`.length);
+    return {
+      alive,
+      ...(exit ? { exitCode: Number(exit[1]) } : {}),
+      logTail: clipped(logTail, bounded * 2),
+    };
+  }
+
   async browserForAgent(
     layout: AgentLayout,
     action: BrowserAction,
@@ -828,11 +1093,16 @@ export class FlySpriteComputer {
    * be free to hand its display to another Bot mid-run.
    */
   private agentControlGuard(layout: AgentLayout): string {
-    const bot = shellQuote(`${BOTS_ROOT}/${layout.key}`);
     return [
       `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`,
-      `mkdir -p ${bot} && touch ${bot}/last-seen`,
+      this.tenantStamp(layout),
     ].join("\n");
+  }
+
+  /** The registry's `last-seen` stamp, without the control assertion. */
+  private tenantStamp(layout: AgentLayout): string {
+    const bot = shellQuote(`${BOTS_ROOT}/${layout.key}`);
+    return `mkdir -p ${bot} && touch ${bot}/last-seen`;
   }
 
   /**

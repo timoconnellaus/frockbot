@@ -523,6 +523,19 @@ export interface SessionEventMap {
    * call, `signal` when the on-Computer watcher reported a change mid-Turn,
    * `turn-end` after a Turn that used the Computer.
    */
+  /**
+   * A background process on the Computer changed hands: it was launched,
+   * looked at, read, or ended. Recorded so a Turn's durable history says what
+   * became of a process that outlived it — including `unknown`, which is a
+   * first-class outcome and not an error.
+   */
+  "computer/process": {
+    turn: number;
+    processId: string;
+    action: "launch" | "check" | "logs" | "stop";
+    status: "starting" | "running" | "exited" | "unknown";
+    exitCode?: number;
+  };
   "computer/sync": {
     turn: number;
     reason: "open" | "signal" | "turn-end";
@@ -1372,6 +1385,45 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventInteger(event.width, "session event.width", 1);
       eventInteger(event.height, "session event.height", 1);
       break;
+    case "computer/process": {
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "processId",
+          "action",
+          "status",
+          ...(Object.hasOwn(event, "exitCode") ? ["exitCode"] : []),
+        ),
+        "session event",
+      );
+      turn();
+      eventString(event.processId, "session event.processId");
+      if (
+        event.action !== "launch" &&
+        event.action !== "check" &&
+        event.action !== "logs" &&
+        event.action !== "stop"
+      ) {
+        throw new Error("session event.action is invalid");
+      }
+      if (
+        event.status !== "starting" &&
+        event.status !== "running" &&
+        event.status !== "exited" &&
+        event.status !== "unknown"
+      ) {
+        throw new Error("session event.status is invalid");
+      }
+      if (
+        event.exitCode !== undefined &&
+        (typeof event.exitCode !== "number" ||
+          !Number.isSafeInteger(event.exitCode))
+      ) {
+        throw new Error("session event.exitCode must be an integer");
+      }
+      break;
+    }
     case "computer/sync": {
       requireEventKeys(
         event,
