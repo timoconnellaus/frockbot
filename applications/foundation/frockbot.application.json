@@ -72,6 +72,11 @@
       "grants": ["bot:self-manage"]
     },
     {
+      "specifier": "@frockbot/plugin-search",
+      "version": "0.0.1",
+      "grants": []
+    },
+    {
       "specifier": "@frockbot/plugin-clock",
       "version": "0.0.1",
       "grants": ["time:read"]

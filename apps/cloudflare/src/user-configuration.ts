@@ -44,6 +44,13 @@ import {
 } from "@frockbot/kernel-contracts";
 import type { MemoryProjectV1 } from "@frockbot/plugin-memory/agent";
 import {
+  SEARCH_MAX_ROW_PAGE_V1,
+  decodeSearchQueryV1,
+  type ClientSearchRebuildReceiptV1,
+  type SearchIndexResultsV1,
+} from "@frockbot/plugin-search";
+import type { BotSearchRpc } from "./search.js";
+import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
@@ -60,6 +67,7 @@ import {
   rpcString,
   rpcEnum,
   rpcDecodedValue,
+  rpcJsonSnapshotV1,
 } from "./durable-rpc.js";
 
 /** The durable key holding this User's Project catalogue. */
@@ -95,6 +103,9 @@ interface UserConfigurationEnv {
   PACKAGE_CATALOG?: R2Bucket;
 }
 
+/** The page of a Bot's projected rows a rebuild pulls, one Bot at a time. */
+const SEARCH_REBUILD_BOT_LIMIT = 200;
+
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   private mounted: Promise<MountedFoundationUserBackend> | undefined;
 
@@ -111,6 +122,39 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           ...(this.env.PACKAGE_CATALOG
             ? { catalog: new R2PackageCatalog(this.env.PACKAGE_CATALOG) }
             : {}),
+          // The transcript index (parity register row 52). It lives on this
+          // object's own SQL storage because "The User's Durable Object is the
+          // authority for everything User-scoped", and it is a *projection*:
+          // its rows are read back out of the Bots' own stored runs by
+          // `rebuildSearchIndex`, so it holds no authority of its own.
+          search: {
+            sql: this.ctx.storage.sql,
+            projectBotRows: (botId, cursor) => {
+              // Every caller of a rebuild has already passed
+              // `assertFlockIdentity`, so this object knows which User it is;
+              // a rebuild that reached here without one would address an
+              // arbitrary Bot object, so it refuses instead.
+              const userId = this.identity;
+              if (!userId) {
+                throw new Error(
+                  "this User Durable Object has no proven identity to rebuild for",
+                );
+              }
+              const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+              // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+              const rpc = this.env.BOT_STATES.get(
+                id,
+              ) as unknown as BotSearchRpc;
+              return rpc
+                .projectSearchRows({
+                  schemaVersion: 1,
+                  userId,
+                  botId,
+                  ...(cursor === undefined ? {} : { cursor }),
+                })
+                .then(rpcJsonSnapshotV1);
+            },
+          },
           commandBotLifecycle: async (userId, command) => {
             const id = this.env.BOT_STATES.idFromName(
               `${userId}:${command.botId}`,
@@ -817,6 +861,16 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     await contributions.publisher.recover();
     // The Bot lifecycle sagas (archive and restore) resume on the same firing.
     await contributions.flock.alarm();
+    // An archive that settled on a retry rather than on its command purges the
+    // transcript index here. Purge is a delete of a projection, so sweeping
+    // every archived Bot on every firing is idempotent and cheap, and it means
+    // no archived Bot keeps rows because its saga finished out of band.
+    const lifecycles = await contributions.flock.listBotLifecycles();
+    for (const lifecycle of lifecycles.lifecycles) {
+      if (lifecycle.status === "archived") {
+        contributions.search.purge(lifecycle.botId);
+      }
+    }
   }
 
   async listBots(input: unknown) {
@@ -849,10 +903,19 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       command: rpcDecoded(decodeBotLifecycleCommandV1),
     });
     await this.assertFlockIdentity(request.userId as string);
-    return (await this.flockContribution()).executeLifecycle(
-      request.userId as string,
-      request.command,
-    );
+    const command = request.command as ReturnType<
+      typeof decodeBotLifecycleCommandV1
+    >;
+    const receipt = await (
+      await this.flockContribution()
+    ).executeLifecycle(request.userId as string, command);
+    // Archiving a Bot removes its transcript from the index. The rows are a
+    // projection, so this destroys nothing: restoring the Bot and rebuilding
+    // brings every one of them back from the Bot's own stored runs.
+    if (command.type === "bot/archive" && receipt.status === "applied") {
+      (await this.searchContribution()).purge(command.botId);
+    }
+    return receipt;
   }
 
   async getBotRegistration(input: unknown) {
@@ -925,6 +988,93 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     await this.assertFlockIdentity(request.userId as string);
     return (await this.publisherContribution()).activeApplicationHash();
+  }
+
+  private async searchContribution(): Promise<
+    MountedFoundationUserBackend["search"]
+  > {
+    return (await this.contributions()).search;
+  }
+
+  /**
+   * Rows for one settled Turn, from the Bot Durable Object that owns it.
+   *
+   * Idempotent on `(botId, runId, seq)`: a resumed Turn, a retried RPC, and a
+   * rebuild all converge on the same rows, so the Bot may treat the call as
+   * fire-and-forget without risking a duplicated transcript.
+   */
+  async indexSearchRows(input: unknown): Promise<{ indexed: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      rows: rpcDecodedValue,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    const botId = request.botId as string;
+    if (!(await (await this.flockContribution()).hasBot(botId))) {
+      throw new Error(`Bot "${botId}" is not registered to this User`);
+    }
+    if (!Array.isArray(request.rows)) {
+      throw new Error("RPC request.rows must be an array");
+    }
+    if (request.rows.length > SEARCH_MAX_ROW_PAGE_V1) {
+      throw new Error("RPC request.rows exceeds its bound");
+    }
+    // A Bot indexes its own transcript and no other's. The `botId` was proved
+    // registered to this User above; a row naming a different Bot is refused
+    // rather than quietly dropped.
+    const foreign = request.rows.find(
+      (row) =>
+        !row ||
+        typeof row !== "object" ||
+        (row as { botId?: unknown }).botId !== botId,
+    );
+    if (foreign) {
+      throw new Error("search rows name another Bot");
+    }
+    return (await this.searchContribution()).indexRows(request.rows);
+  }
+
+  /** One page of hits across every Bot this User has. */
+  async searchTranscripts(input: unknown): Promise<SearchIndexResultsV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      query: rpcDecoded(decodeSearchQueryV1),
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.searchContribution()).search(request.query);
+  }
+
+  /**
+   * Throws the index away and re-projects it from the Bots' own stored runs.
+   *
+   * The index is disposable because this exists. It is also the backfill path
+   * for a Bot whose turns predate the index, so one code path produces every
+   * row the index has ever held.
+   */
+  async rebuildSearchIndex(
+    input: unknown,
+  ): Promise<ClientSearchRebuildReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    const outcome = await (await this.searchContribution()).rebuild();
+    return {
+      schemaVersion: 1,
+      status: "rebuilt",
+      indexedRows: outcome.indexedRows,
+      bots: Math.min(outcome.bots, SEARCH_REBUILD_BOT_LIMIT),
+      indexState: outcome.indexState,
+    };
+  }
+
+  /** Every row of one Bot leaves the index. Archiving a Bot calls this. */
+  async purgeSearchIndex(input: unknown): Promise<{ removed: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.searchContribution()).purge(request.botId as string);
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {

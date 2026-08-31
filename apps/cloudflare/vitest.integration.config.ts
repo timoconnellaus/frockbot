@@ -65,7 +65,13 @@ export default defineConfig({
         durableObjects: {
           // Production classes, not probes.
           BOT_STATES: "BotState",
-          USER_CONFIGURATIONS: "UserConfiguration",
+          // `wrangler.jsonc` lists `UserConfiguration` in `new_sqlite_classes`,
+          // so the transcript index has SQL storage in production; miniflare
+          // needs that said explicitly.
+          USER_CONFIGURATIONS: {
+            className: "UserConfiguration",
+            useSQLite: true,
+          },
         },
         bindings: {
           TEST_MIGRATIONS: authMigrations,
