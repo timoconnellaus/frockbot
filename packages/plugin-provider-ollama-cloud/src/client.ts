@@ -16,6 +16,10 @@ export interface OllamaCloudClientConfig {
 
 const MAX_CATALOG_RESPONSE_BYTES = 512 * 1024;
 const MAX_MODEL_RESPONSE_BYTES = 256 * 1024;
+const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
+const MAX_PROBE_FAILURE_TEXT = 200;
+// The smallest completion Ollama Cloud will produce: one predicted token.
+const PROBE_PREDICTED_TOKENS = 1;
 const MAX_CONNECTION_MODELS = 100;
 const MODEL_LOOKUP_CONCURRENCY = 4;
 
@@ -77,6 +81,41 @@ async function boundedJson(
   } catch {
     throw new Error("Ollama Cloud returned invalid JSON");
   }
+}
+
+async function boundedText(response: Response): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  const reader = response.body?.getReader();
+  if (reader) {
+    while (length <= MAX_PROBE_FAILURE_TEXT) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      chunks.push(chunk.value);
+    }
+    await reader.cancel().catch(() => undefined);
+  }
+  const bytes = new Uint8Array(
+    chunks.reduce((total, c) => total + c.byteLength, 0),
+  );
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder().decode(bytes).slice(0, MAX_PROBE_FAILURE_TEXT);
+  try {
+    const payload = JSON.parse(text) as unknown;
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      const reported = (payload as Record<string, unknown>).error;
+      if (typeof reported === "string" && reported.trim())
+        return reported.trim();
+    }
+  } catch {
+    // A non-JSON body is reported verbatim; the provider owes us no shape here.
+  }
+  return text.trim();
 }
 
 async function mapConcurrent<T, R>(
@@ -209,5 +248,61 @@ export class OllamaCloudClient {
     }).models[0];
     if (!validated) throw new Error("Ollama Cloud model is invalid");
     return validated;
+  }
+
+  /**
+   * Prove an API key is authorized for inference.
+   *
+   * Measured against https://ollama.com on 2026-08-31 and recorded in
+   * `docs/research/ollama-cloud-auth.md`: `GET /api/tags`, `GET /v1/models`,
+   * and `POST /api/show` answer 200 for a valid key, a garbage key, and no key
+   * at all, so no catalog read can validate a key. `POST /api/chat` does
+   * authenticate: 401 `{"error":"Unauthorized"}` for a bad or absent key, 200
+   * for a valid one. A one-token completion is the cheapest authenticated call
+   * (~70 tokens of usage, `done_reason: "length"`).
+   *
+   * The assistant content is never parsed or retained; only the shape of the
+   * response is confirmed.
+   */
+  async probeInference(
+    apiKey: string,
+    providerModelId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const model = modelId(providerModelId);
+    const response = await this.fetcher(`${this.apiBaseUrl}/chat`, {
+      method: "POST",
+      signal,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "hi" }],
+        stream: false,
+        options: { num_predict: PROBE_PREDICTED_TOKENS },
+      }),
+    });
+    if (!response.ok) {
+      const reported = await boundedText(response);
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(
+          `Ollama Cloud rejected the key for inference: ${reported || `HTTP ${response.status}`}`,
+        );
+      }
+      throw new Error(
+        `Ollama Cloud inference probe failed (${response.status})${reported ? `: ${reported}` : ""}`,
+      );
+    }
+    const payload = object(
+      await boundedJson(response, MAX_PROBE_RESPONSE_BYTES),
+      "Ollama Cloud inference probe",
+    );
+    if (typeof payload.error === "string") {
+      throw new Error(
+        `Ollama Cloud rejected the key for inference: ${payload.error.slice(0, MAX_PROBE_FAILURE_TEXT)}`,
+      );
+    }
   }
 }

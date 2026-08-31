@@ -5,6 +5,7 @@ import {
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
   type ConnectionModelCatalogV1,
+  type ConnectionModelV1,
   type CredentialLeaseV1,
 } from "@frockbot/connection-core";
 import type { ConnectionView } from "@frockbot/configuration-core";
@@ -120,6 +121,25 @@ type OllamaCredentialContribution = Omit<
     effectId: string;
   }): Promise<void>;
 };
+
+// Ollama Cloud names its models bare (`gpt-oss:20b`, `glm-5.1`), with no
+// `:cloud` suffix. `gpt-oss:20b` is the smallest model that is routinely
+// present, so a probe against it costs the least; otherwise the first
+// discovered model has to do.
+const PREFERRED_PROBE_MODEL_ID = "gpt-oss:20b";
+
+function probeModelId(models: readonly ConnectionModelV1[]): string {
+  const preferred = models.find(
+    (model) => model.providerModelId === PREFERRED_PROBE_MODEL_ID,
+  );
+  const chosen = preferred ?? models[0];
+  if (!chosen) {
+    throw new Error(
+      "Ollama Cloud exposed no model to validate the key against",
+    );
+  }
+  return chosen.providerModelId;
+}
 
 export interface OllamaUserBackendHost {
   storage: UserSettingsStorage &
@@ -1083,7 +1103,15 @@ export class OllamaCloudUserBackendContribution {
           packageId: PACKAGE_ID,
           lease,
         });
+        // A catalog read is not validation: measured against https://ollama.com
+        // on 2026-08-31, `GET /api/tags`, `GET /v1/models`, and `POST
+        // /api/show` all answer 200 for a valid key, a garbage key, and no key
+        // at all (docs/research/ollama-cloud-auth.md), so `listModels` alone
+        // promotes a bad key to `ready` and the User only learns it is bad when
+        // a Turn ends `model-error`. `POST /api/chat` authenticates, so a
+        // one-token completion is what proves the key.
         const models = await this.client.listModels(apiKey);
+        await this.client.probeInference(apiKey, probeModelId(models));
         outcome = {
           ...record,
           validationCatalog: this.catalog(models),

@@ -2004,4 +2004,153 @@ describe("Ollama Cloud User Contribution", () => {
 
     expect(replay).toEqual(first);
   });
+
+  test("fails a key that lists models but is unauthorized for inference", async () => {
+    const { settings, ollama } = await fixture(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/tags")) {
+        return Response.json({ models: [{ model: "gpt-oss:20b" }] });
+      }
+      if (url.endsWith("/chat")) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      return Response.json({ capabilities: ["tools"] });
+    });
+
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-unauthorized-inference",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Bad key",
+      apiKey: "listable-but-unauthorized",
+    });
+
+    expect(created.status).toBe("failed");
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    expect(connection).toMatchObject({
+      state: "failed",
+      failure: "Ollama Cloud rejected the key for inference: Unauthorized",
+    });
+    expect(connection?.state).not.toBe("ready");
+  });
+
+  test("activates a key that passes the catalog read and the inference probe", async () => {
+    let probes = 0;
+    const { settings, ollama } = await fixture(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/tags")) {
+        return Response.json({ models: [{ model: "gpt-oss:20b" }] });
+      }
+      if (url.endsWith("/chat")) {
+        probes += 1;
+        return Response.json({
+          model: "gpt-oss:20b",
+          message: { role: "assistant", content: "H" },
+          done: true,
+          done_reason: "length",
+          prompt_eval_count: 68,
+          eval_count: 1,
+        });
+      }
+      return Response.json({ capabilities: ["tools"] });
+    });
+
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-authorized-inference",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Good key",
+      apiKey: "authorized",
+    });
+
+    expect(created.status).toBe("applied");
+    expect(probes).toBe(1);
+    expect(
+      await settings.getConnection("account-1", created.connectionId),
+    ).toMatchObject({ state: "ready" });
+  });
+
+  test("probes one predicted token on the smallest discovered model", async () => {
+    const probes: unknown[] = [];
+    const { ollama } = await fixture(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/tags")) {
+        return Response.json({
+          models: [{ model: "glm-5.1" }, { model: "gpt-oss:20b" }],
+        });
+      }
+      if (url.endsWith("/chat")) {
+        probes.push(JSON.parse(await new Request(input, init).text()));
+        return Response.json({ done: true, done_reason: "length" });
+      }
+      return Response.json({ capabilities: ["tools"] });
+    });
+
+    await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-probe-body",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Probe",
+      apiKey: "authorized",
+    });
+
+    expect(probes).toEqual([
+      {
+        model: "gpt-oss:20b",
+        messages: [{ role: "user", content: "hi" }],
+        stream: false,
+        options: { num_predict: 1 },
+      },
+    ]);
+  });
+
+  test("keeps the active generation when rotation fails the inference probe", async () => {
+    let rejectInference = false;
+    const { settings, ollama } = await fixture(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/tags")) {
+        return Response.json({ models: [{ model: "gpt-oss:20b" }] });
+      }
+      if (url.endsWith("/chat")) {
+        return rejectInference
+          ? Response.json({ error: "Unauthorized" }, { status: 401 })
+          : Response.json({ done: true, done_reason: "length" });
+      }
+      return Response.json({ capabilities: ["tools"] });
+    });
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-before-rotate-probe",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Personal",
+      apiKey: "authorized",
+    });
+    const before = (await settings.read("account-1")).connections[0];
+    rejectInference = true;
+
+    const rotated = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/rotate-api-key",
+      commandId: "rotate-unauthorized-inference",
+      connectionId: created.connectionId,
+      apiKey: "listable-but-unauthorized",
+    });
+
+    expect(rotated.status).toBe("failed");
+    expect((await settings.read("account-1")).connections[0]).toMatchObject({
+      state: "ready",
+      generation: before?.generation,
+    });
+  });
 });
