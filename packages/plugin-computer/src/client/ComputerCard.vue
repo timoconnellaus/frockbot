@@ -141,9 +141,11 @@ onBeforeUnmount(() =>
     </section>
 
     <!--
-      The self-check, as a human reads it: the failures are what matter, so
-      they lead, and the passes are counted rather than listed. A Computer
-      nobody has asked says so instead of showing an empty list.
+      The self-check, as a human reads it. Every check is listed with its own
+      detail rather than only the failures, because "disk is 91% full" is
+      worth seeing before it becomes a failure — and a run where nothing
+      failed says so in words, so a wall of ticks is not the only answer. A
+      Computer nobody has asked yet says that instead of showing an empty list.
     -->
     <section v-if="canRunDoctor || doctor" class="computer-doctor">
       <header>
