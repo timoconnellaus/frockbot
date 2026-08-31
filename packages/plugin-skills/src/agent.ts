@@ -4,7 +4,7 @@
 //
 //  1. Load the Bot's Skills once per admitted Turn, through the
 //     kernel-declared `WorkspaceReadsV1`. "Skills are files under the Bot's
-//     instruction root. An edit is visible to the Bot on its next admitted
+//     instruction roots. An edit is visible to the Bot on its next admitted
 //     Turn" — so the catalog is loaded at the Turn's first step and reused for
 //     every later step of that Turn, and an edit made mid-Turn is not visible
 //     until the next one.
@@ -15,8 +15,9 @@
 //     same rule binds: `skill/injected` names every loaded Skill with its
 //     generation, and every refused candidate with its reason.
 //  3. Offer the two tools: `skill_load` reads one body on demand (progressive
-//     disclosure, GrokBot parity), `skill_write` authors a Skill into the
-//     Bot's own instruction root (self-modification).
+//     disclosure, GrokBot parity), `skill_write` authors a Skill into one of
+//     the Bot's instruction roots — its own (self-modification) or its User's
+//     shared root, which every Bot of that User reads (ADR 0016).
 //
 // It never calls the Computer interface and never wakes a Computer; see the
 // hibernation seam documented in `./catalog.ts`.
@@ -51,6 +52,7 @@ import {
   checkSkillQuotaV1,
   SKILL_QUOTA_DEFAULTS_V1,
   type SkillQuotaConfigV1,
+  type SkillQuotaScopeV1,
 } from "./quota.js";
 import {
   isSkillSlugV1,
@@ -178,6 +180,10 @@ export class SkillCatalog {
         name: skill.name,
         generationId: skill.generationId,
         contentHash: skill.contentHash,
+        // Whose Skill it is, when it is not this Bot's own. A shared tier
+        // whose durable record did not say who wrote the instruction would
+        // make "the Bot ran under an instruction it did not author" invisible.
+        ...(skill.by ? { by: skill.by } : {}),
       })),
       refusals: this.#catalog.refusals.map((refusal) => ({
         path: refusal.path,
@@ -294,9 +300,9 @@ const SKILL_WRITE_INPUT_SCHEMA = {
     },
     scope: {
       type: "string",
-      enum: ["bot"],
+      enum: ["bot", "user"],
       description:
-        "Where the Skill is written. Only your own instruction root (bot) is writable; managed and plugin Skills are not editable this way.",
+        "Where the Skill is written: your own instruction root (bot, the default), or your User's shared root (user), where every one of their Bots can read it. Managed and plugin Skills are not editable this way.",
     },
   },
   required: ["name", "description", "body"],
@@ -309,12 +315,13 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 /**
  * Where a `skill_write` lands.
  *
- * All four sources are named so a refusal can be specific about *why* the
- * other three are not writable, rather than reading as an unknown-field error.
- * `bot` is the only one this Package can write: `user` needs the User-global
- * instruction root, and `managed` and `plugin` are not durable-root files at
- * all — one is bytes of a first-party artifact, the other an index over a
- * pinned Catalog generation, and neither has a write path to route to.
+ * All four sources are named so a refusal can be specific about *why* two of
+ * them are not writable, rather than reading as an unknown-field error. `bot`
+ * and `user` are the two instruction roots (ADR 0016) and both are written the
+ * same way, with the Bot's own provenance recorded. `managed` and `plugin` are
+ * not durable-root files at all — one is bytes of a first-party artifact, the
+ * other an index over a pinned Catalog generation — so neither has a write
+ * path to route to.
  */
 export type SkillWriteScopeV1 = "bot" | "user" | "managed" | "plugin";
 
@@ -325,18 +332,38 @@ const SKILL_WRITE_SCOPES: readonly SkillWriteScopeV1[] = [
   "plugin",
 ];
 
-/** Why a scope other than `bot` is refused. GrokBot's own wording for managed. */
+/** Why a scope is refused, or `undefined` when it is writable. GrokBot's own wording for managed. */
 export function skillWriteScopeRefusalV1(
   scope: SkillWriteScopeV1,
 ): string | undefined {
+  const target = skillWriteTargetV1(scope);
+  return target.status === "refused" ? target.reason : undefined;
+}
+
+/**
+ * The instruction root a scope writes, or the reason there is none.
+ *
+ * Declared rather than narrowed at the call site: the two writable scopes are
+ * exactly the two instruction roots, and this is the one place that says so,
+ * so a caller cannot reach the write path holding `managed`.
+ */
+export type SkillWriteTargetV1 =
+  | { status: "writable"; scope: SkillQuotaScopeV1 }
+  | { status: "refused"; reason: string };
+
+export function skillWriteTargetV1(
+  scope: SkillWriteScopeV1,
+): SkillWriteTargetV1 {
   switch (scope) {
     case "bot":
-      return undefined;
+    case "user":
+      return { status: "writable", scope };
     case "managed":
     case "plugin":
-      return "managed skills are not editable this way";
-    case "user":
-      return "User-global Skills have no instruction root yet; write this Skill to your own root instead";
+      return {
+        status: "refused",
+        reason: "managed skills are not editable this way",
+      };
   }
 }
 
@@ -448,6 +475,24 @@ function writeRefusal(reason: string): { content: string; isError: boolean } {
   return { content: `skill_write was refused: ${reason}`, isError: true };
 }
 
+/**
+ * The effect id one Skill write is recorded under.
+ *
+ * The root is part of it. The two instruction roots address Skills by the same
+ * relative path, so `bot` and `user` writes of one slug with one body would
+ * otherwise share an id, and a replay could match the wrong recorded effect.
+ * `bot` keeps its historical form, so ids already in durable logs still match.
+ */
+function effectIdOf(
+  scope: SkillQuotaScopeV1,
+  path: string,
+  contentHash: string,
+): string {
+  return scope === "bot"
+    ? `skill:${path}:${contentHash}`
+    : `skill:${scope}:${path}:${contentHash}`;
+}
+
 export function createSkillWriteTool(
   host: SkillsRuntimeHostV1 & { files: WorkspaceFilesV1 },
   writer: SkillWriterIdentityV1,
@@ -457,7 +502,7 @@ export function createSkillWriteTool(
   return {
     name: "skill_write",
     description:
-      "Write one of your own Skills: a Markdown recipe stored under your instruction root. It becomes visible to you on your next Turn, not this one.",
+      "Write a Skill: a Markdown recipe stored under your own instruction root, or under your User's shared root where all of their Bots can read it. It becomes visible to you on your next Turn, not this one.",
     inputSchema: SKILL_WRITE_INPUT_SCHEMA as unknown as Record<string, unknown>,
     idempotent: false,
     validate: (input: unknown) => {
@@ -477,8 +522,9 @@ export function createSkillWriteTool(
           error instanceof Error ? error.message : String(error),
         );
       }
-      const refusal = skillWriteScopeRefusalV1(decoded.scope ?? "bot");
-      if (refusal) return writeRefusal(refusal);
+      const target = skillWriteTargetV1(decoded.scope ?? "bot");
+      if (target.status === "refused") return writeRefusal(target.reason);
+      const scope = target.scope;
       const slug = decoded.slug ?? skillSlugFromNameV1(decoded.name);
       if (!slug) {
         return writeRefusal(
@@ -519,13 +565,14 @@ export function createSkillWriteTool(
           body: decoded.body,
         },
         {
+          scope,
           quota,
           // Intent before effect, and durable before the write is attempted.
           onIntent: async ({ path: relativePath, contentHash }) => {
             session.append({
               type: "skill/write-intent",
               ...position,
-              effectId: `skill:${relativePath}:${contentHash}`,
+              effectId: effectIdOf(scope, relativePath, contentHash),
               path: relativePath,
               contentHash,
             });
@@ -537,7 +584,7 @@ export function createSkillWriteTool(
       session.append({
         type: "skill/written",
         ...position,
-        effectId: `skill:${outcome.path}:${outcome.contentHash}`,
+        effectId: effectIdOf(scope, outcome.path, outcome.contentHash),
         path: outcome.path,
         generationId: outcome.generationId,
         contentHash: outcome.contentHash,
@@ -547,7 +594,9 @@ export function createSkillWriteTool(
       return {
         content: [
           `Wrote Skill "${decoded.name}" to ${outcome.path} as generation ${outcome.generationId}.`,
-          "It is under your own instruction root with your provenance recorded.",
+          scope === "user"
+            ? "It is under your User's shared instruction root, with your provenance recorded, so every one of their Bots can read it and will be told you wrote it."
+            : "It is under your own instruction root with your provenance recorded.",
           "Your Skill catalog is fixed for this Turn, so it appears in <agent_skills> on your next Turn.",
         ].join(" "),
         isError: false,

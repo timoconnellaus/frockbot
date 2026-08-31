@@ -11,10 +11,15 @@
 // artifact, so two of the three limits have no meaning here, and reserving a
 // daily unit for an edit to a Markdown file would refuse the Bot's own
 // instruction root for the rest of the day. What bounds a Skill is Workspace
-// disk: how many Skills a Bot keeps and how large each one may be. Those are
-// the two limits declared here, and they are checked against what the
-// instruction root already holds rather than against a durable counter, so a
-// resumed Turn that rewrites the same Skill consumes nothing.
+// disk: how many Skills a root keeps and how large each one may be. Those are
+// the limits declared here, and they are checked against what the instruction
+// root already holds rather than against a durable counter, so a resumed Turn
+// that rewrites the same Skill consumes nothing.
+//
+// The count limit is per root, not per Bot: a Bot's own instruction root and
+// the User-global root its User's Bots share are counted separately, because a
+// quota bounds one root's growth and a shared root has a different population
+// of writers.
 //
 // The limits live in the Package, not in the User Durable Object, until the
 // durable-root sync of ADR 0013 exists to make "Workspace disk" measurable;
@@ -22,8 +27,18 @@
 
 export interface SkillQuotaConfigV1 {
   schemaVersion: 1;
-  /** Most Skills one Bot's instruction root may hold. */
+  /** Most Skills one Bot's own instruction root may hold. */
   maxSkillsPerBot: number;
+  /**
+   * Most Skills the User-global instruction root may hold.
+   *
+   * A separate limit rather than a shared one, because the two roots bound
+   * different things: the Bot root bounds one Bot's self-modification, and the
+   * User root bounds a tier every Bot of that User reads and any one of them
+   * can write. Counting them together would let one Bot's authoring exhaust a
+   * root the others share, and the refusal would name the wrong root.
+   */
+  maxSkillsPerUser: number;
   /** Largest single `SKILL.md`, in bytes. */
   maxSkillBytes: number;
 }
@@ -31,8 +46,20 @@ export interface SkillQuotaConfigV1 {
 export const SKILL_QUOTA_DEFAULTS_V1: SkillQuotaConfigV1 = {
   schemaVersion: 1,
   maxSkillsPerBot: 200,
+  maxSkillsPerUser: 200,
   maxSkillBytes: 65_536,
 };
+
+/** Which root a Skill write lands in, and therefore which count bounds it. */
+export type SkillQuotaScopeV1 = "bot" | "user";
+
+/** The Skill-count limit governing one root. */
+export function skillCountLimitV1(
+  scope: SkillQuotaScopeV1,
+  config: SkillQuotaConfigV1 = SKILL_QUOTA_DEFAULTS_V1,
+): number {
+  return scope === "user" ? config.maxSkillsPerUser : config.maxSkillsPerBot;
+}
 
 export type SkillQuotaLimitV1 = "skill-count" | "skill-bytes";
 
@@ -55,9 +82,17 @@ export type SkillQuotaOutcomeV1 =
  * not grow the root, so it is admitted at the limit.
  */
 export function checkSkillQuotaV1(
-  request: { bytes: number; existingSkills: number; replaces: boolean },
+  request: {
+    bytes: number;
+    existingSkills: number;
+    replaces: boolean;
+    /** The root being written; the Bot's own when unsaid. */
+    scope?: SkillQuotaScopeV1;
+  },
   config: SkillQuotaConfigV1 = SKILL_QUOTA_DEFAULTS_V1,
 ): SkillQuotaOutcomeV1 {
+  const scope = request.scope ?? "bot";
+  const limit = skillCountLimitV1(scope, config);
   if (request.bytes > config.maxSkillBytes) {
     return {
       status: "refused",
@@ -67,13 +102,16 @@ export function checkSkillQuotaV1(
       limit: config.maxSkillBytes,
     };
   }
-  if (!request.replaces && request.existingSkills >= config.maxSkillsPerBot) {
+  if (!request.replaces && request.existingSkills >= limit) {
     return {
       status: "refused",
       limitName: "skill-count",
-      reason: `this Bot holds ${request.existingSkills} Skills; the quota allows ${config.maxSkillsPerBot}`,
+      reason:
+        scope === "user"
+          ? `this User's shared instruction root holds ${request.existingSkills} Skills; the quota allows ${limit}`
+          : `this Bot holds ${request.existingSkills} Skills; the quota allows ${limit}`,
       used: request.existingSkills,
-      limit: config.maxSkillsPerBot,
+      limit,
     };
   }
   return { status: "within" };
@@ -88,7 +126,12 @@ export function decodeSkillQuotaConfigV1(
     throw new Error(`${label} must be an object`);
   }
   const value = input as Record<string, unknown>;
-  const keys = ["schemaVersion", "maxSkillsPerBot", "maxSkillBytes"];
+  const keys = [
+    "schemaVersion",
+    "maxSkillsPerBot",
+    "maxSkillsPerUser",
+    "maxSkillBytes",
+  ];
   if (
     value.schemaVersion !== 1 ||
     Object.keys(value).length !== keys.length ||
@@ -110,6 +153,7 @@ export function decodeSkillQuotaConfigV1(
   return {
     schemaVersion: 1,
     maxSkillsPerBot: bounded("maxSkillsPerBot", 10_000),
+    maxSkillsPerUser: bounded("maxSkillsPerUser", 10_000),
     maxSkillBytes: bounded("maxSkillBytes", 1_048_576),
   };
 }

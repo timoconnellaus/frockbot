@@ -546,7 +546,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 19  | A routine run cannot speak to the user, lands silently in a parent inbox; pause/resume/delete/edit with a card                                        | `automation_completion_inbox`; `update_state routine`                                                                                                           | §2.5, §2.7       | `plugin-routines`                                                                                                                 | partial     |
 | 19b | A run finishing against a sleeping parent queues a pending wake the host replays, rather than dropping the result                                     | `host-pending-wakes.json` `kind:"subagent"`, `quietOrigin.automation`, `automationRunUuid`                                                                      | §3.2             | kernel Turn admission                                                                                                             | landed      |
 | 20  | **Skills** — folder + `SKILL.md`, frontmatter `name`/`description`, markdown body, Bot-authorable                                                     | `workflows/<slug>/SKILL.md`; `update_state skill write`                                                                                                         | §2.2, §2.8       | new `plugin-skills`                                                                                                               | landed      |
-| 21  | User skills global across a user's Bots; managed skills read-only; plugin-borne skills indexed not copied                                             | `workflows/`; `managed-skills/`; `plugin-skills/cache.json`                                                                                                     | §2.9             | `plugin-skills`                                                                                                                   | partial     |
+| 21  | User skills global across a user's Bots; managed skills read-only; plugin-borne skills indexed not copied                                             | `workflows/`; `managed-skills/`; `plugin-skills/cache.json`                                                                                                     | §2.9             | `plugin-skills`                                                                                                                   | landed      |
 | 22  | Catalog of path + description injected each turn; bodies read on demand; `/` or `@` invocation                                                        | the `<agent_skills>` block                                                                                                                                      | §2.8             | `plugin-skills` + WebUI                                                                                                           | landed      |
 | 23  | **Computer** — one persistent Linux computer per user shared by all Bots, per-Bot durable roots, shared scratch                                       | one container, 14 agents; `agent-data/agents/<uuid>/` vs `/workspace`                                                                                           | §B8, §A1         | `plugin-computer` + provider; `/workspace` scratch                                                                                | done        |
 | 24  | Desktops allocated on demand, not one per Bot: own display, VNC/noVNC route, owner token, exec port                                                   | 7 live displays for 14 agents; `sand-window-router.mjs` `14000 + display`, `:1` primary                                                                         | §C12, §3.8       | `plugin-fly-sprite`                                                                                                               | partial     |
@@ -792,7 +792,7 @@ the rows whose status the code moved:
   the wider `PendingBotInputV1`; row 53's approval decisions now produce its
   `approval` variant through `enqueuePendingBotInputV1`, inside the caller's own
   transaction — a second producer, never a second queue.
-- **21** — two of the three halves are landed. **Managed** Skills are four
+- **21** — all three halves are landed. **Managed** Skills are four
   first-party `SKILL.md` documents compiled into the `plugin-skills` artifact
   (`plugin-skills/src/managed.ts`), mirroring GrokBot's `add-connector`,
   `export-bot-template`, `import-bot-template` and `learn-from-demonstration`;
@@ -806,12 +806,20 @@ the rows whose status the code moved:
   content, not Workspace files, which is why the constitution's rule about
   instruction roots is untouched: the catalog is ordered `bot` → `user` →
   `managed` → `plugin` under `SKILL_CATALOG_CAPS_V1`, every drop recorded as an
-  `over-source-cap` refusal in `skill/injected`. What is missing is the
-  **user-global** root: `workflows/<slug>/SKILL.md` shared across all of a
-  User's Bots needs a new `user-instructions` `WorkspaceRootV1` kind and an
-  amendment to the constitution's "the Bot's own instruction root" sentence,
-  which is a decision, not code. The `user` slot exists in the ordering, the
-  caps and the ref codec, and is always empty.
+  `over-source-cap` refusal in `skill/injected`. The **user-global** root
+  landed with ADR 0016 and the matching amendment to the constitution's
+  instruction-root sentence: `{ kind: "user-instructions", userId }` is a
+  durable root at `users/<id>/skills/`, mounted on the Computer at GrokBot's
+  own `agent-data/workflows`. `isLoadableSkillSourceV1` accepts the owning User
+  or **any** Bot of that User as its writer and still refuses `first-party`,
+  `unattributed`, and another User's root, so a Bot writing there writes under
+  authority it already holds. `skill_write{scope:"user"}` records the writing
+  Bot's full provenance, the catalog renders it (`by="Bot …"`, the attribution
+  GrokBot spells `[via]`) and `skill/injected` records it, and the quota is per
+  root (`maxSkillsPerBot` plus `maxSkillsPerUser`). The Skills Package is the
+  root's single writer over object storage and the Computer presents it
+  read-only — ADR 0013's Memory exception, extended by ADR 0016 — so a shared
+  tier needs no shard and no Turn wakes a Computer to read a Skill.
 - **22** — the `<agent_skills>` catalog of ref, source and description is injected once
   per Turn, bodies are disclosed on demand through `skill_load`
   (`plugin-skills/src/catalog.ts`, `agent.ts`), and `/` or `@` in the composer
@@ -820,8 +828,8 @@ the rows whose status the code moved:
   rather than pasting text. An invoked ref resolves against the Turn's catalog
   at its exact generation, is recorded as `skill/invoked`, and its body is
   expanded into step 1's `model/request`; an unresolvable ref blocks the Turn
-  with a reason. `bot`, `managed` and `plugin` refs all resolve; `user` is
-  declared in the codec and has no producer, pending row 21's remaining half.
+  with a reason. `bot`, `user`, `managed` and `plugin` refs all resolve, the
+  last of them since row 21's User-global root landed.
 - **23** — one Computer per User with per-Bot durable roots is landed and
   checked (`computer-core/src/index.test.ts`,
   `plugin-fly-sprite/src/computer.test.ts`); the shared scratch is not.

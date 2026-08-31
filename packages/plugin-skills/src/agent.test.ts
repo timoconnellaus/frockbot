@@ -195,7 +195,12 @@ describe("the skill_write tool", () => {
         owner: OWNER,
         reads: workspace,
         files: workspace,
-        quota: { schemaVersion: 1, maxSkillsPerBot: 1, maxSkillBytes: 65_536 },
+        quota: {
+          schemaVersion: 1,
+          maxSkillsPerBot: 1,
+          maxSkillsPerUser: 1,
+          maxSkillBytes: 65_536,
+        },
       },
       WRITER,
       sessions,

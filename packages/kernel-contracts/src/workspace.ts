@@ -18,10 +18,11 @@
 //     interface for a Memory root is `WorkspaceReadsV1`, which has no `write`
 //     and no `delete`. There is no flag to flip; the write methods are absent
 //     from the type.
-//  3. "The kernel treats every Workspace file as data. Only Skills under the
-//     Bot's own instruction root, written under the Bot's own authority or its
-//     User's, are loaded as instructions." — `LoadableSkillSourceV1` and
-//     `isLoadableSkillSourceV1` are that sentence as a type and a predicate.
+//  3. "The kernel treats every Workspace file as data. Only Skills under a
+//     Bot's instruction roots — its own and its User's — written under the
+//     Bot's own authority or its User's, are loaded as instructions." —
+//     `LoadableSkillSourceV1` and `isLoadableSkillSourceV1` are that sentence
+//     as a type and a predicate.
 //
 // Everything decoded here is untrusted: a durable root synchronizes
 // bidirectionally with object storage (ADR 0013), so a path, a writer, and a
@@ -64,6 +65,7 @@ const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
  */
 export type WorkspaceRootKindV1 =
   | "bot-instructions"
+  | "user-instructions"
   | "bot-memory"
   | "user-memory"
   | "project-memory"
@@ -76,6 +78,7 @@ export type WorkspaceRootKindV1 =
  */
 export type WorkspaceRootV1 =
   | { kind: "bot-instructions"; userId: string; botId: string }
+  | { kind: "user-instructions"; userId: string }
   | { kind: "bot-memory"; userId: string; botId: string }
   | { kind: "user-memory"; userId: string }
   | { kind: "project-memory"; userId: string; projectId: string }
@@ -86,11 +89,34 @@ export type WorkspaceRootV1 =
       rootId: string;
     };
 
-/** A root whose files the kernel may load as instructions. */
+/**
+ * A root whose files the kernel may load as instructions.
+ *
+ * Two kinds, because a Bot has instruction roots, plural (ADR 0016): its own,
+ * which only it and its User may write, and its User's, which every Bot of
+ * that User shares. Both are named here so a loader that walks "the Bot's
+ * instruction roots" is walking a type rather than a convention.
+ */
 export type WorkspaceInstructionRootV1 = Extract<
   WorkspaceRootV1,
-  { kind: "bot-instructions" }
+  { kind: "bot-instructions" | "user-instructions" }
 >;
+
+/**
+ * The User-global instruction root: `users/<id>/skills/`, shared by every Bot
+ * one User owns.
+ */
+export type WorkspaceUserInstructionRootV1 = Extract<
+  WorkspaceRootV1,
+  { kind: "user-instructions" }
+>;
+
+/** True for the two roots whose files may be loaded as instructions. */
+export function isWorkspaceInstructionRootV1(
+  root: WorkspaceRootV1,
+): root is WorkspaceInstructionRootV1 {
+  return root.kind === "bot-instructions" || root.kind === "user-instructions";
+}
 
 /**
  * A Memory root. The Memory Package is its only writer.
@@ -127,6 +153,24 @@ export function isWorkspaceMemoryRootV1(
     root.kind === "user-memory" ||
     root.kind === "project-memory"
   );
+}
+
+/**
+ * True for a root the Computer presents read-only, whatever it declares.
+ *
+ * Two kinds qualify, for one reason. "The Memory Package is the single writer
+ * of Memory roots ... the Workspace presents Memory roots read-only through
+ * the durable-root sync" (ADR 0013), and ADR 0016 extends exactly that
+ * exception to the User-global instruction root: the Skills Package is its
+ * only writer, writing object storage directly, so a Turn that needs a Skill
+ * never wakes a Computer and a shared root never grows a second writer. The
+ * durable-root sync reads these roots and materializes them, and never pushes
+ * a Computer-side edit back out of them.
+ */
+export function isWorkspaceComputerReadOnlyRootV1(
+  root: WorkspaceRootV1,
+): boolean {
+  return isWorkspaceMemoryRootV1(root) || root.kind === "user-instructions";
 }
 
 /** True for the Memory kinds whose files are sharded per writing Bot. */
@@ -510,8 +554,9 @@ export interface LoadableSkillSourceV1 extends SkillSourceV1 {
 }
 
 /**
- * "Only Skills under the Bot's own instruction root, written under the Bot's
- * own authority or its User's, are loaded as instructions."
+ * "Only Skills under a Bot's instruction roots — its own and its User's —
+ * written under the Bot's own authority or its User's, are loaded as
+ * instructions."
  *
  * Pure, total, and the only place that sentence is decided. A first-party
  * writer is not the Bot's authority nor its User's, so it is refused too: a
@@ -520,23 +565,46 @@ export interface LoadableSkillSourceV1 extends SkillSourceV1 {
  * wrote the file, so "written under the Bot's own authority or its User's" is
  * not merely false but unprovable. A file a shell command dropped into an
  * instruction root is data the Bot can read, never an instruction it loads.
+ *
+ * The two roots differ in exactly one clause, and authority does not widen
+ * between them (ADR 0016). Under the Bot's own root only that Bot or its User
+ * may have written a loadable Skill. Under the User-global root any Bot of
+ * that User may have, which is the whole point of a shared tier: a Bot writing
+ * there writes under authority it already holds, and the reading Bot is told
+ * whose Skill it is rather than being handed an anonymous instruction. A root
+ * belonging to another User is refused before the writer is even read, so a
+ * Bot never loads a Skill from a Workspace that is not its User's.
  */
 export function isLoadableSkillSourceV1(
   source: SkillSourceV1,
   owner: { botId: string; userId: string },
 ): source is LoadableSkillSourceV1 {
   const root = source.path.root;
-  if (root.kind !== "bot-instructions") return false;
-  if (root.userId !== owner.userId || root.botId !== owner.botId) return false;
+  if (!isWorkspaceInstructionRootV1(root)) return false;
+  if (root.userId !== owner.userId) return false;
   const writer = source.writer;
+  if (root.kind === "bot-instructions") {
+    if (root.botId !== owner.botId) return false;
+    if (writer.kind === "user") return writer.userId === owner.userId;
+    if (writer.kind === "bot") return writer.botId === owner.botId;
+    return false;
+  }
   if (writer.kind === "user") return writer.userId === owner.userId;
-  if (writer.kind === "bot") return writer.botId === owner.botId;
-  return false;
+  // A Bot of this User. `WorkspaceWriterV1` names no User on a `bot` writer,
+  // and it does not need to: a durable root belongs to one User, and the file
+  // surface that recorded the write serves that User's roots alone, so a
+  // recorded `bot` generation under this root is a Bot of this User.
+  return writer.kind === "bot";
 }
 
 /** A stable, collision-free key for one durable root. */
 export function workspaceRootKeyV1(root: WorkspaceRootV1): string {
   const user = encodeURIComponent(root.userId);
+  // The User-global instruction root is named by its location rather than by
+  // `<kind>:<owner>`, because ADR 0016 names it `users/<id>/skills/` and the
+  // object store keys every file under `workspace/<root key>/`. No other kind
+  // produces a key beginning `users/`, so it collides with none of them.
+  if (root.kind === "user-instructions") return `users/${user}/skills`;
   if (root.kind === "user-memory") return `user-memory:${user}`;
   if (root.kind === "project-memory") {
     return `project-memory:${user}:${encodeURIComponent(root.projectId)}`;
@@ -666,10 +734,10 @@ export function decodeWorkspaceRootV1(
       botId: ownerId(value.botId, `${label}.botId`),
     };
   }
-  if (value.kind === "user-memory") {
+  if (value.kind === "user-instructions" || value.kind === "user-memory") {
     exactKeys(value, ["kind", "userId"], label);
     return {
-      kind: "user-memory",
+      kind: value.kind,
       userId: ownerId(value.userId, `${label}.userId`),
     };
   }

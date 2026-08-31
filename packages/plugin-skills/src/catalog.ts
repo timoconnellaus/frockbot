@@ -1,8 +1,9 @@
 // The Skills loader: what a Turn is allowed to load as instructions.
 //
-// FOUR SOURCES, ONE CATALOG. This module loads the Bot's own instruction root
-// and assembles it with the sources that are not durable-root files at all —
-// the managed set compiled into this Package's artifact (`./managed.ts`) and
+// FOUR SOURCES, ONE CATALOG. This module loads the Bot's two instruction roots
+// — its own, and the User-global one every Bot of that User shares (ADR 0016)
+// — and assembles them with the sources that are not durable-root files at all
+// — the managed set compiled into this Package's artifact (`./managed.ts`) and
 // the index over the User's installed Catalog entries (`./plugin-index.ts`).
 // Those two never meet `isLoadableSkillSourceV1`, because they are not
 // Workspace files: they are a Package contributing prompt content, which the
@@ -10,9 +11,10 @@
 // and the User's Catalog pin respectively. The predicate below still decides
 // every question it decided before, about every file it decided it for.
 //
-// "The kernel treats every Workspace file as data. Only Skills under the Bot's
-// own instruction root, written under the Bot's own authority or its User's,
-// are loaded as instructions." That sentence is decided in exactly one place —
+// "The kernel treats every Workspace file as data. Only Skills under a Bot's
+// instruction roots — its own and its User's — written under the Bot's own
+// authority or its User's, are loaded as instructions." That sentence is
+// decided in exactly one place —
 // `isLoadableSkillSourceV1` in `@frockbot/kernel-contracts` — and this module
 // calls it. There is no second opinion here and no override: a candidate the
 // predicate refuses is recorded as a refusal and never read as an instruction.
@@ -139,6 +141,29 @@ export function botInstructionRootV1(
   };
 }
 
+/**
+ * The User-global instruction root, shared by every Bot this User owns.
+ *
+ * It is named from the owner rather than passed in, exactly as the Bot root
+ * is: a caller cannot ask this Package to load another User's Skills, because
+ * there is no argument with which to ask.
+ */
+export function userInstructionRootV1(
+  owner: SkillOwnerV1,
+): WorkspaceInstructionRootV1 {
+  return { kind: "user-instructions", userId: owner.userId };
+}
+
+/** The two roots a Turn's Skills may come out of, in catalog order. */
+export function skillInstructionRootsV1(
+  owner: SkillOwnerV1,
+): { source: "bot" | "user"; root: WorkspaceInstructionRootV1 }[] {
+  return [
+    { source: "bot", root: botInstructionRootV1(owner) },
+    { source: "user", root: userInstructionRootV1(owner) },
+  ];
+}
+
 export function emptySkillCatalogV1(owner: SkillOwnerV1): SkillCatalogV1 {
   return { owner, skills: [], refusals: [] };
 }
@@ -166,12 +191,14 @@ function describeWriter(source: SkillSourceV1): string {
 }
 
 /**
- * How a loaded Bot Skill is attributed in the rendered catalog, or `undefined`
+ * How a loaded Skill is attributed in the rendered catalog, or `undefined`
  * when the Bot wrote it itself and there is nothing to disclose.
  *
- * A Skill written by the Bot's User, or by another of the User's Bots once
- * shared roots exist, is a Skill the reading Bot did not author. Saying so in
- * the catalog line is the shared-tier attribution GrokBot spells `[via]`.
+ * A Skill written by the Bot's User, or by another of the User's Bots in the
+ * User-global root, is a Skill the reading Bot did not author. Saying so in
+ * the catalog line is the shared-tier attribution GrokBot spells `[via]`, and
+ * it is what makes a shared tier honest: the Bot is told whose instruction it
+ * is about to follow.
  */
 function attributionFor(
   source: SkillSourceV1,
@@ -195,6 +222,9 @@ function describeRoot(source: SkillSourceV1): string {
     return `Project "${root.projectId}"'s Memory root`;
   }
   if (root.kind === "bot-memory") return `Bot "${root.botId}"'s Memory root`;
+  if (root.kind === "user-instructions") {
+    return `User "${root.userId}"'s instruction root`;
+  }
   return `Bot "${root.botId}"'s instruction root`;
 }
 
@@ -262,16 +292,30 @@ export async function countSkillDocumentsV1(
 }
 
 /**
- * Enumerates a Bot's Skill candidates and loads the ones the constitution
- * allows. Pure with respect to the Workspace: it reads, and never writes.
+ * Enumerates one instruction root's Skill candidates and loads the ones the
+ * constitution allows. Pure with respect to the Workspace: it reads, and never
+ * writes.
+ *
+ * The root defaults to the Bot's own, which is what every caller wanted while
+ * there was only one. Passing the User-global root loads the shared tier, and
+ * `isLoadableSkillSourceV1` decides both the same way: nothing here widens
+ * what may be loaded, it only says which root is being walked. `source` is the
+ * ref source the loaded Skills are named under, and it must match the root —
+ * which is why both come from `skillInstructionRootsV1` rather than from a
+ * caller's two independent arguments.
  */
 export async function loadSkillCatalogV1(
   reads: WorkspaceReadsV1,
   owner: SkillOwnerV1,
-  options: { maxSkills?: number } = {},
+  options: {
+    maxSkills?: number;
+    root?: WorkspaceInstructionRootV1;
+    source?: "bot" | "user";
+  } = {},
 ): Promise<SkillCatalogV1> {
   const maxSkills = options.maxSkills ?? SKILL_MAX_CATALOG_ENTRIES;
-  const root = botInstructionRootV1(owner);
+  const root = options.root ?? botInstructionRootV1(owner);
+  const refSource = options.source ?? "bot";
   const catalog = emptySkillCatalogV1(owner);
   const entries: WorkspaceEntryV1[] = [];
   let cursor: string | undefined;
@@ -286,7 +330,7 @@ export async function loadSkillCatalogV1(
       catalog.refusals.push({
         path: "",
         kind: "unreadable",
-        reason: `the instruction root could not be listed: ${outcome.reason}`,
+        reason: `the ${refSource} instruction root could not be listed: ${outcome.reason}`,
       });
       return catalog;
     }
@@ -364,7 +408,7 @@ export async function loadSkillCatalogV1(
     catalog.skills.push({
       path,
       ...(slug
-        ? { ref: { schemaVersion: 1 as const, source: "bot" as const, slug } }
+        ? { ref: { schemaVersion: 1 as const, source: refSource, slug } }
         : {}),
       ...(attributionFor(source, owner)
         ? { by: attributionFor(source, owner) as string }
@@ -416,12 +460,7 @@ export interface SkillSourceResultV1 {
   refusals: SkillRefusalV1[];
 }
 
-/**
- * The four sources, keyed as the canonical ordering names them. `user` is
- * declared and always empty until the User-global instruction root lands; the
- * slot exists so admitting it later is a loader change and not an ordering
- * change.
- */
+/** The four sources, keyed as the canonical ordering names them. */
 export type SkillCatalogSourcesV1 = Partial<
   Record<SkillRefSourceV1, SkillSourceResultV1>
 >;
@@ -494,11 +533,14 @@ export function assembleSkillCatalogV1(
 
 /**
  * The whole catalog one Turn runs under: the Bot's own instruction root, the
- * managed set compiled into this Package, and the index over the User's
- * installed Catalog entries — assembled, ordered and capped.
+ * User-global instruction root its User's Bots share, the managed set compiled
+ * into this Package, and the index over the User's installed Catalog entries —
+ * assembled, ordered and capped.
  *
- * The `user` source is absent rather than empty: it has no loader yet, and an
- * empty result would claim a root was read.
+ * Both roots are read every Turn, through the same `WorkspaceReadsV1` and the
+ * same predicate. A User-global root that holds nothing contributes an empty
+ * source rather than being skipped: it was read, and saying so is what makes a
+ * missing Skill a fact about the root instead of a fact about the loader.
  */
 export async function loadFullSkillCatalogV1(
   reads: WorkspaceReadsV1,
@@ -509,10 +551,11 @@ export async function loadFullSkillCatalogV1(
     caps?: SkillCatalogCapsV1;
   } = {},
 ): Promise<SkillCatalogV1> {
-  const bot = await loadSkillCatalogV1(reads, owner);
-  const sources: SkillCatalogSourcesV1 = {
-    bot: { skills: bot.skills, refusals: bot.refusals },
-  };
+  const sources: SkillCatalogSourcesV1 = {};
+  for (const { source, root } of skillInstructionRootsV1(owner)) {
+    const loaded = await loadSkillCatalogV1(reads, owner, { root, source });
+    sources[source] = { skills: loaded.skills, refusals: loaded.refusals };
+  }
   if (options.managed !== false) {
     sources.managed = await loadManagedSkillsV1();
   }

@@ -287,7 +287,7 @@ describe("Fly Workspace layout", () => {
   // Constitution — Computer and Workspace: "durable roots, declared by the
   // Computer Package's Workspace layout"; ADR 0013: the Workspace presents
   // Memory roots read-only.
-  test("declares instruction, Memory, and Package roots with Memory read-only", () => {
+  test("declares instruction, Memory, and Package roots, with Memory and the User-global instruction root read-only", () => {
     expect(FLY_WORKSPACE_LAYOUT.home).toBe("/home/box");
     expect(
       Object.fromEntries(
@@ -301,6 +301,13 @@ describe("Fly Workspace layout", () => {
         "/home/box/agent-data/agents/{bot}/skills",
         "read-write",
         "bot",
+      ],
+      // GrokBot's `agent-data/workflows`, read-only on the Computer because
+      // the Skills Package writes it through object storage (ADR 0016).
+      "user-instructions": [
+        "/home/box/agent-data/workflows",
+        "read-only",
+        "user",
       ],
       "bot-memory": [
         "/home/box/agent-data/agents/{bot}/memory",

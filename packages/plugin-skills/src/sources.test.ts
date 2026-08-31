@@ -16,6 +16,7 @@ import {
   resolveSkillRefV1,
   SKILL_CATALOG_CAPS_V1,
   type SkillCatalogCapsV1,
+  userInstructionRootV1,
 } from "./catalog.ts";
 import { loadManagedSkillsV1, MANAGED_SKILL_DOCUMENTS_V1 } from "./managed.ts";
 import {
@@ -26,6 +27,7 @@ import { FakeWorkspace, skillMarkdown } from "./testing.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
 const OWN_ROOT = botInstructionRootV1(OWNER);
+const USER_ROOT = userInstructionRootV1(OWNER);
 const BOT_WRITER = {
   kind: "bot" as const,
   botId: "bot-1",
@@ -131,9 +133,9 @@ describe("the managed Skill source", () => {
     expect(skillWriteScopeRefusalV1("plugin")).toBe(
       "managed skills are not editable this way",
     );
-    expect(skillWriteScopeRefusalV1("user")).toContain(
-      "no instruction root yet",
-    );
+    // The User-global root landed with ADR 0016, so `user` is writable and no
+    // longer a refusal.
+    expect(skillWriteScopeRefusalV1("user")).toBeUndefined();
   });
 
   test("refuses a managed-scope skill_write with GrokBot's own wording", async () => {
@@ -540,5 +542,219 @@ describe("a Turn's whole catalog", () => {
     });
 
     expect(catalog.skills).toEqual([]);
+  });
+});
+
+describe("the User-global instruction root", () => {
+  const OTHER_BOT_WRITER = { ...BOT_WRITER, botId: "bot-2" };
+  const USER_WRITER = { kind: "user" as const, userId: "user-1" };
+
+  test("loads a Skill another of the User's Bots wrote, attributed to that Bot, and refuses what carries no authority", async () => {
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: OWN_ROOT,
+        path: "skills/own/SKILL.md",
+        text: skillMarkdown("Own", "Use this when local.", "OWN."),
+        writer: BOT_WRITER,
+      },
+      {
+        root: USER_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown("Daily standup", "Use this when standing.", "A."),
+        writer: OTHER_BOT_WRITER,
+      },
+      {
+        root: USER_ROOT,
+        path: "skills/house-style/SKILL.md",
+        text: skillMarkdown("House style", "Use this when writing.", "U."),
+        writer: USER_WRITER,
+      },
+      // A shell on the Computer dropped this one: nothing recorded a writer,
+      // so it is data, never an instruction.
+      {
+        root: USER_ROOT,
+        path: "skills/dropped/SKILL.md",
+        text: skillMarkdown("Dropped", "Use this never.", "X."),
+        writer: { kind: "unattributed" },
+      },
+      // Another User's root is not reachable from this owner at all.
+      {
+        root: { kind: "user-instructions", userId: "user-2" },
+        path: "skills/foreign/SKILL.md",
+        text: skillMarkdown("Foreign", "Use this never.", "X."),
+        writer: OTHER_BOT_WRITER,
+      },
+    ]);
+
+    const catalog = await loadFullSkillCatalogV1(workspace, OWNER, {
+      managed: false,
+    });
+
+    expect(
+      catalog.skills.map((skill) => [skill.ref?.source, skill.ref?.slug]),
+    ).toEqual([
+      ["bot", "own"],
+      ["user", "house-style"],
+      ["user", "standup"],
+    ]);
+    // The shared-tier attribution: the reading Bot is told whose instruction
+    // it is about to follow, and its own Skill discloses nothing.
+    expect(catalog.skills.map((skill) => skill.by)).toEqual([
+      undefined,
+      "your User",
+      'Bot "bot-2"',
+    ]);
+    expect(
+      catalog.refusals.map((refusal) => [refusal.path, refusal.kind]),
+    ).toEqual([["skills/dropped/SKILL.md", "authority"]]);
+    // Another User's root was never even listed.
+    expect(catalog.skills.map((skill) => skill.name)).not.toContain("Foreign");
+
+    const rendered = renderSkillCatalogPromptV1(catalog);
+    expect(rendered).toContain('ref="user/standup"');
+    expect(rendered).toContain('source="user"');
+    expect(rendered).toContain('by="Bot &quot;bot-2&quot;"');
+  });
+
+  test("skill_write with scope user lands in the shared root with the writing Bot's full provenance", async () => {
+    const workspace = new FakeWorkspace();
+    const { sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      { owner: OWNER, reads: workspace, files: workspace },
+      { sessionId: "user-1:bot-1", turnId: "turn-1", runId: "run-1" },
+      sessions,
+    );
+
+    const written = await tool.execute(
+      {
+        name: "Daily standup",
+        description: "Use this when standing.",
+        body: "Ask each Bot for its blockers.",
+        scope: "user",
+      },
+      CONTEXT,
+    );
+    expect(written.isError).toBe(false);
+    expect(written.content).toContain("shared instruction root");
+
+    const stat = await workspace.stat({
+      root: USER_ROOT,
+      path: "skills/daily-standup/SKILL.md",
+    });
+    if (stat.status !== "ok") throw new Error(stat.reason);
+    // The full Bot writer, not a bare id: the Session, Turn and run that
+    // authored it are what make the write reconstructable.
+    expect(stat.entry.generation.writer).toEqual({
+      kind: "bot",
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      turnId: "turn-1",
+      runId: "run-1",
+    });
+    // Nothing was written to the Bot's own root.
+    expect(
+      (
+        await workspace.stat({
+          root: OWN_ROOT,
+          path: "skills/daily-standup/SKILL.md",
+        })
+      ).status,
+    ).toBe("not-found");
+
+    // Another Bot of the same User loads it, and is told who wrote it.
+    const catalog = await loadFullSkillCatalogV1(
+      workspace,
+      { userId: "user-1", botId: "bot-2" },
+      { managed: false },
+    );
+    expect(catalog.skills.map((skill) => [skill.name, skill.by])).toEqual([
+      ["Daily standup", 'Bot "bot-1"'],
+    ]);
+    await dispose();
+  });
+
+  test("the two roots have separate Skill-count quotas", async () => {
+    const workspace = new FakeWorkspace();
+    const { sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      {
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+        quota: {
+          schemaVersion: 1,
+          maxSkillsPerBot: 2,
+          maxSkillsPerUser: 1,
+          maxSkillBytes: 65_536,
+        },
+      },
+      { sessionId: "user-1:bot-1", turnId: "turn-1", runId: "run-1" },
+      sessions,
+    );
+    const write = (name: string, scope: "bot" | "user") =>
+      tool.execute(
+        {
+          name,
+          description: `Use this when ${name}.`,
+          body: "Body.",
+          scope,
+        },
+        CONTEXT,
+      );
+
+    expect((await write("one", "user")).isError).toBe(false);
+    const overUser = await write("two", "user");
+    expect(overUser.isError).toBe(true);
+    expect(overUser.content).toContain("shared instruction root holds 1");
+
+    // The Bot's own root is bounded separately, so the shared root filling up
+    // never refuses a Bot its own self-modification.
+    expect((await write("three", "bot")).isError).toBe(false);
+    expect((await write("four", "bot")).isError).toBe(false);
+    const overBot = await write("five", "bot");
+    expect(overBot.isError).toBe(true);
+    expect(overBot.content).toContain("this Bot holds 2");
+    await dispose();
+  });
+
+  test("a User-global write that supersedes a Skill is admitted at the limit", async () => {
+    const workspace = new FakeWorkspace();
+    const { sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      {
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+        quota: {
+          schemaVersion: 1,
+          maxSkillsPerBot: 1,
+          maxSkillsPerUser: 1,
+          maxSkillBytes: 65_536,
+        },
+      },
+      { sessionId: "user-1:bot-1", turnId: "turn-1", runId: "run-1" },
+      sessions,
+    );
+    const draft = {
+      name: "Daily standup",
+      description: "Use this when standing.",
+      scope: "user" as const,
+    };
+
+    expect(
+      (await tool.execute({ ...draft, body: "First." }, CONTEXT)).isError,
+    ).toBe(false);
+    // Superseding does not grow the root, so it is admitted at the cap.
+    expect(
+      (await tool.execute({ ...draft, body: "Second." }, CONTEXT)).isError,
+    ).toBe(false);
+
+    const read = await workspace.read({
+      root: USER_ROOT,
+      path: "skills/daily-standup/SKILL.md",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(new TextDecoder().decode(read.file.bytes)).toContain("Second.");
+    await dispose();
   });
 });

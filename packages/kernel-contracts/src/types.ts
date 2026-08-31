@@ -365,6 +365,15 @@ export interface SessionEventMap {
       name: string;
       generationId: string;
       contentHash: string;
+      /**
+       * Who the Skill is attributed to, when the reading Bot did not author
+       * it: its User, or another Bot of that User writing the User-global
+       * instruction root. Absent for a Skill the Bot wrote itself, which is
+       * the common case and has nothing to disclose. It is rendered in the
+       * catalog block, so the durable record and the prompt agree on whose
+       * instruction the Turn ran under.
+       */
+      by?: string;
     }>;
     refusals: Array<{ path: string; reason: string }>;
   };
@@ -1159,15 +1168,21 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       event.skills.forEach((skill, index) => {
         const label = `session event.skills[${index}]`;
         const entry = eventRecord(skill, label);
+        // Exact keys either way: a Skill the Bot wrote itself carries no `by`,
+        // and one written by its User or another of its User's Bots carries
+        // the attribution the catalog block renders.
         requireEventKeys(
           entry,
-          ["path", "name", "generationId", "contentHash"],
+          entry.by === undefined
+            ? ["path", "name", "generationId", "contentHash"]
+            : ["path", "name", "generationId", "contentHash", "by"],
           label,
         );
         eventString(entry.path, `${label}.path`);
         eventString(entry.name, `${label}.name`);
         eventString(entry.generationId, `${label}.generationId`);
         eventString(entry.contentHash, `${label}.contentHash`);
+        if (entry.by !== undefined) eventString(entry.by, `${label}.by`);
       });
       event.refusals.forEach((refusal, index) => {
         const label = `session event.refusals[${index}]`;
