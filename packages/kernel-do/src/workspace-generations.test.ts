@@ -105,6 +105,24 @@ describe("minted generation ids", () => {
     expect(earlier > later).toBe(true);
   });
 
+  test("are distinct when two cold mints run concurrently", async () => {
+    // The cursor is only assigned after an `await` on storage, so two mints
+    // that begin before either has read it — the ordinary case on a freshly
+    // constructed object, where nothing is cached — must not both read the
+    // same cursor and hand two files one generation.
+    const { generations, storage } = store();
+    const at = new Date("2026-08-31T00:00:00.000Z");
+    const ids = await Promise.all([
+      generations.mint(at),
+      generations.mint(at),
+      generations.mint(at),
+    ]);
+    expect(new Set(ids).size).toBe(3);
+    // And the durable cursor still describes the last of them.
+    const highest = [...ids].sort().at(-1) ?? "";
+    expect((await store(storage).generations.mint(at)) > highest).toBe(true);
+  });
+
   test("keep increasing across eviction, because the cursor is durable", async () => {
     const storage = new MemoryStorage();
     const first = await store(storage).generations.mint(

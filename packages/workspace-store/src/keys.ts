@@ -8,21 +8,22 @@
 //   file      workspace/<workspaceRootKeyV1(root)>/<relative>
 //   conflict  workspace/<workspaceRootKeyV1(root)>/<relative>.conflict/<generationId>
 //
-// The conflict key is a *prefix* of nothing a file can occupy: a relative path
-// segment may not end in `.conflict` and then contain a further segment that
-// is a generation id, because a file's own key never has a segment after it.
-// Listing a root therefore skips any key containing `/<name>.conflict/`, and a
-// preserved losing write is durable, addressable, and never mistaken for the
-// file it lost to.
+// The conflict key is a *prefix* of nothing a file can occupy, and that is
+// enforced rather than assumed: `normalizeWorkspaceRelativePathV1` refuses any
+// segment ending in `.conflict`, so `notes.conflict/a.md` is not a path a
+// caller can present. Listing a root therefore skips any key containing
+// `/<name>.conflict/`, and a preserved losing write is durable, addressable,
+// and never mistaken for the file it lost to.
 import {
+  WORKSPACE_CONFLICT_SEGMENT_SUFFIX,
   workspaceRootKeyV1,
   type WorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
 
 /** Every durable-root object lives under this prefix. */
 export const WORKSPACE_OBJECT_PREFIX = "workspace";
-/** The segment marking a preserved losing write. */
-export const WORKSPACE_CONFLICT_SUFFIX = ".conflict";
+/** The segment marking a preserved losing write; a path may not end in it. */
+export const WORKSPACE_CONFLICT_SUFFIX = WORKSPACE_CONFLICT_SEGMENT_SUFFIX;
 
 /** The prefix every object of one durable root shares. */
 export function workspaceObjectPrefixV1(root: WorkspaceRootV1): string {

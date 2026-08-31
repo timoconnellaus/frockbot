@@ -53,8 +53,17 @@ const MEMORY_MAX_PROJECTS = 200;
 const MEMORY_MAX_JOINED_PROJECTS = 32;
 const MEMORY_PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
+/** The durable key pinning the User this object was provisioned for. */
+const USER_IDENTITY_KEY = "user:identity";
+
 interface UserConfigurationEnv {
   CREDENTIAL_KEYRING?: string;
+  /**
+   * This object's own namespace. Every caller reaches a User Durable Object
+   * through `idFromName(userId)`, so the namespace is how the object checks
+   * that the `userId` an RPC carries is the one it *is*.
+   */
+  USER_CONFIGURATIONS?: DurableObjectNamespace;
 }
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
@@ -70,6 +79,41 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       );
     }
     return this.mounted;
+  }
+
+  /**
+   * The User this Durable Object is.
+   *
+   * Comparing an RPC's `userId` with a root's `userId` proves only that the
+   * request agrees with itself; both come from the caller. A User Durable
+   * Object is addressed by `idFromName(userId)`, so its identity is the name
+   * it was constructed for: the id derived from the claimed `userId` must be
+   * this object's own id. That identity is pinned in durable storage the first
+   * time it is asserted — provisioning is the first RPC a new User object ever
+   * receives — so the check survives eviction and holds even where the
+   * namespace binding is not reachable.
+   */
+  private identity: string | undefined;
+
+  private async assertUserIdentity(userId: string): Promise<string> {
+    if (this.identity === userId) return userId;
+    const namespace = this.env.USER_CONFIGURATIONS;
+    if (namespace && !namespace.idFromName(userId).equals(this.ctx.id)) {
+      throw new Error(
+        "this User Durable Object is the authority for a different User",
+      );
+    }
+    const pinned = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
+    if (pinned !== undefined && pinned !== userId) {
+      throw new Error(
+        "this User Durable Object is the authority for a different User",
+      );
+    }
+    if (pinned === undefined) {
+      await this.ctx.storage.put(USER_IDENTITY_KEY, userId);
+    }
+    this.identity = userId;
+    return userId;
   }
 
   private async settingsContribution(): Promise<
@@ -98,11 +142,13 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
 
   async readConfiguration(input: unknown) {
     const request = decodeUserConfigurationReadRpcV1(input);
+    await this.assertUserIdentity(request.userId);
     return (await this.settingsContribution()).readConfiguration(request);
   }
 
   async executeConfiguration(input: unknown) {
     const request = decodeUserConfigurationExecuteRpcV1(input);
+    await this.assertUserIdentity(request.userId);
     return (await this.settingsContribution()).executeConfiguration(request);
   }
 
@@ -322,6 +368,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     state: this.ctx,
   });
 
+  /** `userId` must already have passed `assertUserIdentity`. */
   private sharedMemoryRoot(userId: string, value: unknown): WorkspaceRootV1 {
     const root = decodeWorkspaceRootV1(value);
     if (!isWorkspaceSharedMemoryRootV1(root) || root.userId !== userId) {
@@ -347,7 +394,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       at: rpcString(64),
       root: rpcDecodedValue,
     });
-    const userId = request.userId as string;
+    const userId = await this.assertUserIdentity(request.userId as string);
     this.sharedMemoryRoot(userId, request.root);
     const at = new Date(request.at as string);
     if (!Number.isFinite(at.getTime())) {
@@ -364,7 +411,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       root: rpcDecodedValue,
       path: rpcString(1_024),
     });
-    const root = this.sharedMemoryRoot(request.userId as string, request.root);
+    const root = this.sharedMemoryRoot(
+      await this.assertUserIdentity(request.userId as string),
+      request.root,
+    );
     return this.workspaceGenerations.current(
       root,
       normalizeWorkspaceRelativePathV1(request.path),
@@ -377,7 +427,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       entry: rpcDecodedValue,
     });
     await this.workspaceGenerations.record(
-      this.sharedMemoryRecord(request.userId as string, request.entry),
+      this.sharedMemoryRecord(
+        await this.assertUserIdentity(request.userId as string),
+        request.entry,
+      ),
     );
   }
 
@@ -387,7 +440,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       entry: rpcDecodedValue,
     });
     await this.workspaceGenerations.tombstone(
-      this.sharedMemoryRecord(request.userId as string, request.entry),
+      this.sharedMemoryRecord(
+        await this.assertUserIdentity(request.userId as string),
+        request.entry,
+      ),
     );
   }
 
@@ -397,7 +453,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       entry: rpcDecodedValue,
     });
     await this.workspaceGenerations.conflict(
-      this.sharedMemoryRecord(request.userId as string, request.entry),
+      this.sharedMemoryRecord(
+        await this.assertUserIdentity(request.userId as string),
+        request.entry,
+      ),
     );
   }
 
@@ -409,7 +468,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       root: rpcDecodedValue,
       path: rpcString(1_024),
     });
-    const root = this.sharedMemoryRoot(request.userId as string, request.root);
+    const root = this.sharedMemoryRoot(
+      await this.assertUserIdentity(request.userId as string),
+      request.root,
+    );
     return this.workspaceGenerations.conflicts(
       root,
       normalizeWorkspaceRelativePathV1(request.path),
@@ -616,6 +678,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   private async assertFlockIdentity(userId: string): Promise<void> {
+    await this.assertUserIdentity(userId);
     await (
       await this.settingsContribution()
     ).readConfiguration({ schemaVersion: 1, userId });

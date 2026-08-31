@@ -124,29 +124,108 @@ describe("Memory in Workerd", () => {
     });
   });
 
-  test("a Bot may not write another Bot's shard of a shared Memory root", async () => {
+  test("a Bot writes its own shard of a shared Memory root on real R2, and another Bot's is refused", async () => {
     const suffix = crypto.randomUUID();
     const userId = `memory-user-${suffix}`;
     const identity = { userId, botId: `memory-bot-c-${suffix}` };
     await provisionBot(identity);
     const stub = bot(`memory-c-${suffix}`);
+    const root = userMemoryRoot(userId);
+    const writer = {
+      kind: "bot" as const,
+      botId: identity.botId,
+      sessionId: `${userId}:${identity.botId}`,
+      turnId: "t",
+      runId: "r",
+    };
 
-    const refused = await stub.writeWorkspaceFile({
-      root: userMemoryRoot(userId),
+    // Through the *Memory* surface — the Memory Package's own seam, and the
+    // only one that writes a Memory root at all. Writing through the kernel
+    // surface would prove nothing about shard ownership, because that surface
+    // refuses every Memory root before ownership is ever consulted.
+    const forged = await stub.memoryWriteWorkspaceFile({
+      ...identity,
+      root,
       path: `by-agent/${identity.botId}-other/profile.md`,
       text: "- (2026-08-31) Forged.\n",
-      writer: {
-        kind: "bot",
-        botId: identity.botId,
-        sessionId: `${userId}:${identity.botId}`,
-        turnId: "t",
-        runId: "r",
-      },
+      writer,
       expectedGenerationId: null,
     });
+    expect(forged.status).toBe("refused");
+    expect(forged.reason).toContain("Memory shard");
 
-    // The kernel surface refuses every Memory root outright, which is the
-    // stronger of the two refusals and the one the constitution names.
-    expect(refused.status).toBe("refused");
+    // And the Bot's own shard is written, on real R2, through the same seam.
+    const own = await stub.memoryWriteWorkspaceFile({
+      ...identity,
+      root,
+      path: `by-agent/${identity.botId}/profile.md`,
+      text: "- (2026-08-31) Mine.\n",
+      writer,
+      expectedGenerationId: null,
+    });
+    expect(own.status).toBe("ok");
+
+    // The forged shard does not exist; the Bot's own does.
+    expect(
+      await stub.memoryReadWorkspaceFile({
+        ...identity,
+        root,
+        path: `by-agent/${identity.botId}-other/profile.md`,
+      }),
+    ).toMatchObject({ status: "not-found" });
+    expect(
+      await stub.memoryReadWorkspaceFile({
+        ...identity,
+        root,
+        path: `by-agent/${identity.botId}/profile.md`,
+      }),
+    ).toMatchObject({ status: "ok", text: "- (2026-08-31) Mine.\n" });
+
+    // The generation is in the User Durable Object, which is the authority for
+    // a shared Memory root, and it survives eviction.
+    const userStub = env.USER_CONFIGURATIONS.getByName(userId);
+    await evictDurableObject(userStub);
+    const recorded = await userStub.currentWorkspaceGeneration({
+      schemaVersion: 1,
+      userId,
+      root,
+      path: `by-agent/${identity.botId}/profile.md`,
+    });
+    expect(recorded?.generation.generationId).toBe(own.generationId);
+  });
+
+  test("a User Durable Object refuses an RPC naming another User's root", async () => {
+    const suffix = crypto.randomUUID();
+    const mine = `memory-user-${suffix}`;
+    const theirs = `memory-other-${suffix}`;
+    const identity = { userId: mine, botId: `memory-bot-d-${suffix}` };
+    await provisionBot(identity);
+
+    // Addressed as *this* User's object, and asked about another User. The
+    // request agrees with itself — `userId` and `root.userId` both name the
+    // other User — which is exactly why comparing the two proves nothing.
+    const stub = env.USER_CONFIGURATIONS.getByName(mine);
+    let refusal = "";
+    try {
+      await stub.currentWorkspaceGeneration({
+        schemaVersion: 1,
+        userId: theirs,
+        root: userMemoryRoot(theirs),
+        path: "by-agent/whoever/profile.md",
+      });
+    } catch (error) {
+      refusal = error instanceof Error ? error.message : String(error);
+    }
+    expect(refusal).toContain("different User");
+
+    // And its own root still answers.
+    await expect(
+      stub.currentWorkspaceGeneration({
+        schemaVersion: 1,
+        userId: mine,
+        root: userMemoryRoot(mine),
+        path: "by-agent/whoever/profile.md",
+      }),
+    ).resolves.toBeUndefined();
   });
 });

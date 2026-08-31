@@ -71,6 +71,8 @@ export class DurableWorkspaceGenerations implements WorkspaceGenerationsV1 {
   private readonly ctx: DurableObjectState;
   /** The cursor, cached while resident; storage remains the authority. */
   private cursor: GenerationCursor | undefined;
+  /** Serializes minting, so no two mints can read one cursor. */
+  private minting: Promise<void> = Promise.resolve();
 
   constructor(options: DurableWorkspaceGenerationsOptions) {
     this.ctx = options.state;
@@ -80,8 +82,26 @@ export class DurableWorkspaceGenerations implements WorkspaceGenerationsV1 {
    * The `root` is accepted and unused: this ledger *is* one authority, so
    * every id it mints already orders against every other. Routing a root to
    * the object that owns it happens above, in the Worker.
+   *
+   * Minting is serialized through `minting`. The cursor is only assigned after
+   * an `await` on storage, so two mints that begin before either has read —
+   * the ordinary case on a cold object, where nothing is cached — would both
+   * read the same cursor and return the same id. Two files would then claim
+   * one generation, which is the one thing a generation id exists to prevent.
    */
   async mint(at: Date, _root?: WorkspaceRootV1): Promise<string> {
+    const minted = this.minting.then(
+      () => this.mintOne(at),
+      () => this.mintOne(at),
+    );
+    this.minting = minted.then(
+      () => undefined,
+      () => undefined,
+    );
+    return minted;
+  }
+
+  private async mintOne(at: Date): Promise<string> {
     const stored =
       this.cursor ??
       decodeCursor(

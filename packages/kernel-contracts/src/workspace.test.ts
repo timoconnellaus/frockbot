@@ -172,6 +172,33 @@ describe("workspace paths", () => {
     }
   });
 
+  test("rejects the segments the object-storage key scheme and the sync reserve", () => {
+    // `workspace/<root>/<relative>.conflict/<generationId>` preserves a losing
+    // write, so a file may not occupy a `.conflict` segment: `notes.conflict`
+    // would shadow its own conflicts, and `notes.conflict/a.md` would be read
+    // as one. `.frockbot-generations` and `.frockbot-sync` belong to the
+    // Computer-side sync agent.
+    for (const path of [
+      "notes.conflict",
+      "notes.conflict/a.md",
+      "notes.conflict/0000-0001",
+      ".conflict",
+      "skills/deploy.conflict/SKILL.md",
+      ".frockbot-generations",
+      ".frockbot-generations/notes.md",
+      "skills/.frockbot-sync/tombstones/notes.md",
+    ]) {
+      expect(() => normalizeWorkspaceRelativePathV1(path)).toThrow();
+    }
+    // Nothing else that merely mentions the word is refused.
+    expect(normalizeWorkspaceRelativePathV1("conflict/notes.md")).toBe(
+      "conflict/notes.md",
+    );
+    expect(normalizeWorkspaceRelativePathV1("notes.conflicted.md")).toBe(
+      "notes.conflicted.md",
+    );
+  });
+
   test("a decoded path carries its root and rejects extra fields", () => {
     expect(
       decodeWorkspacePathV1({ root: instructionRoot(), path: "skills/a.md" }),

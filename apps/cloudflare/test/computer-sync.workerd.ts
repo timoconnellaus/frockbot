@@ -76,7 +76,11 @@ describe("the durable-root sync's records in the Bot Durable Object", () => {
 
     // The bytes did land: the intent is what makes that knowable without
     // repeating the write.
-    const stored = await stub.readWorkspaceFile({ root, path: "notes.md" });
+    const stored = await stub.readWorkspaceFile({
+      userId: identity.userId,
+      root,
+      path: "notes.md",
+    });
     expect(stored).toMatchObject({ status: "ok", text: "written by a shell" });
   });
 
@@ -92,7 +96,11 @@ describe("the durable-root sync's records in the Bot Durable Object", () => {
       text: "written by a shell",
     });
     await stub.computerSyncRun({ ...identity, interrupt: true });
-    const first = await stub.readWorkspaceFile({ root, path: "notes.md" });
+    const first = await stub.readWorkspaceFile({
+      userId: identity.userId,
+      root,
+      path: "notes.md",
+    });
     expect(first.status).toBe("ok");
 
     await evictDurableObject(stub);
@@ -104,7 +112,11 @@ describe("the durable-root sync's records in the Bot Durable Object", () => {
     // one that stands.
     expect(resumed.adopted).toEqual(["notes.md"]);
     expect(resumed.pushed).toEqual([]);
-    const after = await stub.readWorkspaceFile({ root, path: "notes.md" });
+    const after = await stub.readWorkspaceFile({
+      userId: identity.userId,
+      root,
+      path: "notes.md",
+    });
     expect(after.generationId).toBe(first.generationId);
     // The intent is settled once its outcome is known.
     expect(await stub.pendingSyncEffects()).toEqual([]);

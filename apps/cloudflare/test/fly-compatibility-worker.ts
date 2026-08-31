@@ -113,8 +113,16 @@ function probeOutcome(outcome: WorkspaceWriteOutcomeV1): WorkspaceProbeOutcome {
   };
 }
 
-/** One durable-root write, as a workerd test drives it over RPC. */
+/**
+ * One durable-root write, as a workerd test drives it over RPC.
+ *
+ * `userId` is the User the store is *built for*, not one read off the root:
+ * production builds the surface with an `owner` the Durable Object already
+ * knows (`bindSurfaces`), and a store built without one would refuse nothing,
+ * so a probe that omitted it would prove less than the deployed path does.
+ */
 export interface WorkspaceProbeWrite {
+  userId: string;
   root: WorkspaceRootV1;
   path: string;
   text: string;
@@ -272,8 +280,8 @@ export class WorkerdBotState extends BotState {
    * `WORKSPACE_FILES` the Skills seam reads, built over the real R2 bucket and
    * this object's own generation ledger.
    */
-  private workspace(): WorkspaceFilesV1 {
-    const files = createDurableWorkspaceFilesV1(this.ctx, this.env);
+  private workspace(owner: { userId: string }): WorkspaceFilesV1 {
+    const files = createDurableWorkspaceFilesV1(this.ctx, this.env, { owner });
     if (!files) throw new Error("no Workspace bucket is bound");
     return files;
   }
@@ -286,7 +294,7 @@ export class WorkerdBotState extends BotState {
     input: WorkspaceProbeWrite,
   ): Promise<WorkspaceProbeOutcome> {
     return probeOutcome(
-      await this.workspace().write({
+      await this.workspace({ userId: input.userId }).write({
         path: { root: input.root, path: input.path },
         bytes: new TextEncoder().encode(input.text),
         writer: input.writer,
@@ -296,13 +304,14 @@ export class WorkerdBotState extends BotState {
   }
 
   async deleteWorkspaceFile(input: {
+    userId: string;
     root: WorkspaceRootV1;
     path: string;
     writer: WorkspaceWriterV1;
     expectedGenerationId: string;
   }): Promise<WorkspaceProbeOutcome> {
     return probeOutcome(
-      await this.workspace().delete({
+      await this.workspace({ userId: input.userId }).delete({
         path: { root: input.root, path: input.path },
         writer: input.writer,
         expectedGenerationId: input.expectedGenerationId,
@@ -311,10 +320,11 @@ export class WorkerdBotState extends BotState {
   }
 
   async readWorkspaceFile(input: {
+    userId: string;
     root: WorkspaceRootV1;
     path: string;
   }): Promise<{ status: string; text?: string; generationId?: string }> {
-    const outcome = await this.workspace().read({
+    const outcome = await this.workspace({ userId: input.userId }).read({
       root: input.root,
       path: input.path,
     });
@@ -438,6 +448,48 @@ export class WorkerdBotState extends BotState {
     const events = [...session.events];
     await root.fiber.dispose();
     return { ...result, events };
+  }
+
+  /**
+   * A write through the *Memory* surface — the production one the Memory
+   * Package holds, built in `bindSurfaces` with this Bot's owner and the
+   * routed generation ledger. The kernel surface refuses every Memory root
+   * outright, so only this surface can show what shard ownership refuses:
+   * a Bot writing another Bot's shard of a shared root.
+   */
+  async memoryWriteWorkspaceFile(
+    input: WorkspaceProbeWrite & { botId: string },
+  ): Promise<WorkspaceProbeOutcome> {
+    this.bindSurfaces({ userId: input.userId, botId: input.botId });
+    const files = this.backendEnv.MEMORY_WORKSPACE_FILES;
+    if (!files) throw new Error("no Memory Workspace surface is bound");
+    return probeOutcome(
+      await files.write({
+        path: { root: input.root, path: input.path },
+        bytes: new TextEncoder().encode(input.text),
+        writer: input.writer,
+        expectedGenerationId: input.expectedGenerationId,
+      }),
+    );
+  }
+
+  /** The same surface, reading back what real R2 holds. */
+  async memoryReadWorkspaceFile(input: {
+    userId: string;
+    botId: string;
+    root: WorkspaceRootV1;
+    path: string;
+  }): Promise<{ status: string; text?: string; generationId?: string }> {
+    this.bindSurfaces({ userId: input.userId, botId: input.botId });
+    const files = this.backendEnv.MEMORY_WORKSPACE_FILES;
+    if (!files) throw new Error("no Memory Workspace surface is bound");
+    const outcome = await files.read({ root: input.root, path: input.path });
+    if (outcome.status !== "ok") return { status: outcome.status };
+    return {
+      status: "ok",
+      text: new TextDecoder().decode(outcome.file.bytes),
+      generationId: outcome.file.generation.generationId,
+    };
   }
 
   /** The Bot object's own ledger, to show a shared root is *not* recorded here. */
