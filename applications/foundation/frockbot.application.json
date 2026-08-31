@@ -97,6 +97,11 @@
       "grants": ["memory:read", "memory:write"]
     },
     {
+      "specifier": "@frockbot/plugin-image",
+      "version": "0.0.1",
+      "grants": ["image:generate", "workspace:write"]
+    },
+    {
       "specifier": "@frockbot/plugin-computer",
       "version": "0.0.1",
       "grants": ["computer:execute", "computer:browser", "webui:remote-frame"]

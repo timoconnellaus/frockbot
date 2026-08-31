@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
+    "./backend-image": "./src/backend-image.ts",
     "./backend": "./src/backend.ts",
     "./backend-authoring": "./src/backend-authoring.ts",
     "./backend-composition": "./src/backend-composition.ts",
@@ -54,6 +55,7 @@
     "@frockbot/kernel-do": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
+    "@frockbot/plugin-image": "workspace:*",
     "@frockbot/plugin-mcp": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-routines": "workspace:*",

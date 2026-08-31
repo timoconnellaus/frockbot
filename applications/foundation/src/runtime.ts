@@ -180,6 +180,11 @@ import {
   createMemoryRuntimePlugin,
   type MemoryRuntimeHostV1,
 } from "@frockbot/plugin-memory/agent";
+import imageManifest from "@frockbot/plugin-image/manifest";
+import {
+  createImageRuntimePlugin,
+  type ImageRuntimeHostV1,
+} from "@frockbot/plugin-image/agent";
 import shellAgentPlugin from "@frockbot/plugin-shell/agent";
 import shellManifest from "@frockbot/plugin-shell/manifest";
 import skillsManifest from "@frockbot/plugin-skills/manifest";
@@ -206,6 +211,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-flock", flockManifest],
   ["@frockbot/plugin-mcp", mcpManifest],
   ["@frockbot/plugin-memory", memoryManifest],
+  ["@frockbot/plugin-image", imageManifest],
   ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
   ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
   ["@frockbot/plugin-package-publisher", packagePublisherManifest],
@@ -686,6 +692,14 @@ export function createFoundationHostedRuntimePackages(
      */
     memory?: MemoryRuntimeHostV1;
     /**
+     * The image-generation seam, supplied by the Bot Durable Object for one
+     * admitted Turn. Absent outside a Turn, and outside one whose Workspace is
+     * reachable, and the Image Package is then not mounted: a Bot generates an
+     * image only inside a Turn whose Session and Turn the write can name, and
+     * only where the file it produces has somewhere durable to land.
+     */
+    image?: ImageRuntimeHostV1;
+    /**
      * The Routines seam, supplied by the Bot Durable Object for one admitted
      * Turn. Absent outside a Turn, and the Routines Package is then not
      * mounted: a Bot writes a Routine only inside a Turn whose Session and Turn
@@ -737,6 +751,9 @@ export function createFoundationHostedRuntimePackages(
       : []),
     ...(host.memory
       ? [runtimePackage(plan, "memory", createMemoryRuntimePlugin(host.memory))]
+      : []),
+    ...(host.image
+      ? [runtimePackage(plan, "image", createImageRuntimePlugin(host.image))]
       : []),
     ...(host.routines
       ? [
@@ -1000,6 +1017,9 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("skills");
   // Memory mounts only for a Turn whose Memory roots the host can reach.
   runtimeIds.delete("memory");
+  // Image generation mounts only for a Turn whose Workspace the host can
+  // write, so a generated image records the Session and Turn that produced it.
+  runtimeIds.delete("image");
   // A Bot changes itself only inside an admitted Turn, which supplies the
   // self-management host; the Flock's other Contributions are backend and
   // client, and neither runs here.

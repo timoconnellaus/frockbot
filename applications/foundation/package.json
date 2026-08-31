@@ -35,6 +35,7 @@
     "@frockbot/plugin-echo": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-fly-sprite": "workspace:*",
+    "@frockbot/plugin-image": "workspace:*",
     "@frockbot/plugin-identity": "workspace:*",
     "@frockbot/plugin-mcp": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",

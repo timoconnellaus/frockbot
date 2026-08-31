@@ -432,6 +432,43 @@ export interface SessionEventMap {
     projects: string[];
   };
   /**
+   * The Bot recorded the intent to generate an image, before the model ran.
+   *
+   * "Record durable execution intent before invoking an external side effect.
+   * Only effects an interface declares read-only are exempt." Image generation
+   * is billed and durable, so the intent is recorded first and keyed by the
+   * effect, which is also the object's name under the Package's Workspace
+   * root. `promptHash` rather than the prompt: the prompt reaches the log once
+   * already, in `tool/call`, and this event exists to fence the effect, not to
+   * copy its input.
+   */
+  "image/generate-intent": {
+    turn: number;
+    step: number;
+    effectId: string;
+    model: string;
+    promptHash: string;
+    width: number;
+    height: number;
+  };
+  /**
+   * The generation the image write produced. Recorded after the Workspace
+   * write settles, so recovery can tell an effect that reached storage from
+   * one that did not, and never bills a second time for one that did.
+   */
+  "image/generated": {
+    turn: number;
+    step: number;
+    effectId: string;
+    model: string;
+    path: string;
+    generationId: string;
+    contentHash: string;
+    mimeType: string;
+    width: number;
+    height: number;
+  };
+  /**
    * One run of the durable-root sync between the Computer's Workspace and
    * object storage (ADR 0013), on a Turn that had the Computer open.
    *
@@ -1142,6 +1179,56 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       event.projects.forEach((project, index) =>
         eventString(project, `session event.projects[${index}]`),
       );
+      break;
+    case "image/generate-intent":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "model",
+          "promptHash",
+          "width",
+          "height",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.model, "session event.model");
+      eventString(event.promptHash, "session event.promptHash");
+      eventInteger(event.width, "session event.width", 1);
+      eventInteger(event.height, "session event.height", 1);
+      break;
+    case "image/generated":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "model",
+          "path",
+          "generationId",
+          "contentHash",
+          "mimeType",
+          "width",
+          "height",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.model, "session event.model");
+      eventString(event.path, "session event.path");
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.contentHash, "session event.contentHash");
+      eventString(event.mimeType, "session event.mimeType");
+      eventInteger(event.width, "session event.width", 1);
+      eventInteger(event.height, "session event.height", 1);
       break;
     case "computer/sync": {
       requireEventKeys(

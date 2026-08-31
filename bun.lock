@@ -36,6 +36,7 @@
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-fly-sprite": "workspace:*",
         "@frockbot/plugin-identity": "workspace:*",
+        "@frockbot/plugin-image": "workspace:*",
         "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-mobile-clipboard": "workspace:*",
@@ -99,6 +100,7 @@
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
+        "@frockbot/plugin-image": "workspace:*",
         "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-package-publisher": "workspace:*",
@@ -648,6 +650,19 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/plugin-image": {
+      "name": "@frockbot/plugin-image",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-agent-loop": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-mcp": {
       "name": "@frockbot/plugin-mcp",
       "version": "0.0.1",
@@ -872,6 +887,7 @@
         "@frockbot/kernel-do": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
+        "@frockbot/plugin-image": "workspace:*",
         "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
@@ -1270,6 +1286,8 @@
     "@frockbot/plugin-fly-sprite": ["@frockbot/plugin-fly-sprite@workspace:packages/plugin-fly-sprite"],
 
     "@frockbot/plugin-identity": ["@frockbot/plugin-identity@workspace:packages/plugin-identity"],
+
+    "@frockbot/plugin-image": ["@frockbot/plugin-image@workspace:packages/plugin-image"],
 
     "@frockbot/plugin-mcp": ["@frockbot/plugin-mcp@workspace:packages/plugin-mcp"],
 

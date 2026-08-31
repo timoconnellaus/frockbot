@@ -32,6 +32,7 @@
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
+    "@frockbot/plugin-image": "workspace:*",
     "@frockbot/plugin-mcp": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-package-publisher": "workspace:*",

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 4,
+  "id": "image",
+  "displayName": "Image generation",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "contributions": {
+    "runtime": { "entry": "./agent" }
+  },
+  "permissions": ["image:generate", "workspace:write"],
+  "configuration": {
+    "settings": [
+      {
+        "id": "model",
+        "schemaVersion": 1,
+        "scopes": ["user", "bot"],
+        "schema": {
+          "type": "string",
+          "title": "Image model",
+          "description": "The text-to-image model generate_image runs. Defaults to @cf/black-forest-labs/flux-1-schnell.",
+          "enum": [
+            "@cf/black-forest-labs/flux-1-schnell",
+            "@cf/black-forest-labs/flux-2-klein-4b",
+            "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+            "@cf/bytedance/stable-diffusion-xl-lightning"
+          ]
+        }
+      }
+    ],
+    "connectionTypes": [],
+    "capabilities": [
+      {
+        "id": "image-generation",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent", "channel"]
+        }
+      }
+    ]
+  }
+}
