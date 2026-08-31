@@ -69,6 +69,12 @@ export interface RoutineViewV1 {
   createdAt: string;
   updatedAt: string;
   lastRunAt?: string;
+  /**
+   * When the scheduler will next fire this Routine. Absent for a webhook
+   * Routine, and for a paused one: the UI shows what the authority promised and
+   * nothing else.
+   */
+  nextRunAt?: string;
 }
 
 export interface RoutineListViewV1 {
@@ -133,7 +139,13 @@ export type RoutineCommandV1 =
     })
   | (RoutineCommandMetaV1 & { type: "routine/pause"; routineId: string })
   | (RoutineCommandMetaV1 & { type: "routine/resume"; routineId: string })
-  | (RoutineCommandMetaV1 & { type: "routine/delete"; routineId: string });
+  | (RoutineCommandMetaV1 & { type: "routine/delete"; routineId: string })
+  /**
+   * Fire now, out of band. It enqueues a firing rather than running one: the
+   * caller may itself be a Turn in flight, and a Routine is never run in
+   * parallel with anything. The alarm drains it.
+   */
+  | (RoutineCommandMetaV1 & { type: "routine/run"; routineId: string });
 
 export type RoutineCommandTypeV1 = RoutineCommandV1["type"];
 
@@ -143,6 +155,7 @@ export const ROUTINE_COMMAND_TYPES: readonly RoutineCommandTypeV1[] = [
   "routine/pause",
   "routine/resume",
   "routine/delete",
+  "routine/run",
 ];
 
 export type RoutineCommandReceiptV1 =
@@ -157,6 +170,14 @@ export type RoutineCommandReceiptV1 =
       commandId: string;
       status: "deleted";
       routineId: string;
+    }
+  | {
+      schemaVersion: 1;
+      commandId: string;
+      status: "fired";
+      routineId: string;
+      /** The run id the firing will be admitted under. */
+      fireId: string;
     };
 
 /**
@@ -375,7 +396,7 @@ export function decodeRoutineViewV1(value: unknown): RoutineViewV1 {
       "createdAt",
       "updatedAt",
     ],
-    ["schedule", "trigger", "lastRunAt"],
+    ["schedule", "trigger", "lastRunAt", "nextRunAt"],
     "Routine view",
   );
   if (candidate.schemaVersion !== 1) {
@@ -425,6 +446,11 @@ export function decodeRoutineViewV1(value: unknown): RoutineViewV1 {
       ? {}
       : {
           lastRunAt: routineTimestamp(candidate.lastRunAt, "Routine lastRunAt"),
+        }),
+    ...(candidate.nextRunAt === undefined
+      ? {}
+      : {
+          nextRunAt: routineTimestamp(candidate.nextRunAt, "Routine nextRunAt"),
         }),
   };
   requireScheduleXorTriggerV1(view);
@@ -558,6 +584,21 @@ export function decodeRoutineCommandReceiptV1(
       commandId: commandIdentifier(candidate.commandId, "Routine commandId"),
       status: "deleted",
       routineId: commandIdentifier(candidate.routineId, "Routine id"),
+    };
+  }
+  if (candidate.status === "fired") {
+    routineExactKeys(
+      candidate,
+      ["schemaVersion", "commandId", "status", "routineId", "fireId"],
+      [],
+      "Routine command receipt",
+    );
+    return {
+      schemaVersion: 1,
+      commandId: commandIdentifier(candidate.commandId, "Routine commandId"),
+      status: "fired",
+      routineId: commandIdentifier(candidate.routineId, "Routine id"),
+      fireId: routineText(candidate.fireId, 256, "Routine fireId"),
     };
   }
   if (candidate.status !== "applied") {

@@ -29,6 +29,8 @@ export interface RoutinesClientState {
   save(botId: string, submission: RoutineFormSubmissionV1): Promise<void>;
   setEnabled(botId: string, routineId: string, enabled: boolean): Promise<void>;
   remove(botId: string, routineId: string): Promise<void>;
+  /** Ask for one firing now. It is queued; the alarm runs it. */
+  runNow(botId: string, routineId: string): Promise<void>;
 }
 
 export const routinesStateKey: InjectionKey<Ref<RoutinesClientState>> =

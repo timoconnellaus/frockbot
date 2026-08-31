@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The Bot's Routines: the list, the create/edit form, and one run log per
 // Routine. It renders durable state and submits versioned commands; it decides
-// nothing. "Next run" is deliberately blank — no scheduler exists yet, and a
-// computed-looking time the backend never promised would be a lie in the UI.
+// nothing — "Next run" is the moment the scheduler has actually armed an alarm
+// on, sent down with the Routine, and blank when there is none to promise.
 import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, reactive, ref, watch } from "vue";
@@ -147,7 +147,7 @@ async function toggleLog(routineId: string): Promise<void> {
       <dl class="routine-card__facts">
         <div>
           <dt>Next run</dt>
-          <dd>—</dd>
+          <dd>{{ routine.nextRunAt ?? "—" }}</dd>
         </div>
         <div>
           <dt>Last run</dt>
@@ -175,6 +175,13 @@ async function toggleLog(routineId: string): Promise<void> {
           "
         >
           {{ routine.enabled ? "Pause" : "Resume" }}
+        </UiButton>
+        <UiButton
+          type="button"
+          :disabled="routines.busy"
+          @click="botId && routines.runNow(botId, routine.routineId)"
+        >
+          Run now
         </UiButton>
         <UiButton type="button" @click="toggleLog(routine.routineId)">
           {{ openLog === routine.routineId ? "Hide runs" : "Run log" }}

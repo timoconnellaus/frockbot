@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   isRoutineTimezoneV1,
+  missedRoutineRunsV1,
+  nextRoutineRunV1,
   normalizeRoutineScheduleV1,
   RoutineScheduleError,
 } from "./cron.js";
@@ -106,5 +108,110 @@ describe("isRoutineTimezoneV1", () => {
     expect(isRoutineTimezoneV1("")).toBe(false);
     expect(isRoutineTimezoneV1("Not/AZone")).toBe(false);
     expect(isRoutineTimezoneV1(7)).toBe(false);
+  });
+});
+
+describe("nextRoutineRunV1", () => {
+  const anchor = new Date("2026-01-01T00:00:00.000Z");
+
+  function next(schedule: string, timezone: string, from: string): string {
+    const run = nextRoutineRunV1(
+      normalizeRoutineScheduleV1(schedule, timezone),
+      new Date(from),
+      anchor,
+    );
+    if (!run) throw new Error("expected a next run");
+    return run.toISOString();
+  }
+
+  test("keeps a wall-clock time across the end of Sydney daylight saving", () => {
+    // Sydney leaves AEDT (UTC+11) for AEST (UTC+10) at 03:00 on 5 April 2026.
+    // 09:00 local is 22:00Z the day before while AEDT holds, and 23:00Z after.
+    expect(next("0 9 * * *", "Australia/Sydney", "2026-04-02T12:00:00Z")).toBe(
+      "2026-04-02T22:00:00.000Z",
+    );
+    expect(next("0 9 * * *", "Australia/Sydney", "2026-04-04T12:00:00Z")).toBe(
+      "2026-04-04T23:00:00.000Z",
+    );
+  });
+
+  test("keeps a wall-clock time across the start of New York daylight saving", () => {
+    // New York enters EDT at 02:00 on 8 March 2026: 09:00 local moves from
+    // 14:00Z to 13:00Z, and the schedule does not drift with it.
+    expect(next("0 9 * * *", "America/New_York", "2026-03-06T20:00:00Z")).toBe(
+      "2026-03-07T14:00:00.000Z",
+    );
+    expect(next("0 9 * * *", "America/New_York", "2026-03-08T00:00:00Z")).toBe(
+      "2026-03-08T13:00:00.000Z",
+    );
+  });
+
+  test("reads CRON_TZ= as the zone the pattern is evaluated in", () => {
+    // The record says UTC; the schedule the user typed overrides it. At
+    // 00:00Z it is already 10:00 in Sydney, so the next 09:00 there is the
+    // following morning — 23:00Z, not 09:00Z.
+    expect(
+      next("CRON_TZ=Australia/Sydney 0 9 * * *", "UTC", "2026-06-01T00:00:00Z"),
+    ).toBe("2026-06-01T23:00:00.000Z");
+    expect(next("0 9 * * *", "UTC", "2026-06-01T00:00:00Z")).toBe(
+      "2026-06-01T09:00:00.000Z",
+    );
+  });
+
+  test("fires @daily at local midnight", () => {
+    expect(next("@daily", "Australia/Sydney", "2026-06-01T00:00:00Z")).toBe(
+      "2026-06-01T14:00:00.000Z",
+    );
+  });
+
+  test("counts @every 5m forward from its anchor, not from the asking time", () => {
+    const normalized = normalizeRoutineScheduleV1("@every 5m", "UTC");
+    expect(
+      nextRoutineRunV1(
+        normalized,
+        new Date("2026-01-01T00:07:30.000Z"),
+        anchor,
+      )?.toISOString(),
+    ).toBe("2026-01-01T00:10:00.000Z");
+    expect(nextRoutineRunV1(normalized, anchor, anchor)?.toISOString()).toBe(
+      "2026-01-01T00:05:00.000Z",
+    );
+  });
+});
+
+describe("missedRoutineRunsV1", () => {
+  const anchor = new Date("2026-01-01T00:00:00.000Z");
+
+  test("counts the elapsed occurrences of a cron, the one firing included", () => {
+    expect(
+      missedRoutineRunsV1(
+        normalizeRoutineScheduleV1("0 * * * *", "UTC"),
+        new Date("2026-01-01T01:00:00Z"),
+        new Date("2026-01-01T04:30:00Z"),
+        anchor,
+      ),
+    ).toBe(4);
+  });
+
+  test("counts an interval schedule arithmetically", () => {
+    expect(
+      missedRoutineRunsV1(
+        normalizeRoutineScheduleV1("@every 5m", "UTC"),
+        new Date("2026-01-01T00:05:00Z"),
+        new Date("2026-01-01T00:32:00Z"),
+        anchor,
+      ),
+    ).toBe(6);
+  });
+
+  test("counts nothing when the occurrence has not arrived", () => {
+    expect(
+      missedRoutineRunsV1(
+        normalizeRoutineScheduleV1("@daily", "UTC"),
+        new Date("2026-01-02T00:00:00Z"),
+        new Date("2026-01-01T00:00:00Z"),
+        anchor,
+      ),
+    ).toBe(0);
   });
 });

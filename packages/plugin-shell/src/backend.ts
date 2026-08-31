@@ -131,9 +131,12 @@ import {
   type ClientSkillCatalogV1,
 } from "./skill-protocol.js";
 import {
+  createBotRoutines,
   createBotRoutinesHost,
-  createBotRoutineStore,
+  routineFireOutcomeV1,
+  routineTurnCommandV1,
 } from "./backend-routines.js";
+import type { RoutineScheduler } from "@frockbot/plugin-routines/scheduler";
 import {
   RoutineNotFoundError,
   type RoutineStore,
@@ -370,6 +373,12 @@ export class ShellBotBackendContribution {
    * Durable Object storage every other durable record lives in.
    */
   private readonly routines: RoutineStore;
+  /**
+   * The Routine scheduler, composed into the object's one alarm. It owns no
+   * alarm of its own: `scheduledDeadlines`, `deferScheduledWork` and
+   * `settleScheduledWork` are the whole of its access to the clock.
+   */
+  private readonly routineScheduler: RoutineScheduler;
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -378,7 +387,9 @@ export class ShellBotBackendContribution {
       host.compileApplication ?? compileFoundationApplication;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
-    this.routines = createBotRoutineStore(host.state.storage);
+    const routines = createBotRoutines(host.state.storage);
+    this.routines = routines.store;
+    this.routineScheduler = routines.scheduler;
     const createAuthority: CreateBotDurableAuthority =
       host.createAuthority ?? ((options) => new BotDurableAuthority(options));
     this.authority = createAuthority<BotSettingsViewV1>({
@@ -2327,9 +2338,12 @@ export class ShellBotBackendContribution {
     const sagas = await transaction.list<unknown>({
       prefix: ASSIGNMENT_SAGA_PREFIX,
     });
-    return [...sagas.values()].map(
-      (stored) => requireStoredAssignmentSaga(stored).deadlineAt,
-    );
+    return [
+      ...[...sagas.values()].map(
+        (stored) => requireStoredAssignmentSaga(stored).deadlineAt,
+      ),
+      ...(await this.routineScheduler.deadlines(transaction)),
+    ];
   }
 
   private async deferScheduledWork(
@@ -2344,6 +2358,9 @@ export class ShellBotBackendContribution {
         deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
       } satisfies StoredAssignmentSaga);
     }
+    // A saga's deadline is a retry, so pushing it forward loses nothing. A
+    // Routine's is a debt, so the scheduler holds it instead of moving it.
+    await this.routineScheduler.defer(transaction);
   }
 
   private async settleScheduledWork(): Promise<void> {
@@ -2364,6 +2381,47 @@ export class ShellBotBackendContribution {
         );
       }
     }
+    await this.settleRoutineFirings();
+    // The alarm that woke this object has been consumed. Re-arm on whatever is
+    // owed next, or a Routine that fired once would never fire again.
+    await this.ctx.storage.transaction((transaction) =>
+      this.authority.refreshRecoveryAlarm(transaction),
+    );
+  }
+
+  /**
+   * Drain the Routines that are owed a firing.
+   *
+   * The scheduler mints the durable firing; this closure is the only thing that
+   * admits a Turn for it, and it does so with `authority.run` — a direct call
+   * inside the Durable Object. `turnType: "automation"` and the recorded origin
+   * come from `routineTurnCommandV1`, and the fire id *is* the run id, so a
+   * retry after eviction is refused by the kernel's own idempotency rather than
+   * running the Routine a second time.
+   */
+  private async settleRoutineFirings(): Promise<void> {
+    const identity = await this.authority.readDurableIdentity();
+    if (!identity) return;
+    // A run already occupies the object. `alarm()` defers before it reaches
+    // here whenever the Turn is executing in this isolate, but a durable active
+    // run outlives an eviction, and admitting a firing against one would burn
+    // the occurrence on an error instead of holding the debt.
+    if (await this.authority.readActiveRunId()) return;
+    await this.routineScheduler.settle(async (fire) => {
+      try {
+        await this.authority.run(
+          routineTurnCommandV1(identity, fire, new Date().toISOString()),
+        );
+      } catch (error) {
+        return routineFireOutcomeV1(
+          await this.authority.readStoredRun(fire.fireId),
+          error,
+        );
+      }
+      return routineFireOutcomeV1(
+        await this.authority.readStoredRun(fire.fireId),
+      );
+    });
   }
   /**
    * The narrow User Durable Object RPC the Bot uses to reserve one authored
@@ -2786,7 +2844,10 @@ export class ShellBotBackendContribution {
 
   /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */
   async listRoutines(identity: BotIdentity): Promise<RoutineListViewV1> {
-    return this.routines.list(identity.botId);
+    return this.routines.list(
+      identity.botId,
+      await this.routineScheduler.nextRuns(),
+    );
   }
 
   /**
@@ -2801,7 +2862,14 @@ export class ShellBotBackendContribution {
     if (command.botId !== identity.botId) {
       throw new RoutineNotFoundError(command.routineId ?? command.botId);
     }
-    return this.routines.execute(command, { kind: "user" });
+    const receipt = await this.routines.execute(command, { kind: "user" });
+    // A created, re-timed, resumed or manually fired Routine changes what the
+    // object is owed next, so the alarm is re-armed in the same call that wrote
+    // the record rather than waiting for the next one to happen by.
+    await this.ctx.storage.transaction((transaction) =>
+      this.authority.refreshRecoveryAlarm(transaction),
+    );
+    return receipt;
   }
 
   /** One Routine's bounded run log, newest first. */

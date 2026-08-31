@@ -38,10 +38,13 @@ import {
   ROUTINE_LIMIT_PER_BOT,
   ROUTINE_PREFIX,
   ROUTINE_RUN_LOG_LIMIT,
+  routineFireKeyV1,
   routineKeyV1,
+  routineQueuePrefixV1,
   routineReceiptKeyV1,
   routineRunKeyV1,
   routineRunPrefixV1,
+  routineScheduleKeyV1,
   nextRunSequenceV1,
 } from "./storage-keys.js";
 import {
@@ -86,6 +89,19 @@ interface StoredRoutineReceiptV1 {
   receipt: RoutineCommandReceiptV1;
 }
 
+/**
+ * The scheduler, as the command path needs it. `routine/run` asks for a firing
+ * and gets an id back; it never runs one itself, because the caller may be a
+ * Turn already in flight. `RoutineScheduler` satisfies this structurally, so
+ * the authority does not import the scheduler to hold one.
+ */
+export interface RoutineFiringSeamV1 {
+  enqueueWithin(
+    transaction: RoutineStorageWritesV1,
+    input: { routineId: string; trigger: "manual"; discriminator: string },
+  ): Promise<{ fireId: string; queued: boolean }>;
+}
+
 export interface RoutineStoreOptionsV1 {
   /** The zone a Routine that names none is scheduled in. */
   defaultTimezone?: string;
@@ -93,6 +109,8 @@ export interface RoutineStoreOptionsV1 {
   now?(): Date;
   /** Injected so a test can pin an id; production passes nothing. */
   newRoutineId?(): string;
+  /** Absent means `routine/run` is refused rather than silently doing nothing. */
+  firings?: RoutineFiringSeamV1;
 }
 
 function writerView(writer: RoutineWriterV1): RoutineWriterViewV1 {
@@ -101,8 +119,17 @@ function writerView(writer: RoutineWriterV1): RoutineWriterViewV1 {
     : { kind: "bot", botId: writer.botId };
 }
 
-/** The DTO for one record. Never carries key material, by construction. */
-export function routineViewV1(record: RoutineRecordV1): RoutineViewV1 {
+/**
+ * The DTO for one record. Never carries key material, by construction.
+ *
+ * `nextRunAt` is passed in rather than computed: the scheduler owns the clock,
+ * and a projection that recomputed one would be a second opinion on when the
+ * Routine fires.
+ */
+export function routineViewV1(
+  record: RoutineRecordV1,
+  nextRunAt?: string,
+): RoutineViewV1 {
   return {
     schemaVersion: 1,
     routineId: record.routineId,
@@ -117,7 +144,48 @@ export function routineViewV1(record: RoutineRecordV1): RoutineViewV1 {
     ...(record.schedule === undefined ? {} : { schedule: record.schedule }),
     ...(record.trigger === undefined ? {} : { trigger: record.trigger }),
     ...(record.lastRunAt === undefined ? {} : { lastRunAt: record.lastRunAt }),
+    ...(nextRunAt === undefined ||
+    !record.enabled ||
+    record.schedule === undefined
+      ? {}
+      : { nextRunAt }),
   };
+}
+
+/**
+ * Append one entry to a Routine's run log, inside a transaction the caller
+ * already holds, and trim the log to its bound.
+ *
+ * The scheduler writes the `running` entry in the same transaction that mints
+ * the firing, and rewrites that entry when the firing settles, so it appends
+ * through this rather than through `RoutineStore.recordRun`, which opens a
+ * transaction of its own. An entry id that is already present is rewritten in
+ * place: a settlement never appends a second row for a firing that has one.
+ */
+export async function appendRoutineRunEntryV1(
+  transaction: RoutineStorageWritesV1,
+  entry: RoutineRunEntryV1,
+): Promise<void> {
+  const decoded = decodeRoutineRunEntryV1(entry);
+  const existing = await transaction.list<unknown>({
+    prefix: routineRunPrefixV1(decoded.routineId),
+  });
+  const seen = [...existing.entries()].find(
+    ([, value]) => decodeRoutineRunEntryV1(value).entryId === decoded.entryId,
+  );
+  if (seen) {
+    await transaction.put(seen[0], decoded);
+    return;
+  }
+  await transaction.put(
+    routineRunKeyV1(decoded.routineId, nextRunSequenceV1([...existing.keys()])),
+    decoded,
+  );
+  // Keys descend, so the oldest entries sort last.
+  const keys = [...existing.keys()].sort();
+  for (const key of keys.slice(ROUTINE_RUN_LOG_LIMIT - 1)) {
+    await transaction.delete(key);
+  }
 }
 
 export class RoutineStore {
@@ -125,22 +193,34 @@ export class RoutineStore {
   readonly #defaultTimezone: string;
   readonly #now: () => Date;
   readonly #newRoutineId: () => string;
+  readonly #firings: RoutineFiringSeamV1 | undefined;
 
   constructor(storage: RoutineStorageV1, options: RoutineStoreOptionsV1 = {}) {
     this.#storage = storage;
     this.#defaultTimezone = options.defaultTimezone ?? "UTC";
     this.#now = options.now ?? (() => new Date());
     this.#newRoutineId = options.newRoutineId ?? (() => crypto.randomUUID());
+    this.#firings = options.firings;
   }
 
-  /** Every Routine this Bot holds, newest first. */
-  async list(botId: string): Promise<RoutineListViewV1> {
+  /**
+   * Every Routine this Bot holds, newest first. `nextRuns` comes from the
+   * scheduler, so "next run" in the UI is the moment an alarm is actually armed
+   * on and not a time this projection guessed.
+   */
+  async list(
+    botId: string,
+    nextRuns?: ReadonlyMap<string, string>,
+  ): Promise<RoutineListViewV1> {
     const stored = await this.#storage.list<unknown>({
       prefix: ROUTINE_PREFIX,
       limit: ROUTINE_LIMIT_PER_BOT,
     });
     const routines = [...stored.values()]
-      .map((value) => routineViewV1(decodeRoutineRecordV1(value)))
+      .map((value) => {
+        const record = decodeRoutineRecordV1(value);
+        return routineViewV1(record, nextRuns?.get(record.routineId));
+      })
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     return { schemaVersion: 1, botId, routines };
   }
@@ -194,33 +274,9 @@ export class RoutineStore {
    * from the run index. Trimming loses index rows, never facts.
    */
   async recordRun(entry: RoutineRunEntryV1): Promise<void> {
-    const decoded = decodeRoutineRunEntryV1(entry);
-    await this.#storage.transaction(async (transaction) => {
-      const existing = await transaction.list<unknown>({
-        prefix: routineRunPrefixV1(decoded.routineId),
-      });
-      const seen = [...existing.entries()].find(
-        ([, value]) =>
-          decodeRoutineRunEntryV1(value).entryId === decoded.entryId,
-      );
-      if (seen) {
-        // Settling a firing rewrites its own entry; it never appends a second.
-        await transaction.put(seen[0], decoded);
-        return;
-      }
-      await transaction.put(
-        routineRunKeyV1(
-          decoded.routineId,
-          nextRunSequenceV1([...existing.keys()]),
-        ),
-        decoded,
-      );
-      // Keys descend, so the oldest entries sort last.
-      const keys = [...existing.keys()].sort();
-      for (const key of keys.slice(ROUTINE_RUN_LOG_LIMIT - 1)) {
-        await transaction.delete(key);
-      }
-    });
+    await this.#storage.transaction((transaction) =>
+      appendRoutineRunEntryV1(transaction, entry),
+    );
   }
 
   /**
@@ -327,8 +383,36 @@ export class RoutineStore {
     if (stored === undefined) throw new RoutineNotFoundError(command.routineId);
     const current = decodeRoutineRecordV1(stored);
 
+    if (command.type === "routine/run") {
+      if (!this.#firings) {
+        throw new RoutineDecodeError(
+          "this Bot cannot fire a Routine on demand",
+        );
+      }
+      const { fireId } = await this.#firings.enqueueWithin(transaction, {
+        routineId: command.routineId,
+        trigger: "manual",
+        discriminator: `manual-${command.commandId}`,
+      });
+      return {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        status: "fired",
+        routineId: command.routineId,
+        fireId,
+      };
+    }
+
     if (command.type === "routine/delete") {
       await transaction.delete(routineKeyV1(command.routineId));
+      // The clock, the unsettled firing and anything queued behind it go with
+      // the record: nothing may fire a Routine that no longer exists.
+      await transaction.delete(routineScheduleKeyV1(command.routineId));
+      await transaction.delete(routineFireKeyV1(command.routineId));
+      const waiting = await transaction.list<unknown>({
+        prefix: routineQueuePrefixV1(command.routineId),
+      });
+      for (const key of waiting.keys()) await transaction.delete(key);
       const runs = await transaction.list<unknown>({
         prefix: routineRunPrefixV1(command.routineId),
       });

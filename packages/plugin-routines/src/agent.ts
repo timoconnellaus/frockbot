@@ -9,7 +9,10 @@
 // "Self-modification never widens authority": a Bot-authored Routine runs as the
 // Bot, with the Bot's Assignments. Nothing here grants anything.
 //
-// `run_now` is deliberately absent. D1 fires nothing.
+// `run_now` fires the Routine out of band. It enqueues rather than runs: the
+// tool is called from inside an admitted Turn, and a Bot Durable Object holds
+// exactly one run at a time, so the firing is durable immediately and lands the
+// moment the calling Turn settles. "Queue, never drop, never parallel."
 import type {
   ToolDefinition,
   ToolExecutionContext,
@@ -58,6 +61,7 @@ export const ROUTINE_MANAGE_ACTIONS = [
   "pause",
   "resume",
   "delete",
+  "run_now",
 ] as const;
 
 export type RoutineManageActionV1 = (typeof ROUTINE_MANAGE_ACTIONS)[number];
@@ -68,7 +72,8 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
     action: {
       type: "string",
       enum: [...ROUTINE_MANAGE_ACTIONS],
-      description: "What to do with the Routine.",
+      description:
+        "What to do with the Routine. run_now queues one firing immediately; it lands after the current Turn.",
     },
     routineId: {
       type: "string",
@@ -227,7 +232,8 @@ export function routineManageCommandV1(
   }
   return decodeRoutineCommandV1({
     ...base,
-    type: `routine/${input.action}`,
+    type:
+      input.action === "run_now" ? "routine/run" : `routine/${input.action}`,
     routineId: input.routineId,
   });
 }
@@ -242,7 +248,7 @@ export function createRoutineManageTool(
   return {
     name: "routine_manage",
     description: [
-      "Create, edit, pause, resume, or delete one of your own Routines.",
+      "Create, edit, pause, resume, delete, or immediately run one of your own Routines.",
       "A Routine is a standing instruction that fires on a schedule or on a delivered webhook,",
       `as its own Turn rather than inside this conversation. Names are at most ${ROUTINE_NAME_MAX_LENGTH}`,
       `characters and prompts at most ${ROUTINE_PROMPT_MAX_LENGTH}.`,
@@ -285,6 +291,15 @@ export function createRoutineManageTool(
       if (receipt.status === "deleted") {
         return {
           content: `Deleted Routine ${receipt.routineId}.`,
+          isError: false,
+        };
+      }
+      if (receipt.status === "fired") {
+        return {
+          content: [
+            `Routine ${receipt.routineId} is queued to fire as run ${receipt.fireId}.`,
+            "It runs as its own Turn once this one ends; it does not run inside this conversation.",
+          ].join(" "),
           isError: false,
         };
       }

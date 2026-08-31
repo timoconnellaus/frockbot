@@ -119,6 +119,24 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
         state.value.busy = false;
       }
     },
+    async runNow(botId: string, routineId: string) {
+      state.value.busy = true;
+      try {
+        await post(botId, {
+          schemaVersion: 1,
+          type: "routine/run",
+          commandId: crypto.randomUUID(),
+          botId,
+          routineId,
+        });
+        await state.value.load(botId);
+        await state.value.loadRuns(botId, routineId);
+      } catch (error) {
+        state.value.error = message(error, "Could not run the Routine");
+      } finally {
+        state.value.busy = false;
+      }
+    },
     async remove(botId: string, routineId: string) {
       state.value.busy = true;
       try {

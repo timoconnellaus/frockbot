@@ -65,7 +65,7 @@ describe("decodeRoutineCommandV1", () => {
 
   test("refuses an unknown type and an unsupported version", () => {
     expect(() =>
-      decodeRoutineCommandV1({ ...CREATE, type: "routine/run" }),
+      decodeRoutineCommandV1({ ...CREATE, type: "routine/backfill" }),
     ).toThrow(/type is unknown/);
     expect(() =>
       decodeRoutineCommandV1({ ...CREATE, schemaVersion: 2 }),
