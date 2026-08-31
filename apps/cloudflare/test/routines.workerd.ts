@@ -5,11 +5,15 @@
 // survives eviction, because "Persist enough state to resume safely after
 // Durable Object eviction" is not a property of the object staying resident.
 //
-// Nothing here fires anything. D1 ships records, commands and the surfaces that
-// read them; the scheduler is the next PR, and the run log is correspondingly
-// empty at every point in this test.
+// The scheduler is exercised against the same object: the alarm the kernel
+// arms, the firing it mints, and the automation Turn `authority.run` admits
+// from inside the Durable Object.
 import { env } from "cloudflare:workers";
-import { evictDurableObject } from "cloudflare:test";
+import {
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
 
@@ -84,7 +88,8 @@ describe("Routines in Workerd", () => {
       createdBy: { kind: "user" },
     });
 
-    // D1 fires nothing, so the run log is empty and says so rather than 404.
+    // Nothing has fired yet, so the run log is empty and says so rather
+    // than 404.
     expect(
       (
         await routines(identity.userId, identity.botId).listRoutineRuns({
@@ -201,5 +206,282 @@ describe("Routines in Workerd", () => {
       (await routines(identity.userId, identity.botId).listRoutines(envelope))
         .routines,
     ).toEqual([]);
+  });
+});
+
+interface StoredRunProbe {
+  runId: string;
+  sessionId: string;
+  status: string;
+  admission?: {
+    turnType: string;
+    origin?: {
+      kind: string;
+      routineId: string;
+      fireId: string;
+      trigger: string;
+    };
+  };
+}
+
+/**
+ * Seed the Routine's durable clock as though the object had been evicted while
+ * the occurrence passed. There is no clock to move in workerd, so the debt is
+ * written instead — which is exactly the record a slept-through Routine leaves.
+ */
+async function backdate(
+  identity: { userId: string; botId: string },
+  routineId: string,
+  dueAt: number,
+): Promise<void> {
+  await runInDurableObject(
+    bot(identity.userId, identity.botId),
+    async (_instance, state) => {
+      const record = await state.storage.get<{ updatedAt: string }>(
+        `routine:${routineId}`,
+      );
+      await state.storage.put(`routine-schedule:${routineId}`, {
+        schemaVersion: 1,
+        routineId,
+        anchor: record!.updatedAt,
+        dueAt,
+      });
+    },
+  );
+}
+
+async function storedRuns(identity: {
+  userId: string;
+  botId: string;
+}): Promise<StoredRunProbe[]> {
+  return runInDurableObject(
+    bot(identity.userId, identity.botId),
+    async (_instance, state) => {
+      const runs = await state.storage.list<StoredRunProbe>({ prefix: "run:" });
+      return [...runs.values()];
+    },
+  );
+}
+
+async function armedAlarm(identity: {
+  userId: string;
+  botId: string;
+}): Promise<number | null> {
+  return runInDurableObject(
+    bot(identity.userId, identity.botId),
+    (_instance, state) => state.storage.getAlarm(),
+  );
+}
+
+async function createRoutine(
+  identity: { userId: string; botId: string },
+  command: Record<string, unknown>,
+): Promise<void> {
+  const receipt = await routines(
+    identity.userId,
+    identity.botId,
+  ).executeRoutineCommand({
+    schemaVersion: 1,
+    ...identity,
+    command: { schemaVersion: 1, botId: identity.botId, ...command },
+  });
+  expect(receipt).toMatchObject({ status: "applied" });
+}
+
+describe("the Routine scheduler on the Bot Durable Object's one alarm", () => {
+  test("arms the alarm on the Routine's next occurrence", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `routines-alarm-${suffix}`,
+      botId: `routines-alarm-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+
+    // No Routine, no alarm.
+    expect(await armedAlarm(identity)).toBeNull();
+
+    await createRoutine(identity, {
+      type: "routine/create",
+      commandId: `create-${suffix}`,
+      routineId: "brief",
+      name: "Hourly brief",
+      prompt: "Summarize overnight email.",
+      schedule: "0 * * * *",
+      timezone: "UTC",
+    });
+
+    const armed = await armedAlarm(identity);
+    expect(armed).not.toBeNull();
+    // The next top of the hour, and nothing sooner.
+    expect(armed!).toBeGreaterThan(Date.now());
+    expect(armed!).toBeLessThanOrEqual(Date.now() + 60 * 60_000);
+
+    // Pausing it takes the alarm away: there is nothing left to wake for.
+    await routines(identity.userId, identity.botId).executeRoutineCommand({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        type: "routine/pause",
+        commandId: `pause-${suffix}`,
+        botId: identity.botId,
+        routineId: "brief",
+      },
+    });
+    expect(await armedAlarm(identity)).toBeNull();
+  });
+
+  test("a Routine three hours late fires exactly once through the alarm", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `routines-late-${suffix}`,
+      botId: `routines-late-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    await createRoutine(identity, {
+      type: "routine/create",
+      commandId: `create-${suffix}`,
+      routineId: "brief",
+      name: "Hourly brief",
+      prompt: "Summarize overnight email.",
+      schedule: "0 * * * *",
+      timezone: "UTC",
+    });
+    await backdate(identity, "brief", Date.now() - 3 * 60 * 60_000);
+
+    expect(
+      await runDurableObjectAlarm(bot(identity.userId, identity.botId)),
+    ).toBe(true);
+
+    const runs = await storedRuns(identity);
+    const automation = runs.filter(
+      (run) => run.admission?.origin?.routineId === "brief",
+    );
+    expect(automation).toHaveLength(1);
+    expect(automation[0]).toMatchObject({
+      status: "completed",
+      sessionId: "routine:brief",
+      admission: {
+        turnType: "automation",
+        origin: { kind: "routine", trigger: "cron" },
+      },
+    });
+    // The fire id is the run id: a retry is refused by the kernel's own
+    // idempotency rather than running the Routine a second time.
+    expect(automation[0]!.admission!.origin!.fireId).toBe(automation[0]!.runId);
+
+    // One firing, and one entry saying what it slept through.
+    const log = await routines(identity.userId, identity.botId).listRoutineRuns(
+      { schemaVersion: 1, ...identity, routineId: "brief" },
+    );
+    expect(
+      (log.entries as Array<{ status: string }>).map((entry) => entry.status),
+    ).toEqual(["ok", "skipped"]);
+
+    // Draining again fires nothing: the clock advanced before the Turn ran.
+    await runDurableObjectAlarm(bot(identity.userId, identity.botId));
+    expect(
+      (await storedRuns(identity)).filter(
+        (run) => run.admission?.origin?.routineId === "brief",
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("arms the one alarm on the earliest deadline the object owes", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `routines-min-${suffix}`,
+      botId: `routines-min-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    await createRoutine(identity, {
+      type: "routine/create",
+      commandId: `late-${suffix}`,
+      routineId: "late",
+      name: "Nightly",
+      prompt: "Summarize the day.",
+      schedule: "0 23 * * *",
+      timezone: "UTC",
+    });
+    const afterOne = await armedAlarm(identity);
+
+    await createRoutine(identity, {
+      type: "routine/create",
+      commandId: `soon-${suffix}`,
+      routineId: "soon",
+      name: "Hourly",
+      prompt: "Check the queue.",
+      schedule: "0 * * * *",
+      timezone: "UTC",
+    });
+    const afterTwo = await armedAlarm(identity);
+
+    // One object, one alarm, and it is the minimum of everything owed —
+    // Routines beside the Shell's own saga deadlines, never a second timer.
+    expect(afterTwo).not.toBeNull();
+    expect(afterTwo!).toBeLessThanOrEqual(afterOne!);
+    expect(afterTwo!).toBeLessThanOrEqual(Date.now() + 60 * 60_000);
+
+    // Deleting the sooner one hands the alarm back to the later one.
+    await routines(identity.userId, identity.botId).executeRoutineCommand({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        type: "routine/delete",
+        commandId: `delete-${suffix}`,
+        botId: identity.botId,
+        routineId: "soon",
+      },
+    });
+    expect(await armedAlarm(identity)).toBe(afterOne);
+  });
+
+  test("run_now queues a manual firing that the alarm drains", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `routines-manual-${suffix}`,
+      botId: `routines-manual-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    await createRoutine(identity, {
+      type: "routine/create",
+      commandId: `create-${suffix}`,
+      routineId: "brief",
+      name: "Webhook brief",
+      prompt: "Summarize overnight email.",
+      trigger: { kind: "webhook" },
+      timezone: "UTC",
+    });
+
+    const receipt = await routines(
+      identity.userId,
+      identity.botId,
+    ).executeRoutineCommand({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        type: "routine/run",
+        commandId: `run-${suffix}`,
+        botId: identity.botId,
+        routineId: "brief",
+      },
+    });
+    expect(receipt).toMatchObject({ status: "fired", routineId: "brief" });
+
+    // It survives eviction, because it is a durable record and not a timer.
+    await evictDurableObject(bot(identity.userId, identity.botId));
+    await runDurableObjectAlarm(bot(identity.userId, identity.botId));
+
+    const runs = await storedRuns(identity);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      status: "completed",
+      admission: {
+        turnType: "automation",
+        origin: { routineId: "brief", trigger: "manual" },
+      },
+    });
   });
 });

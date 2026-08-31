@@ -1,10 +1,12 @@
-// Schedule syntax: the one place a Routine's `schedule` string is understood.
+// Schedules: the one place a Routine's `schedule` string is understood — both
+// the syntax a write must pass and the next firing the scheduler arms an alarm
+// on.
 //
-// D1 validates syntax at write time and nothing else. "Timezone is validated
+// "Timezone is validated
 // with `Intl.DateTimeFormat` at *write* time so a bad TZ is a rejected command,
 // not a dead alarm" — the same rule applies to the pattern itself: a Routine
-// whose schedule cannot be parsed is never written, so the scheduler that
-// arrives in D2 can assume every stored schedule is parseable.
+// whose schedule cannot be parsed is never written, so the scheduler can assume
+// every stored schedule is parseable.
 //
 // `croner` owns 5-field cron and IANA timezones. It does not understand
 // GrokBot's `CRON_TZ=` prefix, its `@shorthand` aliases, or `@every <duration>`,
@@ -176,4 +178,69 @@ export function normalizeRoutineScheduleV1(
 /** A one-line summary of a schedule for a list row. */
 export function describeRoutineScheduleV1(schedule: string): string {
   return schedule.trim();
+}
+
+/**
+ * The first firing strictly after `from`, or `undefined` when the schedule has
+ * no further occurrence. D1 only parsed; this is the evaluation the scheduler
+ * rests on.
+ *
+ * An interval schedule (`@every 15m`) has no calendar to consult, so it counts
+ * forward from its own anchor: the moment the Routine's timing was last
+ * written. That keeps `@every 15m` fifteen minutes apart across a firing, an
+ * eviction and a redeploy, instead of drifting to whenever the object happened
+ * to wake.
+ */
+export function nextRoutineRunV1(
+  normalized: NormalizedScheduleV1,
+  from: Date,
+  anchor: Date,
+): Date | undefined {
+  if (normalized.kind === "interval") {
+    const elapsed = from.getTime() - anchor.getTime();
+    const periods =
+      elapsed < 0 ? 0 : Math.floor(elapsed / normalized.intervalMs) + 1;
+    return new Date(anchor.getTime() + periods * normalized.intervalMs);
+  }
+  const cron = new Cron(normalized.pattern, {
+    timezone: normalized.timezone,
+    paused: true,
+  });
+  try {
+    return cron.nextRun(from) ?? undefined;
+  } finally {
+    cron.stop();
+  }
+}
+
+/** Most missed occurrences one coalescing report counts before it gives up. */
+export const ROUTINE_MISSED_COUNT_CAP = 1_000;
+
+/**
+ * How many firings a Routine slept through: occurrences in `(due, now]`, the
+ * one about to fire included. Capped, because a Routine dormant for a year on
+ * `@every 5m` must not be counted one occurrence at a time.
+ */
+export function missedRoutineRunsV1(
+  normalized: NormalizedScheduleV1,
+  due: Date,
+  now: Date,
+  anchor: Date,
+): number {
+  if (now.getTime() < due.getTime()) return 0;
+  if (normalized.kind === "interval") {
+    return Math.min(
+      ROUTINE_MISSED_COUNT_CAP,
+      Math.floor((now.getTime() - due.getTime()) / normalized.intervalMs) + 1,
+    );
+  }
+  let counted = 1;
+  let cursor = due;
+  while (counted < ROUTINE_MISSED_COUNT_CAP) {
+    const next = nextRoutineRunV1(normalized, cursor, anchor);
+    if (!next || next.getTime() > now.getTime()) break;
+    cursor = next;
+    counted += 1;
+  }
+  return counted;
 }

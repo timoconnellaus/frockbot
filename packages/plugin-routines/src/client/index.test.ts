@@ -153,4 +153,55 @@ describe("Routines client contribution", () => {
     expect(mounted.state.value.runs.brief).toEqual([]);
     mounted.dispose();
   });
+
+  test("run now posts routine/run and reloads the Routine and its log", async () => {
+    const mounted = mount({
+      hostedRequest: (path, method, body) => {
+        if (method === "POST") {
+          return Promise.resolve({
+            schemaVersion: 1,
+            commandId: (JSON.parse(body ?? "{}") as { commandId: string })
+              .commandId,
+            status: "fired",
+            routineId: "brief",
+            fireId: "rf-brief-manual-cmd",
+          });
+        }
+        if (path.endsWith("/runs")) {
+          return Promise.resolve({
+            schemaVersion: 1,
+            botId: "scout",
+            routineId: "brief",
+            entries: [
+              {
+                schemaVersion: 1,
+                entryId: "rf-brief-manual-cmd-entry",
+                runId: "rf-brief-manual-cmd",
+                trigger: "manual",
+                status: "running",
+                startedAt: "2026-08-31T00:00:00.000Z",
+              },
+            ],
+          });
+        }
+        return Promise.resolve({
+          schemaVersion: 1,
+          botId: "scout",
+          routines: [{ ...ROUTINE, nextRunAt: "2026-09-01T21:00:00.000Z" }],
+        });
+      },
+    });
+
+    await mounted.state.value.runNow("scout", "brief");
+    expect(mounted.state.value.error).toBeUndefined();
+    // The Routine came back with the moment the scheduler armed on.
+    expect(mounted.state.value.routines[0]?.nextRunAt).toBe(
+      "2026-09-01T21:00:00.000Z",
+    );
+    expect(mounted.state.value.runs.brief?.[0]).toMatchObject({
+      trigger: "manual",
+      status: "running",
+    });
+    mounted.dispose();
+  });
 });

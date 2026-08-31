@@ -167,7 +167,7 @@ describe("routine_manage", () => {
   test("refuses unknown input fields and an unknown action", () => {
     const seam = host();
     const tool = createRoutineManageTool({ ...seam, writer: WRITER });
-    expect(tool.validate?.({ action: "run_now", routineId: "brief" })).toBe(
+    expect(tool.validate?.({ action: "backfill", routineId: "brief" })).toBe(
       false,
     );
     expect(tool.validate?.({ action: "pause", secret: "x" })).toBe(false);
