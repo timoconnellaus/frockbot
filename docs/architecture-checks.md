@@ -284,3 +284,48 @@ that failed before the fix.
 | — at capacity the new tenant is refused with a declared outcome, never given a display another Bot is using          | `packages/plugin-fly-sprite/src/computer.test.ts`  | `refuses the new tenant when every display is live, rather than sharing one`      | Bun     |
 | — an idle tenant under human takeover keeps its display                                                              | `packages/plugin-fly-sprite/src/computer.test.ts`  | `an idle tenant under human control keeps its display`                            | Bun     |
 | one Durable Object is one authority: two surfaces of one Bot object never mint the same generation                   | `apps/cloudflare/test/workspace.workerd.ts`        | `two surfaces on one Bot object never mint the same generation`                   | workerd |
+
+## Integration
+
+The rows above prove rules unit by unit and, in workerd, Durable Object by
+Durable Object. None of them crosses the gateway: no test outside this section
+issues a `SELF.fetch`, so every seam **between** the pieces was uncovered — and
+five production incidents landed on exactly those seams.
+
+`bun run --filter @frockbot/cloudflare test:integration` runs
+`vitest.integration.config.ts`, whose worker `main` is `src/index.ts`. `SELF`
+is therefore the deployed gateway, unmodified, and each test is a real request
+through gateway auth → the User Durable Object → the `USER_APPLICATIONS` Worker
+Loader → the actual built `dist/artifacts/foundation-v1.mjs` → the Bot Durable
+Object → the outbound provider seam. Ollama Cloud is stubbed at
+`outboundService` (`apps/cloudflare/test/harness/miniflare.ts`), reproducing the
+measured behaviour that only `POST /api/chat` and `POST /v1/chat/completions`
+authenticate. The suite needs no secret: authentication uses the development
+identity the Electron shell already uses.
+
+The seam numbers are the ones in the seam map that accompanied this layer's
+design.
+
+| Seam                                                        | Incident it guards                                                                                               | File                                                               | Test name                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S2 gateway → Worker Loader → R2 application artifact        | 1 — an HTML body reached a client that called `response.json()`                                                  | `apps/cloudflare/test/integration/gateway-artifact.integration.ts` | `serves the artifact's HTML shell with the User's identity and its module`                                                                                                                                                                                        |
+| — the same seam for the client bundle it serves             | 1                                                                                                                | `apps/cloudflare/test/integration/gateway-artifact.integration.ts` | `serves /app.js as JavaScript and /app.css as CSS`                                                                                                                                                                                                                |
+| S1 browser → gateway auth                                   | —                                                                                                                | `apps/cloudflare/test/integration/gateway-artifact.integration.ts` | `serves %s without an identity`, `refuses an unauthenticated non-asset request with JSON, not HTML`, `names the authenticated User back to the client`                                                                                                            |
+| S6 `/app-manifest` producer → client plugin-catalog decoder | 2 — the decoder compared two hashes that differ by construction; 3 — it refused the optional `configuration` key | `apps/cloudflare/test/integration/manifest-catalog.integration.ts` | `is accepted by decodePluginCatalog, configuration and all`                                                                                                                                                                                                       |
+| S5 application Worker → Bot Durable Object runs             | 1 — `listRuns` threw past the route and the Worker died                                                          | `apps/cloudflare/test/integration/turns.integration.ts`            | `is a JSON failure with its reason, never workerd's HTML error page`                                                                                                                                                                                              |
+| S5 the whole Turn path, provisioned the product's own way   | —                                                                                                                | `apps/cloudflare/test/integration/turns.integration.ts`            | `answers with the provider's reply and lists the run afterwards`                                                                                                                                                                                                  |
+| S5 + S7 a provider rejection reaching the client DTO        | 5                                                                                                                | `apps/cloudflare/test/integration/turns.integration.ts`            | `carries a provider rejection into the run's durable failure`                                                                                                                                                                                                     |
+| S4 gateway → connections route                              | 4 — "Failed to fetch" when the User pressed Connect                                                              | `apps/cloudflare/test/integration/connections.integration.ts`      | `answers the browser with JSON, never a transport failure`, `answers a Connection command lookup for the command the client sent`                                                                                                                                 |
+| S7 User Durable Object → outbound Ollama Cloud              | 5 — a garbage key reached `ready`, because no catalog read authenticates                                         | `apps/cloudflare/test/integration/connections.integration.ts`      | `leaves a key the provider rejects for inference failed, with the reason`, `reaches ready for a key the provider accepts for inference`                                                                                                                           |
+| S3 gateway → User and Bot settings                          | —                                                                                                                | `apps/cloudflare/test/integration/settings.integration.ts`         | `carries the default-model choice from the command to the User view`, `carries a Bot profile change from the command to the Bot view`, `refuses a stale expectedRevision with 409 revision-conflict`, `refuses a Bot command whose botId does not match the path` |
+
+Not covered here, and why:
+
+- **S8 Bot Durable Object → Computer/Sprite.** Unreachable from workerd at all
+  (ADR 0004): the Sprites HTTP exec protocol needs preserved chunk boundaries
+  that workerd does not preserve, so every exec fails in local dev, in this
+  pool, and in the deployed Worker alike. `test:fly:workerd:live` records that
+  boundary as an opt-in probe.
+- **S9 client HTTP error decoding.** `apiRequest` runs in a browser. This layer
+  proves the bodies it receives are always JSON; proving what the browser does
+  with them needs the Playwright layer.

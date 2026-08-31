@@ -51,6 +51,12 @@ jobs:
       - name: Test Package bundler runtime
         run: bun run --filter @frockbot/cloudflare-bundler test:workerd
 
+      - name: Test Cloudflare integration
+        # `SELF.fetch` through the real gateway, the real built artifact and the
+        # real Durable Objects. The provider is stubbed at the outbound seam and
+        # authentication uses the development identity, so this needs no secret.
+        run: bun run --filter @frockbot/cloudflare test:integration
+
       - name: Build
         run: bun run build
 
