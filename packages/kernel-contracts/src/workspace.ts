@@ -104,13 +104,25 @@ export interface WorkspaceInstructionPathV1 extends WorkspacePathV1 {
 /**
  * Who performed a durable-root write.
  *
- * This is the constitution's one provenance vocabulary — "The recorded origin
- * of a Package or change: first-party, User, or Bot, and for a Bot the Session
- * and Turn that produced it" — narrowed to a file writer. It is not a second
- * provenance type: `PackageProvenanceV1` in `@frockbot/kernel-composition`
- * names the same three kinds for a Package artifact, and cannot be imported
- * here because `kernel-composition` depends on `kernel-contracts`, not the
- * other way round. The two must stay in step; the kinds are the contract.
+ * The first three kinds are the constitution's one provenance vocabulary —
+ * "The recorded origin of a Package or change: first-party, User, or Bot, and
+ * for a Bot the Session and Turn that produced it" — narrowed to a file
+ * writer. They are not a second provenance type: `PackageProvenanceV1` in
+ * `@frockbot/kernel-composition` names the same three kinds for a Package
+ * artifact, and cannot be imported here because `kernel-composition` depends
+ * on `kernel-contracts`, not the other way round. The two must stay in step;
+ * the kinds are the contract.
+ *
+ * `unattributed` is the fourth kind, and it is not a fourth provenance: it
+ * denotes a file whose writer was *not recorded* — written by a process on the
+ * Computer outside the Workspace file surface (`computer_exec`, an installer,
+ * a shell redirect), so no generation names who produced it. It is what a
+ * reader answers about such a file, never what a writer may claim: "every
+ * write to a durable root records its writer", so a `write` or a `delete` that
+ * names `unattributed` is refused. An unattributed file is ordinary data — it
+ * can be read, listed, and overwritten by an authorized writer — but it
+ * carries no authority, so `isLoadableSkillSourceV1` refuses it and it is
+ * never loaded as an instruction.
  */
 export type WorkspaceWriterV1 =
   | { kind: "first-party"; packageId: string }
@@ -121,7 +133,8 @@ export type WorkspaceWriterV1 =
       sessionId: string;
       turnId: string;
       runId: string;
-    };
+    }
+  | { kind: "unattributed" };
 
 /**
  * One immutable version of a file under a durable root. Generations are
@@ -239,14 +252,31 @@ export interface WorkspaceFilesV1 extends WorkspaceReadsV1 {
 export type WorkspaceMemoryProjectionV1 = WorkspaceReadsV1;
 
 /**
- * True when a root accepts a write through the kernel-consumed interface.
+ * True when a root accepts a write through the kernel-consumed interface, and
+ * — when a writer is supplied — when that writer may name itself on a write.
+ *
  * False for every Memory root: the Memory Package writes object storage
- * directly and the Workspace presents Memory read-only.
+ * directly and the Workspace presents Memory read-only. False for an
+ * `unattributed` writer whatever the root: "every write to a durable root
+ * records its writer", so a write must always name a real one. `unattributed`
+ * is an answer a reader gives about a file nobody recorded, not a writer a
+ * caller may present.
  */
 export function workspaceRootAcceptsKernelWriteV1(
   root: WorkspaceRootV1,
+  writer?: WorkspaceWriterV1,
 ): boolean {
+  if (writer !== undefined && !workspaceWriterMayWriteV1(writer)) return false;
   return root.kind !== "bot-memory" && root.kind !== "user-memory";
+}
+
+/**
+ * True when a writer may be named on a `write` or a `delete`. Only
+ * `unattributed` may not: it records the absence of a recorded writer, and a
+ * write that recorded nothing would be a write with no writer.
+ */
+export function workspaceWriterMayWriteV1(writer: WorkspaceWriterV1): boolean {
+  return writer.kind !== "unattributed";
 }
 
 /**
@@ -287,7 +317,11 @@ export interface LoadableSkillSourceV1 extends SkillSourceV1 {
  *
  * Pure, total, and the only place that sentence is decided. A first-party
  * writer is not the Bot's authority nor its User's, so it is refused too: a
- * Package that wants to ship instructions ships a Package, not a Skill.
+ * Package that wants to ship instructions ships a Package, not a Skill. An
+ * `unattributed` writer is refused for a stronger reason: nothing recorded who
+ * wrote the file, so "written under the Bot's own authority or its User's" is
+ * not merely false but unprovable. A file a shell command dropped into an
+ * instruction root is data the Bot can read, never an instruction it loads.
  */
 export function isLoadableSkillSourceV1(
   source: SkillSourceV1,
@@ -457,6 +491,10 @@ export function decodeWorkspaceWriterV1(
   if (value.kind === "user") {
     exactKeys(value, ["kind", "userId"], label);
     return { kind: "user", userId: ownerId(value.userId, `${label}.userId`) };
+  }
+  if (value.kind === "unattributed") {
+    exactKeys(value, ["kind"], label);
+    return { kind: "unattributed" };
   }
   if (value.kind === "bot") {
     exactKeys(value, ["kind", "botId", "sessionId", "turnId", "runId"], label);

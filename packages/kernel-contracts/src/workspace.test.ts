@@ -12,6 +12,7 @@ import {
   workspaceMemoryProjectionV1,
   workspaceRootAcceptsKernelWriteV1,
   workspaceRootKeyV1,
+  workspaceWriterMayWriteV1,
   WORKSPACE_MAX_PATH_LENGTH,
   WORKSPACE_MAX_PATH_SEGMENTS,
   WORKSPACE_MAX_SEGMENT_LENGTH,
@@ -178,6 +179,18 @@ describe("workspace paths", () => {
 });
 
 describe("writer provenance and generations", () => {
+  test("decodes an unattributed writer, which records that nobody was recorded", () => {
+    expect(decodeWorkspaceWriterV1({ kind: "unattributed" })).toEqual({
+      kind: "unattributed",
+    });
+    for (const invalid of [
+      { kind: "unattributed", userId: "user-1" },
+      { kind: "unattributed", packageId: "memory" },
+    ]) {
+      expect(() => decodeWorkspaceWriterV1(invalid)).toThrow();
+    }
+  });
+
   test("decodes the three provenance kinds and nothing else", () => {
     expect(
       decodeWorkspaceWriterV1({ kind: "first-party", packageId: "memory" }),
@@ -285,6 +298,34 @@ describe("Memory roots are single-writer", () => {
         userId: "user-1",
         packageId: "notes",
         rootId: "archive",
+      }),
+    ).toBe(true);
+  });
+
+  test("no write may name an unattributed writer, whatever the root", () => {
+    const unattributed: WorkspaceWriterV1 = { kind: "unattributed" };
+    expect(workspaceWriterMayWriteV1(unattributed)).toBe(false);
+    expect(workspaceWriterMayWriteV1({ kind: "user", userId: "user-1" })).toBe(
+      true,
+    );
+    expect(
+      workspaceRootAcceptsKernelWriteV1(instructionRoot(), unattributed),
+    ).toBe(false);
+    expect(
+      workspaceRootAcceptsKernelWriteV1(
+        {
+          kind: "package-declared",
+          userId: "user-1",
+          packageId: "notes",
+          rootId: "archive",
+        },
+        unattributed,
+      ),
+    ).toBe(false);
+    expect(
+      workspaceRootAcceptsKernelWriteV1(instructionRoot(), {
+        kind: "user",
+        userId: "user-1",
       }),
     ).toBe(true);
   });
@@ -398,6 +439,28 @@ describe("Skill sources", () => {
         isLoadableSkillSourceV1(skillSource(instructionRoot(), writer), owner),
       ).toBe(false);
     }
+  });
+
+  test("a file with no recorded writer is never a Skill source", () => {
+    // A shell command on the Computer can drop a SKILL.md into any root it can
+    // reach. Nothing recorded who wrote it, so it is data, never an
+    // instruction — even under the Bot's own instruction root.
+    expect(
+      isLoadableSkillSourceV1(
+        skillSource(instructionRoot(), { kind: "unattributed" }),
+        owner,
+      ),
+    ).toBe(false);
+    expect(
+      isLoadableSkillSourceV1(
+        decodeSkillSourceV1({
+          path: { root: instructionRoot(), path: "skills/dropped/SKILL.md" },
+          writer: { kind: "unattributed" },
+          generation: generation({ writer: { kind: "unattributed" } }),
+        }),
+        owner,
+      ),
+    ).toBe(false);
   });
 
   test("a decoded Skill source keeps its recorded writer", () => {

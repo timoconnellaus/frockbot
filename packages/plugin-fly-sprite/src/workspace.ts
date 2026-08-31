@@ -11,7 +11,11 @@
 //  - "every write to a durable root records its writer" — a write stores a
 //    generation sidecar next to the file holding the minted generation id, the
 //    sha-256 content address, the size, the writer, and the timestamp. A read
-//    or a list answers with that recorded generation.
+//    or a list answers with that recorded generation. A file with no sidecar
+//    went around this surface — a shell command on the Computer wrote it — so
+//    nothing recorded its writer and it is answered as `unattributed`, which
+//    is data and never an instruction. A write may not *claim* that writer:
+//    `unattributed` is refused on `write` and `delete`.
 //  - "a Bot's instruction root and Bot Memory root are writable only by that
 //    Bot or its User" — a write whose writer is neither is `refused`, as is
 //    every write to a Memory root through the kernel-consumed surface, because
@@ -32,6 +36,7 @@ import {
   WORKSPACE_MAX_LIST_ENTRIES,
   normalizeWorkspaceRelativePathV1,
   workspaceRootAcceptsKernelWriteV1,
+  workspaceWriterMayWriteV1,
   type WorkspaceDeleteRequestV1,
   type WorkspaceEntryV1,
   type WorkspaceFailureV1,
@@ -158,7 +163,8 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
 
   /**
    * "a Bot's instruction root and Bot Memory root are writable only by that
-   * Bot or its User". A first-party Package is neither.
+   * Bot or its User". A first-party Package is neither, and `unattributed` is
+   * not a writer at all.
    */
   private admitWrite(
     root: WorkspaceRootV1,
@@ -166,6 +172,12 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
   ): WorkspaceFailureV1 | undefined {
     const refused = this.admit(root);
     if (refused) return refused;
+    if (!workspaceWriterMayWriteV1(writer)) {
+      return failure(
+        "refused",
+        "Every write to a durable root records its writer; an unattributed writer records none",
+      );
+    }
     if (
       this.options.surface === "kernel" &&
       !workspaceRootAcceptsKernelWriteV1(root)
@@ -220,16 +232,16 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
   /**
    * Recovers a generation for a file. A file the sidecar records answers with
    * exactly what was recorded. A file written by ordinary shell work on the
-   * Computer — `computer_exec`, an installer, the Bot's own editor — has no
-   * recorded writer, so it is attributed to the User whose Computer it is:
-   * the User's Computer is the trust boundary, and a User-authored file is the
-   * weakest true claim available. It is never attributed to a Bot, so such a
-   * file is never loadable as a Skill.
+   * Computer — `computer_exec`, an installer, the Bot's own editor — went
+   * around the Workspace file surface, so nothing recorded who wrote it. It is
+   * attributed to `{ kind: "unattributed" }`, which is the truth: not the
+   * User, not a Bot, nobody recorded. Attributing it to the User would be a
+   * claim the Computer cannot support, and the User is a writer whose Skills
+   * *are* loadable, so any Bot with a shell could have written itself an
+   * instruction. Unattributed files stay visible and readable, and are never
+   * loaded as instructions.
    */
-  private generationOf(
-    raw: RawFile,
-    root: WorkspaceRootV1,
-  ): WorkspaceGenerationV1 {
+  private generationOf(raw: RawFile): WorkspaceGenerationV1 {
     const recorded = this.decodeMeta(raw.meta);
     if (recorded) return recorded;
     return {
@@ -237,7 +249,7 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       generationId: `${raw.modifiedSeconds.toString().padStart(15, "0")}-shell`,
       contentHash: raw.contentHash,
       size: Math.min(raw.size, WORKSPACE_MAX_FILE_BYTES),
-      writer: { kind: "user", userId: root.userId },
+      writer: { kind: "unattributed" },
       writtenAt: new Date(raw.modifiedSeconds * 1000).toISOString(),
     };
   }
@@ -315,7 +327,7 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       size: Number(size.trim()),
       modifiedSeconds: Number(modified.trim()),
     };
-    const generation = this.generationOf(raw, path.root);
+    const generation = this.generationOf(raw);
     return {
       generation,
       ...(withBytes
@@ -412,15 +424,12 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       }
       entries.push({
         path,
-        generation: this.generationOf(
-          {
-            meta,
-            contentHash,
-            size: Number(size),
-            modifiedSeconds: Number(modified),
-          },
-          request.root,
-        ),
+        generation: this.generationOf({
+          meta,
+          contentHash,
+          size: Number(size),
+          modifiedSeconds: Number(modified),
+        }),
       });
     }
     const hasMore = entries.length > limit;

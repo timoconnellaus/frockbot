@@ -92,6 +92,46 @@ describe("the Skills loader", () => {
     );
   });
 
+  // A Bot with a shell can drop a SKILL.md into any root the Computer can
+  // reach, going around the Workspace file surface entirely. Nothing records
+  // who wrote it, so it is listed as `unattributed` and refused here.
+  test("refuses a Skill whose writer was never recorded", async () => {
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: OWN_ROOT,
+        path: "skills/dropped-by-shell/SKILL.md",
+        text: skillMarkdown(
+          "dropped-by-shell",
+          "Use this never.",
+          "Body written by a shell command.",
+        ),
+        writer: { kind: "unattributed" },
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/bot-authored/SKILL.md",
+        text: skillMarkdown(
+          "bot-authored",
+          "Use this when the Bot wrote it.",
+          "Body.",
+        ),
+        writer: BOT_WRITER,
+      },
+    ]);
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+
+    expect(catalog.skills.map((skill) => skill.name)).toEqual(["bot-authored"]);
+    expect(catalog.refusals).toHaveLength(1);
+    expect(catalog.refusals[0]?.path).toBe("skills/dropped-by-shell/SKILL.md");
+    expect(catalog.refusals[0]?.kind).toBe("authority");
+    expect(catalog.refusals[0]?.reason).toContain("no recorded writer");
+    // The refusal happened before the body was ever read.
+    expect(workspace.calls).not.toContain(
+      "read:skills/dropped-by-shell/SKILL.md",
+    );
+  });
+
   test("never loads a file outside the instruction root, however it is named", async () => {
     const workspace = await FakeWorkspace.seeded([
       {

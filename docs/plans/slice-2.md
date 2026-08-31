@@ -99,6 +99,23 @@ named seam, `ComputerWorkspace.memoryWriter`. It accepts Memory roots and
 nothing else; the kernel surface accepts everything else and no Memory root.
 Step 3 deletes it.
 
+**Where constitution and code still disagree.** "Every write to a durable root
+records its writer" holds for every write that goes _through_ the Workspace
+file surface, which records a generation sidecar beside the file. A shell
+command on the Computer — `computer_exec`, an installer, the Bot's own editor —
+can still create a file in a durable root without touching that surface, so no
+sidecar exists and nothing recorded who wrote it. Such a file is answered as
+`{ kind: "unattributed" }`: it is visible, listable and readable data, it can
+be overwritten by an authorized writer, and it is never loaded as an
+instruction, because `isLoadableSkillSourceV1` refuses it. It was previously
+attributed to the User whose Computer it is, which was a claim the Computer
+could not support and a hole in the instruction boundary — the User is a writer
+whose Skills _are_ loadable, so any Bot with a shell could drop a `SKILL.md`
+into another Bot's instruction root and have it loaded. `unattributed` is a
+reader's answer only: a `write` or a `delete` that names it is refused. Closing
+the gap properly — recording a writer for every file however it arrives — is
+the Computer-side sync agent's job under ADR 0013.
+
 **Tests that gate.** Two Bots of one User resolve to one Computer and one
 provider Sprite; each tenant sees its own directory and display; a Bot reads
 another Bot's Workspace file (organizational separation, not a boundary); an

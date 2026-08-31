@@ -103,7 +103,10 @@ function describeWriter(source: SkillSourceV1): string {
     return `first-party Package "${writer.packageId}"`;
   }
   if (writer.kind === "user") return `User "${writer.userId}"`;
-  return `Bot "${writer.botId}"`;
+  if (writer.kind === "bot") return `Bot "${writer.botId}"`;
+  // Nothing recorded a writer: a process on the Computer wrote the file
+  // outside the Workspace file surface, so no authority can be read off it.
+  return "no recorded writer (written outside the Workspace file surface)";
 }
 
 function describeRoot(source: SkillSourceV1): string {

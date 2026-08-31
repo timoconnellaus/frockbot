@@ -530,10 +530,10 @@ describe("Fly Workspace files", () => {
     ).toMatchObject({ status: "not-found" });
   });
 
-  // A file written by ordinary shell work has no recorded writer. It is
-  // attributed to the User whose Computer it is, never to a Bot, so it can
-  // never be loaded as a Skill.
-  test("attributes an unrecorded file to the User, never to a Bot", async () => {
+  // A file written by ordinary shell work went around this surface, so no
+  // sidecar records who wrote it. It is `unattributed` — not the User, not a
+  // Bot — so it is readable data and never loadable as a Skill.
+  test("attributes a file with no recorded writer as unattributed", async () => {
     const { client, workspace } = await openWorkspace();
     client.sprite.files.set(
       `/home/box/agent-data/agents/${computerBotKey(BOT)}/skills/by-shell.md`,
@@ -546,10 +546,36 @@ describe("Fly Workspace files", () => {
     });
 
     if (stat.status !== "ok") throw new Error(stat.reason);
-    expect(stat.entry.generation.writer).toEqual({
-      kind: "user",
-      userId: USER,
-    });
+    expect(stat.entry.generation.writer).toEqual({ kind: "unattributed" });
+
+    const listed = await workspace.list({ root: skillsRoot });
+    if (listed.status !== "ok") throw new Error(listed.reason);
+    expect(
+      listed.entries.find((entry) => entry.path.path === "by-shell.md")
+        ?.generation.writer,
+    ).toEqual({ kind: "unattributed" });
+  });
+
+  // "every write to a durable root records its writer": `unattributed` is an
+  // answer about a file nobody recorded, never a writer a caller may present.
+  test("refuses a write or a delete that names an unattributed writer", async () => {
+    const { workspace } = await openWorkspace();
+
+    expect(
+      await workspace.write({
+        path: { root: skillsRoot, path: "SKILL.md" },
+        bytes: new TextEncoder().encode("body"),
+        writer: { kind: "unattributed" },
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await workspace.delete({
+        path: { root: packageRoot, path: "a.md" },
+        writer: { kind: "unattributed" },
+        expectedGenerationId: "whatever",
+      }),
+    ).toMatchObject({ status: "refused" });
   });
 
   // Constitution — Computer and Workspace: connections drop on every pause, so
