@@ -20,6 +20,24 @@ provider seam. The script runs `artifact:build` first, and `test/integration/
 fixtures.ts` seeds the built artifact into the local `APPLICATION_ARTIFACTS`
 bucket, so the bytes under test are the bytes that would deploy.
 
+Both projects run their files **sequentially** (`fileParallelism: false`). The
+fakes are shared: the Computer host fake is one Node-side object the whole run
+drives, the Workers AI fake's call log is one array per pool worker, and the
+outbound stub's MCP handshake counter and blocked-address tally are Node module
+state. Several tests read one of those counts, act, and assert it moved by
+exactly one — true only if no other file is acting at the same time. Anything
+added here inherits that guarantee; nothing here should reintroduce parallelism
+without first giving every fake per-test isolation.
+
+The artifact is checked for staleness at config load. `test:integration` runs
+`artifact:build` first, so it is always current there; running `vitest run
+--config vitest.integration.config.ts` by hand does not, and the suite would
+then exercise whatever was left in `dist/artifacts/` from the last build.
+`test/artifact-freshness.ts` compares the artifact's mtime against every source
+the bundler recorded in `foundation-v1.mjs.map` (`node_modules` excluded) plus
+the `src/client` tree that `vite build` inlines into it, and fails the run by
+name if any of them is newer. The fix it names is `artifact:build`.
+
 Authentication uses the gateway's development identity
 (`ALLOW_DEVELOPMENT_AUTH: "true"` plus an `x-frockbot-user-id` header), with a
 fresh random user id per test so no two tests share Durable Object state. No
