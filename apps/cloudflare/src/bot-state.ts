@@ -37,7 +37,11 @@ import {
   decodeIsolateAuthorityRequestV1,
   decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
-import type { NormalizedModelRequest } from "@frockbot/kernel-contracts";
+import type {
+  NormalizedModelRequest,
+  WorkspaceFilesV1,
+} from "@frockbot/kernel-contracts";
+import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
@@ -73,6 +77,16 @@ function decodeBotIdentityRpcV1(input: unknown): {
 export class BotState extends DurableObject<BotStateEnv> {
   private readonly compileApplication: typeof compileFoundationApplication;
   private readonly outboundFetch?: typeof fetch;
+  /**
+   * The environment the Shell Package runs under: the Durable Object's
+   * bindings plus the Workspace file surface built over them. `WORKSPACE_FILES`
+   * is not a Worker binding — it is `WorkspaceFilesV1` over the durable-root
+   * object store, with its generations recorded in this object — so it is
+   * constructed here and never reaches the deployed bindings map.
+   */
+  private readonly backendEnv: BotStateEnv & {
+    WORKSPACE_FILES?: WorkspaceFilesV1;
+  };
   private mounted:
     | Promise<{
         shell: ShellBotBackendContribution;
@@ -90,6 +104,11 @@ export class BotState extends DurableObject<BotStateEnv> {
     this.compileApplication =
       dependencies.compileApplication ?? compileFoundationApplication;
     this.outboundFetch = dependencies.outboundFetch;
+    const workspace = createDurableWorkspaceFilesV1(ctx, env);
+    this.backendEnv = {
+      ...env,
+      ...(workspace ? { WORKSPACE_FILES: workspace } : {}),
+    };
   }
 
   private contributions(): Promise<{
@@ -110,7 +129,7 @@ export class BotState extends DurableObject<BotStateEnv> {
               return createShellBotBackendPlugin(
                 {
                   state: this.ctx,
-                  env: this.env,
+                  env: this.backendEnv,
                   outboundFetch: this.outboundFetch,
                   // The Durable Object owns the kernel authority; the Shell
                   // Package supplies only its configuration and Composition

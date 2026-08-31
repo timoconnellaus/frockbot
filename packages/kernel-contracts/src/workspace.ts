@@ -44,6 +44,8 @@ export const WORKSPACE_MAX_PATH_SEGMENTS = 32;
 export const WORKSPACE_MAX_ROOT_ID_LENGTH = 128;
 /** Longest owner identifier, matching `IsolateIdentityV1.botId`. */
 export const WORKSPACE_MAX_OWNER_ID_LENGTH = 256;
+/** Longest Project identifier, matching the Package-declared root id bound. */
+export const WORKSPACE_MAX_PROJECT_ID_LENGTH = 128;
 /** Upper bound on a single durable-root file. */
 export const WORKSPACE_MAX_FILE_BYTES = 1_048_576;
 /** Upper bound on one `list` page. */
@@ -51,6 +53,8 @@ export const WORKSPACE_MAX_LIST_ENTRIES = 1_000;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const ROOT_ID = /^[a-z][a-z0-9-]{0,127}$/;
+/** A Project is named by a slug, exactly as GrokBot names one on disk. */
+const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
 /**
  * The kinds of durable root. "durable roots, declared by the Computer
@@ -59,7 +63,11 @@ const ROOT_ID = /^[a-z][a-z0-9-]{0,127}$/;
  * manifest declares.
  */
 export type WorkspaceRootKindV1 =
-  "bot-instructions" | "bot-memory" | "user-memory" | "package-declared";
+  | "bot-instructions"
+  | "bot-memory"
+  | "user-memory"
+  | "project-memory"
+  | "package-declared";
 
 /**
  * A durable root, identified by kind and owner. Every root belongs to a User —
@@ -70,6 +78,7 @@ export type WorkspaceRootV1 =
   | { kind: "bot-instructions"; userId: string; botId: string }
   | { kind: "bot-memory"; userId: string; botId: string }
   | { kind: "user-memory"; userId: string }
+  | { kind: "project-memory"; userId: string; projectId: string }
   | {
       kind: "package-declared";
       userId: string;
@@ -83,11 +92,49 @@ export type WorkspaceInstructionRootV1 = Extract<
   { kind: "bot-instructions" }
 >;
 
-/** A Memory root. The Memory Package is its only writer. */
+/**
+ * A Memory root. The Memory Package is its only writer.
+ *
+ * "Memory is Markdown files under durable roots of the Workspace in three
+ * tiers: a Bot Memory root per Bot, a User Memory root shared by the User's
+ * Bots, and a Project Memory root per Project that a Bot has joined." All
+ * three kinds are covered here; the two shared ones are additionally
+ * `WorkspaceSharedMemoryRootV1`, because sharding is what makes a shared tier
+ * single-writer per file.
+ */
 export type WorkspaceMemoryRootV1 = Extract<
   WorkspaceRootV1,
-  { kind: "bot-memory" | "user-memory" }
+  { kind: "bot-memory" | "user-memory" | "project-memory" }
 >;
+
+/**
+ * A Memory root more than one Bot writes. "Shared tiers are sharded per
+ * writing Bot on disk so every Memory file has exactly one writer; readers
+ * merge shards, newest fact wins on conflict, and every shared fact records
+ * which Bot learned it."
+ */
+export type WorkspaceSharedMemoryRootV1 = Extract<
+  WorkspaceRootV1,
+  { kind: "user-memory" | "project-memory" }
+>;
+
+/** True for the three Memory kinds and nothing else. */
+export function isWorkspaceMemoryRootV1(
+  root: WorkspaceRootV1,
+): root is WorkspaceMemoryRootV1 {
+  return (
+    root.kind === "bot-memory" ||
+    root.kind === "user-memory" ||
+    root.kind === "project-memory"
+  );
+}
+
+/** True for the Memory kinds whose files are sharded per writing Bot. */
+export function isWorkspaceSharedMemoryRootV1(
+  root: WorkspaceRootV1,
+): root is WorkspaceSharedMemoryRootV1 {
+  return root.kind === "user-memory" || root.kind === "project-memory";
+}
 
 /** A validated relative path inside one durable root. */
 export interface WorkspacePathV1 {
@@ -194,8 +241,37 @@ export type WorkspaceListOutcomeV1 =
   | { status: "ok"; entries: WorkspaceEntryV1[]; cursor?: string }
   | WorkspaceFailureV1;
 
+/**
+ * A write that lost a conditional write. "a write that would overwrite a
+ * generation its writer has not seen is preserved as a conflicting generation
+ * and surfaced, never merged or dropped" (ADR 0013), so the outcome carries
+ * both sides: the generation that holds the file now, and the losing write,
+ * preserved under its own generation with `conflictsWith` set.
+ */
+export interface WorkspaceConflictV1 extends WorkspaceFailureV1 {
+  status: "conflict";
+  /** The generation the file holds now, when the store could read one. */
+  current?: WorkspaceGenerationV1;
+  /** The losing write, preserved rather than dropped. */
+  preserved?: WorkspaceGenerationV1;
+}
+
+/**
+ * Narrows a write outcome to the conflict variant. `WorkspaceFailureV1` can
+ * also carry the `conflict` status — a store that has no generations to report
+ * still answers `conflict` — so the status alone does not discriminate the
+ * union, and this predicate is how a caller reaches the two generations.
+ */
+export function isWorkspaceConflictV1(
+  outcome: WorkspaceWriteOutcomeV1,
+): outcome is WorkspaceConflictV1 {
+  return outcome.status === "conflict";
+}
+
 export type WorkspaceWriteOutcomeV1 =
-  { status: "ok"; generation: WorkspaceGenerationV1 } | WorkspaceFailureV1;
+  | { status: "ok"; generation: WorkspaceGenerationV1 }
+  | WorkspaceConflictV1
+  | WorkspaceFailureV1;
 
 export interface WorkspaceListRequestV1 {
   root: WorkspaceRootV1;
@@ -267,7 +343,7 @@ export function workspaceRootAcceptsKernelWriteV1(
   writer?: WorkspaceWriterV1,
 ): boolean {
   if (writer !== undefined && !workspaceWriterMayWriteV1(writer)) return false;
-  return root.kind !== "bot-memory" && root.kind !== "user-memory";
+  return !isWorkspaceMemoryRootV1(root);
 }
 
 /**
@@ -293,6 +369,128 @@ export function workspaceMemoryProjectionV1(
     list: (request) => files.list(request),
     stat: (path) => files.stat(path),
   };
+}
+
+/**
+ * The directory a shared Memory tier gives one writing Bot. GrokBot's own
+ * layout, kept verbatim: `user-memory/by-agent/<agent-uuid>/`, and
+ * `projects/<slug>/memory/by-agent/<assistantId>/` for a Project. The prefix
+ * is the mechanism behind "every Memory file has exactly one writer".
+ */
+export const WORKSPACE_MEMORY_SHARD_PREFIX = "by-agent";
+
+/**
+ * One writing Bot's slice of a Memory root.
+ *
+ * A Bot Memory root has exactly one writer already, so its shard is the whole
+ * root and its `prefix` is empty. A shared root's shard is
+ * `by-agent/<botId>/`, and a reader that wants the tier merges every shard by
+ * listing the root without one.
+ */
+export interface WorkspaceShardV1 {
+  root: WorkspaceMemoryRootV1;
+  /** The Bot whose files live under `prefix`. */
+  botId: string;
+  /** Relative prefix inside the root; `""` for a Bot Memory root. */
+  prefix: string;
+}
+
+/**
+ * The relative prefix a Bot's files sit under inside a Memory root. Empty for
+ * `bot-memory` — that root is already single-writer, so sharding it would add
+ * a directory level that means nothing.
+ */
+export function memoryShardPrefixV1(
+  root: WorkspaceMemoryRootV1,
+  botId: string,
+): string {
+  if (root.kind === "bot-memory") return "";
+  const shard = boundedString(
+    botId,
+    "shard botId",
+    WORKSPACE_MAX_OWNER_ID_LENGTH,
+  );
+  if (shard.includes("/") || shard === "." || shard === "..") {
+    throw new Error("shard botId is not a single path segment");
+  }
+  return `${WORKSPACE_MEMORY_SHARD_PREFIX}/${encodeURIComponent(shard)}/`;
+}
+
+/** The shard a Bot writes in one Memory root. */
+export function workspaceMemoryShardV1(
+  root: WorkspaceMemoryRootV1,
+  botId: string,
+): WorkspaceShardV1 {
+  return { root, botId, prefix: memoryShardPrefixV1(root, botId) };
+}
+
+/**
+ * Places one writing Bot's Memory file inside the root that owns it: under
+ * `by-agent/<botId>/` in a shared tier, directly in the root for `bot-memory`.
+ * The result is a validated path, so a `relative` that escapes its root is
+ * refused here rather than reaching object storage.
+ */
+export function memoryShardPathV1(
+  root: WorkspaceMemoryRootV1,
+  botId: string,
+  relative: string,
+): WorkspacePathV1 {
+  const tail = normalizeWorkspaceRelativePathV1(relative, "memory shard path");
+  return {
+    root,
+    path: normalizeWorkspaceRelativePathV1(
+      `${memoryShardPrefixV1(root, botId)}${tail}`,
+      "memory shard path",
+    ),
+  };
+}
+
+/**
+ * The Bot whose shard a path falls in, or `undefined` when the path is not
+ * inside a shard. `bot-memory` answers the root's own Bot: the whole root is
+ * that Bot's shard.
+ */
+export function memoryShardOwnerV1(path: WorkspacePathV1): string | undefined {
+  const root = path.root;
+  if (root.kind === "bot-memory") return root.botId;
+  if (!isWorkspaceSharedMemoryRootV1(root)) return undefined;
+  const segments = path.path.split("/");
+  if (segments.length < 3 || segments[0] !== WORKSPACE_MEMORY_SHARD_PREFIX) {
+    return undefined;
+  }
+  const shard = segments[1] ?? "";
+  if (!shard) return undefined;
+  try {
+    return decodeURIComponent(shard);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * "within a shared root each Bot's shard is written only on that Bot's
+ * behalf".
+ *
+ * True only when the writer may own the file at `path`: a Bot writer when the
+ * path is inside its own shard, a User writer for any shard of a root the User
+ * owns — the User's Computer is the trust boundary, and a User may correct
+ * their own Memory — and never a first-party Package (a Package that wants to
+ * ship instructions ships a Package) or an `unattributed` writer (nothing
+ * recorded who wrote it, so ownership is not merely false but unprovable).
+ *
+ * Pure, total, and false for every non-Memory root: this predicate answers the
+ * Memory sharding rule only, never the wider question of who may write a root.
+ */
+export function writerOwnsMemoryPathV1(
+  path: WorkspacePathV1,
+  writer: WorkspaceWriterV1,
+): boolean {
+  const root = path.root;
+  if (!isWorkspaceMemoryRootV1(root)) return false;
+  if (writer.kind === "user") return writer.userId === root.userId;
+  if (writer.kind !== "bot") return false;
+  if (root.kind === "bot-memory") return writer.botId === root.botId;
+  return memoryShardOwnerV1(path) === writer.botId;
 }
 
 /**
@@ -340,6 +538,9 @@ export function isLoadableSkillSourceV1(
 export function workspaceRootKeyV1(root: WorkspaceRootV1): string {
   const user = encodeURIComponent(root.userId);
   if (root.kind === "user-memory") return `user-memory:${user}`;
+  if (root.kind === "project-memory") {
+    return `project-memory:${user}:${encodeURIComponent(root.projectId)}`;
+  }
   if (root.kind === "package-declared") {
     return `package-declared:${user}:${encodeURIComponent(root.packageId)}:${root.rootId}`;
   }
@@ -444,6 +645,22 @@ export function decodeWorkspaceRootV1(
     return {
       kind: "user-memory",
       userId: ownerId(value.userId, `${label}.userId`),
+    };
+  }
+  if (value.kind === "project-memory") {
+    exactKeys(value, ["kind", "userId", "projectId"], label);
+    const projectId = boundedString(
+      value.projectId,
+      `${label}.projectId`,
+      WORKSPACE_MAX_PROJECT_ID_LENGTH,
+    );
+    if (!PROJECT_ID.test(projectId)) {
+      throw new Error(`${label}.projectId is invalid`);
+    }
+    return {
+      kind: "project-memory",
+      userId: ownerId(value.userId, `${label}.userId`),
+      projectId,
     };
   }
   if (value.kind === "package-declared") {
@@ -592,15 +809,57 @@ export function decodeWorkspaceFailureV1(
   label = "workspace failure",
 ): WorkspaceFailureV1 {
   const value = record(input, label);
-  exactKeys(value, ["status", "reason"], label);
+  exactKeys(value, ["status", "reason"], label, ["current", "preserved"]);
   const status = FAILURE_STATUSES.find(
     (candidate) => candidate === value.status,
   );
   if (!status) throw new Error(`${label}.status is invalid`);
-  return {
+  const failure: WorkspaceFailureV1 = {
     status,
     reason: boundedString(value.reason, `${label}.reason`, 512),
   };
+  if (value.current === undefined && value.preserved === undefined) {
+    return failure;
+  }
+  if (status !== "conflict") {
+    throw new Error(
+      `${label} carries conflicting generations without a conflict`,
+    );
+  }
+  return decodeWorkspaceConflictV1(value, label);
+}
+
+/**
+ * A conflict outcome with the two generations ADR 0013 requires to survive.
+ * Both are optional: a store that could not read the current generation still
+ * answers `conflict` rather than inventing one.
+ */
+export function decodeWorkspaceConflictV1(
+  input: unknown,
+  label = "workspace conflict",
+): WorkspaceConflictV1 {
+  const value = record(input, label);
+  exactKeys(value, ["status", "reason"], label, ["current", "preserved"]);
+  if (value.status !== "conflict") {
+    throw new Error(`${label}.status must be "conflict"`);
+  }
+  const conflict: WorkspaceConflictV1 = {
+    status: "conflict",
+    reason: boundedString(value.reason, `${label}.reason`, 512),
+  };
+  if (value.current !== undefined) {
+    conflict.current = decodeWorkspaceGenerationV1(
+      value.current,
+      `${label}.current`,
+    );
+  }
+  if (value.preserved !== undefined) {
+    conflict.preserved = decodeWorkspaceGenerationV1(
+      value.preserved,
+      `${label}.preserved`,
+    );
+  }
+  return conflict;
 }
 
 export function decodeSkillSourceV1(
@@ -617,4 +876,107 @@ export function decodeSkillSourceV1(
       `${label}.generation`,
     ),
   };
+}
+
+/**
+ * One durable generation record: what a Durable Object stores about a single
+ * file in a durable root.
+ *
+ * "The Workspace and its object-storage twin are the only durable state
+ * outside a Durable Object. They hold files, never authority: a Durable Object
+ * records every intent, effect, and generation that concerns them." The bytes
+ * live in object storage; this record is the authority for which generation
+ * those bytes are, who wrote them, and — through `etag` — which conditional
+ * write may replace them.
+ */
+export interface WorkspaceGenerationRecordV1 {
+  schemaVersion: 1;
+  root: WorkspaceRootV1;
+  /** Validated relative path inside `root`. */
+  path: string;
+  generation: WorkspaceGenerationV1;
+  /**
+   * The object-storage entity tag the generation's bytes landed under. It is
+   * what an `If-Match` write is conditioned on, so a writer that has seen
+   * `generation.generationId` can prove it. Absent on a tombstone, and absent
+   * when the record was recovered from a store that reported none.
+   */
+  etag?: string;
+  /** True when the record is a deletion tombstone rather than a file. */
+  deleted?: boolean;
+  /** Object key holding a preserved losing write, on a conflict record. */
+  conflictKey?: string;
+}
+
+/**
+ * The generation ledger a durable root's owning Durable Object keeps, declared
+ * here and implemented there. "The User's Durable Object is the authority for
+ * ... the generation records of User Memory roots"; the Bot's Durable Object is
+ * the authority for its own roots. An object-storage implementation of
+ * `WorkspaceFilesV1` consumes this interface and owns none of it.
+ */
+export interface WorkspaceGenerationsV1 {
+  /** A sortable, monotonic generation id, minted by the owning authority. */
+  mint(at: Date): Promise<string>;
+  /** The generation the authority believes the file currently holds. */
+  current(
+    root: WorkspaceRootV1,
+    path: string,
+  ): Promise<WorkspaceGenerationRecordV1 | undefined>;
+  /** Records a generation that won its conditional write. */
+  record(entry: WorkspaceGenerationRecordV1): Promise<void>;
+  /**
+   * Records a deletion. A delete leaves a durable tombstone, so "nothing is
+   * here" is a recorded outcome with a writer rather than an absence nobody
+   * can account for after a Durable Object is evicted.
+   */
+  tombstone(entry: WorkspaceGenerationRecordV1): Promise<void>;
+  /** Records a losing write, preserved beside the winner and surfaced. */
+  conflict(entry: WorkspaceGenerationRecordV1): Promise<void>;
+  /** Every preserved losing write for one file, oldest first. */
+  conflicts(
+    root: WorkspaceRootV1,
+    path: string,
+  ): Promise<WorkspaceGenerationRecordV1[]>;
+}
+
+export function decodeWorkspaceGenerationRecordV1(
+  input: unknown,
+  label = "workspace generation record",
+): WorkspaceGenerationRecordV1 {
+  const value = record(input, label);
+  exactKeys(value, ["schemaVersion", "root", "path", "generation"], label, [
+    "etag",
+    "deleted",
+    "conflictKey",
+  ]);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  const entry: WorkspaceGenerationRecordV1 = {
+    schemaVersion: 1,
+    root: decodeWorkspaceRootV1(value.root, `${label}.root`),
+    path: normalizeWorkspaceRelativePathV1(value.path, `${label}.path`),
+    generation: decodeWorkspaceGenerationV1(
+      value.generation,
+      `${label}.generation`,
+    ),
+  };
+  if (value.etag !== undefined) {
+    entry.etag = boundedString(value.etag, `${label}.etag`, 256);
+  }
+  if (value.deleted !== undefined) {
+    if (typeof value.deleted !== "boolean") {
+      throw new Error(`${label}.deleted must be a boolean`);
+    }
+    entry.deleted = value.deleted;
+  }
+  if (value.conflictKey !== undefined) {
+    entry.conflictKey = boundedString(
+      value.conflictKey,
+      `${label}.conflictKey`,
+      2048,
+    );
+  }
+  return entry;
 }

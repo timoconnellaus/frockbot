@@ -13,13 +13,14 @@
 // backs it from object storage; whether a Computer host happens to be running
 // changes nothing above this line.
 //
-// SEAM, open. The `WORKSPACE_FILES` binding named below does not exist yet:
-// the Computer step of `docs/plans/slice-2.md` implements the Workspace file
-// surface, and the Memory step implements the durable-root sync that backs it
-// from object storage. Until one of them is bound, this returns `undefined`
-// and the Skills Package is not mounted at all — a Turn with no readable
-// instruction root loads no instructions, visibly, rather than inventing a
-// second store to read them from.
+// SEAM. `WORKSPACE_FILES` is bound in production by
+// `apps/cloudflare/src/workspace.ts`: `WorkspaceFilesV1` over object storage,
+// with every generation recorded in this Bot's Durable Object (Step 3a of
+// `docs/plans/slice-2.md`). A host that binds nothing — a test, a shell with no
+// bucket — still gets `undefined` here, and the Skills Package is then not
+// mounted at all: a Turn with no readable instruction root loads no
+// instructions, visibly, rather than inventing a second store to read them
+// from.
 import type { WorkspaceFilesV1 } from "@frockbot/kernel-contracts";
 import type { SkillsRuntimeHostV1 } from "@frockbot/plugin-skills/agent";
 
@@ -53,8 +54,9 @@ export function createBotSkillsHost(
   turn: BotSkillsTurn,
   env: object,
 ): SkillsRuntimeHostV1 | undefined {
-  // SAFETY: the Workspace file surface is a dynamic Durable Object binding,
-  // not part of the generated `Env`. Absence is the expected state today.
+  // SAFETY: the Workspace file surface is constructed onto the Durable Object
+  // environment rather than declared in the generated `Env`, because it is not
+  // a Worker binding. Absence is a supported state, not an error.
   const files = (env as BotSkillsEnv).WORKSPACE_FILES;
   if (!files) return undefined;
   return {

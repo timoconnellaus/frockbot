@@ -11,8 +11,18 @@ import {
   BotDurableAuthority,
   createStoredRunCodecV1,
   DurableCompositionStore,
+  DurableWorkspaceGenerations,
   type BotTurnExecutionInput,
 } from "@frockbot/kernel-do";
+import { isWorkspaceConflictV1 } from "@frockbot/kernel-contracts";
+import type {
+  WorkspaceFilesV1,
+  WorkspaceGenerationRecordV1,
+  WorkspaceRootV1,
+  WorkspaceWriteOutcomeV1,
+  WorkspaceWriterV1,
+} from "@frockbot/kernel-contracts";
+import { createDurableWorkspaceFilesV1 } from "../src/workspace.ts";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
@@ -46,7 +56,133 @@ export { BotCapabilities } from "../src/bot-capabilities.ts";
 export { BotIsolateProbe } from "./bot-isolate-probe.ts";
 export { AuthoringProbe } from "./authoring-probe.ts";
 
+/**
+ * A write outcome flattened for the RPC seam: the fields a test asserts on,
+ * as plain strings, so nothing here depends on how the union is narrowed.
+ */
+export interface WorkspaceProbeOutcome {
+  status: string;
+  reason?: string;
+  generationId?: string;
+  currentGenerationId?: string;
+  preservedGenerationId?: string;
+  preservedConflictsWith?: string;
+}
+
+function probeOutcome(outcome: WorkspaceWriteOutcomeV1): WorkspaceProbeOutcome {
+  if (outcome.status === "ok") {
+    return { status: "ok", generationId: outcome.generation.generationId };
+  }
+  const conflict = isWorkspaceConflictV1(outcome) ? outcome : undefined;
+  return {
+    status: outcome.status,
+    reason: outcome.reason,
+    ...(conflict?.current
+      ? { currentGenerationId: conflict.current.generationId }
+      : {}),
+    ...(conflict?.preserved
+      ? {
+          preservedGenerationId: conflict.preserved.generationId,
+          ...(conflict.preserved.conflictsWith
+            ? { preservedConflictsWith: conflict.preserved.conflictsWith }
+            : {}),
+        }
+      : {}),
+  };
+}
+
+/** One durable-root write, as a workerd test drives it over RPC. */
+export interface WorkspaceProbeWrite {
+  root: WorkspaceRootV1;
+  path: string;
+  text: string;
+  writer: WorkspaceWriterV1;
+  expectedGenerationId: string | null;
+}
+
 export class WorkerdBotState extends BotState {
+  /**
+   * The production Workspace surface this object serves — the same
+   * `WORKSPACE_FILES` the Skills seam reads, built over the real R2 bucket and
+   * this object's own generation ledger.
+   */
+  private workspace(): WorkspaceFilesV1 {
+    const files = createDurableWorkspaceFilesV1(this.ctx, this.env);
+    if (!files) throw new Error("no Workspace bucket is bound");
+    return files;
+  }
+
+  private generations(): DurableWorkspaceGenerations {
+    return new DurableWorkspaceGenerations({ state: this.ctx });
+  }
+
+  async writeWorkspaceFile(
+    input: WorkspaceProbeWrite,
+  ): Promise<WorkspaceProbeOutcome> {
+    return probeOutcome(
+      await this.workspace().write({
+        path: { root: input.root, path: input.path },
+        bytes: new TextEncoder().encode(input.text),
+        writer: input.writer,
+        expectedGenerationId: input.expectedGenerationId,
+      }),
+    );
+  }
+
+  async deleteWorkspaceFile(input: {
+    root: WorkspaceRootV1;
+    path: string;
+    writer: WorkspaceWriterV1;
+    expectedGenerationId: string;
+  }): Promise<WorkspaceProbeOutcome> {
+    return probeOutcome(
+      await this.workspace().delete({
+        path: { root: input.root, path: input.path },
+        writer: input.writer,
+        expectedGenerationId: input.expectedGenerationId,
+      }),
+    );
+  }
+
+  async readWorkspaceFile(input: {
+    root: WorkspaceRootV1;
+    path: string;
+  }): Promise<{ status: string; text?: string; generationId?: string }> {
+    const outcome = await this.workspace().read({
+      root: input.root,
+      path: input.path,
+    });
+    if (outcome.status !== "ok") return { status: outcome.status };
+    return {
+      status: "ok",
+      text: new TextDecoder().decode(outcome.file.bytes),
+      generationId: outcome.file.generation.generationId,
+    };
+  }
+
+  /** Read straight off durable storage, so eviction is what is being tested. */
+  async workspaceGeneration(input: {
+    root: WorkspaceRootV1;
+    path: string;
+  }): Promise<WorkspaceGenerationRecordV1 | undefined> {
+    return this.generations().current(input.root, input.path);
+  }
+
+  async workspaceConflicts(input: {
+    root: WorkspaceRootV1;
+    path: string;
+  }): Promise<WorkspaceGenerationRecordV1[]> {
+    return this.generations().conflicts(input.root, input.path);
+  }
+
+  /** The preserved bytes of one losing write, read back out of object storage. */
+  async workspaceConflictBody(
+    conflictKey: string,
+  ): Promise<string | undefined> {
+    const object = await this.env.MEMORY_FILES.get(conflictKey);
+    return object ? object.text() : undefined;
+  }
+
   /** Seeds the durable Bot configuration the isolate capability path reads. */
   async seedBotConfiguration(settings: BotSettingsViewV1): Promise<void> {
     await this.ctx.storage.put(BOT_CONFIGURATION_KEY, settings);

@@ -115,6 +115,9 @@ function describeRoot(source: SkillSourceV1): string {
     return `a root declared by Package "${root.packageId}"`;
   }
   if (root.kind === "user-memory") return "the User Memory root";
+  if (root.kind === "project-memory") {
+    return `Project "${root.projectId}"'s Memory root`;
+  }
   if (root.kind === "bot-memory") return `Bot "${root.botId}"'s Memory root`;
   return `Bot "${root.botId}"'s instruction root`;
 }

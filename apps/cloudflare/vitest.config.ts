@@ -83,7 +83,7 @@ export default defineConfig({
         workerLoaders: {
           BOT_PACKAGES: {},
         },
-        r2Buckets: ["APPLICATION_ARTIFACTS"],
+        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
         durableObjects: {
           AUTHORING: "AuthoringProbe",
           BOT_ISOLATES: "BotIsolateProbe",

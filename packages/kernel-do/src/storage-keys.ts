@@ -21,6 +21,50 @@ export const COMPOSITION_QUARANTINE_PREFIX = "composition:quarantine:";
 /** Attempts are zero-padded so the prefix listing is attempt-ordered. */
 export const COMPOSITION_FAILURE_ATTEMPT_DIGITS = 4;
 export const RECOVERY_ALARM_DELAY_MS = 60_000;
+/** The current generation of one durable-root file. */
+export const WORKSPACE_GENERATION_PREFIX = "workspace:generation:";
+/** Preserved losing writes for one durable-root file. */
+export const WORKSPACE_CONFLICT_PREFIX = "workspace:conflict:";
+/** The monotonic cursor every minted Workspace generation id advances. */
+export const WORKSPACE_GENERATION_CURSOR_KEY = "workspace:generation-cursor";
+/** Longest readable key tail before it is fingerprinted; Durable Object keys are bounded. */
+const WORKSPACE_KEY_TAIL_LIMIT = 900;
+
+function fingerprint(value: string): string {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(value)) {
+    hash ^= BigInt(byte);
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+/**
+ * The key tail identifying one file in one durable root. Readable while it
+ * fits — a root key plus a relative path — and fingerprinted past that, so a
+ * long path can never push a Durable Object key over its bound.
+ */
+export function workspaceFileKeyTail(rootKey: string, path: string): string {
+  const tail = `${rootKey}:${path}`;
+  if (tail.length <= WORKSPACE_KEY_TAIL_LIMIT) return tail;
+  return `${tail.slice(0, WORKSPACE_KEY_TAIL_LIMIT - 20)}#${fingerprint(tail)}`;
+}
+
+export function workspaceGenerationKey(rootKey: string, path: string): string {
+  return `${WORKSPACE_GENERATION_PREFIX}${workspaceFileKeyTail(rootKey, path)}`;
+}
+
+export function workspaceConflictPrefix(rootKey: string, path: string): string {
+  return `${WORKSPACE_CONFLICT_PREFIX}${workspaceFileKeyTail(rootKey, path)}:`;
+}
+
+export function workspaceConflictKey(
+  rootKey: string,
+  path: string,
+  generationId: string,
+): string {
+  return `${workspaceConflictPrefix(rootKey, path)}${generationId}`;
+}
 
 export function runIndexKey(acceptedAt: string, runId: string): string {
   return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;

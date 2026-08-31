@@ -7,7 +7,16 @@ import {
   decodeWorkspacePathV1,
   decodeWorkspaceRootV1,
   decodeWorkspaceWriterV1,
+  decodeWorkspaceConflictV1,
+  decodeWorkspaceGenerationRecordV1,
   isLoadableSkillSourceV1,
+  isWorkspaceMemoryRootV1,
+  isWorkspaceSharedMemoryRootV1,
+  memoryShardOwnerV1,
+  memoryShardPathV1,
+  memoryShardPrefixV1,
+  workspaceMemoryShardV1,
+  writerOwnsMemoryPathV1,
   normalizeWorkspaceRelativePathV1,
   workspaceMemoryProjectionV1,
   workspaceRootAcceptsKernelWriteV1,
@@ -16,7 +25,9 @@ import {
   WORKSPACE_MAX_PATH_LENGTH,
   WORKSPACE_MAX_PATH_SEGMENTS,
   WORKSPACE_MAX_SEGMENT_LENGTH,
+  WORKSPACE_MEMORY_SHARD_PREFIX,
   type SkillSourceV1,
+  type WorkspaceMemoryRootV1,
   type WorkspaceFilesV1,
   type WorkspaceGenerationV1,
   type WorkspaceRootV1,
@@ -477,6 +488,288 @@ describe("Skill sources", () => {
         writer: bot,
         generation: generation({ writer: bot }),
       }),
+    ).toThrow();
+  });
+});
+
+describe("the three Memory tiers", () => {
+  const botRoot: WorkspaceMemoryRootV1 = {
+    kind: "bot-memory",
+    userId: "user-1",
+    botId: "bot-1",
+  };
+  const userRoot: WorkspaceMemoryRootV1 = {
+    kind: "user-memory",
+    userId: "user-1",
+  };
+  const projectRoot: WorkspaceMemoryRootV1 = {
+    kind: "project-memory",
+    userId: "user-1",
+    projectId: "school-run",
+  };
+
+  test("decodes a Project Memory root and bounds its Project id", () => {
+    expect(decodeWorkspaceRootV1(projectRoot)).toEqual(projectRoot);
+    expect(() =>
+      decodeWorkspaceRootV1({ kind: "project-memory", userId: "user-1" }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkspaceRootV1({ ...projectRoot, projectId: "Not A Slug" }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkspaceRootV1({ ...projectRoot, projectId: "a".repeat(129) }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkspaceRootV1({ ...projectRoot, botId: "bot-1" }),
+    ).toThrow();
+  });
+
+  test("all three kinds are Memory roots, and only two are shared", () => {
+    expect(
+      [botRoot, userRoot, projectRoot].map(isWorkspaceMemoryRootV1),
+    ).toEqual([true, true, true]);
+    expect(isWorkspaceMemoryRootV1(instructionRoot())).toBe(false);
+    expect(
+      [botRoot, userRoot, projectRoot].map(isWorkspaceSharedMemoryRootV1),
+    ).toEqual([false, true, true]);
+  });
+
+  test("no Memory root accepts a kernel write, Project Memory included", () => {
+    expect(workspaceRootAcceptsKernelWriteV1(projectRoot)).toBe(false);
+  });
+
+  test("a Project Memory root key never collides with another root", () => {
+    expect(workspaceRootKeyV1(projectRoot)).toBe(
+      "project-memory:user-1:school-run",
+    );
+    const keys = [
+      workspaceRootKeyV1(botRoot),
+      workspaceRootKeyV1(userRoot),
+      workspaceRootKeyV1(projectRoot),
+      workspaceRootKeyV1(instructionRoot()),
+    ];
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe("shared Memory tiers are sharded per writing Bot", () => {
+  const userRoot: WorkspaceMemoryRootV1 = {
+    kind: "user-memory",
+    userId: "user-1",
+  };
+  const projectRoot: WorkspaceMemoryRootV1 = {
+    kind: "project-memory",
+    userId: "user-1",
+    projectId: "school-run",
+  };
+  const botRoot: WorkspaceMemoryRootV1 = {
+    kind: "bot-memory",
+    userId: "user-1",
+    botId: "bot-1",
+  };
+
+  test("a shared root places a Bot's files under its own shard", () => {
+    expect(memoryShardPrefixV1(userRoot, "bot-1")).toBe(
+      `${WORKSPACE_MEMORY_SHARD_PREFIX}/bot-1/`,
+    );
+    expect(memoryShardPathV1(userRoot, "bot-1", "profile.md")).toEqual({
+      root: userRoot,
+      path: "by-agent/bot-1/profile.md",
+    });
+    expect(memoryShardPathV1(projectRoot, "bot-2", "log/2026-08.md")).toEqual({
+      root: projectRoot,
+      path: "by-agent/bot-2/log/2026-08.md",
+    });
+    expect(workspaceMemoryShardV1(projectRoot, "bot-2")).toEqual({
+      root: projectRoot,
+      botId: "bot-2",
+      prefix: "by-agent/bot-2/",
+    });
+  });
+
+  test("a Bot Memory root has one writer already, so it has no shard prefix", () => {
+    expect(memoryShardPrefixV1(botRoot, "bot-1")).toBe("");
+    expect(memoryShardPathV1(botRoot, "bot-1", "profile.md")).toEqual({
+      root: botRoot,
+      path: "profile.md",
+    });
+    expect(workspaceMemoryShardV1(botRoot, "bot-1").prefix).toBe("");
+  });
+
+  test("a shard path refuses an escaping relative path or Bot id", () => {
+    expect(() =>
+      memoryShardPathV1(userRoot, "bot-1", "../escape.md"),
+    ).toThrow();
+    expect(() =>
+      memoryShardPathV1(userRoot, "bot-1", "/absolute.md"),
+    ).toThrow();
+    expect(() => memoryShardPathV1(userRoot, "a/b", "profile.md")).toThrow();
+    expect(() => memoryShardPathV1(userRoot, "..", "profile.md")).toThrow();
+    expect(() => memoryShardPathV1(userRoot, "", "profile.md")).toThrow();
+  });
+
+  test("the shard owner is read back off the path", () => {
+    expect(
+      memoryShardOwnerV1(memoryShardPathV1(userRoot, "bot-9", "profile.md")),
+    ).toBe("bot-9");
+    expect(memoryShardOwnerV1({ root: userRoot, path: "profile.md" })).toBe(
+      undefined,
+    );
+    expect(memoryShardOwnerV1({ root: botRoot, path: "profile.md" })).toBe(
+      "bot-1",
+    );
+    expect(
+      memoryShardOwnerV1({ root: instructionRoot(), path: "a/SKILL.md" }),
+    ).toBe(undefined);
+  });
+
+  test("a Bot writer owns only its own shard", () => {
+    const bot = (botId: string): WorkspaceWriterV1 => ({
+      kind: "bot",
+      botId,
+      sessionId: "user-1:bot",
+      turnId: "turn-1",
+      runId: "run-1",
+    });
+    const own = memoryShardPathV1(userRoot, "bot-1", "profile.md");
+    expect(writerOwnsMemoryPathV1(own, bot("bot-1"))).toBe(true);
+    expect(writerOwnsMemoryPathV1(own, bot("bot-2"))).toBe(false);
+    // An unsharded file in a shared root belongs to no Bot's shard.
+    expect(
+      writerOwnsMemoryPathV1(
+        { root: userRoot, path: "profile.md" },
+        bot("bot-1"),
+      ),
+    ).toBe(false);
+    // A Bot Memory root is its own Bot's shard, and no other Bot's.
+    expect(
+      writerOwnsMemoryPathV1(
+        { root: botRoot, path: "profile.md" },
+        bot("bot-1"),
+      ),
+    ).toBe(true);
+    expect(
+      writerOwnsMemoryPathV1(
+        { root: botRoot, path: "profile.md" },
+        bot("bot-2"),
+      ),
+    ).toBe(false);
+  });
+
+  test("a User owns every shard of their own root; a Package owns none", () => {
+    const user: WorkspaceWriterV1 = { kind: "user", userId: "user-1" };
+    const other: WorkspaceWriterV1 = { kind: "user", userId: "user-2" };
+    expect(
+      writerOwnsMemoryPathV1(
+        memoryShardPathV1(projectRoot, "bot-7", "profile.md"),
+        user,
+      ),
+    ).toBe(true);
+    expect(
+      writerOwnsMemoryPathV1(
+        memoryShardPathV1(projectRoot, "bot-7", "profile.md"),
+        other,
+      ),
+    ).toBe(false);
+    expect(
+      writerOwnsMemoryPathV1(memoryShardPathV1(userRoot, "bot-1", "p.md"), {
+        kind: "first-party",
+        packageId: "memory",
+      }),
+    ).toBe(false);
+    expect(
+      writerOwnsMemoryPathV1(memoryShardPathV1(userRoot, "bot-1", "p.md"), {
+        kind: "unattributed",
+      }),
+    ).toBe(false);
+  });
+
+  test("the predicate answers only the Memory sharding rule", () => {
+    expect(
+      writerOwnsMemoryPathV1(
+        { root: instructionRoot(), path: "skills/a/SKILL.md" },
+        { kind: "user", userId: "user-1" },
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("conflicting generations survive as a declared variant", () => {
+  test("a conflict carries both generations and decodes exactly", () => {
+    const current = generation({ generationId: "000000000000001-000001" });
+    const preserved = generation({
+      generationId: "000000000000002-000001",
+      conflictsWith: "000000000000001-000001",
+    });
+    const decoded = decodeWorkspaceConflictV1({
+      status: "conflict",
+      reason: "the file changed since the writer last saw it",
+      current,
+      preserved,
+    });
+    expect(decoded.current?.generationId).toBe("000000000000001-000001");
+    expect(decoded.preserved?.conflictsWith).toBe("000000000000001-000001");
+    expect(
+      decodeWorkspaceFailureV1({
+        status: "conflict",
+        reason: "the file changed since the writer last saw it",
+        current,
+        preserved,
+      }),
+    ).toEqual(decoded);
+    expect(() =>
+      decodeWorkspaceConflictV1({ status: "refused", reason: "no" }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkspaceFailureV1({ status: "refused", reason: "no", current }),
+    ).toThrow();
+  });
+});
+
+describe("durable generation records", () => {
+  test("a record names its root, path, generation, and object etag", () => {
+    const entry = decodeWorkspaceGenerationRecordV1({
+      schemaVersion: 1,
+      root: instructionRoot(),
+      path: "skills/deploy/SKILL.md",
+      generation: generation(),
+      etag: "abc123",
+    });
+    expect(entry.root).toEqual(instructionRoot());
+    expect(entry.etag).toBe("abc123");
+    expect(entry.deleted).toBe(undefined);
+  });
+
+  test("a tombstone is a record, so a delete leaves durable evidence", () => {
+    const entry = decodeWorkspaceGenerationRecordV1({
+      schemaVersion: 1,
+      root: instructionRoot(),
+      path: "skills/deploy/SKILL.md",
+      generation: generation({
+        contentHash:
+          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        size: 0,
+      }),
+      deleted: true,
+    });
+    expect(entry.deleted).toBe(true);
+  });
+
+  test("rejects an unknown field, a bad path, and a wrong schema version", () => {
+    const base = {
+      schemaVersion: 1,
+      root: instructionRoot(),
+      path: "a.md",
+      generation: generation(),
+    };
+    expect(() =>
+      decodeWorkspaceGenerationRecordV1({ ...base, surprise: 1 }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkspaceGenerationRecordV1({ ...base, path: "../a.md" }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkspaceGenerationRecordV1({ ...base, schemaVersion: 2 }),
     ).toThrow();
   });
 });

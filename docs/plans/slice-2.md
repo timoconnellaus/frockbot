@@ -3,7 +3,9 @@
 ## Status
 
 steps 0, 1, and 2 landed (the shared Workspace contract; one Computer per
-User; the Skills loader); step 3 not started
+User; the Skills loader), and step 3a landed (the object-storage Workspace
+store, which also mounts the Skills loader in production); the rest of step 3
+not started
 
 ## Resolved decisions
 
@@ -234,6 +236,89 @@ file contract carries bytes and cannot classify them.
 call; a Workspace write into a Memory root is rejected at runtime; conflicting
 Workspace and object-storage writes to a non-Memory durable root both survive
 as generations and are surfaced; indexes rebuild from the files.
+
+### Step 3a — object-storage Workspace store (landed)
+
+**Status.** Landed, ahead of the rest of Step 3, as the shared foundation the
+Memory Package and the Computer-side durable-root sync both consume.
+
+**What it is.** `packages/workspace-store` implements `WorkspaceFilesV1` over
+object storage. It is not kernel code — it is an implementation, and it imports
+`@frockbot/kernel-contracts` and nothing else.
+
+- `createObjectWorkspaceFilesV1({ bucket, generations, clock, owner, surface })`
+  → `WorkspaceFilesV1`.
+- `bucket` is `ObjectBucketV1`, a structural interface over R2 declared in the
+  package (`get`/`head`/`put`/`delete`/`list`, with `onlyIf` conditional
+  semantics on `put` and a `null` answer for a failed precondition). A Bun test
+  uses `createInMemoryObjectBucketV1`; workerd uses the real R2 adapter in
+  `apps/cloudflare/src/workspace.ts`.
+- `generations` is `WorkspaceGenerationsV1`, declared in `kernel-contracts` and
+  implemented by the owning Durable Object:
+  `packages/kernel-do/src/workspace-generations.ts`
+  (`DurableWorkspaceGenerations`) over the `workspace:` storage keys.
+- `surface` mirrors the Fly implementation exactly: `"kernel"` refuses every
+  Memory root write, `"memory"` serves Memory roots and nothing else.
+
+**Object-key and conflict-key scheme.**
+
+```
+file      workspace/<workspaceRootKeyV1(root)>/<relative>
+conflict  workspace/<workspaceRootKeyV1(root)>/<relative>.conflict/<generationId>
+```
+
+Every `put` is conditional. `expectedGenerationId` is mapped to the ETag the
+Durable Object recorded for that generation and sent as `If-Match`; `null` is
+sent as `If-None-Match: *` (the R2 adapter sends `uploadedBefore: epoch`
+alongside, so "create only if absent" holds even where a wildcard etag would be
+compared literally). A losing write is written to its conflict key, recorded in
+the ledger as a conflicting generation with `conflictsWith` set, and returned
+as `{ status: "conflict", current, preserved }` — preserved, surfaced, never
+merged or dropped. A delete removes the object and records a durable tombstone,
+which is the only evidence that survives, because object storage forgets the
+key.
+
+**Contract additions** (`packages/kernel-contracts/src/workspace.ts`), all
+consumed by the two steps below: a fifth root kind `project-memory`
+`{ kind, userId, projectId }` with a bounded slug; `WorkspaceMemoryRootV1`
+covering all three tiers and `WorkspaceSharedMemoryRootV1` covering the two
+shared ones; `WorkspaceShardV1` with `memoryShardPrefixV1`,
+`memoryShardPathV1`, `workspaceMemoryShardV1` and `memoryShardOwnerV1`
+(`by-agent/<botId>/`, empty for `bot-memory`); `writerOwnsMemoryPathV1`, true
+only when a Bot writes its own shard, a User writes any shard of their own
+root, and never for first-party or `unattributed`; `WorkspaceConflictV1` with
+`isWorkspaceConflictV1`; and `WorkspaceGenerationsV1` /
+`WorkspaceGenerationRecordV1` with their decoders.
+`isLoadableSkillSourceV1` is unchanged.
+
+**The seam the two later steps consume.**
+
+- **Memory Package.** Construct the store with `surface: "memory"` and the
+  User's or Bot's ledger, write through `memoryShardPathV1`, and hand the
+  kernel `workspaceMemoryProjectionV1` of it. It replaces
+  `packages/plugin-memory/src/workspace-storage.ts` and deletes
+  `ComputerWorkspace.memoryWriter`.
+- **Computer sync.** The same object keys and the same conditional-write rules
+  are what the FUSE-side agent must obey, and `WorkspaceGenerationsV1` is where
+  it records what it wrote. A file it writes with no generation metadata reads
+  back as `unattributed`, exactly as a shell-written file does on the Computer.
+
+**Wiring.** `apps/cloudflare/src/workspace.ts` exports
+`createR2ObjectBucketV1` and `createDurableWorkspaceFilesV1`. `BotState`
+constructs the store over the existing `MEMORY_FILES` bucket and passes it to
+the Shell Package as `WORKSPACE_FILES`, so the Skills loader is now mounted in
+production and reads Skills from object storage without waking the Computer.
+The bucket binding was reused rather than renamed: `WORKSPACE_FILES` is a
+`WorkspaceFilesV1` on the Durable Object environment, not an R2 bucket, so the
+two names must stay distinct. Durable-root objects live under the `workspace/`
+prefix and never collide with the Memory Package's existing keys.
+
+**Known disagreement, recorded rather than hidden.** `AGENTS.md` § Authorities
+gives the User's Durable Object "the generation records of User Memory roots";
+only the Bot object's ledger is wired today. Nothing writes a shared root in
+production yet, so nothing is wrong at runtime — the Memory step closes it by
+routing shared roots to the User object through the same interface. It is in
+the **Open** list of `docs/architecture-checks.md`.
 
 ### Parity facts
 

@@ -70,6 +70,31 @@ the Workspace file surface the Computer provider implements.
 | a losing conditional write is a conflict, never a silent overwrite                                                                                                      | `packages/plugin-fly-sprite/src/workspace.test.ts` | `answers conflict when the expected generation is not the current one`           | Bun    |
 | Computer connections drop on every pause; a dropped connection is an outcome, not a failure                                                                             | `packages/plugin-fly-sprite/src/workspace.test.ts` | `answers unavailable rather than throwing when the Sprite is paused`             | Bun    |
 
+## Workspace store
+
+Rows for `docs/plans/slice-2.md` Step 3a — `WorkspaceFilesV1` over object
+storage (`packages/workspace-store`), its generation ledger in the owning
+Durable Object (`packages/kernel-do/src/workspace-generations.ts`), and the
+`WORKSPACE_FILES` binding that mounts the Skills loader in production
+(`apps/cloudflare/src/workspace.ts`).
+
+| Constitutional check                                                                                                    | File                                                   | Test name                                                                                 | Runner  |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------- | ------- |
+| Skills function while the Computer is hibernated: a Skill written to object storage is loaded on the next admitted Turn | `apps/cloudflare/test/workspace.workerd.ts`            | `a Skill written through the store is loaded on the next admitted Turn`                   | workerd |
+| — the exact Skill generation each Turn used is reconstructable from durable state                                       | `apps/cloudflare/test/workspace.workerd.ts`            | `a Skill written through the store is loaded on the next admitted Turn`                   | workerd |
+| a write that would overwrite a generation its writer has not seen is preserved as a conflicting generation and surfaced | `apps/cloudflare/test/workspace.workerd.ts`            | `a stale expected generation conflicts, and both generations survive`                     | workerd |
+| — its record half: the losing write survives in the Durable Object ledger across eviction                               | `apps/cloudflare/test/workspace.workerd.ts`            | `a stale expected generation conflicts, and both generations survive`                     | workerd |
+| — a create that asserts absence never becomes a silent overwrite on real R2                                             | `apps/cloudflare/test/workspace.workerd.ts`            | `asserting absence over an existing object conflicts, never overwrites`                   | workerd |
+| — the same rules against an in-memory object store, including the conflict key layout                                   | `packages/workspace-store/src/store.test.ts`           | `a stale expected generation conflicts and both generations survive`                      | Bun     |
+| every write to a durable root records its writer, and a delete leaves a durable tombstone                               | `apps/cloudflare/test/workspace.workerd.ts`            | `a delete leaves a tombstone the Durable Object still holds after eviction`               | workerd |
+| — its record half: mint, record, tombstone, conflict, and their decoders                                                | `packages/kernel-do/src/workspace-generations.test.ts` | `the generation ledger` (4 tests)                                                         | Bun     |
+| — generation ids stay sortable and strictly increasing across eviction                                                  | `packages/kernel-do/src/workspace-generations.test.ts` | `minted generation ids` (3 tests)                                                         | Bun     |
+| a Skill written outside the Bot's own authority is refused at the store, not merely unloaded                            | `apps/cloudflare/test/workspace.workerd.ts`            | `a Skill another Bot wrote is refused at the store, not merely unloaded`                  | workerd |
+| — `unattributed` writers, first-party writers, and other Bots are refused on instruction and Memory roots               | `packages/workspace-store/src/store.test.ts`           | `who may write` (7 tests)                                                                 | Bun     |
+| Memory is Markdown under three tiers, and shared tiers are sharded per writing Bot so every file has exactly one writer | `packages/kernel-contracts/src/workspace.test.ts`      | `the three Memory tiers` (4 tests), `shared Memory tiers are sharded per writing Bot` (6) | Bun     |
+| — its runtime half: a Bot writes only its own shard, and a listing with no shard merges every Bot's                     | `packages/workspace-store/src/store.test.ts`           | `shared Memory tiers are sharded per writing Bot` (5 tests)                               | Bun     |
+| a Workspace write into a Memory root is rejected — **object-storage half**                                              | `packages/workspace-store/src/store.test.ts`           | `the kernel surface refuses every Memory root and the Memory surface refuses every other` | Bun     |
+
 ## Open
 
 Rules in `AGENTS.md` § Architecture checks that no named test proves yet. They
@@ -105,17 +130,21 @@ step start awaiting its model request`) but never across a real workerd
 - **Computer tools operate without a desktop client.** No check. The Computer
   Package's tests exercise provider routing, not the absence of a desktop
   shell.
-- **Skills, the parts the loader cannot yet reach.** The loader and its checks
-  are real (see the **Skills** subsection below), but nothing binds a
-  `WorkspaceFilesV1` into the Bot Durable Object yet, so no production Turn
-  loads a Skill: `packages/plugin-shell/src/backend-skills.ts` returns
-  `undefined` and the Package is not mounted. Two consequences have no check.
-  First, "an edit is visible to the Bot on its next admitted Turn" is proven
-  only against an in-memory Workspace, not across a real durable-root sync.
-  Second, the per-Bot Skill quota is Package-local rather than durable per-User
-  configuration, so no check ties it to the User Durable Object the way
-  authoring's does. Both close when the Computer and Memory steps of
-  `docs/plans/slice-2.md` land the Workspace file surface.
+- **Skills, the parts the loader cannot yet reach.** The binding gap is closed:
+  `apps/cloudflare/src/workspace.ts` binds `WORKSPACE_FILES` over R2, and the
+  **Workspace store** rows above prove a production Turn loading a Skill from
+  object storage. Two smaller gaps remain. First, the per-Bot Skill quota is
+  Package-local rather than durable per-User configuration, so no check ties it
+  to the User Durable Object the way authoring's does. Second, Workspace disk
+  is still not measurable as a per-User quota.
+- **Where the generation ledger lives.** `AGENTS.md` § Authorities gives the
+  User's Durable Object "the generation records of User Memory roots", but the
+  only ledger wired today is the Bot object's, so a shared Memory root written
+  from two Bots would record its generations in two places. Nothing writes a
+  shared root in production yet — the Memory Package still writes the
+  Computer's `memoryWriter` seam — so the disagreement is latent, and the
+  Memory step closes it by routing shared roots to the User object through the
+  same `WorkspaceGenerationsV1` interface.
 - **UI style contract** (`scripts/check-ui-styles.ts`) and the **kernel import
   contract** (`scripts/check-kernel-imports.ts`) remain standalone linters as
   well as tests, because `bun run typecheck` must fail on them before any test
