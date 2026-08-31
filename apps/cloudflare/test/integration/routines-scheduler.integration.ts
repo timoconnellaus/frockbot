@@ -11,7 +11,7 @@ import {
   runDurableObjectAlarm,
   runInDurableObject,
 } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   asUser,
   dueAtWithFiringHeadroomV1,
@@ -19,6 +19,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  settledRoutineFiringV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -63,20 +64,6 @@ async function makeDue(userId: string, botId: string): Promise<void> {
   });
 }
 
-async function storedRuns(
-  userId: string,
-  botId: string,
-): Promise<StoredRunProbe[]> {
-  return runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => [
-      ...(
-        await state.storage.list<StoredRunProbe>({ prefix: "run:" })
-      ).values(),
-    ],
-  );
-}
-
 describe("a Routine firing, from the command to the admitted Turn", () => {
   it("fires a one-minute cron into an automation Turn with a recorded origin", async () => {
     const userId = freshUserId("routines-fire");
@@ -112,12 +99,11 @@ describe("a Routine firing, from the command to the admitted Turn", () => {
     // the Routine, and nothing outside the Bot asks it to fire.
     expect(await runDurableObjectAlarm(botStub(userId, botId))).toBe(true);
 
-    const runs = await storedRuns(userId, botId);
-    const automation = runs.filter(
-      (run) => run.admission?.origin?.routineId === "brief",
-    );
-    expect(automation).toHaveLength(1);
-    expect(automation[0]).toMatchObject({
+    // The firing is read once it has settled, never the instant the alarm
+    // returns: the run record exists from admission onwards, so a read that
+    // races the Turn sees the origin already and the status not yet.
+    const fired = await settledRoutineFiringV1<StoredRunProbe>(userId, botId);
+    expect(fired).toMatchObject({
       status: "completed",
       sessionId: "routine:brief",
       admission: {
@@ -136,7 +122,7 @@ describe("a Routine firing, from the command to the admitted Turn", () => {
     expect(log.entries[0]).toMatchObject({
       status: "ok",
       trigger: "cron",
-      runId: automation[0]!.runId,
+      runId: fired.runId,
     });
 
     // And the Routine now reports when it last ran.
@@ -152,9 +138,7 @@ describe("a Routine firing, from the command to the admitted Turn", () => {
       await asUser(userId, `/api/bots/${botId}/turns`),
     )) as { runs: Array<Record<string, unknown>> };
     expect(turns.runs.length).toBe(before.runs.length);
-    expect(
-      turns.runs.find((run) => run.runId === automation[0]!.runId),
-    ).toBeUndefined();
+    expect(turns.runs.find((run) => run.runId === fired.runId)).toBeUndefined();
   });
 
   it("runs a Routine on demand and records the firing as manual", async () => {
@@ -189,22 +173,14 @@ describe("a Routine firing, from the command to the admitted Turn", () => {
     expect(receipt).toMatchObject({ status: "fired" });
 
     // A manual firing is owed immediately, so the object may well have woken
-    // itself already; driving the alarm is idempotent either way, and the
-    // firing lands exactly once.
-    await vi.waitFor(
-      async () => {
-        await runDurableObjectAlarm(botStub(userId, botId));
-        const fired = (await storedRuns(userId, botId)).filter(
-          (run) => run.admission?.origin?.routineId === "brief",
-        );
-        expect(fired).toHaveLength(1);
-        expect(fired[0]).toMatchObject({
-          runId: receipt.fireId,
-          status: "completed",
-          admission: { turnType: "automation", origin: { trigger: "manual" } },
-        });
-      },
-      { timeout: 5_000, interval: 50 },
-    );
+    // itself already; the wait drives the alarm idempotently either way, and
+    // the firing lands exactly once.
+    expect(
+      await settledRoutineFiringV1<StoredRunProbe>(userId, botId),
+    ).toMatchObject({
+      runId: receipt.fireId,
+      status: "completed",
+      admission: { turnType: "automation", origin: { trigger: "manual" } },
+    });
   });
 });
