@@ -102,6 +102,8 @@ interface Env {
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
   COMPUTER_HOST: Fetcher;
+  /** Shared secret presented on every Computer host call. */
+  COMPUTER_HOST_TOKEN?: string;
   AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;

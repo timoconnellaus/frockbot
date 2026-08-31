@@ -1,5 +1,6 @@
 import type { AuthoringProbe } from "./authoring-probe.ts";
 import type { BotIsolateProbe } from "./bot-isolate-probe.ts";
+import type { ComputerHostClientProbe } from "./computer-host-probe.ts";
 import type {
   CompositionProbe,
   FlyCompatibilityProbe,
@@ -13,6 +14,10 @@ interface FlyTestEnv {
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
   SECRET_TOKEN: string;
   COMPOSITIONS: DurableObjectNamespace<CompositionProbe>;
+  COMPUTER_HOST: Fetcher;
+  COMPUTER_HOST_CLIENT: DurableObjectNamespace<ComputerHostClientProbe>;
+  COMPUTER_HOST_SHARDS: string;
+  COMPUTER_HOST_TOKEN: string;
   FLY_COMPATIBILITY: DurableObjectNamespace<FlyCompatibilityProbe>;
   FROCKBOT_RUN_LIVE_SPRITE_TEST: string;
   PACKAGE_CATALOG: R2Bucket;

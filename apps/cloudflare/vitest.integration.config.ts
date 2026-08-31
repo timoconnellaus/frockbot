@@ -18,6 +18,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 import {
+  createComputerHostFake,
+  FAKE_COMPUTER_HOST_TOKEN,
+} from "./test/computer-host-fake.ts";
+import {
   createOutboundService,
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
@@ -40,6 +44,11 @@ const authMigrations = await readD1Migrations(
   resolve(import.meta.dirname, "migrations"),
 );
 
+// The same fake the hermetic project binds, so a `SELF.fetch` Turn that uses
+// the Computer crosses the real v1 seam. See `test/computer-host-fake.ts` for
+// why a container cannot run under this pool.
+const computerHost = createComputerHostFake();
+
 export default defineConfig({
   // `manifest-catalog.integration.ts` imports the production client decoder
   // from `@frockbot/plugin-shell/client`, whose module graph reaches Vue single
@@ -59,6 +68,9 @@ export default defineConfig({
           // Object loads Bot-authored Packages in the other namespace.
           USER_APPLICATIONS: {},
           BOT_PACKAGES: {},
+        },
+        serviceBindings: {
+          COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
         },
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         d1Databases: ["AUTH_DB"],
@@ -80,10 +92,11 @@ export default defineConfig({
           ALLOW_DEVELOPMENT_AUTH: "true",
           ALLOWED_CLIENT_ORIGINS: "capacitor://localhost,frockbot://localhost",
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
-          // No Sprite in this project: the Computer is unreachable from
-          // workerd (ADR 0004) and no test here touches it. An empty token is
-          // what production hands a Worker with no Computer configured.
+          // No Sprite token reaches this Worker in production either: the
+          // Computer runs on the host (ADR 0004), and SPRITES_TOKEN survives
+          // here only as the "is a Computer configured" gate.
           SPRITES_TOKEN: "",
+          COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
         },
         // Deliberately absent, and why:
         //
@@ -100,7 +113,6 @@ export default defineConfig({
         //   `test/package-bundler-fake.ts` in would need an auxiliary Worker
         //   with an RPC entrypoint, and no test in this layer authors a
         //   Package. `test/authoring.workerd.ts` covers that seam with the fake.
-        // - `COMPUTER_HOST`: same reason as `SPRITES_TOKEN`.
       },
     }),
   ],

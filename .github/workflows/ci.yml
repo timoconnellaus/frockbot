@@ -317,6 +317,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
+          COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
         shell: bash
         run: |
@@ -334,6 +335,7 @@ jobs:
             'GOOGLE_CLIENT_ID',
             'GOOGLE_CLIENT_SECRET',
             'SPRITES_TOKEN',
+            'COMPUTER_HOST_TOKEN',
             'CREDENTIAL_KEYRING',
           ];
           console.log(
