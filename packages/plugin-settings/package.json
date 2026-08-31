@@ -21,11 +21,12 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@frockbot/catalog-core": "workspace:*",
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
-    "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
+    "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"

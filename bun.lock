@@ -84,6 +84,7 @@
         "@better-auth/electron": "1.7.2",
         "@frockbot/agent-runtime": "workspace:*",
         "@frockbot/application-foundation": "workspace:*",
+        "@frockbot/catalog-core": "workspace:*",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/computer-core": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
@@ -275,6 +276,17 @@
       },
       "devDependencies": {
         "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/catalog-core": {
+      "name": "@frockbot/catalog-core",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-composition": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.6",
         "typescript": "^7.0.2",
       },
     },
@@ -793,6 +805,7 @@
       "name": "@frockbot/plugin-settings",
       "version": "0.0.1",
       "dependencies": {
+        "@frockbot/catalog-core": "workspace:*",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/client-ui": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
@@ -818,6 +831,7 @@
         "@cordisjs/plugin-webui": "0.8.2",
         "@frockbot/agent-runtime": "workspace:*",
         "@frockbot/application-foundation": "workspace:*",
+        "@frockbot/catalog-core": "workspace:*",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/client-ui": "workspace:*",
         "@frockbot/computer-core": "workspace:*",
@@ -1144,6 +1158,8 @@
     "@frockbot/application-foundation": ["@frockbot/application-foundation@workspace:applications/foundation"],
 
     "@frockbot/architecture-checks": ["@frockbot/architecture-checks@workspace:packages/architecture-checks"],
+
+    "@frockbot/catalog-core": ["@frockbot/catalog-core@workspace:packages/catalog-core"],
 
     "@frockbot/client-core": ["@frockbot/client-core@workspace:packages/client-core"],
 
@@ -2785,6 +2801,8 @@
 
     "@electron/windows-sign/fs-extra": ["fs-extra@11.4.0", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^6.0.1", "universalify": "^2.0.0" } }, "sha512-EQsFzMUJkCKGr1ePqlYADkIUmHW1s3ZXr5Yqy6wbGrfUCphpl2maM/kyOIRA2HpP3AaFQTZXD4ldjek+nccddA=="],
 
+    "@frockbot/catalog-core/@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
+
     "@frockbot/client-ui/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/cloudflare/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
@@ -3081,6 +3099,8 @@
 
     "@electron/universal/minimatch/brace-expansion": ["brace-expansion@2.1.4", "", { "dependencies": { "balanced-match": "^1.0.0" } }, "sha512-hGfVzPxthbf3+2yjg/RBs60cB0FhqBS/zvdV/4wn4/BmN0bNMMHPc4V/BbFieqf1TKAGGAHnY4eSjajCl0f2Xg=="],
 
+    "@frockbot/catalog-core/@types/bun/bun-types": ["bun-types@1.3.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-OlFwHcnNV99r//9v5IIOgQ9Uk37gZqrNMCcqEaExdkVq3Avwqok1bJFmvGMCkCE0FqzdY8VMOZpfpR3lwI+CsQ=="],
+
     "@frockbot/configuration-core/@types/bun/bun-types": ["bun-types@1.3.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-OlFwHcnNV99r//9v5IIOgQ9Uk37gZqrNMCcqEaExdkVq3Avwqok1bJFmvGMCkCE0FqzdY8VMOZpfpR3lwI+CsQ=="],
 
     "@frockbot/connection-core/@types/bun/bun-types": ["bun-types@1.3.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-OlFwHcnNV99r//9v5IIOgQ9Uk37gZqrNMCcqEaExdkVq3Avwqok1bJFmvGMCkCE0FqzdY8VMOZpfpR3lwI+CsQ=="],
@@ -3338,6 +3358,8 @@
     "@electron/node-gyp/tar/minizlib/minipass": ["minipass@3.3.6", "", { "dependencies": { "yallist": "^4.0.0" } }, "sha512-DxiNidxSEK+tHG6zOIklvNOwm3hvCrbUrdtzY74U6HKTJxvIDfOUL5W5P2Ghd3DTkhhKPYGqeNUIh5qcM4YBfw=="],
 
     "@electron/universal/minimatch/brace-expansion/balanced-match": ["balanced-match@1.0.2", "", {}, "sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw=="],
+
+    "@frockbot/catalog-core/@types/bun/bun-types/@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
 
     "@frockbot/configuration-core/@types/bun/bun-types/@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
 

@@ -555,8 +555,8 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 38  | Subagents start blank; background by default; check, message, stop, resume by id; the model set varies by turn type              | `Check`/`Message`/`StopSubagent`, `resume=<id>`; `available_subagent_models` = `sand-automation` only on automation turns                                       | §2.15, §3.12     | `plugin-subagents`                           | not started |
 | 39  | Only one desktop-GUI subagent at a time, because the screen is shared                                                            | `computerUse` serialization                                                                                                                                     | §2.15            | `plugin-fly-sprite` lease                    | not started |
 | 40  | Child → parent handoff that ends the child's turn                                                                                | `WakeParent{message}`; parent = the same Bot's visible conversation                                                                                             | §2.13            | kernel Turn admission                        | not started |
-| 41  | **Connectors / MCP** — plugin = marketplace bundle of MCP connectors ± skills, stable numeric id                                 | `plugins/cache/…/.cursor-plugin/plugin.json`                                                                                                                    | §2.10            | `plugin-catalog`                             | partial     |
-| 42  | Plugin discovery, fetch, install state and uninstall over a 296-plugin catalog; plugins are user-scoped                          | `SearchPlugins`/`GetPlugin`/`UninstallPlugin`; `installed=yes (user)`                                                                                           | §2.10            | `plugin-catalog`                             | partial     |
+| 41  | **Connectors / MCP** — plugin = marketplace bundle of MCP connectors ± skills, stable numeric id                                 | `plugins/cache/…/.cursor-plugin/plugin.json`                                                                                                                    | §2.10            | `catalog-core` + `plugin-settings`           | partial     |
+| 42  | Plugin discovery, fetch, install state and uninstall over a 296-plugin catalog; plugins are user-scoped                          | `SearchPlugins`/`GetPlugin`/`UninstallPlugin`; `installed=yes (user)`                                                                                           | §2.10            | `catalog-core` + `plugin-settings`           | partial     |
 | 43  | Multi-account connectors with per-account labels; MCP lifecycle (status, restart, rename, instructions)                          | Gmail/Calendar/Drive ×5; `GetMcpServerStatus`, `SetMcpInstructions`                                                                                             | §16, §17         | `connection-core`                            | partial     |
 | 44  | Custom (non-marketplace) stdio MCP servers, which cannot ship in a template                                                      | `user-beeper`, `user-beeper-desktop`                                                                                                                            | §2.10            | `connection-core`                            | not started |
 | 45  | Per-Bot connector credential store                                                                                               | `connector-secrets/<agent-uuid>/`                                                                                                                               | §10              | `plugin-credentials`                         | partial     |
@@ -696,6 +696,24 @@ the rows whose status the code moved:
 - **27** — one in-box reference file is written
   (`/home/box/reference/README.md`, `plugin-fly-sprite/src/computer.ts`), but
   there is no self-check the Bot runs and no log it is pointed at.
+
+- **41** — the Catalog half is landed and the MCP half is not. A remote,
+  versioned Catalog exists (`packages/catalog-core`, the `PACKAGE_CATALOG`
+  bucket, the gateway's `/catalog/v1/*` routes), and a Catalog entry already
+  carries the fields a connector bundle needs — `servers[]`, `setupFields`,
+  `skills[]` — but nothing yet reads them: there is no `plugin-mcp`, no MCP
+  client, no handshake, and no tool projection, so no MCP connector can be
+  installed. `catalogId` is the stable opaque marketplace identity GrokBot's
+  numeric `plugin_id` plays, split from the composition identity `packageId`.
+  Bundled skills are carried in the entry and not indexed (plan decision 4).
+- **42** — discovery, fetch, install state and uninstall are landed over a
+  first-party seed catalog whose entries are the compiled-in Packages
+  (`scripts/publish-catalog.ts`), and installs are User-scoped as GrokBot's
+  are. What is missing is scale and provenance breadth: 22 first-party entries
+  against GrokBot's 296, no third-party or Bot-published entry in the index yet
+  (ADR 0008 publication writes artifacts, not Catalog rows), and no agent-side
+  `SearchPlugins`/`GetPlugin` tools — the Catalog is reachable from the hosted
+  Plugins surface only.
 
 ## Open questions for GrokBot
 

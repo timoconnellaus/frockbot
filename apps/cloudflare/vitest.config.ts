@@ -24,7 +24,7 @@ export default defineConfig({
         workerLoaders: {
           BOT_PACKAGES: {},
         },
-        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
+        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         durableObjects: {
           AUTHORING: "AuthoringProbe",
           BOT_ISOLATES: "BotIsolateProbe",

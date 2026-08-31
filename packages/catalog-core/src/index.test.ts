@@ -1,0 +1,287 @@
+import { describe, expect, test } from "bun:test";
+import {
+  assertCatalogEntryMatchesIndexV1,
+  catalogContentHashV1,
+  catalogEntryKeyV1,
+  catalogIndexKeyV1,
+  CATALOG_POINTER_KEY_V1,
+  decodeCatalogEntryDocumentV1,
+  decodeCatalogEntryV1,
+  decodeCatalogIndexDocumentV1,
+  decodeCatalogIndexV1,
+  decodeCatalogPointerV1,
+  MAX_CATALOG_ENTRIES_V1,
+  parseCatalogIndexDocumentV1,
+  type CatalogEntryV1,
+  type CatalogIndexEntryV1,
+} from "./index.ts";
+
+const MANIFEST_HASH = "a".repeat(64);
+
+function indexEntry(
+  overrides: Partial<CatalogIndexEntryV1> = {},
+): CatalogIndexEntryV1 {
+  return {
+    catalogId: "mcp-weather",
+    packageId: "mcp-weather",
+    displayName: "Weather",
+    description: "Forecasts from a public MCP server.",
+    version: "0.0.1",
+    manifestHash: MANIFEST_HASH,
+    kind: "mcp-connector",
+    ...overrides,
+  };
+}
+
+function entryDetail(overrides: Partial<CatalogEntryV1> = {}): CatalogEntryV1 {
+  return {
+    schemaVersion: 1,
+    catalogId: "mcp-weather",
+    packageId: "mcp-weather",
+    displayName: "Weather",
+    description: "Forecasts from a public MCP server.",
+    version: "0.0.1",
+    kind: "mcp-connector",
+    manifestHash: MANIFEST_HASH,
+    servers: [],
+    setupFields: [],
+    skills: [],
+    ...overrides,
+  };
+}
+
+describe("catalog index decoding", () => {
+  test("accepts an index and keeps only declared fields", () => {
+    const index = decodeCatalogIndexV1({
+      schemaVersion: 1,
+      generation: "gen-0001",
+      entries: [indexEntry()],
+    });
+    expect(index.entries[0]?.catalogId).toBe("mcp-weather");
+    expect(Object.hasOwn(index.entries[0]!, "logo")).toBe(false);
+  });
+
+  test("rejects an unknown field on the index", () => {
+    expect(() =>
+      decodeCatalogIndexV1({
+        schemaVersion: 1,
+        generation: "gen-0001",
+        entries: [],
+        cursor: "next",
+      }),
+    ).toThrow('unknown field "cursor"');
+  });
+
+  test("rejects an unknown field on an entry", () => {
+    expect(() =>
+      decodeCatalogIndexV1({
+        schemaVersion: 1,
+        generation: "gen-0001",
+        entries: [{ ...indexEntry(), price: 10 }],
+      }),
+    ).toThrow('unknown field "price"');
+  });
+
+  test("rejects an unsupported schema version", () => {
+    expect(() =>
+      decodeCatalogIndexV1({
+        schemaVersion: 2,
+        generation: "gen-0001",
+        entries: [],
+      }),
+    ).toThrow("schema version is unsupported");
+  });
+
+  test("rejects a manifest hash that is not a SHA-256 digest", () => {
+    expect(() =>
+      decodeCatalogIndexV1({
+        schemaVersion: 1,
+        generation: "gen-0001",
+        entries: [indexEntry({ manifestHash: "not-a-hash" })],
+      }),
+    ).toThrow("manifestHash is invalid");
+  });
+
+  test("rejects a repeated catalogId", () => {
+    expect(() =>
+      decodeCatalogIndexV1({
+        schemaVersion: 1,
+        generation: "gen-0001",
+        entries: [indexEntry(), indexEntry()],
+      }),
+    ).toThrow("repeats a catalogId");
+  });
+
+  test("rejects more entries than the bound", () => {
+    expect(() =>
+      decodeCatalogIndexV1({
+        schemaVersion: 1,
+        generation: "gen-0001",
+        entries: Array.from({ length: MAX_CATALOG_ENTRIES_V1 + 1 }, (_, i) =>
+          indexEntry({ catalogId: `mcp-${i}`, packageId: `mcp-${i}` }),
+        ),
+      }),
+    ).toThrow("bounded array");
+  });
+
+  test("rejects a non-https logo or homepage", () => {
+    for (const field of ["logo", "homepage"] as const) {
+      expect(() =>
+        decodeCatalogIndexV1({
+          schemaVersion: 1,
+          generation: "gen-0001",
+          entries: [
+            indexEntry({
+              [field]: "javascript:alert(1)",
+            } as Partial<CatalogIndexEntryV1>),
+          ],
+        }),
+      ).toThrow("must be an https URL");
+    }
+  });
+});
+
+describe("catalog entry decoding", () => {
+  test("accepts servers, setup fields and skills", () => {
+    const entry = decodeCatalogEntryV1(
+      entryDetail({
+        servers: [
+          {
+            name: "weather",
+            transport: "streamable-http",
+            url: "https://mcp.example.com/weather",
+            auth: "api-key",
+          },
+        ],
+        setupFields: [
+          { type: "string", title: "Region", minLength: 2, maxLength: 8 },
+        ],
+        skills: [{ name: "forecast", description: "Ask for a forecast." }],
+      }),
+    );
+    expect(entry.servers[0]?.transport).toBe("streamable-http");
+    expect(entry.setupFields[0]?.title).toBe("Region");
+    expect(entry.skills[0]?.name).toBe("forecast");
+  });
+
+  test("rejects an unknown transport", () => {
+    expect(() =>
+      decodeCatalogEntryV1(
+        entryDetail({
+          servers: [
+            {
+              name: "weather",
+              transport: "stdio" as never,
+              url: "https://mcp.example.com/weather",
+              auth: "none",
+            },
+          ],
+        }),
+      ),
+    ).toThrow("transport is invalid");
+  });
+
+  test("rejects a setup field the Package manifest dialect would refuse", () => {
+    expect(() =>
+      decodeCatalogEntryV1(
+        entryDetail({ setupFields: [{ $ref: "#/x" } as never] }),
+      ),
+    ).toThrow();
+  });
+
+  test("rejects an unknown field on the detail document", () => {
+    expect(() =>
+      decodeCatalogEntryV1({ ...entryDetail(), installs: 12 }),
+    ).toThrow('unknown field "installs"');
+  });
+});
+
+describe("content addressing", () => {
+  test("verifies a document against its hash before decoding", async () => {
+    const document = JSON.stringify({
+      schemaVersion: 1,
+      generation: "gen-0001",
+      entries: [indexEntry()],
+    });
+    const hash = await catalogContentHashV1(document);
+    const index = await decodeCatalogIndexDocumentV1(document, hash);
+    expect(index.generation).toBe("gen-0001");
+  });
+
+  test("refuses a document whose bytes changed under a pinned hash", async () => {
+    const document = JSON.stringify({
+      schemaVersion: 1,
+      generation: "gen-0001",
+      entries: [indexEntry()],
+    });
+    const hash = await catalogContentHashV1(document);
+    const tampered = JSON.stringify({
+      schemaVersion: 1,
+      generation: "gen-0001",
+      entries: [indexEntry({ displayName: "Weather Pro" })],
+    });
+    await expect(decodeCatalogIndexDocumentV1(tampered, hash)).rejects.toThrow(
+      "failed content hash verification",
+    );
+  });
+
+  test("refuses an entry document under a mismatched hash", async () => {
+    const document = JSON.stringify(entryDetail());
+    await expect(
+      decodeCatalogEntryDocumentV1(document, "b".repeat(64)),
+    ).rejects.toThrow("failed content hash verification");
+  });
+
+  test("refuses a document that is not JSON", () => {
+    expect(() => parseCatalogIndexDocumentV1("<html>")).toThrow("is not JSON");
+  });
+});
+
+describe("object layout", () => {
+  test("keys name a generation-scoped, immutable object", () => {
+    expect(catalogIndexKeyV1("gen-0001")).toBe("catalog/gen-0001/index.json");
+    expect(catalogEntryKeyV1("gen-0001", "mcp-weather")).toBe(
+      "catalog/gen-0001/entry/mcp-weather.json",
+    );
+    expect(CATALOG_POINTER_KEY_V1).toBe("catalog/current");
+  });
+
+  test("refuses a generation or catalogId that could escape its prefix", () => {
+    expect(() => catalogIndexKeyV1("../secrets")).toThrow(
+      "catalog generation is invalid",
+    );
+    expect(() => catalogEntryKeyV1("gen-0001", "../../index")).toThrow(
+      "catalogId is invalid",
+    );
+  });
+
+  test("decodes the pointer and refuses a partial one", () => {
+    expect(
+      decodeCatalogPointerV1({
+        schemaVersion: 1,
+        generation: "gen-0001",
+        indexHash: MANIFEST_HASH,
+      }).generation,
+    ).toBe("gen-0001");
+    expect(() =>
+      decodeCatalogPointerV1({ schemaVersion: 1, generation: "gen-0001" }),
+    ).toThrow('is missing "indexHash"');
+  });
+});
+
+describe("entry against index", () => {
+  test("accepts an entry that agrees with its index row", () => {
+    expect(() =>
+      assertCatalogEntryMatchesIndexV1(entryDetail(), indexEntry()),
+    ).not.toThrow();
+  });
+
+  test("refuses an entry whose version drifted from the index", () => {
+    expect(() =>
+      assertCatalogEntryMatchesIndexV1(
+        entryDetail({ version: "0.0.2" }),
+        indexEntry(),
+      ),
+    ).toThrow("does not match its index row");
+  });
+});

@@ -1197,3 +1197,163 @@ describe("effective Bot model resolution", () => {
     });
   });
 });
+
+describe("Catalog installs and uninstall", () => {
+  const meta = {
+    schemaVersion: 1 as const,
+    commandId: "install-1",
+    expectedRevision: 0,
+  };
+
+  test("decodes a Catalog install with its generation and values", () => {
+    expect(
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "user/install-package",
+        packageId: "mcp-weather",
+        version: "0.0.1",
+        catalogId: "mcp-weather",
+        catalogGeneration: "gen-one",
+        values: { region: "au" },
+      }),
+    ).toEqual({
+      ...meta,
+      type: "user/install-package",
+      packageId: "mcp-weather",
+      version: "0.0.1",
+      catalogId: "mcp-weather",
+      catalogGeneration: "gen-one",
+      values: { region: "au" },
+    });
+  });
+
+  test("keeps the compiled-in install exactly as it was", () => {
+    expect(
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "user/install-package",
+        packageId: "clock",
+        version: "0.0.1",
+      }),
+    ).toEqual({
+      ...meta,
+      type: "user/install-package",
+      packageId: "clock",
+      version: "0.0.1",
+    });
+  });
+
+  test("refuses half a Catalog install", () => {
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "user/install-package",
+        packageId: "mcp-weather",
+        version: "0.0.1",
+        catalogId: "mcp-weather",
+      }),
+    ).toThrow("requires both catalogId and catalogGeneration");
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "user/install-package",
+        packageId: "clock",
+        version: "0.0.1",
+        values: { region: "au" },
+      }),
+    ).toThrow("install values require a Catalog entry");
+  });
+
+  test("refuses install values that are not bounded JSON", () => {
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "user/install-package",
+        packageId: "mcp-weather",
+        version: "0.0.1",
+        catalogId: "mcp-weather",
+        catalogGeneration: "gen-one",
+        values: { region: "x".repeat(20_000) },
+      }),
+    ).toThrow("values is too large");
+  });
+
+  test("decodes uninstall and refuses an unknown field on it", () => {
+    expect(
+      decodeConfigurationCommandV1({
+        ...meta,
+        commandId: "uninstall-1",
+        type: "user/uninstall-package",
+        packageId: "mcp-weather",
+      }),
+    ).toEqual({
+      ...meta,
+      commandId: "uninstall-1",
+      type: "user/uninstall-package",
+      packageId: "mcp-weather",
+    });
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...meta,
+        commandId: "uninstall-1",
+        type: "user/uninstall-package",
+        packageId: "mcp-weather",
+        cascade: true,
+      }),
+    ).toThrow(ConfigurationDecodeError);
+  });
+
+  test("the User settings view accepts an absent Catalog pin and a whole one", () => {
+    const base = {
+      schemaVersion: 1 as const,
+      revision: 3,
+      profile: { name: "Tim" },
+      packages: [],
+      connections: [],
+    };
+    expect(decodeUserSettingsViewV1(base)).not.toHaveProperty(
+      "catalogGeneration",
+    );
+    expect(
+      decodeUserSettingsViewV1({
+        ...base,
+        catalogGeneration: "gen-one",
+        catalogIndexHash: "a".repeat(64),
+      }),
+    ).toMatchObject({ catalogGeneration: "gen-one" });
+    // Half a pin is corrupt durable state, not a pin.
+    expect(() =>
+      decodeUserSettingsViewV1({ ...base, catalogGeneration: "gen-one" }),
+    ).toThrow(ConfigurationDecodeError);
+  });
+
+  test("an installation carries its Catalog provenance through the codec", () => {
+    const installation = {
+      packageId: "mcp-weather",
+      version: "0.0.1",
+      state: "installed" as const,
+      catalogId: "mcp-weather",
+      catalogGeneration: "gen-one",
+      provenance: "catalog" as const,
+      values: { region: "au" },
+    };
+    expect(
+      decodeUserSettingsViewV1({
+        schemaVersion: 1,
+        revision: 1,
+        profile: { name: "Tim" },
+        packages: [installation],
+        connections: [],
+      }).packages,
+    ).toEqual([installation]);
+    expect(() =>
+      decodeUserSettingsViewV1({
+        schemaVersion: 1,
+        revision: 1,
+        profile: { name: "Tim" },
+        packages: [{ ...installation, provenance: "bot" }],
+        connections: [],
+      }),
+    ).toThrow("provenance is invalid");
+  });
+});

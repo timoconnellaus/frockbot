@@ -77,8 +77,16 @@ A Package-provided delivery surface, such as Telegram or the hosted WebUI, throu
 _Avoid_: Integration, transport
 
 **Catalog**:
-The set of Packages available for installation, whether first-party, User-published, or Bot-authored.
+The set of Packages available for installation, whether first-party, User-published, or Bot-authored. Published as immutable, content-addressed generations; a reader pins one generation and installs only from it.
 _Avoid_: Registry, marketplace, store
+
+**Catalog generation**:
+One immutable, content-addressed publication of the Catalog: an index and its entries, named by a mutable pointer. A generation is never edited, only superseded.
+_Avoid_: Version, snapshot, release
+
+**Catalog entry**:
+One installable row in a Catalog generation, identified by an opaque immutable catalogId and naming the Package it installs.
+_Avoid_: Listing, item, plugin record
 
 **Isolate**:
 A Dynamic Worker the Bot's Durable Object loads to execute non-first-party Package code with only the bindings the Bot's Assignments grant.

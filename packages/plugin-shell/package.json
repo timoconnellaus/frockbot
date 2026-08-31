@@ -37,6 +37,7 @@
     "@cordisjs/plugin-webui": "0.8.2",
     "@frockbot/agent-runtime": "workspace:*",
     "@frockbot/application-foundation": "workspace:*",
+    "@frockbot/catalog-core": "workspace:*",
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/computer-core": "workspace:*",

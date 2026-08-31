@@ -257,6 +257,28 @@ export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;
 }
 
+/** One verified Catalog object, as `/catalog/v1/*` serves it. */
+export interface CatalogGatewayDocument {
+  generation: string;
+  hash: string;
+  document: string;
+}
+
+/**
+ * The read-only Catalog seam the gateway holds. Only the two documents the
+ * routes serve: the gateway publishes the Catalog, it does not own it, and it
+ * never writes to the bucket.
+ */
+export interface CatalogGatewayStore {
+  readIndexDocument(
+    generation?: string,
+  ): Promise<CatalogGatewayDocument | undefined>;
+  readEntryDocument(
+    catalogId: string,
+    generation?: string,
+  ): Promise<CatalogGatewayDocument | undefined>;
+}
+
 /**
  * Bot-authored Package artifacts (`docs/plans/kernel-and-isolate.md` Step 3).
  * Content-addressed and immutable, stored at `packages/<contentHash>.mjs` in the
@@ -492,6 +514,8 @@ export interface GatewayDependencies {
   botStateFor(userId: string): UserBotStateBinding;
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
+  /** Absent when the deployment publishes no Catalog; `/catalog/v1/*` then 503s. */
+  catalog?: CatalogGatewayStore;
   backendContributions?: readonly BackendRouteContribution[];
   /** Webview origins allowed to call `/api/*` cross-origin. */
   allowedClientOrigins?: string[];

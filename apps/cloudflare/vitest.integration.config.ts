@@ -60,7 +60,7 @@ export default defineConfig({
           USER_APPLICATIONS: {},
           BOT_PACKAGES: {},
         },
-        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
+        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {
           // Production classes, not probes.

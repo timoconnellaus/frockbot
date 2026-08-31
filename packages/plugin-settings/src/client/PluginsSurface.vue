@@ -3,6 +3,8 @@ import { UiButton, UiIcon } from "@frockbot/client-ui";
 import type { ConnectionView } from "@frockbot/configuration-core";
 import {
   frockBotWebDataKey,
+  type CatalogEntryV1,
+  type CatalogIndexEntryV1,
   type PluginCatalogItem,
 } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onMounted, ref } from "vue";
@@ -32,7 +34,77 @@ const filteredCatalog = computed(() => {
   );
 });
 
-onMounted(() => web.value.loadPluginCatalog());
+const catalogSearch = ref("");
+const openCatalogId = ref<string>();
+const openCatalogEntry = ref<CatalogEntryV1>();
+const catalogEntryLoading = ref(false);
+const uninstallingPackageId = ref<string>();
+const filteredPackageCatalog = computed(() => {
+  const query = catalogSearch.value.trim().toLocaleLowerCase();
+  if (!query) return web.value.packageCatalog;
+  return web.value.packageCatalog.filter(
+    (entry) =>
+      entry.displayName.toLocaleLowerCase().includes(query) ||
+      entry.packageId.toLocaleLowerCase().includes(query) ||
+      entry.description.toLocaleLowerCase().includes(query),
+  );
+});
+
+onMounted(() => {
+  void web.value.loadPluginCatalog();
+  void web.value.loadPackageCatalog();
+});
+
+/**
+ * Opening an entry loads its detail from the same generation the index came
+ * from, so the panel never describes a different generation than the row.
+ */
+async function toggleCatalogEntry(entry: CatalogIndexEntryV1): Promise<void> {
+  if (openCatalogId.value === entry.catalogId) {
+    openCatalogId.value = undefined;
+    openCatalogEntry.value = undefined;
+    return;
+  }
+  openCatalogId.value = entry.catalogId;
+  openCatalogEntry.value = undefined;
+  catalogEntryLoading.value = true;
+  try {
+    const detail = await web.value.loadCatalogEntry(entry.catalogId);
+    if (openCatalogId.value === entry.catalogId) {
+      openCatalogEntry.value = detail;
+    }
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not load the entry";
+  } finally {
+    catalogEntryLoading.value = false;
+  }
+}
+
+async function installFromCatalog(entry: CatalogIndexEntryV1): Promise<void> {
+  try {
+    await web.value.installCatalogPackage(entry);
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not install the Package";
+  }
+}
+
+async function confirmUninstall(packageId: string): Promise<void> {
+  try {
+    await web.value.uninstallPackage(packageId);
+    uninstallingPackageId.value = undefined;
+    if (openCatalogId.value === packageId) {
+      openCatalogId.value = undefined;
+      openCatalogEntry.value = undefined;
+    }
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error
+        ? error.message
+        : "Could not uninstall the Package";
+  }
+}
 
 function isPackageInstalled(packageId: string): boolean {
   return Boolean(
@@ -496,6 +568,147 @@ async function disconnect(connectionId: string): Promise<void> {
     >
       No connection Packages are available.
     </p>
+
+    <section class="catalog" aria-labelledby="package-catalog-heading">
+      <h3 id="package-catalog-heading" class="catalog-heading">
+        Package Catalog
+      </h3>
+      <p class="plugin-intro">
+        Packages published to the remote Catalog. Installing one makes it
+        available to every Bot you own; a Bot still needs an explicit Assignment
+        before it can use anything.
+      </p>
+      <label class="plugin-search">
+        <UiIcon name="search" />
+        <input
+          v-model="catalogSearch"
+          placeholder="Search the Catalog"
+          aria-label="Search the Package Catalog"
+        />
+      </label>
+      <p v-if="web.packageCatalogGeneration" class="catalog-generation">
+        Generation {{ web.packageCatalogGeneration }}
+      </p>
+      <div class="plugin-grid">
+        <article
+          v-for="entry in filteredPackageCatalog"
+          :key="entry.catalogId"
+          class="plugin-card"
+        >
+          <button
+            type="button"
+            class="plugin-summary plugin-summary--interactive"
+            :aria-expanded="openCatalogId === entry.catalogId"
+            :aria-controls="`catalog-detail-${entry.catalogId}`"
+            @click="toggleCatalogEntry(entry)"
+          >
+            <span class="plugin-logo" aria-hidden="true">
+              {{ entry.displayName.slice(0, 1) }}
+            </span>
+            <span class="plugin-card-copy">
+              <strong>{{ entry.displayName }}</strong>
+              <small>{{ entry.description }}</small>
+            </span>
+            <span class="catalog-version">{{ entry.version }}</span>
+            <UiIcon
+              class="plugin-chevron"
+              :class="{
+                'plugin-chevron--open': openCatalogId === entry.catalogId,
+              }"
+              name="chevrons-right"
+              size="sm"
+            />
+          </button>
+          <div
+            :id="`catalog-detail-${entry.catalogId}`"
+            class="plugin-accounts"
+            :class="{
+              'plugin-accounts--open': openCatalogId === entry.catalogId,
+            }"
+            :inert="openCatalogId === entry.catalogId ? undefined : true"
+          >
+            <div class="plugin-accounts-inner">
+              <div class="catalog-detail">
+                <p v-if="catalogEntryLoading" class="catalog-note">Loading…</p>
+                <template v-else-if="openCatalogEntry">
+                  <p class="catalog-note">{{ openCatalogEntry.description }}</p>
+                  <dl class="catalog-facts">
+                    <div>
+                      <dt>Package</dt>
+                      <dd>{{ openCatalogEntry.packageId }}</dd>
+                    </div>
+                    <div>
+                      <dt>Version</dt>
+                      <dd>{{ openCatalogEntry.version }}</dd>
+                    </div>
+                    <div v-if="openCatalogEntry.homepage">
+                      <dt>Homepage</dt>
+                      <dd>
+                        <a
+                          :href="openCatalogEntry.homepage"
+                          rel="noreferrer noopener"
+                          target="_blank"
+                        >
+                          {{ openCatalogEntry.homepage }}
+                        </a>
+                      </dd>
+                    </div>
+                  </dl>
+                </template>
+                <div
+                  v-if="uninstallingPackageId === entry.packageId"
+                  class="catalog-confirm"
+                  role="alert"
+                >
+                  <p>
+                    Uninstalling {{ entry.displayName }} removes it from every
+                    Bot. Assignments that depend on it are not deleted: they
+                    become unavailable and stay visible so you can repair or
+                    remove them. Connections and their credentials are kept.
+                  </p>
+                  <div class="account-actions">
+                    <UiButton @click="uninstallingPackageId = undefined">
+                      Keep it
+                    </UiButton>
+                    <UiButton
+                      variant="danger"
+                      @click="confirmUninstall(entry.packageId)"
+                    >
+                      Uninstall
+                    </UiButton>
+                  </div>
+                </div>
+                <div v-else class="account-actions">
+                  <UiButton
+                    v-if="isPackageInstalled(entry.packageId)"
+                    variant="danger"
+                    @click="uninstallingPackageId = entry.packageId"
+                  >
+                    Uninstall
+                  </UiButton>
+                  <UiButton
+                    v-else
+                    variant="primary"
+                    @click="installFromCatalog(entry)"
+                  >
+                    Install
+                  </UiButton>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+      <p
+        v-if="web.packageCatalog.length === 0 && !web.settingsError"
+        class="plugin-empty"
+      >
+        The Catalog has nothing to offer yet.
+      </p>
+      <p v-else-if="filteredPackageCatalog.length === 0" class="plugin-empty">
+        No Catalog entry matches that search.
+      </p>
+    </section>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
     </p>
@@ -800,6 +1013,84 @@ async function disconnect(connectionId: string): Promise<void> {
 .connection-failure {
   margin: 0;
   color: var(--frock-danger-text);
+  font-size: var(--frock-text-sm);
+}
+
+.catalog {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--frock-border);
+}
+
+.catalog-heading {
+  margin: 0 0 4px;
+  font-size: var(--frock-text-md);
+  font-weight: 600;
+}
+
+.catalog .plugin-search {
+  margin-top: 14px;
+}
+
+.catalog-generation {
+  margin: 10px 0 0;
+  color: var(--frock-text-subtle);
+  font-size: var(--frock-text-sm);
+}
+
+.catalog-version {
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+  white-space: nowrap;
+}
+
+.catalog-detail {
+  display: grid;
+  gap: 12px;
+  padding: 12px 8px;
+  border-top: 1px solid var(--frock-border);
+}
+
+.catalog-note {
+  margin: 0;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+
+.catalog-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.catalog-facts div {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.catalog-facts dt {
+  color: var(--frock-text-subtle);
+  font-size: var(--frock-text-sm);
+}
+
+.catalog-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--frock-text-sm);
+}
+
+.catalog-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-control);
+  background: var(--frock-surface-subtle);
+}
+
+.catalog-confirm p {
+  margin: 0;
   font-size: var(--frock-text-sm);
 }
 

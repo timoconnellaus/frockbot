@@ -31,6 +31,12 @@ import type {
   OperationReceiptV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import {
+  decodeCatalogEntryV1,
+  decodeCatalogIndexV1,
+  type CatalogEntryV1,
+  type CatalogIndexEntryV1,
+} from "@frockbot/catalog-core";
 import { ref } from "vue";
 import {
   frockBotWebDataKey,
@@ -594,7 +600,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   let selectionGeneration = 0;
   let userSettingsGeneration = 0;
   let pluginCatalogGeneration = 0;
-  const settingsLoadErrors = new Map<"bot" | "user" | "catalog", string>();
+  let packageCatalogGeneration = 0;
+  const settingsLoadErrors = new Map<
+    "bot" | "user" | "catalog" | "package-catalog",
+    string
+  >();
   const connectionOperations = readConnectionOperations();
   const stopCommands = new Map<string, string>();
   const authorizationOperations = new Map<
@@ -871,7 +881,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   }
 
   function updateSettingsLoadError(
-    source: "bot" | "user" | "catalog",
+    source: "bot" | "user" | "catalog" | "package-catalog",
     message?: string,
   ): void {
     settingsLoadErrors.delete(source);
@@ -950,6 +960,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     composerContext: undefined,
     messages: [],
     pluginCatalog: [],
+    packageCatalog: [],
     async selectBot(botId: string): Promise<void> {
       activeRequest?.abort();
       admissionObserver?.abort();
@@ -1368,6 +1379,87 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           error instanceof Error ? error.message : "Could not load Plugins",
         );
       }
+    },
+    /**
+     * The remote Catalog index. Read through the gateway route, never from
+     * object storage, and decoded at the seam like every other inbound value.
+     */
+    async loadPackageCatalog(): Promise<void> {
+      if (!ctx.transport.hostedRequest) {
+        updateSettingsLoadError(
+          "package-catalog",
+          "The Catalog is unavailable",
+        );
+        return;
+      }
+      const generation = ++packageCatalogGeneration;
+      try {
+        const index = decodeCatalogIndexV1(
+          await ctx.transport.hostedRequest("/catalog/v1/index"),
+        );
+        if (generation !== packageCatalogGeneration) return;
+        web.value.packageCatalog = index.entries;
+        web.value.packageCatalogGeneration = index.generation;
+        updateSettingsLoadError("package-catalog");
+      } catch (error) {
+        if (generation !== packageCatalogGeneration) return;
+        updateSettingsLoadError(
+          "package-catalog",
+          error instanceof Error ? error.message : "Could not load the Catalog",
+        );
+      }
+    },
+    async loadCatalogEntry(
+      catalogId: string,
+    ): Promise<CatalogEntryV1 | undefined> {
+      if (!ctx.transport.hostedRequest) {
+        throw new Error("The Catalog is unavailable");
+      }
+      // Pinned to the generation the index came from, so an entry never
+      // describes a different generation than the row that opened it.
+      const pinned = web.value.packageCatalogGeneration;
+      return decodeCatalogEntryV1(
+        await ctx.transport.hostedRequest(
+          `/catalog/v1/entry/${encodeURIComponent(catalogId)}${
+            pinned ? `?generation=${encodeURIComponent(pinned)}` : ""
+          }`,
+        ),
+      );
+    },
+    async installCatalogPackage(entry: CatalogIndexEntryV1): Promise<void> {
+      const settings = web.value.userSettings;
+      const generation = web.value.packageCatalogGeneration;
+      if (!settings || !ctx.transport.executeConfiguration) {
+        throw new Error("Plugins are unavailable");
+      }
+      if (!generation) throw new Error("The Catalog generation is unknown");
+      const receipt = await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: crypto.randomUUID(),
+        expectedRevision: settings.revision,
+        packageId: entry.packageId,
+        version: entry.version,
+        catalogId: entry.catalogId,
+        catalogGeneration: generation,
+      });
+      await web.value.loadPluginCatalog();
+      if (receipt.status === "rejected") throw new Error(receipt.failure);
+    },
+    async uninstallPackage(packageId: string): Promise<void> {
+      const settings = web.value.userSettings;
+      if (!settings || !ctx.transport.executeConfiguration) {
+        throw new Error("Plugins are unavailable");
+      }
+      const receipt = await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "user/uninstall-package",
+        commandId: crypto.randomUUID(),
+        expectedRevision: settings.revision,
+        packageId,
+      });
+      await web.value.loadPluginCatalog();
+      if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
     async installPackage(packageId: string, version: string): Promise<void> {
       const settings = web.value.userSettings;

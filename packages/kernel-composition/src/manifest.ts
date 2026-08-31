@@ -1104,3 +1104,15 @@ export function declaredContributionKinds(
   if (manifest.contributions.mobile) kinds.push("mobile");
   return kinds;
 }
+
+/**
+ * The Package setting schema decoder, exported for seams outside a manifest
+ * that carry the same shape — a Catalog entry's `setupFields`, for instance.
+ * Reuse rather than a second dialect: a field a Package could not declare in
+ * its manifest must not become installable through the Catalog.
+ */
+export function decodePackageSettingSchemaV1(
+  value: unknown,
+): PackageSettingSchema {
+  return safeSchema(value);
+}
