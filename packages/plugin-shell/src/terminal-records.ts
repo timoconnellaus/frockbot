@@ -41,7 +41,7 @@ export interface ShellTerminalRunV1 {
     turnType?: string;
     // Wide on purpose: the kernel records one origin shape per producer, and
     // this module only asks which producer it was.
-    origin?: { kind: string; routineId?: string; channelId?: string };
+    origin?: { kind: string; routineId?: string };
   };
 }
 

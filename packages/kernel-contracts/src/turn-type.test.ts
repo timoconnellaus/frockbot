@@ -15,12 +15,7 @@ function durable(event: Record<string, unknown>): unknown {
 
 describe("TurnTypeV1", () => {
   test("names every turn type the admission vocabulary declares", () => {
-    expect([...TURN_TYPES_V1]).toEqual([
-      "chat",
-      "automation",
-      "subagent",
-      "channel",
-    ]);
+    expect([...TURN_TYPES_V1]).toEqual(["chat", "automation", "subagent"]);
     for (const turnType of TURN_TYPES_V1) {
       expect(decodeTurnTypeV1(turnType)).toBe(turnType);
     }
@@ -99,8 +94,8 @@ describe("admittedTurnTypesV1", () => {
   });
 
   test("keeps the declared vocabulary order and drops duplicates", () => {
-    expect(admittedTurnTypesV1(["channel", "chat", "chat"], undefined)).toEqual(
-      ["chat", "channel"],
-    );
+    expect(
+      admittedTurnTypesV1(["subagent", "chat", "chat"], undefined),
+    ).toEqual(["chat", "subagent"]);
   });
 });

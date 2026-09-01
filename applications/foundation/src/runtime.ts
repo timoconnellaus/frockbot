@@ -167,26 +167,6 @@ import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
-import channelsManifest from "@frockbot/plugin-channels/manifest";
-import telegramManifest from "@frockbot/plugin-telegram/manifest";
-// The Channels gateway Contribution carries the connect route and the webhook
-// door an external platform delivers on.
-import {
-  createChannelsBackendContribution,
-  type ChannelsGatewayHost,
-} from "@frockbot/plugin-channels/backend";
-export type { ChannelsGatewayHost } from "@frockbot/plugin-channels/backend";
-const createChannelsGatewayPlugin = (
-  createChannelsBackendContribution as typeof createChannelsBackendContribution & {
-    plugin(
-      host: ChannelsGatewayHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
-import { createChannelsRuntimePlugin } from "@frockbot/plugin-channels/agent";
-import type { ChannelsRuntimeHostV1 } from "@frockbot/plugin-channels/agent-host";
-export type { ChannelsRuntimeHostV1 } from "@frockbot/plugin-channels/agent-host";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 // The Routines gateway Contribution carries the Bot-scoped Routine routes.
 import {
@@ -339,8 +319,6 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-subagents", subagentsManifest],
   ["@frockbot/plugin-user-machine", userMachineManifest],
   ["@frockbot/plugin-machine-messages", machineMessagesManifest],
-  ["@frockbot/plugin-channels", channelsManifest],
-  ["@frockbot/plugin-telegram", telegramManifest],
 ]);
 
 const runtimeContributions = new Map([
@@ -602,7 +580,6 @@ export type FoundationGatewayHost = {
   RoutinesGatewayHost &
   SubagentsGatewayHost &
   MachineGatewayHostV1 &
-  ChannelsGatewayHost &
   SearchGatewayHost &
   AuditGatewayHost &
   PackagePublisherGatewayHost;
@@ -680,11 +657,6 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-user-machine/backend"
         ) {
           plugin = createMachineGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-channels/backend"
-        ) {
-          plugin = createChannelsGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-search/backend"
@@ -879,13 +851,6 @@ export function createFoundationHostedRuntimePackages(
      */
     subagents?: SubagentsRuntimeHostV1;
     /**
-     * The Channels seam, supplied by the Bot Durable Object for one admitted
-     * Turn. Absent outside a Turn, and the Channels Package is then not
-     * mounted: a Bot posts to a Channel only inside a Turn whose Session and
-     * Turn the message's provenance can name.
-     */
-    channels?: ChannelsRuntimeHostV1;
-    /**
      * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside one whose
      * durable roots are reachable in object storage — the Computer provider
@@ -995,15 +960,6 @@ export function createFoundationHostedRuntimePackages(
             plan,
             "subagents",
             createSubagentsRuntimePlugin(host.subagents),
-          ),
-        ]
-      : []),
-    ...(host.channels
-      ? [
-          runtimePackage(
-            plan,
-            "channels",
-            createChannelsRuntimePlugin(host.channels),
           ),
         ]
       : []),
@@ -1308,11 +1264,6 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Subagents mount only for a Turn, so a dispatched task names the run that
   // dispatched it and the Subagent Durable Object it reaches is addressable.
   runtimeIds.delete("subagents");
-  // Channels mount only for a Turn, so a posted message records the Session and
-  // Turn that produced it — and so the tools are absent where there is no Turn
-  // to attribute them to.
-  runtimeIds.delete("channels");
-  runtimeIds.delete("telegram");
   // The registered machine's tools mount only for a Turn: the control tools
   // write an intent record the Turn's Session and run name, and the approval
   // that gates them is a send onto that Turn's own durable log.

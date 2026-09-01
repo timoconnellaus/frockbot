@@ -176,12 +176,7 @@ describe("computer_doctor", () => {
     const state = fixture(new FakeWorkspace());
     const harness = await mount(state.provider);
 
-    for (const turnType of [
-      "chat",
-      "automation",
-      "subagent",
-      "channel",
-    ] as const) {
+    for (const turnType of ["chat", "automation", "subagent"] as const) {
       const names = harness.root.tools
         .schemas({ turnType })
         .map((schema) => schema.name);

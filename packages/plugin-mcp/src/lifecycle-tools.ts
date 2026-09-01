@@ -32,13 +32,12 @@ export const MCP_LIFECYCLE_TURN_TYPES: readonly TurnTypeV1[] = [
   "chat",
   "automation",
   "subagent",
-  "channel",
 ];
 
 /**
  * Adding a server, and asking the User to authorize one, are chat-only; every
  * other lifecycle verb is not. Both are User-shaped decisions, and an
- * automation, subagent or channel Turn has no User in front of it to make one.
+ * automation or subagent Turn has no User in front of it to make one.
  */
 export const MCP_ADMISSION_TURN_TYPES: readonly TurnTypeV1[] = ["chat"];
 

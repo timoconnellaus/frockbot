@@ -233,9 +233,9 @@ export function settledRoutineOriginV1(run: {
 }): { routineId: string } | undefined {
   if (run.admission?.turnType !== "automation") return undefined;
   const origin = run.admission.origin;
-  // A `subagent` or `channel` origin reaches here on no path today — neither is
-  // an `automation` Turn — but the kind is checked rather than assumed, and the
-  // id it carries is checked with it.
+  // A `subagent` origin reaches here on no path today — it is not an
+  // `automation` Turn — but the kind is checked rather than assumed, and the id
+  // it carries is checked with it.
   if (!origin || origin.kind !== "routine" || !origin.routineId) {
     return undefined;
   }

@@ -5,6 +5,7 @@ These rules govern production features and architecture. Treat them as invariant
 ## Product intent
 
 - FrockBot reaches capability parity with GrokBot, and every parity capability is delivered as a Package on a minimal kernel. The parity register is the checklist in `docs/research/grokbot-computer.md`.
+- The parity register is a checklist, not a mandate to ship every row: the owner may decline or defer a register capability. A declined capability is recorded in the register with the date and reason and is removed from the product rather than left half-built; it may be reinstated later by the same route.
 - Users extend FrockBot beyond parity with installable Packages.
 - A Bot extends itself: it may author, activate, revise, and revert its own Packages, Skills, and Routines within the authority its User has granted. Self-modification is a product feature with the same durability, provenance, and trust rules as everything else.
 

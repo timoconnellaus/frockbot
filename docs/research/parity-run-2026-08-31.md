@@ -26,7 +26,7 @@ says so at HEAD.
 | O — web tools and images      | #62, #68, #77                | 47 `landed`                                   |
 | P — audit                     | #75, #79                     | 30, 30b `landed`                              |
 | Q — transcript search         | #53, #58, #59                | 52 `partial` (text only; media never written) |
-| T — UI shell                  | #73                          | 50 `landed`; 51 `partial` (Channels)          |
+| T — UI shell                  | #73                          | 50 `landed`; 51 `partial` (shortcut)          |
 | — the browser e2e layer       | #54                          | no row; it is the fifth test layer            |
 
 Four ADRs were written during the run: 0012 (one Computer per User), 0013
@@ -92,12 +92,10 @@ was ever observed." Row 39 — "Only one desktop-GUI subagent at a time, because
 the screen is shared" — additionally cannot be proved anywhere but against a
 live Sprite under contention, which nothing in CI does.
 
-**N — channels (rows 35, 36, 57f).** Not started, and its absence is already
-visible in the product by an owner decision recorded against row 51: the info
-pane's fourth half is "**Channels**, deferred by an owner decision because
-neither sense of the word exists yet — row 35's Bot-to-Bot group chats and row
-43's channel connectors are both `not started`. The pane carries a labelled,
-empty Channels section where they will mount."
+**N — Channels (rows 35, 36, 57f).** Superseded on 2026-09-01: the owner
+removed this capability as not needed yet. The Packages, runtime paths, UI, and
+empty info-pane placeholder described by this run no longer exist; the parity
+register records the decision.
 
 ## Open follow-ups
 

@@ -41,8 +41,7 @@
       "outlets": [
         "frockbot.user-settings-sections",
         "frockbot.bot-settings-sections",
-        "frockbot.bot-info-sections",
-        "frockbot.bot-info-channels"
+        "frockbot.bot-info-sections"
       ]
     }
   },

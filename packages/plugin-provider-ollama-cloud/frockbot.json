@@ -62,7 +62,7 @@
         "kind": "model",
         "connectionTypes": ["ollama-cloud-account"],
         "admission": {
-          "turnTypes": ["chat", "automation", "subagent", "channel"]
+          "turnTypes": ["chat", "automation", "subagent"]
         }
       },
       {
@@ -70,7 +70,7 @@
         "kind": "tool",
         "connectionTypes": ["ollama-cloud-account"],
         "admission": {
-          "turnTypes": ["chat", "automation", "subagent", "channel"],
+          "turnTypes": ["chat", "automation", "subagent"],
           "subagentRoles": ["executor"]
         }
       }

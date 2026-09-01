@@ -72,7 +72,7 @@ describe("settings link scheme", () => {
 
   test("drops a fragment belonging to another surface", () => {
     expect(
-      decodeSettingsLinkV1("/?settings=bot-settings#bot-info-channels"),
+      decodeSettingsLinkV1("/?settings=bot-settings#bot-info-routines"),
     ).toEqual({ surface: "bot-settings" });
   });
 
