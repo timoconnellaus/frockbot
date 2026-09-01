@@ -9,3 +9,6 @@ SPRITES_TOKEN=replace-with-fly-sprites-token
 COMPUTER_HOST_TOKEN=replace-with-shared-computer-host-token
 CREDENTIAL_KEYRING={"schemaVersion":1,"currentKeyId":"development","keys":{"development":"replace-with-base64url-encoded-32-byte-key"}}
 ALLOW_DEVELOPMENT_AUTH=true
+# Authorizes the read-only operator surface at /api/debug/*. Absent or empty
+# and those routes 404. Deployed as a Wrangler secret, never a var.
+DEBUG_TOKEN=replace-with-a-random-32-byte-token

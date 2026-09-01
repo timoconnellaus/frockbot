@@ -4,6 +4,7 @@ import {
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
 import type { MachineResultDeliveryV1 } from "@frockbot/plugin-user-machine/delivery";
+import type { DebugGatewaySurface } from "./debug.js";
 import type {
   BotConfigurationExecuteRpcV1,
   BotConfigurationReadRpcV1,
@@ -717,6 +718,8 @@ export interface GatewayDependencies {
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   /** Absent when the deployment publishes no Catalog; `/catalog/v1/*` then 503s. */
   catalog?: CatalogGatewayStore;
+  /** Absent, or with no token, when the deployment publishes no `/api/debug`. */
+  debug?: DebugGatewaySurface;
   backendContributions?: readonly BackendRouteContribution[];
   /** Webview origins allowed to call `/api/*` cross-origin. */
   allowedClientOrigins?: string[];
