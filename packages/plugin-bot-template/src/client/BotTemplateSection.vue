@@ -5,7 +5,7 @@
 // a visibility is a separate, deliberate click here — "Publication beyond the
 // authoring User is a User action." The link is only shown once a share is
 // actually `link` or `public`, so a copied URL always resolves.
-import { UiButton, UiIcon } from "@frockbot/client-ui";
+import { UiButton } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import type {
   TemplateShareRecordV1,
@@ -23,6 +23,7 @@ if (!providedWeb || !providedState) {
 const web = providedWeb;
 const templates = providedState;
 const copied = ref<string>();
+const flowOpen = ref(false);
 
 const botId = computed(() => web.value.activeBotId);
 
@@ -86,103 +87,117 @@ async function copyLink(share: TemplateShareRecordV1): Promise<void> {
 
 <template>
   <section class="templates">
-    <header class="templates__header">
-      <span class="templates__icon" aria-hidden="true"
-        ><UiIcon name="sparkle"
-      /></span>
-      <span class="templates__intro">
-        <strong>Bot template</strong>
-        <small>
-          A recipe another person can build a Bot like this one from: the
-          profile, this Bot's own Skills, its Routines' prompts, and the
-          Packages it needs. Never Memory, credentials, Connections, or your
-          Computer's files.
-        </small>
-      </span>
-      <UiButton
-        type="button"
-        :disabled="!botId || templates.busy"
-        @click="botId && templates.stage(botId)"
-      >
-        {{ templates.busy ? "Packing…" : "Export a template" }}
-      </UiButton>
-    </header>
-
-    <p v-if="templates.error" class="templates__error" role="alert">
-      {{ templates.error }}
-    </p>
-
-    <p
-      v-if="templates.summary && templates.openShareId"
-      class="templates__summary"
+    <UiButton
+      class="templates__open"
+      type="button"
+      :aria-expanded="flowOpen"
+      @click="flowOpen = !flowOpen"
     >
-      Packed {{ templates.summary.skills }} Skill(s),
-      {{ templates.summary.routines }} Routine(s),
-      {{ templates.summary.packages }} Package(s) and
-      {{ templates.summary.publicServers }} public MCP server(s).
-      <template v-if="templates.summary.needsConnection > 0">
-        {{ templates.summary.needsConnection }} server(s) are left as a
-        placeholder the importer fills with their own Connection.
-      </template>
-      Memory, credentials, Connections and Assignments were not included.
-    </p>
+      Share as template
+    </UiButton>
 
-    <p v-if="templates.loaded && shares.length === 0" class="templates__empty">
-      No template has been exported from this Bot yet.
-    </p>
-
-    <article v-for="share in shares" :key="share.shareId" class="template-card">
-      <div class="template-card__head">
-        <span class="template-card__text">
-          <strong>{{ describe(share) }}</strong>
-          <small>Packed {{ share.createdAt }}</small>
+    <div v-if="flowOpen" class="templates__flow">
+      <header class="templates__header">
+        <span class="templates__intro">
+          <strong>Share this Bot</strong>
+          <small>
+            Packs the profile, Bot-authored Skills, Routines, and required
+            Packages. Memory, credentials, Connections, Assignments, and
+            Computer files stay private.
+          </small>
         </span>
-      </div>
+        <UiButton
+          type="button"
+          :disabled="!botId || templates.busy"
+          @click="botId && templates.stage(botId)"
+        >
+          {{ templates.busy ? "Packing…" : "Pack template" }}
+        </UiButton>
+      </header>
 
-      <fieldset v-if="!share.revokedAt" class="template-card__visibility">
-        <legend>Who can read it</legend>
-        <label v-for="option in visibilities" :key="option.value">
-          <input
-            type="radio"
-            :name="`visibility-${share.shareId}`"
-            :value="option.value"
-            :checked="share.visibility === option.value"
-            :disabled="templates.busy"
-            @change="templates.setVisibility(share.shareId, option.value)"
-          />
-          <span>
-            <strong>{{ option.label }}</strong>
-            <small>{{ option.hint }}</small>
-          </span>
-        </label>
-      </fieldset>
-
-      <p
-        v-if="!share.revokedAt && share.visibility !== 'private'"
-        class="template-card__link"
-      >
-        <code>{{ shareUrl(share) }}</code>
+      <p v-if="templates.error" class="templates__error" role="alert">
+        {{ templates.error }}
       </p>
 
-      <div class="template-card__actions">
-        <UiButton
+      <p
+        v-if="templates.summary && templates.openShareId"
+        class="templates__summary"
+      >
+        Packed {{ templates.summary.skills }} Skill(s),
+        {{ templates.summary.routines }} Routine(s),
+        {{ templates.summary.packages }} Package(s) and
+        {{ templates.summary.publicServers }} public MCP server(s).
+        <template v-if="templates.summary.needsConnection > 0">
+          {{ templates.summary.needsConnection }} server(s) are left as a
+          placeholder the importer fills with their own Connection.
+        </template>
+        Memory, credentials, Connections and Assignments were not included.
+      </p>
+
+      <p
+        v-if="templates.loaded && shares.length === 0"
+        class="templates__empty"
+      >
+        No template has been shared from this Bot yet.
+      </p>
+
+      <article
+        v-for="share in shares"
+        :key="share.shareId"
+        class="template-card"
+      >
+        <div class="template-card__head">
+          <span class="template-card__text">
+            <strong>{{ describe(share) }}</strong>
+            <small>Packed {{ share.createdAt }}</small>
+          </span>
+        </div>
+
+        <fieldset v-if="!share.revokedAt" class="template-card__visibility">
+          <legend>Who can read it</legend>
+          <label v-for="option in visibilities" :key="option.value">
+            <input
+              type="radio"
+              :name="`visibility-${share.shareId}`"
+              :value="option.value"
+              :checked="share.visibility === option.value"
+              :disabled="templates.busy"
+              @change="templates.setVisibility(share.shareId, option.value)"
+            />
+            <span>
+              <strong>{{ option.label }}</strong>
+              <small>{{ option.hint }}</small>
+            </span>
+          </label>
+        </fieldset>
+
+        <p
           v-if="!share.revokedAt && share.visibility !== 'private'"
-          type="button"
-          @click="copyLink(share)"
+          class="template-card__link"
         >
-          {{ copied === share.shareId ? "Copied" : "Copy link" }}
-        </UiButton>
-        <UiButton
-          v-if="!share.revokedAt"
-          type="button"
-          variant="danger"
-          :disabled="templates.busy"
-          @click="templates.revoke(share.shareId)"
-        >
-          Revoke
-        </UiButton>
-      </div>
-    </article>
+          <code>{{ shareUrl(share) }}</code>
+        </p>
+
+        <div class="template-card__actions">
+          <UiButton
+            v-if="!share.revokedAt && share.visibility !== 'private'"
+            type="button"
+            @click="copyLink(share)"
+          >
+            {{ copied === share.shareId ? "Copied" : "Copy link" }}
+          </UiButton>
+          <UiButton
+            v-if="!share.revokedAt"
+            type="button"
+            variant="danger"
+            :disabled="templates.busy"
+            @click="templates.revoke(share.shareId)"
+          >
+            Revoke
+          </UiButton>
+        </div>
+      </article>
+    </div>
   </section>
 </template>
 
@@ -193,22 +208,21 @@ async function copyLink(share: TemplateShareRecordV1): Promise<void> {
   gap: 12px;
 }
 
+.templates__open {
+  width: 100%;
+}
+
+.templates__flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+}
+
 .templates__header {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.templates__icon {
-  display: grid;
-  width: var(--frock-avatar-sm);
-  height: var(--frock-avatar-sm);
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 8px;
-  color: var(--frock-action-primary);
-  background: var(--frock-surface);
-  box-shadow: inset 0 0 0 1px var(--frock-border);
 }
 
 .templates__intro {

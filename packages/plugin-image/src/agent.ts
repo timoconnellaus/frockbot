@@ -80,7 +80,6 @@ export const IMAGE_TOOL_TURN_TYPES: readonly TurnTypeV1[] = [
   "chat",
   "automation",
   "subagent",
-  "channel",
 ];
 
 /** The longest prompt `generate_image` accepts. */

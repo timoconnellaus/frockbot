@@ -3,7 +3,13 @@
 // settings). Nothing in the repository proved before this layer that the built
 // artifact boots in a browser at all: incident 1 shipped because the only
 // consumer of that path was a person.
-import { test, expect, createBot, openApplication } from "./fixtures.ts";
+import {
+  test,
+  expect,
+  composerInput,
+  createBot,
+  openApplication,
+} from "./fixtures.ts";
 
 test("a new User creates a first Bot and finds it in the directory", async ({
   page,
@@ -13,7 +19,11 @@ test("a new User creates a first Bot and finds it in the directory", async ({
 
   // The client mounted, which means `/` served the artifact's HTML, `/app.js`
   // was JavaScript and the shell reached the User Durable Object.
-  await expect(page.getByText("Your flock").first()).toBeVisible();
+  await expect(
+    page
+      .locator("aside.sidebar")
+      .getByRole("button", { name: "Search every Bot's conversations" }),
+  ).toBeVisible();
   await expect(
     page.getByText("No Bots yet. Add your first sheep."),
   ).toBeVisible();
@@ -24,11 +34,15 @@ test("a new User creates a first Bot and finds it in the directory", async ({
   await expect(
     page.getByRole("button", { name: /Shepherd/ }).first(),
   ).toBeVisible();
-  await expect(page.locator("main").getByText("Shepherd")).toBeVisible();
+  // Exact: the empty Session's greeting heading also carries the name.
+  await expect(
+    page.locator("main").getByText("Shepherd", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Shepherd is ready." }),
-  ).toBeHidden();
-  await expect(
-    page.getByRole("heading", { name: "Choose a model" }),
   ).toBeVisible();
+  await expect(page.locator(".workspace-title small")).toHaveText(
+    "DeepSeek V4 Flash · Cloudflare Workers AI",
+  );
+  await expect(composerInput(page)).toBeEnabled();
 });

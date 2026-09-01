@@ -70,6 +70,7 @@ import {
 } from "@frockbot/plugin-shell/backend-isolate";
 import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
 import { UserConfiguration } from "../src/user-configuration.ts";
+export { DeploymentPolicy } from "../src/deployment-policy.ts";
 
 interface FlyCompatibilityEnv {
   /** The shared Computer host (ADR 0004). The provider reaches a Sprite here. */
@@ -87,8 +88,6 @@ export { BotIsolateProbe } from "./bot-isolate-probe.ts";
 export { AuthoringProbe } from "./authoring-probe.ts";
 export { SearchSpikeProbe } from "./search-probe.ts";
 export { AuditProbe } from "./audit-probe.ts";
-export { ChannelStoreProbe } from "./channel-store-probe.ts";
-export { ChannelConnectorProbe } from "./channel-connector-probe.ts";
 export { ComputerHostClientProbe } from "./computer-host-probe.ts";
 
 /**

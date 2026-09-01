@@ -79,6 +79,7 @@ export async function provisionBot(identity: {
         connectionId: connection.connectionId,
         providerModelId: "glm-5.3-flash:cloud",
       },
+      source: "user",
     },
   });
   await configuration.createBot({

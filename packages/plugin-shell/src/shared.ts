@@ -1,7 +1,6 @@
 export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 import type {
-  BotAvatarContentTypeV1,
   JsonValue,
   BotNameProvenanceV1,
   BotNotificationPolicy,
@@ -120,15 +119,7 @@ export interface PluginCatalogItem {
   version: string;
   capabilities: Array<{
     id: string;
-    kind:
-      | "model"
-      | "tool"
-      | "memory"
-      | "notification"
-      | "computer"
-      // Manifest v5. A Channel Capability is listed like any other; the
-      // Plugins surface renders its id and kind and nothing more.
-      | "channel";
+    kind: "model" | "tool" | "memory" | "notification" | "computer";
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{
@@ -214,13 +205,6 @@ export interface FrockBotWebData {
     profile: BotProfilePatchV1,
     namedBy?: BotNameProvenanceV1,
   ): Promise<void>;
-  /** Uploads avatar bytes and records the reference on the Bot's profile. */
-  uploadBotAvatar(input: {
-    contentType: BotAvatarContentTypeV1;
-    bytes: string;
-  }): Promise<void>;
-  /** Restores the generated sheep avatar. */
-  clearBotAvatar(): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;
   assignCapability(
     assignment: Omit<CapabilityAssignmentView, "state">,

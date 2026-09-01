@@ -2,10 +2,10 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     // The harness and the Playwright config run in Node, and the specs drive a
-    // browser, so neither the Worker globals of the parent config nor its
-    // WebWorker lib apply here.
+    // browser, so the WebWorker lib does not apply here. Workers types remain
+    // for the auxiliary AI RPC Worker compiled by the same harness.
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["bun"]
+    "types": ["bun", "@cloudflare/workers-types"]
   },
   "include": ["./**/*.ts"]
 }

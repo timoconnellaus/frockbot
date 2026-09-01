@@ -130,6 +130,37 @@ async function grantWebTools(userId: string, botId: string): Promise<void> {
   );
 }
 
+/**
+ * Take back every Assignment the Bot holds for a Package. A new Bot snapshots
+ * an enabled Assignment for each installed, connection-less, non-model
+ * Capability, so "no Assignment for this Package" is now something a test has
+ * to ask for through the product's own surface rather than something a fresh
+ * Bot happens to be.
+ */
+async function unassignPackage(
+  userId: string,
+  botId: string,
+  packageId: string,
+): Promise<void> {
+  const settings = (await expectOkJson(
+    await asUser(userId, `/api/bots/${botId}/settings`),
+  )) as { assignments: { assignmentId: string; packageId: string }[] };
+  for (const assignment of settings.assignments.filter(
+    (candidate) => candidate.packageId === packageId,
+  )) {
+    await expectOkJson(
+      await postAsUser(userId, `/api/bots/${botId}/settings`, {
+        schemaVersion: 1,
+        type: "bot/unassign-capability",
+        commandId: `unassign-${assignment.assignmentId}`,
+        botId,
+        expectedRevision: await botRevision(userId, botId),
+        assignmentId: assignment.assignmentId,
+      }),
+    );
+  }
+}
+
 describe("web_search through the gateway, the artifact and the Bot", () => {
   it("records the provider's results as durable JSON on the Turn", async () => {
     const userId = freshUserId("web-search");
@@ -275,8 +306,11 @@ describe("a Bot with no web Assignment", () => {
   it("is never offered the tools, so the call is refused as unknown", async () => {
     const userId = freshUserId("web-unassigned");
     const botId = "bare-bot";
-    // Provisioned for chat, and nothing else: no Web Package, no Assignment.
+    // Provisioned for chat, and nothing else. The Web Package is installed
+    // for every User, so the Bot starts with the default `web-fetch`
+    // Assignment; taking it back is what makes this Bot the unassigned one.
     await provisionThroughGateway({ userId, botId });
+    await unassignPackage(userId, botId, "web");
 
     const turn = await turnCalling(
       userId,

@@ -305,8 +305,14 @@ describe("connecting an OAuth-protected MCP server", () => {
     );
     expect(response.status).toBe(400);
     expect((await ledger()).codeExchanges).toBe(before.codeExchanges);
-    // And nothing was created for anyone.
-    expect((await readUserSettings(userId)).connections).toHaveLength(0);
+    // And nothing was created for anyone: this User holds only the ambient
+    // Workers AI Connection its first configuration read bootstraps, and no
+    // MCP Connection at all.
+    expect(
+      (await readUserSettings(userId)).connections.filter(
+        (connection) => connection.connectionTypeId === OAUTH_CONNECTION_TYPE,
+      ),
+    ).toHaveLength(0);
   });
 });
 

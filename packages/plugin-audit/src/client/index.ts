@@ -38,7 +38,7 @@ export const auditClientPlugin: ClientPlugin = (ctx) => {
     body?: string,
   ): Promise<unknown> => {
     if (!ctx.transport.hostedRequest) {
-      throw new Error("Activity is unavailable on this client");
+      throw new Error("Audit log is unavailable on this client");
     }
     return ctx.transport.hostedRequest(path, method, body);
   };
@@ -64,7 +64,7 @@ export const auditClientPlugin: ClientPlugin = (ctx) => {
         state.value.loaded = true;
         state.value.error = undefined;
       } catch (error) {
-        state.value.error = message(error, "Could not load Activity");
+        state.value.error = message(error, "Could not load audit log");
       } finally {
         state.value.busy = false;
       }
@@ -84,7 +84,7 @@ export const auditClientPlugin: ClientPlugin = (ctx) => {
         state.value.indexState = page.indexState;
         state.value.error = undefined;
       } catch (error) {
-        state.value.error = message(error, "Could not load more Activity");
+        state.value.error = message(error, "Could not load more audit entries");
       } finally {
         state.value.busy = false;
       }
@@ -101,7 +101,7 @@ export const auditClientPlugin: ClientPlugin = (ctx) => {
         );
         state.value.error = undefined;
       } catch (error) {
-        state.value.error = message(error, "Could not rebuild Activity");
+        state.value.error = message(error, "Could not rebuild audit log");
       } finally {
         state.value.busy = false;
       }

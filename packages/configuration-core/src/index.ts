@@ -74,41 +74,6 @@ export interface BotSelfWriterV1 {
   turnId: string;
 }
 
-/** The content types an uploaded Bot avatar may carry. */
-export const BOT_AVATAR_CONTENT_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "image/svg+xml",
-] as const;
-
-export type BotAvatarContentTypeV1 = (typeof BOT_AVATAR_CONTENT_TYPES)[number];
-
-/** 5 MB, the largest avatar an upload may carry. */
-export const BOT_AVATAR_MAX_BYTES = 5_242_880;
-
-/** Length of the lowercase hexadecimal SHA-256 digest an avatar is keyed by. */
-const AVATAR_DIGEST_LENGTH = 64;
-
-/**
- * The Bot's avatar. Absent means the default: the Flock's generated sheep
- * recipe. `{ kind: "sheep" }` says the same thing explicitly, so a clear can be
- * expressed as a value rather than as a missing field on a partial update.
- *
- * An uploaded image is a reference, never bytes: the bytes are immutable,
- * content-addressed durable content and the durable Bot state holds only the
- * digest that addresses them.
- */
-export type BotAvatarV1 =
-  | { kind: "sheep" }
-  | {
-      kind: "image";
-      digest: string;
-      contentType: BotAvatarContentTypeV1;
-      size: number;
-    };
-
 export interface BotProfile {
   name: string;
   label?: string;
@@ -117,8 +82,6 @@ export interface BotProfile {
   title?: string;
   /** Provenance of the current `name`. Absent on records written before it. */
   namedBy?: BotNameProvenanceV1;
-  /** Absent means the generated sheep avatar. */
-  avatar?: BotAvatarV1;
   /** Keeps the Bot out of the default sidebar list without archiving it. */
   hiddenFromSidebar?: boolean;
 }
@@ -126,14 +89,13 @@ export interface BotProfile {
 /**
  * A partial Bot profile. Only the keys that are present change; an absent key
  * leaves the durable field exactly as it was. An empty string clears an
- * optional text field, and `{ kind: "sheep" }` clears an uploaded avatar.
+ * optional text field.
  */
 export interface BotProfilePatchV1 {
   name?: string;
   label?: string;
   description?: string;
   title?: string;
-  avatar?: BotAvatarV1;
   hiddenFromSidebar?: boolean;
 }
 
@@ -145,6 +107,9 @@ export interface ModelAssignment {
   connectionId: string;
   providerModelId: string;
 }
+
+/** Whether the User chose the default model or a provider selected it safely. */
+export type NewBotModelTemplateSourceV1 = "user" | "auto";
 
 /**
  * Where an installed Package came from. `first-party` is a Package compiled
@@ -238,6 +203,11 @@ export interface UserSettingsViewV1 {
   connections: ConnectionView[];
   newBotModelTemplate?: ModelAssignment;
   /**
+   * `user` is sticky, including when the User explicitly clears the default.
+   * Providers may replace only an `auto` default (or the untouched absence).
+   */
+  newBotModelTemplateSource?: NewBotModelTemplateSourceV1;
+  /**
    * The remote Catalog generation this User is pinned to, and the content hash
    * of that generation's index. Pinned on the first read that finds a Catalog
    * and never moved by an install, so a Catalog install is always validated
@@ -292,7 +262,7 @@ export function initializeBotSettingsV1(
     botId,
     revision: 0,
     profile: { name: botId === "default" ? "Barebones" : botId },
-    notifications: { enabled: false },
+    notifications: { enabled: true },
     assignments: [],
     assignmentOperations: [],
     model: model ? structuredClone(model) : undefined,
@@ -319,6 +289,7 @@ export type ConfigurationCommandV1 =
   | (CommandMetaV1 & {
       type: "user/set-new-bot-model";
       model?: ModelAssignment;
+      source: NewBotModelTemplateSourceV1;
     })
   | (CommandMetaV1 & {
       type: "user/install-package";
@@ -528,8 +499,7 @@ export interface ExecutionPackageDefinition {
   version: string;
   capabilities: Array<{
     id: string;
-    kind?:
-      "tool" | "model" | "memory" | "notification" | "computer" | "channel";
+    kind?: "tool" | "model" | "memory" | "notification" | "computer";
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{
@@ -982,66 +952,11 @@ function flag(value: unknown, label: string): boolean {
   return value;
 }
 
-/**
- * The exact avatar DTO. It crosses the Bot Durable Object seam, the gateway
- * seam, and (in a later slice) the Bot isolate seam, so it decodes exactly
- * once, here.
- */
-export function decodeBotAvatarV1(
-  value: unknown,
-  label = "avatar",
-): BotAvatarV1 {
-  const avatar = record(value, label);
-  if (avatar.kind === "sheep") {
-    exactRecord(value, label, ["kind"]);
-    return { kind: "sheep" };
-  }
-  const image = exactRecord(value, label, [
-    "kind",
-    "digest",
-    "contentType",
-    "size",
-  ]);
-  if (image.kind !== "image") {
-    throw new ConfigurationDecodeError(`${label}.kind is invalid`);
-  }
-  const digest = image.digest;
-  if (
-    typeof digest !== "string" ||
-    digest.length !== AVATAR_DIGEST_LENGTH ||
-    !/^[0-9a-f]+$/.test(digest)
-  ) {
-    throw new ConfigurationDecodeError(`${label}.digest is invalid`);
-  }
-  const contentType = image.contentType;
-  if (
-    typeof contentType !== "string" ||
-    !(BOT_AVATAR_CONTENT_TYPES as readonly string[]).includes(contentType)
-  ) {
-    throw new ConfigurationDecodeError(`${label}.contentType is invalid`);
-  }
-  const size = image.size;
-  if (
-    !Number.isSafeInteger(size) ||
-    (size as number) < 1 ||
-    (size as number) > BOT_AVATAR_MAX_BYTES
-  ) {
-    throw new ConfigurationDecodeError(`${label}.size is invalid`);
-  }
-  return {
-    kind: "image",
-    digest,
-    contentType: contentType as BotAvatarContentTypeV1,
-    size: size as number,
-  };
-}
-
 const BOT_PROFILE_OPTIONAL_FIELDS = [
   "label",
   "description",
   "title",
   "namedBy",
-  "avatar",
   "hiddenFromSidebar",
 ] as const;
 
@@ -1066,9 +981,6 @@ function botProfile(value: unknown): BotProfile {
     ...(profile.namedBy === undefined
       ? {}
       : { namedBy: nameProvenance(profile.namedBy, "profile.namedBy") }),
-    ...(profile.avatar === undefined
-      ? {}
-      : { avatar: decodeBotAvatarV1(profile.avatar, "profile.avatar") }),
     ...(profile.hiddenFromSidebar === undefined
       ? {}
       : {
@@ -1104,7 +1016,7 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
     value,
     "profile",
     [],
-    ["name", "label", "description", "title", "avatar", "hiddenFromSidebar"],
+    ["name", "label", "description", "title", "hiddenFromSidebar"],
   );
   if (Reflect.ownKeys(patch).length === 0) {
     throw new ConfigurationDecodeError("profile has invalid fields");
@@ -1121,9 +1033,6 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
     ...optional("label", 120),
     ...optional("description", 10_000),
     ...optional("title", 120),
-    ...(patch.avatar === undefined
-      ? {}
-      : { avatar: decodeBotAvatarV1(patch.avatar, "profile.avatar") }),
     ...(patch.hiddenFromSidebar === undefined
       ? {}
       : {
@@ -1137,8 +1046,8 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
 
 /**
  * Apply a partial profile update. Only the keys the patch carries change; an
- * empty string clears an optional text field, and a `sheep` avatar clears an
- * uploaded one. `namedBy` is recorded only when the name actually changes, so
+ * empty string clears an optional text field. `namedBy` is recorded only when
+ * the name actually changes, so
  * an unrelated edit never rewrites the provenance of the current name.
  */
 export function applyBotProfilePatchV1(
@@ -1156,10 +1065,6 @@ export function applyBotProfilePatchV1(
     if (value === undefined) continue;
     if (value === "") delete next[key];
     else next[key] = value;
-  }
-  if (patch.avatar !== undefined) {
-    if (patch.avatar.kind === "sheep") delete next.avatar;
-    else next.avatar = { ...patch.avatar };
   }
   if (patch.hiddenFromSidebar !== undefined) {
     if (patch.hiddenFromSidebar) next.hiddenFromSidebar = true;
@@ -1245,11 +1150,22 @@ export function decodeConfigurationCommandV1(
       };
     }
     case "user/set-new-bot-model": {
-      const command = exactCommand(input, [], ["model"]);
+      const command = exactCommand(input, ["source"], ["model"]);
+      if (command.source !== "user" && command.source !== "auto") {
+        throw new ConfigurationDecodeError(
+          "new Bot model source must be user or auto",
+        );
+      }
+      if (command.source === "auto" && command.model === undefined) {
+        throw new ConfigurationDecodeError(
+          "an automatic new Bot model must name a model",
+        );
+      }
       return {
         ...commandMeta(command),
         type: value.type,
         model: command.model === undefined ? undefined : model(command.model),
+        source: command.source,
       };
     }
     case "user/install-package": {
@@ -1751,7 +1667,9 @@ export function decodePendingAuthorizationV1(
   };
 }
 
-function capabilityAssignment(value: unknown): CapabilityAssignmentView {
+export function decodeCapabilityAssignmentV1(
+  value: unknown,
+): CapabilityAssignmentView {
   const assignment = exactRecord(
     value,
     "Capability Assignment",
@@ -1855,7 +1773,12 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     input,
     "User settings",
     ["schemaVersion", "revision", "profile", "packages", "connections"],
-    ["newBotModelTemplate", "catalogGeneration", "catalogIndexHash"],
+    [
+      "newBotModelTemplate",
+      "newBotModelTemplateSource",
+      "catalogGeneration",
+      "catalogIndexHash",
+    ],
   );
   schemaVersion(value);
   const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
@@ -1866,6 +1789,31 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
   ) {
     throw new ConfigurationDecodeError(
       "User settings Packages and Connections must be bounded arrays",
+    );
+  }
+  if (
+    value.newBotModelTemplateSource !== undefined &&
+    value.newBotModelTemplateSource !== "user" &&
+    value.newBotModelTemplateSource !== "auto"
+  ) {
+    throw new ConfigurationDecodeError(
+      "new Bot model source must be user or auto",
+    );
+  }
+  if (
+    value.newBotModelTemplate !== undefined &&
+    value.newBotModelTemplateSource === undefined
+  ) {
+    throw new ConfigurationDecodeError(
+      "a new Bot model must record its source",
+    );
+  }
+  if (
+    value.newBotModelTemplate === undefined &&
+    value.newBotModelTemplateSource === "auto"
+  ) {
+    throw new ConfigurationDecodeError(
+      "an automatic new Bot model must name a model",
     );
   }
   return {
@@ -1881,6 +1829,7 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
       value.newBotModelTemplate === undefined
         ? undefined
         : model(value.newBotModelTemplate),
+    newBotModelTemplateSource: value.newBotModelTemplateSource,
     // The pin is optional — a deployment with no Catalog has none — but never
     // half present: one field alone is a corrupt pin, not a pin.
     ...(value.catalogGeneration === undefined &&
@@ -1930,7 +1879,7 @@ export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
     revision: viewRevision(value.revision),
     profile: botProfile(value.profile),
     notifications: notifications(value.notifications),
-    assignments: value.assignments.map(capabilityAssignment),
+    assignments: value.assignments.map(decodeCapabilityAssignmentV1),
     assignmentOperations: value.assignmentOperations.map(assignmentOperation),
     model: value.model === undefined ? undefined : model(value.model),
   };
@@ -2534,123 +2483,4 @@ export function decodeCompositionCommandReceiptV1(
     status: "applied",
     generationId: decodeCompositionGenerationIdV1(value.generationId),
   };
-}
-
-/**
- * An avatar upload. The bytes travel base64-encoded because the hosted client
- * transport carries a string body; they are written once as immutable,
- * content-addressed durable content, and the Bot's durable profile then holds
- * only the digest that addresses them.
- */
-export interface UploadBotAvatarCommandV1 {
-  schemaVersion: 1;
-  type: "bot/upload-avatar";
-  botId: string;
-  contentType: BotAvatarContentTypeV1;
-  bytes: string;
-}
-
-export interface BotAvatarUploadReceiptV1 {
-  schemaVersion: 1;
-  botId: string;
-  avatar: Extract<BotAvatarV1, { kind: "image" }>;
-}
-
-const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
-
-/**
- * The byte count a base64 payload decodes to, computed without decoding it, so
- * an oversized upload is refused before it is materialized.
- */
-function base64ByteLength(value: string): number {
-  if (value.length % 4 !== 0 || !BASE64_PATTERN.test(value)) {
-    throw new ConfigurationDecodeError("avatar bytes are not base64");
-  }
-  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
-  return (value.length / 4) * 3 - padding;
-}
-
-export function decodeUploadBotAvatarCommandV1(
-  input: unknown,
-): UploadBotAvatarCommandV1 {
-  const value = exactRecord(input, "avatar upload command", [
-    "schemaVersion",
-    "type",
-    "botId",
-    "contentType",
-    "bytes",
-  ]);
-  if (value.schemaVersion !== 1 || value.type !== "bot/upload-avatar") {
-    throw new ConfigurationDecodeError("unsupported avatar upload command");
-  }
-  if (
-    typeof value.contentType !== "string" ||
-    !(BOT_AVATAR_CONTENT_TYPES as readonly string[]).includes(value.contentType)
-  ) {
-    throw new ConfigurationDecodeError(
-      "avatar contentType is not a supported image",
-    );
-  }
-  if (typeof value.bytes !== "string") {
-    throw new ConfigurationDecodeError("avatar bytes are invalid");
-  }
-  const size = base64ByteLength(value.bytes);
-  if (size < 1) throw new ConfigurationDecodeError("avatar bytes are empty");
-  if (size > BOT_AVATAR_MAX_BYTES) {
-    throw new ConfigurationDecodeError(
-      `avatar exceeds ${BOT_AVATAR_MAX_BYTES} bytes`,
-    );
-  }
-  return {
-    schemaVersion: 1,
-    type: "bot/upload-avatar",
-    botId: decodeBotIdV1(value.botId),
-    contentType: value.contentType as BotAvatarContentTypeV1,
-    bytes: value.bytes,
-  };
-}
-
-/** The exact bytes an upload command carries, decoded once at the seam. */
-export function decodeBotAvatarBytesV1(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-export function decodeBotAvatarUploadReceiptV1(
-  input: unknown,
-): BotAvatarUploadReceiptV1 {
-  const value = exactRecord(input, "avatar upload receipt", [
-    "schemaVersion",
-    "botId",
-    "avatar",
-  ]);
-  if (value.schemaVersion !== 1) {
-    throw new ConfigurationDecodeError("unsupported avatar upload receipt");
-  }
-  const avatar = decodeBotAvatarV1(value.avatar, "avatar");
-  if (avatar.kind !== "image") {
-    throw new ConfigurationDecodeError(
-      "avatar upload receipt avatar is invalid",
-    );
-  }
-  return {
-    schemaVersion: 1,
-    botId: decodeBotIdV1(value.botId),
-    avatar,
-  };
-}
-
-/**
- * The object key an avatar's bytes live at. Content-addressed, and namespaced
- * by the owning User so one User's avatar is never served for another's Bot.
- */
-export function botAvatarObjectKeyV1(userId: string, digest: string): string {
-  if (!/^[0-9a-f]{64}$/.test(digest)) {
-    throw new ConfigurationDecodeError("avatar digest is invalid");
-  }
-  return `bot-avatars/${encodeURIComponent(userId)}/${digest}`;
 }

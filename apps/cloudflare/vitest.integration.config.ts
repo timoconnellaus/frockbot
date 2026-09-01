@@ -105,12 +105,21 @@ export default defineConfig({
             className: "UserConfiguration",
             useSQLite: true,
           },
+          DEPLOYMENT_POLICY: {
+            className: "DeploymentPolicy",
+            useSQLite: true,
+          },
         },
         bindings: {
           TEST_MIGRATIONS: authMigrations,
           FOUNDATION_ARTIFACT: foundationArtifact,
           DEFAULT_APPLICATION_HASH: "foundation-v1",
           ALLOW_DEVELOPMENT_AUTH: "true",
+          // The same placeholder `wrangler.jsonc` gives the `development` and
+          // `e2e` environments: with an allowlist configured, only the
+          // canonical `development` identity is a deployment admin, so the
+          // per-test identities here are ordinary Users.
+          FROCKBOT_ADMIN_EMAILS: "owner@example.com",
           ALLOWED_CLIENT_ORIGINS: "capacitor://localhost,frockbot://localhost",
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
           // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a

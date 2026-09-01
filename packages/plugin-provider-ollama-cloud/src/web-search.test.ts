@@ -327,12 +327,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     const { root } = await mount({
       respond: () => Response.json({ results: [] }),
     });
-    for (const turnType of [
-      "chat",
-      "automation",
-      "subagent",
-      "channel",
-    ] as const) {
+    for (const turnType of ["chat", "automation", "subagent"] as const) {
       expect({
         turnType,
         names: root.tools.schemas({ turnType }).map((schema) => schema.name),

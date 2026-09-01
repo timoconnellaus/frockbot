@@ -166,7 +166,7 @@
         "kind": "tool",
         "connectionTypes": ["mcp-remote", "mcp-remote-key", "mcp-remote-oauth"],
         "admission": {
-          "turnTypes": ["chat", "automation", "subagent", "channel"],
+          "turnTypes": ["chat", "automation", "subagent"],
           "subagentRoles": ["executor"]
         }
       },
@@ -175,7 +175,7 @@
         "kind": "tool",
         "connectionTypes": [],
         "admission": {
-          "turnTypes": ["chat", "automation", "subagent", "channel"]
+          "turnTypes": ["chat", "automation", "subagent"]
         }
       }
     ]

@@ -188,12 +188,7 @@ describe("mounting one Assignment", () => {
   test("offers its tools on every turn type the manifest admits", async () => {
     const { root } = await mount({ fetch: server({}) });
 
-    for (const turnType of [
-      "chat",
-      "automation",
-      "subagent",
-      "channel",
-    ] as const) {
+    for (const turnType of ["chat", "automation", "subagent"] as const) {
       expect(root.tools.schemas({ turnType }).map((tool) => tool.name)).toEqual(
         ["mcp__example__echo"],
       );

@@ -79,20 +79,30 @@ describe("settings client contribution", () => {
     expect(slots.map((slot) => slot.slot)).toEqual([
       "frockbot.sidebar-actions",
       "frockbot.user-profile",
-      "frockbot.bot-actions",
+      "frockbot.right-panel",
       "frockbot.bot-actions",
     ]);
     // Composition is an internal detail the Settings Package no longer shows,
     // so it provides no client state of its own.
     expect(provided).toEqual([]);
-    for (const id of ["bot-settings", "bot-info", "plugins", "user-settings"]) {
+    for (const id of [
+      "bot-settings",
+      "plugins",
+      "package-catalog",
+      "user-settings",
+    ]) {
       expect(surfaces.has(id)).toBe(true);
     }
 
     for (const dispose of result.toReversed()) dispose();
     expect(slots).toEqual([]);
     expect(surfaces.active.value).toBeUndefined();
-    for (const id of ["bot-settings", "bot-info", "plugins", "user-settings"]) {
+    for (const id of [
+      "bot-settings",
+      "plugins",
+      "package-catalog",
+      "user-settings",
+    ]) {
       expect(surfaces.has(id)).toBe(false);
     }
   });

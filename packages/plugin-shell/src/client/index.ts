@@ -19,9 +19,7 @@ import type {
 import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import { decodeSendToUserPayloadV1 } from "@frockbot/kernel-contracts";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
-import { decodeBotAvatarUploadReceiptV1 } from "@frockbot/configuration-core";
 import type {
-  BotAvatarContentTypeV1,
   BotNameProvenanceV1,
   BotNotificationPolicy,
   BotProfile,
@@ -304,27 +302,35 @@ export function projectDurableRuns(
     const notification = notifications.find(
       (candidate) => candidate.runId === run.runId,
     );
-    if (
-      !state.messages.some(
-        (message) => message.runId === run.runId && message.role === "user",
-      )
-    ) {
-      state.messages.push({
-        id: `${run.runId}:user`,
-        runId: run.runId,
-        role: "user",
-        text: run.input,
-        ...(run.admittedAt ? { at: run.admittedAt } : {}),
-        status: "completed",
-        tools: [],
-        sends: [],
-      });
-    }
-    const assistant = assistantMessage(run, notification);
-    if (run.admittedAt) assistant.at = run.admittedAt;
+    const userIndex = state.messages.findIndex(
+      (message) => message.runId === run.runId && message.role === "user",
+    );
+    const existingUser = userIndex >= 0 ? state.messages[userIndex] : undefined;
+    const user: WebChatMessage = {
+      id: `${run.runId}:user`,
+      runId: run.runId,
+      role: "user",
+      text: run.input,
+      ...(run.admittedAt
+        ? { at: run.admittedAt }
+        : existingUser?.at
+          ? { at: existingUser.at }
+          : {}),
+      status: "completed",
+      tools: [],
+      sends: [],
+    };
+    if (userIndex >= 0) state.messages[userIndex] = user;
+    else state.messages.push(user);
+
     const assistantIndex = state.messages.findIndex(
       (message) => message.runId === run.runId && message.role === "assistant",
     );
+    const assistant = assistantMessage(run, notification);
+    const assistantAt =
+      run.admittedAt ??
+      (assistantIndex >= 0 ? state.messages[assistantIndex]?.at : undefined);
+    if (assistantAt) assistant.at = assistantAt;
     if (assistantIndex >= 0) state.messages[assistantIndex] = assistant;
     else state.messages.push(assistant);
 
@@ -633,11 +639,10 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
       throw new Error("Application Package metadata is invalid");
     }
     const decoded = decodeFrockBotManifest({
-      // v5, so a Capability carrying an admission ceiling or the `channel`
-      // kind decodes here too. Both are durable manifest state the Plugins
-      // surface does not render; refusing the manifest over either would hide
-      // the whole Package.
-      schemaVersion: 5,
+      // v4, so a Capability carrying an admission ceiling decodes here too.
+      // Admission is durable manifest state the Plugins surface does not
+      // render; refusing the manifest over it would hide the whole Package.
+      schemaVersion: 4,
       id: candidate.id,
       displayName: candidate.displayName,
       version: candidate.version,
@@ -1353,32 +1358,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       // system line appears without waiting for the next Turn.
       await deliverNotifications(botId);
     },
-    async uploadBotAvatar(input: {
-      contentType: BotAvatarContentTypeV1;
-      bytes: string;
-    }): Promise<void> {
-      const botId = web.value.activeBotId;
-      if (!botId || !ctx.transport.hostedRequest) {
-        throw new Error("Avatar upload is unavailable");
-      }
-      const receipt = decodeBotAvatarUploadReceiptV1(
-        await ctx.transport.hostedRequest(
-          `/api/bots/${encodeURIComponent(botId)}/avatar`,
-          "POST",
-          JSON.stringify({
-            schemaVersion: 1,
-            type: "bot/upload-avatar",
-            botId,
-            contentType: input.contentType,
-            bytes: input.bytes,
-          }),
-        ),
-      );
-      await web.value.setBotProfile({ avatar: receipt.avatar });
-    },
-    async clearBotAvatar(): Promise<void> {
-      await web.value.setBotProfile({ avatar: { kind: "sheep" } });
-    },
     async saveBotNotifications(
       notifications: BotNotificationPolicy,
     ): Promise<void> {
@@ -1611,7 +1590,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const current = settings.newBotModelTemplate;
       if (
         current?.connectionId === model?.connectionId &&
-        current?.providerModelId === model?.providerModelId
+        current?.providerModelId === model?.providerModelId &&
+        settings.newBotModelTemplateSource === "user"
       ) {
         return;
       }
@@ -1621,6 +1601,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         commandId: crypto.randomUUID(),
         expectedRevision: settings.revision,
         ...(model ? { model } : {}),
+        source: "user",
       });
       await web.value.loadUserSettings();
       if (receipt.status === "rejected") throw new Error(receipt.failure);
@@ -2094,23 +2075,26 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!botId) return { accepted: false, error: "no-bot" };
       const generation = selectionGeneration;
       const pendingRunId = crypto.randomUUID();
+      const optimisticAt = new Date().toISOString();
       web.value.activeRunId = pendingRunId;
       web.value.error = undefined;
       web.value.messages.push(
         {
-          id: crypto.randomUUID(),
+          id: `${pendingRunId}:user`,
           runId: pendingRunId,
           role: "user",
           text,
+          at: optimisticAt,
           status: "completed",
           tools: [],
           sends: [],
         },
         {
-          id: crypto.randomUUID(),
+          id: `${pendingRunId}:assistant`,
           runId: pendingRunId,
           role: "assistant",
           text: "",
+          at: optimisticAt,
           status: "streaming",
           tools: [],
           sends: [],
@@ -2139,13 +2123,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )
           return { accepted: true, runId: result.runId };
         for (const message of web.value.messages) {
-          if (message.runId === pendingRunId) message.runId = result.runId;
+          if (message.runId !== pendingRunId) continue;
+          message.runId = result.runId;
+          message.id = `${result.runId}:${message.role}`;
         }
         replaceMessage(web.value.messages, result.runId, {
-          id: crypto.randomUUID(),
+          id: `${result.runId}:assistant`,
           runId: result.runId,
           role: "assistant",
           text: result.text,
+          at: optimisticAt,
           status: "completed",
           tools: toolsFrom(result.events),
           sends: sendsFrom(result.events),
@@ -2172,12 +2159,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
         replaceMessage(web.value.messages, pendingRunId, {
-          id: crypto.randomUUID(),
+          id: `${pendingRunId}:assistant`,
           runId: pendingRunId,
           role: "assistant",
           text: aborted
             ? "Request stopped locally; admission may still be durable."
             : "Confirming whether this Turn was admitted.",
+          at: optimisticAt,
           status: "interrupted",
           tools: [],
           sends: [],
@@ -2202,10 +2190,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         }
         if (disposition === "not-admitted") {
           replaceMessage(web.value.messages, pendingRunId, {
-            id: crypto.randomUUID(),
+            id: `${pendingRunId}:assistant`,
             runId: pendingRunId,
             role: "assistant",
             text: "Turn was not admitted.",
+            at: optimisticAt,
             status: "error",
             tools: [],
             sends: [],

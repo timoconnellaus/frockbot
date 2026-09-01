@@ -470,7 +470,7 @@ export function createWebRuntimePlugin(
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) =>
     ctx.tools.register(createWebFetchToolDefinitionV1(config), {
-      admissionCeiling: ["chat", "automation", "subagent", "channel"],
+      admissionCeiling: ["chat", "automation", "subagent"],
       subagentRoleCeiling: ["executor"],
     });
   plugin.inject = ["tools"];

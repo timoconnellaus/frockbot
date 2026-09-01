@@ -23,8 +23,6 @@ export interface SearchBotDescriptorV1 {
   archived: boolean;
   /** A Bot its own settings keep out of the sidebar. Searchable, and labelled. */
   hidden: boolean;
-  /** The uploaded avatar, when the Bot has one instead of its sheep. */
-  avatarUrl?: string;
 }
 
 /**
@@ -51,7 +49,6 @@ export function groupSearchHitsV1(
         botName: bot?.name ?? hit.botId,
         archived: bot?.archived ?? false,
         hidden: bot?.hidden ?? false,
-        ...(bot?.avatarUrl ? { avatarUrl: bot.avatarUrl } : {}),
         hits: [],
         totalHits: 0,
       };

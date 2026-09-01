@@ -226,6 +226,38 @@ describe("marketing worker", () => {
   );
 });
 
+describe("homepage product depictions", () => {
+  test("keeps the marketing page light while rendering the product workspace dark", async () => {
+    const rules = parseStyleRules(await publicFile("styles.css"));
+    const declarations = (selector: string) =>
+      Object.assign(
+        {},
+        ...rules
+          .filter((rule) => rule.selectors.includes(selector))
+          .map((rule) => rule.declarations),
+      ) as Record<string, string>;
+
+    expect(declarations(":root")["--product-window"]).toBe("#1f1e24");
+    expect(declarations("body").background).toBe("var(--paper)");
+    expect(declarations(".workspace").background).toBe("var(--product-window)");
+    expect(declarations(".workspace aside").background).toBe(
+      "var(--product-sidebar)",
+    );
+    expect(declarations(".bot-row.active").background).toBe(
+      "var(--product-raised)",
+    );
+    expect(declarations(".workspace-thread").background).toBe(
+      "var(--product-thread)",
+    );
+    expect(declarations(".workspace-panel").background).toBe(
+      "var(--product-sidebar)",
+    );
+    expect(declarations(".workspace-bubble-user").background).toBe(
+      "var(--pink)",
+    );
+  });
+});
+
 describe("legal policy pages", () => {
   test("homepage links to both legal routes", async () => {
     const homepage = await publicFile("index.html");

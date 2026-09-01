@@ -184,14 +184,21 @@ async function rejectOversizedSse(
 
 async function* readSseData(
   body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
 ): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let responseBytes = 0;
+  const cancel = (): void => {
+    void reader.cancel(signal.reason).catch(() => undefined);
+  };
+  signal.addEventListener("abort", cancel, { once: true });
   try {
+    signal.throwIfAborted();
     while (true) {
       const { done, value } = await reader.read();
+      signal.throwIfAborted();
       responseBytes += value?.byteLength ?? 0;
       if (responseBytes > MAX_SSE_RESPONSE_BYTES) {
         await rejectOversizedSse(reader);
@@ -217,6 +224,7 @@ async function* readSseData(
     }
     if (buffer.startsWith("data:")) yield buffer.slice(5).trimStart();
   } finally {
+    signal.removeEventListener("abort", cancel);
     reader.releaseLock();
   }
 }
@@ -259,6 +267,73 @@ function parseJson(value: string, label: string): JsonValue {
 
 function parseToolInput(value: string): JsonValue {
   return value ? parseJson(value, "Model returned invalid tool arguments") : {};
+}
+
+/**
+ * Normalize an OpenAI-compatible SSE body. Native provider bindings can reuse
+ * this wire decoder without pretending their in-process call is HTTP.
+ */
+export async function* streamOpenAICompatibleBody(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+): AsyncIterable<LlmStreamEvent> {
+  const tools = new Map<number, ToolAccumulator>();
+  let finishReason: string | undefined;
+  let terminal = false;
+  let sawChoice = false;
+  for await (const data of readSseData(body, signal)) {
+    if (data === "[DONE]") {
+      terminal = true;
+      break;
+    }
+    const payload = asRecord(
+      parseJson(data, "Model returned an invalid stream event"),
+    );
+    const choices = payload?.choices;
+    const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
+    const delta = asRecord(choice?.delta);
+    if (choice && (delta || typeof choice.finish_reason === "string")) {
+      sawChoice = true;
+    }
+    if (typeof delta?.content === "string" && delta.content) {
+      yield { type: "text-delta", text: delta.content };
+    }
+    applyToolDeltas(delta?.tool_calls, tools);
+    if (typeof choice?.finish_reason === "string") {
+      finishReason = choice.finish_reason;
+      terminal = true;
+    }
+  }
+  if (!terminal) {
+    throw new Error("Model response stream ended before a terminal marker");
+  }
+  if (!sawChoice) {
+    throw new Error("Model response stream did not include a valid choice");
+  }
+
+  for (const tool of [...tools.values()].sort(
+    (left, right) => left.index - right.index,
+  )) {
+    if (!tool.name)
+      throw new Error("Model returned a tool call without a name");
+    yield {
+      type: "tool-call",
+      call: {
+        id: tool.id || crypto.randomUUID(),
+        name: tool.name,
+        input: parseToolInput(tool.arguments),
+      },
+    };
+  }
+  yield {
+    type: "finish",
+    reason:
+      tools.size > 0 || finishReason === "tool_calls"
+        ? "tool-calls"
+        : finishReason === "length"
+          ? "max-tokens"
+          : "completed",
+  };
 }
 
 export class OpenAICompatibleProvider implements LlmProvider {
@@ -307,64 +382,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
     if (!response.body)
       throw new Error("Model response did not include a stream");
 
-    const tools = new Map<number, ToolAccumulator>();
-    let finishReason: string | undefined;
-    let terminal = false;
-    let sawChoice = false;
-    for await (const data of readSseData(response.body)) {
-      signal.throwIfAborted();
-      if (data === "[DONE]") {
-        terminal = true;
-        break;
-      }
-      const payload = asRecord(
-        parseJson(data, "Model returned an invalid stream event"),
-      );
-      const choices = payload?.choices;
-      const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
-      const delta = asRecord(choice?.delta);
-      if (choice && (delta || typeof choice.finish_reason === "string")) {
-        sawChoice = true;
-      }
-      if (typeof delta?.content === "string" && delta.content) {
-        yield { type: "text-delta", text: delta.content };
-      }
-      applyToolDeltas(delta?.tool_calls, tools);
-      if (typeof choice?.finish_reason === "string") {
-        finishReason = choice.finish_reason;
-        terminal = true;
-      }
-    }
-    if (!terminal) {
-      throw new Error("Model response stream ended before a terminal marker");
-    }
-    if (!sawChoice) {
-      throw new Error("Model response stream did not include a valid choice");
-    }
-
-    for (const tool of [...tools.values()].sort(
-      (left, right) => left.index - right.index,
-    )) {
-      if (!tool.name)
-        throw new Error("Model returned a tool call without a name");
-      yield {
-        type: "tool-call",
-        call: {
-          id: tool.id || crypto.randomUUID(),
-          name: tool.name,
-          input: parseToolInput(tool.arguments),
-        },
-      };
-    }
-    yield {
-      type: "finish",
-      reason:
-        tools.size > 0 || finishReason === "tool_calls"
-          ? "tool-calls"
-          : finishReason === "length"
-            ? "max-tokens"
-            : "completed",
-    };
+    yield* streamOpenAICompatibleBody(response.body, signal);
   }
 }
 

@@ -52,10 +52,19 @@ function hostedAuthMode(request: Request): HostedAuthModeV1 {
   return mode;
 }
 
+function hostedIsAdmin(request: Request): boolean {
+  const value = request.headers.get("x-frockbot-is-admin-v1");
+  if (value !== "true" && value !== "false") {
+    throw new Error("hosted admin projection is invalid");
+  }
+  return value === "true";
+}
+
 function appHtml(
   userId: string,
   applicationHash: string,
   authMode: HostedAuthModeV1,
+  isAdmin: boolean,
 ): string {
   if (!isRpcIdentifier(userId)) throw new Error("invalid user id");
   if (!isApplicationDeploymentHash(applicationHash)) {
@@ -70,7 +79,7 @@ function appHtml(
   <title>FrockBot</title>
   <link rel="stylesheet" href="/app.css">
 </head>
-<body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}" data-frockbot-auth-mode="${authMode}">
+<body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}" data-frockbot-auth-mode="${authMode}" data-frockbot-is-admin="${String(isAdmin)}">
   <div id="app"></div>
   <script type="module" src="/app.js"></script>
 </body>
@@ -149,6 +158,7 @@ export function createUserApplication() {
             env.DEPLOYMENT.userId,
             env.DEPLOYMENT.applicationHash,
             hostedAuthMode(request),
+            hostedIsAdmin(request),
           ),
           {
             headers: { "content-type": "text/html; charset=utf-8" },

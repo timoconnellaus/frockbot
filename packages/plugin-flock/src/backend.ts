@@ -7,7 +7,6 @@ import {
   decodeBotLifecycleCommandV1,
   decodeCreateBotCommandV1,
   decodeUpdateSheepCommandV1,
-  type BotAvatarUploadReceiptV1,
   type BotDirectoryViewV1,
   type BotIdentityDirectoryViewV1,
   type BotLifecycleCommandV1,
@@ -17,12 +16,7 @@ import {
   type FlockReceiptV1,
   type SheepIdentityViewV1,
   type UpdateSheepCommandV1,
-  type UploadBotAvatarCommandV1,
 } from "./shared.js";
-import {
-  ConfigurationDecodeError,
-  decodeUploadBotAvatarCommandV1,
-} from "@frockbot/configuration-core";
 import {
   decodeBotUnreadCommandV1,
   UnreadDecodeError,
@@ -67,21 +61,6 @@ export interface FlockGatewayHost {
     botId: string,
     command: BotUnreadCommandV1,
   ): Promise<BotUnreadReceiptV1>;
-  /** The stored avatar bytes, or `undefined` when the Bot uses its sheep. */
-  readBotAvatar(
-    userId: string,
-    botId: string,
-  ): Promise<{ bytes: Uint8Array; contentType: string } | undefined>;
-  /**
-   * Writes the avatar bytes as immutable content-addressed durable content and
-   * returns the reference. It changes no Bot state: a `bot/set-profile`
-   * command carrying the returned reference is the durable write.
-   */
-  uploadBotAvatar(
-    userId: string,
-    botId: string,
-    command: UploadBotAvatarCommandV1,
-  ): Promise<BotAvatarUploadReceiptV1>;
 }
 export interface FlockBackendRouteContribution {
   packageId: string;
@@ -94,14 +73,11 @@ export interface FlockBackendRouteContribution {
 function errorResponse(error: unknown): Response {
   if (
     error instanceof FlockDecodeError ||
-    error instanceof ConfigurationDecodeError ||
     error instanceof UnreadDecodeError ||
     (typeof error === "object" &&
       error !== null &&
       "name" in error &&
-      (error.name === "FlockDecodeError" ||
-        error.name === "ConfigurationDecodeError" ||
-        error.name === "UnreadDecodeError"))
+      (error.name === "FlockDecodeError" || error.name === "UnreadDecodeError"))
   )
     return Response.json(
       {
@@ -178,7 +154,6 @@ export function createFlockBackendContribution(
       const sheep = url.pathname.match(/^\/api\/bots\/([^/]+)\/sheep$/);
       const unread = url.pathname.match(/^\/api\/bots\/([^/]+)\/unread$/);
       const lifecycle = url.pathname.match(/^\/api\/bots\/([^/]+)\/lifecycle$/);
-      const avatar = url.pathname.match(/^\/api\/bots\/([^/]+)\/avatar$/);
       if (
         url.pathname !== "/api/bots" &&
         url.pathname !== "/api/bots/lifecycles" &&
@@ -187,8 +162,7 @@ export function createFlockBackendContribution(
         url.pathname !== "/api/bots/notifications" &&
         !sheep &&
         !unread &&
-        !lifecycle &&
-        !avatar
+        !lifecycle
       )
         return undefined;
       try {
@@ -230,44 +204,6 @@ export function createFlockBackendContribution(
             );
           return Response.json(
             await host.executeBotUnreadCommand(context.userId, botId, command),
-          );
-        }
-        if (avatar) {
-          const botId = decodePathId(avatar[1]!);
-          if (request.method === "GET") {
-            const stored = await host.readBotAvatar(context.userId, botId);
-            if (!stored)
-              return Response.json(
-                {
-                  error: `Bot "${botId}" has no uploaded avatar`,
-                  code: "avatar-not-found",
-                  definitive: true,
-                },
-                { status: 404 },
-              );
-            return new Response(stored.bytes as unknown as BodyInit, {
-              headers: {
-                "content-type": stored.contentType,
-                // Content-addressed bytes never change under their digest.
-                "cache-control": "private, max-age=31536000, immutable",
-                "content-security-policy": "default-src 'none'; sandbox",
-                "x-content-type-options": "nosniff",
-              },
-            });
-          }
-          if (request.method !== "POST")
-            return Response.json(
-              { error: "method not allowed" },
-              { status: 405 },
-            );
-          const command = decodeUploadBotAvatarCommandV1(await request.json());
-          if (command.botId !== botId)
-            throw new FlockDecodeError(
-              "avatar command does not match request path",
-            );
-          return Response.json(
-            await host.uploadBotAvatar(context.userId, botId, command),
-            { status: 201 },
           );
         }
         if (url.pathname === "/api/bots/lifecycles") {

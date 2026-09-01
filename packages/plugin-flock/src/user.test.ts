@@ -45,9 +45,17 @@ const settings = {
   schemaVersion: 1 as const,
   revision: 4,
   profile: { name: "User" },
-  packages: [],
+  packages: [
+    { packageId: "web", version: "0.0.1", state: "installed" as const },
+    {
+      packageId: "provider-ollama-cloud",
+      version: "0.0.1",
+      state: "installed" as const,
+    },
+  ],
   connections: [],
   newBotModelTemplate: { connectionId: "provider", providerModelId: "model" },
+  newBotModelTemplateSource: "auto" as const,
 };
 function command(commandId = "create-1", expectedRevision = 0) {
   return {
@@ -66,6 +74,33 @@ describe("Flock User contribution", () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({
       storage,
+      availablePackages: [
+        {
+          packageId: "web",
+          version: "0.0.1",
+          capabilities: [
+            { id: "web-fetch", kind: "tool", connectionTypes: [] },
+          ],
+          connectionTypes: [],
+        },
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          capabilities: [
+            {
+              id: "ollama-cloud-models",
+              kind: "model",
+              connectionTypes: ["ollama-cloud-account"],
+            },
+          ],
+          connectionTypes: [
+            {
+              id: "ollama-cloud-account",
+              capabilities: ["ollama-cloud-models"],
+            },
+          ],
+        },
+      ],
       readUserSettings: () => Promise.resolve(settings),
       claimInitialModelBinding: (_storage, input) =>
         Promise.resolve({
@@ -92,6 +127,14 @@ describe("Flock User contribution", () => {
     expect(await contribution.registration("alpha")).toMatchObject({
       initialModel: undefined,
       initialModelBinding: undefined,
+      initialAssignments: [
+        {
+          assignmentId: "default-0-0",
+          packageId: "web",
+          capabilityId: "web-fetch",
+          state: "enabled",
+        },
+      ],
     });
     await expect(
       contribution.createBot("user-1", { ...command(), name: "Different" }),

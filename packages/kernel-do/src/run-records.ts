@@ -45,22 +45,6 @@ export interface StoredRunRoutineOriginV1 {
 }
 
 /**
- * A Turn one Channel message produced.
- *
- * `fireId` is the message. It is the run this object admits the Turn under, so
- * a redelivery of the same message is refused by the kernel's own Turn
- * idempotency instead of running the Bot twice. The Channel's own record — its
- * membership, its message log, the delivery this settles — lives in the User
- * Durable Object and never here.
- */
-export interface StoredRunChannelOriginV1 {
-  kind: "channel";
-  channelId: string;
-  fireId: string;
-  trigger: StoredRunTriggerV1;
-}
-
-/**
  * A Turn a parent Turn dispatched as a subagent task.
  *
  * It is recorded in the *child* object: the Subagent Durable Object runs the
@@ -76,9 +60,7 @@ export interface StoredRunSubagentOriginV1 {
 
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
-  | StoredRunRoutineOriginV1
-  | StoredRunChannelOriginV1
-  | StoredRunSubagentOriginV1;
+  StoredRunRoutineOriginV1 | StoredRunSubagentOriginV1;
 
 const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
   "cron",
@@ -264,15 +246,12 @@ function decodeStoredRunOrigin(
       parentRunId: candidate.parentRunId,
     };
   }
-  if (candidate.kind !== "routine" && candidate.kind !== "channel") {
+  if (candidate.kind !== "routine") {
     throw new Error(`run "${runId}" has an invalid admission origin kind`);
   }
-  // The producer's own id field, so a Routine origin and a Channel origin are
-  // each exact rather than a union that would accept either name on either.
-  const owner = candidate.kind === "routine" ? "routineId" : "channelId";
   requireExactOriginFields(
     candidate,
-    ["kind", owner, "fireId", "trigger"],
+    ["kind", "routineId", "fireId", "trigger"],
     runId,
   );
   const trigger = STORED_RUN_ORIGIN_TRIGGERS.find(
@@ -282,24 +261,17 @@ function decodeStoredRunOrigin(
     throw new Error(`run "${runId}" has an invalid admission origin trigger`);
   }
   if (
-    !boundedString(candidate[owner], 256) ||
+    !boundedString(candidate.routineId, 256) ||
     !boundedString(candidate.fireId, 256)
   ) {
     throw new Error(`run "${runId}" has an invalid admission origin id`);
   }
-  return candidate.kind === "routine"
-    ? {
-        kind: "routine",
-        routineId: candidate.routineId as string,
-        fireId: candidate.fireId as string,
-        trigger,
-      }
-    : {
-        kind: "channel",
-        channelId: candidate.channelId as string,
-        fireId: candidate.fireId as string,
-        trigger,
-      };
+  return {
+    kind: "routine",
+    routineId: candidate.routineId as string,
+    fireId: candidate.fireId as string,
+    trigger,
+  };
 }
 
 function decodeStoredRunAdmission(
@@ -642,14 +614,6 @@ export interface BotNotificationIntent {
    * rather than an update about one that finished. Absent means `normal`.
    */
   urgency?: "normal" | "critical";
-  /**
-   * The Channel this intent belongs to, when a group message raised it.
-   *
-   * One message reaches every other member, so the same message raises one
-   * intent per recipient Bot. The dimension is what lets the client tell the
-   * person once about the room rather than once per Bot in it.
-   */
-  channelId?: string;
 }
 
 export interface BotTurnCompletion {

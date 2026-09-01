@@ -3,8 +3,10 @@
 }
 
 :root {
-  color: #1e1d27;
-  background: #faf7f2;
+  color-scheme: dark;
+  color: #f4f2f6;
+  background: #1f1e24;
+  accent-color: #ec386b;
   font-family:
     Manrope,
     ui-sans-serif,
@@ -15,31 +17,37 @@
   font-synthesis: none;
 
   /* Semantic color aliases. Feature plugins consume these names only. */
-  --frock-text: #1e1d27;
-  --frock-text-muted: #6d6974;
-  --frock-text-subtle: #9a949d;
+  --frock-text: #f4f2f6;
+  --frock-text-muted: #aaa6b1;
+  --frock-text-subtle: #8d8896;
   --frock-on-accent: #fff;
-  --frock-surface: #fff;
-  --frock-surface-raised: #fff;
-  --frock-surface-subtle: #faf7f2;
-  --frock-surface-accent: #fce2ea;
-  --frock-surface-accent-soft: #fff7f9;
-  --frock-border: #e7e0d9;
-  --frock-border-strong: #d9d0c9;
+  --frock-surface-window: #1f1e24;
+  --frock-surface: #211f26;
+  --frock-surface-sidebar: #1a191e;
+  --frock-surface-raised: #2c2a33;
+  --frock-surface-subtle: #26242c;
+  --frock-surface-accent: #432330;
+  --frock-surface-accent-soft: #2f2027;
+  --frock-border: #3a3742;
+  --frock-border-strong: #6c6874;
   --frock-border-focus: #ec386b;
   --frock-action-primary: #ec386b;
   --frock-action-primary-hover: #d92d5f;
-  --frock-action-secondary: #fce2ea;
-  --frock-action-secondary-text: #d92d5f;
-  --frock-success: #3b9b73;
-  --frock-success-surface: #eef7f2;
-  --frock-success-border: #cbe4d8;
-  --frock-danger-text: #a83241;
-  --frock-danger-surface: #fff0f2;
-  --frock-danger-border: #edb7bf;
-  --frock-focus-ring: rgb(236 56 107 / 28%);
-  --frock-scrollbar: #d8d0ca;
-  --frock-overlay-tint: rgb(22 13 24 / 65%);
+  --frock-action-primary-pressed: #c62656;
+  --frock-action-secondary: #432330;
+  --frock-action-secondary-text: #f2a6bd;
+  --frock-success: #73d6aa;
+  --frock-success-surface: #203329;
+  --frock-success-border: #355f4a;
+  --frock-warning: #f0c36a;
+  --frock-warning-surface: #3a301e;
+  --frock-warning-border: #6d5a2e;
+  --frock-danger-text: #ff9aa8;
+  --frock-danger-surface: #3a2025;
+  --frock-danger-border: #70404a;
+  --frock-focus-ring: rgb(236 56 107 / 32%);
+  --frock-scrollbar: #514d5b;
+  --frock-overlay-tint: rgb(10 9 12 / 76%);
 
   /* Shared typography, geometry, elevation, and motion aliases. */
   --frock-font-display: "Archivo Black", Manrope, sans-serif;
@@ -86,52 +94,52 @@
   --frock-radius-card: 14px;
   --frock-radius-panel: 20px;
   --frock-settings-width: 520px;
-  --frock-shadow-card: 0 8px 22px rgb(38 21 28 / 6%);
-  --frock-shadow-panel: 18px 0 55px rgb(38 21 28 / 18%);
-  --frock-shadow-floating: 0 18px 45px rgb(38 21 28 / 18%);
-  --frock-shadow-icon: 0 8px 18px rgb(236 56 107 / 22%);
-  --frock-shadow-control: 0 8px 28px rgb(38 21 28 / 14%);
-  --frock-shadow-composer: 0 12px 32px rgb(51 25 35 / 10%);
-  --frock-shadow-right-panel: -16px 0 36px rgb(38 21 28 / 14%);
+  --frock-shadow-card: 0 8px 22px rgb(0 0 0 / 24%);
+  --frock-shadow-panel: 18px 0 55px rgb(0 0 0 / 42%);
+  --frock-shadow-floating: 0 18px 45px rgb(0 0 0 / 44%);
+  --frock-shadow-icon: 0 8px 18px rgb(236 56 107 / 28%);
+  --frock-shadow-control: 0 8px 28px rgb(0 0 0 / 34%);
+  --frock-shadow-composer: 0 12px 32px rgb(0 0 0 / 38%);
+  --frock-shadow-right-panel: -16px 0 36px rgb(0 0 0 / 38%);
   --frock-motion-fast: 140ms cubic-bezier(0.2, 0, 0, 1);
   --frock-motion-panel: 220ms cubic-bezier(0.2, 0, 0, 1);
   --frock-motion-enter: 260ms cubic-bezier(0.16, 1, 0.3, 1);
-  --frock-fill-hover: rgb(30 29 39 / 5%);
-  --frock-fill-pressed: rgb(30 29 39 / 9%);
-  --frock-skeleton: rgb(30 29 39 / 7%);
-  --frock-skeleton-shine: rgb(255 255 255 / 60%);
+  --frock-fill-hover: rgb(244 242 246 / 7%);
+  --frock-fill-pressed: rgb(244 242 246 / 12%);
+  --frock-skeleton: rgb(244 242 246 / 8%);
+  --frock-skeleton-shine: rgb(255 255 255 / 12%);
   --frock-layer-menu: 30;
   --frock-layer-panel: 40;
   --frock-layer-surface: 100;
 
   /* Capability presentation aliases shared across first-party plugins. */
-  --frock-computer-accent: #3477b5;
-  --frock-computer-accent-text: #1b4a73;
-  --frock-computer-surface: #eaf2fb;
-  --frock-computer-border: #b6d2ec;
+  --frock-computer-accent: #67a9e8;
+  --frock-computer-accent-text: #9ecfff;
+  --frock-computer-surface: #1e3044;
+  --frock-computer-border: #315e87;
   --frock-computer-viewer: #0c0c0c;
-  --frock-provider-google: #4285f4;
-  --frock-text-disabled: #aaa3aa;
-  --frock-surface-disabled: #eee8e3;
-  --frock-danger-strong: #bc3444;
-  --frock-accent-border: #ecc7d3;
-  --frock-accent-text: #8d5768;
-  --frock-accent-surface: #fff6f8;
-  --frock-success-bright: #49c88b;
+  --frock-provider-google: #8ab4f8;
+  --frock-text-disabled: #77727f;
+  --frock-surface-disabled: #35323b;
+  --frock-danger-strong: #ff788c;
+  --frock-accent-border: #704052;
+  --frock-accent-text: #f2a6bd;
+  --frock-accent-surface: #321f28;
+  --frock-success-bright: #73d6aa;
   --frock-overlay-border: rgb(255 255 255 / 25%);
-  --frock-shadow-accent: 0 10px 24px rgb(236 56 107 / 20%);
-  --frock-shadow-auth: 0 24px 70px rgb(38 21 28 / 12%);
-  --frock-shadow-avatar: 0 15px 35px rgb(112 38 61 / 15%);
-  --frock-shadow-dialog: 0 30px 90px rgb(16 8 16 / 44%);
+  --frock-shadow-accent: 0 10px 24px rgb(236 56 107 / 28%);
+  --frock-shadow-auth: 0 24px 70px rgb(0 0 0 / 42%);
+  --frock-shadow-avatar: 0 15px 35px rgb(0 0 0 / 34%);
+  --frock-shadow-dialog: 0 30px 90px rgb(0 0 0 / 62%);
   --frock-thread-gradient: linear-gradient(
     180deg,
     var(--frock-surface) 0%,
-    var(--frock-surface) 82%,
-    var(--frock-surface-accent-soft) 100%
+    var(--frock-surface) 78%,
+    var(--frock-surface-window) 100%
   );
   --frock-auth-background: radial-gradient(
     circle at 50% 20%,
-    rgb(252 226 234 / 82%),
+    rgb(236 56 107 / 14%),
     transparent 34%
   );
   --frock-flock-preview: linear-gradient(
@@ -140,15 +148,15 @@
     var(--frock-surface-subtle)
   );
 
-  --frock-computer-success-border: #bfe0d0;
-  --frock-computer-error-border: #f0c2c6;
-  --frock-computer-error-text: #a8323d;
-  --frock-computer-error-surface: #fdecee;
-  --frock-computer-grid: rgb(30 29 39 / 4%);
-  --frock-computer-inset: rgb(30 29 39 / 3%);
-  --frock-computer-control-tint: rgb(250 247 242 / 82%);
-  --frock-computer-control-surface: rgb(255 255 255 / 94%);
-  --frock-computer-focus: rgb(52 119 181 / 28%);
+  --frock-computer-success-border: #355f4a;
+  --frock-computer-error-border: #70404a;
+  --frock-computer-error-text: #ff9aa8;
+  --frock-computer-error-surface: #3a2025;
+  --frock-computer-grid: rgb(244 242 246 / 5%);
+  --frock-computer-inset: rgb(244 242 246 / 4%);
+  --frock-computer-control-tint: rgb(31 30 36 / 84%);
+  --frock-computer-control-surface: rgb(44 42 51 / 96%);
+  --frock-computer-focus: rgb(103 169 232 / 34%);
 
   --frock-viewer-overlay: rgb(3 3 3 / 94%);
   --frock-viewer-text: #dedede;
@@ -202,6 +210,10 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
+}
+
+body {
+  background: var(--frock-surface-window);
 }
 
 button,

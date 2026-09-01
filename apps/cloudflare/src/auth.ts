@@ -71,7 +71,9 @@ export function gatewayAuth(environment: RuntimeAuthEnvironment): GatewayAuth {
     handler: (request) => auth.handler(request),
     getSession: async (headers) => {
       const session = await auth.api.getSession({ headers });
-      return session ? { user: { id: session.user.id } } : null;
+      return session
+        ? { user: { id: session.user.id, email: session.user.email } }
+        : null;
     },
   };
 }

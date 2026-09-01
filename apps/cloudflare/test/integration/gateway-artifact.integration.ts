@@ -71,6 +71,13 @@ describe("gateway authentication", () => {
     const userId = freshUserId("identity");
     const response = await asUser(userId, "/api/identity");
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ schemaVersion: 1, userId });
+    // `isAdmin` is part of the projection, and this identity is not the
+    // canonical `development` one, so the configured allowlist decides: it
+    // holds an address no development identity can present.
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      userId,
+      isAdmin: false,
+    });
   });
 });

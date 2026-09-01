@@ -9,7 +9,7 @@
 // into one the suite does not exercise. So the binding is impersonated at the
 // only seam that matters: `env.AI.run(model, input)`.
 //
-// What is real here: the wire shape. `flux-1-schnell` answers
+// What is real here: the wire shapes. `flux-1-schnell` answers
 // `{ image: "<base64>" }` — measured against Cloudflare's model schema for
 // `@cf/black-forest-labs/flux-1-schnell` on 2026-08-31 — and so does this. The
 // bytes are a genuine 1×1 PNG, so `plugin-image`'s own container decoder reads
@@ -52,14 +52,25 @@ const SCRIPT = `
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 const PNG = ${JSON.stringify(FAKE_PNG_BASE64)};
+const encoder = new TextEncoder();
 
 let calls = [];
 
 export class ${WORKERS_AI_FAKE_ENTRYPOINT} extends WorkerEntrypoint {
-  // The Workers AI binding's only method, answering the envelope the FLUX
-  // text-to-image models answer with.
   run(model, input) {
     calls.push({ model, prompt: String(input?.prompt ?? "") });
+    if (Array.isArray(input?.messages)) {
+      const payload =
+        'data: {"choices":[{"delta":{"content":"Workers AI reply"}}]}\\n\\n' +
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\\n\\n' +
+        'data: [DONE]\\n\\n';
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(payload));
+          controller.close();
+        },
+      });
+    }
     return { image: PNG };
   }
 

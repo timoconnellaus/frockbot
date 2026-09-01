@@ -456,7 +456,7 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   /**
-   * Raises a visible failure through the notification channel. Used when a
+   * Raises a visible failure through notifications. Used when a
    * failure has no Turn completion to ride along with — a Composition that
    * failed closed, for instance, whose Turn still succeeds on the last known
    * good and would otherwise report nothing wrong.

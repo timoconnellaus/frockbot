@@ -165,7 +165,7 @@ describe("skills", () => {
 
   it("scrubs while building the pack, never by editing the Bot", () => {
     const input = source({
-      profile: { name: "Budget", avatarKind: "image" },
+      profile: { name: "Budget" },
       skills: [
         {
           source: "managed",
@@ -473,14 +473,10 @@ describe("MCP servers and Connections", () => {
   });
 });
 
-describe("profile, avatar and Memory", () => {
-  it("replaces an uploaded avatar with a fresh sheep", () => {
-    const { template, summary } = buildBotTemplateV1(
-      source({ profile: { name: "Budget", avatarKind: "image" } }),
-    );
+describe("profile avatar and Memory", () => {
+  it("exports the Bot's sheep avatar", () => {
+    const { template } = buildBotTemplateV1(source());
     expect(template.profile.avatar).toEqual({ kind: "sheep", recipe: sheep });
-    expect(JSON.stringify(template)).not.toContain("digest");
-    expect(omitted(summary, "avatar-image")).toBe(1);
   });
 
   it("records that Memory is never exported", () => {

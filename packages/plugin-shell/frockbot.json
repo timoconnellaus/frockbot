@@ -36,7 +36,8 @@
         "frockbot.bot-actions",
         "frockbot.header-actions",
         "frockbot.overlays",
-        "frockbot.bot-identity"
+        "frockbot.bot-identity",
+        "frockbot.bot-avatar"
       ]
     }
   },
@@ -50,7 +51,7 @@
         "kind": "tool",
         "connectionTypes": [],
         "admission": {
-          "turnTypes": ["chat", "channel"]
+          "turnTypes": ["chat"]
         }
       },
       {

@@ -1,16 +1,11 @@
 <script setup lang="ts">
-// The Routines line of the per-Bot info pane.
-//
-// A glance, not a section: counts, the next armed firing and the last one,
-// with a link into the full section in Bot settings. Every value comes from the
-// same listing the section reads, so the pane never claims a firing the
-// authority has not armed.
+// The Routines glance in the default Bot panel. Every row comes from the same
+// durable listing the full editor reads.
 import { UiAnchor, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, watch } from "vue";
 import { routinesStateKey } from "./state.js";
-import { summarizeRoutinesV1 } from "./routines-summary.js";
 
 const providedWeb = inject(frockBotWebDataKey);
 const providedState = inject(routinesStateKey);
@@ -20,10 +15,8 @@ if (!providedWeb || !providedState) {
 const web = providedWeb;
 const routines = providedState;
 const botId = computed(() => web.value.activeBotId);
-const summary = computed(() =>
-  summarizeRoutinesV1(
-    routines.value.botId === botId.value ? routines.value.routines : [],
-  ),
+const rows = computed(() =>
+  routines.value.botId === botId.value ? routines.value.routines : [],
 );
 const link = computed(() =>
   settingsLinkV1({ anchor: "bot-info-routines", botId: botId.value }),
@@ -53,44 +46,28 @@ watch(
     class="routines-summary"
   >
     <header class="routines-summary__head">
-      <span class="routines-summary__icon" aria-hidden="true"
-        ><UiIcon name="history" size="sm"
-      /></span>
       <h3>Routines</h3>
-      <span class="routines-summary__count"
-        >{{ summary.enabled }}/{{ summary.total }} enabled</span
+      <a
+        class="routines-summary__add"
+        :href="sectionLink"
+        aria-label="Open Routines editor"
+        title="Open Routines editor"
       >
+        <UiIcon name="plus" size="sm" />
+      </a>
     </header>
-    <p v-if="summary.total === 0" class="routines-summary__empty">
+    <p v-if="rows.length === 0" class="routines-summary__empty">
       No Routines yet.
-      <a :href="sectionLink">Add one in Bot settings.</a>
     </p>
-    <dl v-else class="routines-summary__facts">
-      <div>
-        <dt>Next run</dt>
-        <dd>
-          {{
-            summary.nextRunAt
-              ? `${summary.nextRunAt} · ${summary.nextRunName}`
-              : "None armed"
-          }}
-        </dd>
-      </div>
-      <div>
-        <dt>Last run</dt>
-        <dd>
-          {{
-            summary.lastRunAt
-              ? `${summary.lastRunAt} · ${summary.lastRunName}`
-              : "Never"
-          }}
-        </dd>
-      </div>
-      <div v-if="summary.webhooks > 0">
-        <dt>Webhook triggers</dt>
-        <dd>{{ summary.webhooks }}</dd>
-      </div>
-    </dl>
+    <ul v-else class="routines-summary__rows">
+      <li v-for="routine in rows" :key="routine.routineId">
+        <span>
+          <strong>{{ routine.name }}</strong>
+          <small>{{ routine.schedule ?? "Webhook" }}</small>
+        </span>
+        <small>{{ routine.enabled ? "On" : "Paused" }}</small>
+      </li>
+    </ul>
   </UiAnchor>
 </template>
 
@@ -99,10 +76,7 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--frock-border);
-  border-radius: var(--frock-radius-card);
-  background: var(--frock-surface);
+  padding-right: var(--frock-control-sm);
 }
 
 .routines-summary__head {
@@ -111,10 +85,17 @@ watch(
   gap: 8px;
 }
 
-.routines-summary__icon {
+.routines-summary__add {
   display: grid;
+  width: var(--frock-control-sm);
+  height: var(--frock-control-sm);
   place-items: center;
-  color: var(--frock-text-muted);
+  border-radius: var(--frock-radius-control);
+  color: var(--frock-text);
+}
+
+.routines-summary__add:hover {
+  background: var(--frock-fill-hover);
 }
 
 .routines-summary__head h3 {
@@ -124,39 +105,46 @@ watch(
   font-weight: 600;
 }
 
-.routines-summary__count {
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-}
-
 .routines-summary__empty {
   margin: 0;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
 }
 
-.routines-summary__facts {
+.routines-summary__rows {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.routines-summary__facts div {
+.routines-summary__rows li {
   display: flex;
-  gap: 8px;
+  align-items: center;
   justify-content: space-between;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--frock-border);
 }
 
-.routines-summary__facts dt {
-  color: var(--frock-text-muted);
+.routines-summary__rows li > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.routines-summary__rows strong {
+  overflow: hidden;
+  color: var(--frock-text);
   font-size: var(--frock-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.routines-summary__facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  text-align: right;
+.routines-summary__rows small {
+  color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
 }
 </style>

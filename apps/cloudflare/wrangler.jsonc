@@ -82,6 +82,10 @@
         "name": "USER_CONFIGURATIONS",
         "class_name": "UserConfiguration",
       },
+      {
+        "name": "DEPLOYMENT_POLICY",
+        "class_name": "DeploymentPolicy",
+      },
     ],
   },
   "migrations": [
@@ -92,6 +96,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["UserConfiguration"],
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["DeploymentPolicy"],
     },
   ],
   "vars": {
@@ -166,11 +174,17 @@
             "name": "USER_CONFIGURATIONS",
             "class_name": "UserConfiguration",
           },
+          {
+            "name": "DEPLOYMENT_POLICY",
+            "class_name": "DeploymentPolicy",
+          },
         ],
       },
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
+        // Placeholder only. Production supplies this as a secret.
+        "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
       },
     },
     // The browser end-to-end harness (`apps/cloudflare/e2e/harness.ts`) runs
@@ -183,10 +197,11 @@
     // Only binding locality differs. `main`, `compatibility_date`,
     // `compatibility_flags`, `migrations` and the Durable Object classes are
     // the top-level production ones, and every var is the production value.
-    // `MEMORY_INDEX` and `AI` are omitted rather than faked, exactly as
-    // `vitest.integration.config.ts` omits them: miniflare simulates neither,
-    // and no production code path reads either today, so a Package that starts
-    // to read one fails loudly at that seam instead of against a stub.
+    // `MEMORY_INDEX` is omitted because workerd has no local Vectorize
+    // simulator. `AI` is a local RPC service under this environment: the e2e
+    // harness starts its auxiliary Worker in a second local Wrangler process,
+    // which the dev service registry connects at the same `run(model, input)`
+    // seam without spending account credits or requiring a Cloudflare token.
     "e2e": {
       // This environment is never deployed. Without an empty list it would
       // inherit the top-level custom domain and a stray `wrangler deploy --env
@@ -212,6 +227,11 @@
         {
           "binding": "COMPUTER_HOST",
           "service": "frockbot-computer-host",
+        },
+        {
+          "binding": "AI",
+          "service": "frockbot-workers-ai-e2e",
+          "entrypoint": "WorkersAiFake",
         },
       ],
       "r2_buckets": [
@@ -250,11 +270,18 @@
             "name": "USER_CONFIGURATIONS",
             "class_name": "UserConfiguration",
           },
+          {
+            "name": "DEPLOYMENT_POLICY",
+            "class_name": "DeploymentPolicy",
+          },
         ],
       },
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
+        // The canonical `development` identity is admin in this environment;
+        // this placeholder also proves the configured-allowlist rule.
+        "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
       },
     },
   },

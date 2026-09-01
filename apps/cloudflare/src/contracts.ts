@@ -92,6 +92,7 @@ import type {
   ClientTurnV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
+import type { DeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
 
 export interface BackendRouteContribution {
   packageId: string;
@@ -103,7 +104,11 @@ export interface BackendRouteContribution {
   route(
     request: Request,
     url: URL,
-    context: { userId?: string; client: "browser" | "desktop" },
+    context: {
+      userId?: string;
+      client: "browser" | "desktop";
+      isAdmin: boolean;
+    },
   ): Promise<Response | undefined>;
 }
 
@@ -414,6 +419,7 @@ export interface BundlerBinding {
 export interface AuthSession {
   user: {
     id: string;
+    email?: string;
   };
 }
 
@@ -711,6 +717,10 @@ export interface GatewayDependencies {
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
   auth: GatewayAuth;
+  userExists(userId: string): Promise<boolean>;
+  readDeploymentPolicy(): Promise<DeploymentPolicyV1>;
+  /** Raw deployment secret; only the derived `isAdmin` boolean reaches clients. */
+  adminEmails?: string;
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): UserBotStateBinding;
   userConfigurationFor(userId: string): UserConfigurationBinding;

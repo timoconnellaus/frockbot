@@ -12,7 +12,11 @@ if (!surfaces || !web)
 
 <template>
   <UiIconButton
-    v-if="web.settingsAvailable && web.activeBotId"
+    v-if="
+      web.settingsAvailable &&
+      web.activeBotId &&
+      surfaces.activeId.value !== 'bot-settings'
+    "
     class="bot-settings-trigger"
     icon="gear"
     label="Bot settings"

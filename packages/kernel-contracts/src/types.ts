@@ -185,18 +185,17 @@ export function turnFailureMessage(
  * catalog per turn type — the parity register's row 57 — so the kernel has to
  * carry the value; which tools a turn type admits stays Package policy.
  *
- * All four names are declared at once because the value crosses the manifest,
- * the isolate contract, and the durable run record: adding one later is a wire
- * change in three places. Only `chat` and `automation` have a producer today.
+ * All names are declared together because the value crosses the manifest, the
+ * isolate contract, and the durable run record: adding one later is a wire
+ * change in three places.
  */
-export type TurnTypeV1 = "chat" | "automation" | "subagent" | "channel";
+export type TurnTypeV1 = "chat" | "automation" | "subagent";
 
 /** The declared turn types, in their canonical order. */
 export const TURN_TYPES_V1: readonly TurnTypeV1[] = [
   "chat",
   "automation",
   "subagent",
-  "channel",
 ];
 
 /** The strict decoder for a turn type crossing any seam. */

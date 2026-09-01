@@ -18,6 +18,12 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
 import auditManifest from "@frockbot/plugin-audit/manifest";
+import adminManifest from "@frockbot/plugin-admin/manifest";
+import {
+  createAdminBackendContribution,
+  type AdminGatewayHost,
+} from "@frockbot/plugin-admin/backend";
+const createAdminGatewayPlugin = createAdminBackendContribution.plugin;
 // Gateway Audit behavior is resolved as a lifecycle-owned Plugin.
 import {
   createAuditBackendContribution,
@@ -72,7 +78,11 @@ export interface BackendRouteContribution {
   route(
     request: Request,
     url: URL,
-    context: { userId?: string; client?: "browser" | "desktop" },
+    context: {
+      userId?: string;
+      client: "browser" | "desktop";
+      isAdmin: boolean;
+    },
   ): Promise<Response | undefined>;
 }
 // pi-lens-ignore: ts:2307
@@ -167,26 +177,8 @@ import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
-import channelsManifest from "@frockbot/plugin-channels/manifest";
-import telegramManifest from "@frockbot/plugin-telegram/manifest";
-// The Channels gateway Contribution carries the connect route and the webhook
-// door an external platform delivers on.
-import {
-  createChannelsBackendContribution,
-  type ChannelsGatewayHost,
-} from "@frockbot/plugin-channels/backend";
-export type { ChannelsGatewayHost } from "@frockbot/plugin-channels/backend";
-const createChannelsGatewayPlugin = (
-  createChannelsBackendContribution as typeof createChannelsBackendContribution & {
-    plugin(
-      host: ChannelsGatewayHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
-import { createChannelsRuntimePlugin } from "@frockbot/plugin-channels/agent";
-import type { ChannelsRuntimeHostV1 } from "@frockbot/plugin-channels/agent-host";
-export type { ChannelsRuntimeHostV1 } from "@frockbot/plugin-channels/agent-host";
+import workersAiManifest from "@frockbot/plugin-provider-workers-ai/manifest";
+import { createWorkersAiRuntimePlugin } from "@frockbot/plugin-provider-workers-ai/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 // The Routines gateway Contribution carries the Bot-scoped Routine routes.
 import {
@@ -309,6 +301,7 @@ export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-ui-theme", uiThemeManifest],
   ["@frockbot/plugin-auth", authManifest],
+  ["@frockbot/plugin-admin", adminManifest],
   ["@frockbot/plugin-bot-template", botTemplateManifest],
   ["@frockbot/plugin-authoring", authoringManifest],
   ["@frockbot/plugin-identity", identityManifest],
@@ -316,6 +309,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-credentials", credentialsManifest],
   ["@frockbot/plugin-web", webManifest],
   ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
+  ["@frockbot/plugin-provider-workers-ai", workersAiManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
@@ -339,8 +333,6 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-subagents", subagentsManifest],
   ["@frockbot/plugin-user-machine", userMachineManifest],
   ["@frockbot/plugin-machine-messages", machineMessagesManifest],
-  ["@frockbot/plugin-channels", channelsManifest],
-  ["@frockbot/plugin-telegram", telegramManifest],
 ]);
 
 const runtimeContributions = new Map([
@@ -471,11 +463,16 @@ const assignedRuntimeContributionFactories = new Map<
 interface ModelRuntimeContributionConfig {
   accountId: string;
   connectionId: string;
-  leaseCredential(
+  connectionGeneration?: string;
+  leaseCredential?(
     effectId: string,
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
-  settleCredential(effectId: string): Promise<void>;
+  settleCredential?(effectId: string): Promise<void>;
+  runWorkersAi?: (
+    model: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
   fetch?: typeof fetch;
   /**
    * Endpoint root carried on the Connection's settings bag, when its User
@@ -497,12 +494,39 @@ const modelRuntimeContributionFactories = new Map<
     "@frockbot/plugin-provider-ollama-cloud/runtime",
     {
       providerType: "ollama-cloud",
-      create: ({ apiBaseUrl, ...config }) =>
-        createOllamaCloudRuntimePlugin({
+      create: ({
+        apiBaseUrl,
+        leaseCredential,
+        settleCredential,
+        ...config
+      }) => {
+        if (!leaseCredential || !settleCredential) {
+          throw new Error("Ollama Cloud credential host is unavailable");
+        }
+        return createOllamaCloudRuntimePlugin({
           ...config,
           packageId: "provider-ollama-cloud",
+          leaseCredential,
+          settleCredential,
           chatBaseUrl: ollamaChatBaseUrl(apiBaseUrl),
-        } as Parameters<typeof createOllamaCloudRuntimePlugin>[0]),
+        });
+      },
+    },
+  ],
+  [
+    "@frockbot/plugin-provider-workers-ai/runtime",
+    {
+      providerType: "workers-ai",
+      create: ({ connectionId, connectionGeneration, runWorkersAi }) => {
+        if (!connectionGeneration || !runWorkersAi) {
+          throw new Error("Workers AI binding host is unavailable");
+        }
+        return createWorkersAiRuntimePlugin({
+          connectionId,
+          connectionGeneration,
+          run: runWorkersAi,
+        });
+      },
     },
   ],
 ]);
@@ -595,14 +619,14 @@ export interface MountedFoundationBackend<T> {
 /** Mount every declared backend Contribution into one owned Cordis root. */
 export type FoundationGatewayHost = {
   backendHost: "gateway";
-} & BotTemplateGatewayHostV1 &
+} & AdminGatewayHost &
+  BotTemplateGatewayHostV1 &
   FlockGatewayHost &
   McpGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
   SubagentsGatewayHost &
   MachineGatewayHostV1 &
-  ChannelsGatewayHost &
   SearchGatewayHost &
   AuditGatewayHost &
   PackagePublisherGatewayHost;
@@ -647,6 +671,11 @@ export async function createFoundationBackendContributions<T>(
         let plugin: Plugin;
         if (
           host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-admin/backend"
+        ) {
+          plugin = createAdminGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-flock/backend"
         ) {
           plugin = createFlockGatewayPlugin(host, lifecycle);
@@ -680,11 +709,6 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-user-machine/backend"
         ) {
           plugin = createMachineGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-channels/backend"
-        ) {
-          plugin = createChannelsGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-search/backend"
@@ -879,13 +903,6 @@ export function createFoundationHostedRuntimePackages(
      */
     subagents?: SubagentsRuntimeHostV1;
     /**
-     * The Channels seam, supplied by the Bot Durable Object for one admitted
-     * Turn. Absent outside a Turn, and the Channels Package is then not
-     * mounted: a Bot posts to a Channel only inside a Turn whose Session and
-     * Turn the message's provenance can name.
-     */
-    channels?: ChannelsRuntimeHostV1;
-    /**
      * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside one whose
      * durable roots are reachable in object storage — the Computer provider
@@ -995,15 +1012,6 @@ export function createFoundationHostedRuntimePackages(
             plan,
             "subagents",
             createSubagentsRuntimePlugin(host.subagents),
-          ),
-        ]
-      : []),
-    ...(host.channels
-      ? [
-          runtimePackage(
-            plan,
-            "channels",
-            createChannelsRuntimePlugin(host.channels),
           ),
         ]
       : []),
@@ -1229,6 +1237,9 @@ export function createFoundationModelRuntimePackage(
     plugin: factory.create({
       ...host,
       connectionId: binding.connection.connectionId,
+      ...(binding.connection.generation
+        ? { connectionGeneration: binding.connection.generation }
+        : {}),
       // Every inbound value is decoded at its seam: the provider Package
       // validates the endpoint root before it composes a request URL.
       ...(typeof binding.connection.settings?.["api-base-url"] === "string"
@@ -1308,11 +1319,6 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Subagents mount only for a Turn, so a dispatched task names the run that
   // dispatched it and the Subagent Durable Object it reaches is addressable.
   runtimeIds.delete("subagents");
-  // Channels mount only for a Turn, so a posted message records the Session and
-  // Turn that produced it — and so the tools are absent where there is no Turn
-  // to attribute them to.
-  runtimeIds.delete("channels");
-  runtimeIds.delete("telegram");
   // The registered machine's tools mount only for a Turn: the control tools
   // write an intent record the Turn's Session and run name, and the approval
   // that gates them is a send onto that Turn's own durable log.
@@ -1332,6 +1338,7 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // its handshake resolve.
   runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
+  runtimeIds.delete("provider-workers-ai");
   // The Web Package's `web_fetch` mounts only for a Bot whose User assigned
   // the `web-fetch` Capability to it.
   runtimeIds.delete("web");

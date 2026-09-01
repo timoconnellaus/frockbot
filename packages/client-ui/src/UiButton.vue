@@ -30,6 +30,7 @@ withDefaults(
   background: transparent;
   font-size: var(--frock-text-base);
   font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background-color var(--frock-motion-fast),
@@ -49,6 +50,10 @@ withDefaults(
 
 .ui-button--primary:hover:not(:disabled) {
   background: var(--frock-action-primary-hover);
+}
+
+.ui-button--primary:active:not(:disabled) {
+  background: var(--frock-action-primary-pressed);
 }
 
 .ui-button--secondary {

@@ -22,10 +22,14 @@ import { decodeRunCursorV1 } from "./run-cursor.js";
 
 /** The single durable key the whole record lives under. */
 export const UNREAD_STATE_KEY = "shell:unread";
+/** The newest visible chat line, written beside unread activity at settlement. */
+export const SIDEBAR_PREVIEW_KEY = "shell:preview";
 /** Idempotency receipts for `bot/mark-read` and `bot/mark-unread`. */
 export const UNREAD_RECEIPT_PREFIX = "shell:unread-receipt:";
 /** Everything past this is reported as "99+"; the sidebar never renders more. */
 export const UNREAD_COUNT_CAP = 99;
+/** A sidebar row never carries more transcript text than it can render. */
+export const SIDEBAR_PREVIEW_TEXT_LIMIT = 120;
 
 const MAX_CURSOR_LENGTH = 320;
 const MAX_TIMESTAMP_LENGTH = 64;
@@ -51,6 +55,19 @@ export interface UnreadStateV1 {
   lastViewedAt?: string;
   /** User intent that is not derivable from any cursor. */
   manuallyUnread: boolean;
+}
+
+/**
+ * The small durable projection a sidebar row needs from the latest settled
+ * chat Turn. It is not transcript authority: the stored run and Session events
+ * remain that. This only avoids opening every run log during the bounded
+ * sidebar fan-out.
+ */
+export interface SidebarMessagePreviewV1 {
+  schemaVersion: 1;
+  text: string;
+  at: string;
+  role: "assistant" | "user";
 }
 
 export function emptyUnreadStateV1(): UnreadStateV1 {
@@ -175,6 +192,74 @@ export function optionalUnreadStateV1(input: unknown): UnreadStateV1 {
     : decodeUnreadStateV1(input);
 }
 
+/** Exact durable/client codec for one projected visible chat line. */
+export function decodeSidebarMessagePreviewV1(
+  input: unknown,
+): SidebarMessagePreviewV1 {
+  const value = record(input, "sidebar message preview");
+  exactKeys(
+    value,
+    ["schemaVersion", "text", "at", "role"],
+    [],
+    "sidebar message preview",
+  );
+  if (value.schemaVersion !== 1) {
+    throw new UnreadDecodeError(
+      "sidebar message preview schemaVersion is invalid",
+    );
+  }
+  if (
+    typeof value.text !== "string" ||
+    value.text.length === 0 ||
+    value.text.length > SIDEBAR_PREVIEW_TEXT_LIMIT
+  ) {
+    throw new UnreadDecodeError("sidebar message preview text is invalid");
+  }
+  const at = optionalTimestamp(value, "at", "sidebar message preview");
+  if (at === undefined) {
+    throw new UnreadDecodeError("sidebar message preview at is invalid");
+  }
+  if (value.role !== "assistant" && value.role !== "user") {
+    throw new UnreadDecodeError("sidebar message preview role is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    text: value.text,
+    at,
+    role: value.role,
+  };
+}
+
+/** An absent preview means this Bot has no settled visible chat line yet. */
+export function optionalSidebarMessagePreviewV1(
+  input: unknown,
+): SidebarMessagePreviewV1 | undefined {
+  return input === undefined ? undefined : decodeSidebarMessagePreviewV1(input);
+}
+
+/**
+ * Selects the last visible line of a completed chat Turn. The assistant reply
+ * is later when it has text; an empty reply leaves the User's admitted input as
+ * the preview. Both are bounded before they enter the durable projection.
+ */
+export function sidebarMessagePreviewForTurnV1(
+  turn: { acceptedAt: string; input: string; responseText?: string },
+  settledAt: string,
+): SidebarMessagePreviewV1 | undefined {
+  const role = turn.responseText ? "assistant" : "user";
+  const text = (turn.responseText || turn.input).slice(
+    0,
+    SIDEBAR_PREVIEW_TEXT_LIMIT,
+  );
+  if (text.length === 0) return undefined;
+  return decodeSidebarMessagePreviewV1({
+    schemaVersion: 1,
+    text,
+    at: role === "assistant" ? settledAt : turn.acceptedAt,
+    role,
+  });
+}
+
 /**
  * Records a settled chat Turn. Monotonic: a cursor that is not newer than the
  * one already recorded leaves the record byte-for-byte unchanged, so a
@@ -249,6 +334,8 @@ export interface BotUnreadViewV1 {
   lastActivityCursor?: string;
   lastActivityAt?: string;
   lastViewedAt?: string;
+  /** Latest settled assistant/user line, projected for the sidebar only. */
+  lastMessage?: SidebarMessagePreviewV1;
 }
 
 export interface BotUnreadDirectoryViewV1 {
@@ -265,6 +352,7 @@ export function projectBotUnreadViewV1(
   botId: string,
   state: UnreadStateV1,
   cursors: readonly string[],
+  lastMessage?: SidebarMessagePreviewV1,
 ): BotUnreadViewV1 {
   const ceiling = state.lastActivityCursor;
   let counted = 0;
@@ -299,6 +387,7 @@ export function projectBotUnreadViewV1(
     ...(state.lastViewedAt === undefined
       ? {}
       : { lastViewedAt: state.lastViewedAt }),
+    ...(lastMessage === undefined ? {} : { lastMessage }),
   };
 }
 
@@ -378,7 +467,7 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
   exactKeys(
     value,
     ["schemaVersion", "botId", "count", "capped", "unread", "manuallyUnread"],
-    ["lastActivityCursor", "lastActivityAt", "lastViewedAt"],
+    ["lastActivityCursor", "lastActivityAt", "lastViewedAt", "lastMessage"],
     "unread view",
   );
   if (value.schemaVersion !== 1) {
@@ -412,6 +501,7 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
     "unread view",
   );
   const lastViewedAt = optionalTimestamp(value, "lastViewedAt", "unread view");
+  const lastMessage = optionalSidebarMessagePreviewV1(value.lastMessage);
   return {
     schemaVersion: 1,
     botId: value.botId,
@@ -422,6 +512,7 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
     ...(lastActivityCursor === undefined ? {} : { lastActivityCursor }),
     ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
     ...(lastViewedAt === undefined ? {} : { lastViewedAt }),
+    ...(lastMessage === undefined ? {} : { lastMessage }),
   };
 }
 
@@ -475,15 +566,6 @@ export interface BotPendingNotificationV1 {
   createdAt: string;
   title: string;
   body: string;
-  /**
-   * The Channel a group message raised this intent in, when one did.
-   *
-   * A Channel message is owed to every member but its sender, so the same
-   * message raises one intent per recipient Bot. This dimension is what lets
-   * the client tell the person once about the room rather than once per Bot,
-   * and what lets it open the thread the message is actually in.
-   */
-  channelId?: string;
 }
 
 export interface BotNotificationDirectoryViewV1 {
@@ -526,7 +608,7 @@ function decodeBotPendingNotificationV1(
       "title",
       "body",
     ],
-    ["channelId"],
+    [],
     "pending notification",
   );
   if (value.schemaVersion !== 1) {
@@ -570,15 +652,6 @@ function decodeBotPendingNotificationV1(
       "pending notification body",
       true,
     ),
-    ...(value.channelId === undefined
-      ? {}
-      : {
-          channelId: boundedText(
-            value.channelId,
-            MAX_NOTIFICATION_ID_LENGTH,
-            "pending notification channelId",
-          ),
-        }),
   };
 }
 

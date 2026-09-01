@@ -33,7 +33,6 @@ import {
 import type { ActiveContribution } from "@frockbot/kernel-composition";
 import {
   type BotCapabilitiesStub,
-  type LlmMessage,
   type PersistSessionEvents,
   type SessionEvent,
   type TurnTypeV1,
@@ -103,12 +102,6 @@ export interface ShellCompositionMountOptions {
    */
   turnType?: TurnTypeV1;
   /**
-   * The history a non-chat Turn's model request carries instead of the Bot's
-   * own transcript. A `channel` Turn is given the Channel's own recent
-   * messages; absent, and every Package's own narrowing stands unchanged.
-   */
-  freshHistory?: readonly LlmMessage[];
-  /**
    * The subagent role the admitted Turn runs under; the mounted Agent trims
    * its catalog to it as well. Absent ⇒ no role narrowing.
    */
@@ -161,9 +154,6 @@ export function createShellCompositionHost(
         modelSelection: options.modelSelection,
         systemPromptSection: options.systemPromptSection,
         ...(options.turnType ? { turnType: options.turnType } : {}),
-        ...(options.freshHistory
-          ? { freshTurnHistory: options.freshHistory }
-          : {}),
         ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),
       });
 

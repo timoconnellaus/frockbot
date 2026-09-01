@@ -289,6 +289,7 @@ describe("Bot capability assignment admission", () => {
                   connectionId: "provider-1",
                   providerModelId: "model-1",
                 },
+                newBotModelTemplateSource: "auto",
               }),
           }),
         },
@@ -1631,6 +1632,7 @@ describe("User default model", () => {
         connectionId: "gmail-1",
         providerModelId: "fixture-model",
       },
+      newBotModelTemplateSource: "auto",
     };
     const userConfiguration = {
       readConfiguration: () => Promise.resolve(structuredClone(user)),
@@ -1718,6 +1720,7 @@ describe("User default model", () => {
             connectionId: "gmail-1",
             providerModelId: "fixture-model",
           },
+          newBotModelTemplateSource: "auto",
         }),
       executeConnectionDependency: (request: { action: string }) => {
         if (request.action === "read") {
