@@ -128,8 +128,14 @@ export async function openApplication(
   // Not the "Create Bot" button: for a User with no Bots the creation dialog
   // opens by itself, and its submit carries the same name. The sidebar's
   // Plugins trigger renders once the shell has mounted and read the manifest.
+  //
+  // On a phone the sidebar is a closed drawer — inert, and so invisible to a
+  // role query — and the menu button that opens it is the same signal: it too
+  // renders only once the shell has mounted.
   await expect(
-    page.getByRole("button", { name: "Plugins", exact: true }),
+    page
+      .getByRole("button", { name: "Plugins", exact: true })
+      .or(page.getByRole("button", { name: "Show navigation" })),
   ).toBeVisible();
 }
 

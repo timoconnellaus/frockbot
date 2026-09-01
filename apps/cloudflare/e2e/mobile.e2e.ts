@@ -1,0 +1,248 @@
+// The phone layout.
+//
+// The hosted WebUI is the product UI on every platform (`AGENTS.md`, "One
+// production path"), so the phone is not a separate client: it is this same
+// bundle at a 390pt viewport. What that costs the layout is measurable, and
+// this spec measures it rather than eyeballing it — nothing may overflow the
+// viewport horizontally, the composer must stay reachable, and the two columns
+// a phone has no room for (the Bot list and the right panel) must be reachable
+// as drawers.
+//
+// It also writes the screenshots that stand as the visual record of the layout,
+// into Playwright's output directory.
+import { mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  test,
+  expect,
+  openApplication,
+  firstRunDialog,
+  connectOllama,
+  closeOverlay,
+  chooseDefaultModel,
+  createBot,
+  ollamaCard,
+  composerInput,
+  sendMessage,
+  setFakeOllamaChatMode,
+  E2E_MODEL_LABEL,
+  E2E_CONNECTION_LABEL,
+} from "./fixtures.ts";
+import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
+import type { Page } from "@playwright/test";
+
+/** A 2019-and-later iPhone in portrait: the narrowest viewport worth serving. */
+const PHONE = { width: 390, height: 844 } as const;
+
+test.use({ viewport: PHONE, deviceScaleFactor: 2, hasTouch: true });
+
+const shotDirectory = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "test-results",
+  "mobile",
+);
+
+/**
+ * Wait for every drawer that is moving to arrive.
+ *
+ * Both drawers slide, so a box measured on the frame after the click is a box
+ * part-way across the window, and a screenshot taken there is of a layout that
+ * exists for 220ms. Only transitions are waited on: an animation may be
+ * infinite — the Bot avatar breathes while a Turn runs — and waiting for one of
+ * those to stop would never return.
+ */
+async function settle(page: Page): Promise<void> {
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .filter((animation) => "transitionProperty" in animation)
+      .every((animation) => animation.playState !== "running"),
+  );
+}
+
+async function shot(page: Page, name: string): Promise<void> {
+  await settle(page);
+  await mkdir(shotDirectory, { recursive: true });
+  await page.screenshot({ path: join(shotDirectory, `${name}.png`) });
+}
+
+/**
+ * Nothing is wider than the window.
+ *
+ * A phone layout fails first as a sideways scrollbar: one column that kept its
+ * desktop width pushes everything else off the screen. The document is the
+ * outer measure; the thread is the inner one, because content the conversation
+ * cannot wrap — a long path, a wide code block — overflows inside it while the
+ * document still looks clean.
+ *
+ * The shell itself is deliberately not measured. A closed drawer is parked
+ * outside the window on purpose, and a transformed descendant counts towards
+ * its ancestor's overflow region even though `.frockbot-root` clips it away.
+ */
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const overflow = await page.evaluate(() => {
+    const measure = (
+      selector: string,
+    ): { overflow: number; scrolled: number } => {
+      const element = document.querySelector(selector);
+      if (!element) return { overflow: 0, scrolled: 0 };
+      return {
+        overflow: element.scrollWidth - element.clientWidth,
+        scrolled: element.scrollLeft,
+      };
+    };
+    /*
+     * A parked drawer still counts as layout overflow, which is fine as long
+     * as nothing can scroll to it. Asking for the scroll is the only honest
+     * test of that: a clipped element refuses and stays at zero, a hidden one
+     * accepts and takes the layout with it.
+     */
+    const root = document.querySelector(".frockbot-root");
+    let rootScrolledAfterPush = 0;
+    if (root) {
+      root.scrollLeft = 999;
+      rootScrolledAfterPush = root.scrollLeft;
+      root.scrollLeft = 0;
+    }
+    return {
+      document:
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+      root: measure(".frockbot-root"),
+      rootScrolledAfterPush,
+      thread: measure(".thread"),
+    };
+  });
+  expect(
+    overflow.document,
+    "the document overflows sideways",
+  ).toBeLessThanOrEqual(0);
+  // The root clips rather than scrolls, so a parked drawer can never be
+  // scrolled into view — which would drag the whole layout sideways with it,
+  // and did: focusing the composer was enough to do it.
+  expect(overflow.root.scrolled, "the shell is scrolled sideways").toBe(0);
+  expect(
+    overflow.rootScrolledAfterPush,
+    "the shell can be scrolled sideways",
+  ).toBe(0);
+  expect(
+    overflow.thread.overflow,
+    "the conversation overflows sideways",
+  ).toBeLessThanOrEqual(0);
+}
+
+/** Every part of an element is inside the viewport. */
+async function expectWithinViewport(
+  page: Page,
+  selector: string,
+  label: string,
+): Promise<void> {
+  await settle(page);
+  const box = await page.locator(selector).first().boundingBox();
+  expect(box, `${label} has no box`).not.toBeNull();
+  if (!box) return;
+  expect(box.x, `${label} starts left of the viewport`).toBeGreaterThanOrEqual(
+    -1,
+  );
+  expect(
+    box.x + box.width,
+    `${label} runs past the right edge`,
+  ).toBeLessThanOrEqual(PHONE.width + 1);
+}
+
+test("the shell is usable on a phone", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await openApplication(page, userId);
+  await shot(page, "01-first-run-dialog");
+  await expectNoHorizontalOverflow(page);
+  await firstRunDialog(page).getByRole("button", { name: "Cancel" }).click();
+
+  // The Bot list and the sidebar actions live behind the navigation drawer on a
+  // phone, so reaching Plugins is itself a test of the drawer.
+  await openNavigation(page);
+  await shot(page, "02-navigation-drawer");
+  await expectNoHorizontalOverflow(page);
+
+  await connectOllama(page, {
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+  });
+  await expect(
+    ollamaCard(page).getByText("ready · models fresh"),
+  ).toBeVisible();
+  await shot(page, "03-plugins-surface");
+  await expectNoHorizontalOverflow(page);
+  await closeOverlay(page);
+
+  await openNavigation(page);
+  await chooseDefaultModel(
+    page,
+    `${E2E_MODEL_LABEL} — ${E2E_CONNECTION_LABEL}`,
+  );
+
+  await openNavigation(page);
+  await createBot(page, "Pocket");
+  await expect(
+    page.getByRole("heading", { name: "Pocket is ready." }),
+  ).toBeVisible();
+  await expect(composerInput(page)).toBeEnabled();
+  await shot(page, "04-empty-thread");
+  await expectNoHorizontalOverflow(page);
+  await expectWithinViewport(page, ".composer", "the composer");
+  await expectWithinViewport(page, ".topbar", "the topbar");
+
+  // Choosing a Bot is what the drawer is for, so it closes behind the choice
+  // rather than covering the conversation it just opened.
+  await expect(page.locator(".sidebar")).toBeHidden();
+
+  // The fake provider's chat mode is one piece of state the whole suite
+  // shares, and a spec before this one may have revoked the key to prove a
+  // failing Turn. Say what this spec needs rather than inherit it.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  await sendMessage(page, "Does this **fit** on a phone?");
+  await expect(
+    page.locator(".message-assistant strong", { hasText: "local Ollama stub" }),
+  ).toBeVisible();
+  await shot(page, "05-conversation");
+  await expectNoHorizontalOverflow(page);
+  // A bubble may be narrower than the thread, never wider than the window.
+  await expectWithinViewport(page, ".message-user .message-bubble", "a bubble");
+
+  // The right panel is the third column a phone has no room for. It opens over
+  // the conversation, full width, and closes again.
+  await page.getByRole("button", { name: "Show side panel" }).click();
+  await shot(page, "06-right-panel");
+  await expectNoHorizontalOverflow(page);
+  await expectWithinViewport(page, ".right-panel", "the right panel");
+  await page.getByRole("button", { name: "Hide side panel" }).click();
+
+  // Bot settings is a panel-placed surface: on a phone it takes the whole
+  // window rather than a 360px column.
+  await page.getByRole("button", { name: "Bot settings" }).click();
+  await expect(
+    page.getByRole("region", { name: "Bot settings" }),
+  ).toBeVisible();
+  await shot(page, "07-bot-settings-panel");
+  await expectNoHorizontalOverflow(page);
+  await expectWithinViewport(page, ".panel-surface-view", "the panel surface");
+});
+
+/**
+ * Open the navigation drawer.
+ *
+ * On a phone the sidebar is off-canvas and inert until the menu button opens
+ * it; at desktop widths there is no menu button and the sidebar is always
+ * there. Written to work either way so the helper describes the intent —
+ * "make the sidebar reachable" — rather than one layout's mechanics.
+ */
+async function openNavigation(page: Page): Promise<void> {
+  const menu = page.getByRole("button", { name: "Show navigation" });
+  if (await menu.isVisible().catch(() => false)) {
+    await menu.click();
+    await expect(page.locator(".sidebar")).toBeVisible();
+  }
+}
