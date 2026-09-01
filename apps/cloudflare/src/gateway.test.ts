@@ -2024,6 +2024,19 @@ describe("Cloudflare user application gateway", () => {
     expect(response.status).toBe(401);
   });
 
+  test("serves the site icon without an authenticated identity", async () => {
+    const { gateway } = createTestGateway();
+
+    // A browser asks for the site icon before anyone signs in, so it has to be
+    // a public asset alongside the shell it decorates.
+    const icon = await gateway(
+      new Request("https://frockbot.test/favicon.ico"),
+    );
+
+    expect(icon.status).toBe(200);
+    expect(icon.headers.get("content-type")).toBe("image/png");
+  });
+
   test("ignores development identity headers unless explicitly enabled", async () => {
     const { gateway } = createTestGateway(
       undefined,
