@@ -647,7 +647,12 @@ the rows whose status the code moved:
   sidebar grows a "Show N hidden" group instead (`FlockSidebar.vue`). The
   durable field is `BotProfile.hiddenFromSidebar`, beside — not inside — the
   notification policy, because it describes how the Bot presents itself rather
-  than when it notifies.
+  than when it notifies. The same hosted sidebar now matches GrokBot's
+  organisational shape: Search and Create Bot share its top row, visible Bots
+  group by the case-insensitive trimmed `BotProfile.label` with Unassigned last,
+  and each row reads a bounded `shell:preview` written atomically with settled
+  unread activity for its latest message and time. Labels remain presentation
+  state and are not injected into a Bot's Turn.
 - **5** — the avatar half is landed: an uploaded PNG, JPEG, WebP, GIF or SVG up
   to 5 MB is set through `POST /api/bots/:id/avatar`, served back from
   `GET /api/bots/:id/avatar`, and cleared by setting the avatar back to the

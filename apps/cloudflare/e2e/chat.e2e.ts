@@ -15,7 +15,7 @@ import {
   sendMessage,
   setFakeOllamaChatMode,
 } from "./fixtures.ts";
-import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
+import { E2E_ASSISTANT_REPLY, E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 
 test("a Turn settles, renders Markdown, and survives a reload", async ({
   page,
@@ -40,6 +40,16 @@ test("a Turn settles, renders Markdown, and survives a reload", async ({
     }),
   ).toBeVisible();
 
+  // The row is the Bot Durable Object's small settled preview projection, not
+  // a copy scraped out of the open thread. Its time is present beside the name.
+  const sidebarRow = page.locator(".flock-bot-row", {
+    has: page.getByText("Talker", { exact: true }),
+  });
+  await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY, {
+    timeout: 30_000,
+  });
+  await expect(sidebarRow.locator("time")).not.toHaveText("");
+
   // A reload replays the conversation from `GET /api/bots/:bot/turns`. Incident
   // 1 was that route answering HTML: the history vanished and the console
   // carried `Unexpected token '<'`, which the `page` fixture would now fail on.
@@ -50,6 +60,7 @@ test("a Turn settles, renders Markdown, and survives a reload", async ({
       hasText: "local Ollama stub",
     }),
   ).toBeVisible();
+  await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY);
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({

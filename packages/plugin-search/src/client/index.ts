@@ -177,7 +177,7 @@ export const searchClientPlugin: ClientPlugin = (ctx) => {
       component: SearchOverlay,
     }),
     ctx.slot({
-      slot: "frockbot.header-actions",
+      slot: "frockbot.sidebar-top",
       order: 10,
       component: SearchBox,
     }),

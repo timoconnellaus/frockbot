@@ -373,8 +373,10 @@ import {
   botUnreadCommandFingerprintV1,
   markUnreadReadV1,
   markUnreadV1,
+  optionalSidebarMessagePreviewV1,
   optionalUnreadStateV1,
   projectBotUnreadViewV1,
+  SIDEBAR_PREVIEW_KEY,
   unreadReceiptKeyV1,
   UNREAD_COUNT_CAP,
   UNREAD_STATE_KEY,
@@ -2232,7 +2234,6 @@ export class ShellBotBackendContribution {
     );
     const promptParts = [
       `You are ${settings.profile.name}.`,
-      settings.profile.label,
       settings.profile.description,
     ].filter((part): part is string => Boolean(part?.trim()));
     // The pin, never the current generation: activation takes effect at the
@@ -5229,9 +5230,15 @@ export class ShellBotBackendContribution {
    */
   async readUnread(identity: BotIdentity): Promise<BotUnreadViewV1> {
     await this.authority.validateIdentity(identity);
-    const state = optionalUnreadStateV1(
-      await this.ctx.storage.get<unknown>(UNREAD_STATE_KEY),
+    const [storedState, storedPreview] = await this.ctx.storage.transaction(
+      (transaction) =>
+        Promise.all([
+          transaction.get<unknown>(UNREAD_STATE_KEY),
+          transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
+        ]),
     );
+    const state = optionalUnreadStateV1(storedState);
+    const preview = optionalSidebarMessagePreviewV1(storedPreview);
     const index = await this.authority.listRunIndex({
       limit: UNREAD_COUNT_CAP + 1,
     });
@@ -5239,6 +5246,7 @@ export class ShellBotBackendContribution {
       identity.botId,
       state,
       index.map((entry) => entry.cursor),
+      preview,
     );
   }
 
@@ -5268,7 +5276,12 @@ export class ShellBotBackendContribution {
             `unread command id "${command.commandId}" was reused for a different command`,
           );
         }
-        return optionalUnreadStateV1(existing.state);
+        return {
+          state: optionalUnreadStateV1(existing.state),
+          preview: optionalSidebarMessagePreviewV1(
+            await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
+          ),
+        };
       }
       const current = optionalUnreadStateV1(
         await transaction.get<unknown>(UNREAD_STATE_KEY),
@@ -5289,7 +5302,12 @@ export class ShellBotBackendContribution {
         [UNREAD_STATE_KEY]: next,
         [receiptKey]: { commandFingerprint: fingerprint, state: next },
       });
-      return next;
+      return {
+        state: next,
+        preview: optionalSidebarMessagePreviewV1(
+          await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
+        ),
+      };
     });
     const index = await this.authority.listRunIndex({
       limit: UNREAD_COUNT_CAP + 1,
@@ -5300,8 +5318,9 @@ export class ShellBotBackendContribution {
       status: "applied",
       unread: projectBotUnreadViewV1(
         identity.botId,
-        stored,
+        stored.state,
         index.map((entry) => entry.cursor),
+        stored.preview,
       ),
     };
   }

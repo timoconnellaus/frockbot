@@ -23,6 +23,7 @@ interface UnreadView {
   unread: boolean;
   manuallyUnread: boolean;
   lastActivityCursor?: string;
+  lastMessage?: { text: string; at: string; role: "assistant" | "user" };
 }
 
 async function unreadDirectory(userId: string): Promise<UnreadView[]> {
@@ -69,7 +70,11 @@ describe("unread and notifications through the gateway", () => {
     expect(turn.status).toBe(200);
 
     const settled = await unreadDirectory(userId);
-    expect(forBot(settled, botA)).toMatchObject({ count: 1, unread: true });
+    expect(forBot(settled, botA)).toMatchObject({
+      count: 1,
+      unread: true,
+      lastMessage: { text: "Ollama reply", role: "assistant" },
+    });
     expect(forBot(settled, botB)).toMatchObject({ count: 0, unread: false });
 
     // Selecting A while the page is visible is what sends this.

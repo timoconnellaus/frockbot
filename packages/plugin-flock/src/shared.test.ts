@@ -166,6 +166,7 @@ describe("Flock v1 contracts", () => {
       name: "Atlas",
       namedBy: "bot" as const,
       hiddenFromSidebar: true,
+      label: "Personal",
       title: "Chief of staff",
       avatar: {
         kind: "image" as const,
@@ -186,6 +187,9 @@ describe("Flock v1 contracts", () => {
     expect(() =>
       decodeBotIdentityViewV1({ ...identity, namedBy: "admin" }),
     ).toThrow("namedBy is invalid");
+    expect(() => decodeBotIdentityViewV1({ ...identity, extra: true })).toThrow(
+      "unknown or missing field",
+    );
     // A sheep avatar is the absence of an uploaded one, never a directory row.
     expect(() =>
       decodeBotIdentityViewV1({ ...identity, avatar: { kind: "sheep" } }),

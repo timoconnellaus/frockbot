@@ -7,7 +7,7 @@
 // nobody would notice until they counted.
 import { describe, expect, test } from "bun:test";
 import { shellTerminalRecordsV1 } from "./terminal-records.js";
-import { UNREAD_STATE_KEY } from "./unread.js";
+import { SIDEBAR_PREVIEW_KEY, UNREAD_STATE_KEY } from "./unread.js";
 import { approvalKeyV1, decodeApprovalRecordV1 } from "./approvals.js";
 import { decodeRoutineInboxEntryV1 } from "@frockbot/plugin-routines/inbox";
 import {
@@ -53,6 +53,8 @@ describe("the settling transaction's records", () => {
       run: {
         runId: "run-1",
         sessionId: "user-1:bot-1",
+        acceptedAt: NOW,
+        input: "Please delete it",
         admission: { turnType: "chat" },
         events: [{ type: "turn/start" }, APPROVAL_SEND],
       },
@@ -63,6 +65,7 @@ describe("the settling transaction's records", () => {
 
     expect(Object.keys(records).sort()).toEqual([
       approvalKeyV1("ap-1"),
+      SIDEBAR_PREVIEW_KEY,
       UNREAD_STATE_KEY,
     ]);
     expect(
@@ -73,6 +76,12 @@ describe("the settling transaction's records", () => {
     expect(records[UNREAD_STATE_KEY]).toMatchObject({
       lastActivityCursor: CURSOR,
       lastActivityAt: NOW,
+    });
+    expect(records[SIDEBAR_PREVIEW_KEY]).toEqual({
+      schemaVersion: 1,
+      text: "Please delete it",
+      at: NOW,
+      role: "user",
     });
   });
 
@@ -95,6 +104,8 @@ describe("the settling transaction's records", () => {
     const run = {
       runId: "rf-brief-1",
       sessionId: "user-1:bot-1",
+      acceptedAt: NOW,
+      input: "look",
       admission: {
         turnType: "automation",
         origin: { kind: "routine", routineId: "brief" },
@@ -141,6 +152,8 @@ describe("the settling transaction's records", () => {
     const run = {
       runId: "rf-brief-1",
       sessionId: "user-1:bot-1",
+      acceptedAt: NOW,
+      input: "look",
       admission: {
         turnType: "automation",
         origin: { kind: "routine", routineId: "brief" },
@@ -185,6 +198,8 @@ describe("the settling transaction's records", () => {
       run: {
         runId: "run-1",
         sessionId: "user-1:bot-1",
+        acceptedAt: NOW,
+        input: "Please delete it",
         admission: { turnType: "chat" },
         events: [APPROVAL_SEND],
       },

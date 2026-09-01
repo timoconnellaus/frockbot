@@ -13,7 +13,11 @@ test("a new User creates a first Bot and finds it in the directory", async ({
 
   // The client mounted, which means `/` served the artifact's HTML, `/app.js`
   // was JavaScript and the shell reached the User Durable Object.
-  await expect(page.getByText("Your flock").first()).toBeVisible();
+  await expect(
+    page
+      .locator("aside.sidebar")
+      .getByRole("button", { name: "Search every Bot's conversations" }),
+  ).toBeVisible();
   await expect(
     page.getByText("No Bots yet. Add your first sheep."),
   ).toBeVisible();

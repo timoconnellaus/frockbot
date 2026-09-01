@@ -71,6 +71,21 @@
   letter-spacing: var(--frock-tracking-display);
 }
 
+.sidebar-top {
+  display: flex;
+  height: 34px;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0 2px 6px;
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-top > *:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .bot-list {
   min-height: 0;
   overflow: auto;
@@ -104,6 +119,11 @@
   padding: 0 116px 0 18px;
   border-bottom: 1px solid var(--frock-border);
   -webkit-app-region: drag;
+}
+
+.topbar > :last-child:not(.workspace-title) {
+  flex: 0 0 auto;
+  -webkit-app-region: no-drag;
 }
 
 .bot-identity {
