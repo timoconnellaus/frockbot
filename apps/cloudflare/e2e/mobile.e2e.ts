@@ -162,11 +162,16 @@ test("the shell is usable on a phone", async ({
   await firstRunDialog(page).getByRole("button", { name: "Cancel" }).click();
 
   // The Bot list and the sidebar actions live behind the navigation drawer on a
-  // phone, so reaching Plugins is itself a test of the drawer.
+  // phone, so reaching any of them is itself a test of the drawer. The
+  // provisioning helpers open it for themselves; this one call is here to
+  // photograph it and to prove it opens on its own account.
   await openNavigation(page);
   await shot(page, "02-navigation-drawer");
   await expectNoHorizontalOverflow(page);
+  await closeNavigation(page);
 
+  // Enablement on Plugins, setup on Models: two surfaces, and on a phone the
+  // drawer closes behind each of them.
   await connectOllama(page, {
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,
@@ -174,17 +179,15 @@ test("the shell is usable on a phone", async ({
   await expect(
     ollamaCard(page).getByText("ready · models fresh"),
   ).toBeVisible();
-  await shot(page, "03-plugins-surface");
+  await shot(page, "03-models-surface");
   await expectNoHorizontalOverflow(page);
   await closeOverlay(page);
 
-  await openNavigation(page);
   await chooseDefaultModel(
     page,
     `${E2E_MODEL_LABEL} — ${E2E_CONNECTION_LABEL}`,
   );
 
-  await openNavigation(page);
   await createBot(page, "Pocket");
   await expect(
     page.getByRole("heading", { name: "Pocket is ready." }),
@@ -218,31 +221,39 @@ test("the shell is usable on a phone", async ({
   await shot(page, "06-right-panel");
   await expectNoHorizontalOverflow(page);
   await expectWithinViewport(page, ".right-panel", "the right panel");
-  await page.getByRole("button", { name: "Hide side panel" }).click();
 
-  // Bot settings is a panel-placed surface: on a phone it takes the whole
-  // window rather than a 360px column.
+  // And closes again, giving the conversation the whole window back.
+  await page.getByRole("button", { name: "Hide side panel" }).click();
+  await expect(page.locator(".right-panel")).toBeHidden();
+
+  // Settings is reached from the panel's own header and takes the panel's
+  // place, so on a phone it is the whole window rather than a 360px column.
+  await page.getByRole("button", { name: "Show side panel" }).click();
   await page.getByRole("button", { name: "Bot settings" }).click();
-  await expect(
-    page.getByRole("region", { name: "Bot settings" }),
-  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
   await shot(page, "07-bot-settings-panel");
   await expectNoHorizontalOverflow(page);
   await expectWithinViewport(page, ".panel-surface-view", "the panel surface");
 });
 
-/**
- * Open the navigation drawer.
- *
- * On a phone the sidebar is off-canvas and inert until the menu button opens
- * it; at desktop widths there is no menu button and the sidebar is always
- * there. Written to work either way so the helper describes the intent —
- * "make the sidebar reachable" — rather than one layout's mechanics.
- */
+/** Open the navigation drawer and prove it arrived. */
 async function openNavigation(page: Page): Promise<void> {
-  const menu = page.getByRole("button", { name: "Show navigation" });
-  if (await menu.isVisible().catch(() => false)) {
-    await menu.click();
-    await expect(page.locator(".sidebar")).toBeVisible();
-  }
+  await page.getByRole("button", { name: "Show navigation" }).click();
+  await expect(page.locator(".sidebar")).toBeVisible();
+}
+
+/**
+ * Close it by tapping the conversation behind it, which is the way back a
+ * person reaches for before they look for a control.
+ *
+ * The tap is offset deliberately. The scrim covers the window, so its centre
+ * is behind the drawer; what a person actually taps is the strip of
+ * conversation still showing beside it, and that is the gesture worth
+ * proving.
+ */
+async function closeNavigation(page: Page): Promise<void> {
+  await page
+    .locator(".nav-scrim")
+    .click({ position: { x: PHONE.width - 20, y: PHONE.height / 2 } });
+  await expect(page.locator(".sidebar")).toBeHidden();
 }

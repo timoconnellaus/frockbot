@@ -19,7 +19,7 @@ it asserted without running it.
 | ----------------------- | --------------------------------------------------------- |
 | `01-first-run-dialog`   | The Bot creation dialog a first-run User meets            |
 | `02-navigation-drawer`  | The Bot list as a drawer, over a dimmed conversation      |
-| `03-plugins-surface`    | A hosted surface at full width                            |
+| `03-models-surface`     | A hosted surface at full width                            |
 | `04-empty-thread`       | One column: topbar, conversation, composer                |
 | `05-conversation`       | A Turn, with the drawer closed behind the Bot that opened |
 | `06-right-panel`        | The right panel as the trailing drawer, full width        |
