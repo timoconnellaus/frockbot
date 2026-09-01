@@ -34,7 +34,10 @@ test("a new User creates a first Bot and finds it in the directory", async ({
   await expect(
     page.getByRole("button", { name: /Shepherd/ }).first(),
   ).toBeVisible();
-  await expect(page.locator("main").getByText("Shepherd")).toBeVisible();
+  // Exact: the empty Session's greeting heading also carries the name.
+  await expect(
+    page.locator("main").getByText("Shepherd", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Shepherd is ready." }),
   ).toBeVisible();

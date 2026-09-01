@@ -39,7 +39,9 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
   await expect(panel.getByLabel("Name", { exact: true })).toHaveValue(
     "Inspected",
   );
-  await expect(panel.getByLabel("Label", { exact: true })).toHaveAttribute(
+  // By role and prefix: an optional field's accessible name carries its hint,
+  // and its settings row also carries a "Copy link to Label" button.
+  await expect(panel.getByRole("textbox", { name: /^Label/u })).toHaveAttribute(
     "placeholder",
     "Research, marketing, admin",
   );
@@ -53,12 +55,12 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
   await expect(
     panel.getByRole("button", { name: "Save settings" }),
   ).toBeVisible();
-  await expect(panel.getByLabel("Title", { exact: true })).toBeHidden();
+  await expect(panel.getByRole("textbox", { name: /^Title/u })).toBeHidden();
 
   // The Assignment catalog is the client's decode of `/app-manifest`. A Package
   // the decoder refused would leave this section empty and the banner set.
   await panel.getByText("Advanced").click();
-  await expect(panel.getByLabel("Title", { exact: true })).toBeVisible();
+  await expect(panel.getByRole("textbox", { name: /^Title/u })).toBeVisible();
   await expect(panel.getByText("Members", { exact: true })).toBeVisible();
   await expect(panel.getByText("Named by user")).toBeVisible();
   await expect(panel.getByText("Capability Assignments")).toBeVisible();

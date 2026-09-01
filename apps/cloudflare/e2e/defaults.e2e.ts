@@ -17,7 +17,9 @@ test("a fresh User and Bot start with first-party capabilities", async ({
   await createBot(page, "Equipped");
   await openPlugins(page);
 
-  await expect(page.getByText(/^\d+ installed$/u)).toBeVisible();
+  // Unanchored: the strip leads with a status badge, so its text carries
+  // whitespace either side of the count.
+  await expect(page.getByText(/\d+ installed/u)).toBeVisible();
   for (const displayName of [
     "Bot templates",
     "Flock",
@@ -45,12 +47,17 @@ test("a fresh User and Bot start with first-party capabilities", async ({
   ).toBeVisible();
   await expect(page.getByLabel("Search the Package Catalog")).toBeVisible();
 
+  // The retired Bot info pane's contents live in Bot settings now: the
+  // notifications switch on the front of it, the Assignment catalog under
+  // Advanced.
   await page.getByRole("button", { name: "Close panel" }).click();
-  await page.getByRole("button", { name: "Bot info" }).click();
-  const pane = page.getByRole("region", { name: "Bot info" });
+  // Exact: the Catalog behind this panel lists a "FrockBot Settings" Package.
+  await page.getByRole("button", { name: "Bot settings", exact: true }).click();
+  const pane = page.getByRole("region", { name: "Settings" });
   await expect(
     pane.locator("#bot-info-notifications").getByRole("checkbox"),
   ).toBeChecked();
+  await pane.getByText("Advanced").click();
   await expect(
     pane.getByText("Web · web-fetch", { exact: true }),
   ).toBeVisible();
