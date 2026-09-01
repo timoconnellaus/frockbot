@@ -259,7 +259,9 @@ import {
 import { enqueuePendingBotInputV1 } from "@frockbot/plugin-routines/inbox-store";
 import {
   createBotMachineHost,
+  createBotMachineMessagesHost,
   dispatchApprovedMachineIntentV1,
+  resolveBotMachineMessagesGateV1,
   type BotMachineSeamV1,
 } from "./backend-machine.js";
 import { settleMachineIntentV1 } from "@frockbot/plugin-user-machine/approval";
@@ -4197,6 +4199,17 @@ export class ShellBotBackendContribution {
     // The `image.model` Package setting, already checked against the enum the
     // Image Package's manifest declares.
     const configuredImageModel = packageSettings("image").model;
+    // Row 57g. Resolved before the Composition is built, because the answer
+    // decides whether a Package is mounted at all: a feature gate that let the
+    // tools exist and refuse would still have told the model they were there.
+    // The registry is read only when the setting is on.
+    const machineSeam = turn ? this.machineSeam(identity) : undefined;
+    const messagesGate = machineSeam
+      ? await resolveBotMachineMessagesGateV1(
+          packageSettings("machine-messages"),
+          () => machineSeam.list(),
+        )
+      : ({ status: "off" } as const);
     // Filled in once this Turn's model binding is resolved, below. The tool
     // and the prompt section both read it lazily, from inside the Turn.
     const subagentModels: SubagentModelOptionV1[] = [];
@@ -4358,6 +4371,28 @@ export class ShellBotBackendContribution {
                 turn,
                 this.ctx.storage,
                 this.machineSeam(identity),
+              ),
+            }
+          : {}),
+        // Row 57g, mounted only behind its whole gate: the User setting on, and
+        // a connected macOS machine that reports the `messages` capability.
+        ...(turn && machineSeam && messagesGate.status === "ready"
+          ? {
+              machineMessages: createBotMachineMessagesHost(
+                {
+                  ...createBotMachineHost(
+                    identity,
+                    turn,
+                    this.ctx.storage,
+                    machineSeam,
+                  ),
+                  writer: {
+                    sessionId: turn.sessionId,
+                    turnId: turn.turnId,
+                    runId: turn.runId,
+                  },
+                },
+                machineSeam,
               ),
             }
           : {}),

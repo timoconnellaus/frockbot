@@ -298,6 +298,15 @@ export function machineApprovalActionV1(
       return `Copy ${op.path} from ${label} into the Computer workspace at ${op.workspacePath}`;
     case "copy-from-computer":
       return `Copy ${op.workspacePath} from the Computer workspace onto ${label} at ${op.path}`;
+    case "messages":
+      // Row 57g. Only `send` ever reaches a card — the six reads are exempt —
+      // but the sentence is written for the whole variant so a later call that
+      // does take one cannot fall through to something vague. The card carries
+      // the *exact text*, because approving a message you have not read is not
+      // approving anything.
+      return op.call.kind === "send"
+        ? `Send an iMessage from ${label} to ${op.call.to}: "${op.call.text}"`
+        : `Read Messages on ${label} (${op.call.kind})`;
   }
 }
 
@@ -306,7 +315,11 @@ export function machineApprovalRationaleV1(
   op: MachineOpV1,
   label: string,
 ): string {
-  return op.kind === "exec"
-    ? `This runs on your own machine "${label}", outside the Computer sandbox, with your account's permissions.`
-    : `This touches the filesystem of your own machine "${label}", which is separate from the Computer workspace.`;
+  if (op.kind === "exec") {
+    return `This runs on your own machine "${label}", outside the Computer sandbox, with your account's permissions.`;
+  }
+  if (op.kind === "messages") {
+    return `This sends from Messages.app on your own machine "${label}", as you. The person receiving it sees a message from you, and it cannot be unsent.`;
+  }
+  return `This touches the filesystem of your own machine "${label}", which is separate from the Computer workspace.`;
 }

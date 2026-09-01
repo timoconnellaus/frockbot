@@ -79,6 +79,23 @@ describe("the classifier table", () => {
     for (const name of ["machine_list", "machine_command_check"]) {
       expect(auditKindForToolV1(name, { commandId: "c1" })).toBeUndefined();
     }
+    // Row 57g. Every one of the seven Messages verbs is an `mcp` row against
+    // the Mac it named — reaching a service on somebody's laptop, which is the
+    // shape §4.2 gives them — and the send is audited exactly like the reads.
+    for (const name of [
+      "machine_messages_check_permissions",
+      "machine_messages_find_chats",
+      "machine_messages_chat_items",
+      "machine_messages_search",
+      "machine_messages_activity",
+      "machine_messages_fetch_attachment",
+      "machine_messages_send",
+    ]) {
+      expect(auditKindForToolV1(name, { machineId: "994dc2ee-1" })).toEqual({
+        kind: "mcp",
+        target: "machine:994dc2ee-1",
+      });
+    }
     // A machine tool that named no machine could not have run; the row says
     // so by falling back to the target it did name.
     expect(auditKindForToolV1("machine_exec", { command: "ls" })).toEqual({

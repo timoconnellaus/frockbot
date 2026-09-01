@@ -55,6 +55,7 @@
     "@frockbot/plugin-subagents": "workspace:*",
     "@frockbot/plugin-telegram": "workspace:*",
     "@frockbot/plugin-ui-theme": "workspace:*",
+    "@frockbot/plugin-machine-messages": "workspace:*",
     "@frockbot/plugin-user-machine": "workspace:*",
     "@frockbot/plugin-web": "workspace:*",
     "@frockbot/template-core": "workspace:*",

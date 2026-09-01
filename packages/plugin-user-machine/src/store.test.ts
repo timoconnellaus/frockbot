@@ -41,7 +41,10 @@ beforeEach(() => {
 
 async function register(
   machineId: string,
-  options: { now?: number; capabilities?: ("exec" | "files")[] } = {},
+  options: {
+    now?: number;
+    capabilities?: ("exec" | "files" | "messages")[];
+  } = {},
 ) {
   const now = options.now ?? T0;
   await writeMachinePairingV1(storage, {
@@ -399,5 +402,106 @@ describe("claims, results and leases", () => {
         T0,
       ),
     ).rejects.toThrow(MachineRegistryError);
+  });
+});
+
+describe("the Messages permission report (register row 57g)", () => {
+  const permissions = {
+    schemaVersion: 1 as const,
+    fullDiskAccess: true,
+    automation: false,
+    checkedAt: "2026-09-01T00:00:00.000Z",
+    detail: "Automation over Messages.app has not been granted",
+  };
+
+  async function answerCheck(
+    outcome: "ok" | "refused",
+    stdout: string,
+  ): Promise<void> {
+    await register("mac-1", { capabilities: ["exec", "files", "messages"] });
+    await dispatchMachineCommandV1(
+      storage,
+      command("mac-1", "c-messages", {
+        op: { kind: "messages", call: { kind: "check-permissions" } },
+      }),
+      T0,
+    );
+    await recordMachineResultV1(
+      storage,
+      "mac-1",
+      {
+        schemaVersion: 1,
+        commandId: "c-messages",
+        finishedAt: "2026-09-01T00:00:01.000Z",
+        outcome,
+        truncated: false,
+        stdout,
+      },
+      T0,
+    );
+  }
+
+  test("an answered check updates the registry row, and only it can", async () => {
+    await answerCheck(
+      "ok",
+      JSON.stringify({ kind: "permissions", permissions }),
+    );
+    expect(
+      (await readMachineRecordV1(storage, "mac-1"))?.messagesPermissions,
+    ).toEqual(permissions);
+  });
+
+  test("a check the machine refused grants nothing", async () => {
+    await answerCheck(
+      "refused",
+      JSON.stringify({ kind: "permissions", permissions }),
+    );
+    expect(
+      (await readMachineRecordV1(storage, "mac-1"))?.messagesPermissions,
+    ).toBeUndefined();
+  });
+
+  test("a result that is not a permission report leaves the row alone", async () => {
+    await register("mac-2", { capabilities: ["exec", "files", "messages"] });
+    await dispatchMachineCommandV1(
+      storage,
+      command("mac-2", "c-read", {
+        op: { kind: "messages", call: { kind: "activity", limit: 5 } },
+      }),
+      T0,
+    );
+    await recordMachineResultV1(
+      storage,
+      "mac-2",
+      {
+        schemaVersion: 1,
+        commandId: "c-read",
+        finishedAt: "2026-09-01T00:00:01.000Z",
+        outcome: "ok",
+        truncated: false,
+        // A read cannot grant itself a permission by saying it has one.
+        stdout: JSON.stringify({ kind: "permissions", permissions }),
+      },
+      T0,
+    );
+    expect(
+      (await readMachineRecordV1(storage, "mac-2"))?.messagesPermissions,
+    ).toBeUndefined();
+  });
+
+  test("a machine that never reported messages cannot be sent a messages op", async () => {
+    await register("mac-3");
+    expect(
+      await dispatchMachineCommandV1(
+        storage,
+        command("mac-3", "c-x", {
+          op: { kind: "messages", call: { kind: "activity", limit: 5 } },
+        }),
+        T0,
+      ),
+    ).toEqual({
+      status: "refused",
+      reason: "Refused: this machine does not report the messages capability.",
+    });
   });
 });
