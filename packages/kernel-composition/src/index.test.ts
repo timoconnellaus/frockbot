@@ -169,8 +169,6 @@ describe("PackageCatalog", () => {
       id: "clock",
       contributions: {
         runtime: { entry: "./agent" },
-        desktop: { entry: "./host", execution: "trusted-main" },
-        client: { mounts: [{ slot: "frockbot.right-panel" }] },
       },
       permissions: ["time:read"],
     });

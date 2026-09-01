@@ -79,7 +79,7 @@ describe("settings client contribution", () => {
     expect(slots.map((slot) => slot.slot)).toEqual([
       "frockbot.sidebar-actions",
       "frockbot.user-profile",
-      "frockbot.bot-actions",
+      "frockbot.right-panel",
       "frockbot.bot-actions",
     ]);
     // Composition is an internal detail the Settings Package no longer shows,
@@ -87,7 +87,6 @@ describe("settings client contribution", () => {
     expect(provided).toEqual([]);
     for (const id of [
       "bot-settings",
-      "bot-info",
       "plugins",
       "package-catalog",
       "user-settings",
@@ -100,7 +99,6 @@ describe("settings client contribution", () => {
     expect(surfaces.active.value).toBeUndefined();
     for (const id of [
       "bot-settings",
-      "bot-info",
       "plugins",
       "package-catalog",
       "user-settings",

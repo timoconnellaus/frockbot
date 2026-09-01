@@ -56,12 +56,8 @@ import {
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
-  botAvatarObjectKeyV1,
-  decodeBotAvatarBytesV1,
   decodeBotIdV1,
-  type BotAvatarUploadReceiptV1,
   type BotSettingsViewV1,
-  type UploadBotAvatarCommandV1,
 } from "@frockbot/configuration-core";
 import {
   decodeRoutineCommandReceiptV1,
@@ -778,7 +774,6 @@ function botIdentityView(
     namedBy: profile.namedBy ?? "user",
     hiddenFromSidebar: profile.hiddenFromSidebar === true,
     ...(profile.title === undefined ? {} : { title: profile.title }),
-    ...(profile.avatar?.kind === "image" ? { avatar: profile.avatar } : {}),
   };
 }
 
@@ -901,72 +896,6 @@ async function executeBotUnreadCommand(
       await botStateStub(env, userId, botId).executeUnreadCommand(command),
     ),
   );
-}
-
-async function readBotAvatar(
-  env: Env,
-  userId: string,
-  botId: string,
-): Promise<{ bytes: Uint8Array; contentType: string } | undefined> {
-  const settings = (await botStateStub(env, userId, botId).readConfiguration({
-    schemaVersion: 1,
-    userId,
-    botId,
-  })) as BotSettingsViewV1;
-  const avatar = settings.profile.avatar;
-  if (avatar?.kind !== "image") return undefined;
-  const object = await env.APPLICATION_ARTIFACTS.get(
-    botAvatarObjectKeyV1(userId, avatar.digest),
-  );
-  if (!object) return undefined;
-  return {
-    bytes: new Uint8Array(await object.arrayBuffer()),
-    contentType: avatar.contentType,
-  };
-}
-
-async function uploadBotAvatar(
-  env: Env,
-  userId: string,
-  botId: string,
-  command: UploadBotAvatarCommandV1,
-): Promise<BotAvatarUploadReceiptV1> {
-  // Membership before storage: an unregistered Bot never causes a write.
-  const membership = decodeBotMembershipViewV1(
-    rpcJsonSnapshot(
-      await userConfigurationStub(env, userId).hasBot({
-        schemaVersion: 1,
-        userId,
-        botId,
-      }),
-    ),
-  );
-  if (!membership.registered) {
-    throw new BotNotFoundError(botId);
-  }
-  const bytes = decodeBotAvatarBytesV1(command.bytes);
-  const digest = [
-    ...new Uint8Array(
-      await crypto.subtle.digest("SHA-256", bytes as unknown as BufferSource),
-    ),
-  ]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  await env.APPLICATION_ARTIFACTS.put(
-    botAvatarObjectKeyV1(userId, digest),
-    bytes,
-    { httpMetadata: { contentType: command.contentType } },
-  );
-  return {
-    schemaVersion: 1,
-    botId,
-    avatar: {
-      kind: "image",
-      digest,
-      contentType: command.contentType,
-      size: bytes.byteLength,
-    },
-  };
 }
 
 /**
@@ -1162,13 +1091,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         botId: string,
         command: BotUnreadCommandV1,
       ) => executeBotUnreadCommand(env, userId, botId, command),
-      readBotAvatar: (userId: string, botId: string) =>
-        readBotAvatar(env, userId, botId),
-      uploadBotAvatar: (
-        userId: string,
-        botId: string,
-        command: UploadBotAvatarCommandV1,
-      ) => uploadBotAvatar(env, userId, botId, command),
       readSheep: async (userId, botId) =>
         decodeSheepIdentityViewV1(
           rpcJsonSnapshot(

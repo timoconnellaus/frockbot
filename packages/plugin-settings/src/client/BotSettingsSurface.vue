@@ -17,17 +17,13 @@ import {
   onMounted,
   reactive,
   ref,
+  nextTick,
   watch,
 } from "vue";
 import {
   assignmentHasPendingOperation,
   projectAssignmentOperations,
 } from "./assignment-operations.js";
-import {
-  BOT_AVATAR_ACCEPT,
-  botAvatarUrl,
-  prepareAvatarUpload,
-} from "./avatar-upload.js";
 import {
   describeModelAssignment,
   eligibleModelConnections,
@@ -59,7 +55,16 @@ function link(anchor: string): string {
  * `details` cannot be scrolled to. A link into either opens it first; the User
  * can still close it, and the `toggle` handler keeps their choice.
  */
-const ADVANCED_ANCHORS = new Set(["bot-model", "bot-capabilities"]);
+const ADVANCED_ANCHORS = new Set([
+  "bot-title",
+  "bot-hidden-from-sidebar",
+  "bot-model",
+  "bot-capabilities",
+  "bot-routines",
+  "bot-audit",
+  "bot-info-identity",
+  "bot-info-members",
+]);
 const advancedOpen = ref(false);
 
 function openAdvancedFor(anchor: string): void {
@@ -67,7 +72,11 @@ function openAdvancedFor(anchor: string): void {
 }
 
 function onAnchorAnnounced(event: Event): void {
-  openAdvancedFor((event as UiAnchorEvent).detail);
+  const anchor = (event as UiAnchorEvent).detail;
+  openAdvancedFor(anchor);
+  void nextTick(() =>
+    document.getElementById(anchor)?.scrollIntoView({ block: "nearest" }),
+  );
 }
 
 const name = ref("");
@@ -98,54 +107,6 @@ async function decideApproval(
   }
 }
 const saving = ref(false);
-const avatarBusy = ref(false);
-const avatarInput = ref<HTMLInputElement>();
-
-/*
- * The avatar is bytes, not a form field: it is uploaded and recorded the
- * moment it is chosen, so a half-filled form is never carrying a five-megabyte
- * payload waiting for Save.
- */
-const avatar = computed(() => {
-  const profile = web.value.botSettings?.profile;
-  const botId = web.value.activeBotId;
-  return profile?.avatar?.kind === "image" && botId
-    ? { src: botAvatarUrl(botId, profile.avatar.digest) }
-    : undefined;
-});
-
-async function chooseAvatar(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  avatarBusy.value = true;
-  try {
-    await web.value.uploadBotAvatar(
-      prepareAvatarUpload({
-        contentType: file.type,
-        bytes: new Uint8Array(await file.arrayBuffer()),
-      }),
-    );
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not upload the avatar";
-  } finally {
-    input.value = "";
-    avatarBusy.value = false;
-  }
-}
-
-async function clearAvatar(): Promise<void> {
-  avatarBusy.value = true;
-  try {
-    await web.value.clearBotAvatar();
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not clear the avatar";
-  } finally {
-    avatarBusy.value = false;
-  }
-}
 const modelMode = ref<"default" | "custom">("default");
 const assignmentBusy = ref<string>();
 const selectedConnections = reactive<Record<string, string>>({});
@@ -305,8 +266,7 @@ async function saveModel(): Promise<void> {
 async function save(): Promise<void> {
   saving.value = true;
   try {
-    // A partial update: the empty string clears an optional field, and the
-    // avatar is left exactly as the upload control set it.
+    // A partial update: the empty string clears an optional field.
     await web.value.setBotProfile({
       name: name.value,
       label: label.value,
@@ -392,51 +352,13 @@ async function unassign(
 
 <template>
   <form class="settings-form" @submit.prevent="save">
-    <div class="settings-intro">
-      <span v-if="avatar" class="settings-avatar settings-avatar--image">
-        <img :src="avatar.src" alt="" />
-      </span>
-      <span v-else class="settings-avatar" aria-hidden="true"
-        ><UiIcon name="sparkle" size="lg"
-      /></span>
-      <div>
-        <strong>Shape this Bot</strong>
-        <p>
-          Identity, Assignments, and notifications belong to the selected Bot.
-        </p>
-      </div>
-    </div>
     <UiAnchor
       anchor="bot-avatar"
       label="Avatar"
       :href="link('bot-avatar')"
-      class="settings-row"
+      class="settings-row avatar-setting"
     >
-      <div class="avatar-actions">
-        <input
-          ref="avatarInput"
-          class="avatar-picker"
-          type="file"
-          :accept="BOT_AVATAR_ACCEPT"
-          @change="chooseAvatar"
-        />
-        <UiButton
-          type="button"
-          :disabled="avatarBusy"
-          @click="avatarInput?.click()"
-        >
-          {{ avatar ? "Replace avatar" : "Upload avatar" }}
-        </UiButton>
-        <UiButton
-          v-if="avatar"
-          type="button"
-          variant="danger"
-          :disabled="avatarBusy"
-          @click="clearAvatar"
-        >
-          Use the sheep
-        </UiButton>
-      </div>
+      <k-slot name="frockbot.bot-avatar-editor" />
     </UiAnchor>
     <UiAnchor
       anchor="bot-name"
@@ -446,20 +368,6 @@ async function unassign(
     >
       <UiField label="Name">
         <input v-model="name" maxlength="100" required />
-      </UiField>
-    </UiAnchor>
-    <UiAnchor
-      anchor="bot-title"
-      label="Title"
-      :href="link('bot-title')"
-      class="settings-row"
-    >
-      <UiField label="Title" hint="optional">
-        <input
-          v-model="title"
-          maxlength="120"
-          placeholder="Chief of staff, night-shift researcher"
-        />
       </UiField>
     </UiAnchor>
     <UiAnchor
@@ -486,34 +394,22 @@ async function unassign(
         <textarea v-model="description" maxlength="10000" rows="7" />
       </UiField>
     </UiAnchor>
-    <UiAnchor
-      anchor="bot-notifications"
-      label="Notifications"
-      :href="link('bot-notifications')"
-      class="settings-row"
-    >
-      <label class="notification-setting">
-        <span>
-          <strong>Notifications</strong>
-          <small>Get notified when this Bot finishes or needs input.</small>
-        </span>
-        <input v-model="notifications" type="checkbox" />
-      </label>
-    </UiAnchor>
-    <UiAnchor
-      anchor="bot-hidden-from-sidebar"
-      label="Hidden from sidebar"
-      :href="link('bot-hidden-from-sidebar')"
-      class="settings-row"
-    >
-      <label class="notification-setting">
-        <span>
-          <strong>Hidden from sidebar</strong>
-          <small>Keeps this Bot out of the list without archiving it.</small>
-        </span>
-        <input v-model="hiddenFromSidebar" type="checkbox" />
-      </label>
-    </UiAnchor>
+    <div id="bot-info-notifications">
+      <UiAnchor
+        anchor="bot-notifications"
+        label="Notifications"
+        :href="link('bot-notifications')"
+        class="settings-row"
+      >
+        <label class="notification-setting">
+          <span>
+            <strong>Notifications</strong>
+            <small>Get notified when this Bot finishes or needs input</small>
+          </span>
+          <input v-model="notifications" type="checkbox" />
+        </label>
+      </UiAnchor>
+    </div>
     <!--
       Pending decisions. The card in the conversation is where a decision is
       normally answered; this is where the ones nobody scrolled back to are
@@ -548,7 +444,6 @@ async function unassign(
       </ul>
     </UiAnchor>
 
-    <p v-if="overriding" class="model-note">Overrides default model</p>
     <details
       class="advanced"
       :open="advancedOpen"
@@ -561,6 +456,66 @@ async function unassign(
         /></span>
       </summary>
       <div class="advanced__body">
+        <UiAnchor
+          anchor="bot-title"
+          label="Title"
+          :href="link('bot-title')"
+          class="settings-row"
+        >
+          <UiField label="Title" hint="optional">
+            <input
+              v-model="title"
+              maxlength="120"
+              placeholder="Chief of staff, night-shift researcher"
+            />
+          </UiField>
+        </UiAnchor>
+        <UiAnchor
+          anchor="bot-hidden-from-sidebar"
+          label="Hidden from sidebar"
+          :href="link('bot-hidden-from-sidebar')"
+          class="settings-row"
+        >
+          <label class="notification-setting">
+            <span>
+              <strong>Hidden from sidebar</strong>
+              <small
+                >Keeps this Bot out of the list without archiving it.</small
+              >
+            </span>
+            <input v-model="hiddenFromSidebar" type="checkbox" />
+          </label>
+        </UiAnchor>
+        <UiAnchor
+          anchor="bot-info-identity"
+          label="Identity"
+          :href="link('bot-info-identity')"
+          class="bot-members"
+        >
+          <div>
+            <strong>Identity</strong>
+            <p>{{ name || "This Bot" }} · Bot {{ web.activeBotId }}</p>
+          </div>
+          <span>
+            Named by {{ web.botSettings?.profile.namedBy ?? "user" }}
+          </span>
+        </UiAnchor>
+        <UiAnchor
+          anchor="bot-info-members"
+          label="Members"
+          :href="link('bot-info-members')"
+          class="bot-members"
+        >
+          <div>
+            <strong>Members</strong>
+            <p>This Bot and the authority explicitly assigned to it.</p>
+          </div>
+          <span>
+            {{ web.botSettings?.assignments.length ?? 0 }} Capability
+            Assignment(s)
+          </span>
+        </UiAnchor>
+        <p v-if="overriding" class="model-note">Overrides default model</p>
         <UiAnchor
           anchor="bot-model"
           label="Model"
@@ -762,9 +717,12 @@ async function unassign(
             </p>
           </section>
         </UiAnchor>
+        <k-slot name="frockbot.bot-settings-sections" />
       </div>
     </details>
-    <k-slot name="frockbot.bot-settings-sections" />
+    <div class="primary-contributions">
+      <k-slot name="frockbot.bot-settings-primary-sections" />
+    </div>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
     </p>
@@ -795,69 +753,22 @@ async function unassign(
   padding: 16px;
 }
 
-.settings-intro,
 .assignment-card,
-.notification-setting {
+.notification-setting,
+.bot-members {
   border: 1px solid var(--frock-border);
   border-radius: var(--frock-radius-card);
   background: var(--frock-surface-subtle);
 }
 
-.settings-intro {
+.avatar-setting {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--frock-border);
-  border-radius: var(--frock-radius-card);
-  background: var(--frock-surface-subtle);
+  padding-right: 0;
 }
 
-.settings-avatar--image {
-  overflow: hidden;
-  padding: 0;
-}
-
-.settings-avatar--image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.avatar-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.avatar-picker {
-  display: none;
-}
-
-.settings-avatar {
-  display: grid;
-  width: var(--frock-avatar-md);
-  height: var(--frock-avatar-md);
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 16px;
-  color: var(--frock-action-secondary-text);
-  background: var(--frock-surface-accent);
-}
-
-.settings-intro strong,
-.settings-intro p,
-.assignment-settings p {
-  display: block;
-  margin: 0;
-}
-
-.settings-intro strong {
-  font-size: var(--frock-text-lg);
-  font-weight: 600;
-}
-
-.settings-intro p,
 .assignment-settings p,
 .assignment-card small {
   margin-top: 4px;
@@ -869,6 +780,38 @@ async function unassign(
 .assignment-settings {
   display: grid;
   gap: 10px;
+}
+
+.bot-members {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+}
+
+.bot-members strong,
+.bot-members p {
+  display: block;
+  margin: 0;
+}
+
+.bot-members strong {
+  color: var(--frock-text);
+  font-size: var(--frock-text-md);
+}
+
+.bot-members p,
+.bot-members > span {
+  margin-top: 4px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+
+.bot-members > span {
+  max-width: 110px;
+  flex: 0 0 auto;
+  text-align: right;
 }
 
 .assignment-settings strong {
@@ -952,10 +895,47 @@ async function unassign(
 
 .exact-model-setting input[type="checkbox"],
 .notification-setting input[type="checkbox"] {
-  width: 19px;
-  height: 19px;
+  position: relative;
+  width: 38px;
+  height: 22px;
   flex: 0 0 auto;
-  accent-color: var(--frock-action-primary);
+  appearance: none;
+  border: 1px solid var(--frock-border-strong);
+  border-radius: 999px;
+  background: var(--frock-fill-pressed);
+  cursor: pointer;
+  transition: background-color var(--frock-motion-fast);
+}
+
+.exact-model-setting input[type="checkbox"]::before,
+.notification-setting input[type="checkbox"]::before {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--frock-surface-raised);
+  box-shadow: var(--frock-shadow-control);
+  content: "";
+  transition: transform var(--frock-motion-fast);
+}
+
+.exact-model-setting input[type="checkbox"]:checked,
+.notification-setting input[type="checkbox"]:checked {
+  border-color: var(--frock-action-primary);
+  background: var(--frock-action-primary);
+}
+
+.exact-model-setting input[type="checkbox"]:checked::before,
+.notification-setting input[type="checkbox"]:checked::before {
+  transform: translateX(16px);
+}
+
+.exact-model-setting input[type="checkbox"]:focus-visible,
+.notification-setting input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--frock-focus-ring);
+  outline-offset: 2px;
 }
 
 .pending-approvals {
@@ -1086,5 +1066,11 @@ async function unassign(
 .settings-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.primary-contributions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 </style>

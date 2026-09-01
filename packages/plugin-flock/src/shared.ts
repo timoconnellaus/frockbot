@@ -1,28 +1,15 @@
 // Shared configuration types remain provider-neutral at this package seam.
 import {
-  decodeBotAvatarV1,
   decodeCapabilityAssignmentV1,
   decodeBotIdV1,
   decodeBotSelfWriterV1,
   isPublicIdentifier,
-  type BotAvatarV1,
   type BotNameProvenanceV1,
   type BotSelfWriterV1,
   type CapabilityAssignmentView,
   type ModelAssignment,
 } from "@frockbot/configuration-core";
 export type { BotSelfWriterV1 } from "@frockbot/configuration-core";
-export {
-  BOT_AVATAR_CONTENT_TYPES,
-  BOT_AVATAR_MAX_BYTES,
-  botAvatarObjectKeyV1,
-  decodeBotAvatarBytesV1,
-  decodeBotAvatarUploadReceiptV1,
-  decodeUploadBotAvatarCommandV1,
-  type BotAvatarContentTypeV1,
-  type BotAvatarUploadReceiptV1,
-  type UploadBotAvatarCommandV1,
-} from "@frockbot/configuration-core";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
 
 export const FLOCK_DIRECTORY_LIMIT = 100;
@@ -152,7 +139,7 @@ export interface StoredFlockReceiptV1 {
  *
  * The registration seed in the User Durable Object is immutable (ADR 0006), so
  * the mutable half of a Bot's identity — the current name, its provenance, a
- * title, an uploaded avatar, and whether the sidebar hides it — is read through
+ * title and whether the sidebar hides it — is read through
  * from the Bot Durable Object that owns it rather than copied into the seed.
  */
 export interface BotIdentityViewV1 {
@@ -162,8 +149,6 @@ export interface BotIdentityViewV1 {
   namedBy: BotNameProvenanceV1;
   hiddenFromSidebar: boolean;
   title?: string;
-  /** Present only for an uploaded image; absent means the sheep recipe. */
-  avatar?: Extract<BotAvatarV1, { kind: "image" }>;
 }
 
 export interface BotIdentityDirectoryViewV1 {
@@ -677,24 +662,10 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
   exact(
     value,
     ["schemaVersion", "botId", "name", "namedBy", "hiddenFromSidebar"],
-    ["title", "avatar"],
+    ["title"],
   );
   if (value.schemaVersion !== 1 || typeof value.hiddenFromSidebar !== "boolean")
     throw new FlockDecodeError("Bot identity is invalid");
-  let avatar: Extract<BotAvatarV1, { kind: "image" }> | undefined;
-  if (value.avatar !== undefined) {
-    let decoded: BotAvatarV1;
-    try {
-      decoded = decodeBotAvatarV1(value.avatar, "avatar");
-    } catch (error) {
-      throw new FlockDecodeError(
-        error instanceof Error ? error.message : "avatar is invalid",
-      );
-    }
-    if (decoded.kind !== "image")
-      throw new FlockDecodeError("Bot identity avatar is invalid");
-    avatar = decoded;
-  }
   return {
     schemaVersion: 1,
     botId: botIdentifier(value.botId),
@@ -704,7 +675,6 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
     ...(value.title === undefined
       ? {}
       : { title: boundedText(value.title, "title", 120) }),
-    ...(avatar ? { avatar } : {}),
   };
 }
 

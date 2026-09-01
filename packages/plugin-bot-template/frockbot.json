@@ -17,7 +17,13 @@
     "runtime": { "entry": "./agent" },
     "client": {
       "entry": "./client",
-      "mounts": [{ "slot": "frockbot.bot-settings-sections", "order": 20 }],
+      "mounts": [
+        {
+          "slot": "frockbot.bot-settings-primary-sections",
+          "order": 20
+        },
+        { "slot": "frockbot.bot-settings-sections", "order": 21 }
+      ],
       "outlets": []
     }
   },

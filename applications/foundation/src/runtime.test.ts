@@ -114,7 +114,6 @@ describe("foundation application", () => {
         "auth",
         "settings",
         "bot-template",
-        "clock",
         "computer",
         "user-machine",
         "package-publisher",
@@ -123,7 +122,6 @@ describe("foundation application", () => {
       ],
       desktop: [
         "auth",
-        "clock",
         "desktop-clipboard",
         "desktop-directory-picker",
         "desktop-notifications",
@@ -391,9 +389,6 @@ describe("foundation application", () => {
       listBotNotifications: () =>
         Promise.resolve({ schemaVersion: 1 as const, notifications: [] }),
       executeBotUnreadCommand: () =>
-        Promise.reject(new Error("not used while composing")),
-      readBotAvatar: () => Promise.resolve(undefined),
-      uploadBotAvatar: () =>
         Promise.reject(new Error("not used while composing")),
       executeConnection: () =>
         Promise.reject(new Error("not used while composing")),

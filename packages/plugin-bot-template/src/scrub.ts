@@ -22,8 +22,6 @@
 //     required, a Connection." An import must not inherit either.
 //   `PackageInstallationView.values`  setup fields may hold keys.
 //   The model assignment  it names a Connection.
-//   An uploaded avatar  bytes are keyed per-User (D1); a fresh sheep replaces
-//     it.
 import {
   MAX_TEMPLATE_ROUTINE_PROMPT_BYTES_V1,
   MAX_TEMPLATE_SKILL_BODY_BYTES_V1,
@@ -113,18 +111,12 @@ export interface TemplateSourceV1 {
     name: string;
     title?: string;
     description?: string;
-    /** Present only for an uploaded image; it is replaced by `sheep`. */
-    avatarKind?: "sheep" | "image";
   };
   /**
    * The recipe the exported profile carries: this Bot's own generated sheep.
    *
    * A `SheepRecipeV1` is four layer ids — deterministic, tiny, and nobody's
-   * photograph — so it travels. Uploaded avatar bytes never do: they are keyed
-   * per-User (`botAvatarObjectKeyV1`), copying them across Users forks
-   * user-scoped content, and the image could be a person's face (ADR 0015, D1).
-   * A Bot whose avatar is an uploaded image exports its sheep and records the
-   * omission.
+   * photograph — so it travels (ADR 0015, D1).
    */
   sheep: TemplateSheepRecipeV1;
   skills: readonly TemplateSkillCandidateV1[];
@@ -442,7 +434,6 @@ export function buildBotTemplateV1(
   source: TemplateSourceV1,
 ): TemplateBuildResultV1 {
   const omissions = new Omissions();
-  if (source.profile.avatarKind === "image") omissions.add("avatar-image");
   if (source.hasModelAssignment) omissions.add("model");
   omissions.add("assignment", source.assignmentCount ?? 0);
   // Memory is never read, so there is nothing to count; the omission is
@@ -519,9 +510,6 @@ export function describeTemplateSummaryV1(
     }
     if (omission.reason === "unattributed-skill") {
       scrubbed.push(`${omission.count} Skill(s) with no recorded writer`);
-    }
-    if (omission.reason === "avatar-image") {
-      scrubbed.push("the uploaded avatar (a fresh sheep is used instead)");
     }
     if (omission.reason === "package-values") {
       scrubbed.push("Package setup values");

@@ -155,13 +155,6 @@ async function readDirectory(
     name: identity.name,
     archived: status.get(identity.botId) === "archived",
     hidden: identity.hiddenFromSidebar,
-    // Content-addressed, so the digest in the URL is what makes it cacheable
-    // for ever and still change the moment the avatar does.
-    ...(identity.avatar
-      ? {
-          avatarUrl: `/api/bots/${encodeURIComponent(identity.botId)}/avatar?v=${encodeURIComponent(identity.avatar.digest)}`,
-        }
-      : {}),
   }));
 }
 

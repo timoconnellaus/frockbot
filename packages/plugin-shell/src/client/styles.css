@@ -101,7 +101,7 @@
   height: var(--frock-titlebar-height);
   align-items: center;
   gap: 12px;
-  padding: 0 116px 0 18px;
+  padding: 0 64px 0 18px;
   border-bottom: 1px solid var(--frock-border);
   -webkit-app-region: drag;
 }
@@ -161,8 +161,8 @@
 }
 
 /*
- * Bot actions and the panel toggle are pinned to the window's trailing edge,
- * above whichever column is there, so they never move when the panel opens.
+ * The panel collapse control is pinned to the window's trailing edge. Feature
+ * actions live in the panel's own header.
  */
 .window-actions {
   position: absolute;
@@ -691,9 +691,27 @@
 .right-panel-content {
   position: absolute;
   inset: 0;
+  display: flex;
   width: var(--frock-panel-width);
+  min-height: 0;
+  flex-direction: column;
+}
+
+.right-panel-header {
+  display: flex;
+  height: var(--frock-titlebar-height);
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 52px 0 12px;
+  border-bottom: 1px solid var(--frock-border);
+}
+
+.right-panel-body {
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
-  padding: var(--frock-titlebar-height) 16px 16px;
+  padding: 16px;
   scrollbar-color: var(--frock-scrollbar) transparent;
   scrollbar-width: thin;
 }
@@ -709,9 +727,8 @@
 }
 
 /*
- * The window actions are pinned over this column's top-right corner, so the
- * close control sits at the header's leading edge and the title stops short
- * of the gear and the panel toggle.
+ * The title and back control belong to the surface header; only the generic
+ * collapse control floats over its trailing edge.
  */
 .panel-surface-header {
   display: flex;
@@ -719,7 +736,7 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  padding: 0 96px 0 10px;
+  padding: 0 52px 0 10px;
   border-bottom: 1px solid var(--frock-border);
 }
 

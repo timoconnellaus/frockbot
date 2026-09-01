@@ -524,7 +524,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 2   | Create and edit a Bot from inside a Bot; only provided fields change; no delete tool                                                                  | `CreateAgent{name, description?}`, `UpdateAgent{agent_id, …}`                                                                                                   | §2.12            | `plugin-flock`                                                                                                                                                                                                                      | landed                                              |
 | 3   | Bot deletion is a user-only permanent UI action; no archive, no hide                                                                                  | sidebar right-click → Delete, removes transcript                                                                                                                | §2A              | `plugin-flock` + settings UI                                                                                                                                                                                                        | divergent                                           |
 | 4   | Per-Bot settings: `hidden_from_sidebar` (still reachable by palette), `notify_on_updates`                                                             | `update_state settings set` → `settings.json`                                                                                                                   | §2.18            | `plugin-settings`                                                                                                                                                                                                                   | landed                                              |
-| 5   | Per-Bot avatar set from a file on disk or cleared; self-rename announced, provenance recorded                                                         | `update_state avatar`; `profile.json.namedBy`                                                                                                                   | §2.2, §2.18      | `plugin-flock`                                                                                                                                                                                                                      | partial                                             |
+| 5   | Per-Bot avatar set from a file on disk or cleared; self-rename announced, provenance recorded                                                         | `update_state avatar`; `profile.json.namedBy`                                                                                                                   | §2.2, §2.18      | `plugin-flock`                                                                                                                                                                                                                      | divergent                                           |
 | 6   | Export/import a Bot as a shareable template: scrubbed prose, visibility scope, review card                                                            | `export-bot-template` + `create_bot_share_json`; `import-bot-template`                                                                                          | §2.11, §2A       | `plugin-bot-template`                                                                                                                                                                                                               | landed                                              |
 | 7   | **Memory** — profile tier: enduring facts, one per line, injected every turn                                                                          | `agents/<id>/memory/profile.md`                                                                                                                                 | §5, §2.2         | `plugin-memory`                                                                                                                                                                                                                     | landed                                              |
 | 8   | Log tier: dated monthly file, `- (YYYY-MM-DD) <fact>`, read on demand rather than injected                                                            | `memory/log/YYYY-MM.md`                                                                                                                                         | §2.2, §2.3       | `plugin-memory`                                                                                                                                                                                                                     | landed                                              |
@@ -580,7 +580,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 48  | **Registered machine** — registry of the user's own machines with live connected state                                                                | `ListMachines` → `{machineId, label, connected}`                                                                                                                | §2.16            | `plugin-user-machine`: User-DO registry, pairing/enroll/poll/claim/result routes, `machine_list`, desktop agent, settings section                                                                                                   | landed                                              |
 | 49  | Shell/Read/AwaitShell targeted at a machine by id with local-exec approval; copy files both ways                                                      | `machineId`; `CopyToBox`/`CopyFromBox`                                                                                                                          | §2.16, §2A       | `plugin-user-machine`: `machine_exec`/`machine_read`/`machine_copy_*`/`machine_command_check`, per-call approval, `machine:<id>` audit — chat turns only, and `copy_from_computer` refuses (protocol v1 carries no Workspace bytes) | partial                                             |
 | 50  | **UI** — settings tabs with per-row deep links the agent may cite but never invent                                                                    | `grokbot://app/v1/settings?id=<anchor>`                                                                                                                         | §2A              | `plugin-shell/settings-links` + `plugin-settings`                                                                                                                                                                                   | landed                                              |
-| 51  | Per-Bot info pane: live computer preview + routines + channels + members                                                                              | chat header / `Cmd+Shift+I`                                                                                                                                     | §2A              | `plugin-settings` surface + `plugin-computer` / `plugin-routines`; the Channels portion was removed by the row 35–36 owner decision                                                                                                 | partial                                             |
+| 51  | Default Bot panel: live computer preview + Routines list; settings cog swaps the panel to Bot settings                                                | right panel / settings cog                                                                                                                                      | §2A              | `plugin-settings` frame + `plugin-computer` / `plugin-routines` slots                                                                                                                                                               | landed                                              |
 | 52  | Search across every Bot's transcript and media (the agent gets no tool over it)                                                                       | `search-index.db` `messages` / `media`                                                                                                                          | §2.4             | new `plugin-search`                                                                                                                                                                                                                 | partial                                             |
 | 53  | Approval cards for the Bot's own risky actions (Auto-review)                                                                                          | harness "when your own action needs approval"                                                                                                                   | §2.17            | `plugin-shell` (card, record, decision, expiry) + WebUI                                                                                                                                                                             | partial                                             |
 | 54  | **Learn from demonstration** — a screen recording becomes a user-global skill, then the video is deleted                                              | `learn-from-demonstration`: teach queue → `session.json` → `watchVideo` → `update_state skill write`                                                            | §3.9             | `plugin-skills` + capture UI                                                                                                                                                                                                        | not started                                         |
@@ -662,24 +662,14 @@ the rows whose status the code moved:
   `initializeBotSettingsV1` now matches it, and the Create Bot gesture asks for
   browser notification permission without blocking or changing that durable
   intent when the browser refuses.
-- **5** — the avatar half is landed: an uploaded PNG, JPEG, WebP, GIF or SVG up
-  to 5 MB is set through `POST /api/bots/:id/avatar`, served back from
-  `GET /api/bots/:id/avatar`, and cleared by setting the avatar back to the
-  sheep; the provenance is recorded in `BotProfile.namedBy` and a rename appends
-  a durable `bot/renamed` Session event the WebUI renders as a system line. The
-  self-rename is landed too: `bot_update` (row 2) issues the command with
-  `namedBy: "bot"` and a `writer` naming the Bot, Session and Turn, and the
-  `bot/renamed` event carries both.
-
-  What is still missing is the _file_ half. GrokBot's `update_state avatar` takes
-  a path on the box; FrockBot's avatar arrives as bytes over
-  `POST /api/bots/:id/avatar`, which only a client can call, so a Bot cannot set
-  its own avatar from a file it wrote on its Computer. **TODO:** that needs a
-  Computer-dependent read — the Bot names a path, the Computer provider reads the
-  bytes and hands them to the same content-addressed upload — and it is therefore
-  blocked on the Computer rows (23–28) being exercised against a live Sprite. It
-  is deliberately out of scope for the self-management slice, whose tools
-  function while the Computer is hibernated.
+- **5** — **owner decision 2026-09-01: sheep avatars, no image upload.** The
+  Flock's generated sheep recipe is the Bot avatar and Tailor sheep is its only
+  editor. The former uploaded-image DTO, object-storage route, and client upload
+  controls were removed rather than leaving a second avatar path. Self-rename
+  and provenance remain landed: `bot_update` records `namedBy: "bot"`, names the
+  Bot, Session, and Turn as writer, and appends the durable `bot/renamed` event.
+  This row is therefore deliberately divergent only on GrokBot's file-avatar
+  behavior.
 
 - **6** — landed, with the departures recorded in ADR 0015 rather than here.
   `BotTemplateV1` matches GrokBot's share document section for section except
@@ -1133,16 +1123,15 @@ than a silent absence. Row 44 is the only one.
   intent only, so a muted Bot still goes bold. One shape difference, from row 4:
   a Bot hidden from the sidebar has no row to carry a badge, so its unread rolls
   into one aggregate on the "Show N hidden" entry.
-- **51** — the pane retains the portions FrockBot ships. Identity
-  (avatar, name, title, label, description, `namedBy` provenance), Members, the
-  Computer preview through `frockbot.computer`, a Routines glance through the
-  new `frockbot.bot-info-sections` outlet, and the notification toggle all
-  render; a Playwright spec opens the pane and asserts every section at 1351px
-  and at 390px. The Channels portion and its empty placeholder were removed by
-  the owner decision recorded on rows 35 and 36. "Members" therefore means the
-  Bot's own identity plus its Capability Assignments.
-  GrokBot's `Cmd+Shift+I` shortcut is not bound; the pane opens from the
-  window's Bot actions and from its own deep link.
+- **51** — landed in the GrokBot-aligned right panel. Its default content is
+  the selected Bot's Computer thumbnail and caption followed by the durable
+  Routines list and a `+` link to the Advanced editor. The panel header's only
+  Bot action is the settings cog; Settings owns its own title and back action.
+  The separate Bot info surface and Clock card were retired. Identity
+  provenance, Members, and Capability Assignment summary moved under Advanced,
+  while the old Computer, Routines, Identity, Members, and Notifications deep
+  links continue to resolve at their new homes. Playwright covers the default
+  panel and settings swap at 1351px and 390px.
 
 - **53** — the card mechanism is landed; the policy that decides _which_
   actions need one is not. An `approval` payload on `send_to_user`

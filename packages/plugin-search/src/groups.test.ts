@@ -120,7 +120,6 @@ describe("grouping hits by Bot", () => {
           name: "Site foreman",
           archived: false,
           hidden: false,
-          avatarUrl: "/api/bots/bot-a/avatar?v=abc",
         },
       ],
     );

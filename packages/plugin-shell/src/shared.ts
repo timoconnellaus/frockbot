@@ -1,7 +1,6 @@
 export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 import type {
-  BotAvatarContentTypeV1,
   JsonValue,
   BotNameProvenanceV1,
   BotNotificationPolicy,
@@ -206,13 +205,6 @@ export interface FrockBotWebData {
     profile: BotProfilePatchV1,
     namedBy?: BotNameProvenanceV1,
   ): Promise<void>;
-  /** Uploads avatar bytes and records the reference on the Bot's profile. */
-  uploadBotAvatar(input: {
-    contentType: BotAvatarContentTypeV1;
-    bytes: string;
-  }): Promise<void>;
-  /** Restores the generated sheep avatar. */
-  clearBotAvatar(): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;
   assignCapability(
     assignment: Omit<CapabilityAssignmentView, "state">,

@@ -19,9 +19,7 @@ import type {
 import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import { decodeSendToUserPayloadV1 } from "@frockbot/kernel-contracts";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
-import { decodeBotAvatarUploadReceiptV1 } from "@frockbot/configuration-core";
 import type {
-  BotAvatarContentTypeV1,
   BotNameProvenanceV1,
   BotNotificationPolicy,
   BotProfile,
@@ -1359,32 +1357,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       // A rename produces a durable announcement; reload the Session so the
       // system line appears without waiting for the next Turn.
       await deliverNotifications(botId);
-    },
-    async uploadBotAvatar(input: {
-      contentType: BotAvatarContentTypeV1;
-      bytes: string;
-    }): Promise<void> {
-      const botId = web.value.activeBotId;
-      if (!botId || !ctx.transport.hostedRequest) {
-        throw new Error("Avatar upload is unavailable");
-      }
-      const receipt = decodeBotAvatarUploadReceiptV1(
-        await ctx.transport.hostedRequest(
-          `/api/bots/${encodeURIComponent(botId)}/avatar`,
-          "POST",
-          JSON.stringify({
-            schemaVersion: 1,
-            type: "bot/upload-avatar",
-            botId,
-            contentType: input.contentType,
-            bytes: input.bytes,
-          }),
-        ),
-      );
-      await web.value.setBotProfile({ avatar: receipt.avatar });
-    },
-    async clearBotAvatar(): Promise<void> {
-      await web.value.setBotProfile({ avatar: { kind: "sheep" } });
     },
     async saveBotNotifications(
       notifications: BotNotificationPolicy,

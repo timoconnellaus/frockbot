@@ -4,7 +4,10 @@
   "displayName": "Flock",
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
-  "dependencies": { "shell": ">=0.0.1", "ui-theme": ">=0.0.1" },
+  "dependencies": {
+    "shell": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
+  },
   "contributions": {
     "backend": [
       { "entry": "./backend", "host": "gateway" },
@@ -17,7 +20,9 @@
       "mounts": [
         { "slot": "frockbot.sidebar-bots", "order": 10 },
         { "slot": "frockbot.overlays", "order": 10 },
-        { "slot": "frockbot.bot-identity", "order": 10 }
+        { "slot": "frockbot.bot-identity", "order": 10 },
+        { "slot": "frockbot.bot-avatar", "order": 10 },
+        { "slot": "frockbot.bot-avatar-editor", "order": 10 }
       ],
       "outlets": []
     }

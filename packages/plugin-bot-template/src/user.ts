@@ -93,7 +93,7 @@ export interface TemplateBlobStoreV1 {
  */
 export interface TemplateBotReaderV1 {
   readSettings(userId: string, botId: string): Promise<BotSettingsViewV1>;
-  /** This Bot's own generated sheep. Uploaded avatar bytes never travel (D1). */
+  /** This Bot's own generated sheep avatar (D1). */
   readSheep(userId: string, botId: string): Promise<TemplateSheepRecipeV1>;
   /** Own-root Skills, bodies included. Managed and plugin Skills never appear. */
   readSkills(
@@ -422,9 +422,6 @@ export class BotTemplateUserBackendContribution {
         ...(settings.profile.description === undefined
           ? {}
           : { description: settings.profile.description }),
-        ...(settings.profile.avatar?.kind === "image"
-          ? { avatarKind: "image" as const }
-          : {}),
       },
       sheep,
       skills,
