@@ -569,12 +569,15 @@ async function addMcpServer(): Promise<void> {
 
 /** Start whichever authorization the card's Connection type declares. */
 function beginConnect(item: PluginCatalogItem): void {
+  const connectionType = primaryConnectionType(item);
+  if (!connectionType) {
+    web.value.settingsError = `${item.displayName} does not declare a Connection Type.`;
+    return;
+  }
   if (item.packageId === MCP_PACKAGE_ID) {
     beginMcpConnection();
     return;
   }
-  const connectionType = primaryConnectionType(item);
-  if (!connectionType) return;
   if (connectionType.authorizationKind === "api-key") {
     beginApiKeyConnection(item.packageId, connectionType.id, item.displayName);
     return;
@@ -815,28 +818,33 @@ async function disconnect(connectionId: string): Promise<void> {
               }}
             </small>
           </span>
-          <UiButton
-            v-if="
-              isPackageInstalled(item.packageId) &&
-              (item.settings ?? []).length > 0
-            "
-            @click="beginPackageSettings(item)"
-          >
-            Settings
-          </UiButton>
-          <UiButton
-            v-if="isPackageInstalled(item.packageId)"
-            @click="beginConnect(item)"
-          >
-            Connect
-          </UiButton>
-          <UiButton
-            v-else
-            variant="primary"
-            @click="install(item.packageId, item.version)"
-          >
-            Add
-          </UiButton>
+          <span class="plugin-summary-actions">
+            <UiButton
+              v-if="
+                isPackageInstalled(item.packageId) &&
+                (item.settings ?? []).length > 0
+              "
+              @click="beginPackageSettings(item)"
+            >
+              Settings
+            </UiButton>
+            <UiButton
+              v-if="
+                isPackageInstalled(item.packageId) &&
+                item.connectionTypes.length > 0
+              "
+              @click="beginConnect(item)"
+            >
+              Connect
+            </UiButton>
+            <UiButton
+              v-if="!isPackageInstalled(item.packageId)"
+              variant="primary"
+              @click="install(item.packageId, item.version)"
+            >
+              Add
+            </UiButton>
+          </span>
         </div>
 
         <div
@@ -1528,6 +1536,13 @@ async function disconnect(connectionId: string): Promise<void> {
 
 .plugin-summary--interactive:hover {
   background: var(--frock-fill-hover);
+}
+
+.plugin-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .plugin-card-copy strong {

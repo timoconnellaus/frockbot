@@ -512,18 +512,22 @@
 }
 
 .composer textarea {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
+  min-height: 36px;
   max-height: 120px;
   flex: 1;
-  align-self: center;
+  align-self: stretch;
   resize: none;
   border: 0;
   outline: 0;
-  padding: 0;
+  padding: 8px 0;
   color: var(--frock-text);
   background: transparent;
   font-size: var(--frock-text-md);
   line-height: var(--frock-leading-normal);
+  text-align: left;
 }
 
 .composer textarea::placeholder {
@@ -543,10 +547,11 @@
 
 .composer-body {
   display: flex;
+  width: 100%;
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  align-self: center;
+  align-self: stretch;
   gap: 6px;
 }
 

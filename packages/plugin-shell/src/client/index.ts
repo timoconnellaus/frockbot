@@ -304,27 +304,35 @@ export function projectDurableRuns(
     const notification = notifications.find(
       (candidate) => candidate.runId === run.runId,
     );
-    if (
-      !state.messages.some(
-        (message) => message.runId === run.runId && message.role === "user",
-      )
-    ) {
-      state.messages.push({
-        id: `${run.runId}:user`,
-        runId: run.runId,
-        role: "user",
-        text: run.input,
-        ...(run.admittedAt ? { at: run.admittedAt } : {}),
-        status: "completed",
-        tools: [],
-        sends: [],
-      });
-    }
-    const assistant = assistantMessage(run, notification);
-    if (run.admittedAt) assistant.at = run.admittedAt;
+    const userIndex = state.messages.findIndex(
+      (message) => message.runId === run.runId && message.role === "user",
+    );
+    const existingUser = userIndex >= 0 ? state.messages[userIndex] : undefined;
+    const user: WebChatMessage = {
+      id: `${run.runId}:user`,
+      runId: run.runId,
+      role: "user",
+      text: run.input,
+      ...(run.admittedAt
+        ? { at: run.admittedAt }
+        : existingUser?.at
+          ? { at: existingUser.at }
+          : {}),
+      status: "completed",
+      tools: [],
+      sends: [],
+    };
+    if (userIndex >= 0) state.messages[userIndex] = user;
+    else state.messages.push(user);
+
     const assistantIndex = state.messages.findIndex(
       (message) => message.runId === run.runId && message.role === "assistant",
     );
+    const assistant = assistantMessage(run, notification);
+    const assistantAt =
+      run.admittedAt ??
+      (assistantIndex >= 0 ? state.messages[assistantIndex]?.at : undefined);
+    if (assistantAt) assistant.at = assistantAt;
     if (assistantIndex >= 0) state.messages[assistantIndex] = assistant;
     else state.messages.push(assistant);
 
@@ -2094,23 +2102,26 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!botId) return { accepted: false, error: "no-bot" };
       const generation = selectionGeneration;
       const pendingRunId = crypto.randomUUID();
+      const optimisticAt = new Date().toISOString();
       web.value.activeRunId = pendingRunId;
       web.value.error = undefined;
       web.value.messages.push(
         {
-          id: crypto.randomUUID(),
+          id: `${pendingRunId}:user`,
           runId: pendingRunId,
           role: "user",
           text,
+          at: optimisticAt,
           status: "completed",
           tools: [],
           sends: [],
         },
         {
-          id: crypto.randomUUID(),
+          id: `${pendingRunId}:assistant`,
           runId: pendingRunId,
           role: "assistant",
           text: "",
+          at: optimisticAt,
           status: "streaming",
           tools: [],
           sends: [],
@@ -2139,13 +2150,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )
           return { accepted: true, runId: result.runId };
         for (const message of web.value.messages) {
-          if (message.runId === pendingRunId) message.runId = result.runId;
+          if (message.runId !== pendingRunId) continue;
+          message.runId = result.runId;
+          message.id = `${result.runId}:${message.role}`;
         }
         replaceMessage(web.value.messages, result.runId, {
-          id: crypto.randomUUID(),
+          id: `${result.runId}:assistant`,
           runId: result.runId,
           role: "assistant",
           text: result.text,
+          at: optimisticAt,
           status: "completed",
           tools: toolsFrom(result.events),
           sends: sendsFrom(result.events),
@@ -2172,12 +2186,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
         replaceMessage(web.value.messages, pendingRunId, {
-          id: crypto.randomUUID(),
+          id: `${pendingRunId}:assistant`,
           runId: pendingRunId,
           role: "assistant",
           text: aborted
             ? "Request stopped locally; admission may still be durable."
             : "Confirming whether this Turn was admitted.",
+          at: optimisticAt,
           status: "interrupted",
           tools: [],
           sends: [],
@@ -2202,10 +2217,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         }
         if (disposition === "not-admitted") {
           replaceMessage(web.value.messages, pendingRunId, {
-            id: crypto.randomUUID(),
+            id: `${pendingRunId}:assistant`,
             runId: pendingRunId,
             role: "assistant",
             text: "Turn was not admitted.",
+            at: optimisticAt,
             status: "error",
             tools: [],
             sends: [],

@@ -1024,6 +1024,125 @@ describe("detached Turn projection", () => {
 });
 
 describe("active durable Turn projection", () => {
+  test("keeps two optimistic Turns in admission order through projection and reload", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/?bot=primary" },
+        history: { replaceState: () => undefined },
+      },
+    });
+    const runs: ClientRun[] = [];
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: (_botId, input) => {
+          const ordinal = runs.length + 1;
+          const runId = `run-${ordinal}`;
+          const responseText = `answer-${ordinal}`;
+          runs.push({
+            runId,
+            admittedAt: `2026-09-01T00:0${ordinal}:00.000Z`,
+            input,
+            events: [],
+            status: "completed",
+            responseText,
+          });
+          return Promise.resolve({ runId, text: responseText, events: [] });
+        },
+        readConfiguration: (query) =>
+          Promise.resolve(
+            query.type === "bot/get"
+              ? initializeBotSettingsV1(query.botId)
+              : {
+                  schemaVersion: 1 as const,
+                  revision: 0,
+                  profile: { name: "Test User" },
+                  packages: [],
+                  connections: [],
+                },
+          ),
+        listRuns: () => Promise.resolve(runs),
+        listNotifications: () => Promise.resolve([]),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    const shell = provided.value;
+
+    const renderedMessages = () =>
+      shell.messages
+        .map((message, index) => ({ message, index }))
+        .sort((left, right) => {
+          const byTime = (left.message.at ?? "").localeCompare(
+            right.message.at ?? "",
+          );
+          return byTime || left.index - right.index;
+        })
+        .map(({ message }) => ({
+          id: message.id,
+          role: message.role,
+          text: message.text,
+          at: message.at,
+        }));
+    const expected: ReturnType<typeof renderedMessages> = [
+      {
+        id: "run-1:user",
+        role: "user",
+        text: "question-1",
+        at: "2026-09-01T00:01:00.000Z",
+      },
+      {
+        id: "run-1:assistant",
+        role: "assistant",
+        text: "answer-1",
+        at: "2026-09-01T00:01:00.000Z",
+      },
+      {
+        id: "run-2:user",
+        role: "user",
+        text: "question-2",
+        at: "2026-09-01T00:02:00.000Z",
+      },
+      {
+        id: "run-2:assistant",
+        role: "assistant",
+        text: "answer-2",
+        at: "2026-09-01T00:02:00.000Z",
+      },
+    ];
+
+    await shell.selectBot("primary");
+    const firstSend = shell.sendPrompt("question-1");
+    const [optimisticUser, optimisticAssistant] = shell.messages.slice(-2);
+    expect(optimisticUser).toMatchObject({
+      id: `${optimisticUser?.runId}:user`,
+      role: "user",
+      text: "question-1",
+    });
+    expect(optimisticAssistant).toMatchObject({
+      id: `${optimisticAssistant?.runId}:assistant`,
+      role: "assistant",
+      text: "",
+    });
+    expect(optimisticUser?.at).toBeDefined();
+    expect(optimisticAssistant?.at).toBe(optimisticUser?.at);
+    await firstSend;
+    await shell.sendPrompt("question-2");
+    expect(renderedMessages()).toEqual(expected);
+
+    // Bot selection follows the same clear-and-project path as a reload.
+    await shell.selectBot("primary");
+    expect(renderedMessages()).toEqual(expected);
+  });
+
   test("restores busy state and replaces a stale running placeholder", () => {
     const state: Pick<
       FrockBotWebData,

@@ -17,7 +17,7 @@ import {
 } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 
-test("a Turn settles, renders Markdown, and survives a reload", async ({
+test("Turns stay ordered, render Markdown, and survive a reload", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -29,27 +29,49 @@ test("a Turn settles, renders Markdown, and survives a reload", async ({
     botName: "Talker",
   });
 
-  await sendMessage(page, "Render **this** please");
+  const firstPrompt = "Render **this** please";
+  const secondPrompt = "Then render _that_ too";
+  await sendMessage(page, firstPrompt);
+  await sendMessage(page, secondPrompt);
 
   const thread = page.locator("main");
-  await expect(thread.getByText("Render **this** please")).toBeVisible();
+  await expect(thread.getByText(firstPrompt)).toBeVisible();
+  await expect(thread.getByText(secondPrompt)).toBeVisible();
   // The assistant reply is Markdown the client rendered, not escaped text.
-  await expect(
-    thread.locator(".message-assistant strong", {
-      hasText: "local Ollama stub",
-    }),
-  ).toBeVisible();
+  const renderedMarkdown = thread.locator(".message-assistant strong", {
+    hasText: "local Ollama stub",
+  });
+  await expect(renderedMarkdown).toHaveCount(2);
+  await expect(renderedMarkdown.first()).toBeVisible();
+
+  const turnOrder = () =>
+    thread
+      .locator("article.message-user, article.message-assistant")
+      .evaluateAll((messages) =>
+        messages.map((message) => ({
+          role: message.classList.contains("message-user")
+            ? "user"
+            : "assistant",
+          text: message.textContent?.trim(),
+        })),
+      );
+  const expectedOrder = [
+    { role: "user", text: firstPrompt },
+    { role: "assistant", text: "Reply from the local Ollama stub." },
+    { role: "user", text: secondPrompt },
+    { role: "assistant", text: "Reply from the local Ollama stub." },
+  ];
+  await expect.poll(turnOrder).toEqual(expectedOrder);
 
   // A reload replays the conversation from `GET /api/bots/:bot/turns`. Incident
   // 1 was that route answering HTML: the history vanished and the console
   // carried `Unexpected token '<'`, which the `page` fixture would now fail on.
   await page.reload();
-  await expect(thread.getByText("Render **this** please")).toBeVisible();
-  await expect(
-    thread.locator(".message-assistant strong", {
-      hasText: "local Ollama stub",
-    }),
-  ).toBeVisible();
+  await expect(thread.getByText(firstPrompt)).toBeVisible();
+  await expect(thread.getByText(secondPrompt)).toBeVisible();
+  await expect(renderedMarkdown).toHaveCount(2);
+  await expect(renderedMarkdown.first()).toBeVisible();
+  await expect.poll(turnOrder).toEqual(expectedOrder);
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({
