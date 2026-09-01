@@ -33,6 +33,9 @@ export default defineConfig({
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         durableObjects: {
           AUTHORING: "AuthoringProbe",
+          // The Channel authority, over real Durable Object storage: the point
+          // is that a message and its deliveries survive an eviction.
+          CHANNEL_STORE: "ChannelStoreProbe",
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",

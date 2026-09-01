@@ -52,6 +52,11 @@
       "grants": ["routines:read", "routines:write"]
     },
     {
+      "specifier": "@frockbot/plugin-channels",
+      "version": "0.0.1",
+      "grants": ["channels:read", "channels:write"]
+    },
+    {
       "specifier": "@frockbot/plugin-credentials",
       "version": "0.0.1",
       "grants": ["credentials:manage"]

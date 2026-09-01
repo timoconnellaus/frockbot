@@ -33,6 +33,7 @@
     "@frockbot/plugin-audit": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-bot-template": "workspace:*",
+    "@frockbot/plugin-channels": "workspace:*",
     "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-image": "workspace:*",

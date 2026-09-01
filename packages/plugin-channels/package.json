@@ -1,0 +1,48 @@
+{
+  "name": "@frockbot/plugin-channels",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
+    "./agent-host": "./src/agent-host.ts",
+    "./frockbot.json": "./frockbot.json",
+    "./manifest": "./src/manifest.ts",
+    "./package.json": "./package.json",
+    "./prompt": "./src/prompt.ts",
+    "./records": "./src/records.ts",
+    "./shared": "./src/shared.ts",
+    "./storage-keys": "./src/storage-keys.ts",
+    "./store": "./src/store.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "frockbot": {
+    "manifest": "./frockbot.json"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/configuration-core": "workspace:*",
+    "@frockbot/kernel-agent-loop": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  },
+  "devDependencies": {
+    "@frockbot/plugin-prompt": "workspace:*",
+    "@frockbot/plugin-tools": "workspace:*",
+    "@types/bun": "1.4.0",
+    "@types/node": "26.2.0",
+    "typescript": "5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/plugin-channels"
+  }
+}

@@ -14,31 +14,26 @@
 //     the parent transcript is a pointer, not copied into the prompt". The
 //     parent's messages are never copied, at any length.
 //
-// Memory is deliberately untouched by both rules. "The parent agent's shared
+//  3. **A `channel` Turn is given a history that is not this Bot's at all.**
+//     It falls under rule 2 here — it is not a chat Turn, so it sees its own
+//     Turn and nothing of the conversation — and the Channels Package then
+//     supplies the Channel's own recent messages in place of the pointer,
+//     through the Agent runtime's fresh-history mode. That substitution happens
+//     outside this module, and this module is what makes it safe: whatever the
+//     Turn is given, none of the Bot's personal transcript is in it.
+//
+// Memory is deliberately untouched by all three rules. "The parent agent's shared
 // durable memories are available": Memory is injected as a prompt section, not
 // as history, so a firing keeps every tier the parent has.
-import type {
-  LlmMessage,
-  SessionEvent,
-  TurnTypeV1,
+import {
+  currentTurnV1,
+  messageTurnsV1,
+  type LlmMessage,
+  type SessionEvent,
+  type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
 
-/** The event types `Session.deriveMessages` turns into a message, in order. */
-const MESSAGE_EVENT_TYPES = new Set([
-  "user/message",
-  "assistant/message",
-  "tool/result",
-]);
-
-/** The turn each derived message belongs to, in the order they were derived. */
-function messageTurns(events: readonly SessionEvent[]): number[] {
-  const turns: number[] = [];
-  for (const event of events) {
-    if (!MESSAGE_EVENT_TYPES.has(event.type)) continue;
-    turns.push("turn" in event ? event.turn : 0);
-  }
-  return turns;
-}
+export { currentTurnV1 };
 
 /**
  * The turn type each Turn was admitted as. A Turn recorded before turn
@@ -52,12 +47,6 @@ export function turnTypesByTurnV1(
     if (event.type === "turn/admission") types.set(event.turn, event.turnType);
   }
   return types;
-}
-
-/** The Turn a request is being assembled inside: the last one started. */
-export function currentTurnV1(events: readonly SessionEvent[]): number {
-  const started = events.findLast((event) => event.type === "turn/start");
-  return started?.type === "turn/start" ? started.turn : 0;
 }
 
 /**
@@ -101,7 +90,7 @@ export interface TurnScopedMessagesInputV1 {
 export function turnScopedMessagesV1(
   input: TurnScopedMessagesInputV1,
 ): LlmMessage[] {
-  const turns = messageTurns(input.events);
+  const turns = messageTurnsV1(input.events);
   if (turns.length !== input.messages.length) {
     throw new Error(
       "session history and derived messages disagree about their length",

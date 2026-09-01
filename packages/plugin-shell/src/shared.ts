@@ -98,7 +98,15 @@ export interface PluginCatalogItem {
   version: string;
   capabilities: Array<{
     id: string;
-    kind: "model" | "tool" | "memory" | "notification" | "computer";
+    kind:
+      | "model"
+      | "tool"
+      | "memory"
+      | "notification"
+      | "computer"
+      // Manifest v5. A Channel Capability is listed like any other; the
+      // Plugins surface renders its id and kind and nothing more.
+      | "channel";
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{

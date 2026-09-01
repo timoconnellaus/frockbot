@@ -33,6 +33,7 @@ import {
 import type { ActiveContribution } from "@frockbot/kernel-composition";
 import {
   type BotCapabilitiesStub,
+  type LlmMessage,
   type PersistSessionEvents,
   type SessionEvent,
   type TurnTypeV1,
@@ -101,6 +102,12 @@ export interface ShellCompositionMountOptions {
    * catalog to it. Absent ⇒ `chat`.
    */
   turnType?: TurnTypeV1;
+  /**
+   * The history a non-chat Turn's model request carries instead of the Bot's
+   * own transcript. A `channel` Turn is given the Channel's own recent
+   * messages; absent, and every Package's own narrowing stands unchanged.
+   */
+  freshHistory?: readonly LlmMessage[];
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
 }
@@ -149,6 +156,9 @@ export function createShellCompositionHost(
         modelSelection: options.modelSelection,
         systemPromptSection: options.systemPromptSection,
         ...(options.turnType ? { turnType: options.turnType } : {}),
+        ...(options.freshHistory
+          ? { freshTurnHistory: options.freshHistory }
+          : {}),
       });
 
       const isolateMembers = generation.members.filter(

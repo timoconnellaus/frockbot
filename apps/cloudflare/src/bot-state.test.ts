@@ -180,6 +180,16 @@ describe("BotState Ollama execution", () => {
           sheep: randomSheepRecipeV1(() => 0),
         }),
       readConfiguration: () => Promise.resolve(structuredClone(user)),
+      // The Channels seam. A Turn renders the teammate and channel prompt
+      // sections from these, and a Bot with neither renders both as empty.
+      listChannels: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          botId: "ollama-bot",
+          channels: [],
+        }),
+      listBots: () =>
+        Promise.resolve({ schemaVersion: 1 as const, revision: 0, bots: [] }),
       getConnection: () =>
         Promise.resolve(structuredClone(user.connections[0])),
       executeConnectionDependency: (request: {

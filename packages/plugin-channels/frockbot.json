@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 5,
+  "id": "channels",
+  "displayName": "Channels",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "shell": ">=0.0.1"
+  },
+  "contributions": {
+    "runtime": { "entry": "./agent" }
+  },
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [],
+    "capabilities": [
+      {
+        "id": "channel-tools",
+        "kind": "channel",
+        "connectionTypes": [],
+        "admission": {
+          "turnTypes": ["chat", "channel"]
+        }
+      }
+    ]
+  },
+  "permissions": ["channels:read", "channels:write"]
+}
