@@ -37,6 +37,12 @@ const search = ref("");
 const busyPackageId = ref<string>();
 
 const installations = computed(() => web.value.userSettings?.packages ?? []);
+const installedPluginCount = computed(
+  () =>
+    web.value.pluginCatalog.filter((item) =>
+      isPackageInstalled(installations.value, item.packageId),
+    ).length,
+);
 const filteredCatalog = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
   if (!query) return web.value.pluginCatalog;
@@ -131,6 +137,12 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
 
 <template>
   <div class="plugins-surface">
+    <div class="installed-strip" aria-live="polite">
+      <span class="plugin-status-badge" aria-hidden="true">
+        <UiIcon name="check" :size="12" :weight="2.5" />
+      </span>
+      {{ installedPluginCount }} installed
+    </div>
     <label class="plugin-search">
       <UiIcon name="search" />
       <input
@@ -228,6 +240,26 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
 <style scoped>
 .plugins-surface {
   padding: 24px;
+}
+
+.installed-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+  font-weight: 600;
+}
+
+.plugin-status-badge {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--frock-on-accent);
+  background: var(--frock-success);
 }
 
 .plugin-anchor {

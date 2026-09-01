@@ -172,29 +172,58 @@ export async function openPlugins(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "Plugins" })).toBeVisible();
 }
 
-/** The Ollama Cloud card in the Plugins overlay, in either of its two shapes. */
+/** Open the Models overlay and wait for its heading. */
+export async function openModels(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "FrockBot user" }).click();
+  await page.getByRole("menuitem", { name: "Models", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Models" })).toBeVisible();
+}
+
+/**
+ * The Ollama Cloud card on the Models surface, where a model provider's
+ * accounts live. Plugins holds the same Package's enablement row and none of
+ * its configuration.
+ */
 export function ollamaCard(page: Page): Locator {
+  return page.locator("article.provider-card", {
+    has: page.getByText("Ollama Cloud", { exact: true }),
+  });
+}
+
+/** The Ollama Cloud enablement row in Plugins. */
+export function ollamaPluginRow(page: Page): Locator {
   return page.locator("article.plugin-card", {
     has: page.getByText("Ollama Cloud", { exact: true }),
   });
 }
 
 /**
- * Install the Ollama Cloud Package and connect an API key to an endpoint.
+ * Enable the Ollama Cloud Package if it is not already, then connect an API
+ * key to an endpoint on Models.
  *
- * `API base URL` is the Package's own Connection setting, so pointing the
- * Connection at the harness's fake server is the shipped path a User takes to
- * reach a local Ollama — not a test-only door. It leaves the form submitted;
- * the caller decides whether it expects success or a failure.
+ * The two steps are two surfaces on purpose: Plugins decides whether the
+ * Package is on, Models sets it up. `API base URL` is the Package's own
+ * Connection setting, so pointing the Connection at the harness's fake server
+ * is the shipped path a User takes to reach a local Ollama — not a test-only
+ * door. It leaves the form submitted; the caller decides whether it expects
+ * success or a failure.
  */
 export async function connectOllama(
   page: Page,
   options: { apiKey: string; apiBaseUrl: string; label?: string },
 ): Promise<void> {
   await openPlugins(page);
+  const row = ollamaPluginRow(page);
+  for (const label of ["Add", "Enable"]) {
+    const action = row.getByRole("button", { name: label, exact: true });
+    if (await action.isVisible().catch(() => false)) {
+      await action.click();
+      break;
+    }
+  }
+  await closeOverlay(page);
+  await openModels(page);
   const card = ollamaCard(page);
-  const install = card.getByRole("button", { name: "Add", exact: true });
-  if (await install.isVisible().catch(() => false)) await install.click();
   await card.getByRole("button", { name: "Connect", exact: true }).click();
   await page
     .getByLabel("Connection label")
@@ -210,27 +239,27 @@ export async function closeOverlay(page: Page): Promise<void> {
 }
 
 /**
- * Choose the default model every new Bot starts on.
+ * Choose the default model every new Bot starts on, on Models — the surface
+ * that owns both the provider's accounts and the choice made from them.
  *
- * The surface fills its own fields in `onMounted`, after two awaited loads, so
- * a selection made before that resolves is overwritten. Waiting for the name
- * field to carry the stored profile name is waiting for exactly that moment.
+ * The surface reads its stored selection in `onMounted`, after an awaited
+ * catalog load, so a selection made before that resolves is overwritten.
+ * Waiting for the option to exist waits for exactly that moment: the options
+ * come from the same load.
  */
 export async function chooseDefaultModel(
   page: Page,
   optionLabel: string,
 ): Promise<void> {
-  await page.getByRole("button", { name: "FrockBot user" }).click();
-  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await openModels(page);
+  const models = page.getByLabel(/^Default model/);
   await expect(
-    page.getByRole("heading", { name: "Application settings" }),
-  ).toBeVisible();
-  await expect(page.getByLabel("Name", { exact: true })).not.toHaveValue("");
-  await page.getByLabel(/^Default model/).selectOption({ label: optionLabel });
-  await page.getByRole("button", { name: "Save settings" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Application settings" }),
-  ).toBeHidden();
+    models.getByRole("option", { name: optionLabel }),
+  ).toBeAttached();
+  await models.selectOption({ label: optionLabel });
+  await page.getByRole("button", { name: "Save model" }).click();
+  await closeOverlay(page);
+  await expect(page.getByRole("heading", { name: "Models" })).toBeHidden();
 }
 
 /**
