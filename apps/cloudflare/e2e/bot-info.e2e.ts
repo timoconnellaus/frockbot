@@ -69,6 +69,12 @@ test("the default panel and Settings fit the mobile shell", async ({
   });
   await page.setViewportSize({ width: 390, height: 844 });
 
+  // On a phone the right panel is a drawer, and a drawer that opened itself
+  // over the conversation is the layout this replaced — so it starts closed
+  // and the toggle is how it arrives. What this test is about is unchanged:
+  // that the panel and Settings fit the window once they are on screen.
+  await page.getByRole("button", { name: "Show side panel" }).click();
+
   const panel = page.getByRole("region", { name: "Bot panel" });
   await expect(panel).toBeVisible();
   await expect(panel.getByText("Pocket's screen")).toBeVisible();

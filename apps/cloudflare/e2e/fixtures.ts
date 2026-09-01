@@ -153,7 +153,9 @@ export async function createBot(page: Page, name: string): Promise<void> {
   // the helper correct whichever state the shell settles into.
   await expect(async () => {
     if (await dialog.isVisible()) return;
-    // The sidebar trigger is an icon button, so it is the one with a title.
+    // The sidebar trigger is an icon button, so it is the one with a title —
+    // and on a phone it is behind the drawer.
+    await revealSidebar(page);
     await page.getByTitle("Create Bot").click({ timeout: 2_000 });
     await expect(dialog).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
@@ -172,14 +174,32 @@ export async function createBot(page: Page, name: string): Promise<void> {
   await expect(dialog).toBeHidden();
 }
 
+/**
+ * Make the sidebar reachable, whatever the layout.
+ *
+ * Below the phone breakpoint the sidebar is a drawer that closes behind
+ * whatever it opened, so a helper that clicks something inside it has to open
+ * it first — and a helper that clicks two things, on two surfaces, has to open
+ * it twice. At desktop widths there is no menu button and this does nothing,
+ * which is what lets every helper below call it unconditionally.
+ */
+export async function revealSidebar(page: Page): Promise<void> {
+  const menu = page.getByRole("button", { name: "Show navigation" });
+  if (!(await menu.isVisible().catch(() => false))) return;
+  await menu.click();
+  await expect(page.locator(".sidebar")).toBeVisible();
+}
+
 /** Open the Plugins overlay and wait for its heading. */
 export async function openPlugins(page: Page): Promise<void> {
+  await revealSidebar(page);
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Plugins" })).toBeVisible();
 }
 
 /** Open the Models overlay and wait for its heading. */
 export async function openModels(page: Page): Promise<void> {
+  await revealSidebar(page);
   await page.getByRole("button", { name: "FrockBot user" }).click();
   await page.getByRole("menuitem", { name: "Models", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Models" })).toBeVisible();
