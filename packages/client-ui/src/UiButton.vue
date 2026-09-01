@@ -52,6 +52,10 @@ withDefaults(
   background: var(--frock-action-primary-hover);
 }
 
+.ui-button--primary:active:not(:disabled) {
+  background: var(--frock-action-primary-pressed);
+}
+
 .ui-button--secondary {
   border-color: var(--frock-border);
   background: var(--frock-surface-raised);

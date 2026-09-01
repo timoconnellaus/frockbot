@@ -398,8 +398,10 @@
   height: 38px;
   margin-top: 6px;
   padding: 0 12px;
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: var(--frock-radius-control);
+  color: var(--frock-text);
+  background: var(--frock-surface-raised);
   font: inherit;
   font-size: var(--frock-text-md);
   transition: border-color var(--frock-motion-fast);
@@ -431,9 +433,10 @@
 .flock-select-grid label {
   display: block;
   padding: 8px 10px;
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: 12px;
   color: var(--frock-text-muted);
+  background: var(--frock-surface-raised);
   font-size: var(--frock-text-xs);
   font-weight: 700;
   letter-spacing: var(--frock-tracking-eyebrow);
@@ -508,6 +511,10 @@
 
 .flock-actions .primary:hover {
   background: var(--frock-action-primary-hover);
+}
+
+.flock-actions .primary:active {
+  background: var(--frock-action-primary-pressed);
 }
 
 @media (max-width: 600px) {

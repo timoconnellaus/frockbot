@@ -51,7 +51,7 @@
   padding: 8px 10px;
   color: var(--frock-text-muted);
   background: var(--frock-surface-subtle);
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: var(--frock-radius-control);
 }
 

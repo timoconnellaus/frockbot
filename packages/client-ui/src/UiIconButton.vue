@@ -112,6 +112,10 @@ withDefaults(
   background: var(--frock-action-primary-hover);
 }
 
+.ui-icon-button--primary:active:not(:disabled) {
+  background: var(--frock-action-primary-pressed);
+}
+
 .ui-icon-button:active:not(:disabled) {
   transform: scale(0.94);
 }

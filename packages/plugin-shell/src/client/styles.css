@@ -27,7 +27,7 @@
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: var(--frock-surface);
+  background: var(--frock-surface-window);
   transition: grid-template-columns var(--frock-motion-panel);
 }
 
@@ -48,7 +48,7 @@
   flex-direction: column;
   padding: 0 10px 10px;
   border-right: 1px solid var(--frock-border);
-  background: var(--frock-surface-subtle);
+  background: var(--frock-surface-sidebar);
 }
 
 .brand {
@@ -207,7 +207,8 @@
   left: 0;
   overflow-y: auto;
   padding: 16px 20px 24px;
-  background: var(--frock-thread-gradient);
+  background-color: var(--frock-surface);
+  background-image: var(--frock-thread-gradient);
   scrollbar-color: var(--frock-scrollbar) transparent;
   scrollbar-width: thin;
 }
@@ -371,7 +372,8 @@
   border: 1px solid var(--frock-border);
   border-radius: 18px 18px 18px 6px;
   color: var(--frock-text);
-  background: var(--frock-surface-subtle);
+  background: var(--frock-surface-raised);
+  box-shadow: var(--frock-shadow-card);
   font-size: var(--frock-text-md);
   line-height: var(--frock-leading-normal);
   white-space: pre-wrap;
@@ -475,7 +477,7 @@
   right: 24px;
   bottom: 92px;
   color: var(--frock-text);
-  background: var(--frock-surface);
+  background: var(--frock-surface-raised);
   box-shadow: var(--frock-shadow-card);
 }
 
@@ -536,9 +538,9 @@
   align-items: flex-end;
   gap: 8px;
   padding: 8px 8px 8px 18px;
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: 26px;
-  background: var(--frock-surface);
+  background: var(--frock-surface-raised);
   box-shadow: var(--frock-shadow-composer);
   transition:
     border-color var(--frock-motion-fast),
@@ -699,7 +701,7 @@
   min-width: 0;
   overflow: hidden;
   border-left: 1px solid var(--frock-border);
-  background: var(--frock-surface-subtle);
+  background: var(--frock-surface-sidebar);
 }
 
 .right-panel-stack {
@@ -857,7 +859,7 @@
 }
 
 .message-attachments img {
-  border: 1px solid var(--frockbot-border, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--frock-border);
   border-radius: var(--frockbot-radius-small, 4px);
   display: block;
   max-width: 20rem;

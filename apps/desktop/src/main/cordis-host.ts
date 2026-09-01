@@ -44,7 +44,7 @@ class DesktopWindowService extends Service {
       height: 859,
       minWidth: 980,
       minHeight: 620,
-      backgroundColor: "#faf7f2",
+      backgroundColor: "#1f1e24",
       show: false,
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
       webPreferences: {
