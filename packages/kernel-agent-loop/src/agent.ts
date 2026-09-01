@@ -26,6 +26,13 @@ export interface AgentOptions {
    * every Turn recorded before turn admission existed replays as.
    */
   turnType?: TurnTypeV1;
+  /**
+   * The subagent role this Agent's runs are admitted under. A second ceiling
+   * dimension on the same terms as `turnType`: it selects the tool catalog and
+   * nothing else, and the kernel holds no opinion about what a role name
+   * means. Only meaningful on a `subagent` Turn; absent means no narrowing.
+   */
+  subagentRole?: string;
   /** Durably linearizes each new effect against Stop immediately before use. */
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   modelBinding?: ModelBindingSnapshot;

@@ -17,6 +17,7 @@
 //    reconciliation that races the child's own callback, records one outcome.
 
 import {
+  decodeTaskDesktopLeaseIntentV1,
   decodeTaskMessageRecordV1,
   decodeTaskRecordV1,
   isTaskIdV1,
@@ -26,6 +27,8 @@ import {
   TASK_DEADLINE_MS_V1,
   TASK_MAX_DEPTH_V1,
   TASK_MESSAGE_QUEUE_LIMIT_V1,
+  taskDesktopLeaseOwnerV1,
+  type TaskDesktopLeaseIntentV1,
   type TaskMessageRecordV1,
   type TaskModelV1,
   type TaskOutcomeV1,
@@ -147,6 +150,18 @@ export class TaskStore {
           reason: `this Bot already has ${active.size} subagents running; the bound is ${TASK_CONCURRENCY_PER_BOT_V1}. Wait for one to finish.`,
         };
       }
+      // One `computerUse` task at a time, because the screen is shared. The
+      // durable check is here, before anything is written; the User-wide
+      // serializer is the Computer host's own lease, acquired next.
+      if (request.type === "computerUse") {
+        const held = await this.#heldDesktopLease(transaction, request.now);
+        if (held && held.taskId !== request.taskId) {
+          return {
+            status: "refused",
+            reason: desktopHeldReasonV1(held),
+          };
+        }
+      }
       const createdAt = request.now.toISOString();
       const record: TaskRecordV1 = decodeTaskRecordV1({
         schemaVersion: 1,
@@ -179,15 +194,16 @@ export class TaskStore {
       });
       await this.#appendIndex(transaction, record.taskId);
       if (record.type === "computerUse") {
-        // The lease intent is recorded before the dispatch and before any host
-        // call. Acquiring the lease itself is G3's; what is durable today is
-        // that this task is the one that asked for the desktop.
+        // Intent before effect: this task is durably the one that asked for the
+        // desktop *before* the Computer host is asked for the lease, so an
+        // acquire that lands and is then lost is read back rather than
+        // repeated, and a settle knows what to release.
         await transaction.put(TASK_DESKTOP_LEASE_KEY, {
           schemaVersion: 1,
           taskId: record.taskId,
           scope: "desktop-gui",
           recordedAt: createdAt,
-        });
+        } satisfies TaskDesktopLeaseIntentV1);
       }
       return { status: "admitted", record };
     });
@@ -221,6 +237,98 @@ export class TaskStore {
       const running: TaskRecordV1 = { ...record, status: "running" };
       await transaction.put(taskKeyV1(taskId), running);
       return running;
+    });
+  }
+
+  /**
+   * The desktop lease as it stands, or `undefined` when nothing holds it.
+   *
+   * A lease is *held* while the task that recorded it is still live and its
+   * host expiry has not passed. An intent whose task has settled, or a lease
+   * the host has already let lapse, holds nothing: the desktop is free and the
+   * next dispatch takes it.
+   */
+  async #heldDesktopLease(
+    transaction: TaskStorageReadsV1,
+    now: Date,
+  ): Promise<TaskDesktopLeaseIntentV1 | undefined> {
+    const stored = await transaction.get<unknown>(TASK_DESKTOP_LEASE_KEY);
+    if (stored === undefined) return undefined;
+    let lease: TaskDesktopLeaseIntentV1;
+    try {
+      lease = decodeTaskDesktopLeaseIntentV1(stored);
+    } catch {
+      return undefined;
+    }
+    if (lease.expiresAt && Date.parse(lease.expiresAt) <= now.getTime()) {
+      return undefined;
+    }
+    const holder = await transaction.get<unknown>(taskKeyV1(lease.taskId));
+    if (holder === undefined) return undefined;
+    try {
+      if (isTerminalTaskStatusV1(decodeTaskRecordV1(holder).status)) {
+        return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+    return lease;
+  }
+
+  /** What holds the desktop right now, for a refusal that can name it. */
+  async desktopLease(
+    now = new Date(),
+  ): Promise<TaskDesktopLeaseIntentV1 | undefined> {
+    return this.#heldDesktopLease(this.#storage, now);
+  }
+
+  /**
+   * Records that the host granted the desktop to this task, on the key the
+   * intent was written under. A lease the record no longer names is not
+   * recorded: the task settled while the acquire was in flight, and the
+   * release that settle performs is the truthful next act.
+   */
+  async recordDesktopLease(
+    botId: string,
+    taskId: string,
+    expiresAt: string | undefined,
+  ): Promise<TaskDesktopLeaseIntentV1 | undefined> {
+    return this.#storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(TASK_DESKTOP_LEASE_KEY);
+      if (stored === undefined) return undefined;
+      const intent = decodeTaskDesktopLeaseIntentV1(stored);
+      if (intent.taskId !== taskId) return undefined;
+      const acquired: TaskDesktopLeaseIntentV1 = {
+        ...intent,
+        ownerId: taskDesktopLeaseOwnerV1(botId, taskId),
+        ...(expiresAt === undefined ? {} : { expiresAt }),
+      };
+      await transaction.put(TASK_DESKTOP_LEASE_KEY, acquired);
+      return acquired;
+    });
+  }
+
+  /**
+   * Drops the lease record this task holds and answers what it held, so the
+   * caller can hand the host its release. A lease another task holds is left
+   * exactly where it is.
+   */
+  async releaseDesktopLease(
+    taskId: string,
+  ): Promise<TaskDesktopLeaseIntentV1 | undefined> {
+    return this.#storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(TASK_DESKTOP_LEASE_KEY);
+      if (stored === undefined) return undefined;
+      let intent: TaskDesktopLeaseIntentV1;
+      try {
+        intent = decodeTaskDesktopLeaseIntentV1(stored);
+      } catch {
+        await transaction.delete(TASK_DESKTOP_LEASE_KEY);
+        return undefined;
+      }
+      if (intent.taskId !== taskId) return undefined;
+      await transaction.delete(TASK_DESKTOP_LEASE_KEY);
+      return intent;
     });
   }
 
@@ -299,10 +407,16 @@ export class TaskStore {
       }
       const prefix = taskMessagePrefixV1(taskId);
       const queued = await transaction.list<unknown>({ prefix });
-      if (queued.size >= TASK_MESSAGE_QUEUE_LIMIT_V1) {
+      // The bound is on what is *waiting*. A message the child has already
+      // read is history, not queue depth, so a long-lived subagent can be told
+      // more than sixteen things over its life.
+      const waiting = [...queued.values()].filter(
+        (value) => decodeTaskMessageRecordV1(value).deliveredAt === undefined,
+      ).length;
+      if (waiting >= TASK_MESSAGE_QUEUE_LIMIT_V1) {
         return {
           status: "refused" as const,
-          reason: `task "${taskId}" already has ${queued.size} messages waiting; the bound is ${TASK_MESSAGE_QUEUE_LIMIT_V1}`,
+          reason: `task "${taskId}" already has ${waiting} messages waiting; the bound is ${TASK_MESSAGE_QUEUE_LIMIT_V1}`,
         };
       }
       let seq = 0;
@@ -321,12 +435,12 @@ export class TaskStore {
       return {
         status: "queued" as const,
         record: queuedRecord,
-        depth: queued.size + 1,
+        depth: waiting + 1,
       };
     });
   }
 
-  /** The messages waiting on one task, oldest first. */
+  /** The messages on one task, oldest first, delivered ones included. */
   async messages(taskId: string): Promise<TaskMessageRecordV1[]> {
     const stored = await this.#storage.list<unknown>({
       prefix: taskMessagePrefixV1(taskId),
@@ -334,6 +448,59 @@ export class TaskStore {
     return [...stored.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([, value]) => decodeTaskMessageRecordV1(value));
+  }
+
+  /** The messages still waiting to reach the child, oldest first. */
+  async pendingMessages(taskId: string): Promise<TaskMessageRecordV1[]> {
+    return (await this.messages(taskId)).filter(
+      (message) => message.deliveredAt === undefined,
+    );
+  }
+
+  /**
+   * Hands the child every message it has not yet read, and marks them read in
+   * the same transaction.
+   *
+   * This is the act that makes the queue a queue. A `task_message` that is
+   * appended and never drained is semantically an empty queue — GrokBot's
+   * `MessageSubagent` influences the *running* child — so the child claims
+   * here on its way into a step and folds what it gets into that step's
+   * inputs.
+   *
+   * Claiming marks rather than deletes, so the delivery is idempotent under
+   * retry: a second claim reads the marks back and hands the child nothing.
+   * The messages stay until the task settles, which is when the queue is
+   * dropped wholesale.
+   */
+  async claimMessages(
+    taskId: string,
+    now: Date,
+  ): Promise<TaskMessageRecordV1[]> {
+    return this.#storage.transaction(async (transaction) => {
+      const prefix = taskMessagePrefixV1(taskId);
+      const stored = await transaction.list<unknown>({ prefix });
+      const claimed: TaskMessageRecordV1[] = [];
+      for (const [key, value] of [...stored.entries()].sort(([left], [right]) =>
+        left.localeCompare(right),
+      )) {
+        let message: TaskMessageRecordV1;
+        try {
+          message = decodeTaskMessageRecordV1(value);
+        } catch {
+          // A message that cannot be decoded is not handed to a model.
+          await transaction.delete(key);
+          continue;
+        }
+        if (message.deliveredAt !== undefined) continue;
+        const delivered: TaskMessageRecordV1 = {
+          ...message,
+          deliveredAt: now.toISOString(),
+        };
+        await transaction.put(key, delivered);
+        claimed.push(delivered);
+      }
+      return claimed;
+    });
   }
 
   /**
@@ -508,4 +675,21 @@ export class TaskStore {
     }
     return records;
   }
+}
+
+/**
+ * The typed refusal a second `computerUse` dispatch reads.
+ *
+ * It names the holder, because "the desktop is busy" is not something a Bot
+ * can act on and "task X holds it until T" is: the Bot can check that task,
+ * message it, or stop it.
+ */
+export function desktopHeldReasonV1(lease: {
+  taskId: string;
+  expiresAt?: string;
+}): string {
+  const until = lease.expiresAt
+    ? ` until ${lease.expiresAt}`
+    : " and has not reported an expiry";
+  return `the desktop is held by task "${lease.taskId}"${until}; only one computerUse subagent may run at a time because the screen is shared`;
 }

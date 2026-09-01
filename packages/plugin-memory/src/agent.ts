@@ -512,6 +512,10 @@ export function createMemoryWriteTool(
 ): ToolDefinition {
   return {
     name: "memory_write",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Record one fact in memory. Choose the scope deliberately: bot memory is yours, user memory is shared with every Bot of this User, project memory is shared inside one Project. You always write into your own shard; never try to edit another Bot's.",
     inputSchema: MEMORY_WRITE_SCHEMA as unknown as Record<string, unknown>,
@@ -619,6 +623,10 @@ export function createMemoryForgetTool(
 ): ToolDefinition {
   return {
     name: "memory_forget",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Forget one fact by its exact recorded text. A fact you recorded is removed. A shared fact another Bot recorded is not edited — a retraction is written into your own shard instead, and newest wins.",
     inputSchema: MEMORY_FORGET_SCHEMA as unknown as Record<string, unknown>,
@@ -801,6 +809,10 @@ export function createMemorySearchTool(
 ): ToolDefinition {
   return {
     name: "memory_search",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Search your memory files for anything the injected block did not carry. Your prompt holds only the most recent capped selection; the rest is on disk.",
     inputSchema: MEMORY_SEARCH_SCHEMA as unknown as Record<string, unknown>,
@@ -844,6 +856,10 @@ export function createMemoryRebuildIndexTool(
 ): ToolDefinition {
   return {
     name: "memory_rebuild_index",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Throw away the derived memory index and build it again from the memory files. Safe at any time: the index holds no facts, only a way of finding them.",
     inputSchema: {

@@ -55,7 +55,10 @@ import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
 } from "../approvals.js";
-import { decodeTaskListViewV1 } from "@frockbot/plugin-subagents/shared";
+import {
+  decodeTaskListViewV1,
+  decodeTaskViewV1,
+} from "@frockbot/plugin-subagents/shared";
 import { ref } from "vue";
 import {
   frockBotWebDataKey,
@@ -1205,6 +1208,36 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId === botId
         )
           web.value.tasks = [];
+      }
+    },
+    /**
+     * Explicit, authenticated cancellation of one subagent from the client.
+     *
+     * The receipt is the task as the Bot Durable Object recorded it, not what
+     * the click asked for: a task that had already settled comes back settled,
+     * and the list shows that rather than a cancellation that did not happen.
+     */
+    async stopTask(taskId: string): Promise<void> {
+      const post = ctx.transport.hostedRequest;
+      const botId = web.value.activeBotId;
+      if (!post || !botId) return;
+      try {
+        const view = decodeTaskViewV1(
+          await post(
+            `/api/bots/${encodeURIComponent(botId)}/tasks/${encodeURIComponent(taskId)}/stop`,
+            "POST",
+            JSON.stringify({ schemaVersion: 1 }),
+          ),
+        );
+        if (web.value.activeBotId !== botId) return;
+        web.value.tasks = web.value.tasks.map((task) =>
+          task.taskId === view.taskId ? view : task,
+        );
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error
+            ? error.message
+            : "Could not stop the subagent";
       }
     },
     async decideApproval(

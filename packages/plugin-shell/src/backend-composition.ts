@@ -108,6 +108,11 @@ export interface ShellCompositionMountOptions {
    * messages; absent, and every Package's own narrowing stands unchanged.
    */
   freshHistory?: readonly LlmMessage[];
+  /**
+   * The subagent role the admitted Turn runs under; the mounted Agent trims
+   * its catalog to it as well. Absent ⇒ no role narrowing.
+   */
+  subagentRole?: string;
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
 }
@@ -159,6 +164,7 @@ export function createShellCompositionHost(
         ...(options.freshHistory
           ? { freshTurnHistory: options.freshHistory }
           : {}),
+        ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),
       });
 
       const isolateMembers = generation.members.filter(

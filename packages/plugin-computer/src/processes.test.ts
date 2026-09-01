@@ -331,6 +331,30 @@ describe("the process tools' admission", () => {
   });
 });
 
+describe("the Computer tools' subagent roles", () => {
+  test("browserUse gets the browser and nothing else on the box", async () => {
+    const harness = await mount(fakeComputer(), storage());
+    const named = (subagentRole: string) =>
+      harness.root.tools
+        .schemas({ turnType: "subagent", subagentRole })
+        .map((tool) => tool.name);
+
+    // `browserUse` is "page-level Chrome" (`docs/research/
+    // grokbot-computer.md` l.351–356): the browser, and not the shell, the
+    // screen, or the processes a shell left behind.
+    expect(named("browserUse")).toEqual(["computer_browser"]);
+    expect(named("browserUse")).not.toContain("computer_exec");
+    expect(named("computerUse")).toContain("computer_exec");
+    expect(named("computerUse")).toContain("computer_screenshot");
+    expect(named("computerUse")).toContain("computer_browser");
+    expect(named("executor")).toContain("computer_exec");
+    // The two video roles have no Computer at all.
+    expect(named("watchVideo")).toEqual([]);
+    expect(named("videoReview")).toEqual([]);
+    await harness.dispose();
+  });
+});
+
 describe("stopping a background process", () => {
   test("ends it and records the outcome once", async () => {
     const computer = fakeComputer();

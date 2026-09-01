@@ -23,6 +23,7 @@
     "dev": "wrangler dev --port 8790",
     "test": "bun test src container",
     "test:live": "bun run live-test.ts",
+    "test:live:desktop": "bun run live-desktop-lease.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p container/tsconfig.json"
   },
   "dependencies": {

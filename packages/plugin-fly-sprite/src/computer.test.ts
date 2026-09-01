@@ -437,12 +437,16 @@ describe("Fly Sprite computer", () => {
     const session = await computer.viewer?.open({ signal: signal() });
     expect(session?.url).toContain("/vnc.html#");
 
-    const lease = await computer.control?.acquire({ signal: signal() });
+    const lease = await computer.control?.acquire(undefined, {
+      signal: signal(),
+    });
     expect(lease?.id).toBeTruthy();
     expect(Date.parse(lease?.expiresAt ?? "")).toBeGreaterThan(Date.now());
-    const renewed = await computer.control?.renew(lease!, { signal: signal() });
+    const renewed = await computer.control?.renew(lease!, undefined, {
+      signal: signal(),
+    });
     expect(renewed?.id).toBe(lease?.id);
-    await computer.control?.release(lease!, { signal: signal() });
+    await computer.control?.release(lease!, undefined, { signal: signal() });
     expect(host.leases.size).toBe(0);
   });
 

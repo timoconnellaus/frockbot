@@ -157,11 +157,16 @@ describe("routine_manage", () => {
     expect(missingId.content).toContain("needs a routineId");
   });
 
-  test("declares no admission of its own, so its Capability's ceiling decides", () => {
+  test("names no turn types of its own, so its Capability's ceiling decides", () => {
     const seam = host();
-    expect(
-      createRoutineManageTool({ ...seam, writer: WRITER }).admission,
-    ).toBeUndefined();
+    const admission = createRoutineManageTool({
+      ...seam,
+      writer: WRITER,
+    }).admission;
+    expect(admission?.turnTypes).toBeUndefined();
+    // It does narrow the second dimension: managing Routines is a general work
+    // tool, so only an `executor` subagent is offered it.
+    expect(admission?.subagentRoles).toEqual(["executor"]);
   });
 
   test("refuses unknown input fields and an unknown action", () => {

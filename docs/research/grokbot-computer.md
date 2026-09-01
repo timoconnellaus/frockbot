@@ -566,9 +566,9 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 34c | WebAuthn proxying to the User's authenticator                                                                                                         | `sand-webauthn-proxy-host`, `.sand-webauthn-proxy-enabled`                                                                                                      | §A3              | none — declined                                                                                                                                                                                                                                           | declined    |
 | 35  | **Channels** — Bot-to-Bot group chats, 1–6 members, in the sidebar, posted into by id                                                                 | `CreateChannel`/`UpdateChannel`; `SendToAgent`                                                                                                                  | §2.14            | `plugin-channels`: records, membership and the message log in the User DO; `channel_manage`; sidebar list, group thread with per-sender avatars and tapback chips, and per-Channel unread                                                                 | landed      |
 | 36  | External channel connectors (Telegram etc.) connected and disconnected per Bot                                                                        | info-pane Channels; `update_state channel disconnect{platform}`                                                                                                 | §2.14, §2A       | `plugin-telegram` (`telegram-bot` Connection Type) over a `ChannelConnector` seam in `plugin-channels`: signed per-Channel webhook, outbound by lease, `channel_manage disconnect`, and a WebUI connect/disconnect surface showing the Connection's label | landed      |
-| 37  | **Subagents** — typed roles: executor, browserUse, computerUse, watchVideo, videoReview                                                               | `Task{description, prompt, subagent_type, model?, resume?, file_attachments?, run_in_background?}`                                                              | §2.15, §3.12     | new `plugin-subagents`                                                                                                                                                                                                                                    | not started |
-| 38  | Subagents start blank; background by default; check, message, stop, resume by id; the model set varies by turn type                                   | `Check`/`Message`/`StopSubagent`, `resume=<id>`; `available_subagent_models` = `sand-automation` only on automation turns                                       | §2.15, §3.12     | `plugin-subagents`                                                                                                                                                                                                                                        | not started |
-| 39  | Only one desktop-GUI subagent at a time, because the screen is shared                                                                                 | `computerUse` serialization                                                                                                                                     | §2.15            | `plugin-fly-sprite` lease                                                                                                                                                                                                                                 | not started |
+| 37  | **Subagents** — typed roles: executor, browserUse, computerUse, watchVideo, videoReview                                                               | `Task{description, prompt, subagent_type, model?, resume?, file_attachments?, run_in_background?}`                                                              | §2.15, §3.12     | `plugin-subagents` `Task` + role ceilings (ADR 0017)                                                                                                                                                                                                      | landed      |
+| 38  | Subagents start blank; background by default; check, message, stop, resume by id; the model set varies by turn type                                   | `Check`/`Message`/`StopSubagent`, `resume=<id>`; `available_subagent_models` = `sand-automation` only on automation turns                                       | §2.15, §3.12     | `plugin-subagents` `task_check`/`task_message`/`task_stop`/`task_resume`                                                                                                                                                                                  | landed      |
+| 39  | Only one desktop-GUI subagent at a time, because the screen is shared                                                                                 | `computerUse` serialization                                                                                                                                     | §2.15            | Computer host `control` `desktop-gui` lease, per User                                                                                                                                                                                                     | landed      |
 | 40  | Child → parent handoff that ends the child's turn                                                                                                     | `WakeParent{message}`; parent = the same Bot's visible conversation                                                                                             | §2.13            | `plugin-shell` + kernel Turn admission                                                                                                                                                                                                                    | partial     |
 | 41  | **Connectors / MCP** — plugin = marketplace bundle of MCP connectors ± skills, stable numeric id                                                      | `plugins/cache/…/.cursor-plugin/plugin.json`                                                                                                                    | §2.10            | `catalog-core` + `plugin-settings` + `plugin-mcp`                                                                                                                                                                                                         | partial     |
 | 42  | Plugin discovery, fetch, install state and uninstall over a 296-plugin catalog; plugins are user-scoped                                               | `SearchPlugins`/`GetPlugin`/`UninstallPlugin`; `installed=yes (user)`                                                                                           | §2.10            | `catalog-core` + `plugin-settings`                                                                                                                                                                                                                        | partial     |
@@ -1044,6 +1044,60 @@ than a silent absence. Row 44 is the only one.
   changing when one arrives. `computer_screenshot` and `generate_image`
   attachments are Workspace files referenced from a tool result, not indexed
   media, so the row stays `partial` until there is media to find.
+- **37** — landed. The five roles exist as a real ceiling, not a label. A
+  `Task` names `type` (GrokBot's `subagent_type`), the child Turn is admitted
+  with it, and `ToolRegistry.schemas` takes a second coordinate beside the turn
+  type — so `browserUse` is offered `computer_browser` and not `computer_exec`,
+  `computerUse` is offered the shell, the screen and the browser, and
+  `watchVideo`/`videoReview` reach no Computer at all. The role is an opaque
+  string to the kernel exactly as a turn type is: the narrowing is _declared_,
+  by a tool definition or by a manifest Capability's
+  `admission.subagentRoles`, and the registry only intersects the two. It is
+  recorded on the durable run, so a child recovered after eviction re-mounts
+  the same catalog rather than a wider one.
+
+  Three shape differences from GrokBot's schema, all in the argument names:
+  `type` for `subagent_type`, `background` for `run_in_background`, and
+  `attachments` for `file_attachments`. The defaults match — `executor`, and
+  background `true`. Depth is one by construction rather than by counting: the
+  dispatch and lifecycle tools declare `admission.turnTypes: ["chat",
+"automation"]`, so a `subagent` Turn is never offered them and there is no
+  grandchild to bound.
+
+- **38** — landed. A child starts blank in a Subagent Durable Object of the
+  same Bot (ADR 0017): its own Session, none of the parent's transcript or
+  memory-of-the-Turn, and a summary — never a transcript — handed back through
+  the completion inbox, a pending wake and a notification intent. `task_check`,
+  `task_message`, `task_stop` and `task_resume` are the four lifecycle tools;
+  `resume` refuses a running task and refuses a `model`, because the resumed
+  run continues a Session already pinned to a binding.
+  `<available_subagent_models>` renders from the Bot's enabled model
+  Assignments and narrows to exactly one slug on an automation or subagent
+  Turn, which is GrokBot's `sand-automation`-only rule.
+
+  `task_message` is _delivery_, not queueing: the parent holds the bounded
+  queue, and the child claims it on its way into each step of its Turn and
+  folds what it gets into that step's inputs, in `seq` order. The claim marks
+  what it took in the parent's own transaction, so a step retried after an
+  eviction reads the marks back rather than the instruction — the child's
+  Session shows each message exactly once. A queue nobody read would have been
+  an empty queue, and GrokBot's `MessageSubagent` influences the _running_
+  child.
+
+- **39** — landed, at a different home than this register first guessed. The
+  lease is not `plugin-fly-sprite`'s: that one is per tenant layout, and the
+  desktop is not. One Computer serves all of a User's Bots and there is one
+  screen on it, so `computerUse` is serialized at the Computer host's own
+  `control` op — already the single writer that serializes human takeover —
+  under a new User-wide `desktop-gui` scope keyed against the box rather than
+  against a tenant directory. The Bot Durable Object records the intent
+  (`task-lease:desktop`) before the host is asked, records the grant on the
+  same key, and releases on every path that settles a task: completion,
+  failure, `task_stop`, and the deadline reconciliation. A second `computerUse`
+  dispatch — including one from another Bot of the same User, which no Bot
+  Durable Object can see — is refused with the holder's owner id, which names
+  the Bot and the task, so the refusal is something the dispatcher can act on.
+  A lapsed lease holds nothing.
 - **56** — landed. `UnreadStateV1` under `shell:unread`
   (`plugin-shell/src/unread.ts`) is GrokBot's `kv.unreadState` kept as a pair of
   admission-index cursors rather than a counter, with the count derived on read

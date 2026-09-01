@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createSubagentModelsPromptSectionV1,
+  foldPendingTaskMessagesV1,
   createTaskCheckTool,
   createTaskMessageTool,
   createTaskResumeTool,
@@ -417,5 +418,63 @@ describe("the lifecycle tools", () => {
     );
     expect(result.isError).toBe(false);
     expect(result.content).toContain("still running, id tk-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Message delivery (G3). A queue nobody reads is an empty queue: GrokBot's
+// `MessageSubagent` influences the *running* child, so the child folds what its
+// parent queued into the next step of its own Turn.
+// ---------------------------------------------------------------------------
+
+describe("delivering queued messages into the child's next step", () => {
+  const entered = (
+    inputs: Array<{ messageId: string; text: string }> = [],
+  ) => ({ kind: "enter" as const, inputs });
+
+  test("folds them in, in seq order, under ids derived from the queue", () => {
+    const decision = foldPendingTaskMessagesV1(
+      entered(),
+      [
+        { seq: 1, message: "second" },
+        { seq: 0, message: "first" },
+      ],
+      "tk-1",
+    );
+    if (decision.kind !== "enter") throw new Error("the step was rejected");
+    expect(decision.inputs.map((input) => input.messageId)).toEqual([
+      "task-msg:tk-1:0",
+      "task-msg:tk-1:1",
+    ]);
+    expect(decision.inputs[0]?.text).toContain("first");
+    expect(decision.inputs[1]?.text).toContain("second");
+    // It reads as a message from the dispatcher, because that is what it is:
+    // the child has no transcript to place a bare instruction in.
+    expect(decision.inputs[0]?.text).toContain("dispatcher");
+  });
+
+  test("keeps the step's own inputs ahead of the delivered ones", () => {
+    const decision = foldPendingTaskMessagesV1(
+      entered([{ messageId: "m-1", text: "the brief" }]),
+      [{ seq: 0, message: "and one more thing" }],
+      "tk-1",
+    );
+    if (decision.kind !== "enter") throw new Error("the step was rejected");
+    expect(decision.inputs.map((input) => input.messageId)).toEqual([
+      "m-1",
+      "task-msg:tk-1:0",
+    ]);
+  });
+
+  test("a step with nothing queued is the step it already was", () => {
+    const decision = entered();
+    expect(foldPendingTaskMessagesV1(decision, [], "tk-1")).toBe(decision);
+  });
+
+  test("a rejected step stays rejected: delivery never admits a Turn", () => {
+    const rejected = { kind: "reject" as const, reason: "no" };
+    expect(
+      foldPendingTaskMessagesV1(rejected, [{ seq: 0, message: "hi" }], "tk-1"),
+    ).toBe(rejected);
   });
 });

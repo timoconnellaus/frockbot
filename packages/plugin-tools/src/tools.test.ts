@@ -368,4 +368,104 @@ describe("ToolRegistry turn admission", () => {
       result: { content: "handed off", isError: false, endsTurn: true },
     });
   });
+  // -------------------------------------------------------------------------
+  // The second ceiling dimension: the subagent role (ADR 0017, slice G3).
+  //
+  // The registry treats a role exactly as it treats a turn type — an opaque
+  // string a registration may narrow itself by. It reads no meaning into
+  // "browserUse"; it only intersects declaration with manifest ceiling and
+  // filters.
+  // -------------------------------------------------------------------------
+
+  const desktop: ToolDefinition = {
+    name: "computer_exec",
+    description: "Runs a shell command on the Computer.",
+    inputSchema: { type: "object" },
+    admission: {
+      turnTypes: ["chat", "automation", "subagent", "channel"],
+      subagentRoles: ["executor", "computerUse"],
+    },
+    execute: () => Promise.resolve({ content: "ran", isError: false }),
+  };
+  const browser: ToolDefinition = {
+    name: "computer_browser",
+    description: "Drives the browser on the Computer.",
+    inputSchema: { type: "object" },
+    admission: {
+      turnTypes: ["chat", "automation", "subagent", "channel"],
+      subagentRoles: ["executor", "browserUse", "computerUse"],
+    },
+    execute: () => Promise.resolve({ content: "snapshot", isError: false }),
+  };
+
+  test("a turn that names no role is narrowed by no role", async () => {
+    const root = await admissionRoot();
+    root.tools.register(work);
+    root.tools.register(desktop);
+    expect(root.tools.schemas({ turnType: "chat" }).map((s) => s.name)).toEqual(
+      ["work", "computer_exec"],
+    );
+  });
+
+  test("trims the catalog to what the subagent role admits", async () => {
+    const root = await admissionRoot();
+    root.tools.register(work);
+    root.tools.register(desktop);
+    root.tools.register(browser);
+
+    expect(
+      root.tools
+        .schemas({ turnType: "subagent", subagentRole: "browserUse" })
+        .map((s) => s.name),
+    ).toEqual(["work", "computer_browser"]);
+    expect(
+      root.tools
+        .schemas({ turnType: "subagent", subagentRole: "computerUse" })
+        .map((s) => s.name),
+    ).toEqual(["work", "computer_exec", "computer_browser"]);
+    expect(
+      root.tools
+        .schemas({ turnType: "subagent", subagentRole: "watchVideo" })
+        .map((s) => s.name),
+    ).toEqual(["work"]);
+  });
+
+  test("bounds a role declaration by the manifest role ceiling", async () => {
+    const root = await admissionRoot();
+    root.tools.register(browser, { subagentRoleCeiling: ["executor"] });
+    expect(
+      root.tools
+        .schemas({ turnType: "subagent", subagentRole: "browserUse" })
+        .map((s) => s.name),
+    ).toEqual([]);
+    expect(
+      root.tools
+        .schemas({ turnType: "subagent", subagentRole: "executor" })
+        .map((s) => s.name),
+    ).toEqual(["computer_browser"]);
+  });
+
+  test("denies a call a role was never offered, without executing it", async () => {
+    let executions = 0;
+    const root = await admissionRoot();
+    root.tools.register({
+      ...desktop,
+      execute: () => {
+        executions += 1;
+        return Promise.resolve({ content: "ran", isError: false });
+      },
+    });
+    const preparation = await root.tools.prepare(
+      { id: "provider-call", name: "computer_exec", input: {} },
+      {
+        ...contextFor("computer_exec", "subagent"),
+        subagentRole: "browserUse",
+      },
+    );
+    expect(preparation.kind).toBe("denied");
+    if (preparation.kind !== "denied") throw new Error("expected a denial");
+    expect(preparation.result.isError).toBe(true);
+    expect(preparation.result.content).toContain("browserUse");
+    expect(executions).toBe(0);
+  });
 });

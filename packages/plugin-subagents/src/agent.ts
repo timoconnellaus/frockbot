@@ -86,6 +86,67 @@ export function subagentsAdmissionCeilingV1(
   return turnTypes as readonly TurnTypeV1[];
 }
 
+/** One queued `task_message` on its way into the child's next step. */
+export interface PendingTaskMessageV1 {
+  seq: number;
+  message: string;
+}
+
+/**
+ * The message id one delivered `task_message` is recorded under.
+ *
+ * Derived from the task and the queue sequence, so the child's own Session
+ * says which message this was and a redelivery would be visible as a repeat
+ * rather than passing as a new instruction.
+ */
+export function taskMessageInputIdV1(taskId: string, seq: number): string {
+  return `task-msg:${taskId}:${seq}`;
+}
+
+/**
+ * How one delivered message reads to the child. It is a message from the
+ * parent Bot, not from a user, and it says so: the child has no transcript to
+ * place it in and would otherwise read it as the start of a new conversation.
+ */
+export function taskMessageInputTextV1(message: string): string {
+  return `Your dispatcher sent you a message: ${message}`;
+}
+
+/**
+ * Folds the messages a child claimed into the step it is about to take.
+ *
+ * Pure, and separate from the middleware that calls it, because this is the
+ * whole of the delivery rule: seq order, one input per message, an id derived
+ * from the queue so a repeat would be visible as a repeat, and a step that was
+ * rejected stays rejected.
+ */
+export function foldPendingTaskMessagesV1(
+  decision:
+    | { kind: "enter"; inputs: { messageId: string; text: string }[] }
+    | {
+        kind: "reject";
+        reason: string;
+      },
+  pending: readonly PendingTaskMessageV1[],
+  taskId: string,
+):
+  | { kind: "enter"; inputs: { messageId: string; text: string }[] }
+  | { kind: "reject"; reason: string } {
+  if (decision.kind !== "enter" || pending.length === 0) return decision;
+  return {
+    kind: "enter",
+    inputs: [
+      ...decision.inputs,
+      ...[...pending]
+        .sort((left, right) => left.seq - right.seq)
+        .map((entry) => ({
+          messageId: taskMessageInputIdV1(taskId, entry.seq),
+          text: taskMessageInputTextV1(entry.message),
+        })),
+    ],
+  };
+}
+
 /** What one decoded `Task` call asks for. */
 export interface TaskToolInputV1 {
   description: string;
@@ -166,6 +227,23 @@ export interface SubagentsRuntimeHostV1 {
   writer?: { sessionId: string; turnId: string; runId: string };
   /** The turn type this Turn was admitted as; the catalog is narrowed by it. */
   turnType: TurnTypeV1;
+  /**
+   * The role a *child* Turn was admitted under, when this host is a Subagent
+   * Durable Object's. Absent in a parent Bot, which has no role.
+   */
+  subagentRole?: TaskTypeV1;
+  /** The task this child is running, when this host is a child's. */
+  taskId?: string;
+  /**
+   * Claims the messages the parent has queued for this child, marking them
+   * delivered durably, and hands them back in `seq` order.
+   *
+   * Present only in a child: this is the seam that makes `task_message` mean
+   * something. GrokBot's `MessageSubagent` influences the *running* child, so
+   * a queue nobody reads is an empty queue — the child drains here on its way
+   * into each step of its Turn and folds what it gets into that step's inputs.
+   */
+  drainMessages?(): Promise<readonly PendingTaskMessageV1[]>;
   /** The models this Turn may dispatch onto, resolved from enabled Assignments. */
   models(): readonly SubagentModelOptionV1[];
   dispatch(
@@ -927,10 +1005,29 @@ export function createSubagentsRuntimePlugin(
     let currentStep = 1;
     const disposers: Array<() => void> = [
       ctx.systemPrompt.register(createSubagentModelsPromptSectionV1(host)),
-      ctx.on("agent/pre-step", (_agent, _inputs, turn, step, next) => {
+      ctx.on("agent/pre-step", async (_agent, _inputs, turn, step, next) => {
         currentTurn = turn;
         currentStep = step;
-        return next();
+        const decision = await next();
+        // Delivery, not merely queueing. The claim is durable and marks what
+        // it took, so a step that is retried after the claim reads the marks
+        // back and does not hand the model the same instruction twice; the
+        // loop records each folded input as a `user/message` on the child's
+        // own Session, which is where "exactly once" is finally visible.
+        if (decision.kind !== "enter" || !host.drainMessages) return decision;
+        let pending: readonly PendingTaskMessageV1[];
+        try {
+          pending = await host.drainMessages();
+        } catch {
+          // A parent that cannot be reached has not lost the message: it is
+          // still queued, undelivered, and the next step claims it.
+          return decision;
+        }
+        return foldPendingTaskMessagesV1(
+          decision,
+          pending,
+          host.taskId ?? "task",
+        );
       }),
     ];
     const writer = host.writer;

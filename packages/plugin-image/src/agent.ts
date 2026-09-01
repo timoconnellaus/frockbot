@@ -74,6 +74,8 @@ import {
  * ceiling here is the manifest's `admission.turnTypes` restated as code the
  * registry can read at mount time.
  */
+export const IMAGE_TOOL_SUBAGENT_ROLES: readonly string[] = ["executor"];
+
 export const IMAGE_TOOL_TURN_TYPES: readonly TurnTypeV1[] = [
   "chat",
   "automation",
@@ -321,6 +323,10 @@ export function createGenerateImageTool(
 ): ToolDefinition {
   return {
     name: "generate_image",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Generate one image from a text prompt and store it in your Workspace. Answers the file's path, content hash and size — not the image bytes; read the path to see the picture.",
     inputSchema: GENERATE_IMAGE_INPUT_SCHEMA as unknown as Record<
@@ -611,7 +617,10 @@ export function createImageRuntimePlugin(
   const plugin: Plugin.Function = (ctx) => {
     const dispose = ctx.tools.register(
       createGenerateImageTool(host, ctx.sessions),
-      { admissionCeiling: IMAGE_TOOL_TURN_TYPES },
+      {
+        admissionCeiling: IMAGE_TOOL_TURN_TYPES,
+        subagentRoleCeiling: IMAGE_TOOL_SUBAGENT_ROLES,
+      },
     );
     return () => dispose();
   };

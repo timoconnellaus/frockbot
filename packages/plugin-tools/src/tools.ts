@@ -1,6 +1,8 @@
 import { type Context, Service } from "cordis";
 import {
+  admittedSubagentRolesV1,
   admittedTurnTypesV1,
+  isSubagentRoleAdmittedV1,
   type ToolCall,
   type ToolDefinition,
   type ToolEffectReconciliation,
@@ -30,6 +32,12 @@ interface RegisteredTool {
    * between the catalog the model saw and the call the loop admits.
    */
   admitted: readonly TurnTypeV1[];
+  /**
+   * The second ceiling dimension, resolved the same way and at the same
+   * moment: the subagent roles this tool may be offered to. `undefined` is
+   * every role — a tool that declares nothing is narrowed by nothing.
+   */
+  admittedRoles: readonly string[] | undefined;
 }
 
 export class ToolRegistry extends Service implements ToolExecution {
@@ -52,6 +60,10 @@ export class ToolRegistry extends Service implements ToolExecution {
         definition.admission?.turnTypes,
         options?.admissionCeiling,
       ),
+      admittedRoles: admittedSubagentRolesV1(
+        definition.admission?.subagentRoles,
+        options?.subagentRoleCeiling,
+      ),
     };
     this.definitions.set(definition.name, registered);
     return () => {
@@ -61,9 +73,19 @@ export class ToolRegistry extends Service implements ToolExecution {
     };
   }
 
-  schemas(admission: { turnType: TurnTypeV1 }): ToolSchema[] {
+  schemas(admission: {
+    turnType: TurnTypeV1;
+    subagentRole?: string;
+  }): ToolSchema[] {
     return [...this.definitions.values()]
-      .filter((registered) => registered.admitted.includes(admission.turnType))
+      .filter(
+        (registered) =>
+          registered.admitted.includes(admission.turnType) &&
+          isSubagentRoleAdmittedV1(
+            registered.admittedRoles,
+            admission.subagentRole,
+          ),
+      )
       .map(({ definition: { name, description, inputSchema } }) => ({
         name,
         description,
@@ -92,6 +114,24 @@ export class ToolRegistry extends Service implements ToolExecution {
           call,
           result: {
             content: `Tool is not available on a ${context.turnType} turn: ${call.name}`,
+            isError: true,
+          },
+        };
+      }
+      // The same defence on the second dimension. A `browserUse` subagent that
+      // names `computer_exec` was never offered it, and the ceiling says so
+      // here as well as in the catalog.
+      if (
+        !isSubagentRoleAdmittedV1(
+          registered.admittedRoles,
+          context.subagentRole,
+        )
+      ) {
+        return {
+          kind: "denied",
+          call,
+          result: {
+            content: `Tool is not available to a ${context.subagentRole} subagent: ${call.name}`,
             isError: true,
           },
         };

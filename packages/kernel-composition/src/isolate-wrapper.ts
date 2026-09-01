@@ -136,7 +136,12 @@ function declaredTools() {
     // The kernel decodes and bounds it; the wrapper only carries it across.
     const admission =
       tool.admission && typeof tool.admission === "object"
-        ? { turnTypes: tool.admission.turnTypes }
+        ? {
+            turnTypes: tool.admission.turnTypes,
+            ...(tool.admission.subagentRoles
+              ? { subagentRoles: tool.admission.subagentRoles }
+              : {}),
+          }
         : undefined;
     return Object.assign(
       {

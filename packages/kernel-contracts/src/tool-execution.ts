@@ -19,6 +19,13 @@ export interface ToolExecutionContext {
   toolCall?: ToolCall;
   /** The turn type this Turn was admitted as. */
   turnType: TurnTypeV1;
+  /**
+   * The subagent role this Turn was admitted under, on a `subagent` Turn that
+   * declared one. An opaque string here for the same reason `turnType` is: the
+   * kernel carries it and narrows the catalog by it, and what any role name
+   * means is Package policy.
+   */
+  subagentRole?: string;
   signal: AbortSignal;
 }
 
@@ -43,9 +50,22 @@ export interface ToolExecutionResult {
   attachments?: ToolAttachmentV1[];
 }
 
-/** The turn types an admission declaration names. */
+/** The turn types — and, optionally, the subagent roles — an admission names. */
 export interface TurnAdmissionV1 {
-  turnTypes: TurnTypeV1[];
+  /**
+   * The turn types this tool is offered on. Optional, so a declaration can
+   * narrow the *role* dimension alone: a work tool that every turn type may
+   * call but only an `executor` subagent may reach says exactly that, and does
+   * not have to restate the full turn-type list to do it.
+   */
+  turnTypes?: TurnTypeV1[];
+  /**
+   * The subagent roles this tool is offered to on a `subagent` Turn. Absent
+   * means every role, exactly as an absent `admission` means every turn type:
+   * narrowing is always something a declaration *does*, never something the
+   * kernel assumes. The strings are opaque here.
+   */
+  subagentRoles?: string[];
 }
 
 /**
@@ -64,6 +84,40 @@ export function admittedTurnTypesV1(
       (declared === undefined || declared.includes(turnType)) &&
       (ceiling === undefined || ceiling.includes(turnType)),
   );
+}
+
+/**
+ * The subagent roles a registered tool may be offered to: its own declaration,
+ * bounded by the durable manifest ceiling of the Capability that contributed
+ * it. `undefined` — both absent — is every role. The result is deduplicated
+ * and keeps the declaration's order.
+ */
+export function admittedSubagentRolesV1(
+  declared: readonly string[] | undefined,
+  ceiling: readonly string[] | undefined,
+): readonly string[] | undefined {
+  if (declared === undefined && ceiling === undefined) return undefined;
+  const source = declared ?? ceiling ?? [];
+  const bound = declared === undefined ? undefined : ceiling;
+  const admitted: string[] = [];
+  for (const role of source) {
+    if (bound !== undefined && !bound.includes(role)) continue;
+    if (!admitted.includes(role)) admitted.push(role);
+  }
+  return admitted;
+}
+
+/**
+ * Whether a tool with these admitted roles is offered to one Turn's role. A
+ * Turn that names no role is not narrowed at all — role is a *second* ceiling
+ * dimension, and a Turn outside the subagent world has no coordinate on it.
+ */
+export function isSubagentRoleAdmittedV1(
+  admitted: readonly string[] | undefined,
+  role: string | undefined,
+): boolean {
+  if (role === undefined || admitted === undefined) return true;
+  return admitted.includes(role);
 }
 
 export type ToolEffectReconciliation =
@@ -91,8 +145,11 @@ export type ToolPreparation =
 
 /** The kernel-declared tool execution interface. Implemented by a Package. */
 export interface ToolExecution {
-  /** The catalog trimmed to what this turn type admits. */
-  schemas(admission: { turnType: TurnTypeV1 }): ToolSchema[];
+  /** The catalog trimmed to what this turn type — and role — admits. */
+  schemas(admission: {
+    turnType: TurnTypeV1;
+    subagentRole?: string;
+  }): ToolSchema[];
   prepare(
     call: ToolCall,
     context: ToolExecutionContext,
@@ -121,6 +178,11 @@ export interface ToolRegistrationOptions {
    * tool may not be admitted onto a turn type its manifest does not list.
    */
   admissionCeiling?: readonly TurnTypeV1[];
+  /**
+   * The same durable ceiling on the second dimension: the subagent roles the
+   * Capability's manifest lists. Absent is a manifest that set no bound.
+   */
+  subagentRoleCeiling?: readonly string[];
 }
 
 /** Contributing Packages register tool definitions through this surface. */

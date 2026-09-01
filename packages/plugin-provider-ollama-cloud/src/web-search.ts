@@ -241,6 +241,7 @@ export function createOllamaWebSearchRuntimePlugin(
     );
     return ctx.tools.register(definition, {
       admissionCeiling: ["chat", "automation", "subagent", "channel"],
+      subagentRoleCeiling: ["executor"],
     });
   };
   plugin.inject = ["tools", "credentialLease"];

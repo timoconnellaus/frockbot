@@ -28,6 +28,7 @@ import {
   computerSpriteNameSourceV1,
   CONTROL_SCRIPT,
   DATA_ROOT,
+  DESKTOP_GUI_LEASE_KEY,
   DESKTOP_SERVICE,
   ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
@@ -1561,10 +1562,19 @@ export class ComputerHost {
     }
     const record = await this.computer(request.identity.userId);
     const sprite = await this.client.getSprite(record.spriteName);
-    const botKey = computerBotKeyV1(request.tenant.botId, this.digest);
+    // The lease key *is* the scope. A `bot` lease is keyed by the tenant's own
+    // directory, exactly as human takeover always was; a `desktop-gui` lease is
+    // keyed by one name shared by every tenant on the box, which is what makes
+    // it User-wide — one Computer serves all of a User's Bots, and there is one
+    // screen on it. The key is not a tenant directory and cannot collide with
+    // one: `computerBotKeyV1` never produces this name.
+    const leaseKey =
+      operation.scope === "desktop-gui"
+        ? DESKTOP_GUI_LEASE_KEY
+        : computerBotKeyV1(request.tenant.botId, this.digest);
     const outcome = await this.run(
       sprite,
-      `exec ${CONTROL_SCRIPT} ${shellQuote(operation.action)} ${shellQuote(botKey)} ${shellQuote(operation.ownerId)} ${operation.maxAgeSeconds}\n`,
+      `exec ${CONTROL_SCRIPT} ${shellQuote(operation.action)} ${shellQuote(leaseKey)} ${shellQuote(operation.ownerId)} ${operation.maxAgeSeconds}\n`,
       "control",
       COMPUTER_HOST_PHASE_TIMEOUTS.control,
     );

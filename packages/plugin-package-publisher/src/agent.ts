@@ -99,6 +99,8 @@ export function createPackagePublisherAgentPlugin(
   const plugin: Plugin.Function = (ctx) => {
     const list: ToolDefinition = {
       name: "list_setup_revisions",
+      // A general work tool: `executor` reach only.
+      admission: { subagentRoles: ["executor"] },
       description:
         "List the immutable setup revisions published for this User and identify the active revision.",
       inputSchema: {
@@ -121,6 +123,8 @@ export function createPackagePublisherAgentPlugin(
     };
     const publish: ToolDefinition = {
       name: "publish_setup",
+      // A general work tool: `executor` reach only.
+      admission: { subagentRoles: ["executor"] },
       description: `Publish and activate the tested Git setup in ${SETUP_DIRECTORY}. The committed source is archived from HEAD, the built application is read from ${SETUP_APPLICATION_FILE}, and all required check results must be provided. This affects all Bots owned by the User.`,
       inputSchema: {
         type: "object",
@@ -213,6 +217,8 @@ export function createPackagePublisherAgentPlugin(
     };
     const rollback: ToolDefinition = {
       name: "rollback_setup",
+      // A general work tool: `executor` reach only.
+      admission: { subagentRoles: ["executor"] },
       description:
         "Activate an earlier immutable setup revision for all Bots owned by the User.",
       inputSchema: {

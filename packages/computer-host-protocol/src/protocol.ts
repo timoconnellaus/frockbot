@@ -149,11 +149,25 @@ export interface ComputerHostFileDeleteOperationV1 {
 
 export type ComputerHostControlActionV1 = "acquire" | "renew" | "release";
 
+/**
+ * What one control lease covers.
+ *
+ * `bot` is the original scope and the default: the human-takeover lease on one
+ * tenant's own desktop slot. `desktop-gui` is User-wide — one Computer serves
+ * all of a User's Bots and there is one screen on it, so a lease that
+ * serializes GUI work has to be held against the box, not against a tenant
+ * directory (ADR 0017, `computerUse`: "only one may run at a time because the
+ * screen is shared").
+ */
+export type ComputerHostControlScopeV1 = "bot" | "desktop-gui";
+
 export interface ComputerHostControlOperationV1 {
   kind: "control";
   action: ComputerHostControlActionV1;
   ownerId: string;
   maxAgeSeconds: number;
+  /** Absent ⇒ `bot`, the per-tenant takeover lease every caller held before. */
+  scope?: ComputerHostControlScopeV1;
 }
 
 export interface ComputerHostViewerOperationV1 {
@@ -656,6 +670,10 @@ function decodeOperation(
       if (action !== "acquire" && action !== "renew" && action !== "release") {
         fail("Computer control action is invalid");
       }
+      const scope = value.scope;
+      if (scope !== undefined && scope !== "bot" && scope !== "desktop-gui") {
+        fail("Computer control scope is invalid");
+      }
       return {
         kind,
         action,
@@ -666,6 +684,7 @@ function decodeOperation(
           COMPUTER_HOST_LIMITS.controlMaxAgeSeconds,
           "Computer control lease age",
         ),
+        ...(scope === undefined ? {} : { scope }),
       };
     }
     case "viewer": {
@@ -715,7 +734,7 @@ const OPERATION_FIELDS: Record<ComputerHostOperationKindV1, readonly string[]> =
     "file/list": ["path", "recursive"],
     "file/stat": ["path"],
     "file/delete": ["path", "recursive"],
-    control: ["action", "ownerId", "maxAgeSeconds"],
+    control: ["action", "ownerId", "maxAgeSeconds", "scope"],
     viewer: ["action", "sessionId"],
     service: ["name"],
     cancel: [],

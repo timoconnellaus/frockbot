@@ -101,6 +101,10 @@ export function createPackageAuthorTool(
 ): ToolDefinition {
   return {
     name: "package_author",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Author a Package for yourself: one tool implemented in a single TypeScript file that runs in your own isolate. The Package is recorded as a new Composition generation and activates on your next Turn.",
     inputSchema: AUTHOR_PACKAGE_INPUT_SCHEMA_V1,

@@ -243,8 +243,9 @@ function exactKeys(
   value: Record<string, unknown>,
   required: readonly string[],
   label: string,
+  optional: readonly string[] = [],
 ): void {
-  const allowed = new Set<string>(required);
+  const allowed = new Set<string>([...required, ...optional]);
   if (
     !required.every((key) => Object.hasOwn(value, key)) ||
     !Object.keys(value).every((key) => allowed.has(key))
@@ -299,7 +300,7 @@ export function decodeIsolateAdmissionV1(
   label = "isolate admission",
 ): TurnAdmissionV1 {
   const value = record(input, label);
-  exactKeys(value, ["turnTypes"], label);
+  exactKeys(value, ["turnTypes"], label, ["subagentRoles"]);
   if (!Array.isArray(value.turnTypes)) {
     throw new Error(`${label}.turnTypes must be an array`);
   }
@@ -312,8 +313,37 @@ export function decodeIsolateAdmissionV1(
   if (new Set(turnTypes).size !== turnTypes.length) {
     throw new Error(`${label}.turnTypes contains duplicates`);
   }
-  return { turnTypes };
+  if (value.subagentRoles === undefined) return { turnTypes };
+  if (
+    !Array.isArray(value.subagentRoles) ||
+    value.subagentRoles.length === 0 ||
+    value.subagentRoles.length > ISOLATE_SUBAGENT_ROLE_LIMIT
+  ) {
+    throw new Error(`${label}.subagentRoles must be a bounded array`);
+  }
+  const subagentRoles = value.subagentRoles.map((role, index) => {
+    if (
+      typeof role !== "string" ||
+      role.trim().length === 0 ||
+      role.length > ISOLATE_SUBAGENT_ROLE_MAX
+    ) {
+      throw new Error(`${label}.subagentRoles[${index}] is invalid`);
+    }
+    return role;
+  });
+  if (new Set(subagentRoles).size !== subagentRoles.length) {
+    throw new Error(`${label}.subagentRoles contains duplicates`);
+  }
+  return { turnTypes, subagentRoles };
 }
+
+/**
+ * How many roles one declaration may name, and how long a role name may be.
+ * The kernel bounds the string and reads no meaning into it: a role is a name
+ * a Package chose, exactly as a turn type is a name the kernel chose.
+ */
+const ISOLATE_SUBAGENT_ROLE_LIMIT = 16;
+const ISOLATE_SUBAGENT_ROLE_MAX = 64;
 
 export function decodeIsolateToolDescriptorV1(
   input: unknown,

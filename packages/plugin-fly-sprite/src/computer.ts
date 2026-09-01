@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   ComputerError,
   decodeComputerDoctorReportV1,
+  type ComputerControlRequestV1,
   type ComputerDoctorReportV1,
 } from "@frockbot/computer-core";
 import type {
@@ -93,7 +94,7 @@ export interface ComputerHostSurfaceV1 {
     action: "acquire" | "renew" | "release",
     ownerId: string,
     maxAgeSeconds: number,
-    options?: ComputerHostCallOptions,
+    options?: ComputerHostCallOptions & { scope?: "bot" | "desktop-gui" },
   ): Promise<ComputerHostControlResultV1>;
   viewer(
     action: "open" | "revoke",
@@ -404,16 +405,25 @@ export class FlySpriteAgentComputer {
     );
   }
 
-  takeControl(signal?: AbortSignal): Promise<ComputerHostControlResultV1> {
-    return this.computer.control(this.layout, "acquire", signal);
+  takeControl(
+    signal?: AbortSignal,
+    request?: ComputerControlRequestV1,
+  ): Promise<ComputerHostControlResultV1> {
+    return this.computer.control(this.layout, "acquire", signal, request);
   }
 
-  refreshControl(signal?: AbortSignal): Promise<ComputerHostControlResultV1> {
-    return this.computer.control(this.layout, "renew", signal);
+  refreshControl(
+    signal?: AbortSignal,
+    request?: ComputerControlRequestV1,
+  ): Promise<ComputerHostControlResultV1> {
+    return this.computer.control(this.layout, "renew", signal, request);
   }
 
-  releaseControl(signal?: AbortSignal): Promise<void> {
-    return this.computer.releaseForAgent(this.layout, signal);
+  releaseControl(
+    signal?: AbortSignal,
+    request?: ComputerControlRequestV1,
+  ): Promise<void> {
+    return this.computer.releaseForAgent(this.layout, signal, request);
   }
 
   /** The human-control lease owner this Computer holds leases under. */
@@ -986,26 +996,36 @@ export class FlySpriteComputer {
     layout: AgentLayout,
     action: "acquire" | "renew",
     signal?: AbortSignal,
+    request?: ComputerControlRequestV1,
   ): Promise<ComputerHostControlResultV1> {
     return this.hostFor(layout).control(
       action,
-      this.ownerId,
+      request?.ownerId ?? this.ownerId,
       LEASE_MAX_AGE_SECONDS,
-      { signal, timeoutMs: TIMEOUTS.control },
+      {
+        signal,
+        timeoutMs: TIMEOUTS.control,
+        ...(request?.scope ? { scope: request.scope } : {}),
+      },
     );
   }
 
   async releaseForAgent(
     layout: AgentLayout,
     signal?: AbortSignal,
+    request?: ComputerControlRequestV1,
   ): Promise<void> {
     if (!this.host) return;
     try {
       await this.hostFor(layout).control(
         "release",
-        this.ownerId,
+        request?.ownerId ?? this.ownerId,
         LEASE_MAX_AGE_SECONDS,
-        { signal, timeoutMs: TIMEOUTS.control },
+        {
+          signal,
+          timeoutMs: TIMEOUTS.control,
+          ...(request?.scope ? { scope: request.scope } : {}),
+        },
       );
     } catch (error) {
       // A Computer that is not there holds no lease to release. Every other

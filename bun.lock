@@ -980,6 +980,7 @@
         "@frockbot/client-core": "workspace:*",
         "@frockbot/client-ui": "workspace:*",
         "@frockbot/computer-core": "workspace:*",
+        "@frockbot/computer-host-protocol": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-agent-loop": "workspace:*",

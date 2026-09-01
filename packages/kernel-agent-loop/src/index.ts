@@ -142,6 +142,8 @@ class LoopAgent implements Agent {
   #composition: CompositionPinV1;
   /** The turn type every Turn of this Agent is admitted as. */
   #turnType: TurnTypeV1;
+  /** The subagent role that turn type was admitted under, when it has one. */
+  #subagentRole: string | undefined;
   #status: AgentStatus = "idle";
   #inbox: AgentInput[] = [];
   #activity: Promise<void> = Promise.resolve();
@@ -166,6 +168,7 @@ class LoopAgent implements Agent {
     this.id = explicitAgentId || options.sessionId;
     this.#options = options;
     this.#turnType = options.turnType ?? "chat";
+    this.#subagentRole = options.subagentRole;
     this.#maxSteps = maxSteps;
   }
 
@@ -753,7 +756,12 @@ class LoopAgent implements Agent {
         model: this.#options.model,
         system: assembly.text,
         messages: this.session.deriveMessages(),
-        tools: this.#ctx.tools.schemas({ turnType: this.#turnType }),
+        tools: this.#ctx.tools.schemas({
+          turnType: this.#turnType,
+          ...(this.#subagentRole === undefined
+            ? {}
+            : { subagentRole: this.#subagentRole }),
+        }),
         ...(this.#options.modelBinding
           ? { modelBinding: structuredClone(this.#options.modelBinding) }
           : {}),
@@ -989,6 +997,9 @@ class LoopAgent implements Agent {
         toolCall: call,
         compositionGenerationId: this.#composition.generationId,
         turnType: this.#turnType,
+        ...(this.#subagentRole === undefined
+          ? {}
+          : { subagentRole: this.#subagentRole }),
         signal,
       };
       const preparation = await this.#ctx.tools.prepare(call, context);

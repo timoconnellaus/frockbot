@@ -165,6 +165,15 @@ function toggleTask(taskId: string): void {
   expandedTasks.value = next;
 }
 
+/** A subagent still live is one the User may stop; a settled one is not. */
+function isTaskLive(status: string): boolean {
+  return status === "queued" || status === "running";
+}
+
+function stopTask(taskId: string): void {
+  void web.value.stopTask(taskId);
+}
+
 function isVisible(message: WebChatMessage): boolean {
   if (message.role === "user") return message.text.length > 0;
   if (message.role === "system") return message.text.length > 0;
@@ -583,6 +592,24 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                       entry.summary ??
                       "This subagent has not reported a summary yet."
                     }}</span
+                  >
+                  <!--
+                    Cancellation is the User's, explicit and authenticated. It
+                    is offered only while the subagent is live: a settled one
+                    has an outcome, and stopping it would rewrite it.
+                  -->
+                  <span
+                    v-if="
+                      expandedTasks.has(entry.chip.taskId) &&
+                      isTaskLive(entry.status)
+                    "
+                    class="task-chip-stop"
+                    role="button"
+                    tabindex="0"
+                    @click.stop="stopTask(entry.chip.taskId)"
+                    @keydown.enter.stop.prevent="stopTask(entry.chip.taskId)"
+                    @keydown.space.stop.prevent="stopTask(entry.chip.taskId)"
+                    >Stop this subagent</span
                   >
                 </button>
               </div>

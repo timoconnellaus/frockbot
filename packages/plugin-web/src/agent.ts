@@ -433,6 +433,9 @@ export function createWebFetchToolDefinitionV1(
 ): ToolDefinition {
   return {
     name: WEB_FETCH_TOOL_NAME_V1,
+    // A general work tool: the reach an `executor` subagent has, and not the
+    // narrow reach of `browserUse`, `computerUse`, or the two video roles.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Read a public https web page and return its readable text. Refuses non-public addresses.",
     inputSchema: WEB_FETCH_INPUT_SCHEMA,
@@ -468,6 +471,7 @@ export function createWebRuntimePlugin(
   const plugin: Plugin.Function = (ctx) =>
     ctx.tools.register(createWebFetchToolDefinitionV1(config), {
       admissionCeiling: ["chat", "automation", "subagent", "channel"],
+      subagentRoleCeiling: ["executor"],
     });
   plugin.inject = ["tools"];
   return plugin;
