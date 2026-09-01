@@ -38,6 +38,23 @@
   white-space: nowrap;
 }
 
+/*
+ * On a phone the control is the magnifier and nothing else. The word and the
+ * shortcut cost about a third of the topbar, which is the room the Bot's name
+ * needs — and a keyboard shortcut is a promise a touch device cannot keep. The
+ * button keeps its accessible name either way.
+ */
+@media (max-width: 640px) {
+  .search-box {
+    padding: 6px;
+  }
+
+  .search-box-label,
+  .search-box-shortcut {
+    display: none;
+  }
+}
+
 .search-surface {
   display: flex;
   flex-direction: column;

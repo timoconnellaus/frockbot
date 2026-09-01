@@ -4,7 +4,17 @@
   inset: 0;
   width: 100%;
   height: 100%;
+
+  /*
+   * `clip`, not `hidden`. A closed drawer is parked outside the window, and
+   * `hidden` makes this element a scroll container that can still be scrolled
+   * programmatically: focusing a field inside the composer scrolls the parked
+   * drawer into view and takes the whole layout sideways with it. `clip` has
+   * the clipping without the scroll port, so there is nothing to scroll. The
+   * `hidden` above it is the fallback for a renderer without `clip`.
+   */
   overflow: hidden;
+  overflow: clip;
   font-size: var(--frock-text-base);
   line-height: var(--frock-leading-normal);
 }
@@ -805,6 +815,11 @@
     width: var(--panel-surface-width);
   }
 
+  /*
+   * A parked panel is hidden as well as off-canvas: it is not something to
+   * tab into, read out, or hit-test, and `visibility` is the one property that
+   * says all three and still animates.
+   */
   .right-panel {
     position: absolute;
     z-index: 15;
@@ -814,30 +829,186 @@
     width: var(--frock-panel-width);
     box-shadow: var(--frock-shadow-right-panel);
     transform: translateX(100%);
-    transition: transform var(--frock-motion-panel);
+    visibility: hidden;
+    transition:
+      transform var(--frock-motion-panel),
+      visibility var(--frock-motion-panel);
   }
 
   .app-shell.panel-open .right-panel {
     transform: translateX(0);
+    visibility: visible;
   }
 }
 
-@media (max-width: 700px) {
-  .app-shell,
-  .app-shell.panel-open {
-    grid-template-columns: 190px minmax(0, 1fr) var(--panel-current);
+/*
+ * Phone.
+ *
+ * A hand-held viewport has room for exactly one column, so the shell stops
+ * being three columns and becomes the conversation with two drawers over it:
+ * the Bot list from the leading edge, the right panel from the trailing one.
+ * Squeezing all three instead is what the 190px sidebar above used to do, and
+ * at 390px it left the conversation about a hundred points wide with every
+ * label clipped mid-word.
+ *
+ * Only one drawer is ever open: opening either closes the other, in the
+ * component, so this layer never has to reason about them overlapping.
+ */
+@media (max-width: 640px) {
+  .frockbot-root {
+    height: var(--frock-viewport-height);
   }
 
+  .app-shell,
+  .app-shell.panel-open,
+  .app-shell.panel-open.panel-surface {
+    --panel-surface-width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /*
+   * Off canvas and inert. `visibility` rather than transform alone so a closed
+   * drawer is hidden to assistive technology and to a hit test, and so it
+   * still animates: the property is transitioned, not switched.
+   */
   .sidebar {
-    width: 190px;
+    position: absolute;
+    z-index: 25;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: var(--frock-drawer-width);
+    /* `calc` so the declaration is a length the checker can type; `env` alone
+       is not one it knows. */
+    padding-top: calc(var(--frock-safe-top) + 0px);
+    box-shadow: var(--frock-shadow-panel);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform var(--frock-motion-panel),
+      visibility var(--frock-motion-panel);
+  }
+
+  .app-shell.nav-open .sidebar {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  /* The drawers dim the conversation they cover, and the dimmed area closes them. */
+  /*
+   * Under both drawers and over the workspace: the sidebar sits at 25 and the
+   * right panel at 15, so one scrim serves whichever is open.
+   */
+  .nav-scrim {
+    position: absolute;
+    z-index: 14;
+    inset: 0;
+    border: 0;
+    padding: 0;
+    background: var(--frock-overlay-tint);
+    cursor: pointer;
+  }
+
+  .scrim-enter-active,
+  .scrim-leave-active {
+    transition: opacity var(--frock-motion-panel);
+  }
+
+  .scrim-enter-from,
+  .scrim-leave-to {
+    opacity: 0;
+  }
+
+  /* The right panel is a drawer too, and on a phone it takes the whole width. */
+  .right-panel,
+  .app-shell.panel-surface .right-panel {
+    width: 100%;
+  }
+
+  .right-panel-content,
+  .panel-surface-view {
+    width: 100%;
+  }
+
+  /* There is no window chrome to drag and no traffic lights to clear. */
+  .brand {
+    padding-left: 0;
   }
 
   .mac-desktop .brand {
-    padding-left: 72px;
+    padding-left: 0;
+  }
+
+  .topbar {
+    gap: 8px;
+    padding: 0 100px 0 4px;
   }
 
   .brand-mark {
     font-size: var(--frock-text-lg);
+  }
+
+  .window-actions {
+    padding: 0 8px;
+  }
+
+  .nav-toggle {
+    flex: 0 0 auto;
+  }
+
+  /*
+   * The conversation. Its horizontal room is the whole window now, so the
+   * gutters shrink and a bubble may use nearly all of what is left; the
+   * vertical anchors all clear the home indicator.
+   */
+  .thread {
+    bottom: calc(76px + var(--frock-safe-bottom));
+    padding: 12px 12px 20px;
+  }
+
+  .empty-thread {
+    padding: 20px;
+  }
+
+  .message-bubble,
+  .message-user .message-bubble {
+    max-width: 92%;
+  }
+
+  .message-sends,
+  .message-tasks {
+    width: 92%;
+  }
+
+  .message-attachments img {
+    max-width: 100%;
+  }
+
+  .error-banner {
+    right: 10px;
+    bottom: calc(76px + var(--frock-safe-bottom));
+    left: 10px;
+  }
+
+  .jump-latest {
+    right: 14px;
+    bottom: calc(84px + var(--frock-safe-bottom));
+  }
+
+  .composer {
+    right: 10px;
+    bottom: calc(10px + var(--frock-safe-bottom));
+    left: 10px;
+    padding: 6px 6px 6px 14px;
+  }
+
+  .composer textarea {
+    max-height: 96px;
+    font-size: var(--frock-text-input);
+  }
+
+  .skill-chip-name {
+    max-width: 120px;
   }
 }
 

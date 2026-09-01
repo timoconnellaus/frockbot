@@ -61,7 +61,76 @@ const composerContext = computed(
 );
 const draftStore = new ComposerDraftStore();
 const draft = ref(draftStore.draftFor(composerContext.value));
-const rightPanelOpen = ref(true);
+
+/*
+ * The phone layout.
+ *
+ * The same bundle serves every platform, so a phone is this shell at a narrow
+ * viewport rather than a second client. Below the breakpoint there is room for
+ * one column: the Bot list and the right panel become drawers over the
+ * conversation, and only one of them is ever open.
+ *
+ * The width is matched here as well as in `styles.css` because the layout
+ * decides behaviour, not only appearance — the right panel is open by default
+ * on a desktop and must not be on a phone, where it would cover the
+ * conversation the User just opened. The query is the one in the stylesheet;
+ * the two are kept in step deliberately.
+ */
+const PHONE_LAYOUT_QUERY = "(max-width: 640px)";
+const phoneLayoutMedia =
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia(PHONE_LAYOUT_QUERY)
+    : undefined;
+const phoneLayout = ref(phoneLayoutMedia?.matches ?? false);
+const navOpen = ref(false);
+const rightPanelOpen = ref(!phoneLayout.value);
+
+function onPhoneLayoutChange(event: MediaQueryListEvent): void {
+  phoneLayout.value = event.matches;
+}
+
+/*
+ * Crossing the breakpoint resets both drawers to what that layout means by
+ * open: a desktop shows the right panel beside the conversation, a phone shows
+ * neither over it.
+ */
+watch(phoneLayout, (phone) => {
+  navOpen.value = false;
+  if (!panelSurface.value) rightPanelOpen.value = !phone;
+});
+
+function openNav(): void {
+  // One drawer at a time: two half-covered columns is the layout this replaced.
+  rightPanelOpen.value = false;
+  navOpen.value = true;
+}
+
+function closeNav(): void {
+  navOpen.value = false;
+}
+
+function toggleRightPanel(): void {
+  if (!rightPanelOpen.value) navOpen.value = false;
+  rightPanelOpen.value = !rightPanelOpen.value;
+}
+
+/**
+ * Give the conversation back.
+ *
+ * A hosted surface holds the panel's place and covers the whole window, so
+ * there is no scrim to tap while one is open; the panel is left alone in that
+ * case rather than closed out from under it.
+ */
+function closeDrawers(): void {
+  navOpen.value = false;
+  if (!panelSurface.value) rightPanelOpen.value = false;
+}
+
+function onRootKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || !navOpen.value) return;
+  event.preventDefault();
+  closeNav();
+}
 /*
  * Skill invocation. `/` or `@` at a word boundary opens a popover over the
  * Bot's catalog; choosing one attaches a ref chip and removes the trigger from
@@ -329,11 +398,13 @@ onMounted(() => {
   applySettingsDeepLink();
   window.addEventListener("popstate", applySettingsDeepLink);
   window.addEventListener("hashchange", applySettingsDeepLink);
+  phoneLayoutMedia?.addEventListener("change", onPhoneLayoutChange);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("popstate", applySettingsDeepLink);
   window.removeEventListener("hashchange", applySettingsDeepLink);
+  phoneLayoutMedia?.removeEventListener("change", onPhoneLayoutChange);
 });
 
 watch(
@@ -353,6 +424,9 @@ watch(
 watch(
   () => state.value.activeBotId,
   () => {
+    // Choosing a Bot is what the drawer is for, so it closes behind the choice
+    // rather than covering the conversation it just opened.
+    closeNav();
     pinnedToLatest.value = true;
     void scrollToLatest("auto");
     // A Skill belongs to one Bot's instruction root, so a switch drops both
@@ -386,6 +460,16 @@ watch(
 watch(panelSurface, (surface) => {
   if (surface) rightPanelOpen.value = true;
 });
+/*
+ * A surface is the thing the User asked for, and on a phone it fills the
+ * window. The drawer that offered it has served its purpose either way.
+ */
+watch(
+  () => surfaces.activeId.value,
+  (surface) => {
+    if (surface) closeNav();
+  },
+);
 
 /** Keep the textarea at its content height until its CSS maximum takes over. */
 function syncComposerHeight(): void {
@@ -512,16 +596,22 @@ function handleComposerKeydown(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <div class="frockbot-root">
+  <div class="frockbot-root" @keydown="onRootKeydown">
     <div
       class="app-shell"
       :class="{
         'panel-open': rightPanelOpen,
         'panel-surface': Boolean(panelSurface),
         'mac-desktop': macDesktop,
+        'phone-layout': phoneLayout,
+        'nav-open': navOpen,
       }"
     >
-      <aside class="sidebar">
+      <aside
+        class="sidebar"
+        :aria-hidden="phoneLayout && !navOpen"
+        :inert="phoneLayout && !navOpen"
+      >
         <div class="brand" aria-hidden="true">
           <span class="brand-mark">FrockBot</span>
         </div>
@@ -538,8 +628,35 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         </div>
       </aside>
 
+      <!--
+        The dimmed conversation behind an open drawer, and the way back to it.
+        It sits under both drawers and over the workspace, so a tap anywhere on
+        what is still visible of the conversation closes what covers it.
+      -->
+      <Transition name="scrim">
+        <button
+          v-if="phoneLayout && (navOpen || rightPanelOpen)"
+          type="button"
+          class="nav-scrim"
+          aria-label="Close drawer"
+          @click="closeDrawers"
+        />
+      </Transition>
+
       <main class="workspace">
         <header class="topbar">
+          <!--
+            The way back to the Bot list on a phone, where the sidebar is a
+            drawer. At desktop widths the column is simply there and a control
+            that opens it would be a control that does nothing.
+          -->
+          <UiIconButton
+            v-if="phoneLayout"
+            class="nav-toggle"
+            icon="menu"
+            label="Show navigation"
+            @click="openNav"
+          />
           <span class="bot-identity"
             ><k-slot name="frockbot.bot-identity"
           /></span>
@@ -888,7 +1005,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           class="panel-toggle"
           :icon="rightPanelOpen ? 'chevrons-right' : 'chevrons-left'"
           :label="rightPanelOpen ? 'Hide side panel' : 'Show side panel'"
-          @click="rightPanelOpen = !rightPanelOpen"
+          @click="toggleRightPanel"
         />
       </div>
     </div>

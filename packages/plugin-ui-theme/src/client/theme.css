@@ -81,6 +81,31 @@
   /* Application geometry shared by the shell and the plugins it hosts. */
   --frock-sidebar-width: 280px;
   --frock-panel-width: 320px;
+
+  /*
+   * Phone geometry. A hand-held viewport has room for one column, so the
+   * columns a desktop shows side by side become drawers over it; these are the
+   * shared measurements of that layout, in the theme rather than in the shell
+   * because panel plugins lay themselves out against the same edges.
+   *
+   * `--frock-viewport-height` is `100dvh` on a phone: a browser whose toolbar
+   * collapses on scroll changes the visible height without changing the layout
+   * viewport, and a composer pinned to `100%` of the latter ends up under the
+   * toolbar. `--frock-safe-bottom` clears the home indicator, and is zero on
+   * every device that has none.
+   */
+  --frock-viewport-height: 100%;
+  --frock-drawer-width: min(300px, 84vw);
+  --frock-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --frock-safe-top: env(safe-area-inset-top, 0px);
+
+  /*
+   * The size text is entered at. Mobile Safari zooms the page in on a focused
+   * field whose text is below 16px, and a zoomed page cannot be scrolled back
+   * out, so the composer and every plugin's inputs size through this alias
+   * rather than through the reading scale.
+   */
+  --frock-text-input: var(--frock-text-md);
   --frock-titlebar-height: 52px;
   --frock-control-sm: 28px;
   --frock-control-md: 32px;
@@ -279,6 +304,28 @@ summary:focus-visible {
 
   to {
     transform: translateX(100%);
+  }
+}
+
+/*
+ * The phone breakpoint. `packages/plugin-shell/src/client/FrockBotApp.vue`
+ * matches the same width in `matchMedia`, because which layout is on screen
+ * decides behaviour as well as appearance — a drawer that is closed by default
+ * and a right panel that does not open over the conversation.
+ */
+@media (max-width: 640px) {
+  :root {
+    --frock-viewport-height: 100dvh;
+    --frock-text-input: 16px;
+
+    /*
+     * Touch, not a cursor. Apple and Google both put the smallest comfortable
+     * target at around 44px, and every control in the product is sized through
+     * these three aliases.
+     */
+    --frock-control-sm: 34px;
+    --frock-control-md: 40px;
+    --frock-control-lg: 44px;
   }
 }
 

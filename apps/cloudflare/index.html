@@ -2,7 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      `viewport-fit=cover` is what makes `env(safe-area-inset-*)` report
+      anything: without it the page is laid out inside the safe area and the
+      insets are zero, so the shell's phone layout cannot tell a device with a
+      home indicator from one without. The native shell (`apps/mobile`) already
+      asks for the same thing.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <title>FrockBot</title>
     <link
       rel="icon"
