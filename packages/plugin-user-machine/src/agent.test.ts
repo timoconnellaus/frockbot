@@ -482,6 +482,20 @@ describe("machine_command_check", () => {
         commandId: APPROVAL_ID,
       });
       expect(queued.content).toContain("has not answered yet");
+
+      // An approval-exempt read (row 57g's six Messages reads) is dispatched by
+      // its own tool and carries no decision, so it must not read as "waiting
+      // on the user" — nobody was asked.
+      harness.storage.set(key, {
+        ...intent,
+        dispatchedAt: NOW,
+        outcome: "dispatched",
+      });
+      const exempt = await invoke(harness, MACHINE_COMMAND_CHECK_TOOL_V1, {
+        commandId: APPROVAL_ID,
+      });
+      expect(exempt.content).not.toContain("approval");
+      expect(exempt.content).toContain("has not answered yet");
     } finally {
       await harness.dispose();
     }

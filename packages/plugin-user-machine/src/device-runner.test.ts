@@ -252,3 +252,75 @@ describe("machine device runner", () => {
     ).toMatchObject({ outcome: "error", message: "ENOENT: no such file" });
   });
 });
+
+describe("a messages op (register row 57g)", () => {
+  const messagesOp: MachineOpV1 = {
+    kind: "messages",
+    call: { kind: "activity", limit: 5 },
+  };
+
+  test("is handed to the handler the shell wired, verbatim", async () => {
+    const seen: unknown[] = [];
+    const runner = createMachineDeviceRunnerV1({
+      host: host().host,
+      capabilities: ["exec", "files", "messages"],
+      now: () => NOW,
+      messages: (call) => {
+        seen.push(call);
+        return Promise.resolve({
+          finishedAt: "2026-09-01T00:00:05.000Z",
+          outcome: "ok",
+          truncated: false,
+          stdout: '{"kind":"items","items":[]}',
+        });
+      },
+    });
+    const report = await runner.run(
+      commandFor(messagesOp),
+      new AbortController().signal,
+    );
+    expect(seen).toEqual([{ kind: "activity", limit: 5 }]);
+    expect(report.outcome).toBe("ok");
+  });
+
+  test("an agent with no handler refuses rather than answering an empty inbox", async () => {
+    const runner = createMachineDeviceRunnerV1({
+      host: host().host,
+      // The record says it can; this build cannot. Saying so is the only
+      // honest answer — an empty result would read as an empty Messages app.
+      capabilities: ["exec", "files", "messages"],
+      now: () => NOW,
+    });
+    const report = await runner.run(
+      commandFor(messagesOp),
+      new AbortController().signal,
+    );
+    expect(report.outcome).toBe("refused");
+    expect(report.message).toBe(
+      machineRefusalV1("this machine's agent does not offer Messages access"),
+    );
+  });
+
+  test("an agent that never reported the capability refuses before the handler", async () => {
+    let called = false;
+    const runner = createMachineDeviceRunnerV1({
+      host: host().host,
+      capabilities: ["exec", "files"],
+      now: () => NOW,
+      messages: () => {
+        called = true;
+        return Promise.resolve({
+          finishedAt: "2026-09-01T00:00:05.000Z",
+          outcome: "ok",
+          truncated: false,
+        });
+      },
+    });
+    const report = await runner.run(
+      commandFor(messagesOp),
+      new AbortController().signal,
+    );
+    expect(report.outcome).toBe("refused");
+    expect(called).toBe(false);
+  });
+});

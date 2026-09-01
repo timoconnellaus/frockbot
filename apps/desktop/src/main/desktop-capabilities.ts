@@ -18,6 +18,7 @@ import {
 } from "electron";
 import { FileSecretStoreCapability } from "./machine-secrets.js";
 import { NodeMachineHostCapability } from "./machine-host.js";
+import { NodeMessagesHostCapability } from "./messages-host.js";
 
 export class ElectronNotificationCapability extends DesktopNotificationCapability {
   async show(
@@ -87,7 +88,7 @@ export async function installDesktopCapabilities(ctx: Context): Promise<void> {
 }
 
 /**
- * The two capabilities the registered-machine agent runs on.
+ * The three capabilities the registered-machine agent runs on.
  *
  * Kept apart from `installDesktopCapabilities` because they are mounted at a
  * different moment: the agent's contribution needs them before it starts its
@@ -96,6 +97,11 @@ export async function installDesktopCapabilities(ctx: Context): Promise<void> {
  */
 export async function installMachineCapabilities(ctx: Context): Promise<void> {
   await ctx.plugin(NodeMachineHostCapability, {});
+  // Row 57g's hands. Mounted on every platform, because it is the capability
+  // that *reports* it is not a Mac; the agent asks it before claiming the
+  // `messages` capability, and the protocol refuses that claim from anything
+  // but macOS anyway.
+  await ctx.plugin(NodeMessagesHostCapability, {});
   await ctx.plugin(FileSecretStoreCapability, {
     directory: app.getPath("userData"),
     cipher: electronSecretCipher,

@@ -221,6 +221,10 @@ const createSubagentsGatewayPlugin = (
   }
 ).plugin;
 import userMachineManifest from "@frockbot/plugin-user-machine/manifest";
+import machineMessagesManifest from "@frockbot/plugin-machine-messages/manifest";
+import { createMachineMessagesRuntimePlugin } from "@frockbot/plugin-machine-messages/agent";
+import type { MachineMessagesRuntimeHostV1 } from "@frockbot/plugin-machine-messages/agent";
+export type { MachineMessagesRuntimeHostV1 } from "@frockbot/plugin-machine-messages/agent";
 // The registered machine's six tools. Mounted only for an admitted Turn, whose
 // Session and Turn the intent record it writes has to name.
 import {
@@ -334,6 +338,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-routines", routinesManifest],
   ["@frockbot/plugin-subagents", subagentsManifest],
   ["@frockbot/plugin-user-machine", userMachineManifest],
+  ["@frockbot/plugin-machine-messages", machineMessagesManifest],
   ["@frockbot/plugin-channels", channelsManifest],
   ["@frockbot/plugin-telegram", telegramManifest],
 ]);
@@ -933,6 +938,14 @@ export function createFoundationHostedRuntimePackages(
      * nobody can trace back to a conversation.
      */
     machines?: MachineRuntimeHostV1;
+    /**
+     * Row 57g's seam, supplied only when all of its gate is open: the User
+     * setting is on, and at least one connected macOS machine reports the
+     * `messages` capability. Absent, and the seven Messages tools are not
+     * mounted at all — absent from the catalog rather than present and
+     * refusing, which is what a feature gate is for.
+     */
+    machineMessages?: MachineMessagesRuntimeHostV1;
     packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationAssignedRuntimePackage[] {
@@ -1000,6 +1013,15 @@ export function createFoundationHostedRuntimePackages(
             plan,
             "user-machine",
             createMachineRuntimePlugin(host.machines),
+          ),
+        ]
+      : []),
+    ...(host.machineMessages
+      ? [
+          runtimePackage(
+            plan,
+            "machine-messages",
+            createMachineMessagesRuntimePlugin(host.machineMessages),
           ),
         ]
       : []),
@@ -1295,6 +1317,10 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // write an intent record the Turn's Session and run name, and the approval
   // that gates them is a send onto that Turn's own durable log.
   runtimeIds.delete("user-machine");
+  // The Messages tools mount only behind row 57g's whole gate — the User
+  // setting on, and a connected macOS machine reporting the `messages`
+  // capability — so the host supplies them or nothing does.
+  runtimeIds.delete("machine-messages");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

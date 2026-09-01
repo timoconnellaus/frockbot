@@ -27,6 +27,7 @@ import {
   MACHINE_LIMITS_V1,
   type MachineCapabilityV1,
   type MachineCommandV1,
+  type MachineMessagesCallV1,
   machineOpCapabilityV1,
 } from "@frockbot/machine-protocol";
 import type {
@@ -53,10 +54,25 @@ export interface MachineDeviceHostV1 {
   ): Promise<DesktopMachineFileResult>;
 }
 
+/**
+ * What runs one Messages.app call on this laptop (register row 57g).
+ *
+ * A seam rather than a branch, and typed in the protocol's own vocabulary, so
+ * this Package never learns what `chat.db` is: the Messages Package builds the
+ * handler, the Electron shell hands it in, and an agent given no handler
+ * reports no `messages` capability and refuses the op if one arrives anyway.
+ */
+export type MachineMessagesOpRunnerV1 = (
+  call: MachineMessagesCallV1,
+  signal: AbortSignal,
+) => Promise<MachineCommandReportV1>;
+
 export interface MachineDeviceRunnerOptionsV1 {
   host: MachineDeviceHostV1;
   /** What this agent told the backend it can do. An op outside it is refused. */
   capabilities: readonly MachineCapabilityV1[];
+  /** Present only on a macOS agent whose shell wired the Messages handlers. */
+  messages?: MachineMessagesOpRunnerV1;
   now?(): number;
 }
 
@@ -153,6 +169,16 @@ export function createMachineDeviceRunnerV1(
                 }
               : {}),
           };
+        }
+        if (op.kind === "messages") {
+          // The capability check above already refused a machine that never
+          // reported `messages`; this is the second half of the same fact —
+          // an agent that reported it and was wired no handler must say so
+          // rather than answer an empty result that reads like an empty inbox.
+          if (!options.messages) {
+            return refuse(CAPABILITY_REASON.messages);
+          }
+          return await options.messages(op.call, signal);
         }
         if (op.kind === "read" || op.kind === "copy-to-computer") {
           const maxBytes =

@@ -49,6 +49,8 @@ describe("foundation application", () => {
       "fly-sprite",
       "identity",
       "image",
+      "user-machine",
+      "machine-messages",
       "mcp",
       "memory",
       "mobile-clipboard",
@@ -62,7 +64,6 @@ describe("foundation application", () => {
       "skills",
       "subagents",
       "telegram",
-      "user-machine",
     ]);
     expect(first.contributions).toEqual({
       backend: [
@@ -73,6 +74,7 @@ describe("foundation application", () => {
         "bot-template",
         "channels",
         "credentials",
+        "user-machine",
         "mcp",
         "package-publisher",
         "provider-ollama-cloud",
@@ -80,7 +82,6 @@ describe("foundation application", () => {
         "search",
         "subagents",
         "telegram",
-        "user-machine",
       ],
       runtime: [
         "shell",
@@ -95,6 +96,8 @@ describe("foundation application", () => {
         "fly-sprite",
         "identity",
         "image",
+        "user-machine",
+        "machine-messages",
         "mcp",
         "memory",
         "package-publisher",
@@ -104,7 +107,6 @@ describe("foundation application", () => {
         "routines",
         "skills",
         "subagents",
-        "user-machine",
       ],
       client: [
         "ui-theme",
@@ -117,10 +119,10 @@ describe("foundation application", () => {
         "channels",
         "clock",
         "computer",
+        "user-machine",
         "package-publisher",
         "routines",
         "search",
-        "user-machine",
       ],
       desktop: [
         "auth",
