@@ -20,6 +20,12 @@ export const TASK_PREFIX = "task:";
 export const TASK_ACTIVE_PREFIX = "task-active:";
 /** One bounded queue of pending `task_message` payloads (G2 drains them). */
 export const TASK_MESSAGE_PREFIX = "task-msg:";
+/**
+ * The durable intent to cancel one task: written before the child is asked to
+ * stop, so an interrupted `task_stop` is read back rather than repeated, and
+ * deleted by the settle that makes the cancellation terminal.
+ */
+export const TASK_STOP_PREFIX = "task-stop:";
 /** The `computerUse` desktop-lease intent: the effect named before the host call. */
 export const TASK_DESKTOP_LEASE_KEY = "task-lease:desktop";
 /** The bounded reverse index the Bot-level task list reads, newest first. */
@@ -63,6 +69,10 @@ export function taskActiveKeyV1(taskId: string): string {
 
 export function taskContextKeyV1(taskId: string): string {
   return `${TASK_CONTEXT_PREFIX}${requireTaskId(taskId)}`;
+}
+
+export function taskStopKeyV1(taskId: string): string {
+  return `${TASK_STOP_PREFIX}${requireTaskId(taskId)}`;
 }
 
 export function taskMessagePrefixV1(taskId: string): string {
@@ -119,4 +129,20 @@ export function subagentDurableObjectNameV1(identity: {
 /** The Session a child Turn records its own events on. */
 export function taskSessionIdV1(taskId: string): string {
   return `task:${requireTaskId(taskId)}`;
+}
+
+/**
+ * The task whose Session and Subagent Durable Object a child Turn actually
+ * runs in — the *anchor*.
+ *
+ * For a first dispatch that is the task itself. For a resume it is the task
+ * that was resumed, because "the same child Durable Object and Session" is the
+ * whole point of resuming: the child picks its prior transcript up from its own
+ * cursor rather than starting blank a second time.
+ */
+export function taskAnchorIdV1(childSessionId: string): string {
+  const anchor = childSessionId.startsWith("task:")
+    ? childSessionId.slice("task:".length)
+    : childSessionId;
+  return requireTaskId(anchor);
 }

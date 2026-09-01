@@ -24,6 +24,7 @@ import type { McpServerStatusViewV1 } from "@frockbot/plugin-mcp/records";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { ApprovalCardViewV1 } from "./approvals.js";
+import type { TaskViewV1 } from "@frockbot/plugin-subagents/shared";
 import type { InjectionKey, Ref } from "vue";
 
 export type { CatalogEntryV1, CatalogIndexEntryV1 };
@@ -56,6 +57,22 @@ export interface WebToolActivity {
 export type WebSendPayload =
   { kind: "payload"; payload: SendToUserPayloadV1 } | { kind: "unsupported" };
 
+/**
+ * One dispatched subagent, as the thread draws it.
+ *
+ * The chip carries what the durable dispatch said; its live status and summary
+ * are read from {@link FrockBotWebData.tasks}, because a background task
+ * settles long after the Turn that dispatched it and the run's own events
+ * never change again.
+ */
+export interface WebTaskChip {
+  taskId: string;
+  taskType: string;
+  description: string;
+  model: string;
+  background: boolean;
+}
+
 export interface WebChatMessage {
   id: string;
   runId: string;
@@ -77,6 +94,11 @@ export interface WebChatMessage {
   tools: WebToolActivity[];
   /** The typed payloads this Turn sent to the user, oldest first. */
   sends: WebSendPayload[];
+  /**
+   * The subagents this Turn dispatched, oldest first. Optional so every
+   * existing message literal — and every stored projection — still reads.
+   */
+  tasks?: WebTaskChip[];
 }
 
 export interface WebActiveRun {
@@ -170,6 +192,13 @@ export interface FrockBotWebData {
    */
   approvals: ApprovalCardViewV1[];
   /**
+   * The Bot's subagent tasks, newest first. The chip in the transcript is the
+   * durable dispatch; this is what it currently *is* — status, summary, and
+   * failure — so a chip drawn before the child settled says so afterwards
+   * without the run's own events being rewritten.
+   */
+  tasks: TaskViewV1[];
+  /**
    * The User's MCP servers: state, tool count, last handshake, instructions,
    * failure, and the durable refusal ledger. Absent until it is loaded, and
    * absent for a deployment with no MCP route — the Plugins surface then
@@ -238,6 +267,8 @@ export interface FrockBotWebData {
   loadSkillCatalog(): Promise<void>;
   /** Refreshes {@link FrockBotWebData.approvals} for the active Bot. */
   loadApprovals(): Promise<void>;
+  /** Refreshes {@link FrockBotWebData.tasks} for the active Bot. */
+  loadTasks(): Promise<void>;
   /**
    * Records one decision on one approval card. The backend is the authority:
    * this submits the command and re-reads what was recorded, so a card already

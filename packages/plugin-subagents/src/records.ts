@@ -69,10 +69,28 @@ export const TASK_ATTACHMENT_LIMIT_V1 = 4;
 export const TASK_MESSAGE_QUEUE_LIMIT_V1 = 16;
 /** How long a child Turn may live before its parent reconciles it. */
 export const TASK_DEADLINE_MS_V1 = 30 * 60_000;
+/**
+ * How long a `background:false` dispatch waits for its child before it gives
+ * up waiting — and *only* waiting: the task keeps running, the tool answers
+ * "still running, id <taskId>", and the completion reaches the Bot through the
+ * inbox exactly as a background task's does. A Turn is never blocked
+ * indefinitely (plan §2, flow 3).
+ */
+export const TASK_BLOCKING_TIMEOUT_MS_V1 = 120_000;
+/**
+ * How often that wait re-reads durable state.
+ *
+ * It is a *poll of the record*, never an await on the child's settle callback:
+ * the callback is an RPC back into the very object that is still inside the
+ * dispatching Turn, and awaiting it there is the reentrancy hazard G1 named.
+ */
+export const TASK_BLOCKING_POLL_MS_V1 = 500;
 
 export const TASK_DESCRIPTION_MAX_V1 = 200;
 export const TASK_ID_MAX_V1 = 128;
 export const TASK_SUMMARY_MAX_V1 = 8_000;
+/** Longest one queued `task_message` payload may be. */
+export const TASK_MESSAGE_MAX_V1 = 8_000;
 export const TASK_ATTACHMENT_PATH_MAX_V1 = 512;
 
 export class SubagentDecodeError extends Error {
@@ -505,7 +523,11 @@ export function decodeTaskMessageRecordV1(value: unknown): TaskMessageRecordV1 {
     schemaVersion: 1,
     taskId: candidate.taskId,
     seq: candidate.seq as number,
-    message: subagentText(candidate.message, 8_000, `${label} message`),
+    message: subagentText(
+      candidate.message,
+      TASK_MESSAGE_MAX_V1,
+      `${label} message`,
+    ),
     createdAt: subagentTimestamp(candidate.createdAt, `${label} createdAt`),
   };
 }

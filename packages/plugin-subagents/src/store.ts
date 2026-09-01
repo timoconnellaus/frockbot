@@ -17,6 +17,7 @@
 //    reconciliation that races the child's own callback, records one outcome.
 
 import {
+  decodeTaskMessageRecordV1,
   decodeTaskRecordV1,
   isTaskIdV1,
   isTerminalTaskStatusV1,
@@ -24,6 +25,8 @@ import {
   TASK_CONCURRENCY_PER_BOT_V1,
   TASK_DEADLINE_MS_V1,
   TASK_MAX_DEPTH_V1,
+  TASK_MESSAGE_QUEUE_LIMIT_V1,
+  type TaskMessageRecordV1,
   type TaskModelV1,
   type TaskOutcomeV1,
   type TaskRecordV1,
@@ -37,9 +40,13 @@ import {
   TASK_INDEX_PREFIX,
   TASK_PREFIX,
   taskActiveKeyV1,
+  taskAnchorIdV1,
   taskIndexKeyV1,
   taskKeyV1,
+  taskMessageKeyV1,
+  taskMessagePrefixV1,
   taskSessionIdV1,
+  taskStopKeyV1,
 } from "./storage-keys.js";
 import {
   taskViewV1,
@@ -86,6 +93,12 @@ export interface TaskAdmissionRequestV1 {
   attachments: string[];
   dispatch: { runId: string; turnId: string; sessionId: string };
   resumedFrom?: string;
+  /**
+   * The task whose Subagent Durable Object and Session this run executes in.
+   * Absent on a first dispatch, where it is the task itself; present on a
+   * resume, because "a new run in the same child" is what resuming means.
+   */
+  anchorTaskId?: string;
   now: Date;
 }
 
@@ -149,7 +162,7 @@ export class TaskStore {
         depth: TASK_MAX_DEPTH_V1,
         status: "queued",
         dispatch: request.dispatch,
-        childSessionId: taskSessionIdV1(request.taskId),
+        childSessionId: taskSessionIdV1(request.anchorTaskId ?? request.taskId),
         attachments: request.attachments,
         ...(request.resumedFrom === undefined
           ? {}
@@ -233,6 +246,13 @@ export class TaskStore {
       });
       await transaction.put(taskKeyV1(taskId), settled);
       await transaction.delete(taskActiveKeyV1(taskId));
+      await transaction.delete(taskStopKeyV1(taskId));
+      // A queued message a settled task will never read is not history; it is
+      // an unbounded queue nobody drains.
+      const queued = await transaction.list<unknown>({
+        prefix: taskMessagePrefixV1(taskId),
+      });
+      for (const key of queued.keys()) await transaction.delete(key);
       const lease = await transaction.get<{ taskId?: unknown }>(
         TASK_DESKTOP_LEASE_KEY,
       );
@@ -241,6 +261,165 @@ export class TaskStore {
       }
       return { status: "settled" as const, record: settled };
     });
+  }
+
+  /**
+   * Appends one message to a running task's bounded queue.
+   *
+   * Refused unless the task is `running`: a queued task has not opened its
+   * Session yet and a settled one will never read again, and in both cases a
+   * silent append would be a message the Bot believes it sent.
+   */
+  async appendMessage(
+    taskId: string,
+    message: string,
+    now: Date,
+  ): Promise<
+    | { status: "queued"; record: TaskMessageRecordV1; depth: number }
+    | { status: "refused"; reason: string }
+  > {
+    return this.#storage.transaction(async (transaction) => {
+      let record: TaskRecordV1;
+      try {
+        record = await this.#require(transaction, taskId);
+      } catch (error) {
+        if (error instanceof TaskNotFoundError) {
+          return { status: "refused" as const, reason: error.message };
+        }
+        throw error;
+      }
+      if (record.status !== "running") {
+        return {
+          status: "refused" as const,
+          reason:
+            record.status === "queued"
+              ? `task "${taskId}" has not started yet; it cannot be messaged until it is running`
+              : `task "${taskId}" is ${record.status} and can no longer be messaged`,
+        };
+      }
+      const prefix = taskMessagePrefixV1(taskId);
+      const queued = await transaction.list<unknown>({ prefix });
+      if (queued.size >= TASK_MESSAGE_QUEUE_LIMIT_V1) {
+        return {
+          status: "refused" as const,
+          reason: `task "${taskId}" already has ${queued.size} messages waiting; the bound is ${TASK_MESSAGE_QUEUE_LIMIT_V1}`,
+        };
+      }
+      let seq = 0;
+      for (const key of queued.keys()) {
+        const encoded = Number(key.slice(prefix.length));
+        if (Number.isSafeInteger(encoded)) seq = Math.max(seq, encoded + 1);
+      }
+      const queuedRecord = decodeTaskMessageRecordV1({
+        schemaVersion: 1,
+        taskId,
+        seq,
+        message,
+        createdAt: now.toISOString(),
+      });
+      await transaction.put(taskMessageKeyV1(taskId, seq), queuedRecord);
+      return {
+        status: "queued" as const,
+        record: queuedRecord,
+        depth: queued.size + 1,
+      };
+    });
+  }
+
+  /** The messages waiting on one task, oldest first. */
+  async messages(taskId: string): Promise<TaskMessageRecordV1[]> {
+    const stored = await this.#storage.list<unknown>({
+      prefix: taskMessagePrefixV1(taskId),
+    });
+    return [...stored.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, value]) => decodeTaskMessageRecordV1(value));
+  }
+
+  /**
+   * Records the durable intent to cancel one task, before the child is asked.
+   *
+   * Idempotent: a second stop reads the first intent back, so a retried
+   * cancellation never becomes two. A task already terminal is refused, because
+   * cancelling something that has settled would rewrite an outcome.
+   */
+  async requestStop(
+    taskId: string,
+    now: Date,
+    requestedBy: "bot" | "user",
+  ): Promise<
+    | { status: "requested" | "replayed"; record: TaskRecordV1 }
+    | { status: "refused"; reason: string }
+  > {
+    return this.#storage.transaction(async (transaction) => {
+      let record: TaskRecordV1;
+      try {
+        record = await this.#require(transaction, taskId);
+      } catch (error) {
+        if (error instanceof TaskNotFoundError) {
+          return { status: "refused" as const, reason: error.message };
+        }
+        throw error;
+      }
+      if (isTerminalTaskStatusV1(record.status)) {
+        return {
+          status: "refused" as const,
+          reason: `task "${taskId}" is already ${record.status}`,
+        };
+      }
+      const key = taskStopKeyV1(taskId);
+      if ((await transaction.get<unknown>(key)) !== undefined) {
+        return { status: "replayed" as const, record };
+      }
+      await transaction.put(key, {
+        schemaVersion: 1,
+        taskId,
+        requestedBy,
+        requestedAt: now.toISOString(),
+      });
+      return { status: "requested" as const, record };
+    });
+  }
+
+  /** Whether a cancellation has been recorded for one task. */
+  async stopRequested(taskId: string): Promise<boolean> {
+    return (
+      (await this.#storage.get<unknown>(taskStopKeyV1(taskId))) !== undefined
+    );
+  }
+
+  /**
+   * The task a resume runs in the child of. Refuses a task that is still
+   * running (`docs/research/grokbot-computer.md` l.469–470): `resume` names a
+   * *finished* subagent, and resuming a live one would put two Turns in one
+   * Session.
+   */
+  async resumable(
+    taskId: string,
+  ): Promise<
+    | { status: "resumable"; record: TaskRecordV1; anchorTaskId: string }
+    | { status: "refused"; reason: string }
+  > {
+    let record: TaskRecordV1;
+    try {
+      record = await this.read(taskId);
+    } catch (error) {
+      if (error instanceof TaskNotFoundError) {
+        return { status: "refused", reason: error.message };
+      }
+      throw error;
+    }
+    if (!isTerminalTaskStatusV1(record.status)) {
+      return {
+        status: "refused",
+        reason: `task "${taskId}" is still ${record.status}; resume names a subagent that has finished`,
+      };
+    }
+    return {
+      status: "resumable",
+      record,
+      anchorTaskId: taskAnchorIdV1(record.childSessionId),
+    };
   }
 
   async #require(

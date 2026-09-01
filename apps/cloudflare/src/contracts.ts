@@ -71,7 +71,10 @@ import type {
   RoutineRunDetailViewV1,
   RoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
-import type { TaskListViewV1 } from "@frockbot/plugin-subagents/shared";
+import type {
+  TaskListViewV1,
+  TaskViewV1,
+} from "@frockbot/plugin-subagents/shared";
 import type {
   PackagePublicationReceiptV1,
   PackageRevisionHistoryV1,
@@ -635,6 +638,19 @@ export interface BotConfigurationBinding {
     userId: string;
     botId: string;
   }): Promise<TaskListViewV1>;
+  readTask(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    taskId: string;
+  }): Promise<TaskViewV1>;
+  /** Explicit, authenticated cancellation of one task, by its User. */
+  stopTask(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    taskId: string;
+  }): Promise<TaskViewV1>;
   executeRoutineCommand(request: {
     schemaVersion: 1;
     userId: string;

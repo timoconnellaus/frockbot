@@ -1,15 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import {
   createSubagentModelsPromptSectionV1,
+  createTaskCheckTool,
+  createTaskMessageTool,
+  createTaskResumeTool,
+  createTaskStopTool,
   createTaskTool,
   decodeTaskToolInputV1,
   subagentsAdmissionCeilingV1,
   TASK_DISPATCH_CAPABILITY_V1,
+  TASK_LIFECYCLE_CAPABILITY_V1,
   type SubagentDispatchOutcomeV1,
   type SubagentDispatchRequestV1,
 } from "./agent.js";
 import { subagentModelCatalogV1 } from "./models.js";
 import {
+  TASK_MESSAGE_MAX_V1,
   TASK_PROMPT_MAX_BYTES_V1,
   type TaskModelBindingV1,
 } from "./records.js";
@@ -213,5 +219,203 @@ describe("the <available_subagent_models> section", () => {
         turnType: "chat",
       }),
     ).toBe("");
+  });
+});
+
+describe("the lifecycle tools", () => {
+  test("are admitted on chat and automation turns, under the manifest ceiling", () => {
+    expect(subagentsAdmissionCeilingV1(TASK_LIFECYCLE_CAPABILITY_V1)).toEqual([
+      "chat",
+      "automation",
+    ]);
+    for (const tool of [
+      createTaskCheckTool({ check: () => Promise.reject(new Error("unused")) }),
+      createTaskMessageTool({
+        message: () => Promise.reject(new Error("unused")),
+      }),
+      createTaskStopTool({ stop: () => Promise.reject(new Error("unused")) }),
+    ]) {
+      expect(tool.admission).toEqual({ turnTypes: ["chat", "automation"] });
+    }
+  });
+
+  test("task_check says it is a read, and that nothing here is worth polling", async () => {
+    const tool = createTaskCheckTool({
+      check: () =>
+        Promise.resolve({
+          status: "known",
+          taskId: "tk-1",
+          taskType: "executor",
+          description: "read the changelog",
+          taskStatus: "running",
+          model: "provider-ollama-cloud/glm-5.3-flash:cloud",
+          queuedMessages: 2,
+        }),
+    });
+    expect(tool.idempotent).toBe(true);
+    const result = await tool.execute({ taskId: "tk-1" }, context());
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("is running");
+    expect(result.content).toContain("2 of your messages are waiting");
+    expect(result.content).toContain("do not poll");
+  });
+
+  test("task_check reports the last summary of a settled task, and does not tell it to wait", async () => {
+    const tool = createTaskCheckTool({
+      check: () =>
+        Promise.resolve({
+          status: "known",
+          taskId: "tk-1",
+          taskType: "executor",
+          description: "read the changelog",
+          taskStatus: "completed",
+          model: "m",
+          summary: "It changed on Tuesday.",
+          queuedMessages: 0,
+        }),
+    });
+    const result = await tool.execute({ taskId: "tk-1" }, context());
+    expect(result.content).toContain("Last summary: It changed on Tuesday.");
+    expect(result.content).not.toContain("do not poll");
+  });
+
+  test("task_message refuses a task that is not running, without reaching the queue", async () => {
+    let asked = false;
+    const tool = createTaskMessageTool({
+      message: () => {
+        asked = true;
+        return Promise.resolve({
+          status: "refused",
+          reason: 'task "tk-1" is completed and can no longer be messaged',
+        });
+      },
+    });
+    const result = await tool.execute(
+      { taskId: "tk-1", message: "stop reading" },
+      context(),
+    );
+    expect(asked).toBe(true);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("can no longer be messaged");
+  });
+
+  test("task_message refuses an unbounded payload at its own door", async () => {
+    let asked = false;
+    const tool = createTaskMessageTool({
+      message: () => {
+        asked = true;
+        return Promise.resolve({ status: "queued", taskId: "tk-1", depth: 1 });
+      },
+    });
+    const result = await tool.execute(
+      { taskId: "tk-1", message: "x".repeat(TASK_MESSAGE_MAX_V1 + 1) },
+      context(),
+    );
+    expect(asked).toBe(false);
+    expect(result.isError).toBe(true);
+  });
+
+  test("task_stop is idempotent, because stopping a stopped task is stopping it once", () => {
+    expect(
+      createTaskStopTool({ stop: () => Promise.reject(new Error("unused")) })
+        .idempotent,
+    ).toBe(true);
+  });
+
+  test("task_resume refuses a model beside a resume, before anything is dispatched", async () => {
+    let dispatched = false;
+    const tool = createTaskResumeTool({
+      writer: { sessionId: "user:bot", turnId: "run-1", runId: "run-1" },
+      resume: () => {
+        dispatched = true;
+        return Promise.resolve({
+          status: "dispatched",
+          taskId: "tk-2",
+          model: "m",
+        });
+      },
+    });
+    const result = await tool.execute(
+      { resume: "tk-1", prompt: "keep going", model: "other/model" },
+      context(),
+    );
+    expect(dispatched).toBe(false);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("does not take a model");
+  });
+
+  test("task_resume passes a running task's refusal straight through", async () => {
+    const tool = createTaskResumeTool({
+      writer: { sessionId: "user:bot", turnId: "run-1", runId: "run-1" },
+      resume: () =>
+        Promise.resolve({
+          status: "refused",
+          reason:
+            'task "tk-1" is still running; resume names a subagent that has finished',
+        }),
+    });
+    const result = await tool.execute(
+      { resume: "tk-1", prompt: "keep going" },
+      context(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("still running");
+  });
+
+  test("task_resume defaults to the background, exactly as Task does", async () => {
+    let seen: { background: boolean } | undefined;
+    const tool = createTaskResumeTool({
+      writer: { sessionId: "user:bot", turnId: "run-1", runId: "run-1" },
+      resume: (request) => {
+        seen = request;
+        return Promise.resolve({
+          status: "dispatched",
+          taskId: "tk-2",
+          model: "m",
+        });
+      },
+    });
+    const result = await tool.execute(
+      { resume: "tk-1", prompt: "keep going" },
+      context(),
+    );
+    expect(seen?.background).toBe(true);
+    expect(result.content).toContain("Resumed subagent tk-1 as tk-2");
+  });
+
+  test("a blocking dispatch that settled inside the window answers with the summary", async () => {
+    const result = await tool(() =>
+      Promise.resolve({
+        status: "settled",
+        taskId: "tk-1",
+        model: "m",
+        taskStatus: "completed",
+        summary: "It changed on Tuesday.",
+      }),
+    ).execute(
+      {
+        description: "read it",
+        prompt: "read the changelog",
+        background: false,
+      },
+      context(),
+    );
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("It changed on Tuesday.");
+  });
+
+  test("a blocking dispatch that did not settle says it is still running, by id", async () => {
+    const result = await tool(() =>
+      Promise.resolve({ status: "dispatched", taskId: "tk-1", model: "m" }),
+    ).execute(
+      {
+        description: "read it",
+        prompt: "read the changelog",
+        background: false,
+      },
+      context(),
+    );
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("still running, id tk-1");
   });
 });

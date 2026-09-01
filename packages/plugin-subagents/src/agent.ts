@@ -33,20 +33,30 @@ import {
 } from "./models.js";
 import {
   DEFAULT_TASK_TYPE_V1,
+  isTaskIdV1,
   SubagentDecodeError,
   TASK_ATTACHMENT_LIMIT_V1,
   TASK_ATTACHMENT_PATH_MAX_V1,
   TASK_DESCRIPTION_MAX_V1,
+  TASK_ID_MAX_V1,
+  TASK_MESSAGE_MAX_V1,
   TASK_PROMPT_MAX_BYTES_V1,
   TASK_TYPES_V1,
   utf8ByteLengthV1,
   type TaskModelV1,
+  type TaskStatusV1,
   type TaskTypeV1,
 } from "./records.js";
 
 export const TASK_TOOL_V1 = "Task";
+export const TASK_CHECK_TOOL_V1 = "task_check";
+export const TASK_MESSAGE_TOOL_V1 = "task_message";
+export const TASK_STOP_TOOL_V1 = "task_stop";
+export const TASK_RESUME_TOOL_V1 = "task_resume";
 /** The manifest Capability the tool is contributed under. */
 export const TASK_DISPATCH_CAPABILITY_V1 = "task-dispatch";
+/** The manifest Capability the four lifecycle tools are contributed under. */
+export const TASK_LIFECYCLE_CAPABILITY_V1 = "task-lifecycle";
 /** The prompt section id, so a host can find it without knowing its text. */
 export const SUBAGENT_MODELS_SECTION_V1 = "subagent-models";
 
@@ -100,7 +110,51 @@ export interface SubagentDispatchRequestV1 {
 
 export type SubagentDispatchOutcomeV1 =
   | { status: "dispatched"; taskId: string; model: string }
+  /**
+   * A blocking dispatch whose child settled inside the window. The summary is
+   * the tool result, so a `background:false` Task reads like a call that
+   * returned rather than one that has to be checked on.
+   */
+  | {
+      status: "settled";
+      taskId: string;
+      model: string;
+      taskStatus: TaskStatusV1;
+      summary?: string;
+      failure?: string;
+    }
   | { status: "refused"; reason: string };
+
+/** What one `task_check` answers. */
+export type SubagentCheckOutcomeV1 =
+  | {
+      status: "known";
+      taskId: string;
+      taskType: TaskTypeV1;
+      description: string;
+      taskStatus: TaskStatusV1;
+      model: string;
+      summary?: string;
+      failure?: string;
+      queuedMessages: number;
+    }
+  | { status: "refused"; reason: string };
+
+export type SubagentMessageOutcomeV1 =
+  | { status: "queued"; taskId: string; depth: number }
+  | { status: "refused"; reason: string };
+
+export type SubagentStopOutcomeV1 =
+  { status: "stopped"; taskId: string } | { status: "refused"; reason: string };
+
+/** What one `task_resume` asks for: a new run in a finished task's child. */
+export interface SubagentResumeRequestV1 {
+  resume: string;
+  prompt: string;
+  description?: string;
+  background: boolean;
+  effectId: string;
+}
 
 /**
  * The host seam this Package receives. The Durable Object supplies it for one
@@ -117,6 +171,11 @@ export interface SubagentsRuntimeHostV1 {
   dispatch(
     request: SubagentDispatchRequestV1,
   ): Promise<SubagentDispatchOutcomeV1>;
+  /** The four lifecycle seams. Every durable decision is behind them. */
+  check(taskId: string): Promise<SubagentCheckOutcomeV1>;
+  message(taskId: string, message: string): Promise<SubagentMessageOutcomeV1>;
+  stop(taskId: string): Promise<SubagentStopOutcomeV1>;
+  resume(request: SubagentResumeRequestV1): Promise<SubagentDispatchOutcomeV1>;
 }
 
 const TASK_INPUT_SCHEMA = {
@@ -276,10 +335,39 @@ function refusal(reason: string): ToolExecutionResult {
   return { content: `${TASK_TOOL_V1} was refused: ${reason}`, isError: true };
 }
 
+/**
+ * The durable Session line one task lifecycle act leaves on the *parent*.
+ *
+ * The child's Session never enters the visible transcript (ADR 0017), so these
+ * events are the only thing the conversation says about a task, and the client
+ * draws the dispatch as a chip. Recording is best effort by construction: a
+ * line that could not be written must not turn a dispatch that happened into a
+ * tool error that says it did not.
+ */
+export interface SubagentEventRecorderV1 {
+  dispatched(event: {
+    occurrenceId: string;
+    taskId: string;
+    taskType: TaskTypeV1;
+    description: string;
+    model: string;
+    background: boolean;
+  }): void;
+  messaged(event: {
+    occurrenceId: string;
+    taskId: string;
+    message: string;
+  }): void;
+}
+
 export function createTaskTool(
-  host: SubagentsRuntimeHostV1 & {
+  host: Pick<
+    SubagentsRuntimeHostV1,
+    "botId" | "turnType" | "models" | "dispatch"
+  > & {
     writer: NonNullable<SubagentsRuntimeHostV1["writer"]>;
   },
+  record?: SubagentEventRecorderV1,
 ): ToolDefinition {
   return {
     name: TASK_TOOL_V1,
@@ -330,12 +418,476 @@ export function createTaskTool(
         return refusal(error instanceof Error ? error.message : String(error));
       }
       if (outcome.status === "refused") return refusal(outcome.reason);
+      record?.dispatched({
+        occurrenceId: context.effectId,
+        taskId: outcome.taskId,
+        taskType: decoded.type,
+        description: decoded.description,
+        model: outcome.model,
+        background: decoded.background,
+      });
+      if (outcome.status === "settled") {
+        // A `background:false` dispatch whose child finished inside the
+        // blocking window: the summary is the tool result, so the Turn reads
+        // it as a call that returned rather than one to check on.
+        return {
+          content: `${decoded.type} subagent ${outcome.taskId} ${outcome.taskStatus}. ${settledSummaryV1(outcome)}`,
+          isError: outcome.taskStatus !== "completed",
+        };
+      }
       return {
         content: [
           `Dispatched ${decoded.type} subagent ${outcome.taskId} on ${outcome.model}.`,
           "It runs as its own Turn and cannot see this conversation.",
-          "You are notified when it finishes; do not poll for it.",
+          decoded.background
+            ? DO_NOT_POLL
+            : `It is still running, id ${outcome.taskId}; it continues in the background and ${DO_NOT_POLL.charAt(0).toLowerCase()}${DO_NOT_POLL.slice(1)}`,
         ].join(" "),
+        isError: false,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The lifecycle tools (`docs/research/grokbot-computer.md` l.415–418).
+//
+// All four are the same shape: decode the model's words, call the host seam,
+// render the answer. None of them holds durable state, and none of them can
+// widen what a task was admitted to do — a check reads, a message queues, a
+// stop cancels, and a resume dispatches a new run under the *same* admission
+// the first one was granted.
+// ---------------------------------------------------------------------------
+
+function taskIdArgument(value: unknown, tool: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new SubagentDecodeError(`${tool} taskId must be a non-empty string`);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > TASK_ID_MAX_V1 || !isTaskIdV1(trimmed)) {
+    throw new SubagentDecodeError(`${tool} taskId is not a task id`);
+  }
+  return trimmed;
+}
+
+function onlyKeys(
+  input: unknown,
+  required: readonly string[],
+  optional: readonly string[],
+  tool: string,
+): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new SubagentDecodeError(`${tool} input must be an object`);
+  }
+  const value = input as Record<string, unknown>;
+  const allowed = new Set([...required, ...optional]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new SubagentDecodeError(`${tool} input has unknown field "${key}"`);
+    }
+  }
+  for (const key of required) {
+    if (!Object.hasOwn(value, key)) {
+      throw new SubagentDecodeError(`${tool} input is missing "${key}"`);
+    }
+  }
+  return value;
+}
+
+export function decodeTaskCheckInputV1(input: unknown): { taskId: string } {
+  const value = onlyKeys(input, ["taskId"], [], TASK_CHECK_TOOL_V1);
+  return { taskId: taskIdArgument(value.taskId, TASK_CHECK_TOOL_V1) };
+}
+
+export function decodeTaskMessageInputV1(input: unknown): {
+  taskId: string;
+  message: string;
+} {
+  const value = onlyKeys(
+    input,
+    ["taskId", "message"],
+    [],
+    TASK_MESSAGE_TOOL_V1,
+  );
+  if (
+    typeof value.message !== "string" ||
+    value.message.trim().length === 0 ||
+    value.message.trim().length > TASK_MESSAGE_MAX_V1
+  ) {
+    throw new SubagentDecodeError(
+      `${TASK_MESSAGE_TOOL_V1} message must be a non-empty string of at most ${TASK_MESSAGE_MAX_V1} characters`,
+    );
+  }
+  return {
+    taskId: taskIdArgument(value.taskId, TASK_MESSAGE_TOOL_V1),
+    message: value.message.trim(),
+  };
+}
+
+export function decodeTaskStopInputV1(input: unknown): { taskId: string } {
+  const value = onlyKeys(input, ["taskId"], [], TASK_STOP_TOOL_V1);
+  return { taskId: taskIdArgument(value.taskId, TASK_STOP_TOOL_V1) };
+}
+
+export interface TaskResumeInputV1 {
+  resume: string;
+  prompt: string;
+  description?: string;
+  background: boolean;
+}
+
+/**
+ * `resume` and `model` are mutually exclusive (l.472–474): the resumed run
+ * continues a Session that was already pinned to a binding, and naming a second
+ * model would silently change what the transcript was produced by. The refusal
+ * is here rather than at the host, because it is a statement about the tool's
+ * own arguments.
+ */
+export function decodeTaskResumeInputV1(input: unknown): TaskResumeInputV1 {
+  const value = onlyKeys(
+    input,
+    ["resume", "prompt"],
+    ["description", "background", "model"],
+    TASK_RESUME_TOOL_V1,
+  );
+  if (value.model !== undefined) {
+    throw new SubagentDecodeError(
+      `${TASK_RESUME_TOOL_V1} does not take a model: a resumed subagent continues on the model it was dispatched with`,
+    );
+  }
+  const prompt =
+    typeof value.prompt === "string" ? value.prompt.trim() : undefined;
+  if (!prompt || prompt.length === 0) {
+    throw new SubagentDecodeError(
+      `${TASK_RESUME_TOOL_V1} prompt must be a non-empty string`,
+    );
+  }
+  if (utf8ByteLengthV1(prompt) > TASK_PROMPT_MAX_BYTES_V1) {
+    throw new SubagentDecodeError(
+      `${TASK_RESUME_TOOL_V1} prompt must be at most ${TASK_PROMPT_MAX_BYTES_V1} bytes`,
+    );
+  }
+  if (
+    value.description !== undefined &&
+    (typeof value.description !== "string" ||
+      value.description.trim().length === 0 ||
+      value.description.trim().length > TASK_DESCRIPTION_MAX_V1)
+  ) {
+    throw new SubagentDecodeError(
+      `${TASK_RESUME_TOOL_V1} description must be a bounded non-empty string`,
+    );
+  }
+  if (value.background !== undefined && typeof value.background !== "boolean") {
+    throw new SubagentDecodeError(
+      `${TASK_RESUME_TOOL_V1} background must be a boolean`,
+    );
+  }
+  return {
+    resume: taskIdArgument(value.resume, TASK_RESUME_TOOL_V1),
+    prompt,
+    ...(value.description === undefined
+      ? {}
+      : { description: (value.description as string).trim() }),
+    background: value.background === undefined ? true : value.background,
+  };
+}
+
+function toolRefusal(tool: string, reason: string): ToolExecutionResult {
+  return { content: `${tool} was refused: ${reason}`, isError: true };
+}
+
+/** The line every dispatch answer ends on, so no turn learns to poll. */
+const DO_NOT_POLL = "You are notified on completion; do not poll for it.";
+
+function settledSummaryV1(outcome: {
+  taskStatus: TaskStatusV1;
+  summary?: string;
+  failure?: string;
+}): string {
+  if (outcome.taskStatus === "completed") {
+    return outcome.summary ?? "It finished without leaving a summary.";
+  }
+  if (outcome.taskStatus === "stopped") {
+    return `It was stopped.${outcome.failure ? ` ${outcome.failure}` : ""}`;
+  }
+  return `It failed: ${outcome.failure ?? "no reason was recorded"}.`;
+}
+
+export function createTaskCheckTool(
+  host: Pick<SubagentsRuntimeHostV1, "check">,
+): ToolDefinition {
+  return {
+    name: TASK_CHECK_TOOL_V1,
+    description: [
+      "Read the current state of one subagent you dispatched.",
+      "It answers with the task's status and its last summary.",
+      DO_NOT_POLL,
+      "Use this only when your user asks what a subagent is doing.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: {
+          type: "string",
+          description: "The id Task gave you when it dispatched the subagent.",
+        },
+      },
+      required: ["taskId"],
+      additionalProperties: false,
+    },
+    idempotent: true,
+    admission: { turnTypes: ["chat", "automation"] },
+    validate: (input: unknown) => {
+      try {
+        decodeTaskCheckInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (input: unknown): Promise<ToolExecutionResult> => {
+      let taskId: string;
+      try {
+        taskId = decodeTaskCheckInputV1(input).taskId;
+      } catch (error) {
+        return toolRefusal(
+          TASK_CHECK_TOOL_V1,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      const answer = await host.check(taskId);
+      if (answer.status === "refused") {
+        return toolRefusal(TASK_CHECK_TOOL_V1, answer.reason);
+      }
+      const lines = [
+        `${answer.taskType} subagent ${answer.taskId} ("${answer.description}") on ${answer.model} is ${answer.taskStatus}.`,
+      ];
+      if (answer.summary) lines.push(`Last summary: ${answer.summary}`);
+      if (answer.failure) lines.push(`Failure: ${answer.failure}`);
+      if (answer.queuedMessages > 0) {
+        lines.push(`${answer.queuedMessages} of your messages are waiting.`);
+      }
+      if (answer.taskStatus === "queued" || answer.taskStatus === "running") {
+        lines.push(DO_NOT_POLL);
+      }
+      return { content: lines.join(" "), isError: false };
+    },
+  };
+}
+
+export function createTaskMessageTool(
+  host: Pick<SubagentsRuntimeHostV1, "message">,
+  record?: SubagentEventRecorderV1,
+): ToolDefinition {
+  return {
+    name: TASK_MESSAGE_TOOL_V1,
+    description: [
+      "Send one message to a subagent that is still running.",
+      "It is queued and read by the subagent; it is refused if the subagent is not running.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", description: "The subagent's task id." },
+        message: {
+          type: "string",
+          description:
+            "What to tell the subagent. It cannot see this conversation, so say everything it needs.",
+        },
+      },
+      required: ["taskId", "message"],
+      additionalProperties: false,
+    },
+    idempotent: false,
+    admission: { turnTypes: ["chat", "automation"] },
+    validate: (input: unknown) => {
+      try {
+        decodeTaskMessageInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (
+      input: unknown,
+      context: ToolExecutionContext,
+    ): Promise<ToolExecutionResult> => {
+      let decoded: { taskId: string; message: string };
+      try {
+        decoded = decodeTaskMessageInputV1(input);
+      } catch (error) {
+        return toolRefusal(
+          TASK_MESSAGE_TOOL_V1,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      const answer = await host.message(decoded.taskId, decoded.message);
+      if (answer.status === "refused") {
+        return toolRefusal(TASK_MESSAGE_TOOL_V1, answer.reason);
+      }
+      record?.messaged({
+        occurrenceId: context.effectId,
+        taskId: answer.taskId,
+        message: decoded.message,
+      });
+      return {
+        content: `Queued your message for subagent ${answer.taskId}; ${answer.depth} are waiting. ${DO_NOT_POLL}`,
+        isError: false,
+      };
+    },
+  };
+}
+
+export function createTaskStopTool(
+  host: Pick<SubagentsRuntimeHostV1, "stop">,
+): ToolDefinition {
+  return {
+    name: TASK_STOP_TOOL_V1,
+    description: [
+      "Stop a subagent you dispatched. The cancellation is durable and final:",
+      "the subagent ends, its slot is released, and it cannot be restarted —",
+      "use task_resume to run a fresh instruction in the same subagent instead.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", description: "The subagent's task id." },
+      },
+      required: ["taskId"],
+      additionalProperties: false,
+    },
+    // Stopping the same task twice is stopping it once: the second call reads
+    // the recorded cancellation back.
+    idempotent: true,
+    admission: { turnTypes: ["chat", "automation"] },
+    validate: (input: unknown) => {
+      try {
+        decodeTaskStopInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (input: unknown): Promise<ToolExecutionResult> => {
+      let taskId: string;
+      try {
+        taskId = decodeTaskStopInputV1(input).taskId;
+      } catch (error) {
+        return toolRefusal(
+          TASK_STOP_TOOL_V1,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      const answer = await host.stop(taskId);
+      if (answer.status === "refused") {
+        return toolRefusal(TASK_STOP_TOOL_V1, answer.reason);
+      }
+      return {
+        content: `Stopped subagent ${answer.taskId}. The cancellation is durable and it will not run again.`,
+        isError: false,
+      };
+    },
+  };
+}
+
+export function createTaskResumeTool(
+  host: Pick<SubagentsRuntimeHostV1, "resume"> & {
+    writer: NonNullable<SubagentsRuntimeHostV1["writer"]>;
+  },
+  record?: SubagentEventRecorderV1,
+): ToolDefinition {
+  return {
+    name: TASK_RESUME_TOOL_V1,
+    description: [
+      "Give a finished subagent a new instruction, in the same subagent it ran in before,",
+      "so it keeps everything it already learned. It is refused while the subagent is still running,",
+      "and it takes no model: a resumed subagent runs on the model it was dispatched with.",
+      DO_NOT_POLL,
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        resume: {
+          type: "string",
+          description: "The task id of a subagent that has finished.",
+        },
+        prompt: {
+          type: "string",
+          description:
+            "The new instruction. The subagent keeps its own prior transcript.",
+        },
+        description: {
+          type: "string",
+          description:
+            "A short label for this run, shown to your user. Defaults to the earlier one.",
+        },
+        background: {
+          type: "boolean",
+          description: "Defaults to true, exactly as it does on Task.",
+        },
+      },
+      required: ["resume", "prompt"],
+      additionalProperties: false,
+    },
+    idempotent: false,
+    admission: { turnTypes: ["chat", "automation"] },
+    validate: (input: unknown) => {
+      try {
+        decodeTaskResumeInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (
+      input: unknown,
+      context: ToolExecutionContext,
+    ): Promise<ToolExecutionResult> => {
+      let decoded: TaskResumeInputV1;
+      try {
+        decoded = decodeTaskResumeInputV1(input);
+      } catch (error) {
+        return toolRefusal(
+          TASK_RESUME_TOOL_V1,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      let outcome: SubagentDispatchOutcomeV1;
+      try {
+        outcome = await host.resume({
+          resume: decoded.resume,
+          prompt: decoded.prompt,
+          ...(decoded.description === undefined
+            ? {}
+            : { description: decoded.description }),
+          background: decoded.background,
+          effectId: context.effectId,
+        });
+      } catch (error) {
+        return toolRefusal(
+          TASK_RESUME_TOOL_V1,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      if (outcome.status === "refused") {
+        return toolRefusal(TASK_RESUME_TOOL_V1, outcome.reason);
+      }
+      record?.dispatched({
+        occurrenceId: context.effectId,
+        taskId: outcome.taskId,
+        taskType: "executor",
+        description: decoded.description ?? `Resumed ${decoded.resume}`,
+        model: outcome.model,
+        background: decoded.background,
+      });
+      if (outcome.status === "settled") {
+        return {
+          content: `Subagent ${outcome.taskId} resumed and ${outcome.taskStatus}. ${settledSummaryV1(outcome)}`,
+          isError: outcome.taskStatus !== "completed",
+        };
+      }
+      return {
+        content: `Resumed subagent ${decoded.resume} as ${outcome.taskId} on ${outcome.model}. ${DO_NOT_POLL}`,
         isError: false,
       };
     },
@@ -368,23 +920,62 @@ export function createSubagentsRuntimePlugin(
   host: SubagentsRuntimeHostV1,
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) => {
+    // The Turn ordinal and step a task event is recorded under. The Agent loop
+    // announces them; a tool context does not carry them, so they are caught
+    // where the loop already says so — the `plugin-computer` pattern.
+    let currentTurn = 1;
+    let currentStep = 1;
     const disposers: Array<() => void> = [
       ctx.systemPrompt.register(createSubagentModelsPromptSectionV1(host)),
+      ctx.on("agent/pre-step", (_agent, _inputs, turn, step, next) => {
+        currentTurn = turn;
+        currentStep = step;
+        return next();
+      }),
     ];
     const writer = host.writer;
     if (writer) {
-      const ceiling = subagentsAdmissionCeilingV1(TASK_DISPATCH_CAPABILITY_V1);
+      const dispatchCeiling = subagentsAdmissionCeilingV1(
+        TASK_DISPATCH_CAPABILITY_V1,
+      );
+      const lifecycleCeiling = subagentsAdmissionCeilingV1(
+        TASK_LIFECYCLE_CAPABILITY_V1,
+      );
+      const append = (event: Record<string, unknown> & { type: string }) => {
+        const session = ctx.sessions.get(writer.sessionId);
+        if (!session || session.disposed) return;
+        session.append({
+          turn: Math.max(1, currentTurn),
+          step: Math.max(1, currentStep),
+          ...event,
+        } as never);
+      };
+      const record: SubagentEventRecorderV1 = {
+        dispatched: (event) => append({ type: "task/dispatched", ...event }),
+        messaged: (event) => append({ type: "task/message", ...event }),
+      };
       disposers.push(
         ctx.tools.register(
-          createTaskTool({ ...host, writer }),
-          ceiling ? { admissionCeiling: ceiling } : undefined,
+          createTaskTool({ ...host, writer }, record),
+          dispatchCeiling ? { admissionCeiling: dispatchCeiling } : undefined,
         ),
       );
+      const lifecycleOptions = lifecycleCeiling
+        ? { admissionCeiling: lifecycleCeiling }
+        : undefined;
+      for (const tool of [
+        createTaskCheckTool(host),
+        createTaskMessageTool(host, record),
+        createTaskStopTool(host),
+        createTaskResumeTool({ ...host, writer }, record),
+      ]) {
+        disposers.push(ctx.tools.register(tool, lifecycleOptions));
+      }
     }
     return () => {
       for (const dispose of disposers.toReversed()) dispose();
     };
   };
-  plugin.inject = ["tools", "systemPrompt"];
+  plugin.inject = ["tools", "systemPrompt", "sessions"];
   return plugin;
 }

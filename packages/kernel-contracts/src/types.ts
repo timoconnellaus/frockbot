@@ -602,6 +602,53 @@ export interface SessionEventMap {
       turnId: string;
     };
   };
+  /**
+   * A subagent Task this Turn dispatched (ADR 0017). Recorded on the *parent*
+   * Session, because the child's Session is its own durable state and never
+   * enters the visible transcript: this event is the only thing the
+   * conversation says about a task, and the client draws it as a chip.
+   *
+   * `taskType` is an opaque string here for the same reason `turnType` is a
+   * kernel value and a role catalog is not: which roles exist is Package
+   * policy, and the kernel only records the one that was used.
+   */
+  "task/dispatched": {
+    turn: number;
+    step: number;
+    occurrenceId: string;
+    taskId: string;
+    taskType: string;
+    description: string;
+    model: string;
+    background: boolean;
+  };
+  /** A message the parent appended to a running task's bounded queue. */
+  "task/message": {
+    turn: number;
+    step: number;
+    occurrenceId: string;
+    taskId: string;
+    message: string;
+  };
+  /**
+   * A task reached its one terminal state. It carries no `turn`: a background
+   * task settles after the Turn that dispatched it is over, so this is durable
+   * Bot history rather than a step of any Turn — the `bot/renamed` shape.
+   */
+  "task/settled": {
+    taskId: string;
+    status: "completed" | "failed" | "stopped";
+    summary?: string;
+  };
+  /**
+   * Explicit authenticated cancellation of a task, recorded before the child
+   * is asked to stop. `requestedBy` says which door it came through: the Bot's
+   * own `task_stop`, or the User's `POST /tasks/:taskId/stop`.
+   */
+  "task/stopped": {
+    taskId: string;
+    requestedBy: "bot" | "user";
+  };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   /**
    * `reason` states why a Turn ended in a non-`completed` outcome, so the
@@ -1447,6 +1494,73 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.mimeType, "session event.mimeType");
       eventInteger(event.width, "session event.width", 1);
       eventInteger(event.height, "session event.height", 1);
+      break;
+    case "task/dispatched":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "occurrenceId",
+          "taskId",
+          "taskType",
+          "description",
+          "model",
+          "background",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.occurrenceId, "session event.occurrenceId");
+      eventString(event.taskId, "session event.taskId");
+      eventString(event.taskType, "session event.taskType");
+      eventString(event.description, "session event.description");
+      eventString(event.model, "session event.model");
+      if (typeof event.background !== "boolean") {
+        throw new Error("session event.background must be a boolean");
+      }
+      break;
+    case "task/message":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "occurrenceId", "taskId", "message"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.occurrenceId, "session event.occurrenceId");
+      eventString(event.taskId, "session event.taskId");
+      eventString(event.message, "session event.message");
+      break;
+    case "task/settled":
+      requireEventKeys(
+        event,
+        keys(
+          "taskId",
+          "status",
+          ...(Object.hasOwn(event, "summary") ? ["summary"] : []),
+        ),
+        "session event",
+      );
+      eventString(event.taskId, "session event.taskId");
+      if (
+        event.status !== "completed" &&
+        event.status !== "failed" &&
+        event.status !== "stopped"
+      ) {
+        throw new Error("session event.status is invalid");
+      }
+      if (event.summary !== undefined) {
+        eventString(event.summary, "session event.summary");
+      }
+      break;
+    case "task/stopped":
+      requireEventKeys(event, keys("taskId", "requestedBy"), "session event");
+      eventString(event.taskId, "session event.taskId");
+      if (event.requestedBy !== "bot" && event.requestedBy !== "user") {
+        throw new Error("session event.requestedBy is invalid");
+      }
       break;
     case "computer/process": {
       requireEventKeys(

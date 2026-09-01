@@ -36,6 +36,8 @@ const MAX_NOTIFICATION_TITLE_BYTES = 512;
 const MAX_NOTIFICATION_BODY_BYTES = 2_000;
 const MAX_CLIENT_TURN_BYTES = 256_000;
 const MAX_CURSOR_LENGTH = 320;
+const MAX_TASK_DESCRIPTION_BYTES = 800;
+const MAX_TASK_MODEL_BYTES = 512;
 export const CLIENT_RUN_PAGE_LIMIT = 32;
 export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
@@ -82,6 +84,22 @@ export type ClientRunEventV1 =
   | {
       type: "wake/parent";
       message: string;
+    }
+  /**
+   * A subagent this Turn dispatched (ADR 0017). The child's Session never
+   * enters the visible transcript, so this chip is the whole of what the
+   * conversation says about it: what it is, what it was asked to do, and which
+   * model it runs on. Its *live* status and its summary come from the Bot's
+   * task list, not from here — this event is the durable fact that the dispatch
+   * happened, and it never changes after it is written.
+   */
+  | {
+      type: "task/dispatched";
+      taskId: string;
+      taskType: string;
+      description: string;
+      model: string;
+      background: boolean;
     };
 
 export type ClientRunOutcomeV1 =
@@ -363,6 +381,23 @@ function projectionUnits(
           {
             type: "wake/parent",
             message: truncateWireString(event.message, MAX_EVENT_CONTENT_BYTES),
+          },
+        ],
+        droppable: true,
+      });
+    } else if (event.type === "task/dispatched") {
+      units.push({
+        events: [
+          {
+            type: "task/dispatched",
+            taskId: truncate(event.taskId, MAX_EVENT_ID_LENGTH),
+            taskType: truncateWireString(event.taskType, MAX_EVENT_NAME_BYTES),
+            description: truncateWireString(
+              event.description,
+              MAX_TASK_DESCRIPTION_BYTES,
+            ),
+            model: truncateWireString(event.model, MAX_TASK_MODEL_BYTES),
+            background: event.background,
           },
         ],
         droppable: true,
@@ -730,6 +765,37 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
       ),
     };
   }
+  if (event.type === "task/dispatched") {
+    exactKeys(
+      event,
+      ["type", "taskId", "taskType", "description", "model", "background"],
+      "run event",
+    );
+    if (typeof event.background !== "boolean") {
+      throw new Error("run event.background must be a boolean");
+    }
+    return {
+      type: "task/dispatched",
+      taskId: publicEventId(
+        string(event, "taskId", MAX_EVENT_ID_LENGTH, "run event"),
+        "run event.taskId",
+      ),
+      taskType: wireString(
+        event,
+        "taskType",
+        MAX_EVENT_NAME_BYTES,
+        "run event",
+      ),
+      description: wireString(
+        event,
+        "description",
+        MAX_TASK_DESCRIPTION_BYTES,
+        "run event",
+      ),
+      model: wireString(event, "model", MAX_TASK_MODEL_BYTES, "run event"),
+      background: event.background,
+    };
+  }
   throw new Error("run event.type is invalid");
 }
 
@@ -750,7 +816,11 @@ function decodeEvents(
     const call = events[index];
     // A send and a hand-off stand alone: they pair with nothing, so the
     // call/result walk steps straight over them.
-    if (call?.type === "send/to-user" || call?.type === "wake/parent") {
+    if (
+      call?.type === "send/to-user" ||
+      call?.type === "wake/parent" ||
+      call?.type === "task/dispatched"
+    ) {
       index += 1;
       continue;
     }

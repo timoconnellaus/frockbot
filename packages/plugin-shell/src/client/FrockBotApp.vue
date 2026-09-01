@@ -21,6 +21,7 @@ import {
   frockBotWebDataKey,
   type FrockBotWebData,
   type WebChatMessage,
+  type WebTaskChip,
   type WebToolAttachment,
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
@@ -125,14 +126,55 @@ function workspaceFileUrl(path: string): string {
   return `/api/bots/${encodeURIComponent(botId)}/workspace/file?path=${encodeURIComponent(path)}`;
 }
 
+/**
+ * One dispatched subagent, merged with what it currently is.
+ *
+ * The chip's identity — type, description, model — is the durable dispatch on
+ * the run, which never changes. Its status and its summary come from the Bot's
+ * task list, because a background subagent settles long after the Turn that
+ * dispatched it is over. The backend is the authority for both halves; this
+ * only joins them.
+ */
+function taskChipsOf(message: WebChatMessage): Array<{
+  chip: WebTaskChip;
+  status: string;
+  summary?: string;
+}> {
+  return (message.tasks ?? []).map((chip) => {
+    const record = state.value.tasks.find(
+      (candidate) => candidate.taskId === chip.taskId,
+    );
+    return {
+      chip,
+      status: record?.status ?? "queued",
+      ...(record?.summary === undefined
+        ? record?.failure === undefined
+          ? {}
+          : { summary: record.failure }
+        : { summary: record.summary }),
+    };
+  });
+}
+
+/** Which chips the User has opened. Local, and per chip. */
+const expandedTasks = ref(new Set<string>());
+
+function toggleTask(taskId: string): void {
+  const next = new Set(expandedTasks.value);
+  if (!next.delete(taskId)) next.add(taskId);
+  expandedTasks.value = next;
+}
+
 function isVisible(message: WebChatMessage): boolean {
   if (message.role === "user") return message.text.length > 0;
   if (message.role === "system") return message.text.length > 0;
   // A Turn the Bot ended with a widget writes no assistant text at all, so a
-  // send is on its own enough to draw the line.
+  // send is on its own enough to draw the line — and so is a Turn whose only
+  // visible act was dispatching a subagent.
   return (
     message.text.length > 0 ||
     message.sends.length > 0 ||
+    (message.tasks?.length ?? 0) > 0 ||
     message.status === "streaming"
   );
 }
@@ -511,6 +553,38 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   :key="sendIndex"
                   :send="send"
                 />
+              </div>
+              <!--
+                The subagents this Turn dispatched. The child's own Session is
+                never in this transcript, so the chip is the whole of what the
+                conversation says about it; opening one shows the summary the
+                child handed back and nothing else.
+              -->
+              <div v-if="taskChipsOf(message).length > 0" class="message-tasks">
+                <button
+                  v-for="entry in taskChipsOf(message)"
+                  :key="entry.chip.taskId"
+                  type="button"
+                  class="task-chip"
+                  :class="`task-chip-${entry.status}`"
+                  :aria-expanded="expandedTasks.has(entry.chip.taskId)"
+                  @click="toggleTask(entry.chip.taskId)"
+                >
+                  <span class="task-chip-type">{{ entry.chip.taskType }}</span>
+                  <span class="task-chip-description">{{
+                    entry.chip.description
+                  }}</span>
+                  <span class="task-chip-status">{{ entry.status }}</span>
+                  <span class="task-chip-model">{{ entry.chip.model }}</span>
+                  <span
+                    v-if="expandedTasks.has(entry.chip.taskId)"
+                    class="task-chip-summary"
+                    >{{
+                      entry.summary ??
+                      "This subagent has not reported a summary yet."
+                    }}</span
+                  >
+                </button>
               </div>
             </template>
             <div v-else class="message-bubble">{{ message.text }}</div>

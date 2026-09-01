@@ -38,6 +38,23 @@ export function routineAttributionV1(name: string): string {
   return `Automation: ${name}`.slice(0, ROUTINE_NAME_ATTRIBUTION_MAX);
 }
 
+/**
+ * What produced one completion-inbox entry.
+ *
+ * The queue was always wider than Routines — the `approval` pending input says
+ * so — and a background subagent lands in exactly the same two records for
+ * exactly the same reason: it is a Turn that cannot speak to its User, whose
+ * outcome has to be durable somewhere the next conversational Turn reads.
+ * Absent means `routine`, so every entry written before subagents existed still
+ * decodes and still reads as what it was.
+ */
+export type CompletionSourceV1 = "routine" | "subagent";
+
+/** "Subagent: " plus the task's description, capped like an attribution. */
+export function subagentAttributionV1(description: string): string {
+  return `Subagent: ${description}`.slice(0, ROUTINE_NAME_ATTRIBUTION_MAX);
+}
+
 /** Longest hand-off an inbox entry or a pending wake carries. */
 export const ROUTINE_INBOX_TEXT_MAX = 4_000;
 /** Longest title a pending wake carries. */
@@ -60,6 +77,12 @@ export interface RoutineInboxEntryV1 {
   /** Present when the Turn also handed off, naming the wake it queued. */
   wakeId?: string;
   acknowledgedAt?: string;
+  /**
+   * What produced this entry. Absent means `routine`; `routineId` then carries
+   * the task id, because the field names the automation the entry came from
+   * and a subagent task is one.
+   */
+  source?: CompletionSourceV1;
 }
 
 /** A hand-off the Bot has not yet been told about. */
@@ -80,6 +103,8 @@ export interface RoutinePendingWakeV1 {
   quiet: { automation: true };
   /** Set once the alarm has re-emitted this wake's notification intent. */
   renotifiedAt?: string;
+  /** What produced this wake. Absent means `routine`. */
+  source?: CompletionSourceV1;
 }
 
 /**
@@ -110,6 +135,13 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function completionSourceV1(value: unknown, label: string): CompletionSourceV1 {
+  if (value !== "routine" && value !== "subagent") {
+    throw new RoutineDecodeError(`${label} is invalid`);
+  }
+  return value;
+}
+
 export function decodeRoutineInboxEntryV1(
   value: unknown,
   label = "Routine inbox entry",
@@ -127,7 +159,7 @@ export function decodeRoutineInboxEntryV1(
       "createdAt",
       "acknowledged",
     ],
-    ["wakeId", "acknowledgedAt"],
+    ["wakeId", "acknowledgedAt", "source"],
     label,
   );
   if (candidate.schemaVersion !== 1) {
@@ -163,6 +195,9 @@ export function decodeRoutineInboxEntryV1(
             `${label} acknowledgedAt`,
           ),
         }),
+    ...(candidate.source === undefined
+      ? {}
+      : { source: completionSourceV1(candidate.source, `${label} source`) }),
   };
 }
 
@@ -212,7 +247,7 @@ export function decodePendingBotInputV1(
       "createdAt",
       "quiet",
     ],
-    ["renotifiedAt"],
+    ["renotifiedAt", "source"],
     label,
   );
   if (!isRoutineIdV1(candidate.routineId)) {
@@ -245,6 +280,9 @@ export function decodePendingBotInputV1(
             `${label} renotifiedAt`,
           ),
         }),
+    ...(candidate.source === undefined
+      ? {}
+      : { source: completionSourceV1(candidate.source, `${label} source`) }),
   };
 }
 
@@ -276,7 +314,9 @@ export function pendingBotInputPreambleV1(
   for (const input of inputs) {
     if (input.kind === "wake") {
       lines.push(
-        `[${input.title}] While you were away, your Routine "${input.routineId}" finished and handed off:`,
+        input.source === "subagent"
+          ? `[${input.title}] While you were away, the subagent "${input.routineId}" you dispatched finished. Its summary — not its transcript, which you cannot see — is:`
+          : `[${input.title}] While you were away, your Routine "${input.routineId}" finished and handed off:`,
         input.text,
         "",
       );

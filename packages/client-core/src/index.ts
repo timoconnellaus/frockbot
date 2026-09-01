@@ -45,6 +45,16 @@ export interface ClientTurnEvent {
   /** A `wake/parent` hand-off message. */
   message?: string;
   /**
+   * A `task/dispatched` subagent chip. Flat and optional, like every other
+   * field here: the client core holds no product shapes, and which roles exist
+   * is the Subagents Package's opinion, not this one's.
+   */
+  taskId?: string;
+  taskType?: string;
+  description?: string;
+  model?: string;
+  background?: boolean;
+  /**
    * Binaries a tool filed in a durable root. References — media type, content
    * hash, and the encoded Workspace path — never bytes: the client core holds
    * no product shapes and a thread carries paths, not images.
@@ -257,6 +267,16 @@ function decodeTurnEvent(value: unknown): ClientTurnEvent {
   if (event.payload !== undefined) decoded.payload = event.payload;
   if (event.message !== undefined) {
     decoded.message = responseString(event, "message", "turn event");
+  }
+  if (event.taskId !== undefined) {
+    decoded.taskId = responseString(event, "taskId", "turn event");
+    decoded.taskType = responseString(event, "taskType", "turn event");
+    decoded.description = responseString(event, "description", "turn event");
+    decoded.model = responseString(event, "model", "turn event");
+    if (typeof event.background !== "boolean") {
+      throw new Error("turn event.background must be a boolean");
+    }
+    decoded.background = event.background;
   }
   return decoded;
 }

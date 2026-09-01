@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { TaskStore, type TaskAdmissionRequestV1 } from "./store.js";
 import { createMemorySubagentStorageV1 } from "./testing.js";
-import { TASK_CONCURRENCY_PER_BOT_V1, TASK_DEADLINE_MS_V1 } from "./records.js";
+import {
+  TASK_CONCURRENCY_PER_BOT_V1,
+  TASK_DEADLINE_MS_V1,
+  TASK_MESSAGE_QUEUE_LIMIT_V1,
+} from "./records.js";
 import { TASK_DESKTOP_LEASE_KEY } from "./storage-keys.js";
 
 const MODEL = {
@@ -179,5 +183,204 @@ describe("the task list", () => {
       status: "completed",
       summary: "Read the changelog.",
     });
+  });
+});
+
+describe("the bounded message queue", () => {
+  async function running(store: TaskStore): Promise<void> {
+    await store.admit(request("tk-1"));
+    await store.markRunning("tk-1");
+  }
+
+  test("refuses a task that has not started, because it has nothing to read yet", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await store.admit(request("tk-1"));
+    const queued = await store.appendMessage("tk-1", "hello", new Date());
+    expect(queued).toMatchObject({ status: "refused" });
+    expect(queued.status === "refused" && queued.reason).toContain(
+      "has not started yet",
+    );
+  });
+
+  test("refuses a settled task, because it will never read again", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await running(store);
+    await store.settle("tk-1", {
+      status: "completed",
+      settledAt: "2026-09-01T00:05:00.000Z",
+      summary: "done",
+    });
+    const queued = await store.appendMessage("tk-1", "hello", new Date());
+    expect(queued.status === "refused" && queued.reason).toContain(
+      "can no longer be messaged",
+    );
+  });
+
+  test("refuses a task this Bot does not hold", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    const queued = await store.appendMessage("tk-9", "hello", new Date());
+    expect(queued.status === "refused" && queued.reason).toContain("unknown");
+  });
+
+  test("queues in order and stops at the bound rather than growing", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await running(store);
+    for (let index = 0; index < TASK_MESSAGE_QUEUE_LIMIT_V1; index += 1) {
+      const queued = await store.appendMessage(
+        "tk-1",
+        `message ${index}`,
+        new Date(),
+      );
+      expect(queued).toMatchObject({ status: "queued", depth: index + 1 });
+    }
+    const overflow = await store.appendMessage(
+      "tk-1",
+      "one too many",
+      new Date(),
+    );
+    expect(overflow.status === "refused" && overflow.reason).toContain(
+      `the bound is ${TASK_MESSAGE_QUEUE_LIMIT_V1}`,
+    );
+    const queued = await store.messages("tk-1");
+    expect(queued).toHaveLength(TASK_MESSAGE_QUEUE_LIMIT_V1);
+    expect(queued.map((entry) => entry.message)).toEqual(
+      Array.from(
+        { length: TASK_MESSAGE_QUEUE_LIMIT_V1 },
+        (_value, index) => `message ${index}`,
+      ),
+    );
+  });
+
+  test("settling drops the queue nobody will drain", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await running(store);
+    await store.appendMessage("tk-1", "hello", new Date());
+    await store.settle("tk-1", {
+      status: "completed",
+      settledAt: "2026-09-01T00:05:00.000Z",
+      summary: "done",
+    });
+    expect(await store.messages("tk-1")).toEqual([]);
+  });
+});
+
+describe("stopping a task", () => {
+  test("records the intent once, and reads it back on a retry", async () => {
+    const storage = createMemorySubagentStorageV1();
+    const store = new TaskStore(storage);
+    await store.admit(request("tk-1"));
+    await store.markRunning("tk-1");
+    expect(await store.stopRequested("tk-1")).toBe(false);
+    expect(await store.requestStop("tk-1", new Date(), "bot")).toMatchObject({
+      status: "requested",
+    });
+    expect(await store.stopRequested("tk-1")).toBe(true);
+    expect(await store.requestStop("tk-1", new Date(), "user")).toMatchObject({
+      status: "replayed",
+    });
+    expect(storage.keys()).toContain("task-stop:tk-1");
+  });
+
+  test("refuses a task that has already settled rather than rewriting an outcome", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await store.admit(request("tk-1"));
+    await store.settle("tk-1", {
+      status: "completed",
+      settledAt: "2026-09-01T00:05:00.000Z",
+      summary: "done",
+    });
+    const stopped = await store.requestStop("tk-1", new Date(), "user");
+    expect(stopped.status === "refused" && stopped.reason).toContain(
+      "already completed",
+    );
+  });
+
+  test("settling clears the intent, so the record is the only terminal fact", async () => {
+    const storage = createMemorySubagentStorageV1();
+    const store = new TaskStore(storage);
+    await store.admit(request("tk-1"));
+    await store.requestStop("tk-1", new Date(), "user");
+    await store.settle("tk-1", {
+      status: "stopped",
+      settledAt: "2026-09-01T00:05:00.000Z",
+      failure: "Stopped by your user.",
+    });
+    expect(storage.keys()).not.toContain("task-stop:tk-1");
+  });
+});
+
+describe("resuming a task", () => {
+  test("refuses a task that is still running", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await store.admit(request("tk-1"));
+    await store.markRunning("tk-1");
+    const resumable = await store.resumable("tk-1");
+    expect(resumable.status === "refused" && resumable.reason).toContain(
+      "still running",
+    );
+  });
+
+  test("refuses a task that was never admitted", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    const resumable = await store.resumable("tk-9");
+    expect(resumable.status === "refused" && resumable.reason).toContain(
+      "unknown",
+    );
+  });
+
+  test("answers a finished task with the child it ran in", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await store.admit(request("tk-1"));
+    await store.settle("tk-1", {
+      status: "completed",
+      settledAt: "2026-09-01T00:05:00.000Z",
+      summary: "done",
+    });
+    const resumable = await store.resumable("tk-1");
+    expect(resumable).toMatchObject({
+      status: "resumable",
+      anchorTaskId: "tk-1",
+    });
+  });
+
+  test("a resumed run keeps the resumed task's Session, so the child picks up its own cursor", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await store.admit(request("tk-1"));
+    const admitted = await store.admit(
+      request("tk-2", { resumedFrom: "tk-1", anchorTaskId: "tk-1" }),
+    );
+    expect(admitted.status === "admitted" && admitted.record).toMatchObject({
+      taskId: "tk-2",
+      resumedFrom: "tk-1",
+      childSessionId: "task:tk-1",
+    });
+    expect(
+      (await store.resumable("tk-1")).status === "refused" ||
+        (await store.read("tk-2")).childSessionId === "task:tk-1",
+    ).toBe(true);
+  });
+});
+
+describe("settling is idempotent on the task id", () => {
+  test("a second settle reads the first outcome back", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await store.admit(request("tk-1"));
+    const first = await store.settle("tk-1", {
+      status: "completed",
+      settledAt: "2026-09-01T00:05:00.000Z",
+      summary: "the first outcome",
+    });
+    const second = await store.settle("tk-1", {
+      status: "failed",
+      settledAt: "2026-09-01T00:06:00.000Z",
+      failure: "a racing reconciliation",
+    });
+    expect(first.status).toBe("settled");
+    expect(second.status).toBe("replayed");
+    expect(second.record).toMatchObject({
+      status: "completed",
+      outcome: { summary: "the first outcome" },
+    });
+    expect((await store.list("bot")).active).toBe(0);
   });
 });
