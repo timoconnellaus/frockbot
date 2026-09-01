@@ -153,12 +153,6 @@ jobs:
             exit 1
           fi
 
-          # Optional: without it nobody can open Admin, but signups stay closed
-          # and existing Users keep signing in, so the deploy still proceeds.
-          if [[ -z "$FROCKBOT_ADMIN_EMAILS" ]]; then
-            echo '::warning::FROCKBOT_ADMIN_EMAILS is unset; no identity can administer the signup policy until it is added to the production environment.'
-          fi
-
       - name: Deploy frockbot.com
         working-directory: apps/marketing
         env:
@@ -227,6 +221,12 @@ jobs:
           if (( ${#missing[@]} > 0 )); then
             printf 'Missing production configuration: %s\n' "${missing[*]}" >&2
             exit 1
+          fi
+
+          # Optional: without it nobody can open Admin, but signups stay closed
+          # and existing Users keep signing in, so the deploy still proceeds.
+          if [[ -z "$FROCKBOT_ADMIN_EMAILS" ]]; then
+            echo '::warning::FROCKBOT_ADMIN_EMAILS is unset; no identity can administer the signup policy until it is added to the production environment.'
           fi
 
           bun -e '
