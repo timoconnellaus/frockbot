@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 3,
+  "id": "admin",
+  "displayName": "Deployment administration",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "shell": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
+  },
+  "contributions": {
+    "backend": [{ "entry": "./backend", "host": "gateway" }],
+    "client": { "entry": "./client", "mounts": [], "outlets": [] }
+  },
+  "permissions": []
+}

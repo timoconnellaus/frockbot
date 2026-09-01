@@ -32,6 +32,7 @@ describe("foundation application", () => {
     expect(first.packages.map((pkg) => pkg.id)).toEqual([
       "ui-theme",
       "shell",
+      "admin",
       "flock",
       "audit",
       "auth",
@@ -68,6 +69,7 @@ describe("foundation application", () => {
     expect(first.contributions).toEqual({
       backend: [
         "shell",
+        "admin",
         "flock",
         "audit",
         "settings",
@@ -111,6 +113,7 @@ describe("foundation application", () => {
       client: [
         "ui-theme",
         "shell",
+        "admin",
         "flock",
         "audit",
         "auth",
@@ -307,6 +310,16 @@ describe("foundation application", () => {
     const plan = await compileFoundationApplication();
     const backend = await createFoundationBackendContributions(plan, {
       backendHost: "gateway",
+      readDeploymentPolicy: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          revision: 0,
+          signups: { open: false },
+          updatedAt: "2026-09-01T00:00:00.000Z",
+          updatedBy: "deployment-default",
+        }),
+      setDeploymentSignups: () =>
+        Promise.reject(new Error("not used while composing")),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       listTemplateShares: () =>
@@ -431,6 +444,7 @@ describe("foundation application", () => {
         .map((contribution) => contribution.packageId)
         .sort(),
     ).toEqual([
+      "admin",
       "audit",
       "bot-template",
       "channels",

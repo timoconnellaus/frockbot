@@ -18,6 +18,12 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/configuration-core";
 import auditManifest from "@frockbot/plugin-audit/manifest";
+import adminManifest from "@frockbot/plugin-admin/manifest";
+import {
+  createAdminBackendContribution,
+  type AdminGatewayHost,
+} from "@frockbot/plugin-admin/backend";
+const createAdminGatewayPlugin = createAdminBackendContribution.plugin;
 // Gateway Audit behavior is resolved as a lifecycle-owned Plugin.
 import {
   createAuditBackendContribution,
@@ -72,7 +78,11 @@ export interface BackendRouteContribution {
   route(
     request: Request,
     url: URL,
-    context: { userId?: string; client?: "browser" | "desktop" },
+    context: {
+      userId?: string;
+      client: "browser" | "desktop";
+      isAdmin: boolean;
+    },
   ): Promise<Response | undefined>;
 }
 // pi-lens-ignore: ts:2307
@@ -309,6 +319,7 @@ export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-ui-theme", uiThemeManifest],
   ["@frockbot/plugin-auth", authManifest],
+  ["@frockbot/plugin-admin", adminManifest],
   ["@frockbot/plugin-bot-template", botTemplateManifest],
   ["@frockbot/plugin-authoring", authoringManifest],
   ["@frockbot/plugin-identity", identityManifest],
@@ -595,7 +606,8 @@ export interface MountedFoundationBackend<T> {
 /** Mount every declared backend Contribution into one owned Cordis root. */
 export type FoundationGatewayHost = {
   backendHost: "gateway";
-} & BotTemplateGatewayHostV1 &
+} & AdminGatewayHost &
+  BotTemplateGatewayHostV1 &
   FlockGatewayHost &
   McpGatewayHost &
   SettingsGatewayHost &
@@ -646,6 +658,11 @@ export async function createFoundationBackendContributions<T>(
         const specifier = contributionSpecifier(pkg.specifier, backend.entry);
         let plugin: Plugin;
         if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-admin/backend"
+        ) {
+          plugin = createAdminGatewayPlugin(host, lifecycle);
+        } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-flock/backend"
         ) {

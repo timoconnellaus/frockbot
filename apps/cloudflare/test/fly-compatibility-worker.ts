@@ -70,6 +70,7 @@ import {
 } from "@frockbot/plugin-shell/backend-isolate";
 import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
 import { UserConfiguration } from "../src/user-configuration.ts";
+export { DeploymentPolicy } from "../src/deployment-policy.ts";
 
 interface FlyCompatibilityEnv {
   /** The shared Computer host (ADR 0004). The provider reaches a Sprite here. */

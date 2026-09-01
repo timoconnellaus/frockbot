@@ -131,6 +131,11 @@ import {
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
 } from "@frockbot/connection-core";
+import {
+  decodeDeploymentPolicyV1,
+  type DeploymentPolicyV1,
+  type SetSignupsCommandV1,
+} from "@frockbot/plugin-admin/shared";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -160,9 +165,13 @@ import {
 import { createImmutablePlanRequestFactory } from "./immutable-application.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import { UserConfiguration } from "./user-configuration.js";
+import {
+  DEPLOYMENT_POLICY_SINGLETON_NAME,
+  DeploymentPolicy,
+} from "./deployment-policy.js";
 
 export { BotCapabilities } from "./bot-capabilities.js";
-export { BotState, UserConfiguration };
+export { BotState, DeploymentPolicy, UserConfiguration };
 
 interface Env {
   USER_APPLICATIONS: WorkerLoader;
@@ -185,6 +194,7 @@ interface Env {
   AI: Ai;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
+  DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
   COMPUTER_HOST: Fetcher;
   /** Shared secret presented on every Computer host call. */
   COMPUTER_HOST_TOKEN?: string;
@@ -211,6 +221,7 @@ interface Env {
    */
   FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
+  FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
 }
 
@@ -262,6 +273,11 @@ interface BotStateRpc extends BotConfigurationBinding {
  * own seam and not part of the gateway's contract with a Configuration.
  */
 interface UserConfigurationRpc extends UserConfigurationBinding {
+  /** Read-only signup-gate probe; unlike configuration reads, it pins nothing. */
+  isProvisioned(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<boolean>;
   /** Connect one Bot to one external platform. Mints the webhook key. */
   connectChannel(request: {
     schemaVersion: 1;
@@ -442,6 +458,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     id,
   ) as unknown as RpcBoundary<UserConfigurationRpc>;
   return {
+    isProvisioned: (request) => rpc.isProvisioned(request),
     listBots: (request) => rpc.listBots(request),
     listBotLifecycles: (request) => rpc.listBotLifecycles(request),
     executeBotLifecycle: (request) => rpc.executeBotLifecycle(request),
@@ -480,6 +497,17 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     listTemplateImports: (request) => rpc.listTemplateImports(request),
     executeTemplateImport: (request) => rpc.executeTemplateImport(request),
   };
+}
+
+interface DeploymentPolicyRpc {
+  readPolicy(input: unknown): Promise<unknown>;
+  setSignups(input: unknown): Promise<unknown>;
+}
+
+function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
+  return env.DEPLOYMENT_POLICY.getByName(
+    DEPLOYMENT_POLICY_SINGLETON_NAME,
+  ) as unknown as DeploymentPolicyRpc;
 }
 
 /**
@@ -1118,6 +1146,25 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
   (application, env: Env) =>
     createFoundationBackendContributions(application, {
       backendHost: "gateway",
+      readDeploymentPolicy: async (): Promise<DeploymentPolicyV1> =>
+        decodeDeploymentPolicyV1(
+          rpcJsonSnapshot(
+            await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+          ),
+        ),
+      setDeploymentSignups: async (
+        command: SetSignupsCommandV1,
+        updatedBy: string,
+      ): Promise<DeploymentPolicyV1> =>
+        decodeDeploymentPolicyV1(
+          rpcJsonSnapshot(
+            await deploymentPolicyStub(env).setSignups({
+              schemaVersion: 1,
+              command,
+              updatedBy,
+            }),
+          ),
+        ),
       listTemplateShares: async (userId: string) =>
         decodeTemplateShareListViewV1(
           rpcJsonSnapshot(
@@ -1701,6 +1748,20 @@ export default {
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
       auth: gatewayAuth(env),
+      userExists: (userId) =>
+        userConfigurationStub(env, userId).isProvisioned({
+          schemaVersion: 1,
+          userId,
+        }),
+      readDeploymentPolicy: async () =>
+        decodeDeploymentPolicyV1(
+          rpcJsonSnapshot(
+            await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+          ),
+        ),
+      ...(env.FROCKBOT_ADMIN_EMAILS
+        ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
+        : {}),
       applicationHashFor: async (userId) =>
         (await userConfigurationStub(env, userId).activeApplicationHash({
           schemaVersion: 1,

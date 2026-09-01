@@ -105,6 +105,10 @@ export default defineConfig({
             className: "UserConfiguration",
             useSQLite: true,
           },
+          DEPLOYMENT_POLICY: {
+            className: "DeploymentPolicy",
+            useSQLite: true,
+          },
         },
         bindings: {
           TEST_MIGRATIONS: authMigrations,

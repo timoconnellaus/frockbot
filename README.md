@@ -122,6 +122,7 @@ Configure these GitHub `production` environment values:
 | Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                                   |
 | Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                                  |
 | Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                              |
+| Secret   | `FROCKBOT_ADMIN_EMAILS`     | Comma-separated owner emails allowed to administer deployment policy                    |
 | Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                            |
 | Secret   | `COMPUTER_HOST_TOKEN`       | Shared secret the app Worker presents to the Computer host; generate it                 |
 | Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-User Connection credentials                           |
@@ -130,13 +131,15 @@ Configure these GitHub `production` environment values:
 
 Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
 
+New signups are closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities can open **Admin** from the profile menu and change the durable signup policy. The allowlist stays in the gateway and only an `isAdmin` boolean reaches the client. Existing Users continue to sign in while signups are closed.
+
 `ROUTINE_HOOK_SECRET` is generated too, once, with `openssl rand -hex 32` — `./scripts/setup-production.sh` does it if the secret is absent and preserves it if it is not. Every Routine webhook key is `HMAC-SHA256` over its own claims under this secret, and the gateway verifies that signature before any Durable Object is addressed. Rotating it invalidates every webhook key already handed out, which each Routine's owner then has to re-mint; without it set, the delivery route answers `503` and a webhook Routine is recorded without a key rather than given one nothing could verify.
 
 `MACHINE_TOKEN_SECRET` is generated the same way and on the same terms. Every registered machine's token and every pairing code is `HMAC-SHA256` over its own claims under this secret, verified at the edge before any Durable Object is addressed. Rotating it un-enrols every registered machine, which then has to be paired again; without it set, enrollment and every machine route answer `503` rather than admitting a caller nothing could verify.
 
 `COMPUTER_HOST_TOKEN` is not obtained from anywhere — generate it, once, with `openssl rand -hex 32`, and add it as a GitHub `production` secret. It is checked inside the container as well as at the host Worker, because the service binding is not the only route to that port. Rotating it means redeploying both Workers together.
 
-Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, save the remaining secrets to the GitHub `production` environment, and verify the completed configuration.
+Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, and save the generated platform secrets. Then add `FROCKBOT_ADMIN_EMAILS` to the GitHub `production` environment and verify the completed configuration.
 
 Register `https://bot.frockbot.com/api/auth/callback/google` as an authorized Google redirect URI. The deploy token must include Workers Scripts and Workers Routes edit access, and the `frockbot.com` zone must be active in the same Cloudflare account. Production deployment intentionally does not create or delete D1, R2, or Vectorize resources.
 

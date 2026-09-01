@@ -413,6 +413,31 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return (await this.contributions()).publisher;
   }
 
+  /**
+   * Cheap, read-only signup-gate probe.
+   *
+   * Addressing this object is not User materialization: only
+   * `assertUserIdentity` writes the durable identity pin. A closed deployment
+   * can therefore ask whether the User already exists without creating one.
+   */
+  async isProvisioned(input: unknown): Promise<boolean> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    const userId = request.userId as string;
+    const namespace = this.env.USER_CONFIGURATIONS;
+    if (!namespace || !namespace.idFromName(userId).equals(this.ctx.id)) {
+      throw new Error(
+        "this User Durable Object is the authority for a different User",
+      );
+    }
+    const pinned = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
+    if (pinned !== undefined && pinned !== userId) {
+      throw new Error(
+        "this User Durable Object is the authority for a different User",
+      );
+    }
+    return pinned === userId;
+  }
+
   async readConfiguration(input: unknown) {
     const request = decodeUserConfigurationReadRpcV1(input);
     await this.assertUserIdentity(request.userId);

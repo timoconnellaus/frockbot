@@ -4,6 +4,7 @@ export interface AuthenticatedUserV1 {
   id: string;
   name: string;
   email: string;
+  isAdmin: boolean;
 }
 
 export type AuthSessionProjectionV1 =
@@ -58,6 +59,18 @@ function stringField(
   return field;
 }
 
+function booleanField(
+  value: Record<PropertyKey, unknown>,
+  key: string,
+  label: string,
+): boolean {
+  const field = value[key];
+  if (typeof field !== "boolean") {
+    throw new Error(`${label}.${key} is invalid`);
+  }
+  return field;
+}
+
 /** Strictly decodes the auth-owned projection exposed to client Plugins. */
 export function decodeAuthSessionProjectionV1(
   input: unknown,
@@ -90,7 +103,11 @@ export function decodeAuthSessionProjectionV1(
     throw new Error("auth session projection.mode is invalid");
   }
   const user = record(projection.user, "auth session projection.user");
-  exactKeys(user, ["id", "name", "email"], "auth session projection.user");
+  exactKeys(
+    user,
+    ["id", "name", "email", "isAdmin"],
+    "auth session projection.user",
+  );
   return {
     schemaVersion: 1,
     status: "authenticated",
@@ -99,6 +116,7 @@ export function decodeAuthSessionProjectionV1(
       id: stringField(user, "id", "auth session projection.user"),
       name: stringField(user, "name", "auth session projection.user"),
       email: stringField(user, "email", "auth session projection.user"),
+      isAdmin: booleanField(user, "isAdmin", "auth session projection.user"),
     },
   };
 }

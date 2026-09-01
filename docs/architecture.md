@@ -39,6 +39,7 @@ Browser, sandboxed Electron renderer, or Capacitor WebView
 Cloudflare application gateway
 ┌─────────────────────────────────────────────────────────┐
 │ Authentication, immutable User application, DTO routing │
+│   ├── DeploymentPolicy singleton DO for product policy   │
 │   ├── User Durable Object authority/storage/scheduling  │
 │   │   └── application revision ledger + rollback        │
 │   └── Bot Durable Object authority/storage/scheduling   │
@@ -149,6 +150,14 @@ The per-Bot info pane is a panel-placed surface assembled out of Contributions r
 Feature styles are scoped, consume semantic theme aliases, and cannot define literal colors or another global theme. Every Package with a hosted client Contribution declares a dependency on `ui-theme`; CI checks both rules. Direct client plugins are trusted same-origin code. Untrusted or generated rich UI cannot be imported into the WebUI context. It must use a FrockBot sandbox-view contribution rendered in a separately permissioned frame with a narrow message protocol.
 
 The auth Plugin owns the hosted session projection and narrow sign-out action. Browser sessions sign out through Better Auth; Electron sessions use the trusted desktop bridge. The settings profile menu consumes only that Plugin interface, disables the action while pending, and keeps failures visible without clearing the authenticated projection. URL-selected `as_user` / `frockbot_dev_user` development identity is a separate opt-in mode, so the UI explicitly reports sign-out as unavailable rather than pretending to revoke Better Auth state. Signing out detaches the client and does not cancel Bot work.
+
+### Deployment policy and signup admission
+
+Signup admission is a deployment-level product policy beyond GrokBot parity. The singleton `DeploymentPolicy` Durable Object is its authority ([ADR 0018](adr/0018-deployment-policy-authority.md)); it stores `DeploymentPolicyV1`, defaults `signups.open` to `false`, and serializes `deployment/set-signups` commands with an optimistic revision. Its record, revision, last change time, and writer survive gateway restart and Durable Object eviction. It does not use or wake the Computer.
+
+After Better Auth identifies a caller, the gateway asks the addressed User Durable Object only whether its durable `user:identity` pin already exists. That read neither pins the identity nor materializes User settings. Existing Users, allowlisted admins, and development identities proceed without consulting the closed gate. A first-time non-admin proceeds only while signups are open; otherwise the gateway returns the friendly closed-signup page and a real Better Auth sign-out link before application-hash lookup or any User write. If either authority cannot be read, admission fails closed with an observable `503` rather than guessing.
+
+`@frockbot/plugin-admin` owns the authenticated `GET /api/admin/policy` and `POST /api/admin/policy` gateway routes and the hosted **Admin** surface. The write route accepts only the exact `deployment/set-signups { open, revision }` command; a stale revision returns `409`, retrying the same stale command changes nothing, and a successful retry must use the newly read revision. `FROCKBOT_ADMIN_EMAILS` is parsed case-insensitively at the gateway. The allowlist and email never enter the application artifact: the auth-owned client identity projection receives only `isAdmin`, which is also the condition for rendering the profile-menu entry. Non-admin route access is `403`. Disconnecting or closing the surface does not alter an admitted command; the response is a projection of the already durable update.
 
 ## Agent-loop contract
 

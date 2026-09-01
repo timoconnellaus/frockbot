@@ -57,6 +57,10 @@ export default defineConfig({
             className: "UserConfiguration",
             useSQLite: true,
           },
+          DEPLOYMENT_POLICY: {
+            className: "DeploymentPolicy",
+            useSQLite: true,
+          },
         },
         bindings: {
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,

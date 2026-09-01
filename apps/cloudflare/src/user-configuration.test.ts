@@ -102,6 +102,31 @@ const credentialKeyring =
   '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}';
 
 describe("UserConfiguration Connection routing", () => {
+  test("reports provisioning without pinning a first-time User", async () => {
+    const bound = identity("new-user");
+    const configuration = new UserConfiguration(
+      bound.ctx(new MemoryStorage()),
+      { ...bound.env, CREDENTIAL_KEYRING: credentialKeyring },
+    );
+
+    await expect(
+      configuration.isProvisioned({
+        schemaVersion: 1,
+        userId: "new-user",
+      }),
+    ).resolves.toBe(false);
+    await configuration.readConfiguration({
+      schemaVersion: 1,
+      userId: "new-user",
+    });
+    await expect(
+      configuration.isProvisioned({
+        schemaVersion: 1,
+        userId: "new-user",
+      }),
+    ).resolves.toBe(true);
+  });
+
   test("mounts declared User Contributions through the application registry", async () => {
     const bound = identity("user-1");
     const configuration = new UserConfiguration(

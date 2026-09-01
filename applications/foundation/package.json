@@ -25,6 +25,7 @@
     "@frockbot/connection-core": "workspace:*",
     "@frockbot/kernel-composition": "workspace:*",
     "@frockbot/plugin-audit": "workspace:*",
+    "@frockbot/plugin-admin": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-bot-template": "workspace:*",
