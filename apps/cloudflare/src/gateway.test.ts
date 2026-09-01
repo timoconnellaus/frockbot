@@ -787,6 +787,18 @@ class MemoryConfiguration
     });
   }
 
+  readTask(
+    request: Parameters<BotConfigurationBinding["readTask"]>[0],
+  ): ReturnType<BotConfigurationBinding["readTask"]> {
+    return Promise.reject(new Error(`task "${request.taskId}" is unknown`));
+  }
+
+  stopTask(
+    request: Parameters<BotConfigurationBinding["stopTask"]>[0],
+  ): ReturnType<BotConfigurationBinding["stopTask"]> {
+    return Promise.reject(new Error(`task "${request.taskId}" is unknown`));
+  }
+
   executeRoutineCommand(
     request: Parameters<BotConfigurationBinding["executeRoutineCommand"]>[0],
   ) {

@@ -285,6 +285,34 @@ export class RoutineInboxStore {
     );
   }
 
+  /**
+   * Appends one completion-inbox entry outside a settling transaction.
+   *
+   * Routines write their entry *inside* the transaction that settles the Turn,
+   * because the Turn and its outcome are the same object's state. A background
+   * subagent settles from a different Durable Object, so its entry is its own
+   * transaction — and the property that matters is the same one: idempotent on
+   * `entryId`, so a retried settle records one entry, not two.
+   */
+  async append(entry: RoutineInboxEntryV1): Promise<void> {
+    await this.#storage.transaction(async (transaction) => {
+      const stored = await transaction.list<unknown>({
+        prefix: ROUTINE_INBOX_PREFIX,
+      });
+      for (const value of stored.values()) {
+        if (decodeRoutineInboxEntryV1(value).entryId === entry.entryId) return;
+      }
+      const cursor = routineSequenceCursorV1(
+        await transaction.get<unknown>(ROUTINE_INBOX_CURSOR_KEY),
+      );
+      await transaction.put(routineInboxKeyV1(cursor.nextSeq), entry);
+      await transaction.put(ROUTINE_INBOX_CURSOR_KEY, {
+        schemaVersion: 1,
+        nextSeq: cursor.nextSeq + 1,
+      });
+    });
+  }
+
   /** Record that the alarm has re-emitted this wake's notification intent. */
   async markRenotified(key: string): Promise<void> {
     const at = this.#now().toISOString();

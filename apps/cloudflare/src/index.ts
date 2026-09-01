@@ -67,7 +67,10 @@ import {
   decodeRoutineRunDetailViewV1,
   decodeRoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
-import { decodeTaskListViewV1 } from "@frockbot/plugin-subagents/shared";
+import {
+  decodeTaskListViewV1,
+  decodeTaskViewV1,
+} from "@frockbot/plugin-subagents/shared";
 import {
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
@@ -258,6 +261,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     listRoutines: (request) => rpc.listRoutines(request),
     listTasks: (request) => rpc.listTasks(request),
+    readTask: (request) => rpc.readTask(request),
+    stopTask: (request) => rpc.stopTask(request),
     executeRoutineCommand: (request) => rpc.executeRoutineCommand(request),
     listRoutineRuns: (request) => rpc.listRoutineRuns(request),
     deliverRoutineHook: (request) => rpc.deliverRoutineHook(request),
@@ -1239,6 +1244,28 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
               schemaVersion: 1,
               userId,
               botId,
+            }),
+          ),
+        ),
+      readTask: async (userId, botId, taskId) =>
+        decodeTaskViewV1(
+          rpcJsonSnapshotV1(
+            await botStateStub(env, userId, botId).readTask({
+              schemaVersion: 1,
+              userId,
+              botId,
+              taskId,
+            }),
+          ),
+        ),
+      stopTask: async (userId, botId, taskId) =>
+        decodeTaskViewV1(
+          rpcJsonSnapshotV1(
+            await botStateStub(env, userId, botId).stopTask({
+              schemaVersion: 1,
+              userId,
+              botId,
+              taskId,
             }),
           ),
         ),

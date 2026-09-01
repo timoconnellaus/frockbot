@@ -5,6 +5,7 @@ import {
   pendingBotInputPreambleV1,
   routineAttributionV1,
   routineHandoffTextV1,
+  subagentAttributionV1,
 } from "./inbox.js";
 import { RoutineInboxStore, routineTerminalRecordsV1 } from "./inbox-store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
@@ -272,5 +273,79 @@ describe("the approval variant's producer", () => {
         ? pending[0]!.input.decision
         : undefined,
     ).toBe("denied");
+  });
+});
+
+describe("a subagent completion in the same two records", () => {
+  test("attributes a subagent by its description, not as an Automation", () => {
+    expect(subagentAttributionV1("Read the release notes")).toBe(
+      "Subagent: Read the release notes",
+    );
+  });
+
+  test("reads back with its source, so an entry says what produced it", () => {
+    const entry = decodeRoutineInboxEntryV1({
+      schemaVersion: 1,
+      entryId: "ti-tk-1",
+      runId: "tk-1",
+      routineId: "tk-1",
+      text: "executor subagent finished.",
+      attribution: "Subagent: Read the release notes",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      acknowledged: false,
+      source: "subagent",
+    });
+    expect(entry.source).toBe("subagent");
+    // An entry written before subagents existed reads as what it was.
+    expect(
+      decodeRoutineInboxEntryV1({
+        schemaVersion: 1,
+        entryId: "ri-fire-1",
+        runId: "fire-1",
+        routineId: "brief",
+        text: "The Routine finished.",
+        attribution: "Automation: Morning brief",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        acknowledged: false,
+      }).source,
+    ).toBeUndefined();
+  });
+
+  test("refuses a source it does not know", () => {
+    expect(() =>
+      decodePendingBotInputV1({
+        schemaVersion: 1,
+        kind: "wake",
+        wakeId: "tw-tk-1",
+        runId: "tk-1",
+        routineId: "tk-1",
+        title: "Subagent: Read the release notes",
+        text: "It finished.",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        quiet: { automation: true },
+        source: "somewhere-else",
+      }),
+    ).toThrow();
+  });
+
+  test("preambles a subagent wake as a summary, never as a Routine hand-off", () => {
+    const preamble = pendingBotInputPreambleV1([
+      {
+        schemaVersion: 1,
+        kind: "wake",
+        wakeId: "tw-tk-1",
+        runId: "tk-1",
+        routineId: "tk-1",
+        title: "Subagent: Read the release notes",
+        text: "They changed on Tuesday.",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        quiet: { automation: true },
+        source: "subagent",
+      },
+    ]);
+    expect(preamble).toContain("the subagent");
+    expect(preamble).toContain("not its transcript");
+    expect(preamble).toContain("They changed on Tuesday.");
+    expect(preamble).not.toContain("your Routine");
   });
 });

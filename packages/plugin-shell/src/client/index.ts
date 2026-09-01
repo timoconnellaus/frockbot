@@ -55,6 +55,7 @@ import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
 } from "../approvals.js";
+import { decodeTaskListViewV1 } from "@frockbot/plugin-subagents/shared";
 import { ref } from "vue";
 import {
   frockBotWebDataKey,
@@ -64,6 +65,7 @@ import {
   type WebActiveRun,
   type WebChatMessage,
   type WebSendPayload,
+  type WebTaskChip,
   type WebToolActivity,
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
@@ -121,6 +123,34 @@ function sendsFrom(events: ClientTurnEvent[]): WebSendPayload[] {
     }
   }
   return sends;
+}
+
+/**
+ * The subagents this Turn dispatched, as chips. An event missing a field is
+ * skipped rather than drawn half-formed: a run has to render on a client older
+ * than the Bot that produced it.
+ */
+function tasksFrom(events: ClientTurnEvent[]): WebTaskChip[] {
+  const tasks: WebTaskChip[] = [];
+  for (const event of events) {
+    if (event.type !== "task/dispatched") continue;
+    if (
+      event.taskId === undefined ||
+      event.taskType === undefined ||
+      event.description === undefined ||
+      event.model === undefined
+    ) {
+      continue;
+    }
+    tasks.push({
+      taskId: event.taskId,
+      taskType: event.taskType,
+      description: event.description,
+      model: event.model,
+      background: event.background !== false,
+    });
+  }
+  return tasks;
 }
 
 type DurableRunProjectionState = Pick<
@@ -183,6 +213,7 @@ function assistantMessage(
       status: "streaming",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
+      tasks: tasksFrom(run.events),
     };
   }
   if (run.status === "reconciliation-required") {
@@ -197,6 +228,7 @@ function assistantMessage(
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
+      tasks: tasksFrom(run.events),
     };
   }
   if (run.status === "cancelled") {
@@ -208,6 +240,7 @@ function assistantMessage(
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
+      tasks: tasksFrom(run.events),
     };
   }
   return {
@@ -221,6 +254,7 @@ function assistantMessage(
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),
     sends: sendsFrom(run.events),
+    tasks: tasksFrom(run.events),
   };
 }
 
@@ -897,6 +931,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     // A decision may have been recorded on another device since the last poll,
     // and an expiry is recorded by an alarm nobody clicked.
     await web.value.loadApprovals();
+    // A background subagent settles after its Turn is over, so the chips in
+    // the transcript learn what became of it here and not from the run.
+    await web.value.loadTasks();
     if (generation !== selectionGeneration || web.value.activeBotId !== botId)
       return;
     if (!ctx.transport.acknowledgeNotification) return;
@@ -1071,6 +1108,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     packageCatalog: [],
     skillCatalog: [],
     approvals: [],
+    tasks: [],
     async selectBot(botId: string): Promise<void> {
       activeRequest?.abort();
       admissionObserver?.abort();
@@ -1085,6 +1123,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.activeRunId = undefined;
       web.value.skillCatalog = [];
       web.value.approvals = [];
+      web.value.tasks = [];
       const url = URL.parse(window.location.href);
       if (url) {
         url.searchParams.set("bot", botId);
@@ -1140,6 +1179,32 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId === botId
         )
           web.value.approvals = [];
+      }
+    },
+    async loadTasks(): Promise<void> {
+      // A deployment with no tasks route, or one that cannot be read, is an
+      // empty list rather than a banner: the chips in the transcript then say
+      // what the dispatch said and nothing more.
+      const read = ctx.transport.hostedRequest;
+      const botId = web.value.activeBotId;
+      if (!read || !botId) return;
+      const generation = selectionGeneration;
+      try {
+        const view = decodeTaskListViewV1(
+          await read(`/api/bots/${encodeURIComponent(botId)}/tasks`),
+        );
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.tasks = view.tasks;
+      } catch {
+        if (
+          generation === selectionGeneration &&
+          web.value.activeBotId === botId
+        )
+          web.value.tasks = [];
       }
     },
     async decideApproval(

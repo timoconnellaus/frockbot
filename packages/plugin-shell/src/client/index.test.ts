@@ -1074,6 +1074,49 @@ describe("active durable Turn projection", () => {
     expect(state.messages[1]).toMatchObject({ text: "", status: "streaming" });
   });
 
+  test("projects dispatched subagents as chips, and skips one it cannot draw", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-task",
+          input: "Read the notes",
+          status: "completed",
+          responseText: "",
+          events: [
+            {
+              type: "task/dispatched",
+              taskId: "tk-1",
+              taskType: "executor",
+              description: "Read the release notes",
+              model: "provider-ollama-cloud/glm-5.3-flash:cloud",
+              background: true,
+            },
+            // A chip a client older than the Bot would receive half-formed. It
+            // is skipped, never drawn with a field it does not have.
+            { type: "task/dispatched", taskId: "tk-2" },
+          ],
+        },
+      ],
+    );
+
+    expect(state.messages[1]?.tasks).toEqual([
+      {
+        taskId: "tk-1",
+        taskType: "executor",
+        description: "Read the release notes",
+        model: "provider-ollama-cloud/glm-5.3-flash:cloud",
+        background: true,
+      },
+    ]);
+  });
+
   test("projects sends, and says so rather than throwing on one it cannot draw", () => {
     const state: Pick<
       FrockBotWebData,

@@ -97,6 +97,13 @@ export interface SubagentRunTaskRequestV1 {
   compositionGenerationId: string;
   model: TaskModelV1;
   prompt: string;
+  /**
+   * The Session the child Turn runs on. Absent on a first dispatch, where it
+   * is the task's own; present on a resume, where it is the *resumed* task's,
+   * because the whole point of resuming is that the child picks its own
+   * transcript up from its own cursor rather than starting blank again.
+   */
+  sessionId?: string;
 }
 
 export function decodeSubagentRunTaskRequestV1(
@@ -107,7 +114,7 @@ export function decodeSubagentRunTaskRequestV1(
   subagentExactKeys(
     candidate,
     ["taskId", "type", "parent", "compositionGenerationId", "model", "prompt"],
-    [],
+    ["sessionId"],
     label,
   );
   if (!isTaskIdV1(candidate.taskId)) {
@@ -134,6 +141,15 @@ export function decodeSubagentRunTaskRequestV1(
     ),
     model: decodeTaskModelV1(candidate.model, `${label}.model`),
     prompt,
+    ...(candidate.sessionId === undefined
+      ? {}
+      : {
+          sessionId: subagentText(
+            candidate.sessionId,
+            256,
+            `${label}.sessionId`,
+          ),
+        }),
   };
 }
 
@@ -149,7 +165,7 @@ export function subagentTaskContextV1(
     compositionGenerationId: request.compositionGenerationId,
     model: request.model,
     prompt: request.prompt,
-    sessionId: taskSessionIdV1(request.taskId),
+    sessionId: request.sessionId ?? taskSessionIdV1(request.taskId),
     status: "queued",
     acceptedAt,
   };
@@ -233,14 +249,27 @@ export interface SubagentDurableBindingV1 {
    */
   accept(
     identity: BotIdentity,
-    taskId: string,
+    anchorTaskId: string,
     request: SubagentRunTaskRequestV1,
   ): Promise<{ childSessionId: string }>;
   /** Asks a child what became of a task, for deadline reconciliation. */
   probe(
     identity: BotIdentity,
+    anchorTaskId: string,
     taskId: string,
   ): Promise<SubagentTaskContextV1 | undefined>;
+  /**
+   * Explicit, authenticated cancellation, carried to the execution host.
+   *
+   * The parent has already recorded the intent when this is called, so a child
+   * that cannot be reached does not keep the task alive: the parent settles it
+   * `stopped` either way, and the child reads its own cancelled context back.
+   */
+  stop(
+    identity: BotIdentity,
+    anchorTaskId: string,
+    taskId: string,
+  ): Promise<void>;
   /** Records one terminal outcome on the parent, from the child. */
   settleOnParent(
     parent: SubagentParentV1,
@@ -323,11 +352,12 @@ export function createBotSubagentDurableBindingV1(
       runTask(input: unknown): Promise<unknown>;
       readSubagentTask(input: unknown): Promise<unknown>;
       settleTask(input: unknown): Promise<unknown>;
+      stopSubagentTask(input: unknown): Promise<unknown>;
     };
   return {
-    accept: async (identity, taskId, request) => {
+    accept: async (identity, anchorTaskId, request) => {
       const answer = (await stub(
-        subagentDurableObjectNameV1({ ...identity, taskId }),
+        subagentDurableObjectNameV1({ ...identity, taskId: anchorTaskId }),
       ).runTask({
         schemaVersion: 1,
         userId: identity.userId,
@@ -340,9 +370,9 @@ export function createBotSubagentDurableBindingV1(
       }
       return { childSessionId };
     },
-    probe: async (identity, taskId) => {
+    probe: async (identity, anchorTaskId, taskId) => {
       const answer = await stub(
-        subagentDurableObjectNameV1({ ...identity, taskId }),
+        subagentDurableObjectNameV1({ ...identity, taskId: anchorTaskId }),
       ).readSubagentTask({
         schemaVersion: 1,
         userId: identity.userId,
@@ -351,6 +381,16 @@ export function createBotSubagentDurableBindingV1(
       });
       if (answer === undefined || answer === null) return undefined;
       return decodeSubagentTaskContextV1(JSON.parse(JSON.stringify(answer)));
+    },
+    stop: async (identity, anchorTaskId, taskId) => {
+      await stub(
+        subagentDurableObjectNameV1({ ...identity, taskId: anchorTaskId }),
+      ).stopSubagentTask({
+        schemaVersion: 1,
+        userId: identity.userId,
+        botId: identity.botId,
+        taskId,
+      });
     },
     settleOnParent: async (parent, taskId, outcome) => {
       await stub(`${parent.userId}:${parent.botId}`).settleTask({

@@ -398,6 +398,8 @@ describe("foundation application", () => {
       listMachines: () => Promise.reject(new Error("not used while composing")),
       revokeMachine: () =>
         Promise.reject(new Error("not used while composing")),
+      readTask: () => Promise.reject(new Error("not used while composing")),
+      stopTask: () => Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions

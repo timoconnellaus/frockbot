@@ -1197,3 +1197,85 @@ describe("client run protocol v1", () => {
     ).toThrow("run list.announcement.at is invalid");
   });
 });
+
+describe("dispatched subagents in the run projection", () => {
+  const dispatched: SessionEvent = {
+    type: "task/dispatched",
+    seq: 4,
+    timestamp,
+    turn: 1,
+    step: 1,
+    occurrenceId: "tool:1:1:0",
+    taskId: "tk-1",
+    taskType: "executor",
+    description: "Read the release notes",
+    model: "provider-ollama-cloud/glm-5.3-flash:cloud",
+    background: true,
+  };
+
+  test("projects a chip, and round-trips it through the page decoder", () => {
+    const projected = projectClientRunV1(storedRun([dispatched]));
+    expect(projected.events).toEqual([
+      {
+        type: "task/dispatched",
+        taskId: "tk-1",
+        taskType: "executor",
+        description: "Read the release notes",
+        model: "provider-ollama-cloud/glm-5.3-flash:cloud",
+        background: true,
+      },
+    ]);
+    const page = createClientRunListV1([projected], { truncated: false });
+    expect(
+      decodeClientRunPageV1(structuredClone(page)).runs[0]?.events,
+    ).toEqual(projected.events);
+  });
+
+  test("stands alone, so it never breaks the tool call/result walk", () => {
+    const projected = projectClientRunV1(
+      storedRun([...toolEvents(1), dispatched]),
+    );
+    const page = createClientRunListV1([projected], { truncated: false });
+    expect(
+      decodeClientRunPageV1(structuredClone(page)).runs[0]?.events,
+    ).toHaveLength(3);
+  });
+
+  test("carries nothing of the child but its identity — no prompt, no transcript", () => {
+    const projected = projectClientRunV1(
+      storedRun([
+        {
+          ...dispatched,
+          description: "Read the release notes",
+        } as SessionEvent,
+      ]),
+    );
+    expect(JSON.stringify(projected)).not.toContain("summarise");
+  });
+
+  test("refuses a chip that carries a field it does not have", () => {
+    const page = createClientRunListV1(
+      [projectClientRunV1(storedRun([dispatched]))],
+      { truncated: false },
+    );
+    const tampered = structuredClone(page) as {
+      runs: Array<{ events: Array<Record<string, unknown>> }>;
+    };
+    tampered.runs[0]!.events[0]!.prompt = "the child's brief";
+    expect(() => decodeClientRunPageV1(tampered)).toThrow();
+  });
+
+  test("refuses a chip whose background flag is not a boolean", () => {
+    const page = createClientRunListV1(
+      [projectClientRunV1(storedRun([dispatched]))],
+      { truncated: false },
+    );
+    const tampered = structuredClone(page) as {
+      runs: Array<{ events: Array<Record<string, unknown>> }>;
+    };
+    tampered.runs[0]!.events[0]!.background = "yes";
+    expect(() => decodeClientRunPageV1(tampered)).toThrow(
+      "run event.background must be a boolean",
+    );
+  });
+});

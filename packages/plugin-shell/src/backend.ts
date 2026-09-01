@@ -173,15 +173,25 @@ import {
 import type { ChannelWriterV1 } from "@frockbot/plugin-channels/records";
 import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import {
+  subagentAttributionV1,
+  ROUTINE_INBOX_TEXT_MAX,
+  ROUTINE_WAKE_TITLE_MAX,
+  type RoutinePendingWakeV1,
+} from "@frockbot/plugin-routines/inbox";
+import {
   TaskStore,
   type TaskStorageV1,
 } from "@frockbot/plugin-subagents/store";
 import {
   taskPromptDigestV1,
+  TASK_BLOCKING_POLL_MS_V1,
+  TASK_BLOCKING_TIMEOUT_MS_V1,
+  isTerminalTaskStatusV1,
   type TaskOutcomeV1,
   type TaskRecordV1,
 } from "@frockbot/plugin-subagents/records";
 import {
+  taskAnchorIdV1,
   taskContextKeyV1,
   taskKeyV1,
   TASK_ACTIVE_PREFIX,
@@ -196,11 +206,19 @@ import {
   type SubagentModelOptionV1,
 } from "@frockbot/plugin-subagents/models";
 import type {
+  SubagentCheckOutcomeV1,
   SubagentDispatchOutcomeV1,
   SubagentDispatchRequestV1,
+  SubagentMessageOutcomeV1,
+  SubagentResumeRequestV1,
+  SubagentStopOutcomeV1,
   SubagentsRuntimeHostV1,
 } from "@frockbot/plugin-subagents/agent";
-import type { TaskListViewV1 } from "@frockbot/plugin-subagents/shared";
+import {
+  taskViewV1,
+  type TaskListViewV1,
+  type TaskViewV1,
+} from "@frockbot/plugin-subagents/shared";
 import {
   createBotSubagentDurableBindingV1,
   decodeSubagentTaskContextV1,
@@ -477,6 +495,14 @@ export interface ShellBotBackendHost {
    * Durable Object has no honest way to dispatch one.
    */
   subagents?: SubagentDurableBindingV1;
+}
+
+/** The narrow storage seam the Bot's announcement log is written through. */
+interface BotAnnouncementTransaction {
+  get<T>(key: string): Promise<T | undefined>;
+  put(entries: Record<string, unknown>): Promise<void>;
+  list<T>(options: { prefix: string }): Promise<Map<string, T>>;
+  delete(keys: string[]): Promise<number>;
 }
 
 function optionalStoredRun(input: unknown): StoredRun | undefined {
@@ -1084,12 +1110,7 @@ export class ShellBotBackendContribution {
    * dropped, because an announcement is conversational history, not authority.
    */
   private async appendRenameAnnouncement(
-    transaction: {
-      get<T>(key: string): Promise<T | undefined>;
-      put(entries: Record<string, unknown>): Promise<void>;
-      list<T>(options: { prefix: string }): Promise<Map<string, T>>;
-      delete(keys: string[]): Promise<number>;
-    },
+    transaction: BotAnnouncementTransaction,
     rename: {
       from: string;
       to: string;
@@ -1097,10 +1118,7 @@ export class ShellBotBackendContribution {
       writer?: BotSelfWriterV1;
     },
   ): Promise<void> {
-    const seq =
-      ((await transaction.get<number>(BOT_ANNOUNCEMENT_SEQUENCE_KEY)) ?? -1) +
-      1;
-    const event: SessionEvent = {
+    await this.appendAnnouncement(transaction, (seq) => ({
       type: "bot/renamed",
       seq,
       timestamp: new Date().toISOString(),
@@ -1108,7 +1126,25 @@ export class ShellBotBackendContribution {
       to: rename.to,
       namedBy: rename.namedBy,
       ...(rename.writer ? { writer: rename.writer } : {}),
-    };
+    }));
+  }
+
+  /**
+   * Appends one durable Session event that belongs to no Turn.
+   *
+   * A rename is one; so is a task settling, because a background subagent
+   * settles after the Turn that dispatched it is over and there is no live
+   * Session left to append to. The log is append-only and bounded — an
+   * announcement is conversational history, not authority.
+   */
+  private async appendAnnouncement(
+    transaction: BotAnnouncementTransaction,
+    build: (seq: number) => SessionEvent,
+  ): Promise<void> {
+    const seq =
+      ((await transaction.get<number>(BOT_ANNOUNCEMENT_SEQUENCE_KEY)) ?? -1) +
+      1;
+    const event = build(seq);
     await transaction.put({
       [botAnnouncementKey(seq)]: event,
       [BOT_ANNOUNCEMENT_SEQUENCE_KEY]: seq,
@@ -2947,6 +2983,8 @@ export class ShellBotBackendContribution {
     turn: { runId: string; turnId: string; sessionId: string },
     compositionGenerationId: string,
     request: SubagentDispatchRequestV1,
+    /** Present only on a resume: which task this continues, and in whose child. */
+    resume?: { resumedFrom: string; anchorTaskId: string },
   ): Promise<SubagentDispatchOutcomeV1> {
     const binding = this.subagentBinding;
     if (!binding) {
@@ -2974,6 +3012,12 @@ export class ShellBotBackendContribution {
         turnId: turn.turnId,
         sessionId: turn.sessionId,
       },
+      ...(resume
+        ? {
+            resumedFrom: resume.resumedFrom,
+            anchorTaskId: resume.anchorTaskId,
+          }
+        : {}),
       now: new Date(),
     });
     if (admission.status === "refused") {
@@ -3003,6 +3047,7 @@ export class ShellBotBackendContribution {
       });
       return { status: "refused", reason: reservation.reason };
     }
+    const anchorTaskId = taskAnchorIdV1(admission.record.childSessionId);
     const runTask: SubagentRunTaskRequestV1 = {
       taskId,
       type: admission.record.type,
@@ -3016,9 +3061,12 @@ export class ShellBotBackendContribution {
       compositionGenerationId,
       model: admission.record.model,
       prompt: request.prompt,
+      ...(anchorTaskId === taskId
+        ? {}
+        : { sessionId: admission.record.childSessionId }),
     };
     try {
-      await binding.accept(identity, taskId, runTask);
+      await binding.accept(identity, anchorTaskId, runTask);
     } catch (error) {
       const failure =
         error instanceof Error ? error.message : "the subagent could not start";
@@ -3030,11 +3078,83 @@ export class ShellBotBackendContribution {
       return { status: "refused", reason: failure };
     }
     await this.tasks.markRunning(taskId);
+    if (!request.background) {
+      const settled = await this.awaitBlockingTask(
+        identity,
+        anchorTaskId,
+        taskId,
+      );
+      if (settled) {
+        return {
+          status: "settled",
+          taskId,
+          model: admission.record.model.slug,
+          taskStatus: settled.status,
+          ...(settled.summary === undefined
+            ? {}
+            : { summary: settled.summary }),
+          ...(settled.failure === undefined
+            ? {}
+            : { failure: settled.failure }),
+        };
+      }
+    }
     return {
       status: "dispatched",
       taskId,
       model: admission.record.model.slug,
     };
+  }
+
+  /**
+   * Waits, boundedly, for a `background:false` task — and degrades to
+   * background rather than holding a Turn open.
+   *
+   * It *polls durable state*: the parent's own task record first, then the
+   * child's context by RPC. It never awaits the child's settle callback, which
+   * is an RPC back into this very object while this very Turn is still
+   * executing — the reentrancy hazard G1 named. Both reads are ordinary I/O the
+   * Durable Object already does inside a Turn, and the outbound probe is the
+   * same call reconciliation makes.
+   */
+  private async awaitBlockingTask(
+    identity: BotIdentity,
+    anchorTaskId: string,
+    taskId: string,
+  ): Promise<TaskOutcomeV1 | undefined> {
+    const binding = this.subagentBinding;
+    const deadline = Date.now() + TASK_BLOCKING_TIMEOUT_MS_V1;
+    for (;;) {
+      try {
+        const record = await this.tasks.read(taskId);
+        if (record.outcome) return record.outcome;
+      } catch {
+        // A record that cannot be read is not a reason to hold the Turn.
+        return undefined;
+      }
+      if (binding) {
+        try {
+          const context = await binding.probe(identity, anchorTaskId, taskId);
+          if (context?.outcome) {
+            // The child finished but its callback has not landed. Settling
+            // here is the same idempotent write the callback performs.
+            await this.settleTask(identity, taskId, context.outcome);
+            return context.outcome;
+          }
+        } catch {
+          // A child that cannot be probed is simply not finished yet.
+        }
+      }
+      if (Date.now() >= deadline) return undefined;
+      await this.sleep(
+        Math.min(TASK_BLOCKING_POLL_MS_V1, Math.max(0, deadline - Date.now())),
+      );
+    }
+  }
+
+  /** The one wait in this class, named so a test can shorten it. */
+  protected sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -3064,11 +3184,288 @@ export class ShellBotBackendContribution {
         // could not be delivered is retried the next time this task settles or
         // this object reconciles; it never makes a settled task look unsettled.
       }
+      await this.recordTaskCompletion(identity, settled.record);
     }
     await this.ctx.storage.transaction((transaction) =>
       this.authority.refreshRecoveryAlarm(transaction),
     );
     return { status: settled.status };
+  }
+
+  /**
+   * What a settled task leaves behind on the parent (l.352: a background
+   * completion "also posts a user-visible summary on the parent").
+   *
+   * Three records, and they are the *same* three a completed Routine firing
+   * leaves — slice E's seams, reused rather than paralleled:
+   *
+   *  * the `task/settled` Session line, on the Bot's announcement log, because
+   *    a background task settles when the Turn that dispatched it is over and
+   *    there is no live Session to append to;
+   *  * a completion-inbox entry and a pending wake, so the summary — never the
+   *    child's transcript, which the parent has no door onto — is delivered to
+   *    the Bot's next conversational Turn as durable input;
+   *  * a notification intent, so a person hears about it too.
+   *
+   * The inbox half is skipped while the dispatching run is still active: a
+   * blocking dispatch is answered by its own tool result, and telling the same
+   * Turn the same thing twice is not delivery, it is duplication.
+   *
+   * Every write is idempotent on the task id, so a settle that races its own
+   * reconciliation leaves one of each.
+   */
+  private async recordTaskCompletion(
+    identity: BotIdentity,
+    task: TaskRecordV1,
+  ): Promise<void> {
+    const outcome = task.outcome;
+    if (!outcome) return;
+    const at = outcome.settledAt;
+    await this.ctx.storage.transaction((transaction) =>
+      this.appendAnnouncement(transaction, (seq) => ({
+        type: "task/settled",
+        seq,
+        timestamp: at,
+        taskId: task.taskId,
+        status: outcome.status,
+        ...(outcome.summary === undefined
+          ? {}
+          : { summary: outcome.summary.slice(0, ROUTINE_INBOX_TEXT_MAX) }),
+      })),
+    );
+    // The dispatching Turn is still running: it is waiting on this task and
+    // will read the outcome as its own tool result.
+    if ((await this.authority.readActiveRunId()) === task.dispatch.runId) {
+      return;
+    }
+    const text = this.taskCompletionTextV1(task, outcome);
+    const attribution = subagentAttributionV1(task.description);
+    const wakeId = `tw-${task.taskId}`;
+    const entry: RoutineInboxEntryV1 = {
+      schemaVersion: 1,
+      entryId: `ti-${task.taskId}`,
+      // The child's run id *is* the task id, so the entry names the run that
+      // produced it exactly as a firing's entry does.
+      runId: task.taskId,
+      routineId: task.taskId,
+      text,
+      attribution,
+      createdAt: at,
+      acknowledged: false,
+      wakeId,
+      source: "subagent",
+    };
+    await this.routineInbox.append(entry);
+    const wake: RoutinePendingWakeV1 = {
+      schemaVersion: 1,
+      kind: "wake",
+      wakeId,
+      runId: task.taskId,
+      routineId: task.taskId,
+      title: attribution.slice(0, ROUTINE_WAKE_TITLE_MAX),
+      text,
+      createdAt: at,
+      quiet: { automation: true },
+      source: "subagent",
+    };
+    await this.routineInbox.enqueue(wake);
+    let settings: BotSettingsViewV1;
+    try {
+      settings = await this.getSettings(identity);
+    } catch {
+      return;
+    }
+    if (!settings.notifications.enabled) return;
+    await this.authority.recordNotification({
+      notificationId: `task-settled:${task.taskId}`,
+      runId: task.taskId,
+      createdAt: at,
+      title: `${settings.profile.name} finished a subagent task`,
+      body: text.slice(0, 240),
+    });
+  }
+
+  /** The one line a settled task says to its parent. Never a transcript. */
+  private taskCompletionTextV1(
+    task: TaskRecordV1,
+    outcome: TaskOutcomeV1,
+  ): string {
+    const head = `${task.type} subagent "${task.description}" ${outcome.status}.`;
+    const body =
+      outcome.status === "completed"
+        ? (outcome.summary ?? "It left no summary.")
+        : (outcome.failure ??
+          (outcome.status === "stopped"
+            ? "It was stopped."
+            : "No reason was recorded."));
+    return `${head} ${body}`.slice(0, ROUTINE_INBOX_TEXT_MAX);
+  }
+
+  /** One task, as the gateway detail route reads it. */
+  async readTask(identity: BotIdentity, taskId: string): Promise<TaskViewV1> {
+    await this.validateIdentity(identity);
+    return taskViewV1(await this.tasks.read(taskId));
+  }
+
+  /** What `task_check` answers: status, last summary, and nothing to poll on. */
+  private async checkTask(taskId: string): Promise<SubagentCheckOutcomeV1> {
+    let record: TaskRecordV1;
+    try {
+      record = await this.tasks.read(taskId);
+    } catch (error) {
+      return {
+        status: "refused",
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+    return {
+      status: "known",
+      taskId: record.taskId,
+      taskType: record.type,
+      description: record.description,
+      taskStatus: record.status,
+      model: record.model.slug,
+      ...(record.outcome?.summary === undefined
+        ? {}
+        : { summary: record.outcome.summary }),
+      ...(record.outcome?.failure === undefined
+        ? {}
+        : { failure: record.outcome.failure }),
+      queuedMessages: (await this.tasks.messages(taskId)).length,
+    };
+  }
+
+  /** What `task_message` does: append to the bounded queue, or refuse. */
+  private async messageTask(
+    taskId: string,
+    message: string,
+  ): Promise<SubagentMessageOutcomeV1> {
+    const queued = await this.tasks.appendMessage(taskId, message, new Date());
+    if (queued.status === "refused") {
+      return { status: "refused", reason: queued.reason };
+    }
+    return { status: "queued", taskId, depth: queued.depth };
+  }
+
+  /**
+   * Explicit, authenticated cancellation of one task. Durable and terminal.
+   *
+   * The order is the constitution's: the intent is recorded, the child is
+   * asked to stop, and only then is the outcome written — so a stop that dies
+   * between the two is read back rather than repeated, and a child that cannot
+   * be reached does not leave a task the User was told was cancelled still
+   * live. The settle is the one idempotent settle every other path uses.
+   */
+  async stopTask(
+    identity: BotIdentity,
+    taskId: string,
+    requestedBy: "bot" | "user",
+  ): Promise<
+    | { status: "stopped"; record: TaskRecordV1 }
+    | { status: "refused"; reason: string }
+  > {
+    await this.authority.assertIdentity(identity);
+    const requested = await this.tasks.requestStop(
+      taskId,
+      new Date(),
+      requestedBy,
+    );
+    if (requested.status === "refused") {
+      // A task that is already terminal answers with what it already is: a
+      // second Stop on a stopped task is not a failure.
+      let record: TaskRecordV1 | undefined;
+      try {
+        record = await this.tasks.read(taskId);
+      } catch {
+        record = undefined;
+      }
+      if (record && record.status === "stopped") {
+        return { status: "stopped", record };
+      }
+      return { status: "refused", reason: requested.reason };
+    }
+    await this.ctx.storage.transaction((transaction) =>
+      this.appendAnnouncement(transaction, (seq) => ({
+        type: "task/stopped",
+        seq,
+        timestamp: new Date().toISOString(),
+        taskId,
+        requestedBy,
+      })),
+    );
+    const binding = this.subagentBinding;
+    if (binding) {
+      try {
+        await binding.stop(
+          identity,
+          taskAnchorIdV1(requested.record.childSessionId),
+          taskId,
+        );
+      } catch {
+        // The child is an execution host, not the authority. One that cannot
+        // be reached reads its own cancelled context back on its next alarm;
+        // the terminal state is recorded here either way.
+      }
+    }
+    await this.settleTask(identity, taskId, {
+      status: "stopped",
+      settledAt: new Date().toISOString(),
+      failure: `Stopped by ${requestedBy === "user" ? "your user" : "the Bot"}.`,
+    });
+    return { status: "stopped", record: await this.tasks.read(taskId) };
+  }
+
+  /** The gateway's cancellation door. Same act, second authenticated caller. */
+  async stopTaskForUser(
+    identity: BotIdentity,
+    taskId: string,
+  ): Promise<TaskViewV1> {
+    await this.validateIdentity(identity);
+    const stopped = await this.stopTask(identity, taskId, "user");
+    if (stopped.status === "refused") {
+      throw new Error(stopped.reason);
+    }
+    return taskViewV1(stopped.record);
+  }
+
+  /**
+   * A new run in a finished task's own child Durable Object and Session.
+   *
+   * The model is *not* re-resolved: the resumed run keeps the binding the
+   * first one pinned, because the transcript it continues was produced by it.
+   * `resumedFrom` records which task this continues.
+   */
+  private async resumeTask(
+    identity: BotIdentity,
+    turn: { runId: string; turnId: string; sessionId: string },
+    compositionGenerationId: string,
+    request: SubagentResumeRequestV1,
+  ): Promise<SubagentDispatchOutcomeV1> {
+    const resumable = await this.tasks.resumable(request.resume);
+    if (resumable.status === "refused") {
+      return { status: "refused", reason: resumable.reason };
+    }
+    if (await this.tasks.stopRequested(request.resume)) {
+      return {
+        status: "refused",
+        reason: `task "${request.resume}" was stopped; a stopped subagent is not resumed`,
+      };
+    }
+    return this.dispatchSubagentTask(
+      identity,
+      turn,
+      compositionGenerationId,
+      {
+        description: request.description ?? resumable.record.description,
+        prompt: request.prompt,
+        type: resumable.record.type,
+        background: request.background,
+        model: resumable.record.model,
+        attachments: [],
+        effectId: request.effectId,
+      },
+      { resumedFrom: request.resume, anchorTaskId: resumable.anchorTaskId },
+    );
   }
 
   /**
@@ -3095,6 +3492,38 @@ export class ShellBotBackendContribution {
       this.authority.refreshRecoveryAlarm(transaction),
     );
     return { childSessionId: context.sessionId };
+  }
+
+  /**
+   * The child's cancellation door.
+   *
+   * Durable first: the context is marked settled so a child that is evicted
+   * before its Agent notices — or that has not started its Turn yet — cannot
+   * come back and run the task anyway. The Agent signal follows, and is
+   * advisory, exactly as an authenticated Stop's is.
+   */
+  async stopSubagentTask(
+    identity: BotIdentity,
+    taskId: string,
+  ): Promise<{ status: "stopped" | "unknown" }> {
+    await this.authority.assertIdentity(identity);
+    const key = taskContextKeyV1(taskId);
+    const stored = await this.ctx.storage.get<unknown>(key);
+    if (stored === undefined) return { status: "unknown" };
+    const context = decodeSubagentTaskContextV1(stored);
+    if (context.status !== "settled") {
+      await this.ctx.storage.put(key, {
+        ...context,
+        status: "settled",
+        outcome: {
+          status: "stopped",
+          settledAt: new Date().toISOString(),
+          failure: "Stopped by an authenticated cancellation.",
+        },
+      });
+    }
+    this.cancelActiveTurn({ sessionId: context.sessionId, runId: taskId });
+    return { status: "stopped" };
   }
 
   /** What a child holds for one task, for the parent's reconciliation. */
@@ -3200,7 +3629,13 @@ export class ShellBotBackendContribution {
       let outcome: TaskOutcomeV1 | undefined;
       if (binding) {
         try {
-          outcome = (await binding.probe(identity, task.taskId))?.outcome;
+          outcome = (
+            await binding.probe(
+              identity,
+              taskAnchorIdV1(task.childSessionId),
+              task.taskId,
+            )
+          )?.outcome;
         } catch {
           outcome = undefined;
         }
@@ -3241,6 +3676,16 @@ export class ShellBotBackendContribution {
           compositionGenerationId,
           request,
         ),
+      check: (taskId) => this.checkTask(taskId),
+      message: (taskId, message) => this.messageTask(taskId, message),
+      stop: async (taskId): Promise<SubagentStopOutcomeV1> => {
+        const stopped = await this.stopTask(identity, taskId, "bot");
+        return stopped.status === "stopped"
+          ? { status: "stopped", taskId }
+          : { status: "refused", reason: stopped.reason };
+      },
+      resume: (request) =>
+        this.resumeTask(identity, turn, compositionGenerationId, request),
     };
   }
 
@@ -3936,11 +4381,18 @@ export class ShellBotBackendContribution {
       if (input.kind !== "wake" || input.renotifiedAt !== undefined) continue;
       const entry = unread.get(input.runId);
       if (!entry) continue;
+      // The same notification id the settle recorded, per source: a replay is
+      // a second delivery of one intent, never a second intent.
+      const subagent = input.source === "subagent";
       await this.authority.recordNotification({
-        notificationId: `routine-wake:${input.runId}`,
+        notificationId: subagent
+          ? `task-settled:${input.runId}`
+          : `routine-wake:${input.runId}`,
         runId: input.runId,
         createdAt: new Date().toISOString(),
-        title: `${settings.profile.name} finished a Routine`,
+        title: `${settings.profile.name} finished ${
+          subagent ? "a subagent task" : "a Routine"
+        }`,
         body: entry.text.slice(0, 240),
       });
       await this.routineInbox.markRenotified(key);

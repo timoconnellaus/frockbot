@@ -1002,6 +1002,56 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.listTasks(identity);
   }
 
+  /** One task, by id. The parent object's answer; a child holds no list. */
+  async readTask(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      taskId: rpcString(128),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.readTask(identity, request.taskId as string);
+  }
+
+  /**
+   * The User's own cancellation of one task.
+   *
+   * The same durable act `task_stop` performs, through a second authenticated
+   * door: explicit, authenticated, and terminal — never a second mechanism.
+   */
+  async stopTask(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      taskId: rpcString(128),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.stopTaskForUser(identity, request.taskId as string);
+  }
+
+  /** The Subagent Durable Object's cancellation door (ADR 0017). */
+  async stopSubagentTask(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      taskId: rpcString(128),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.stopSubagentTask(identity, request.taskId as string);
+  }
+
   /**
    * The Subagent Durable Object's door (ADR 0017).
    *

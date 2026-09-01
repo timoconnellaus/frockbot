@@ -20,6 +20,12 @@
         "kind": "tool",
         "connectionTypes": [],
         "admission": { "turnTypes": ["chat", "automation"] }
+      },
+      {
+        "id": "task-lifecycle",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": { "turnTypes": ["chat", "automation"] }
       }
     ]
   },
