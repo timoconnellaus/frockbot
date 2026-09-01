@@ -58,7 +58,11 @@ describe("debug route", () => {
   test("401s without a token, and with a wrong one", async () => {
     const route = createDebugRoute(surface());
 
-    for (const headers of [{}, { authorization: "Bearer wrong" }]) {
+    const unauthorized: Array<Record<string, string>> = [
+      {},
+      { authorization: "Bearer wrong" },
+    ];
+    for (const headers of unauthorized) {
       const request = get("/api/debug/users", headers);
       expect((await route(request, new URL(request.url)))?.status).toBe(401);
     }

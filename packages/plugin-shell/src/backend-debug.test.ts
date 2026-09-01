@@ -197,6 +197,6 @@ describe("Bot debug snapshot", () => {
     await contributionOver(storage).debugSnapshot(IDENTITY);
 
     expect(await storage.get<string>("active-run")).toBe("run-wedged");
-    expect(await storage.get(`run:${run.runId}`)).toEqual(run);
+    expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
   });
 });
