@@ -113,6 +113,7 @@ describe("foundation application", () => {
         "auth",
         "settings",
         "bot-template",
+        "channels",
         "clock",
         "computer",
         "package-publisher",
@@ -407,6 +408,17 @@ describe("foundation application", () => {
       deliverChannelWebhook: () =>
         Promise.reject(new Error("not used while composing")),
       connectChannel: () =>
+        Promise.reject(new Error("not used while composing")),
+      listChannels: () => Promise.reject(new Error("not used while composing")),
+      readChannelThreadPage: () =>
+        Promise.reject(new Error("not used while composing")),
+      listChannelUnread: () =>
+        Promise.reject(new Error("not used while composing")),
+      markChannelRead: () =>
+        Promise.reject(new Error("not used while composing")),
+      postChannelMessage: () =>
+        Promise.reject(new Error("not used while composing")),
+      disconnectChannel: () =>
         Promise.reject(new Error("not used while composing")),
     });
     expect(

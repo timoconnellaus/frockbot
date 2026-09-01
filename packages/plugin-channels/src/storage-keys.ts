@@ -83,3 +83,22 @@ export function channelSequenceCursorV1(value: unknown): { nextSeq: number } {
     ? { nextSeq: candidate.nextSeq as number }
     : { nextSeq: 0 };
 }
+
+/**
+ * One Channel's read position for the viewing User.
+ *
+ * A Channel is User-scoped, so how far the User has read it is too: the Bot
+ * Durable Object holds no opinion about a room it is only a member of.
+ */
+export const CHANNEL_READ_PREFIX = "channel-read:";
+
+export function channelReadKeyV1(channelId: string): string {
+  return `${CHANNEL_READ_PREFIX}${channelId}`;
+}
+
+/** One durable `channel/mark-read` receipt, keyed by its idempotency key. */
+export const CHANNEL_READ_RECEIPT_PREFIX = "channel-read-receipt:";
+
+export function channelReadReceiptKeyV1(commandId: string): string {
+  return `${CHANNEL_READ_RECEIPT_PREFIX}${commandId}`;
+}

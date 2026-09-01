@@ -56,9 +56,14 @@ test("the info pane assembles every Package's section without a console error", 
     pane.locator("#bot-info-routines").getByText("0/0 enabled"),
   ).toBeVisible();
 
-  // Channels are deferred, and the pane says so where they will mount.
+  // The Channels Package, through `frockbot.bot-info-channels`. The pane owns
+  // the card and its heading; the Package fills it, so exactly one heading
+  // named "Channels" exists in the region and the connect form is inside it.
   await expect(pane.getByRole("heading", { name: "Channels" })).toBeVisible();
   await expect(pane.locator("#bot-info-channels")).toBeVisible();
+  await expect(
+    pane.locator("#bot-info-channels").getByLabel("Connection"),
+  ).toBeVisible();
 
   // The notification toggle writes on change, with no Save button.
   const notifications = pane

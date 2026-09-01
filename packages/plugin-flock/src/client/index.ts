@@ -525,19 +525,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     const directory = decodeBotNotificationDirectoryViewV1(
       await request("/api/bots/notifications"),
     );
-    for (const intent of directory.notifications) {
-      // The open Bot's intents belong to the Shell: it projects the Turn into
-      // the conversation and acknowledges it there.
-      if (intent.botId === shell?.value.activeBotId) continue;
-      const key = `${intent.botId}:${intent.notificationId}`;
-      if (deliveredNotifications.has(key)) continue;
-      const delivery = await showClientNotificationV1({
-        title: intent.title,
-        body: intent.body,
-      });
-      if (delivery === "unavailable") continue;
-      deliveredNotifications.add(key);
-      await request(
+    const acknowledge = (intent: { botId: string; notificationId: string }) =>
+      request(
         `/api/bots/${encodeURIComponent(intent.botId)}/notifications`,
         "POST",
         JSON.stringify({
@@ -546,6 +535,31 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           notificationId: intent.notificationId,
         }),
       );
+    for (const intent of directory.notifications) {
+      // The open Bot's intents belong to the Shell: it projects the Turn into
+      // the conversation and acknowledges it there. A Channel's do not — a
+      // room the open Bot is in is not the conversation on screen, so it is
+      // told about here whichever Bot the User is looking at.
+      if (!intent.channelId && intent.botId === shell?.value.activeBotId)
+        continue;
+      // One Channel message is owed to every member but its sender, so it
+      // arrives here once per recipient Bot. The person is told about the
+      // room, once — and every Bot's copy is still acknowledged, or the ones
+      // that were folded away are re-listed for ever.
+      const key = intent.channelId
+        ? `channel:${intent.channelId}:${intent.notificationId}`
+        : `${intent.botId}:${intent.notificationId}`;
+      if (deliveredNotifications.has(key)) {
+        if (intent.channelId) await acknowledge(intent);
+        continue;
+      }
+      const delivery = await showClientNotificationV1({
+        title: intent.title,
+        body: intent.body,
+      });
+      if (delivery === "unavailable") continue;
+      deliveredNotifications.add(key);
+      await acknowledge(intent);
     }
   }
 

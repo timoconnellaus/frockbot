@@ -3,13 +3,34 @@
   "id": "channels",
   "displayName": "Channels",
   "version": "0.0.1",
-  "compatibility": { "frockbot": ">=0.0.1" },
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
   "dependencies": {
-    "shell": ">=0.0.1"
+    "shell": ">=0.0.1",
+    "flock": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
   },
   "contributions": {
-    "backend": [{ "entry": "./backend", "host": "gateway" }],
-    "runtime": { "entry": "./agent" }
+    "backend": [
+      {
+        "entry": "./backend",
+        "host": "gateway"
+      }
+    ],
+    "runtime": {
+      "entry": "./agent"
+    },
+    "client": {
+      "entry": "./client",
+      "mounts": [
+        {
+          "slot": "frockbot.sidebar-bots",
+          "order": 20
+        }
+      ],
+      "outlets": []
+    }
   },
   "configuration": {
     "settings": [],

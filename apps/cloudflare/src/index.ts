@@ -4,6 +4,19 @@ import type {
   ChannelDeliveryOutcomeV1,
 } from "@frockbot/plugin-channels/connect";
 import type { ChannelOutboundReceiptV1 } from "@frockbot/plugin-channels/connector";
+import { CHANNEL_USER_PEER_V1 } from "@frockbot/plugin-channels/backend";
+import {
+  decodeChannelCommandReceiptV1,
+  decodeChannelListViewV1,
+  decodeChannelThreadPageViewV1,
+  type ChannelCommandV1,
+} from "@frockbot/plugin-channels/shared";
+import {
+  decodeChannelReadReceiptV1,
+  decodeChannelUnreadDirectoryViewV1,
+  type ChannelReadCommandV1,
+} from "@frockbot/plugin-channels/unread";
+import type { ChannelWriterV1 } from "@frockbot/plugin-channels/records";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { decodeSkillRefsV1 } from "@frockbot/kernel-contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
@@ -275,6 +288,37 @@ interface UserConfigurationRpc extends UserConfigurationBinding {
     hop: number;
     texts: string[];
   }): Promise<{ schemaVersion: 1; receipts: ChannelOutboundReceiptV1[] }>;
+  /** Every Channel one Bot is a member of. */
+  listChannels(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<unknown>;
+  /** One Channel: the record, its members, its thread, a Connection's label. */
+  readChannelThreadPage(request: {
+    schemaVersion: 1;
+    userId: string;
+    channelId: string;
+  }): Promise<unknown>;
+  /** Per-Channel unread for one Bot's rows, in one round trip. */
+  listChannelUnread(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<unknown>;
+  /** The User's own read position in one Channel. */
+  markChannelRead(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: ChannelReadCommandV1;
+  }): Promise<unknown>;
+  /** One Channel command applied as the User rather than as a Bot. */
+  executeChannelCommand(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: ChannelCommandV1;
+    writer: ChannelWriterV1;
+  }): Promise<unknown>;
 }
 
 type RpcBoundary<T> = {
@@ -402,6 +446,11 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     connectChannel: (request) => rpc.connectChannel(request),
     deliverChannelWebhook: (request) => rpc.deliverChannelWebhook(request),
     deliverChannelOutbound: (request) => rpc.deliverChannelOutbound(request),
+    listChannels: (request) => rpc.listChannels(request),
+    readChannelThreadPage: (request) => rpc.readChannelThreadPage(request),
+    listChannelUnread: (request) => rpc.listChannelUnread(request),
+    markChannelRead: (request) => rpc.markChannelRead(request),
+    executeChannelCommand: (request) => rpc.executeChannelCommand(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
@@ -1437,6 +1486,81 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           userId,
           ...request,
         }),
+      // The WebUI's reads. Channel state crosses a Durable Object seam, so it
+      // decodes on arrival rather than being trusted in the shape RPC happened
+      // to return.
+      listChannels: async (userId, botId) =>
+        decodeChannelListViewV1(
+          await userConfigurationStub(env, userId).listChannels({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      readChannelThreadPage: async (userId, channelId) =>
+        decodeChannelThreadPageViewV1(
+          await userConfigurationStub(env, userId).readChannelThreadPage({
+            schemaVersion: 1,
+            userId,
+            channelId,
+          }),
+        ),
+      listChannelUnread: async (userId, botId) =>
+        decodeChannelUnreadDirectoryViewV1(
+          await userConfigurationStub(env, userId).listChannelUnread({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      markChannelRead: async (userId, command) =>
+        decodeChannelReadReceiptV1(
+          await userConfigurationStub(env, userId).markChannelRead({
+            schemaVersion: 1,
+            userId,
+            command: {
+              schemaVersion: 1,
+              type: "channel/mark-read",
+              ...command,
+            },
+          }),
+        ),
+      postChannelMessage: async (userId, command) =>
+        decodeChannelCommandReceiptV1(
+          await userConfigurationStub(env, userId).executeChannelCommand({
+            schemaVersion: 1,
+            userId,
+            command: {
+              schemaVersion: 1,
+              type: "channel/post",
+              commandId: command.commandId,
+              channelId: command.channelId,
+              botId: command.botId,
+              text: command.text,
+              // The person is a peer, not a member: what they say is owed to
+              // every Bot in the room, the one they were looking at included.
+              senderPeer: CHANNEL_USER_PEER_V1,
+            },
+            writer: { kind: "user" },
+          }),
+        ),
+      // Disconnect is the same `channel/disconnect` the `channel_manage` tool
+      // applies. The User is the writer, because the User asked.
+      disconnectChannel: async (userId, command) =>
+        decodeChannelCommandReceiptV1(
+          await userConfigurationStub(env, userId).executeChannelCommand({
+            schemaVersion: 1,
+            userId,
+            command: {
+              schemaVersion: 1,
+              type: "channel/disconnect",
+              commandId: command.commandId,
+              channelId: command.channelId,
+              botId: command.botId,
+            },
+            writer: { kind: "user" },
+          }),
+        ),
       // The secret the gateway verifies a presented webhook key against. It
       // never leaves the Worker; a Bot only ever sees a digest.
       ...(typeof env.ROUTINE_HOOK_SECRET === "string"

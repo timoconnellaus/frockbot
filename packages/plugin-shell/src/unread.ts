@@ -475,6 +475,15 @@ export interface BotPendingNotificationV1 {
   createdAt: string;
   title: string;
   body: string;
+  /**
+   * The Channel a group message raised this intent in, when one did.
+   *
+   * A Channel message is owed to every member but its sender, so the same
+   * message raises one intent per recipient Bot. This dimension is what lets
+   * the client tell the person once about the room rather than once per Bot,
+   * and what lets it open the thread the message is actually in.
+   */
+  channelId?: string;
 }
 
 export interface BotNotificationDirectoryViewV1 {
@@ -517,7 +526,7 @@ function decodeBotPendingNotificationV1(
       "title",
       "body",
     ],
-    [],
+    ["channelId"],
     "pending notification",
   );
   if (value.schemaVersion !== 1) {
@@ -561,6 +570,15 @@ function decodeBotPendingNotificationV1(
       "pending notification body",
       true,
     ),
+    ...(value.channelId === undefined
+      ? {}
+      : {
+          channelId: boundedText(
+            value.channelId,
+            MAX_NOTIFICATION_ID_LENGTH,
+            "pending notification channelId",
+          ),
+        }),
   };
 }
 

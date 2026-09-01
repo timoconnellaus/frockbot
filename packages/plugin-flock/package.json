@@ -6,15 +6,17 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
+    "./assets/manifest.json": "./assets/manifest.json",
     "./backend": "./src/backend.ts",
-    "./user": "./src/user.ts",
     "./bot": "./src/bot.ts",
     "./client": "./src/client/index.ts",
-    "./manifest": "./src/manifest.ts",
-    "./shared": "./src/shared.ts",
-    "./assets/manifest.json": "./assets/manifest.json",
+    "./client/BotAvatar.vue": "./src/client/BotAvatar.vue",
+    "./client/state": "./src/client/state.ts",
     "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
+    "./manifest": "./src/manifest.ts",
+    "./package.json": "./package.json",
+    "./shared": "./src/shared.ts",
+    "./user": "./src/user.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"

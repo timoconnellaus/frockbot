@@ -7,7 +7,8 @@
  * is available and members in group chats. FrockBot assembles the same pane
  * out of Contributions rather than one component: the Computer preview is the
  * Computer Package's `frockbot.computer` slot, the Routines glance and anything
- * later arrive through `frockbot.bot-info-sections`, and what this surface owns
+ * later arrive through `frockbot.bot-info-sections` and
+ * `frockbot.bot-info-channels`, and what this surface owns
  * is the Bot itself — identity, name provenance, the authority it holds, and
  * whether it may interrupt you.
  *
@@ -181,13 +182,18 @@ async function setNotifications(event: Event): Promise<void> {
         anchor="bot-info-channels"
         label="Channels"
         :href="link('bot-info-channels')"
-        class="bot-info__card bot-info__card--empty"
+        class="bot-info__card"
       >
         <header class="bot-info__head"><h3>Channels</h3></header>
         <p class="bot-info__hint">
-          Bot-to-Bot channels and external channel connectors are not built yet.
-          When a Package contributes them they mount here.
+          The rooms this Bot is in, and the platforms it is connected to.
         </p>
+        <!--
+          The Channels Package's own Contribution. The pane gives it a place, a
+          heading and the anchor a deep link cites, and knows nothing about
+          rooms, connectors or keys — exactly as it does for the Computer.
+        -->
+        <k-slot name="frockbot.bot-info-channels" />
       </UiAnchor>
 
       <UiAnchor
@@ -243,11 +249,6 @@ async function setNotifications(event: Event): Promise<void> {
   border: 1px solid var(--frock-border);
   border-radius: var(--frock-radius-card);
   background: var(--frock-surface);
-}
-
-.bot-info__card--empty {
-  border-style: dashed;
-  background: var(--frock-surface-subtle);
 }
 
 .bot-info__identity {

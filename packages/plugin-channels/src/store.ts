@@ -48,6 +48,8 @@ import {
   channelKeyV1,
   channelMessageKeyV1,
   channelMessagePrefixV1,
+  channelReadKeyV1,
+  channelReadReceiptKeyV1,
   channelReceiptKeyV1,
   channelSequenceCursorV1,
   channelSequenceKeyV1,
@@ -59,6 +61,18 @@ import {
   decodeChannelTokenKeyV1,
   type ChannelTokenKeyV1,
 } from "./token.js";
+import {
+  advanceChannelReadCursorV1,
+  channelReadCommandFingerprintV1,
+  decodeChannelReadCursorV1,
+  projectChannelUnreadViewV1,
+  CHANNEL_UNREAD_FANOUT_LIMIT,
+  CHANNEL_UNREAD_PENDING_SCAN,
+  type ChannelReadCommandV1,
+  type ChannelReadCursorV1,
+  type ChannelUnreadDirectoryViewV1,
+  type ChannelUnreadViewV1,
+} from "./unread.js";
 import {
   channelCommandFingerprintV1,
   channelMessageViewV1,
@@ -229,6 +243,110 @@ export class ChannelStore {
       key.keyVersion === keyVersion &&
       channelConstantTimeEqualsV1(key.digest, digest)
     );
+  }
+
+  /**
+   * How far the User has read one Channel, or nothing when they never have.
+   *
+   * User-scoped, like everything else about a Channel: the Bot Durable Object
+   * derives its own badge from its own admission index and holds no opinion
+   * about a room it is only a member of.
+   */
+  async readCursor(
+    channelId: string,
+  ): Promise<ChannelReadCursorV1 | undefined> {
+    const stored = await this.#storage.get<unknown>(
+      channelReadKeyV1(channelId),
+    );
+    return stored === undefined ? undefined : decodeChannelReadCursorV1(stored);
+  }
+
+  /**
+   * Record that the User read one Channel up to a `seq`.
+   *
+   * Monotonic, and durably receipted like every other command here: a retried
+   * command replays its recorded outcome, a reused id carrying different bytes
+   * is an error, and a cursor that is not newer leaves the record untouched.
+   */
+  async markRead(
+    command: ChannelReadCommandV1,
+  ): Promise<ChannelReadCursorV1 | undefined> {
+    const fingerprint = channelReadCommandFingerprintV1(command);
+    const receiptKey = channelReadReceiptKeyV1(command.commandId);
+    const cursorKey = channelReadKeyV1(command.channelId);
+    return this.#storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(receiptKey);
+      if (stored !== undefined) {
+        const receipt = stored as {
+          commandFingerprint?: unknown;
+          cursor?: unknown;
+        };
+        if (receipt.commandFingerprint !== fingerprint) {
+          throw new ChannelDecodeError(
+            "Channel read commandId was reused for a different command",
+          );
+        }
+        return receipt.cursor === undefined
+          ? undefined
+          : decodeChannelReadCursorV1(receipt.cursor);
+      }
+      const current = await transaction.get<unknown>(cursorKey);
+      const next = advanceChannelReadCursorV1(
+        current === undefined ? undefined : decodeChannelReadCursorV1(current),
+        {
+          channelId: command.channelId,
+          upToSeq: command.upToSeq,
+          at: this.#now().toISOString(),
+        },
+      );
+      await transaction.put(cursorKey, next);
+      await transaction.put(receiptKey, {
+        commandFingerprint: fingerprint,
+        cursor: next,
+      });
+      return next;
+    });
+  }
+
+  /**
+   * Unread for every Channel one Bot is a member of.
+   *
+   * Two bounds keep one poll's cost proportional to what a person could be
+   * behind on: the fan-out answers for at most
+   * {@link CHANNEL_UNREAD_FANOUT_LIMIT} Channels, and the "a delivery is still
+   * pending" clause looks only at each Channel's newest
+   * {@link CHANNEL_UNREAD_PENDING_SCAN} messages. Neither bound changes what
+   * an ordinary room reports; both stop a pathological one from costing the
+   * whole log on every tick.
+   */
+  async unread(botId: string): Promise<ChannelUnreadDirectoryViewV1> {
+    const listed = await this.list(botId);
+    const unread: ChannelUnreadViewV1[] = [];
+    for (const channel of listed.channels.slice(
+      0,
+      CHANNEL_UNREAD_FANOUT_LIMIT,
+    )) {
+      unread.push(await this.channelUnread(channel.channelId));
+    }
+    return { schemaVersion: 1, botId, unread };
+  }
+
+  /** One Channel's row, under the same two bounds {@link unread} pays. */
+  async channelUnread(channelId: string): Promise<ChannelUnreadViewV1> {
+    const thread = await this.thread(channelId);
+    const cursor = await this.readCursor(channelId);
+    const pendingMessageIds: string[] = [];
+    for (const message of thread.messages.slice(-CHANNEL_UNREAD_PENDING_SCAN)) {
+      const deliveries = await this.deliveries(message.messageId);
+      if (deliveries.some((delivery) => delivery.state === "pending")) {
+        pendingMessageIds.push(message.messageId);
+      }
+    }
+    return projectChannelUnreadViewV1(channelId, {
+      messages: thread.messages,
+      pendingMessageIds,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
   }
 
   /** Every delivery one message owes, in member order. */
