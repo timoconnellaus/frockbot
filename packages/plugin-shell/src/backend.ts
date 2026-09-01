@@ -125,7 +125,10 @@ import {
   type TemplateShareReceiptV1,
 } from "@frockbot/plugin-bot-template/shared";
 import { createBotMemoryHost } from "./backend-memory.js";
-import { createBotImageHost } from "./backend-image.js";
+import {
+  createBotImageHost,
+  type WorkersAiBindingV1,
+} from "./backend-image.js";
 import {
   createBotPluginSkillsSource,
   createBotSkillCatalogReader,
@@ -477,14 +480,8 @@ export interface BotStateEnv {
    */
   PACKAGE_BUNDLER?: PackageBundlerBinding;
   MEMORY_INDEX: VectorizeIndex;
-  /**
-   * The Workers AI binding, read only by the image-generation seam
-   * (`backend-image.ts`). Optional so a host without Workers AI — a test, the
-   * Electron shell, a self-hosted deployment — still compiles; `generate_image`
-   * then refuses visibly on the Turn that calls it rather than throwing inside
-   * the Agent loop. The `PACKAGE_BUNDLER` precedent.
-   */
-  AI?: Ai;
+  /** The native Workers AI binding consumed through narrow Package adapters. */
+  AI?: WorkersAiBindingV1;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   /**
    * The Bot Durable Object namespace, as the Subagent Durable Object namespace
@@ -4584,6 +4581,11 @@ export class ShellBotBackendContribution {
             bindingPackageId,
             effectId,
           ),
+        ...(this.env.AI
+          ? {
+              runWorkersAi: (model, input) => this.env.AI!.run(model, input),
+            }
+          : {}),
         fetch: this.outboundFetch,
       }),
     );

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 4,
+  "id": "provider-workers-ai",
+  "displayName": "Cloudflare Workers AI",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": { "settings": ">=0.0.1" },
+  "contributions": {
+    "backend": [{ "entry": "./user", "host": "user" }],
+    "runtime": { "entry": "./runtime" }
+  },
+  "permissions": ["connections:manage", "models:invoke"],
+  "configuration": {
+    "connectionTypes": [
+      {
+        "id": "workers-ai-account",
+        "displayName": "Cloudflare Workers AI",
+        "allowMultiple": false,
+        "authorization": { "kind": "ambient-native" },
+        "capabilities": ["workers-ai-models"]
+      }
+    ],
+    "capabilities": [
+      {
+        "id": "workers-ai-models",
+        "kind": "model",
+        "connectionTypes": ["workers-ai-account"],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent", "channel"]
+        }
+      }
+    ]
+  }
+}

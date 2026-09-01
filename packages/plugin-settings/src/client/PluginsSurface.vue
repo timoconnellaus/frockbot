@@ -20,6 +20,7 @@ if (!providedWeb) throw new Error("shell client data was not provided");
 const web = providedWeb;
 // Packages are User-scoped, so the catalog's link names no Bot.
 const packagesLink = settingsLinkV1({ anchor: "user-packages" });
+const defaultModelLink = settingsLinkV1({ anchor: "user-default-model" });
 const search = ref("");
 const expandedPackageId = ref<string>();
 const apiKeyPackageId = ref<string>();
@@ -370,6 +371,20 @@ function primaryConnectionType(
   item: PluginCatalogItem,
 ): PluginCatalogItem["connectionTypes"][number] | undefined {
   return item.connectionTypes[0];
+}
+
+function canBeginConnect(item: PluginCatalogItem): boolean {
+  return primaryConnectionType(item)?.authorizationKind !== "ambient-native";
+}
+
+function defaultModelName(connection: ConnectionView): string | undefined {
+  const selected = web.value.userSettings?.newBotModelTemplate;
+  if (selected?.connectionId !== connection.connectionId) return undefined;
+  return (
+    connection.modelCatalog?.models.find(
+      (model) => model.providerModelId === selected.providerModelId,
+    )?.displayName ?? selected.providerModelId
+  );
 }
 
 /**
@@ -825,11 +840,17 @@ async function disconnect(connectionId: string): Promise<void> {
             Settings
           </UiButton>
           <UiButton
-            v-if="isPackageInstalled(item.packageId)"
+            v-if="isPackageInstalled(item.packageId) && canBeginConnect(item)"
             @click="beginConnect(item)"
           >
             Connect
           </UiButton>
+          <span
+            v-else-if="isPackageInstalled(item.packageId)"
+            class="plugin-status"
+          >
+            Added
+          </span>
           <UiButton
             v-else
             variant="primary"
@@ -864,53 +885,63 @@ async function disconnect(connectionId: string): Promise<void> {
                 </small>
               </div>
               <div class="account-actions">
-                <UiButton @click="beginLabeling(connection)">Rename</UiButton>
-                <template v-if="connection.authorization?.kind === 'api-key'">
+                <template
+                  v-if="connection.authorization?.kind !== 'ambient-native'"
+                >
+                  <UiButton @click="beginLabeling(connection)">Rename</UiButton>
+                  <template v-if="connection.authorization?.kind === 'api-key'">
+                    <UiButton
+                      v-if="
+                        connection.modelCatalog && connection.state === 'ready'
+                      "
+                      @click="refreshModels(connection.connectionId)"
+                    >
+                      Refresh models
+                    </UiButton>
+                    <UiButton
+                      v-if="connection.state === 'ready'"
+                      @click="setEnabled(connection.connectionId, false)"
+                    >
+                      Disable
+                    </UiButton>
+                    <UiButton
+                      v-if="connection.state === 'disabled'"
+                      @click="setEnabled(connection.connectionId, true)"
+                    >
+                      Enable
+                    </UiButton>
+                    <UiButton
+                      v-if="
+                        connection.state === 'ready' ||
+                        connection.state === 'disabled'
+                      "
+                      @click="rotatingConnectionId = connection.connectionId"
+                    >
+                      Rotate key
+                    </UiButton>
+                    <UiButton
+                      v-if="connection.state !== 'revoking'"
+                      variant="danger"
+                      @click="disconnect(connection.connectionId)"
+                    >
+                      Disconnect
+                    </UiButton>
+                  </template>
                   <UiButton
-                    v-if="
-                      connection.modelCatalog && connection.state === 'ready'
-                    "
-                    @click="refreshModels(connection.connectionId)"
-                  >
-                    Refresh models
-                  </UiButton>
-                  <UiButton
-                    v-if="connection.state === 'ready'"
-                    @click="setEnabled(connection.connectionId, false)"
-                  >
-                    Disable
-                  </UiButton>
-                  <UiButton
-                    v-if="connection.state === 'disabled'"
-                    @click="setEnabled(connection.connectionId, true)"
-                  >
-                    Enable
-                  </UiButton>
-                  <UiButton
-                    v-if="
-                      connection.state === 'ready' ||
-                      connection.state === 'disabled'
-                    "
-                    @click="rotatingConnectionId = connection.connectionId"
-                  >
-                    Rotate key
-                  </UiButton>
-                  <UiButton
-                    v-if="connection.state !== 'revoking'"
+                    v-else-if="connection.state !== 'revoking'"
                     variant="danger"
-                    @click="disconnect(connection.connectionId)"
+                    @click="
+                      revoke(connection.packageId, connection.connectionId)
+                    "
                   >
-                    Disconnect
+                    Revoke
                   </UiButton>
                 </template>
-                <UiButton
-                  v-else-if="connection.state !== 'revoking'"
-                  variant="danger"
-                  @click="revoke(connection.packageId, connection.connectionId)"
-                >
-                  Revoke
-                </UiButton>
               </div>
+              <p v-if="defaultModelName(connection)" class="account-default">
+                Default model: {{ defaultModelName(connection) }}
+                <a :href="defaultModelLink">Change</a>
+              </p>
               <p
                 v-if="connection.failure"
                 class="connection-failure"
@@ -1682,6 +1713,17 @@ async function disconnect(connectionId: string): Promise<void> {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.account-default {
+  margin: 0;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+
+.account-default a {
+  margin-left: 4px;
+  color: var(--frock-action-primary);
 }
 
 .account-add {

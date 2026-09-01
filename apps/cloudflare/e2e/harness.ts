@@ -13,13 +13,15 @@
 // `wrangler dev`), lifted here so the test layer runs the developer's own
 // path rather than a second one.
 //
-// The provider is the one thing that is not real. `wrangler dev` has no
+// The providers are the only things that are not real. `wrangler dev` has no
 // `outboundService` knob, so the Worker's outbound `fetch` is the machine's,
 // and a test must not depend on https://ollama.com. Instead this harness runs
 // a fake Ollama HTTP server on a loopback port and each spec points its
 // Connection at it through the Package's own `api-base-url` Connection setting —
 // a shipped product feature (Ollama-compatible endpoints, local Ollama), not a
-// test-only branch.
+// test-only branch. Workers AI is an auxiliary local Wrangler process,
+// discovered through Wrangler's dev service registry and bound under `AI` at
+// the native `run` seam.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
@@ -346,11 +348,14 @@ export interface HarnessOptions {
   port: number;
   /** The port the fake Ollama server listens on. */
   ollamaPort: number;
+  /** The port the auxiliary Workers AI RPC Worker listens on. */
+  workersAiPort: number;
 }
 
 export interface RunningHarness {
   baseUrl: string;
   ollamaUrl: string;
+  workersAiUrl: string;
   stop(): Promise<void>;
 }
 
@@ -364,10 +369,12 @@ export async function startHarness(
 ): Promise<RunningHarness> {
   const persistDirectory = await mkdtemp(join(tmpdir(), "frockbot-e2e-"));
   let ollama: Awaited<ReturnType<typeof startFakeOllama>> | undefined;
+  let workersAi: ChildProcess | undefined;
   let worker: ChildProcess | undefined;
 
   const stop = async (): Promise<void> => {
     if (worker) await stopProcessTree(worker);
+    if (workersAi) await stopProcessTree(workersAi);
     if (ollama) await ollama.close();
     await rm(persistDirectory, { recursive: true, force: true });
   };
@@ -393,11 +400,42 @@ export async function startHarness(
 
     ollama = await startFakeOllama(options.ollamaPort);
 
+    workersAi = spawn(
+      "bunx",
+      [
+        "wrangler",
+        "dev",
+        "--config",
+        resolve(cloudflareRoot, "e2e/workers-ai-fake.wrangler.jsonc"),
+        "--env",
+        "e2e",
+        "--ip",
+        "127.0.0.1",
+        "--port",
+        String(options.workersAiPort),
+      ],
+      {
+        cwd: cloudflareRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      },
+    );
+    workersAi.stdout?.pipe(process.stdout);
+    workersAi.stderr?.pipe(process.stderr);
+    const workersAiUrl = `http://127.0.0.1:${options.workersAiPort}`;
+    const workersAiCrashed = processFailure(
+      workersAi,
+      "Workers AI fake wrangler dev",
+    );
+    await Promise.race([waitForHttpServer(workersAiUrl), workersAiCrashed]);
+
     worker = spawn(
       "bunx",
       [
         "wrangler",
         "dev",
+        "--config",
+        resolve(cloudflareRoot, "wrangler.jsonc"),
         "--env",
         "e2e",
         "--ip",
@@ -436,17 +474,36 @@ export async function startHarness(
     worker.stdout?.pipe(process.stdout);
     worker.stderr?.pipe(process.stderr);
     const baseUrl = `http://127.0.0.1:${options.port}`;
-    const crashed = new Promise<never>((_, fail) => {
-      worker?.once("exit", (code) =>
-        fail(new Error(`wrangler dev exited early with code ${code}`)),
-      );
-      worker?.once("error", fail);
-    });
-    await Promise.race([waitForManifest(baseUrl), crashed]);
+    const crashed = processFailure(worker, "FrockBot wrangler dev");
+    await Promise.race([waitForManifest(baseUrl), crashed, workersAiCrashed]);
 
-    return { baseUrl, ollamaUrl: ollama.url, stop };
+    return { baseUrl, ollamaUrl: ollama.url, workersAiUrl, stop };
   } catch (error) {
     await stop();
     throw error;
   }
+}
+
+function processFailure(child: ChildProcess, label: string): Promise<never> {
+  return new Promise<never>((_, fail) => {
+    child.once("exit", (code) =>
+      fail(new Error(`${label} exited early with code ${code}`)),
+    );
+    child.once("error", fail);
+  });
+}
+
+async function waitForHttpServer(baseUrl: string): Promise<void> {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  let lastFailure = "no attempt was made";
+  while (Date.now() < deadline) {
+    try {
+      await fetch(baseUrl);
+      return;
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((sleep) => setTimeout(sleep, 250));
+  }
+  throw new Error(`Timed out waiting for ${baseUrl}: ${lastFailure}`);
 }

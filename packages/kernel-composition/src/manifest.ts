@@ -90,7 +90,8 @@ export interface ConnectionTypeDefinition {
   allowMultiple: boolean;
   authorization: {
     kind: "none" | "api-key" | "ambient-native" | "grant";
-    driverId: string;
+    /** Ambient native bindings have no credential or authorization driver. */
+    driverId?: string;
   };
   capabilities: string[];
   /**
@@ -1067,7 +1068,12 @@ function decodeConfiguration(
       }
       exactFields(
         connection.authorization,
-        ["kind", "driverId"],
+        [
+          "kind",
+          ...(Object.hasOwn(connection.authorization, "driverId")
+            ? ["driverId"]
+            : []),
+        ],
         "manifest connection authorization",
       );
       const rawKind = requiredString(connection.authorization, "kind");
@@ -1082,6 +1088,20 @@ function decodeConfiguration(
         );
       }
       const kind: ConnectionTypeDefinition["authorization"]["kind"] = rawKind;
+      const driverId =
+        connection.authorization.driverId === undefined
+          ? undefined
+          : requiredString(connection.authorization, "driverId");
+      if (kind !== "ambient-native" && driverId === undefined) {
+        throw new Error(
+          "manifest connection authorization driverId is required",
+        );
+      }
+      if (kind === "ambient-native" && driverId !== undefined) {
+        throw new Error(
+          "manifest ambient-native authorization must not name a driver",
+        );
+      }
       if (typeof connection.allowMultiple !== "boolean") {
         throw new Error("manifest connection allowMultiple must be boolean");
       }
@@ -1091,7 +1111,7 @@ function decodeConfiguration(
         allowMultiple: connection.allowMultiple,
         authorization: {
           kind,
-          driverId: requiredString(connection.authorization, "driverId"),
+          ...(driverId ? { driverId } : {}),
         },
         capabilities: optionalStringArray(connection, "capabilities"),
         ...(allowV4 && connection.settings !== undefined

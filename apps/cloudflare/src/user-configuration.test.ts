@@ -119,9 +119,25 @@ describe("UserConfiguration Connection routing", () => {
       }),
     ).resolves.toMatchObject({
       schemaVersion: 1,
-      revision: 0,
-      packages: expect.any(Array),
-      connections: [],
+      revision: 3,
+      packages: [
+        expect.objectContaining({
+          packageId: "provider-workers-ai",
+          state: "installed",
+        }),
+      ],
+      connections: [
+        expect.objectContaining({
+          connectionId: "workers-ai-ambient",
+          providerType: "workers-ai",
+          state: "ready",
+        }),
+      ],
+      newBotModelTemplate: {
+        connectionId: "workers-ai-ambient",
+        providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      },
+      newBotModelTemplateSource: "auto",
     });
   });
   test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {

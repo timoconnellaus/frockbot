@@ -395,6 +395,7 @@ class MemoryConfiguration
           ...user,
           revision,
           newBotModelTemplate: command.model,
+          newBotModelTemplateSource: command.source,
         };
       } else if (command.type === "user/install-package") {
         this.user = {

@@ -595,6 +595,17 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 57g | Messages.app tools on the registered Mac behind a feature gate and a permission check                                                                 | `FindIMessageChats`/`ChatItems`/`SearchIMessages`/`IMessageActivity`/`FetchIMessageAttachment`/`SendIMessage`/`CheckIMessagePermissions`, `gates.messagesTools` | §4.2             | `plugin-machine-messages` (7 tools, `machines.messagesEnabled`) + `plugin-user-machine` transport + macOS handlers in `apps/desktop`                                                                                                                      | landed      |
 | 57h | Bot asks the user to authorize a one-time virtual payment card, gated on the payment connector                                                        | `request_virtual_card`, `gates.stripeLink` + connector present                                                                                                  | §4.2             | new Package                                                                                                                                                                                                                                               | not started |
 
+**Model onboarding note (no parity status change).** FrockBot now has an
+immediate hosted model path: every User receives a durable ambient Cloudflare
+Workers AI Connection and DeepSeek V4 Flash as the automatic default on first
+configuration read. A successful Ollama Connection replaces an automatic
+default with its preferred catalog model, while an explicit User selection is
+never overwritten. A Bot still receives authority only through its own durable
+model Capability Assignment; the default is a template to claim, not an
+ambient grant. Missing-model copy in the header, empty thread, and composer is
+an action that opens the default-model row when a provider is connected, or
+Plugins when none is connected.
+
 **Status `declined`** means FrockBot deliberately does not copy the row, and the
 row itself carries why. Row 13c is the precedent: GrokBot freezes the rendered
 Memory block per compaction epoch and reuses it, which is its own best

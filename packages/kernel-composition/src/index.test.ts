@@ -429,6 +429,40 @@ describe("decodeFrockBotManifest", () => {
     });
   });
 
+  test("decodes an ambient-native Connection without an authorization driver", () => {
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 4,
+      id: "workers-ai",
+      displayName: "Workers AI",
+      version: "1.0.0",
+      compatibility: { frockbot: ">=0.0.1" },
+      contributions: { runtime: { entry: "./runtime" } },
+      permissions: ["models:invoke"],
+      configuration: {
+        connectionTypes: [
+          {
+            id: "workers-ai-account",
+            displayName: "Workers AI",
+            allowMultiple: false,
+            authorization: { kind: "ambient-native" },
+            capabilities: ["workers-ai-models"],
+          },
+        ],
+        capabilities: [
+          {
+            id: "workers-ai-models",
+            kind: "model",
+            connectionTypes: ["workers-ai-account"],
+          },
+        ],
+      },
+    });
+
+    expect(decoded.configuration?.connectionTypes[0]?.authorization).toEqual({
+      kind: "ambient-native",
+    });
+  });
+
   test("decodes a manifest v4 Capability admission ceiling", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 4,

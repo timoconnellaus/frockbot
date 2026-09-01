@@ -87,6 +87,11 @@
       ]
     },
     {
+      "specifier": "@frockbot/plugin-provider-workers-ai",
+      "version": "0.0.1",
+      "grants": ["connections:manage", "models:invoke"]
+    },
+    {
       "specifier": "@frockbot/plugin-package-publisher",
       "version": "0.0.1",
       "grants": ["package:publish"]
