@@ -651,6 +651,7 @@ export class ShellBotBackendContribution {
         assignment: BotSettingsViewV1["assignments"][number];
         generation: string;
       };
+      assignments?: BotSettingsViewV1["assignments"];
     },
   ): Promise<BotSettingsViewV1> {
     return this.ctx.storage.transaction(async (transaction) => {
@@ -674,9 +675,14 @@ export class ShellBotBackendContribution {
             ? {}
             : { description: initial.description }),
         },
-        assignments: initial.modelBinding
-          ? [structuredClone(initial.modelBinding.assignment)]
-          : [],
+        assignments: [
+          ...(initial.assignments ?? []).map((assignment) =>
+            structuredClone(assignment),
+          ),
+          ...(initial.modelBinding
+            ? [structuredClone(initial.modelBinding.assignment)]
+            : []),
+        ],
       } satisfies BotSettingsViewV1;
       await transaction.put({
         [IDENTITY_KEY]: durableIdentity ?? identity,

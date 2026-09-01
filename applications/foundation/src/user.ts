@@ -276,6 +276,9 @@ export async function createFoundationUserBackendContributions(
               packageId: pkg.id,
               version: pkg.version,
               settings: pkg.manifest.configuration?.settings ?? [],
+              installByDefault:
+                (pkg.manifest.configuration?.connectionTypes.length ?? 0) > 0 ||
+                (pkg.manifest.configuration?.capabilities.length ?? 0) > 0,
             })),
             ...(host.catalog ? { catalog: host.catalog } : {}),
           },
@@ -537,12 +540,19 @@ export async function createFoundationUserBackendContributions(
             storage: host.storage,
             commandBotLifecycle: host.commandBotLifecycle,
             readBotLifecycle: host.readBotLifecycle,
-            readUserSettings: (storage) => {
+            readUserSettings: (storage, userId) => {
               if (!settings) {
                 throw new Error("User settings Contribution is unavailable");
               }
-              return settings.readSnapshot(storage);
+              return settings.read(userId, storage);
             },
+            availablePackages: plan.packages.map((pkg) => ({
+              packageId: pkg.id,
+              version: pkg.version,
+              capabilities: pkg.manifest.configuration?.capabilities ?? [],
+              connectionTypes:
+                pkg.manifest.configuration?.connectionTypes ?? [],
+            })),
             claimInitialModelBinding: async (storage, input) => {
               if (!settings) {
                 throw new Error("User settings Contribution is unavailable");

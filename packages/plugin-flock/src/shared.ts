@@ -1,6 +1,7 @@
 // Shared configuration types remain provider-neutral at this package seam.
 import {
   decodeBotAvatarV1,
+  decodeCapabilityAssignmentV1,
   decodeBotIdV1,
   decodeBotSelfWriterV1,
   isPublicIdentifier,
@@ -56,6 +57,11 @@ export interface BotRegistrationV1 {
   initialDescription?: string;
   initialModel?: ModelAssignment;
   initialModelBinding?: InitialModelBindingV1;
+  /**
+   * Connection-less Capability authority snapshotted from the User's installed
+   * Packages when this Bot was admitted.
+   */
+  initialAssignments?: CapabilityAssignmentView[];
   /**
    * The Bot and Turn that created this Bot, when a Bot created it. Absent for
    * a User-created Bot and for every registration written before this existed.
@@ -412,7 +418,13 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "sheep"],
-    ["initialDescription", "initialModel", "initialModelBinding", "createdBy"],
+    [
+      "initialDescription",
+      "initialModel",
+      "initialModelBinding",
+      "initialAssignments",
+      "createdBy",
+    ],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
@@ -424,6 +436,26 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
     bot.initialModelBinding === undefined
       ? undefined
       : initialModelBinding(bot.initialModelBinding);
+  if (
+    bot.initialAssignments !== undefined &&
+    !Array.isArray(bot.initialAssignments)
+  )
+    throw new FlockDecodeError("initial Assignments are invalid");
+  const initialAssignments =
+    bot.initialAssignments === undefined
+      ? undefined
+      : bot.initialAssignments.map(decodeCapabilityAssignmentV1);
+  if (
+    new Set(
+      (initialAssignments ?? []).map((assignment) => assignment.assignmentId),
+    ).size !== (initialAssignments ?? []).length ||
+    (initialAssignments ?? []).some(
+      (assignment) =>
+        assignment.connectionId !== undefined || assignment.state !== "enabled",
+    )
+  ) {
+    throw new FlockDecodeError("initial Assignments are invalid");
+  }
   if (
     binding &&
     (!initialModel ||
@@ -451,6 +483,7 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
         }),
     initialModel,
     initialModelBinding: binding,
+    ...(initialAssignments ? { initialAssignments } : {}),
     ...(createdBy ? { createdBy } : {}),
     sheep: decodeSheepRecipeV1(bot.sheep),
   };

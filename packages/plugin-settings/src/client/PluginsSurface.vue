@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { UiAnchor, UiButton, UiIcon } from "@frockbot/client-ui";
+import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import type { ConnectionView } from "@frockbot/configuration-core";
 import type {
   PackageSettingDefinition,
@@ -7,17 +8,17 @@ import type {
 } from "@frockbot/kernel-composition";
 import {
   frockBotWebDataKey,
-  type CatalogEntryV1,
-  type CatalogIndexEntryV1,
   type PluginCatalogItem,
 } from "@frockbot/plugin-shell/shared";
-import { catalogSetupFieldKeyV1 } from "@frockbot/catalog-core";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, onMounted, ref } from "vue";
 
 const providedWeb = inject(frockBotWebDataKey);
-if (!providedWeb) throw new Error("shell client data was not provided");
+const providedSurfaces = inject(clientSurfaceRegistryKey);
+if (!providedWeb || !providedSurfaces)
+  throw new Error("Plugins client data was not provided");
 const web = providedWeb;
+const surfaces = providedSurfaces;
 // Packages are User-scoped, so the catalog's link names no Bot.
 const packagesLink = settingsLinkV1({ anchor: "user-packages" });
 const search = ref("");
@@ -63,90 +64,6 @@ const pendingAuthorizations = computed(() =>
   ),
 );
 const reconnectingConnectionId = ref<string>();
-
-/**
- * Guided install: the `setupFields` an entry declares, as the User fills them
- * in. Keyed by entry so opening a second entry does not inherit the first
- * one's answers.
- */
-const setupValues = ref<Record<string, string>>({});
-const setupValuesFor = ref<string>();
-const installingCatalogId = ref<string>();
-
-/**
- * The entry's setup fields, paired with the `values` key each answer is
- * recorded under. A Catalog setup field is a bare JSON Schema with no
- * identifier, so the key is derived — in `catalog-core`, so the form and
- * anything that reads the install back agree on it.
- */
-function setupFieldsOf(entry: CatalogEntryV1 | undefined): Array<{
-  key: string;
-  title: string;
-  description?: string;
-  maxLength?: number;
-}> {
-  return (entry?.setupFields ?? []).map((field, index) => ({
-    key: catalogSetupFieldKeyV1(field, index),
-    title: field.title ?? catalogSetupFieldKeyV1(field, index),
-    ...(field.description ? { description: field.description } : {}),
-    ...(field.maxLength === undefined ? {} : { maxLength: field.maxLength }),
-  }));
-}
-
-/** Whether an entry's servers ask for OAuth, which is what earns a connect step. */
-function entryUsesOAuth(entry: CatalogEntryV1 | undefined): boolean {
-  return (entry?.servers ?? []).some((server) => server.auth === "oauth");
-}
-
-function beginSetup(entry: CatalogEntryV1): void {
-  setupValuesFor.value = entry.catalogId;
-  setupValues.value = Object.fromEntries(
-    setupFieldsOf(entry).map((field) => [field.key, ""]),
-  );
-}
-
-/**
- * Install with the values the form collected, then — for an entry whose
- * servers speak OAuth — hand the User straight to the authorization. Two
- * durable steps, in that order: the Package is installed before anything asks
- * to be authorized against it.
- */
-async function installWithSetupValues(
-  index: CatalogIndexEntryV1,
-  entry: CatalogEntryV1,
-): Promise<void> {
-  installingCatalogId.value = index.catalogId;
-  try {
-    const values = Object.fromEntries(
-      Object.entries(setupValues.value)
-        .map(([key, value]) => [key, value.trim()] as const)
-        .filter(([, value]) => value.length > 0),
-    );
-    await web.value.installCatalogPackage(index, values);
-    setupValuesFor.value = undefined;
-    setupValues.value = {};
-    const server = (entry.servers ?? []).find(
-      (candidate) => candidate.auth === "oauth",
-    );
-    if (server) {
-      await connectCatalogServer(entry.displayName, server.url);
-    }
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not install the Package";
-  } finally {
-    installingCatalogId.value = undefined;
-  }
-}
-
-/** One catalog-named OAuth server, connected through the host-authored path. */
-async function connectCatalogServer(label: string, url: string): Promise<void> {
-  const redirect = await web.value.startMcpAuthorization({
-    label,
-    settings: { url, transport: "streamable-http" },
-  });
-  if (redirect) await web.value.openConnectionAuthorization(redirect);
-}
 
 /**
  * *Reconnect*: the authenticated command that mints a fresh redirect, with
@@ -225,90 +142,56 @@ const rotatingConnectionId = ref<string>();
 const rotationKey = ref("");
 const labelingConnectionId = ref<string>();
 const connectionLabel = ref("");
+const CONNECTABLE_ORDER = new Map([
+  ["provider-ollama-cloud", 0],
+  ["mcp", 1],
+  ["telegram", 2],
+]);
+
+function pluginOrder(
+  left: PluginCatalogItem,
+  right: PluginCatalogItem,
+): number {
+  const leftConnectable = left.connectionTypes.length > 0;
+  const rightConnectable = right.connectionTypes.length > 0;
+  if (leftConnectable !== rightConnectable) return leftConnectable ? -1 : 1;
+  if (leftConnectable) {
+    const priority =
+      (CONNECTABLE_ORDER.get(left.packageId) ?? Number.MAX_SAFE_INTEGER) -
+      (CONNECTABLE_ORDER.get(right.packageId) ?? Number.MAX_SAFE_INTEGER);
+    if (priority !== 0) return priority;
+  }
+  return left.displayName.localeCompare(right.displayName);
+}
+
 const filteredCatalog = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
-  if (!query) return web.value.pluginCatalog;
-  return web.value.pluginCatalog.filter(
-    (item) =>
-      item.displayName.toLocaleLowerCase().includes(query) ||
-      item.connectionTypes.some((connection) =>
-        connection.displayName.toLocaleLowerCase().includes(query),
-      ),
-  );
+  return web.value.pluginCatalog
+    .filter(
+      (item) =>
+        !query ||
+        item.displayName.toLocaleLowerCase().includes(query) ||
+        item.connectionTypes.some((connection) =>
+          connection.displayName.toLocaleLowerCase().includes(query),
+        ),
+    )
+    .toSorted(pluginOrder);
 });
 
-const catalogSearch = ref("");
-const openCatalogId = ref<string>();
-const openCatalogEntry = ref<CatalogEntryV1>();
-const catalogEntryLoading = ref(false);
-const uninstallingPackageId = ref<string>();
-const filteredPackageCatalog = computed(() => {
-  const query = catalogSearch.value.trim().toLocaleLowerCase();
-  if (!query) return web.value.packageCatalog;
-  return web.value.packageCatalog.filter(
-    (entry) =>
-      entry.displayName.toLocaleLowerCase().includes(query) ||
-      entry.packageId.toLocaleLowerCase().includes(query) ||
-      entry.description.toLocaleLowerCase().includes(query),
-  );
-});
+const installedPluginCount = computed(
+  () =>
+    web.value.pluginCatalog.filter((item) => isPackageInstalled(item.packageId))
+      .length,
+);
+
+function openPackageCatalog(): void {
+  surfaces.open("package-catalog");
+}
 
 onMounted(() => {
   void web.value.loadPluginCatalog();
-  void web.value.loadPackageCatalog();
   void web.value.loadMcpServers();
 });
-
-/**
- * Opening an entry loads its detail from the same generation the index came
- * from, so the panel never describes a different generation than the row.
- */
-async function toggleCatalogEntry(entry: CatalogIndexEntryV1): Promise<void> {
-  if (openCatalogId.value === entry.catalogId) {
-    openCatalogId.value = undefined;
-    openCatalogEntry.value = undefined;
-    return;
-  }
-  openCatalogId.value = entry.catalogId;
-  openCatalogEntry.value = undefined;
-  catalogEntryLoading.value = true;
-  try {
-    const detail = await web.value.loadCatalogEntry(entry.catalogId);
-    if (openCatalogId.value === entry.catalogId) {
-      openCatalogEntry.value = detail;
-    }
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not load the entry";
-  } finally {
-    catalogEntryLoading.value = false;
-  }
-}
-
-async function installFromCatalog(entry: CatalogIndexEntryV1): Promise<void> {
-  try {
-    await web.value.installCatalogPackage(entry);
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not install the Package";
-  }
-}
-
-async function confirmUninstall(packageId: string): Promise<void> {
-  try {
-    await web.value.uninstallPackage(packageId);
-    uninstallingPackageId.value = undefined;
-    if (openCatalogId.value === packageId) {
-      openCatalogId.value = undefined;
-      openCatalogEntry.value = undefined;
-    }
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error
-        ? error.message
-        : "Could not uninstall the Package";
-  }
-}
 
 function isPackageInstalled(packageId: string): boolean {
   return Boolean(
@@ -706,6 +589,12 @@ async function disconnect(connectionId: string): Promise<void> {
 
 <template>
   <div class="plugins-surface">
+    <div class="installed-strip" aria-live="polite">
+      <span class="plugin-status-badge" aria-hidden="true">
+        <UiIcon name="check" :size="12" :weight="2.5" />
+      </span>
+      {{ installedPluginCount }} installed
+    </div>
     <label class="plugin-search">
       <UiIcon name="search" />
       <input
@@ -777,9 +666,13 @@ async function disconnect(connectionId: string): Promise<void> {
             <strong>{{ item.displayName }}</strong>
             <small>
               {{
-                item.connectionTypes
-                  .map((connection) => connection.displayName)
-                  .join(", ")
+                item.connectionTypes.length > 0
+                  ? item.connectionTypes
+                      .map((connection) => connection.displayName)
+                      .join(", ")
+                  : item.capabilities
+                      .map((capability) => capability.id)
+                      .join(", ")
               }}
             </small>
           </span>
@@ -812,13 +705,29 @@ async function disconnect(connectionId: string): Promise<void> {
             <strong>{{ item.displayName }}</strong>
             <small>
               {{
-                item.connectionTypes
-                  .map((connection) => connection.displayName)
-                  .join(", ")
+                item.connectionTypes.length > 0
+                  ? item.connectionTypes
+                      .map((connection) => connection.displayName)
+                      .join(", ")
+                  : item.capabilities
+                      .map((capability) => capability.id)
+                      .join(", ")
               }}
             </small>
           </span>
-          <span class="plugin-summary-actions">
+          <span
+            v-if="
+              isPackageInstalled(item.packageId) &&
+              item.connectionTypes.length === 0
+            "
+            class="plugin-status plugin-status--ready"
+          >
+            <span class="plugin-status-badge" aria-hidden="true">
+              <UiIcon name="check" :size="12" :weight="2.5" />
+            </span>
+            Added
+          </span>
+          <span v-else class="plugin-summary-actions">
             <UiButton
               v-if="
                 isPackageInstalled(item.packageId) &&
@@ -829,16 +738,13 @@ async function disconnect(connectionId: string): Promise<void> {
               Settings
             </UiButton>
             <UiButton
-              v-if="
-                isPackageInstalled(item.packageId) &&
-                item.connectionTypes.length > 0
-              "
+              v-if="isPackageInstalled(item.packageId)"
               @click="beginConnect(item)"
             >
               Connect
             </UiButton>
             <UiButton
-              v-if="!isPackageInstalled(item.packageId)"
+              v-else
               variant="primary"
               @click="install(item.packageId, item.version)"
             >
@@ -1212,207 +1118,12 @@ async function disconnect(connectionId: string): Promise<void> {
       v-if="web.pluginCatalog.length === 0 && !web.settingsError"
       class="plugin-empty"
     >
-      No connection Packages are available.
+      No Plugins are available.
     </p>
 
-    <section class="catalog" aria-labelledby="package-catalog-heading">
-      <h3 id="package-catalog-heading" class="catalog-heading">
-        Package Catalog
-      </h3>
-      <p class="plugin-intro">
-        Packages published to the remote Catalog. Installing one makes it
-        available to every Bot you own; a Bot still needs an explicit Assignment
-        before it can use anything.
-      </p>
-      <label class="plugin-search">
-        <UiIcon name="search" />
-        <input
-          v-model="catalogSearch"
-          placeholder="Search the Catalog"
-          aria-label="Search the Package Catalog"
-        />
-      </label>
-      <p v-if="web.packageCatalogGeneration" class="catalog-generation">
-        Generation {{ web.packageCatalogGeneration }}
-      </p>
-      <div class="plugin-grid">
-        <article
-          v-for="entry in filteredPackageCatalog"
-          :key="entry.catalogId"
-          class="plugin-card"
-        >
-          <button
-            type="button"
-            class="plugin-summary plugin-summary--interactive"
-            :aria-expanded="openCatalogId === entry.catalogId"
-            :aria-controls="`catalog-detail-${entry.catalogId}`"
-            @click="toggleCatalogEntry(entry)"
-          >
-            <span class="plugin-logo" aria-hidden="true">
-              {{ entry.displayName.slice(0, 1) }}
-            </span>
-            <span class="plugin-card-copy">
-              <strong>{{ entry.displayName }}</strong>
-              <small>{{ entry.description }}</small>
-            </span>
-            <span class="catalog-version">{{ entry.version }}</span>
-            <UiIcon
-              class="plugin-chevron"
-              :class="{
-                'plugin-chevron--open': openCatalogId === entry.catalogId,
-              }"
-              name="chevrons-right"
-              size="sm"
-            />
-          </button>
-          <div
-            :id="`catalog-detail-${entry.catalogId}`"
-            class="plugin-accounts"
-            :class="{
-              'plugin-accounts--open': openCatalogId === entry.catalogId,
-            }"
-            :inert="openCatalogId === entry.catalogId ? undefined : true"
-          >
-            <div class="plugin-accounts-inner">
-              <div class="catalog-detail">
-                <p v-if="catalogEntryLoading" class="catalog-note">Loading…</p>
-                <template v-else-if="openCatalogEntry">
-                  <p class="catalog-note">{{ openCatalogEntry.description }}</p>
-                  <dl class="catalog-facts">
-                    <div>
-                      <dt>Package</dt>
-                      <dd>{{ openCatalogEntry.packageId }}</dd>
-                    </div>
-                    <div>
-                      <dt>Version</dt>
-                      <dd>{{ openCatalogEntry.version }}</dd>
-                    </div>
-                    <div v-if="openCatalogEntry.homepage">
-                      <dt>Homepage</dt>
-                      <dd>
-                        <a
-                          :href="openCatalogEntry.homepage"
-                          rel="noreferrer noopener"
-                          target="_blank"
-                        >
-                          {{ openCatalogEntry.homepage }}
-                        </a>
-                      </dd>
-                    </div>
-                  </dl>
-                </template>
-                <div
-                  v-if="uninstallingPackageId === entry.packageId"
-                  class="catalog-confirm"
-                  role="alert"
-                >
-                  <p>
-                    Uninstalling {{ entry.displayName }} removes it from every
-                    Bot. Assignments that depend on it are not deleted: they
-                    become unavailable and stay visible so you can repair or
-                    remove them. Connections and their credentials are kept.
-                  </p>
-                  <div class="account-actions">
-                    <UiButton @click="uninstallingPackageId = undefined">
-                      Keep it
-                    </UiButton>
-                    <UiButton
-                      variant="danger"
-                      @click="confirmUninstall(entry.packageId)"
-                    >
-                      Uninstall
-                    </UiButton>
-                  </div>
-                </div>
-                <form
-                  v-else-if="
-                    setupValuesFor === entry.catalogId && openCatalogEntry
-                  "
-                  class="api-key-form"
-                  @submit.prevent="
-                    installWithSetupValues(entry, openCatalogEntry)
-                  "
-                >
-                  <label
-                    v-for="field in setupFieldsOf(openCatalogEntry)"
-                    :key="field.key"
-                  >
-                    <span>{{ field.title }}</span>
-                    <input
-                      v-model="setupValues[field.key]"
-                      autocomplete="off"
-                      :maxlength="field.maxLength ?? 2048"
-                    />
-                    <span v-if="field.description" class="api-key-hint">
-                      {{ field.description }}
-                    </span>
-                  </label>
-                  <p
-                    v-if="entryUsesOAuth(openCatalogEntry)"
-                    class="api-key-hint"
-                  >
-                    After installing, you will be sent to the connector to sign
-                    in. FrockBot records the request; only you can complete it.
-                  </p>
-                  <div class="api-key-actions">
-                    <UiButton @click="setupValuesFor = undefined">
-                      Cancel
-                    </UiButton>
-                    <UiButton
-                      type="submit"
-                      variant="primary"
-                      :disabled="installingCatalogId === entry.catalogId"
-                    >
-                      {{
-                        installingCatalogId === entry.catalogId
-                          ? "Installing…"
-                          : "Install and connect"
-                      }}
-                    </UiButton>
-                  </div>
-                </form>
-                <div v-else class="account-actions">
-                  <UiButton
-                    v-if="isPackageInstalled(entry.packageId)"
-                    variant="danger"
-                    @click="uninstallingPackageId = entry.packageId"
-                  >
-                    Uninstall
-                  </UiButton>
-                  <UiButton
-                    v-else-if="
-                      openCatalogEntry &&
-                      (setupFieldsOf(openCatalogEntry).length > 0 ||
-                        entryUsesOAuth(openCatalogEntry))
-                    "
-                    variant="primary"
-                    @click="beginSetup(openCatalogEntry)"
-                  >
-                    Set up
-                  </UiButton>
-                  <UiButton
-                    v-else
-                    variant="primary"
-                    @click="installFromCatalog(entry)"
-                  >
-                    Install
-                  </UiButton>
-                </div>
-              </div>
-            </div>
-          </div>
-        </article>
-      </div>
-      <p
-        v-if="web.packageCatalog.length === 0 && !web.settingsError"
-        class="plugin-empty"
-      >
-        The Catalog has nothing to offer yet.
-      </p>
-      <p v-else-if="filteredPackageCatalog.length === 0" class="plugin-empty">
-        No Catalog entry matches that search.
-      </p>
-    </section>
+    <button type="button" class="catalog-link" @click="openPackageCatalog">
+      Browse the Package Catalog →
+    </button>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
     </p>
@@ -1456,6 +1167,16 @@ async function disconnect(connectionId: string): Promise<void> {
 
 .plugins-surface {
   padding: 24px;
+}
+
+.installed-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+  font-weight: 600;
 }
 
 .plugin-search {
@@ -1823,86 +1544,24 @@ async function disconnect(connectionId: string): Promise<void> {
   font-size: var(--frock-text-sm);
 }
 
-.catalog {
-  margin-top: 28px;
-  padding-top: 20px;
-  border-top: 1px solid var(--frock-border);
-}
-
-.catalog-heading {
-  margin: 0 0 4px;
-  font-size: var(--frock-text-md);
-  font-weight: 600;
-}
-
-.catalog .plugin-search {
-  margin-top: 14px;
-}
-
-.catalog-generation {
-  margin: 10px 0 0;
-  color: var(--frock-text-subtle);
-  font-size: var(--frock-text-sm);
-}
-
-.catalog-version {
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-  white-space: nowrap;
-}
-
-.catalog-detail {
-  display: grid;
-  gap: 12px;
-  padding: 12px 8px;
-  border-top: 1px solid var(--frock-border);
-}
-
-.catalog-note {
-  margin: 0;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-}
-
-.catalog-facts {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-}
-
-.catalog-facts div {
-  display: grid;
-  grid-template-columns: 90px minmax(0, 1fr);
-  gap: 8px;
-}
-
-.catalog-facts dt {
-  color: var(--frock-text-subtle);
-  font-size: var(--frock-text-sm);
-}
-
-.catalog-facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: var(--frock-text-sm);
-}
-
-.catalog-confirm {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--frock-border);
-  border-radius: var(--frock-radius-control);
-  background: var(--frock-surface-subtle);
-}
-
-.catalog-confirm p {
-  margin: 0;
-  font-size: var(--frock-text-sm);
-}
-
 .settings-error {
   color: var(--frock-danger-text);
   font-size: var(--frock-text-sm);
+}
+
+.catalog-link {
+  display: block;
+  margin: 20px auto 0;
+  padding: 4px;
+  border: 0;
+  color: var(--frock-action-secondary-text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--frock-text-sm);
+  cursor: pointer;
+}
+
+.catalog-link:hover {
+  text-decoration: underline;
 }
 </style>
