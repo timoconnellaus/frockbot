@@ -189,20 +189,22 @@ function isVisible(message: WebChatMessage): boolean {
 }
 /*
  * System lines happen between Turns, so the thread orders by when each line
- * happened. A line with no timestamp keeps the position the projection gave
- * it, which is what makes the sort stable for a Turn still streaming.
+ * happened. A line with no timestamp is treated as arriving now, so an
+ * incomplete projection can never jump above the durable history.
  */
-const messages = computed(() =>
-  state.value.messages
+const messages = computed(() => {
+  const missingAt = new Date().toISOString();
+  return state.value.messages
     .filter(isVisible)
     .map((message, index) => ({ message, index }))
     .sort(
       (left, right) =>
-        (left.message.at ?? "").localeCompare(right.message.at ?? "") ||
-        left.index - right.index,
+        (left.message.at ?? missingAt).localeCompare(
+          right.message.at ?? missingAt,
+        ) || left.index - right.index,
     )
-    .map((entry) => entry.message),
-);
+    .map((entry) => entry.message);
+});
 
 /*
  * One anchor per Turn, on its first visible line, so a deep link resolves to
@@ -277,6 +279,7 @@ const applySettingsDeepLink = (): void => {
 onMounted(() => {
   void web.value.loadPluginCatalog();
   void scrollToLatest("auto");
+  void nextTick(syncComposerHeight);
   applySettingsDeepLink();
   window.addEventListener("popstate", applySettingsDeepLink);
   window.addEventListener("hashchange", applySettingsDeepLink);
@@ -327,9 +330,31 @@ watch(
 watch(draft, (value) => draftStore.setDraft(composerContext.value, value), {
   flush: "sync",
 });
+watch(
+  draft,
+  () => {
+    void nextTick(syncComposerHeight);
+  },
+  { flush: "post" },
+);
 watch(panelSurface, (surface) => {
   if (surface) rightPanelOpen.value = true;
 });
+
+/** Keep the textarea at its content height until its CSS maximum takes over. */
+function syncComposerHeight(): void {
+  const input = composerInput.value;
+  if (!input) return;
+  input.style.height = "auto";
+  const maxHeight = Number.parseFloat(getComputedStyle(input).maxHeight);
+  const contentHeight = input.scrollHeight;
+  const height = Number.isFinite(maxHeight)
+    ? Math.min(contentHeight, maxHeight)
+    : contentHeight;
+  input.style.height = `${height}px`;
+  input.style.overflowY =
+    Number.isFinite(maxHeight) && contentHeight > maxHeight ? "auto" : "hidden";
+}
 
 function syncAttachedSkills(): void {
   attachedSkills.value = [...skillStore.attached()];
@@ -382,6 +407,7 @@ async function sendMessage(): Promise<void> {
   syncAttachedSkills();
   const submission = draftStore.begin(composerContext.value, text);
   draft.value = "";
+  void nextTick(syncComposerHeight);
   // Sending is an explicit request to follow along again.
   pinnedToLatest.value = true;
   void scrollToLatest();
@@ -707,6 +733,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               role="combobox"
               :aria-expanded="skillPopoverOpen"
               aria-controls="skill-popover"
+              @input="syncComposerHeight"
               @keydown="handleComposerKeydown"
               @keyup="refreshSkillPopover"
               @click="refreshSkillPopover"

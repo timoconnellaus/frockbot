@@ -30,6 +30,7 @@ withDefaults(
   background: transparent;
   font-size: var(--frock-text-base);
   font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background-color var(--frock-motion-fast),
