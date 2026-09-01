@@ -30,6 +30,7 @@ const MAX_INPUT_LENGTH = 32_000;
 
 declare const __FROCKBOT_CLIENT_JS__: string;
 declare const __FROCKBOT_CLIENT_CSS__: string;
+declare const __FROCKBOT_CLIENT_ICON__: string;
 
 const APP_JS =
   typeof __FROCKBOT_CLIENT_JS__ === "string"
@@ -37,6 +38,16 @@ const APP_JS =
     : "throw new Error('Worker renderer was not bundled')";
 const APP_CSS =
   typeof __FROCKBOT_CLIENT_CSS__ === "string" ? __FROCKBOT_CLIENT_CSS__ : "";
+// The site icon is a PNG, so it rides the artifact as base64 and is decoded
+// once at module scope rather than on every request.
+const APP_ICON = Uint8Array.from(
+  atob(
+    typeof __FROCKBOT_CLIENT_ICON__ === "string"
+      ? __FROCKBOT_CLIENT_ICON__
+      : "",
+  ),
+  (character) => character.charCodeAt(0),
+);
 
 type HostedAuthModeV1 = "anonymous" | "better-auth" | "development";
 
@@ -77,6 +88,8 @@ function appHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="frockbot-application" content="${applicationHash}">
   <title>FrockBot</title>
+  <link rel="icon" type="image/png" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/favicon.ico">
   <link rel="stylesheet" href="/app.css">
 </head>
 <body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}" data-frockbot-auth-mode="${authMode}" data-frockbot-is-admin="${String(isAdmin)}">
@@ -181,6 +194,18 @@ export function createUserApplication() {
         new Response(APP_CSS, {
           headers: {
             "content-type": "text/css; charset=utf-8",
+            "cache-control": "no-cache",
+          },
+        }),
+      );
+    }
+    if (request.method === "GET" && url.pathname === "/favicon.ico") {
+      // Browsers request `/favicon.ico` by convention even when a link element
+      // names it, so the site icon answers on that one path in its real type.
+      return withSecurityHeaders(
+        new Response(APP_ICON, {
+          headers: {
+            "content-type": "image/png",
             "cache-control": "no-cache",
           },
         }),

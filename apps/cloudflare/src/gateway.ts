@@ -21,7 +21,12 @@ import type {
 } from "./contracts.js";
 
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
-const PUBLIC_ASSET_PATHS = new Set(["/", "/app.js", "/app.css"]);
+const PUBLIC_ASSET_PATHS = new Set([
+  "/",
+  "/app.js",
+  "/app.css",
+  "/favicon.ico",
+]);
 export const SIGNUPS_CLOSED_MESSAGE =
   "FrockBot isn't taking new signups right now.";
 
