@@ -576,6 +576,42 @@ describe("foundation application", () => {
       },
     );
     expect(runtime).toEqual([]);
+
+    const webAssignment = {
+      assignmentId: "default-0-0",
+      packageId: "web",
+      capabilityId: "web-fetch",
+      state: "enabled" as const,
+    };
+    const freshBotRuntime = await createFoundationAssignedRuntimePackages(
+      plan,
+      {
+        schemaVersion: 1,
+        botId: "fresh",
+        revision: 0,
+        profile: { name: "Fresh" },
+        notifications: { enabled: true },
+        assignments: [webAssignment],
+        assignmentOperations: [],
+      },
+      {
+        schemaVersion: 1,
+        botId: "fresh",
+        revision: 0,
+        assignments: [webAssignment],
+      },
+      {
+        userId: "user-1",
+        readSecret: () => undefined,
+        authorizeConnection: () =>
+          Promise.reject(
+            new Error("connection-less Web Assignment must not authorize"),
+          ),
+      },
+    );
+    expect(freshBotRuntime.map((pkg) => pkg.specifier)).toEqual([
+      "@frockbot/plugin-web",
+    ]);
   });
 });
 

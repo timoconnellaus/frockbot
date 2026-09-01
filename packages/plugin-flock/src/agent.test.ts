@@ -94,6 +94,14 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
   const storage = memoryStorage();
   const flock = createFlockUserBackendContribution({
     storage,
+    readUserSettings: () =>
+      Promise.resolve({
+        schemaVersion: 1,
+        revision: 0,
+        profile: { name: "User" },
+        packages: [],
+        connections: [],
+      }),
     now: () => new Date("2026-08-31T10:00:00.000Z"),
     random: () => 0,
     commandBotLifecycle: () => {
@@ -268,12 +276,12 @@ describe("bot_update", () => {
     const test1 = harness();
 
     const result = await createBotUpdateTool(test1.host).execute(
-      { title: "Aide", notify_on_updates: true },
+      { title: "Aide", notify_on_updates: false },
       CONTEXT,
     );
 
     expect(result.isError).toBe(false);
-    expect(test1.settings().notifications).toEqual({ enabled: true });
+    expect(test1.settings().notifications).toEqual({ enabled: false });
     expect(test1.commands().map((command) => command.type)).toEqual([
       "bot/set-profile",
       "bot/update-notifications",

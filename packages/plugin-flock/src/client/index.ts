@@ -67,6 +67,22 @@ function replacePreferredBot(botId?: string): void {
  */
 const UNREAD_POLL_INTERVAL_MS = 15_000;
 
+/**
+ * Notification permission has to start inside a browser gesture. Bot creation
+ * records notification intent regardless of the browser's answer, so this
+ * progressive enhancement is deliberately fire-and-forget.
+ */
+function requestNotificationPermissionFromCreateGesture(): void {
+  if (
+    typeof window === "undefined" ||
+    !("Notification" in window) ||
+    Notification.permission !== "default"
+  ) {
+    return;
+  }
+  void Notification.requestPermission().catch(() => undefined);
+}
+
 export const flockClientPlugin: ClientPlugin = (ctx) => {
   if (!ctx.transport.hostedRequest)
     throw new Error("Flock hosted transport is unavailable");
@@ -419,6 +435,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       state.value.draftSheep = randomSheepRecipeV1();
     },
     async create() {
+      requestNotificationPermissionFromCreateGesture();
       try {
         const userId = await requireAuthenticatedUserId();
         authenticatedUserId = userId;

@@ -292,7 +292,7 @@ export function initializeBotSettingsV1(
     botId,
     revision: 0,
     profile: { name: botId === "default" ? "Barebones" : botId },
-    notifications: { enabled: false },
+    notifications: { enabled: true },
     assignments: [],
     assignmentOperations: [],
     model: model ? structuredClone(model) : undefined,
@@ -1751,7 +1751,9 @@ export function decodePendingAuthorizationV1(
   };
 }
 
-function capabilityAssignment(value: unknown): CapabilityAssignmentView {
+export function decodeCapabilityAssignmentV1(
+  value: unknown,
+): CapabilityAssignmentView {
   const assignment = exactRecord(
     value,
     "Capability Assignment",
@@ -1930,7 +1932,7 @@ export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
     revision: viewRevision(value.revision),
     profile: botProfile(value.profile),
     notifications: notifications(value.notifications),
-    assignments: value.assignments.map(capabilityAssignment),
+    assignments: value.assignments.map(decodeCapabilityAssignmentV1),
     assignmentOperations: value.assignmentOperations.map(assignmentOperation),
     model: value.model === undefined ? undefined : model(value.model),
   };

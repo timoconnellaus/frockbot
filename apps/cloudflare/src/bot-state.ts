@@ -293,6 +293,7 @@ export class BotState extends DurableObject<BotStateEnv> {
                               }),
                           model: registration.initialModel,
                           modelBinding: registration.initialModelBinding,
+                          assignments: registration.initialAssignments ?? [],
                         },
                       )
                       .then(async (settings) => {

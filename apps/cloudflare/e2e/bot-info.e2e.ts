@@ -69,9 +69,9 @@ test("the info pane assembles every Package's section without a console error", 
   const notifications = pane
     .locator("#bot-info-notifications")
     .getByRole("checkbox");
-  await expect(notifications).not.toBeChecked();
-  await notifications.check();
   await expect(notifications).toBeChecked();
+  await notifications.uncheck();
+  await expect(notifications).not.toBeChecked();
 
   await expect(pane.locator("p.settings-error")).toHaveCount(0);
 

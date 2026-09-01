@@ -112,17 +112,22 @@ describe("UserConfiguration Connection routing", () => {
       },
     );
 
-    await expect(
-      configuration.readConfiguration({
-        schemaVersion: 1,
-        userId: "user-1",
-      }),
-    ).resolves.toMatchObject({
+    const first = await configuration.readConfiguration({
       schemaVersion: 1,
-      revision: 0,
-      packages: expect.any(Array),
+      userId: "user-1",
+    });
+    expect(first).toMatchObject({
+      schemaVersion: 1,
+      revision: 1,
       connections: [],
     });
+    expect(first.packages.length).toBeGreaterThan(0);
+    expect(
+      first.packages.every(
+        (pkg) => pkg.state === "installed" && pkg.provenance === "first-party",
+      ),
+    ).toBe(true);
+    expect(first.packages.map((pkg) => pkg.packageId)).toContain("web");
   });
   test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {
     const executed: unknown[] = [];

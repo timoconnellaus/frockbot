@@ -9,6 +9,7 @@ import BotInfoTrigger from "./BotInfoTrigger.vue";
 import BotSettingsSurface from "./BotSettingsSurface.vue";
 import BotSettingsTrigger from "./BotSettingsTrigger.vue";
 import PluginsSurface from "./PluginsSurface.vue";
+import PackageCatalogSurface from "./PackageCatalogSurface.vue";
 import PluginsTrigger from "./PluginsTrigger.vue";
 import UserProfileTrigger from "./UserProfileTrigger.vue";
 import UserSettingsSurface from "./UserSettingsSurface.vue";
@@ -34,6 +35,11 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       id: "plugins",
       title: "Plugins",
       component: PluginsSurface,
+    }),
+    surfaces.register({
+      id: "package-catalog",
+      title: "Package Catalog",
+      component: PackageCatalogSurface,
     }),
     surfaces.register({
       id: "user-settings",

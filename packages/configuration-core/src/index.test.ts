@@ -670,6 +670,7 @@ describe("Bot execution-plan authority", () => {
       connectionId: "provider-1",
       providerModelId: "model-1",
     });
+    expect(initialized.notifications).toEqual({ enabled: true });
   });
 
   const bot = {

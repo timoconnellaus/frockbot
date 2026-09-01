@@ -647,7 +647,10 @@ the rows whose status the code moved:
   sidebar grows a "Show N hidden" group instead (`FlockSidebar.vue`). The
   durable field is `BotProfile.hiddenFromSidebar`, beside — not inside — the
   notification policy, because it describes how the Bot presents itself rather
-  than when it notifies.
+  than when it notifies. GrokBot's `notifyOnAgentUpdates` default is `true`;
+  `initializeBotSettingsV1` now matches it, and the Create Bot gesture asks for
+  browser notification permission without blocking or changing that durable
+  intent when the browser refuses.
 - **5** — the avatar half is landed: an uploaded PNG, JPEG, WebP, GIF or SVG up
   to 5 MB is set through `POST /api/bots/:id/avatar`, served back from
   `GET /api/bots/:id/avatar`, and cleared by setting the avatar back to the
@@ -966,11 +969,16 @@ the rows whose status the code moved:
 - **42** — discovery, fetch, install state and uninstall are landed over a
   first-party seed catalog whose entries are the compiled-in Packages
   (`scripts/publish-catalog.ts`), and installs are User-scoped as GrokBot's
-  are. What is missing is scale and provenance breadth: 22 first-party entries
+  are. The User Durable Object now records every compiled-in Package that
+  declares a Connection Type or Capability as an installed first-party row on
+  its first configuration read, behind a durable one-time marker, so a later
+  uninstall sticks. The Plugins surface projects those rows as Added or their
+  real Connection state; the remote Package Catalog has its own linked surface.
+  What is missing is scale and provenance breadth: 22 first-party entries
   against GrokBot's 296, no third-party or Bot-published entry in the index yet
   (ADR 0008 publication writes artifacts, not Catalog rows), and no agent-side
   `SearchPlugins`/`GetPlugin` tools — the Catalog is reachable from the hosted
-  Plugins surface only.
+  UI only.
 - **43** — the MCP half of the lifecycle is landed and the multi-account half
   is not. A server is a Connection with a durable `McpServerRecordV1` beside it
   (`plugin-mcp/src/records.ts`), and GrokBot's whole lifecycle set has a
