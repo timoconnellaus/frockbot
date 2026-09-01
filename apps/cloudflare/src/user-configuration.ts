@@ -95,11 +95,16 @@ import {
   ChannelStore,
 } from "@frockbot/plugin-channels/store";
 import {
+  channelViewV1,
   decodeChannelCommandV1,
   type ChannelCommandReceiptV1,
   type ChannelCommandV1,
   type ChannelInputV1,
 } from "@frockbot/plugin-channels/shared";
+import {
+  decodeChannelReadCommandV1,
+  type ChannelReadCommandV1,
+} from "@frockbot/plugin-channels/unread";
 import {
   CHANNEL_HISTORY_LIMIT,
   decodeChannelWriterV1,
@@ -2334,6 +2339,77 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     });
     await this.assertFlockIdentity(request.userId as string);
     return this.channels.thread(request.channelId as string);
+  }
+
+  /**
+   * One Channel, as the hosted client renders it.
+   *
+   * The record, its members, its thread, and — for an external Channel — the
+   * *label* of the Connection it speaks through. The label and the platform,
+   * and nothing else: the token was returned once at connect, the digest never
+   * leaves this object, and a WebUI that could read either would be a second
+   * place a credential lives.
+   */
+  async readChannelThreadPage(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      channelId: rpcIdentifier,
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    const channelId = request.channelId as string;
+    const record = await this.channels.read(channelId);
+    if (!record) throw new Error("Channel not found");
+    const thread = await this.channels.thread(channelId);
+    const connection = record.connectionId
+      ? await (
+          await this.contributions()
+        ).settings.getConnection(userId, record.connectionId)
+      : undefined;
+    return {
+      schemaVersion: 1 as const,
+      channel: channelViewV1(record),
+      messages: thread.messages,
+      ...(connection?.displayName === undefined
+        ? {}
+        : { connectionLabel: connection.displayName }),
+      ...(record.kind === "external" && connection?.packageId
+        ? { platform: TELEGRAM_PLATFORM_V1 }
+        : {}),
+    };
+  }
+
+  /** Per-Channel unread for one Bot's sidebar rows, in one round trip. */
+  async listChannelUnread(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return this.channels.unread(request.botId as string);
+  }
+
+  /**
+   * The User's own read position in one Channel.
+   *
+   * An authenticated command, never a side effect of a read: a poll that
+   * refreshed a thread must not clear a badge, exactly as `bot/mark-read` is
+   * not fired by the run listing that refreshed a Bot's.
+   */
+  async markChannelRead(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecoded(decodeChannelReadCommandV1),
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    const command = request.command as ChannelReadCommandV1;
+    await this.channels.markRead(command);
+    return {
+      schemaVersion: 1 as const,
+      commandId: command.commandId,
+      status: "applied" as const,
+      unread: await this.channels.channelUnread(command.channelId),
+    };
   }
 
   /**

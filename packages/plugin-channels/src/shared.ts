@@ -135,6 +135,25 @@ export interface ChannelThreadViewV1 {
   messages: ChannelMessageViewV1[];
 }
 
+/**
+ * One Channel, as the hosted client renders it: the record, the members strip,
+ * the thread, and — for an external Channel — the *label* of the Connection it
+ * speaks through.
+ *
+ * The label, and nothing else. A Connection's credential material never leaves
+ * the backend, so what the WebUI is told about a connected Channel is the name
+ * a person gave it and the platform it belongs to.
+ */
+export interface ChannelThreadPageViewV1 {
+  schemaVersion: 1;
+  channel: ChannelViewV1;
+  messages: ChannelMessageViewV1[];
+  /** The Connection's human label. Never a token, a digest or a webhook path. */
+  connectionLabel?: string;
+  /** The platform an external Channel speaks to, when it is one. */
+  platform?: string;
+}
+
 /** Why a Channel command was refused. Each is a bound the register states. */
 export const CHANNEL_REFUSALS = [
   "unknown-channel",
@@ -792,5 +811,49 @@ export function decodeChannelCommandReceiptV1(
     status: "refused",
     refusal,
     reason: channelText(candidate.reason, CHANNEL_TEXT_MAX, `${label} reason`),
+  };
+}
+
+export function decodeChannelThreadPageViewV1(
+  value: unknown,
+  label = "Channel thread page",
+): ChannelThreadPageViewV1 {
+  const candidate = channelRecord(value, label);
+  channelExactKeys(
+    candidate,
+    ["schemaVersion", "channel", "messages"],
+    ["connectionLabel", "platform"],
+    label,
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new ChannelDecodeError(`${label} schemaVersion is unsupported`);
+  }
+  if (!Array.isArray(candidate.messages)) {
+    throw new ChannelDecodeError(`${label} messages must be an array`);
+  }
+  return {
+    schemaVersion: 1,
+    channel: decodeChannelViewV1(candidate.channel, `${label} channel`),
+    messages: candidate.messages.map((message, index) =>
+      decodeChannelMessageViewV1(message, `${label} messages[${index}]`),
+    ),
+    ...(candidate.connectionLabel === undefined
+      ? {}
+      : {
+          connectionLabel: channelText(
+            candidate.connectionLabel,
+            CHANNEL_NAME_MAX,
+            `${label} connectionLabel`,
+          ),
+        }),
+    ...(candidate.platform === undefined
+      ? {}
+      : {
+          platform: channelText(
+            candidate.platform,
+            CHANNEL_ID_MAX,
+            `${label} platform`,
+          ),
+        }),
   };
 }

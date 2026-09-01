@@ -1,7 +1,12 @@
-// The Channels gateway Contribution: one authenticated route, and one that is
+// The Channels gateway Contribution: the authenticated routes, and one that is
 // not authenticated at all.
 //
+//   GET  /api/bots/:botId/channels                      the sidebar's list
+//   GET  /api/bots/:botId/channels/unread               per-Channel unread
 //   POST /api/bots/:botId/channels/:platform            connect
+//   GET  /api/channels/:channelId                       one thread
+//   POST /api/channels/:channelId/read                  the read position
+//   POST /api/channels/:channelId/disconnect            disconnect
 //   POST /api/plugins/channels/:platform/:token         one delivery
 //
 // The second is a `publicRoute`: a remote platform has no session with this
@@ -25,6 +30,16 @@ import {
   type ChannelDeliveryOutcomeV1,
 } from "./connect.js";
 import {
+  decodeChannelReadCommandV1,
+  type ChannelReadReceiptV1,
+  type ChannelUnreadDirectoryViewV1,
+} from "./unread.js";
+import type {
+  ChannelCommandReceiptV1,
+  ChannelListViewV1,
+  ChannelThreadPageViewV1,
+} from "./shared.js";
+import {
   CHANNEL_WEBHOOK_BODY_MAX_BYTES,
   ChannelTokenError,
   verifyChannelTokenV1,
@@ -32,6 +47,23 @@ import {
 import { ChannelDecodeError } from "./records.js";
 
 const CONNECT = /^\/api\/bots\/([^/]+)\/channels\/([a-z0-9-]{1,32})$/;
+const CHANNELS = /^\/api\/bots\/([^/]+)\/channels$/;
+const CHANNEL_UNREAD = /^\/api\/bots\/([^/]+)\/channels\/unread$/;
+const CHANNEL_THREAD = /^\/api\/channels\/([^/]+)$/;
+const CHANNEL_READ = /^\/api\/channels\/([^/]+)\/read$/;
+const CHANNEL_DISCONNECT = /^\/api\/channels\/([^/]+)\/disconnect$/;
+const CHANNEL_POST = /^\/api\/channels\/([^/]+)\/post$/;
+
+/**
+ * How the User appears in a room they are watching.
+ *
+ * A person is not a Bot and not a member: `senderPeer` is the field the record
+ * already has for "someone who is not a member said this", and the store
+ * already owes such a message to *every* member — which is what the User
+ * speaking into a room has to mean, or the Bot they were addressing would be
+ * the one member that never heard it.
+ */
+export const CHANNEL_USER_PEER_V1 = "you";
 
 export interface ChannelsGatewayHost {
   /**
@@ -61,6 +93,45 @@ export interface ChannelsGatewayHost {
       origin: string;
     },
   ): Promise<ChannelConnectResultV1>;
+  /** Every Channel one of this User's Bots is a member of. */
+  listChannels(userId: string, botId: string): Promise<ChannelListViewV1>;
+  /** One Channel: the record, its members, its thread, a Connection's label. */
+  readChannelThreadPage(
+    userId: string,
+    channelId: string,
+  ): Promise<ChannelThreadPageViewV1>;
+  /** Per-Channel unread for one Bot's rows, in one round trip. */
+  listChannelUnread(
+    userId: string,
+    botId: string,
+  ): Promise<ChannelUnreadDirectoryViewV1>;
+  /** The User's own read position. Never a side effect of a listing. */
+  markChannelRead(
+    userId: string,
+    command: { commandId: string; channelId: string; upToSeq: number },
+  ): Promise<ChannelReadReceiptV1>;
+  /**
+   * One message from the User into a room they are watching, carried as a
+   * peer rather than as one of its Bots. A person's words are the person's.
+   */
+  postChannelMessage(
+    userId: string,
+    command: {
+      commandId: string;
+      channelId: string;
+      botId: string;
+      text: string;
+    },
+  ): Promise<ChannelCommandReceiptV1>;
+  /**
+   * Disconnect one external Channel, as the User rather than as a Bot. It is
+   * the same `channel/disconnect` command `channel_manage` applies: the
+   * webhook is deleted, the key revoked, and the record and its history kept.
+   */
+  disconnectChannel(
+    userId: string,
+    command: { commandId: string; channelId: string; botId: string },
+  ): Promise<ChannelCommandReceiptV1>;
 }
 
 export interface ChannelsBackendRouteContribution {
@@ -159,6 +230,117 @@ async function deliver(
   }
 }
 
+/**
+ * The WebUI's half of the Channels door: four authenticated routes.
+ *
+ *   GET  /api/bots/:botId/channels           the sidebar's list
+ *   GET  /api/bots/:botId/channels/unread    per-Channel unread, one trip
+ *   GET  /api/channels/:channelId            one thread, members and label
+ *   POST /api/channels/:channelId/read       the User's read position
+ *   POST /api/channels/:channelId/disconnect `channel_manage disconnect`
+ *
+ * The gateway owns none of this state and proves nothing about it. Every route
+ * carries the authenticated User to the User Durable Object, which is the
+ * authority for whether the Bot is theirs and whether the Channel exists — so
+ * a Channel that is not this User's is a 404 there, never because this module
+ * checked.
+ *
+ * The unread route is matched before the connect route on purpose: `unread` is
+ * a legal platform-shaped path segment, and the more specific path wins.
+ */
+async function readRoute(
+  host: ChannelsGatewayHost,
+  request: Request,
+  url: URL,
+  userId: string,
+): Promise<Response | undefined> {
+  const unread = CHANNEL_UNREAD.exec(url.pathname);
+  const channels = CHANNELS.exec(url.pathname);
+  const thread = CHANNEL_THREAD.exec(url.pathname);
+  const markRead = CHANNEL_READ.exec(url.pathname);
+  const disconnect = CHANNEL_DISCONNECT.exec(url.pathname);
+  const post = CHANNEL_POST.exec(url.pathname);
+  if (!unread && !channels && !thread && !markRead && !disconnect && !post) {
+    return undefined;
+  }
+  try {
+    if (unread) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      return Response.json(
+        await host.listChannelUnread(userId, pathSegment(unread[1]!)),
+      );
+    }
+    if (channels) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      return Response.json(
+        await host.listChannels(userId, pathSegment(channels[1]!)),
+      );
+    }
+    if (thread) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      return Response.json(
+        await host.readChannelThreadPage(userId, pathSegment(thread[1]!)),
+      );
+    }
+    if (markRead) {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      const command = decodeChannelReadCommandV1(await request.json());
+      if (command.channelId !== pathSegment(markRead[1]!)) {
+        return jsonError(400, "read command does not match request path");
+      }
+      return Response.json(await host.markChannelRead(userId, command));
+    }
+    if (request.method !== "POST") return jsonError(405, "method not allowed");
+    const payload = (await request.json()) as Record<string, unknown>;
+    if (post) {
+      if (
+        typeof payload.commandId !== "string" ||
+        typeof payload.botId !== "string" ||
+        typeof payload.text !== "string"
+      ) {
+        return jsonError(400, "post requires a commandId, a botId and text");
+      }
+      return Response.json(
+        await host.postChannelMessage(userId, {
+          commandId: payload.commandId,
+          botId: payload.botId,
+          text: payload.text,
+          channelId: pathSegment(post[1]!),
+        }),
+      );
+    }
+    if (
+      typeof payload.commandId !== "string" ||
+      typeof payload.botId !== "string"
+    ) {
+      // The Bot is not decoration: only a member may disconnect a Channel, and
+      // the User Durable Object refuses on the member the command names.
+      return jsonError(400, "disconnect requires a commandId and a botId");
+    }
+    return Response.json(
+      await host.disconnectChannel(userId, {
+        commandId: payload.commandId,
+        botId: payload.botId,
+        channelId: pathSegment(disconnect![1]!),
+      }),
+    );
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      (error.name === "BotNotFoundError" || error.name === "ChannelNotFound")
+    ) {
+      return jsonError(404, "Channel not found");
+    }
+    return jsonError(
+      400,
+      error instanceof Error ? error.message : "Channel request failed",
+    );
+  }
+}
+
 export function createChannelsBackendContribution(
   host: ChannelsGatewayHost,
 ): ChannelsBackendRouteContribution {
@@ -166,6 +348,8 @@ export function createChannelsBackendContribution(
     packageId: "channels",
     async route(request, url, context) {
       if (!context.userId) return undefined;
+      const read = await readRoute(host, request, url, context.userId);
+      if (read) return read;
       const connect = CONNECT.exec(url.pathname);
       if (!connect) return undefined;
       if (request.method !== "POST")

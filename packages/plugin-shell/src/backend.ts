@@ -156,6 +156,7 @@ import {
 import {
   channelOutboundSendsV1,
   channelPendingKeyV1,
+  channelRunIdV1,
   channelTurnCommandV1,
   channelTurnHistoryV1,
   createBotChannelsHost,
@@ -2859,7 +2860,52 @@ export class ShellBotBackendContribution {
     await this.ctx.storage.transaction((transaction) =>
       this.authority.refreshRecoveryAlarm(transaction),
     );
+    if (queued) await this.notifyChannelMessage(identity, input);
     return { status: queued ? "queued" : "duplicate" };
+  }
+
+  /**
+   * Tell the User a Channel said something, if this Bot is allowed to.
+   *
+   * `BotNotificationPolicy.enabled` is the mute on updates, and a message in a
+   * room this Bot is in is an update — so a muted Bot contributes no intent,
+   * exactly as it contributes none for a Turn that finished. The badge is not
+   * gated by it: `channel/mark-read` and the Channel's own `seq` decide that,
+   * and muting silences chatter rather than hiding what happened.
+   *
+   * The intent is raised on delivery rather than on settlement, because the
+   * message is what the person is being told about; whether this Bot manages
+   * to answer it is a different fact. It is recorded once per message id, so a
+   * redelivery re-raises nothing.
+   */
+  private async notifyChannelMessage(
+    identity: BotIdentity,
+    input: ChannelInputV1,
+  ): Promise<void> {
+    try {
+      const settings = await this.getSettings(identity);
+      if (!settings.notifications.enabled) return;
+      const sender = input.senderBotId ?? input.senderPeer ?? "Someone";
+      await this.authority.recordNotification({
+        notificationId: `channel-message:${input.messageId}`,
+        runId: channelRunIdV1(input.messageId),
+        createdAt: new Date().toISOString(),
+        title: input.channelName,
+        body: `${sender}: ${input.text}`.slice(0, 240),
+        // The dimension PR #65's fan-out gains here: one message reaches every
+        // other member, so the client folds the room's intents into one telling
+        // rather than one per Bot in it.
+        channelId: input.channelId,
+      });
+    } catch (error) {
+      // A notification is an affordance. The message is already durable and
+      // the Turn is already owed; failing to raise an intent must not refuse
+      // the delivery that carried it.
+      console.error(
+        "Channel message was queued without a notification intent",
+        error instanceof Error ? error.message : "unknown failure",
+      );
+    }
   }
 
   /** The queued Channel inputs this Bot owes a Turn, oldest first. */

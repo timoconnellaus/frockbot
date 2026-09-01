@@ -3,7 +3,9 @@
   "id": "settings",
   "displayName": "FrockBot Settings",
   "version": "0.0.1",
-  "compatibility": { "frockbot": ">=0.0.1" },
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
   "dependencies": {
     "auth": ">=0.0.1",
     "shell": ">=0.0.1",
@@ -11,19 +13,36 @@
   },
   "contributions": {
     "backend": [
-      { "entry": "./backend", "host": "gateway" },
-      { "entry": "./user", "host": "user" }
+      {
+        "entry": "./backend",
+        "host": "gateway"
+      },
+      {
+        "entry": "./user",
+        "host": "user"
+      }
     ],
     "client": {
       "entry": "./client",
       "mounts": [
-        { "slot": "frockbot.sidebar-actions", "order": 10 },
-        { "slot": "frockbot.user-profile", "order": 10 },
-        { "slot": "frockbot.bot-actions", "order": 10 }
+        {
+          "slot": "frockbot.sidebar-actions",
+          "order": 10
+        },
+        {
+          "slot": "frockbot.user-profile",
+          "order": 10
+        },
+        {
+          "slot": "frockbot.bot-actions",
+          "order": 10
+        }
       ],
       "outlets": [
         "frockbot.user-settings-sections",
-        "frockbot.bot-settings-sections"
+        "frockbot.bot-settings-sections",
+        "frockbot.bot-info-sections",
+        "frockbot.bot-info-channels"
       ]
     }
   },

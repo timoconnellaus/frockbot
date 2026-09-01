@@ -600,6 +600,14 @@ export interface BotNotificationIntent {
    * rather than an update about one that finished. Absent means `normal`.
    */
   urgency?: "normal" | "critical";
+  /**
+   * The Channel this intent belongs to, when a group message raised it.
+   *
+   * One message reaches every other member, so the same message raises one
+   * intent per recipient Bot. The dimension is what lets the client tell the
+   * person once about the room rather than once per Bot in it.
+   */
+  channelId?: string;
 }
 
 export interface BotTurnCompletion {

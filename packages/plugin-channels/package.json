@@ -8,6 +8,7 @@
     "./agent": "./src/agent.ts",
     "./agent-host": "./src/agent-host.ts",
     "./backend": "./src/backend.ts",
+    "./client": "./src/client/index.ts",
     "./connect": "./src/connect.ts",
     "./connector": "./src/connector.ts",
     "./frockbot.json": "./frockbot.json",
@@ -18,29 +19,38 @@
     "./shared": "./src/shared.ts",
     "./storage-keys": "./src/storage-keys.ts",
     "./store": "./src/store.ts",
+    "./testing": "./src/testing.ts",
     "./token": "./src/token.ts",
-    "./testing": "./src/testing.ts"
+    "./unread": "./src/unread.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@frockbot/client-core": "workspace:*",
+    "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
     "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/plugin-flock": "workspace:*",
+    "@frockbot/plugin-shell": "workspace:*",
+    "cordis": "4.0.0-rc.8",
+    "vue": "3.5.41"
   },
   "devDependencies": {
     "@frockbot/plugin-prompt": "workspace:*",
     "@frockbot/plugin-tools": "workspace:*",
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",
-    "typescript": "5.9.3"
+    "@vitejs/plugin-vue": "6.0.8",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "vue-tsc": "3.3.10"
   },
   "publishConfig": {
     "access": "public"
