@@ -129,6 +129,10 @@ export default defineConfig({
           // A fixed signing secret, so a test can mint the key it presents and
           // forge one that must be refused.
           ROUTINE_HOOK_SECRET: "workerd-routine-hook-secret-0123456789abcdef",
+          // The registered-machine door's signing secret. Fixed, so a test can
+          // mint the token a machine presents and forge one that must be
+          // refused.
+          MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
         },
         // Deliberately absent, and why:
         //

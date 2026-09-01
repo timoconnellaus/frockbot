@@ -22,6 +22,7 @@ interface FlyTestEnv {
   PACKAGE_CATALOG: R2Bucket;
   SPRITES_TOKEN: string;
   ROUTINE_HOOK_SECRET: string;
+  MACHINE_TOKEN_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
 }
 

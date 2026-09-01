@@ -60,6 +60,7 @@ describe("foundation application", () => {
       "search",
       "skills",
       "subagents",
+      "user-machine",
     ]);
     expect(first.contributions).toEqual({
       backend: [
@@ -75,6 +76,7 @@ describe("foundation application", () => {
         "routines",
         "search",
         "subagents",
+        "user-machine",
       ],
       runtime: [
         "shell",
@@ -382,6 +384,18 @@ describe("foundation application", () => {
           active: 0,
           tasks: [],
         }),
+      createMachinePairing: () =>
+        Promise.reject(new Error("not used while composing")),
+      enrollMachine: () =>
+        Promise.reject(new Error("not used while composing")),
+      pollMachine: () => Promise.reject(new Error("not used while composing")),
+      claimMachineCommand: () =>
+        Promise.reject(new Error("not used while composing")),
+      recordMachineResult: () =>
+        Promise.reject(new Error("not used while composing")),
+      listMachines: () => Promise.reject(new Error("not used while composing")),
+      revokeMachine: () =>
+        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions
@@ -397,6 +411,7 @@ describe("foundation application", () => {
       "search",
       "settings",
       "subagents",
+      "user-machine",
     ]);
     interface TestContribution {
       specifier: string;
@@ -416,7 +431,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(9);
+    expect(userBackend.contributions).toHaveLength(10);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

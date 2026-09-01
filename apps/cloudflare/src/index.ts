@@ -69,6 +69,14 @@ import {
 } from "@frockbot/plugin-routines/shared";
 import { decodeTaskListViewV1 } from "@frockbot/plugin-subagents/shared";
 import {
+  decodeMachineClaimReceiptV1,
+  decodeMachineEnrollmentReceiptV1,
+  decodeMachineListViewV1,
+  decodeMachinePairingOfferV1,
+  decodeMachinePollResultV1,
+  decodeMachineResultReceiptV1,
+} from "@frockbot/machine-protocol";
+import {
   decodeClientSearchRebuildReceiptV1,
   decodeSearchIndexResultsV1,
   type SearchQueryV1,
@@ -164,6 +172,12 @@ interface Env {
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
+  /**
+   * Signs every machine token and pairing code. Absent closes the registered
+   * machine door: pairing, enrollment and every machine route answer 503
+   * rather than admitting a caller nothing could verify.
+   */
+  MACHINE_TOKEN_SECRET?: string;
   /**
    * Signs the callback `state` of every redirect-based Connection. Absent — or
    * weak, or equal to `BETTER_AUTH_SECRET` — closes the `mcp-oauth` door: the
@@ -374,6 +388,31 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
 interface UserSearchRpc {
   searchTranscripts(input: unknown): Promise<unknown>;
   rebuildSearchIndex(input: unknown): Promise<unknown>;
+}
+
+/**
+ * The User Durable Object's registered-machine RPCs.
+ *
+ * Narrow and separate from `UserConfigurationBinding` for the same reason the
+ * transcript index's are: the registry is one Package's Contribution, and the
+ * generic configuration binding every gateway adapter implements has no
+ * business growing a method for somebody's laptop.
+ */
+interface UserMachineRpc {
+  createMachinePairing(input: unknown): Promise<unknown>;
+  enrollMachine(input: unknown): Promise<unknown>;
+  pollMachine(input: unknown): Promise<unknown>;
+  claimMachineCommand(input: unknown): Promise<unknown>;
+  recordMachineResult(input: unknown): Promise<unknown>;
+  listMachines(input: unknown): Promise<unknown>;
+  revokeMachine(input: unknown): Promise<unknown>;
+}
+
+function userMachineStub(env: Env, userId: string): UserMachineRpc {
+  const id = env.USER_CONFIGURATIONS.idFromName(userId);
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its RPC surface.
+  const rpc = env.USER_CONFIGURATIONS.get(id) as unknown as UserMachineRpc;
+  return rpc;
 }
 
 /**
@@ -1219,6 +1258,93 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             botId,
             command,
           }),
+        ),
+      // The secret the gateway verifies a presented machine token or pairing
+      // code against, before any Durable Object is addressed. It never leaves
+      // the Worker: what crosses to the User object is the token's claims and
+      // its digest, never the token.
+      ...(typeof env.MACHINE_TOKEN_SECRET === "string"
+        ? { machineTokenSecret: env.MACHINE_TOKEN_SECRET }
+        : {}),
+      createMachinePairing: async (userId, request) =>
+        decodeMachinePairingOfferV1(
+          rpcJsonSnapshot(
+            await userMachineStub(env, userId).createMachinePairing({
+              schemaVersion: 1,
+              userId,
+              ...(request.label === undefined ? {} : { label: request.label }),
+            }),
+          ),
+        ),
+      enrollMachine: async (userId, input) =>
+        decodeMachineEnrollmentReceiptV1(
+          rpcJsonSnapshot(
+            await userMachineStub(env, userId).enrollMachine({
+              schemaVersion: 1,
+              userId,
+              machineId: input.machineId,
+              enrollment: input.enrollment,
+            }),
+          ),
+        ),
+      pollMachine: async (userId, call) =>
+        decodeMachinePollResultV1(
+          rpcJsonSnapshot(
+            await userMachineStub(env, userId).pollMachine({
+              schemaVersion: 1,
+              userId,
+              machineId: call.machineId,
+              claims: call.claims,
+              tokenDigest: call.tokenDigest,
+              waitSeconds: call.waitSeconds,
+            }),
+          ),
+        ),
+      claimMachineCommand: async (userId, call) =>
+        decodeMachineClaimReceiptV1(
+          rpcJsonSnapshot(
+            await userMachineStub(env, userId).claimMachineCommand({
+              schemaVersion: 1,
+              userId,
+              machineId: call.machineId,
+              commandId: call.commandId,
+              claims: call.claims,
+              tokenDigest: call.tokenDigest,
+            }),
+          ),
+        ),
+      recordMachineResult: async (userId, call) =>
+        decodeMachineResultReceiptV1(
+          rpcJsonSnapshot(
+            await userMachineStub(env, userId).recordMachineResult({
+              schemaVersion: 1,
+              userId,
+              machineId: call.machineId,
+              commandId: call.commandId,
+              claims: call.claims,
+              tokenDigest: call.tokenDigest,
+              result: call.result,
+            }),
+          ),
+        ),
+      listMachines: async (userId) =>
+        decodeMachineListViewV1(
+          rpcJsonSnapshot(
+            await userMachineStub(env, userId).listMachines({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
+      revokeMachine: async (userId, machineId) =>
+        decodeMachineListViewV1(
+          rpcJsonSnapshot(
+            await userMachineStub(env, userId).revokeMachine({
+              schemaVersion: 1,
+              userId,
+              machineId,
+            }),
+          ),
         ),
       // The secret the gateway verifies a presented webhook key against. It
       // never leaves the Worker; a Bot only ever sees a digest.
