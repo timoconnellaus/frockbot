@@ -5,7 +5,7 @@ FrockBot is a hosted application for creating and operating persistent conversat
 ## Language
 
 **User**:
-A person who owns Bots, installed Packages, authorized Connections, and preferences shared across their Bots. Shared availability does not grant a Bot authority to use a Capability.
+A person who owns Bots, enabled Packages, authorized Connections, and preferences shared across their Bots. What a user enables is available to all of that user's bots.
 _Avoid_: Account, tenant
 
 **Bot**:
@@ -40,9 +40,13 @@ _Avoid_: User Connection, credential, integration, account
 Behavior made available by an installed Package, such as a model, tool set, memory provider, or notification adapter.
 _Avoid_: Plugin, feature
 
-**Assignment**:
-A Bot-owned grant selecting a Capability and, when required, a Connection.
-_Avoid_: Installation, connection
+**Enablement**:
+A User-owned grant turning a Package or Connection on for every one of that user's bots. There is no per-bot grant.
+_Avoid_: Assignment, installation, per-bot permission
+
+**Connectors**:
+The surface where a user authorizes, credentials, enables, and revokes Connections. It is a name for the surface; the things it manages are Connections.
+_Avoid_: Integrations, apps, plugins
 
 **Contribution**:
 One environment-specific part of a package, such as desktop-host behavior, agent capability, or WebUI presentation.
@@ -93,7 +97,7 @@ One installable row in a Catalog generation, identified by an opaque immutable c
 _Avoid_: Listing, item, plugin record
 
 **Isolate**:
-A Dynamic Worker the Bot's Durable Object loads to execute non-first-party Package code with only the bindings the Bot's Assignments grant.
+A Dynamic Worker the Bot's Durable Object loads to execute non-first-party Package code with only the bindings its User's enabled Packages and Connections grant.
 _Avoid_: Sandbox, container, worker
 
 **Keyring**:

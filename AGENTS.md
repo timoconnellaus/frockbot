@@ -21,7 +21,7 @@ These rules govern production features and architecture. Treat them as invariant
 ## Authorities
 
 - The cloud backend is authoritative for durable state, product policy, orchestration, and external integrations.
-- The Bot's Durable Object is the authority for everything Bot-scoped: command admission, the append-only event log, the resumable execution cursor, idempotency records, cancellation, serialization, durable scheduling, Routines, Assignments, and the pinned Composition of every admitted Turn.
+- The Bot's Durable Object is the authority for everything Bot-scoped: command admission, the append-only event log, the resumable execution cursor, idempotency records, cancellation, serialization, durable scheduling, Routines, and the pinned Composition of every admitted Turn.
 - The User's Durable Object is the authority for everything User-scoped: Package availability, Connections, credentials, the Computer assignment, User settings, quotas, and the generation records of User and Project Memory roots.
 - The Workspace and its object-storage twin are the only durable state outside a Durable Object. They hold files, never authority: a Durable Object records every intent, effect, and generation that concerns them, and the rules under Computer and Workspace and Memory govern their reconciliation. Immutable content-addressed Package artifacts are durable content, not state: addressed by hash, never mutated, and holding no authority.
 - A Bot's conversational Turns run in its Bot Durable Object; each concurrent child Turn runs in a Subagent Durable Object of the same Bot that holds no authority — the Bot Durable Object admits it, pins its Composition, and records its lifecycle and terminal result. When resident, the Durable Object constructs one application root from the Bot's durable Composition. The root and its Plugins are ephemeral projections of durable state, not authorities that must remain resident.
@@ -38,6 +38,16 @@ These rules govern production features and architecture. Treat them as invariant
 - Development and test adapters exercise the production architecture rather than introducing alternate product runtimes.
 - Platform capabilities such as notifications, clipboard access, file selection, authentication handoff, and deep links are progressive enhancements. Core workflows remain available without a native client process.
 
+## Configuration shape
+
+- Configuration is account-shaped. A Package, Capability, Connection, or external account a User enables is available to every Bot that User owns, immediately and without a second decision. Uniformity is the feature, not a limitation to be corrected with per-Bot overrides.
+- Per-Bot configuration exists only for what must genuinely differ between Bots: identity, instructions, notifications, and what the Bot has authored for itself. Any other per-Bot control ships only with a stated reason the choice cannot be account-level.
+- Configuration only some Users need is itself a Package, disabled by default. The default experience carries no control for it. Enabling the Package adds the control; disabling it makes the values that control captured inert without destroying them, and re-enabling restores them.
+- Where such a Package adds a per-Bot override of an account-level value, absence of an override means inherit. Exactly one account-level value is authoritative when no override is set, and the product behaves correctly with the override Package disabled.
+- A control ships only when a User must make the choice. Otherwise choose a default and ship no control. A Capability that requires no credential and costs the User nothing is enabled when the User signs up.
+- Every control has exactly one home. A thing is enabled in one surface and credentialed in one surface; no other surface repeats that control.
+- The product works with zero configuration. Configuration extends reach; it never repairs a broken default.
+
 ## Minimal kernel
 
 - The kernel is the only production code that is not a Package. It has exactly three parts: Durable Object authority (admission, event log, cursor, idempotency, cancellation, scheduling, and storage), the Agent loop (claim input, call the model, run the tools, record events, repeat), and Package composition (resolve durable desired state into a pinned generation set, mount it, verify it, commit or roll back, and bootstrap and dispose the host that does so).
@@ -49,12 +59,13 @@ These rules govern production features and architecture. Treat them as invariant
 
 - Every production capability beyond the kernel is implemented as a Plugin mounted from a declared Package Contribution.
 - Built-in, User-installed, and Bot-authored Packages follow the same manifest, authority, lifecycle, provenance, and test requirements; only the execution host differs, and it follows provenance as stated below. A Package records its provenance as first-party, User, or Bot.
-- Package availability is User-level. A Bot receives authority solely through an explicit, durable Assignment and, when required, a Connection.
+- Package availability and Connections are User-level, and enabling them is the grant. Enabling a Package or Connection grants it to every Bot that User owns; disabling or revoking it removes it from every Bot. There is no second, per-Bot grant.
+- The grant stays durable and inspectable without being a User decision: every admitted Turn records the enabled Package and Connection set it ran under as part of its Composition generation, and resolution fails closed when a Connection is missing, disabled, or revoked, recording a visible, repairable failure rather than silently running without it.
 - A Composition is the durable, versioned set of Package generations a Bot mounts. Every admitted Turn records the Composition generation it ran under. Changing a Composition creates a new generation; it never mutates a recorded one. Activation takes effect at the next admitted Turn; an in-flight Turn completes on its pinned Composition.
 - Composition fails closed. A generation that fails to resolve, mount, or pass its declared checks leaves the last known-good generation resident and records a durable, visible, repairable failure. A generation that fails to activate three consecutive times is quarantined until a User acts.
 - Compilation and bundling happen outside Durable Objects. Composition consumes immutable, content-addressed artifacts and never builds them.
-- A Composition generation is keyed by its resolved artifact set. An isolate's loader identity is derived only from that artifact set and the digest of the bindings it was granted, so identical artifacts under identical authority share one isolate and a changed Assignment never reaches a cached isolate. Generation creation rate, artifact size, retained generations, Workspace disk, and Bot isolate CPU, subrequests, and model spend are bounded by durable per-User quotas; exceeding a quota refuses the operation and records a visible failure.
-- Every Package whose recorded provenance is not first-party executes in a Dynamic Worker isolate the Bot's Durable Object loads for it, with `globalOutbound` disabled, only the capability bindings the Bot's Assignments grant, and no access to secrets, the keyring, or any Durable Object state other than the bindings expose. Network access exists only through those bindings. First-party Packages may run in the kernel's isolate only when reviewed and shipped with FrockBot.
+- A Composition generation is keyed by its resolved artifact set. An isolate's loader identity is derived only from that artifact set and the digest of the bindings it was granted, so identical artifacts under identical authority share one isolate and a changed grant never reaches a cached isolate. Generation creation rate, artifact size, retained generations, Workspace disk, and Bot isolate CPU, subrequests, and model spend are bounded by durable per-User quotas; exceeding a quota refuses the operation and records a visible failure.
+- Every Package whose recorded provenance is not first-party executes in a Dynamic Worker isolate the Bot's Durable Object loads for it, with `globalOutbound` disabled, only the capability bindings its User's enabled Packages and Connections grant, and no access to secrets, the keyring, or any Durable Object state other than the bindings expose. Network access exists only through those bindings. First-party Packages may run in the kernel's isolate only when reviewed and shipped with FrockBot.
 
 ## Self-modification
 
@@ -133,7 +144,7 @@ Before implementing a production feature, define and verify:
 3. behavior during client disconnect, Durable Object eviction, and Computer hibernation;
 4. cancellation, retry, idempotency, and reconciliation behavior;
 5. required authority, credentials, and trust boundaries;
-6. its hosted UI projection and optional platform enhancements;
+6. its hosted UI projection, optional platform enhancements, and the single surface that owns each of its controls; for any per-Bot control, why the choice cannot be account-level;
 7. observable failure states and recovery tests;
 8. the parity-register item it matches, or its explicit label as beyond parity.
 
@@ -153,7 +164,9 @@ Add automated checks for constitutional rules whenever they can be enforced mech
 - the Fly Sprites SDK is loaded only by the Computer host, never by a Worker or a Package;
 - a Turn that does not use the Computer makes no Computer interface call;
 - Memory is readable and writable with no Computer interface call, a Workspace write into a Memory root is rejected, and conflicting Workspace and object-storage writes to any other durable root both survive as generations and are surfaced;
-- a non-first-party Package loads with `globalOutbound` disabled, its bindings derive only from Assignments, and an authority-widening request produces a pending decision record rather than a grant;
+- a non-first-party Package loads with `globalOutbound` disabled, its bindings derive only from its User's enabled Packages and Connections, and an authority-widening request produces a pending decision record rather than a grant;
+- a Connection enabled at account level is usable by every Bot of that User at its next admitted Turn, and one revoked at account level is unavailable to every Bot at its next admitted Turn;
+- with a per-Bot override Package disabled, every Bot resolves the account-level value, and the overrides it captured survive to be restored when it is re-enabled;
 - a broken Bot-authored generation leaves the last known-good Composition running and records a visible failure;
 - reverting a Bot-authored change restores the prior generation;
 - a Skill written outside the Bot's own authority is not loaded as an instruction;
