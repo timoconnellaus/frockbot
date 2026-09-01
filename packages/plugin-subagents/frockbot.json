@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 4,
+  "id": "subagents",
+  "displayName": "Subagents",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "shell": ">=0.0.1"
+  },
+  "contributions": {
+    "backend": [{ "entry": "./backend", "host": "gateway" }],
+    "runtime": { "entry": "./agent" }
+  },
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [],
+    "capabilities": [
+      {
+        "id": "task-dispatch",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": { "turnTypes": ["chat", "automation"] }
+      }
+    ]
+  },
+  "permissions": ["subagents:dispatch"]
+}

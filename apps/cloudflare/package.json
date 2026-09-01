@@ -44,6 +44,7 @@
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "@frockbot/plugin-skills": "workspace:*",
+    "@frockbot/plugin-subagents": "workspace:*",
     "@frockbot/plugin-tools": "workspace:*",
     "@frockbot/template-core": "workspace:*",
     "@frockbot/workspace-store": "workspace:*",

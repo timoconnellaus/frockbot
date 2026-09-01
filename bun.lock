@@ -51,6 +51,7 @@
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
+        "@frockbot/plugin-subagents": "workspace:*",
         "@frockbot/plugin-ui-theme": "workspace:*",
         "@frockbot/plugin-web": "workspace:*",
         "@frockbot/template-core": "workspace:*",
@@ -115,6 +116,7 @@
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
+        "@frockbot/plugin-subagents": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
         "@frockbot/template-core": "workspace:*",
         "@frockbot/workspace-store": "workspace:*",
@@ -957,6 +959,7 @@
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
+        "@frockbot/plugin-subagents": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "cordis": "4.0.0-rc.8",
         "vue": "3.5.41",
@@ -983,6 +986,19 @@
       "devDependencies": {
         "@types/bun": "1.4.0",
         "typescript": "^7.0.2",
+      },
+    },
+    "packages/plugin-subagents": {
+      "name": "@frockbot/plugin-subagents",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-agent-loop": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "5.9.3",
       },
     },
     "packages/plugin-testkit": {
@@ -1403,6 +1419,8 @@
     "@frockbot/plugin-shell": ["@frockbot/plugin-shell@workspace:packages/plugin-shell"],
 
     "@frockbot/plugin-skills": ["@frockbot/plugin-skills@workspace:packages/plugin-skills"],
+
+    "@frockbot/plugin-subagents": ["@frockbot/plugin-subagents@workspace:packages/plugin-subagents"],
 
     "@frockbot/plugin-testkit": ["@frockbot/plugin-testkit@workspace:packages/plugin-testkit"],
 
@@ -3033,6 +3051,8 @@
     "@frockbot/plugin-shell/@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
 
     "@frockbot/plugin-shell/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "@frockbot/plugin-subagents/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-ui-theme/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

@@ -228,12 +228,17 @@ export function createBotRoutinesHost(
 export function settledRoutineOriginV1(run: {
   admission?: {
     turnType?: string;
-    origin?: { kind: string; routineId: string };
+    origin?: { kind: string; routineId?: string };
   };
 }): { routineId: string } | undefined {
   if (run.admission?.turnType !== "automation") return undefined;
   const origin = run.admission.origin;
-  if (!origin || origin.kind !== "routine") return undefined;
+  // A `subagent` origin reaches here on no path today — a subagent Turn is not
+  // an `automation` Turn — but the kind is checked rather than assumed, and the
+  // id it carries is checked with it.
+  if (!origin || origin.kind !== "routine" || !origin.routineId) {
+    return undefined;
+  }
   return { routineId: origin.routineId };
 }
 
@@ -253,7 +258,7 @@ export async function routineTerminalRecordsForRunV1(input: {
     responseText?: string;
     admission?: {
       turnType?: string;
-      origin?: { kind: string; routineId: string };
+      origin?: { kind: string; routineId?: string };
     };
   };
   read<T>(key: string): Promise<T | undefined>;

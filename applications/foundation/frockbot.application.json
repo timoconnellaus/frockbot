@@ -150,6 +150,11 @@
       "specifier": "@frockbot/plugin-mcp",
       "version": "0.0.1",
       "grants": ["connections:manage", "tools:execute", "network:mcp"]
+    },
+    {
+      "specifier": "@frockbot/plugin-subagents",
+      "version": "0.0.1",
+      "grants": ["subagents:dispatch"]
     }
   ]
 }

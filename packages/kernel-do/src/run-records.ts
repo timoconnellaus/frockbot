@@ -33,20 +33,34 @@ export interface StoredEffectAdmission {
   outcome: StoredEffectAdmissionOutcome;
 }
 
-/** What produced a Turn, when it was not a person speaking to the Bot. */
-export interface StoredRunOriginV1 {
+/** A Turn a Routine's firing produced. */
+export interface StoredRunRoutineOriginV1 {
   kind: "routine";
   routineId: string;
   fireId: string;
   trigger: "cron" | "webhook" | "integration" | "manual";
 }
 
-const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunOriginV1["trigger"][] = [
-  "cron",
-  "webhook",
-  "integration",
-  "manual",
-];
+/**
+ * A Turn a parent Turn dispatched as a subagent task.
+ *
+ * It is recorded in the *child* object: the Subagent Durable Object runs the
+ * Turn, and this is how the run it wrote says whose task it was and which of
+ * the parent's runs asked for it. The parent's own authority — the task record,
+ * the bounds, the terminal outcome — lives in the parent object and never here.
+ */
+export interface StoredRunSubagentOriginV1 {
+  kind: "subagent";
+  taskId: string;
+  parentRunId: string;
+}
+
+/** What produced a Turn, when it was not a person speaking to the Bot. */
+export type StoredRunOriginV1 =
+  StoredRunRoutineOriginV1 | StoredRunSubagentOriginV1;
+
+const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunRoutineOriginV1["trigger"][] =
+  ["cron", "webhook", "integration", "manual"];
 
 /**
  * The turn type an admitted run was accepted as, and what produced it,
@@ -160,15 +174,16 @@ function boundedString(
   );
 }
 
-function decodeStoredRunOrigin(
-  value: unknown,
+/**
+ * Exact fields, per origin kind. Each kind gets its own branch rather than a
+ * union of optional fields: a `routine` origin carrying a `taskId` is not a
+ * record with a spare field, it is a record this codec has never written.
+ */
+function requireExactOriginFields(
+  candidate: Record<PropertyKey, unknown>,
+  fields: readonly string[],
   runId: string,
-): StoredRunOriginV1 {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`run "${runId}" has invalid admission origin`);
-  }
-  const candidate = value as Record<PropertyKey, unknown>;
-  const fields = ["kind", "routineId", "fireId", "trigger"];
+): void {
   const ownKeys = Reflect.ownKeys(candidate);
   if (
     ownKeys.length !== fields.length ||
@@ -177,9 +192,42 @@ function decodeStoredRunOrigin(
   ) {
     throw new Error(`run "${runId}" has invalid admission origin fields`);
   }
+}
+
+function decodeStoredRunOrigin(
+  value: unknown,
+  runId: string,
+): StoredRunOriginV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`run "${runId}" has invalid admission origin`);
+  }
+  const candidate = value as Record<PropertyKey, unknown>;
+  if (candidate.kind === "subagent") {
+    requireExactOriginFields(
+      candidate,
+      ["kind", "taskId", "parentRunId"],
+      runId,
+    );
+    if (
+      !boundedString(candidate.taskId, 256) ||
+      !boundedString(candidate.parentRunId, 256)
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    return {
+      kind: "subagent",
+      taskId: candidate.taskId,
+      parentRunId: candidate.parentRunId,
+    };
+  }
   if (candidate.kind !== "routine") {
     throw new Error(`run "${runId}" has an invalid admission origin kind`);
   }
+  requireExactOriginFields(
+    candidate,
+    ["kind", "routineId", "fireId", "trigger"],
+    runId,
+  );
   const trigger = STORED_RUN_ORIGIN_TRIGGERS.find(
     (value) => value === candidate.trigger,
   );

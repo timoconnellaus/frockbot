@@ -18,6 +18,7 @@ describe("identity plugin", () => {
         sessionId: "session",
         provider: "fixture",
         model: "fixture",
+        turnType: "chat",
       }),
     ).toMatchObject({
       text: DEFAULT_IDENTITY_TEXT,
@@ -30,6 +31,7 @@ describe("identity plugin", () => {
         sessionId: "session",
         provider: "fixture",
         model: "fixture",
+        turnType: "chat",
       }),
     ).toEqual({ text: "", sections: [] });
     await harness.dispose();
@@ -50,6 +52,7 @@ describe("identity plugin", () => {
         sessionId: "session",
         provider: "fixture",
         model: "fixture",
+        turnType: "chat",
       }),
     ).toMatchObject({
       sections: [{ id: "persona", text: "You are a test bot." }],

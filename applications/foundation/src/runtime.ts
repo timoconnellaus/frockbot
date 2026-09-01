@@ -186,6 +186,25 @@ import {
   type RoutinesRuntimeHostV1,
 } from "@frockbot/plugin-routines/agent";
 export type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
+import subagentsManifest from "@frockbot/plugin-subagents/manifest";
+// The Subagents gateway Contribution carries the Bot-scoped task routes.
+import {
+  createSubagentsBackendContribution,
+  type SubagentsGatewayHost,
+} from "@frockbot/plugin-subagents/backend";
+const createSubagentsGatewayPlugin = (
+  createSubagentsBackendContribution as typeof createSubagentsBackendContribution & {
+    plugin(
+      host: SubagentsGatewayHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
+import {
+  createSubagentsRuntimePlugin,
+  type SubagentsRuntimeHostV1,
+} from "@frockbot/plugin-subagents/agent";
+export type { SubagentsRuntimeHostV1 } from "@frockbot/plugin-subagents/agent";
 import searchManifest from "@frockbot/plugin-search/manifest";
 // Gateway Search behavior is resolved as a lifecycle-owned Plugin.
 import {
@@ -270,6 +289,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-audit", auditManifest],
   ["@frockbot/plugin-settings", settingsManifest],
   ["@frockbot/plugin-routines", routinesManifest],
+  ["@frockbot/plugin-subagents", subagentsManifest],
 ]);
 
 const runtimeContributions = new Map([
@@ -529,6 +549,7 @@ export type FoundationGatewayHost = {
   McpGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
+  SubagentsGatewayHost &
   SearchGatewayHost &
   AuditGatewayHost &
   PackagePublisherGatewayHost;
@@ -596,6 +617,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-routines/backend"
         ) {
           plugin = createRoutinesGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-subagents/backend"
+        ) {
+          plugin = createSubagentsGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-search/backend"
@@ -782,6 +808,14 @@ export function createFoundationHostedRuntimePackages(
      */
     routines?: RoutinesRuntimeHostV1;
     /**
+     * The Subagents seam (ADR 0017), supplied by the parent Bot Durable Object
+     * for one admitted Turn. Absent outside a Turn, and outside a deployment
+     * that can address a Subagent Durable Object, and the Package is then not
+     * mounted at all: a Bot dispatches a subagent only inside a Turn whose run
+     * the task record can name.
+     */
+    subagents?: SubagentsRuntimeHostV1;
+    /**
      * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside one whose
      * durable roots are reachable in object storage — the Computer provider
@@ -867,6 +901,15 @@ export function createFoundationHostedRuntimePackages(
             plan,
             "routines",
             createRoutinesRuntimePlugin(host.routines),
+          ),
+        ]
+      : []),
+    ...(host.subagents
+      ? [
+          runtimePackage(
+            plan,
+            "subagents",
+            createSubagentsRuntimePlugin(host.subagents),
           ),
         ]
       : []),
@@ -1150,6 +1193,9 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Routines mount only for a Turn, so a Routine write records the Session and
   // Turn that produced it.
   runtimeIds.delete("routines");
+  // Subagents mount only for a Turn, so a dispatched task names the run that
+  // dispatched it and the Subagent Durable Object it reaches is addressable.
+  runtimeIds.delete("subagents");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");
