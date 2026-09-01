@@ -24,13 +24,20 @@
 
 /** A client surface a settings link may open. */
 export type SettingsSurfaceIdV1 =
-  "bot-settings" | "bot-info" | "user-settings" | "plugins";
+  | "bot-settings"
+  | "bot-info"
+  | "user-settings"
+  | "plugins"
+  | "models"
+  | "connections";
 
 export const SETTINGS_SURFACE_IDS_V1: readonly SettingsSurfaceIdV1[] = [
   "bot-settings",
   "bot-info",
   "user-settings",
   "plugins",
+  "models",
+  "connections",
 ];
 
 /** One linkable row or section. */
@@ -158,7 +165,8 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "bot",
   },
 
-  // Application settings and the Plugins catalog.
+  // Application settings, the Plugins catalog, and the two configuration
+  // surfaces that own what a Package declares: Models and Connections.
   {
     anchor: "user-profile",
     surface: "user-settings",
@@ -166,9 +174,27 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "user",
   },
   {
-    anchor: "user-default-model",
+    anchor: "user-package-settings",
     surface: "user-settings",
+    label: "Package settings",
+    scope: "user",
+  },
+  {
+    anchor: "user-default-model",
+    surface: "models",
     label: "Default model",
+    scope: "user",
+  },
+  {
+    anchor: "user-model-providers",
+    surface: "models",
+    label: "Model providers",
+    scope: "user",
+  },
+  {
+    anchor: "user-connections",
+    surface: "connections",
+    label: "Connections",
     scope: "user",
   },
   {

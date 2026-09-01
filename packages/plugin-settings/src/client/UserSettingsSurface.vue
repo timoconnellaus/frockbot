@@ -3,13 +3,8 @@ import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiAnchor, UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
-import { computed, inject, onMounted, ref } from "vue";
-import {
-  decodeModelSelection,
-  eligibleModelConnections,
-  encodeModelSelection,
-  modelSelectOptions,
-} from "./bot-settings.js";
+import { inject, onMounted, ref } from "vue";
+import PackageSettingsSection from "./PackageSettingsSection.vue";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
 const providedWeb = inject(frockBotWebDataKey);
@@ -20,19 +15,10 @@ const surfaces = providedSurfaces;
 const web = providedWeb;
 // Application settings rows are User-scoped, so their links name no Bot.
 const profileLink = settingsLinkV1({ anchor: "user-profile" });
-const defaultModelLink = settingsLinkV1({ anchor: "user-default-model" });
+const packageSettingsLink = settingsLinkV1({ anchor: "user-package-settings" });
 const name = ref("");
 const email = ref("");
-const defaultModel = ref("");
 const saving = ref(false);
-const readyConnections = computed(() =>
-  eligibleModelConnections({
-    connections: web.value.userSettings?.connections ?? [],
-    packages: web.value.userSettings?.packages ?? [],
-    catalog: web.value.pluginCatalog,
-  }),
-);
-const modelOptions = computed(() => modelSelectOptions(readyConnections.value));
 
 onMounted(async () => {
   await web.value.loadPluginCatalog();
@@ -41,7 +27,6 @@ onMounted(async () => {
   if (!settings) return;
   name.value = settings.profile.name;
   email.value = settings.profile.email ?? "";
-  defaultModel.value = encodeModelSelection(settings.newBotModelTemplate);
 });
 
 async function save(): Promise<void> {
@@ -51,7 +36,6 @@ async function save(): Promise<void> {
       name: name.value,
       email: email.value || undefined,
     });
-    await web.value.saveDefaultModel(decodeModelSelection(defaultModel.value));
     surfaces?.close();
   } catch (error) {
     web.value.settingsError =
@@ -85,36 +69,16 @@ async function save(): Promise<void> {
       </UiField>
     </UiAnchor>
     <UiAnchor
-      anchor="user-default-model"
-      label="Default model"
-      :href="defaultModelLink"
+      anchor="user-package-settings"
+      label="Package settings"
+      :href="packageSettingsLink"
       class="settings-row"
     >
-      <UiField
-        v-if="modelOptions.length > 0"
-        label="Default model"
-        hint="used by every Bot"
-      >
-        <select v-model="defaultModel">
-          <option value="">No default model</option>
-          <option
-            v-for="model in modelOptions"
-            :key="model.value"
-            :value="model.value"
-          >
-            {{ model.label }}
-          </option>
-        </select>
-      </UiField>
-      <p v-if="modelOptions.length > 0" class="field-hint">
-        Used by every Bot unless a Bot overrides it in its advanced settings.
+      <p class="field-hint">
+        Settings of the Packages you have enabled. Model providers are
+        configured in Models and accounts in Connections.
       </p>
-      <div v-else class="model-empty">
-        <p>Connect a model provider in Plugins first.</p>
-        <UiButton type="button" @click="surfaces.open('plugins')">
-          Open Plugins
-        </UiButton>
-      </div>
+      <PackageSettingsSection />
     </UiAnchor>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}

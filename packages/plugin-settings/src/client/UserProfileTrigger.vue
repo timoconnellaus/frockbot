@@ -22,9 +22,9 @@ function closeMenu(): void {
   menuOpen.value = false;
 }
 
-function openSettings(): void {
+function openSurface(id: string): void {
   closeMenu();
-  surfaces?.open("user-settings");
+  surfaces?.open(id);
 }
 
 async function signOut(): Promise<void> {
@@ -55,9 +55,31 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
       {{ web.userSettings?.profile.name ?? "FrockBot user" }}
     </button>
     <div v-if="menuOpen" class="profile-menu" role="menu">
-      <button type="button" role="menuitem" @click="openSettings">
+      <button
+        type="button"
+        role="menuitem"
+        @click="openSurface('user-settings')"
+      >
         Settings
       </button>
+      <!-- The three Package surfaces are reachable where the User already is,
+           and gated exactly as the sidebar's Plugins trigger is: a shell
+           without the Connection protocol shows none of them. -->
+      <template v-if="web.connectionsAvailable">
+        <button type="button" role="menuitem" @click="openSurface('models')">
+          Models
+        </button>
+        <button type="button" role="menuitem" @click="openSurface('plugins')">
+          Plugins
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          @click="openSurface('connections')"
+        >
+          Connections
+        </button>
+      </template>
       <button v-if="developmentIdentity" type="button" role="menuitem" disabled>
         Sign out unavailable
       </button>

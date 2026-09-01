@@ -8,6 +8,8 @@ import BotInfoSurface from "./BotInfoSurface.vue";
 import BotInfoTrigger from "./BotInfoTrigger.vue";
 import BotSettingsSurface from "./BotSettingsSurface.vue";
 import BotSettingsTrigger from "./BotSettingsTrigger.vue";
+import ConnectionsSurface from "./ConnectionsSurface.vue";
+import ModelsSurface from "./ModelsSurface.vue";
 import PluginsSurface from "./PluginsSurface.vue";
 import PluginsTrigger from "./PluginsTrigger.vue";
 import UserProfileTrigger from "./UserProfileTrigger.vue";
@@ -30,10 +32,23 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       component: BotInfoSurface,
       placement: "panel",
     }),
+    // Enablement and configuration are separate surfaces: Plugins turns a
+    // Package on and off, Models configures model providers and picks the
+    // model, and Connections authorizes the accounts a Bot may be given.
     surfaces.register({
       id: "plugins",
       title: "Plugins",
       component: PluginsSurface,
+    }),
+    surfaces.register({
+      id: "models",
+      title: "Models",
+      component: ModelsSurface,
+    }),
+    surfaces.register({
+      id: "connections",
+      title: "Connections",
+      component: ConnectionsSurface,
     }),
     surfaces.register({
       id: "user-settings",

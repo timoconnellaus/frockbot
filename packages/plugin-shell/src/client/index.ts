@@ -1843,6 +1843,27 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       await web.value.loadPluginCatalog();
       if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
+    async setPackageEnabled(
+      packageId: string,
+      enabled: boolean,
+    ): Promise<void> {
+      const settings = web.value.userSettings;
+      if (!settings || !ctx.transport.executeConfiguration) {
+        throw new Error("Plugins are unavailable");
+      }
+      const receipt = await ctx.transport.executeConfiguration({
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: crypto.randomUUID(),
+        expectedRevision: settings.revision,
+        packageId,
+        enabled,
+      });
+      // Enablement is projected onto the installation row the Plugins surface
+      // renders, so the toggle reads back what the User authority recorded.
+      await web.value.loadPluginCatalog();
+      if (receipt.status === "rejected") throw new Error(receipt.failure);
+    },
     async savePackageSettings(
       packageId: string,
       values: Record<string, string | number | boolean>,

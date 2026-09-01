@@ -107,6 +107,14 @@ These rules govern production features and architecture. Treat them as invariant
 - Desktop and mobile Contributions provide optional platform adapters; their absence does not stop Agent execution.
 - The hosted client renders backend state and submits commands. It does not become an alternate authority.
 
+## Settings surfaces
+
+- Enablement is separate from configuration. The Plugins surface installs, uninstalls, enables, and disables Packages and holds no Package configuration; a Package's own knobs, credentials, and accounts are never edited there.
+- A Package's configuration lives on the surface that owns what it configures: model providers on Models, external accounts a User grants a Bot on Connections, and any remaining declared Package settings in Application settings. Every declared setting has exactly one such home, and a Package that is disabled or uninstalled shows none.
+- Models is where a User configures model provider Packages and selects models: provider Connections and their credentials, provider catalogs, and the User's default model. Bot-specific model binding stays in that Bot's settings.
+- Connections is where a User authorizes external accounts and services a Bot may be given access to. It holds account authorization and its durable state only, never Package enablement.
+- A surface renders configuration only from what a Package declares in its manifest, so adding a knob or a Connection Type requires no edit to a settings surface.
+
 ## Durable effects
 
 - Record durable execution intent before invoking an external side effect. Only effects an interface declares read-only are exempt.
@@ -149,6 +157,7 @@ Add automated checks for constitutional rules whenever they can be enforced mech
 - reverting a Bot-authored change restores the prior generation;
 - a Skill written outside the Bot's own authority is not loaded as an instruction;
 - an operation exceeding a durable per-User quota is refused and records a visible failure;
+- every declared Package setting and Connection Type resolves to exactly one configuration surface, and the Plugins surface offers enablement only;
 - Computer tools operate without a desktop client;
 - client bundles and protocols contain no secrets;
 - core runtime code has no Electron dependency.

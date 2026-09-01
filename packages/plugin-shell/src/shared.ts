@@ -286,6 +286,13 @@ export interface FrockBotWebData {
   ): Promise<void>;
   installPackage(packageId: string, version: string): Promise<void>;
   /**
+   * Enables or disables one installed Package for this User. Enablement is the
+   * whole of what the Plugins surface does: a disabled Package keeps its
+   * installation, its settings, and its Connections, and stops being available
+   * to any Bot until it is enabled again.
+   */
+  setPackageEnabled(packageId: string, enabled: boolean): Promise<void>;
+  /**
    * A partial update of one installed Package's setting values. Only the ids
    * it carries change; the rest keep the values they had.
    */
