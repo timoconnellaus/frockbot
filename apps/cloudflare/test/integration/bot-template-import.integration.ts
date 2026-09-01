@@ -246,10 +246,22 @@ describe("importing another User's Bot template", () => {
     ).toBe(false);
     expect(JSON.stringify(importerSettings)).not.toContain(MCP_GOOD_API_KEY);
 
-    const botSettings = (await expectOkJson(
-      await asUser(importerId, `/api/bots/${planned.botId}/settings`),
-    )) as { assignments: unknown[] };
-    expect(botSettings.assignments).toEqual([]);
+    const assignmentsOf = async (
+      botId: string,
+    ): Promise<{ connectionId?: string }[]> =>
+      (
+        (await expectOkJson(
+          await asUser(importerId, `/api/bots/${botId}/settings`),
+        )) as { assignments: { connectionId?: string }[] }
+      ).assignments;
+    // The imported Bot carries exactly what the importer's own Bot carries —
+    // the defaults a new Bot snapshots — and none of it names a Connection,
+    // because an import brings no Connection across.
+    const imported = await assignmentsOf(planned.botId);
+    expect(imported).toEqual(await assignmentsOf("tpl-importer-home"));
+    expect(
+      imported.every((assignment) => assignment.connectionId === undefined),
+    ).toBe(true);
 
     // REPLAY. Confirming again is a read: no second Bot, no second Routine.
     await expectOkJson(

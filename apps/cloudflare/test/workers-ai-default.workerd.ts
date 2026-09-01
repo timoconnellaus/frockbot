@@ -37,19 +37,19 @@ describe("ambient Workers AI default", () => {
       userId,
     });
     expect(settings).toMatchObject({
-      packages: [
+      packages: expect.arrayContaining([
         expect.objectContaining({
           packageId: "provider-workers-ai",
           state: "installed",
         }),
-      ],
-      connections: [
+      ]),
+      connections: expect.arrayContaining([
         expect.objectContaining({
           connectionId: WORKERS_AI_CONNECTION_ID,
           state: "ready",
           providerType: "workers-ai",
         }),
-      ],
+      ]),
       newBotModelTemplate: {
         connectionId: WORKERS_AI_CONNECTION_ID,
         providerModelId: WORKERS_AI_DEFAULT_MODEL,

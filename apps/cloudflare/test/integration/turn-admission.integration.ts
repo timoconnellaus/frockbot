@@ -195,10 +195,13 @@ describe("turn admission through the gateway and the Bot", () => {
     const requests = await runInDurableObject(
       botStub(userId, botId),
       async (_instance: unknown, state: DurableObjectState) => {
+        // `run:` and nothing else: other durable records name the same run
+        // (the admission idempotency record among them) and carry no events,
+        // so an unprefixed scan can answer with the wrong one.
         const stored = await state.storage.list<{
           runId: string;
           events: Array<{ type: string }>;
-        }>();
+        }>({ prefix: "run:" });
         const record = [...stored.values()].find(
           (value) =>
             typeof value === "object" &&
