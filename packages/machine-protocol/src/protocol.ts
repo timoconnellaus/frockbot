@@ -309,6 +309,304 @@ export const MACHINE_COMMAND_OUTCOMES_V1: readonly MachineCommandOutcomeV1[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Messages.app (register row 57g)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a Messages call may carry.
+ *
+ * Separate from `MACHINE_LIMITS_V1` because these are the *content* bounds of
+ * one capability rather than the transport's: a search term, a chat id, the
+ * body of a message somebody is about to send. They are declared here, in the
+ * protocol, for the same reason every other bound is — the tool, the queue and
+ * the agent that reads `chat.db` must all refuse at the same size.
+ */
+export const MACHINE_MESSAGES_LIMITS_V1 = {
+  /** A search term, or a chat filter. */
+  query: 512,
+  /** A chat's guid or its `chat_identifier`. */
+  chatId: 256,
+  /** A handle a message is addressed to — a phone number, an Apple ID, a guid. */
+  recipient: 256,
+  /** The body of one outbound message. */
+  text: 4_096,
+  /** An attachment's row id or guid, as a chat item reports it. */
+  attachmentId: 256,
+  /** The most rows one read may ask for, and the default it takes without one. */
+  rows: 200,
+  defaultRows: 50,
+  /** The most one attachment may return. */
+  attachmentBytes: 8 * 1_024 * 1_024,
+  /** Free text on a permission report, e.g. the macOS error that named it. */
+  detail: 512,
+} as const;
+
+export interface MachineMessagesCheckPermissionsCallV1 {
+  kind: "check-permissions";
+}
+
+export interface MachineMessagesFindChatsCallV1 {
+  kind: "find-chats";
+  query?: string;
+  limit: number;
+}
+
+export interface MachineMessagesChatItemsCallV1 {
+  kind: "chat-items";
+  chatId: string;
+  limit: number;
+  /** Page backwards: only items older than this `message.ROWID`. */
+  beforeRowId?: number;
+}
+
+export interface MachineMessagesSearchCallV1 {
+  kind: "search";
+  query: string;
+  limit: number;
+}
+
+export interface MachineMessagesActivityCallV1 {
+  kind: "activity";
+  limit: number;
+}
+
+export interface MachineMessagesFetchAttachmentCallV1 {
+  kind: "fetch-attachment";
+  attachmentId: string;
+  maxBytes: number;
+}
+
+export interface MachineMessagesSendCallV1 {
+  kind: "send";
+  to: string;
+  text: string;
+}
+
+/**
+ * The seven Messages calls of §4.2, one per GrokBot tool:
+ * `CheckIMessagePermissions`, `FindIMessageChats`, `ChatItems`,
+ * `SearchIMessages`, `IMessageActivity`, `FetchIMessageAttachment`,
+ * `SendIMessage`.
+ *
+ * They ride the *same* command queue as `exec` and `read`. That is what keeps
+ * the register's "per-platform Package" from meaning "second protocol": the
+ * Messages Package builds one of these, wraps it in `{kind:"messages"}` and
+ * hands it to the transport that already exists.
+ */
+export type MachineMessagesCallV1 =
+  | MachineMessagesCheckPermissionsCallV1
+  | MachineMessagesFindChatsCallV1
+  | MachineMessagesChatItemsCallV1
+  | MachineMessagesSearchCallV1
+  | MachineMessagesActivityCallV1
+  | MachineMessagesFetchAttachmentCallV1
+  | MachineMessagesSendCallV1;
+
+export type MachineMessagesCallKindV1 = MachineMessagesCallV1["kind"];
+
+export const MACHINE_MESSAGES_CALL_KINDS_V1: readonly MachineMessagesCallKindV1[] =
+  [
+    "check-permissions",
+    "find-chats",
+    "chat-items",
+    "search",
+    "activity",
+    "fetch-attachment",
+    "send",
+  ];
+
+/**
+ * Whether a call reads or acts.
+ *
+ * The whole of the plan's open decision 4 turns on this one predicate: the six
+ * reads are exempt from a per-call approval card, and `send` — an outbound
+ * external message — always takes one.
+ */
+export function machineMessagesCallIsReadV1(
+  call: MachineMessagesCallV1,
+): boolean {
+  return call.kind !== "send";
+}
+
+export function decodeMachineMessagesCallV1(
+  input: unknown,
+  label = "messages call",
+): MachineMessagesCallV1 {
+  const value = object(input, label);
+  const kind = literal(
+    value.kind,
+    MACHINE_MESSAGES_CALL_KINDS_V1,
+    `${label} kind`,
+  );
+  const rows = (candidate: unknown): number =>
+    boundedInteger(
+      candidate,
+      1,
+      MACHINE_MESSAGES_LIMITS_V1.rows,
+      `${label} limit`,
+    );
+  if (kind === "check-permissions") {
+    exactly(value, ["kind"], `${label} check-permissions`);
+    return { kind };
+  }
+  if (kind === "find-chats") {
+    exactly(value, ["kind", "query", "limit"], `${label} find-chats`);
+    return {
+      kind,
+      ...(value.query === undefined
+        ? {}
+        : {
+            query: boundedString(
+              value.query,
+              MACHINE_MESSAGES_LIMITS_V1.query,
+              `${label} query`,
+            ),
+          }),
+      limit: rows(value.limit),
+    };
+  }
+  if (kind === "chat-items") {
+    exactly(
+      value,
+      ["kind", "chatId", "limit", "beforeRowId"],
+      `${label} chat-items`,
+    );
+    return {
+      kind,
+      chatId: boundedString(
+        value.chatId,
+        MACHINE_MESSAGES_LIMITS_V1.chatId,
+        `${label} chatId`,
+      ),
+      limit: rows(value.limit),
+      ...(value.beforeRowId === undefined
+        ? {}
+        : {
+            beforeRowId: boundedInteger(
+              value.beforeRowId,
+              1,
+              Number.MAX_SAFE_INTEGER,
+              `${label} beforeRowId`,
+            ),
+          }),
+    };
+  }
+  if (kind === "search") {
+    exactly(value, ["kind", "query", "limit"], `${label} search`);
+    return {
+      kind,
+      query: boundedString(
+        value.query,
+        MACHINE_MESSAGES_LIMITS_V1.query,
+        `${label} query`,
+      ),
+      limit: rows(value.limit),
+    };
+  }
+  if (kind === "activity") {
+    exactly(value, ["kind", "limit"], `${label} activity`);
+    return { kind, limit: rows(value.limit) };
+  }
+  if (kind === "fetch-attachment") {
+    exactly(
+      value,
+      ["kind", "attachmentId", "maxBytes"],
+      `${label} fetch-attachment`,
+    );
+    return {
+      kind,
+      attachmentId: boundedString(
+        value.attachmentId,
+        MACHINE_MESSAGES_LIMITS_V1.attachmentId,
+        `${label} attachmentId`,
+      ),
+      maxBytes: boundedInteger(
+        value.maxBytes,
+        1,
+        MACHINE_MESSAGES_LIMITS_V1.attachmentBytes,
+        `${label} maxBytes`,
+      ),
+    };
+  }
+  exactly(value, ["kind", "to", "text"], `${label} send`);
+  return {
+    kind,
+    to: boundedString(
+      value.to,
+      MACHINE_MESSAGES_LIMITS_V1.recipient,
+      `${label} to`,
+    ),
+    text: boundedString(
+      value.text,
+      MACHINE_MESSAGES_LIMITS_V1.text,
+      `${label} text`,
+    ),
+  };
+}
+
+/**
+ * What macOS has granted the agent, as the agent reports it.
+ *
+ * Row 57g's third gate. Neither flag can be *granted* from here — TCC consent
+ * is the User's, given in System Settings — so the protocol carries only what
+ * was observed and when: reading `~/Library/Messages/chat.db` needs Full Disk
+ * Access, and telling Messages.app to send needs Automation rights.
+ */
+export interface MachineMessagesPermissionsV1 {
+  schemaVersion: 1;
+  fullDiskAccess: boolean;
+  automation: boolean;
+  checkedAt: string;
+  /** Whatever macOS said, when it said anything. Never a path to a secret. */
+  detail?: string;
+}
+
+export function decodeMachineMessagesPermissionsV1(
+  input: unknown,
+  label = "messages permissions",
+): MachineMessagesPermissionsV1 {
+  const value = object(input, label);
+  exactly(
+    value,
+    ["schemaVersion", "fullDiskAccess", "automation", "checkedAt", "detail"],
+    label,
+  );
+  return {
+    schemaVersion: schemaVersion(value, label),
+    fullDiskAccess: boolean(value.fullDiskAccess, `${label} fullDiskAccess`),
+    automation: boolean(value.automation, `${label} automation`),
+    checkedAt: timestamp(value.checkedAt, `${label} checkedAt`),
+    ...(value.detail === undefined
+      ? {}
+      : {
+          detail: boundedString(
+            value.detail,
+            MACHINE_MESSAGES_LIMITS_V1.detail,
+            `${label} detail`,
+          ),
+        }),
+  };
+}
+
+/**
+ * Whether the last report clears a call to run at all.
+ *
+ * A report that was never taken is not a grant: an unknown permission refuses
+ * exactly as a denied one does, and the remediation is the same sentence —
+ * run the permission check.
+ */
+export function machineMessagesPermittedV1(
+  call: MachineMessagesCallV1,
+  permissions: MachineMessagesPermissionsV1 | undefined,
+): boolean {
+  if (call.kind === "check-permissions") return true;
+  if (!permissions) return false;
+  return call.kind === "send"
+    ? permissions.fullDiskAccess && permissions.automation
+    : permissions.fullDiskAccess;
+}
+
+// ---------------------------------------------------------------------------
 // Operations
 // ---------------------------------------------------------------------------
 
@@ -341,18 +639,30 @@ export interface MachineCopyFromComputerOpV1 {
 }
 
 /**
+ * One Messages.app call, addressed to the registered Mac (register row 57g).
+ *
+ * It is an op like any other, which is the point: the Messages Package builds
+ * one and hands it to this queue, so there is no second transport, no second
+ * claim, and no second idempotency story.
+ */
+export interface MachineMessagesOpV1 {
+  kind: "messages";
+  call: MachineMessagesCallV1;
+}
+
+/**
  * What one command asks the machine to do.
  *
- * A `{kind:"messages"}` variant is added by `plugin-machine-messages` when row
- * 57g lands; widening this union is additive and does not move the protocol
- * version, which is the whole reason the Messages Package needs no transport
- * of its own.
+ * The `{kind:"messages"}` variant is row 57g's, added additively: widening this
+ * union does not move the protocol version, which is the whole reason the
+ * Messages Package needs no transport of its own.
  */
 export type MachineOpV1 =
   | MachineExecOpV1
   | MachineReadOpV1
   | MachineCopyToComputerOpV1
-  | MachineCopyFromComputerOpV1;
+  | MachineCopyFromComputerOpV1
+  | MachineMessagesOpV1;
 
 export type MachineOpKindV1 = MachineOpV1["kind"];
 
@@ -361,11 +671,20 @@ export const MACHINE_OP_KINDS_V1: readonly MachineOpKindV1[] = [
   "read",
   "copy-to-computer",
   "copy-from-computer",
+  "messages",
 ];
 
-/** The capability an op requires of the machine that will run it. */
+/**
+ * The capability an op requires of the machine that will run it.
+ *
+ * `messages` is its own capability rather than a flavour of `files`, and the
+ * enrollment decoder refuses it from anything but a macOS agent: that is row
+ * 57g's second gate, held in the one place every runtime already decodes.
+ */
 export function machineOpCapabilityV1(op: MachineOpV1): MachineCapabilityV1 {
-  return op.kind === "exec" ? "exec" : "files";
+  if (op.kind === "exec") return "exec";
+  if (op.kind === "messages") return "messages";
+  return "files";
 }
 
 export function decodeMachineOpV1(
@@ -408,6 +727,13 @@ export function decodeMachineOpV1(
         MACHINE_LIMITS_V1.outputBytes,
         `${label} maxOutputBytes`,
       ),
+    };
+  }
+  if (kind === "messages") {
+    exactly(value, ["kind", "call"], `${label} messages`);
+    return {
+      kind,
+      call: decodeMachineMessagesCallV1(value.call, `${label} call`),
     };
   }
   if (kind === "read") {
@@ -638,6 +964,12 @@ export interface MachineRecordV1 {
   keyVersion: number;
   tokenDigest: string;
   revokedAt?: string;
+  /**
+   * The last Messages permission report this machine sent (row 57g's third
+   * gate). Absent until the permission check has been run once, and absent is
+   * a refusal rather than a grant.
+   */
+  messagesPermissions?: MachineMessagesPermissionsV1;
 }
 
 const DIGEST = /^[0-9a-f]{64}$/;
@@ -662,6 +994,7 @@ export function decodeMachineRecordV1(
       "keyVersion",
       "tokenDigest",
       "revokedAt",
+      "messagesPermissions",
     ],
     label,
   );
@@ -708,6 +1041,14 @@ export function decodeMachineRecordV1(
     ...(value.revokedAt === undefined
       ? {}
       : { revokedAt: timestamp(value.revokedAt, `${label} revokedAt`) }),
+    ...(value.messagesPermissions === undefined
+      ? {}
+      : {
+          messagesPermissions: decodeMachineMessagesPermissionsV1(
+            value.messagesPermissions,
+            `${label} messagesPermissions`,
+          ),
+        }),
   };
 }
 
@@ -1016,6 +1357,8 @@ export interface MachineListEntryV1 {
   lastSeenAt: string;
   registeredAt: string;
   revokedAt?: string;
+  /** The last Messages permission report, when one has been taken. */
+  messagesPermissions?: MachineMessagesPermissionsV1;
 }
 
 export interface MachineListViewV1 {
@@ -1039,6 +1382,9 @@ export function machineListEntryV1(
     lastSeenAt: record.lastSeenAt,
     registeredAt: record.registeredAt,
     ...(record.revokedAt === undefined ? {} : { revokedAt: record.revokedAt }),
+    ...(record.messagesPermissions === undefined
+      ? {}
+      : { messagesPermissions: record.messagesPermissions }),
   };
 }
 
@@ -1058,6 +1404,7 @@ export function decodeMachineListEntryV1(
       "lastSeenAt",
       "registeredAt",
       "revokedAt",
+      "messagesPermissions",
     ],
     label,
   );
@@ -1085,6 +1432,14 @@ export function decodeMachineListEntryV1(
     ...(value.revokedAt === undefined
       ? {}
       : { revokedAt: timestamp(value.revokedAt, `${label} revokedAt`) }),
+    ...(value.messagesPermissions === undefined
+      ? {}
+      : {
+          messagesPermissions: decodeMachineMessagesPermissionsV1(
+            value.messagesPermissions,
+            `${label} messagesPermissions`,
+          ),
+        }),
   };
 }
 
@@ -1109,4 +1464,77 @@ export function decodeMachineListViewV1(
     ),
     serverTime: timestamp(value.serverTime, `${label} serverTime`),
   };
+}
+
+// ---------------------------------------------------------------------------
+// What a Messages call answers with
+// ---------------------------------------------------------------------------
+
+/**
+ * A Messages reply rides the result DTO that already exists: the rows are JSON
+ * in `stdout`, an attachment's bytes are in `bytesBase64`, and a refusal is
+ * the `refused` outcome with its remediation in `message`. Nothing about the
+ * result envelope changes, which is why row 57g moves no version.
+ *
+ * Only one shape is *decoded* rather than rendered — the permission report,
+ * because the backend acts on it. Chats and messages are read out of somebody's
+ * Messages.app and are tool-result content, fenced like every other tool result
+ * and never instructions; decoding them strictly would buy nothing and would
+ * make an unfamiliar row an error instead of a line the Bot can read.
+ */
+export const MACHINE_MESSAGES_REPLY_KINDS_V1 = [
+  "permissions",
+  "chats",
+  "items",
+  "attachment",
+  "sent",
+] as const;
+
+export type MachineMessagesReplyKindV1 =
+  (typeof MACHINE_MESSAGES_REPLY_KINDS_V1)[number];
+
+/** The JSON body a Messages result carries in `stdout`. */
+export interface MachineMessagesReplyEnvelopeV1 {
+  kind: MachineMessagesReplyKindV1;
+  [field: string]: unknown;
+}
+
+/**
+ * The permission report a finished command carries, when it was one.
+ *
+ * Pure, and total: anything that is not an `ok` permission check answers
+ * `undefined`, so the caller's rule is one line — a report updates the record,
+ * and everything else leaves it exactly as it was. A machine that answers
+ * nonsense to a permission check has *not* reported permissions, which is a
+ * refusal, because "absent is not a grant".
+ */
+export function machineMessagesPermissionsFromResultV1(
+  op: MachineOpV1,
+  result: Pick<MachineCommandResultV1, "outcome" | "stdout">,
+): MachineMessagesPermissionsV1 | undefined {
+  if (op.kind !== "messages" || op.call.kind !== "check-permissions") {
+    return undefined;
+  }
+  if (result.outcome !== "ok" || typeof result.stdout !== "string") {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const body = parsed as Record<string, unknown>;
+  if (body.kind !== "permissions") return undefined;
+  try {
+    return decodeMachineMessagesPermissionsV1(
+      body.permissions,
+      "reported messages permissions",
+    );
+  } catch {
+    return undefined;
+  }
 }

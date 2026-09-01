@@ -11,6 +11,7 @@ import {
   prepareElectronDesktopAuthRuntime,
 } from "./auth-client.js";
 import { installMachineCapabilities } from "./desktop-capabilities.js";
+import { createMachineMessagesDeviceRunnerV1 } from "@frockbot/plugin-machine-messages/device";
 import { startHostedDesktopApplication } from "./hosted-application.js";
 import {
   createMachineBridgeHandlerV1,
@@ -190,6 +191,13 @@ export async function createCordisDesktopHost(): Promise<Context> {
         await root.plugin(machineContribution.plugin, {
           origin: applicationUrl,
           agentVersion: app.getVersion(),
+          // Row 57g's handlers, handed to the agent rather than reached for by
+          // it: the agent reports the `messages` capability only when it has
+          // these *and* it is running on a Mac, so a Linux build never claims
+          // a capability whose second gate it could not pass.
+          messages: createMachineMessagesDeviceRunnerV1({
+            seam: root.desktopMessages,
+          }),
         });
         // The settings section reaches the agent over one channel, and only
         // from the hosted application's own origin. Registered as a plugin so

@@ -63,6 +63,7 @@
     "@frockbot/plugin-channels": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-image": "workspace:*",
+    "@frockbot/plugin-machine-messages": "workspace:*",
     "@frockbot/plugin-mcp": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-routines": "workspace:*",

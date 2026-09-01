@@ -31,6 +31,7 @@ import {
   decodeMachineRecordV1,
   machineConnectedV1,
   machineListEntryV1,
+  machineMessagesPermissionsFromResultV1,
   machineQuotaRefusalV1,
   machineOpCapabilityV1,
   type MachineCapabilityV1,
@@ -575,6 +576,24 @@ export async function recordMachineResultV1(
     await transaction.put(machineResultKeyV1(result.commandId), result);
     await transaction.delete(entry.key);
     await transaction.delete(machineRequeueKeyV1(result.commandId));
+    // Row 57g's third gate is a fact the *machine* reports, and this is the one
+    // moment it arrives: a permission check that answered `ok` updates the
+    // registry row, and every other result leaves it exactly as it was. The
+    // rule is the protocol's and pure, so the registry cannot start believing
+    // something the agent did not say.
+    const reported = machineMessagesPermissionsFromResultV1(
+      entry.command.op,
+      result,
+    );
+    if (reported) {
+      const record = await readMachineRecordV1(transaction, machineId);
+      if (record) {
+        await transaction.put(machineKeyV1(machineId), {
+          ...record,
+          messagesPermissions: reported,
+        } satisfies MachineRecordV1);
+      }
+    }
     return {
       receipt: {
         schemaVersion: 1,

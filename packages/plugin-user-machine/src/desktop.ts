@@ -24,9 +24,13 @@ import type { DesktopCommand } from "@frockbot/desktop-core";
 import {
   MACHINE_LIMITS_V1,
   type MachineCapabilityV1,
+  type MachinePlatformV1,
 } from "@frockbot/machine-protocol";
 import type { Plugin } from "cordis";
-import { createMachineDeviceRunnerV1 } from "./device-runner.js";
+import {
+  createMachineDeviceRunnerV1,
+  type MachineMessagesOpRunnerV1,
+} from "./device-runner.js";
 import {
   MachineDeviceAgentV1,
   type MachineDeviceAgentStatusV1,
@@ -47,6 +51,16 @@ export interface MachineDesktopConfigV1 {
   agentVersion: string;
   /** Injected in tests; the platform's `fetch` otherwise. */
   fetch?(input: string, init?: RequestInit): Promise<Response>;
+  /**
+   * Row 57g's Messages handlers, supplied by the Electron shell on macOS.
+   *
+   * Absent — every other platform, and a macOS build whose shell wired none —
+   * and this agent does not report the `messages` capability at all, so the
+   * backend never registers a Messages tool against it. Two halves of one gate:
+   * the enrollment decoder refuses `messages` from a non-macOS agent, and this
+   * refuses to claim it without something behind it.
+   */
+  messages?: MachineMessagesOpRunnerV1;
   /** Started on mount unless a test wants to drive cycles by hand. */
   autoStart?: boolean;
 }
@@ -111,24 +125,41 @@ export function machineSecretStoreV1(
 }
 
 /**
- * What this agent reports it can do.
- *
- * `exec` and `files` on every platform the shell runs on. `messages` is row
- * 57g's second gate and is deliberately absent: no agent may report it until
- * the macOS handlers exist, and the protocol decoder already refuses it from
- * anything but a macOS agent.
+ * What this agent reports it can do on every platform the shell runs on.
  */
 export const MACHINE_DESKTOP_CAPABILITIES_V1: readonly MachineCapabilityV1[] = [
   "exec",
   "files",
 ];
 
+/**
+ * What this agent reports, given its platform and what the shell wired.
+ *
+ * Row 57g's second gate, and it is deliberately conjunctive: `messages` is
+ * claimed only by a macOS agent that actually has handlers behind it. Pure, so
+ * the gate is asserted rather than inferred from a running Electron app.
+ */
+export function machineDesktopCapabilitiesV1(
+  platform: MachinePlatformV1,
+  messages: boolean,
+): MachineCapabilityV1[] {
+  return [
+    ...MACHINE_DESKTOP_CAPABILITIES_V1,
+    ...(platform === "macos" && messages
+      ? (["messages"] as MachineCapabilityV1[])
+      : []),
+  ];
+}
+
 export const machineDesktopPlugin: Plugin.Function<MachineDesktopConfigV1> = (
   ctx,
   config,
 ) => {
   const identity = ctx.desktopMachineHost.identity();
-  const capabilities = [...MACHINE_DESKTOP_CAPABILITIES_V1];
+  const capabilities = machineDesktopCapabilitiesV1(
+    identity.platform,
+    config.messages !== undefined,
+  );
   const agent = new MachineDeviceAgentV1({
     origin: config.origin,
     fetch: config.fetch ?? ((input, init) => fetch(input, init)),
@@ -136,6 +167,7 @@ export const machineDesktopPlugin: Plugin.Function<MachineDesktopConfigV1> = (
     runner: createMachineDeviceRunnerV1({
       host: ctx.desktopMachineHost,
       capabilities,
+      ...(config.messages === undefined ? {} : { messages: config.messages }),
     }),
     label: identity.label,
     platform: identity.platform,

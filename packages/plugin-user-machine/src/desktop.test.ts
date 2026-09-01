@@ -20,6 +20,7 @@ import {
   MACHINE_AGENT_STATUS_COMMAND_V1,
   MACHINE_AGENT_UNPAIR_COMMAND_V1,
   MACHINE_DESKTOP_CAPABILITIES_V1,
+  machineDesktopCapabilitiesV1,
   MACHINE_TOKEN_SECRET_KEY_V1,
   decodeMachineEmptyCommandInputV1,
   decodeMachinePairCommandInputV1,
@@ -204,5 +205,29 @@ describe("machine desktop contribution", () => {
       ),
     ).toMatchObject({ enrolled: false, running: false, failures: 0 });
     await root.fiber.dispose();
+  });
+});
+
+describe("what this agent claims it can do (register row 57g)", () => {
+  test("messages is claimed only by a Mac with handlers behind it", () => {
+    expect(machineDesktopCapabilitiesV1("macos", true)).toEqual([
+      "exec",
+      "files",
+      "messages",
+    ]);
+    // A Mac whose shell wired none: claiming it would mean every Messages
+    // command reaching an agent that can only refuse.
+    expect(machineDesktopCapabilitiesV1("macos", false)).toEqual([
+      "exec",
+      "files",
+    ]);
+    // Not a Mac. The enrollment decoder refuses the claim anyway; this is the
+    // same fact on the agent's own side of the wire.
+    for (const platform of ["windows", "linux"] as const) {
+      expect(machineDesktopCapabilitiesV1(platform, true)).toEqual([
+        "exec",
+        "files",
+      ]);
+    }
   });
 });

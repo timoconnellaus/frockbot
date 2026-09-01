@@ -210,6 +210,71 @@ export abstract class DesktopSecretStoreCapability extends Service {
   abstract clear(key: string): Promise<void>;
 }
 
+/**
+ * What macOS has granted the Messages handlers, right now (register row 57g).
+ *
+ * Both flags are TCC's and the User's: Full Disk Access to read
+ * `~/Library/Messages/chat.db`, and Automation over Messages.app to send. The
+ * capability can only ever *report* them — nothing in FrockBot can grant
+ * either, and a build that pretended otherwise would be lying to a person
+ * about their own machine.
+ */
+export interface DesktopMessagesPermissions {
+  fullDiskAccess: boolean;
+  automation: boolean;
+  /** Whatever macOS said, when it said anything. */
+  detail?: string;
+}
+
+export interface DesktopMessagesQueryRequest {
+  /** A `SELECT`. The statement is composed in a Package, under test. */
+  sql: string;
+  parameters: Array<string | number>;
+  maxRows: number;
+}
+
+export interface DesktopMessagesSendRequest {
+  recipient: string;
+  text: string;
+}
+
+/**
+ * The only authority the Messages tools have over the Mac.
+ *
+ * Deliberately four verbs and one fact, and not one of them takes a decision.
+ * Which statement to run, what a row means, what a denied permission answers
+ * and what may be sent all live in `@frockbot/plugin-machine-messages`, where
+ * they run in CI. This seam holds only the parts that cannot run anywhere but
+ * a Mac with a real login session: SQLite, `osascript`, and the disk.
+ */
+export abstract class DesktopMessagesCapability extends Service {
+  constructor(ctx: Context) {
+    super(ctx, "desktopMessages");
+  }
+
+  abstract checkPermissions(
+    signal: AbortSignal,
+  ): Promise<DesktopMessagesPermissions>;
+
+  abstract query(
+    request: DesktopMessagesQueryRequest,
+    signal: AbortSignal,
+  ): Promise<Array<Record<string, string | number | null>>>;
+
+  abstract send(
+    request: DesktopMessagesSendRequest,
+    signal: AbortSignal,
+  ): Promise<void>;
+
+  abstract readFile(
+    request: DesktopMachineFileRequest,
+    signal: AbortSignal,
+  ): Promise<DesktopMachineFileResult>;
+
+  /** The account's home directory, so a `~`-relative attachment resolves. */
+  abstract home(): string;
+}
+
 export abstract class DesktopClipboardCapability extends Service {
   constructor(ctx: Context) {
     super(ctx, "desktopClipboard");
@@ -228,6 +293,7 @@ declare module "cordis" {
     desktopDirectoryPicker: DesktopDirectoryPickerCapability;
     desktopClipboard: DesktopClipboardCapability;
     desktopMachineHost: DesktopMachineHostCapability;
+    desktopMessages: DesktopMessagesCapability;
     desktopSecretStore: DesktopSecretStoreCapability;
   }
 }

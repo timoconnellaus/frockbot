@@ -40,6 +40,7 @@
         "@frockbot/plugin-fly-sprite": "workspace:*",
         "@frockbot/plugin-identity": "workspace:*",
         "@frockbot/plugin-image": "workspace:*",
+        "@frockbot/plugin-machine-messages": "workspace:*",
         "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-mobile-clipboard": "workspace:*",
@@ -214,6 +215,7 @@
         "@frockbot/desktop-core": "workspace:*",
         "@frockbot/machine-protocol": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
+        "@frockbot/plugin-machine-messages": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-user-machine": "workspace:*",
         "@frockbot/protocol": "workspace:*",
@@ -762,6 +764,22 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/plugin-machine-messages": {
+      "name": "@frockbot/plugin-machine-messages",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/kernel-agent-loop": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/machine-protocol": "workspace:*",
+        "@frockbot/plugin-user-machine": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@frockbot/plugin-tools": "workspace:*",
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-mcp": {
       "name": "@frockbot/plugin-mcp",
       "version": "0.0.1",
@@ -992,6 +1010,7 @@
         "@frockbot/plugin-channels": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-image": "workspace:*",
+        "@frockbot/plugin-machine-messages": "workspace:*",
         "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
@@ -1471,6 +1490,8 @@
     "@frockbot/plugin-identity": ["@frockbot/plugin-identity@workspace:packages/plugin-identity"],
 
     "@frockbot/plugin-image": ["@frockbot/plugin-image@workspace:packages/plugin-image"],
+
+    "@frockbot/plugin-machine-messages": ["@frockbot/plugin-machine-messages@workspace:packages/plugin-machine-messages"],
 
     "@frockbot/plugin-mcp": ["@frockbot/plugin-mcp@workspace:packages/plugin-mcp"],
 
@@ -3090,6 +3111,8 @@
 
     "@frockbot/desktop/vite": ["vite@7.1.10", "", { "dependencies": { "esbuild": "^0.25.0", "fdir": "^6.5.0", "picomatch": "^4.0.3", "postcss": "^8.5.6", "rollup": "^4.43.0", "tinyglobby": "^0.2.15" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "jiti": ">=1.21.0", "less": "^4.0.0", "lightningcss": "^1.21.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "jiti", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-CmuvUBzVJ/e3HGxhg6cYk88NGgTnBoOo7ogtfJJ0fefUWAxN/WDSUa50o+oVBxuIhO8FoEZW0j2eW7sfjs5EtA=="],
 
+    "@frockbot/kernel-do/@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260901.1", "", {}, "sha512-m1rNbR3UYC1pgaEyXkSlwLFLDB11QziYUlY0z/nqjwuYtg5dw9zBrgDudoSfYM6ebbPDKU81ogBQAzLp6h1y4w=="],
+
     "@frockbot/machine-protocol/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/marketing/@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260827.1", "", {}, "sha512-L5wIIHcgy67AAfe8nNmfcRHLBtO+2jva14zx1HxH2tunlteNmQvo4nYtcfef1n1MKXu3Z3xB98Fvl1BorkjFtg=="],
@@ -3133,6 +3156,8 @@
     "@frockbot/plugin-search/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-settings/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "@frockbot/plugin-shell/@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260901.1", "", {}, "sha512-m1rNbR3UYC1pgaEyXkSlwLFLDB11QziYUlY0z/nqjwuYtg5dw9zBrgDudoSfYM6ebbPDKU81ogBQAzLp6h1y4w=="],
 
     "@frockbot/plugin-shell/@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
 

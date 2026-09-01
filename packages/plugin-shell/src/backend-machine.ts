@@ -19,9 +19,16 @@ import type {
   MachineCommandV1,
   MachineListViewV1,
 } from "@frockbot/machine-protocol";
+import type { MachineMessagesRuntimeHostV1 } from "@frockbot/plugin-machine-messages/agent";
+import {
+  machineMessagesEnabledV1,
+  machineMessagesGateV1,
+  type MachineMessagesGateV1,
+} from "@frockbot/plugin-machine-messages/gate";
 import type {
   MachineIntentStorageV1,
   MachineRuntimeHostV1,
+  MachineWriterIdentityV1,
 } from "@frockbot/plugin-user-machine/agent";
 import {
   dispatchMachineIntentV1,
@@ -94,4 +101,44 @@ export async function dispatchApprovedMachineIntentV1(
     (command) => seam.dispatch(command),
     now(),
   );
+}
+
+/**
+ * Row 57g's gate, answered for one Turn.
+ *
+ * Two facts and one read. The setting is already in hand — it came from the
+ * same User configuration the rest of this Composition was resolved from — and
+ * the registry is asked for only when it is on, so a deployment with the
+ * feature off pays nothing for it.
+ *
+ * `undefined` means the tools are not mounted: off, or no connected macOS
+ * machine reporting `messages`. A Bot never sees a Messages tool it could only
+ * be refused by.
+ */
+export async function resolveBotMachineMessagesGateV1(
+  settings: Readonly<Record<string, string | number | boolean>> | undefined,
+  list: () => Promise<MachineListViewV1>,
+): Promise<MachineMessagesGateV1> {
+  if (!machineMessagesEnabledV1(settings)) return { status: "off" };
+  const view = await list();
+  return machineMessagesGateV1({ enabled: true, machines: view.machines });
+}
+
+/**
+ * The Messages host for one admitted Turn.
+ *
+ * It is the machine host plus `dispatch`, and it exists only because the six
+ * approval-exempt reads have no settlement to ride: `machine_exec` is queued by
+ * the approval settlement, and a read has no approval. Nothing else widens —
+ * the Package cannot enrol, revoke, or reach any machine this User does not
+ * own, because the seam it is handed is the same one the control tools use.
+ */
+export function createBotMachineMessagesHost(
+  machines: MachineRuntimeHostV1 & { writer: MachineWriterIdentityV1 },
+  seam: Pick<BotMachineSeamV1, "dispatch">,
+): MachineMessagesRuntimeHostV1 {
+  return {
+    machines,
+    dispatch: (command) => seam.dispatch(command),
+  };
 }

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 4,
+  "id": "machine-messages",
+  "displayName": "Messages on your Mac",
+  "version": "0.0.1",
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
+  "dependencies": {
+    "user-machine": ">=0.0.1"
+  },
+  "contributions": {
+    "runtime": {
+      "entry": "./agent"
+    }
+  },
+  "configuration": {
+    "settings": [
+      {
+        "id": "messages-enabled",
+        "schemaVersion": 1,
+        "scopes": ["user"],
+        "schema": {
+          "type": "boolean",
+          "title": "Messages.app tools",
+          "description": "Let a bot read and send iMessages through Messages.app on a registered Mac of yours. Off by default. Reading needs Full Disk Access and sending needs Automation rights, both granted on the Mac itself; sending always asks you to approve it first."
+        }
+      }
+    ],
+    "connectionTypes": [],
+    "capabilities": [
+      {
+        "id": "machine-messages",
+        "kind": "tool",
+        "connectionTypes": [],
+        "admission": {
+          "turnTypes": ["chat"]
+        }
+      }
+    ]
+  },
+  "permissions": []
+}

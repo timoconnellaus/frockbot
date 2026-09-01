@@ -14,6 +14,7 @@ const workspaceMainDependencies = [
   "@frockbot/machine-protocol",
   "@frockbot/plugin-auth",
   "@frockbot/plugin-shell",
+  "@frockbot/plugin-machine-messages",
   "@frockbot/plugin-user-machine",
   "@frockbot/protocol",
 ];
