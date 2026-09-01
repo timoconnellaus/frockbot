@@ -1,6 +1,6 @@
 ---
 status: accepted
-note: proposed for supersession by ADR-0014; flip to `superseded by ADR-0014` when 0014 is accepted
+note: proposed for supersession by ADR-0019; flip to `superseded by ADR-0019` when 0019 is accepted
 ---
 
 # Split Account Connections from Bot Assignments
