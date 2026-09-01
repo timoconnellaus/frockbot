@@ -72,11 +72,21 @@ export class FlyHostContainer extends Container<ComputerHostEnv> {
    * without this every shell command fails at the handshake. Runs after the
    * allowlist gate, so it widens nothing: it only carries the one host the
    * allowlist already admits.
+   *
+   * Assigned in a static block rather than declared as a static field, and the
+   * difference is load-bearing. `outboundByHost` is a static *accessor* on
+   * `Container`, and its setter is what records the handler in the registry
+   * `ContainerProxy` later reads. A class field would define an own property
+   * instead of assigning through that setter: the registry would stay empty,
+   * the proxy would fall through to its plain `fetch`, and the configuration
+   * would still read as correct. `egress-registration.test.ts` holds this.
    */
-  static outboundByHost = {
-    [SPRITES_API_HOST]: (request: Request) =>
-      createOutboundWebSocketProxyV1()(request),
-  };
+  static {
+    this.outboundByHost = {
+      [SPRITES_API_HOST]: (request: Request) =>
+        createOutboundWebSocketProxyV1()(request),
+    };
+  }
   /**
    * Requires the container to trust the CA the platform mints for the
    * interception; `container/entrypoint.sh` does that at start, because the
