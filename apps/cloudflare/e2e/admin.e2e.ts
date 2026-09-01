@@ -23,9 +23,7 @@ async function dismissFirstRun(page: Parameters<typeof openApplication>[0]) {
 async function openAdmin(page: Parameters<typeof openApplication>[0]) {
   await expect(async () => {
     await dismissFirstRun(page);
-    await page
-      .getByRole("button", { name: "FrockBot user" })
-      .click({ timeout: 2_000 });
+    await page.locator("button.profile-trigger").click({ timeout: 2_000 });
     await page
       .getByRole("menuitem", { name: "Admin" })
       .click({ timeout: 2_000 });
@@ -37,6 +35,9 @@ async function openAdmin(page: Parameters<typeof openApplication>[0]) {
 
 test("an admin changes the durable signup policy", async ({ page }) => {
   await openApplication(page, "development");
+  await expect(page.locator("button.profile-trigger")).toHaveText(
+    "Local developer",
+  );
   await openAdmin(page);
 
   const toggle = page.getByLabel("Accept new signups");

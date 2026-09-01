@@ -12,6 +12,16 @@ if (!providedAuth || !surfaces || !web)
 const auth = providedAuth;
 const menuOpen = ref(false);
 const signOutError = ref<string>();
+const sessionUser = computed(() =>
+  auth.projection.value.status === "authenticated"
+    ? auth.projection.value.user
+    : undefined,
+);
+const displayName = computed(() => {
+  const fromSession =
+    sessionUser.value?.name.trim() || sessionUser.value?.email.trim();
+  return fromSession || web.value.userSettings?.profile.name || "FrockBot user";
+});
 const developmentIdentity = computed(
   () =>
     auth.projection.value.status === "authenticated" &&
@@ -58,11 +68,12 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
       class="profile-trigger"
       type="button"
       :aria-expanded="menuOpen"
+      :title="sessionUser?.email"
       aria-haspopup="menu"
       @click="menuOpen = !menuOpen"
     >
       <span class="profile-face" aria-hidden="true" />
-      {{ web.userSettings?.profile.name ?? "FrockBot user" }}
+      {{ displayName }}
     </button>
     <div v-if="menuOpen" class="profile-menu" role="menu">
       <button v-if="isAdmin" type="button" role="menuitem" @click="openAdmin">
