@@ -2045,6 +2045,38 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     );
   }
 
+  /**
+   * One machine and the two counters a control tool checks its quota against.
+   *
+   * The tool refuses before it asks a person anything, so a card the User
+   * approves and the queue then refuses is not a question that wasted their
+   * attention.
+   */
+  async describeMachineTarget(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).describeTarget(
+      request.machineId as string,
+    );
+  }
+
+  /**
+   * Take every finished machine command waiting to be told to a Bot.
+   *
+   * Drained by the Worker that just answered the machine. It is not this
+   * object's job to call another Durable Object: a live reference from one to
+   * another keeps the caller resident, and presence and eviction are the two
+   * things this registry is built not to depend on.
+   */
+  async takeMachineDeliveries(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.machineContribution()).takeDeliveries();
+  }
+
   async listMachines(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     await this.assertUserIdentity(request.userId as string);

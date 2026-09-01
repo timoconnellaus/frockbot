@@ -3,6 +3,7 @@ import {
   type BotIsolateEnv,
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
+import type { MachineResultDeliveryV1 } from "@frockbot/plugin-user-machine/delivery";
 import type {
   BotConfigurationExecuteRpcV1,
   BotConfigurationReadRpcV1,
@@ -657,6 +658,16 @@ export interface BotConfigurationBinding {
     botId: string;
     command: RoutineCommandV1;
   }): Promise<RoutineCommandReceiptV1>;
+  /**
+   * One finished machine command, handed to the Bot that asked for it. Called
+   * by the Worker that answered the machine, never by another Durable Object.
+   */
+  deliverMachineResult(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    delivery: MachineResultDeliveryV1;
+  }): Promise<{ status: "accepted" }>;
   deliverRoutineHook(request: {
     schemaVersion: 1;
     userId: string;

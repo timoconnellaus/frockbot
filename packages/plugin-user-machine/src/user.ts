@@ -49,11 +49,22 @@ import {
   type MachinePairingClaimsV1,
 } from "./pairing.js";
 import {
+  decodeMachineResultDeliveryV1,
+  machineResultDeliveryV1,
+  type MachineResultDeliveryV1,
+} from "./delivery.js";
+import {
+  MACHINE_DELIVERY_PREFIX,
+  machineDeliveryKeyV1,
+} from "./storage-keys.js";
+import type { MachineTargetViewV1 } from "./target.js";
+import {
   claimMachineCommandV1,
   dispatchMachineCommandV1,
   enrollMachineV1,
   listMachineRecordsV1,
   machineListViewV1,
+  machineQuotaSnapshotV1,
   pendingMachineCommandsV1,
   readMachineRecordV1,
   readMachineResultV1,
@@ -297,12 +308,21 @@ export class MachineUserBackendContribution {
         "machine result does not match the request path",
       );
     }
-    const { receipt } = await recordMachineResultV1(
+    const { receipt, result, command } = await recordMachineResultV1(
       this.host.storage,
       machineId,
       input,
       now,
     );
+    // Only the write that recorded it is delivered. A replayed POST answers
+    // `replayed` and tells nobody a second time — "recovery never silently
+    // duplicates" applied to a laptop that retried.
+    if (receipt.status === "recorded" && command) {
+      await this.host.storage.put(
+        machineDeliveryKeyV1(result.commandId),
+        machineResultDeliveryV1(command, result),
+      );
+    }
     return receipt;
   }
 
@@ -339,6 +359,32 @@ export class MachineUserBackendContribution {
     return outcome;
   }
 
+  /**
+   * Take every finished command waiting to be told to a Bot.
+   *
+   * Drained by the Worker that just answered the machine, because the Bot
+   * Durable Object namespace is the adapter's and a Durable Object that holds
+   * a reference to another one cannot be evicted while it does. Taking is
+   * removing: at most once, and losing one costs a preamble line and no
+   * durable fact, since the result itself stays readable.
+   */
+  async takeDeliveries(): Promise<MachineResultDeliveryV1[]> {
+    const stored = await this.host.storage.list<unknown>({
+      prefix: MACHINE_DELIVERY_PREFIX,
+    });
+    const taken: MachineResultDeliveryV1[] = [];
+    for (const [key, value] of stored) {
+      await this.host.storage.delete(key);
+      try {
+        taken.push(decodeMachineResultDeliveryV1(value, "machine delivery"));
+      } catch {
+        // A record this Package cannot read is dropped rather than kept
+        // forever: the result it points at is still the durable answer.
+      }
+    }
+    return taken;
+  }
+
   /** The full result of one command, read on demand rather than pushed. */
   async readResult(
     commandId: string,
@@ -349,6 +395,34 @@ export class MachineUserBackendContribution {
   /** One registry row, for a caller that already knows which machine it wants. */
   async readMachine(machineId: string): Promise<MachineRecordV1 | undefined> {
     return readMachineRecordV1(this.host.storage, machineId);
+  }
+
+  /**
+   * One machine and the counters a control tool checks its quota against, in
+   * one read.
+   *
+   * A tool has five things to establish before it may ask a person anything,
+   * and resolving them one at a time would be four round trips answering
+   * against four different instants.
+   */
+  async describeTarget(machineId: string): Promise<MachineTargetViewV1> {
+    const now = this.now();
+    const record = await readMachineRecordV1(this.host.storage, machineId);
+    const counters = await machineQuotaSnapshotV1(
+      this.host.storage,
+      machineId,
+      now,
+    );
+    return {
+      schemaVersion: 1,
+      machineId,
+      ...(record === undefined
+        ? {}
+        : { entry: machineListEntryV1(record, now) }),
+      queuedCommands: counters.queuedCommands,
+      commandsToday: counters.commandsToday,
+      serverTime: new Date(now).toISOString(),
+    };
   }
 
   /** Presence, as the tool and the settings section see it. */

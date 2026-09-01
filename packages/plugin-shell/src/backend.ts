@@ -247,6 +247,30 @@ import {
 } from "./approvals.js";
 import { enqueuePendingBotInputV1 } from "@frockbot/plugin-routines/inbox-store";
 import {
+  createBotMachineHost,
+  dispatchApprovedMachineIntentV1,
+  type BotMachineSeamV1,
+} from "./backend-machine.js";
+import { settleMachineIntentV1 } from "@frockbot/plugin-user-machine/approval";
+import type { MachineIntentRecordV1 } from "@frockbot/plugin-user-machine/intent";
+import {
+  decodeMachineResultDeliveryV1,
+  type MachineResultDeliveryV1,
+} from "@frockbot/plugin-user-machine/delivery";
+import {
+  decodeMachineListViewV1,
+  decodeMachineCommandResultV1,
+  type MachineCommandResultV1,
+  type MachineCommandV1,
+  type MachineListViewV1,
+} from "@frockbot/machine-protocol";
+import { decodeMachineTargetViewV1 } from "@frockbot/plugin-user-machine/target";
+import type { MachineTargetViewV1 } from "@frockbot/plugin-user-machine/target";
+import {
+  decodeMachineDispatchAnswerV1,
+  type MachineDispatchAnswerV1,
+} from "@frockbot/plugin-user-machine/approval";
+import {
   pendingBotInputPreambleV1,
   routineHandoffTextV1,
   type PendingBotInputV1,
@@ -4018,6 +4042,20 @@ export class ShellBotBackendContribution {
               ),
             }
           : {}),
+        // The registered machine (rows 48, 49). The control tools mount only
+        // inside a Turn, because the intent record they write has to name the
+        // Session and Turn that asked — and because the approval that gates
+        // them is a send onto that Turn's own durable log.
+        ...(turn
+          ? {
+              machines: createBotMachineHost(
+                identity,
+                turn,
+                this.ctx.storage,
+                this.machineSeam(identity),
+              ),
+            }
+          : {}),
         // The durable-root sync runs only inside a Turn that uses the
         // Computer. It attributes nothing: a file a shell wrote there reaches
         // object storage with an unattributed writer.
@@ -4402,6 +4440,56 @@ export class ShellBotBackendContribution {
   }
 
   /**
+   * The User's machines, as this Bot may see them.
+   *
+   * Four calls and no more: list them, resolve one, queue an approved command,
+   * and read a finished command's result. There is no register, no revoke and
+   * no token here — a Bot cannot enrol or revoke a machine, and "self
+   * modification never widens authority" is why.
+   */
+  private machineSeam(identity: BotIdentity): BotMachineSeamV1 {
+    const userConfiguration = this.userConfiguration(identity);
+    return {
+      list: () => userConfiguration.listMachines(identity.userId),
+      describeTarget: (machineId) =>
+        userConfiguration.describeMachineTarget(identity.userId, machineId),
+      readResult: (commandId) =>
+        userConfiguration.readMachineResult(identity.userId, commandId),
+      dispatch: (command) =>
+        userConfiguration.dispatchMachineCommand(identity.userId, command),
+    };
+  }
+
+  /**
+   * One finished machine command, handed over by the User Durable Object.
+   *
+   * The machine answers the backend, never the Bot, so this is how the Bot
+   * learns without being asked: the same durable input queue a Routine hand-off
+   * and an approval decision ride, idempotent on the command id, drained as a
+   * preamble line on the Bot's next conversational Turn. The line carries a
+   * preview; `machine_command_check` reads the whole result.
+   */
+  async deliverMachineResult(
+    delivery: MachineResultDeliveryV1,
+  ): Promise<{ status: "accepted" }> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      await enqueuePendingBotInputV1(transaction, {
+        schemaVersion: 1,
+        kind: "machine-result",
+        commandId: delivery.commandId,
+        machineId: delivery.machineId,
+        outcome: delivery.outcome,
+        preview: delivery.preview,
+        createdAt: delivery.finishedAt,
+      });
+    });
+    await this.ctx.storage.transaction((transaction) =>
+      this.authority.refreshRecoveryAlarm(transaction),
+    );
+    return { status: "accepted" };
+  }
+
+  /**
    * The second of the two points a pending wake is heard at.
    *
    * The first is the Bot's next conversational Turn. This one is the User's:
@@ -4481,7 +4569,12 @@ export class ShellBotBackendContribution {
     approvalId: string,
     decision: "approved" | "denied" | "expired",
     decidedBy: "user" | "expiry",
-  ): Promise<{ approval: ApprovalRecordV1; status: "recorded" | "replayed" }> {
+  ): Promise<{
+    approval: ApprovalRecordV1;
+    status: "recorded" | "replayed";
+    /** Present when the card was a machine command's. */
+    machineIntent?: MachineIntentRecordV1;
+  }> {
     const key = approvalKeyV1(approvalId);
     const at = new Date().toISOString();
     return this.ctx.storage.transaction(async (transaction) => {
@@ -4510,7 +4603,23 @@ export class ShellBotBackendContribution {
         decision,
         createdAt: at,
       });
-      return { approval: decided, status: "recorded" as const };
+      // Row 49: an approval this Bot asked for may be a command waiting for a
+      // machine of the User's. The decision and what it authorized become
+      // durable together, so a person can never have approved something whose
+      // intent record still says nobody answered. Nothing is dispatched here:
+      // a cross-Durable-Object call inside this transaction would make its
+      // atomicity a lie.
+      const machineIntent = await settleMachineIntentV1(
+        transaction,
+        approvalId,
+        decision,
+        at,
+      );
+      return {
+        approval: decided,
+        status: "recorded" as const,
+        ...(machineIntent === undefined ? {} : { machineIntent }),
+      };
     });
   }
 
@@ -4558,6 +4667,20 @@ export class ShellBotBackendContribution {
       command.decision,
       "user",
     );
+    // Only the write that decided it dispatches — a second click answers
+    // `replayed` and reaches no laptop — and only `approved` does. An expiry
+    // never gets here at all: it settles through the alarm, which dispatches
+    // nothing by construction.
+    if (
+      settled.status === "recorded" &&
+      settled.machineIntent?.decision === "approved"
+    ) {
+      await dispatchApprovedMachineIntentV1(
+        this.ctx.storage,
+        settled.machineIntent,
+        this.machineSeam(identity),
+      );
+    }
     return {
       schemaVersion: 1,
       approval: projectApprovalCardV1(settled.approval),
@@ -5190,6 +5313,19 @@ export class ShellBotBackendContribution {
         texts: string[];
       },
     ): Promise<unknown>;
+    listMachines(userId: string): Promise<MachineListViewV1>;
+    describeMachineTarget(
+      userId: string,
+      machineId: string,
+    ): Promise<MachineTargetViewV1>;
+    dispatchMachineCommand(
+      userId: string,
+      command: MachineCommandV1,
+    ): Promise<MachineDispatchAnswerV1>;
+    readMachineResult(
+      userId: string,
+      commandId: string,
+    ): Promise<MachineCommandResultV1 | undefined>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
@@ -5227,9 +5363,45 @@ export class ShellBotBackendContribution {
       executeChannelCommand(input: unknown): Promise<unknown>;
       listChannels(input: unknown): Promise<unknown>;
       deliverChannelOutbound(input: unknown): Promise<unknown>;
+      listMachines(input: unknown): Promise<unknown>;
+      describeMachineTarget(input: unknown): Promise<unknown>;
+      dispatchMachineCommand(input: unknown): Promise<unknown>;
+      readMachineResult(input: unknown): Promise<unknown>;
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
+      // A machine is a User asset, so every one of these crosses the seam and
+      // is decoded on arrival rather than trusted in the shape RPC returned.
+      listMachines: async (userId) =>
+        decodeMachineListViewV1(
+          await rpc.listMachines({ schemaVersion: 1, userId }),
+        ),
+      describeMachineTarget: async (userId, machineId) =>
+        decodeMachineTargetViewV1(
+          await rpc.describeMachineTarget({
+            schemaVersion: 1,
+            userId,
+            machineId,
+          }),
+        ),
+      dispatchMachineCommand: async (userId, command) =>
+        decodeMachineDispatchAnswerV1(
+          await rpc.dispatchMachineCommand({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
+      readMachineResult: async (userId, commandId) => {
+        const stored = await rpc.readMachineResult({
+          schemaVersion: 1,
+          userId,
+          commandId,
+        });
+        return stored === undefined || stored === null
+          ? undefined
+          : decodeMachineCommandResultV1(stored, "machine command result");
+      },
       readPackageRevisions: (userId) =>
         rpc.readPackageRevisions({ schemaVersion: 1, userId }),
       publishPackage: (userId, command) =>

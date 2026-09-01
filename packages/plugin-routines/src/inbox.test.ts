@@ -349,3 +349,54 @@ describe("a subagent completion in the same two records", () => {
     expect(preamble).not.toContain("your Routine");
   });
 });
+
+describe("the machine-result variant", () => {
+  const delivery = {
+    schemaVersion: 1 as const,
+    kind: "machine-result" as const,
+    commandId: "cmd-1",
+    machineId: "mac-1",
+    outcome: "ok" as const,
+    preview: "exit 0 — nothing to commit",
+    createdAt: NOW,
+  };
+
+  test("round-trips through the codec and refuses an unknown outcome", () => {
+    expect(decodePendingBotInputV1(delivery)).toEqual(delivery);
+    expect(() =>
+      decodePendingBotInputV1({ ...delivery, outcome: "maybe" }),
+    ).toThrow("outcome is invalid");
+    expect(() => decodePendingBotInputV1({ ...delivery, stdout: "…" })).toThrow(
+      'unknown field "stdout"',
+    );
+  });
+
+  test("its preamble line names the command and points at the full read", () => {
+    const preamble = pendingBotInputPreambleV1([delivery]);
+    expect(preamble).toContain('Command "cmd-1" on machine mac-1 finished ok');
+    expect(preamble).toContain("exit 0 — nothing to commit");
+    // The whole result is read on demand: a megabyte of stdout must never ride
+    // the preamble and push the person's own words out of the request.
+    expect(preamble).toContain("machine_command_check");
+  });
+
+  test("joins the one queue and de-duplicates on its command id", async () => {
+    const store = storage();
+    await settle(store, { runId: "rf-1", handoff: "one" });
+    const inbox = new RoutineInboxStore(store);
+    await inbox.enqueue(delivery);
+    // A machine that answered twice — its own retry — must not tell the Bot
+    // twice; `commandId` is the id the queue de-duplicates on.
+    await inbox.enqueue({ ...delivery, preview: "a second telling" });
+    const pending = await inbox.pending();
+    expect(pending).toHaveLength(2);
+    const drained = await inbox.drainInto("rf-2");
+    expect(drained.map((input) => input.kind)).toEqual([
+      "wake",
+      "machine-result",
+    ]);
+    expect(
+      drained[1]!.kind === "machine-result" ? drained[1]!.preview : undefined,
+    ).toBe("exit 0 — nothing to commit");
+  });
+});

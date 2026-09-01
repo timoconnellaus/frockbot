@@ -221,6 +221,13 @@ const createSubagentsGatewayPlugin = (
   }
 ).plugin;
 import userMachineManifest from "@frockbot/plugin-user-machine/manifest";
+// The registered machine's six tools. Mounted only for an admitted Turn, whose
+// Session and Turn the intent record it writes has to name.
+import {
+  createMachineRuntimePlugin,
+  type MachineRuntimeHostV1,
+} from "@frockbot/plugin-user-machine/agent";
+export type { MachineRuntimeHostV1 } from "@frockbot/plugin-user-machine/agent";
 // The registered-machine routes: three authenticated, four `publicRoute`s
 // carrying a machine token rather than a session.
 import {
@@ -919,6 +926,13 @@ export function createFoundationHostedRuntimePackages(
      * command path, and a Turn with no such path cannot reach it.
      */
     botTemplate?: BotTemplateRuntimeHostV1;
+    /**
+     * The registered machine seam, supplied by the Bot Durable Object for one
+     * admitted Turn. Absent outside a Turn, and the machine tools are then not
+     * mounted at all: an intent record with no Session and Turn is an effect
+     * nobody can trace back to a conversation.
+     */
+    machines?: MachineRuntimeHostV1;
     packagePublisher: PackagePublisherAgentHost;
   },
 ): FoundationAssignedRuntimePackage[] {
@@ -977,6 +991,15 @@ export function createFoundationHostedRuntimePackages(
             plan,
             "channels",
             createChannelsRuntimePlugin(host.channels),
+          ),
+        ]
+      : []),
+    ...(host.machines
+      ? [
+          runtimePackage(
+            plan,
+            "user-machine",
+            createMachineRuntimePlugin(host.machines),
           ),
         ]
       : []),
@@ -1268,6 +1291,10 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // to attribute them to.
   runtimeIds.delete("channels");
   runtimeIds.delete("telegram");
+  // The registered machine's tools mount only for a Turn: the control tools
+  // write an intent record the Turn's Session and run name, and the approval
+  // that gates them is a send onto that Turn's own durable log.
+  runtimeIds.delete("user-machine");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

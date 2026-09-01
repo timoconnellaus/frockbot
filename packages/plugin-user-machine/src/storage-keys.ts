@@ -79,6 +79,20 @@ export function nextMachineQueueSequenceV1(keys: readonly string[]): number {
 }
 
 /** The UTC day a dispatch counts against. Machines cross time zones; the quota does not. */
+/**
+ * One finished command waiting to be told to the Bot that asked for it.
+ *
+ * A durable outbox rather than a call: this object holds the queue, and the
+ * Bot Durable Object namespace belongs to the adapter. The Worker that just
+ * answered the machine drains it, which keeps a Durable Object from holding a
+ * reference to another one open across a request.
+ */
+export const MACHINE_DELIVERY_PREFIX = "machine-delivery:";
+
+export function machineDeliveryKeyV1(commandId: string): string {
+  return `${MACHINE_DELIVERY_PREFIX}${commandId}`;
+}
+
 export function machineUsageDayV1(now: number | Date): string {
   return new Date(now).toISOString().slice(0, 10);
 }
