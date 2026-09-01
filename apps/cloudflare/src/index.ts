@@ -114,6 +114,8 @@ import {
   type SetSignupsCommandV1,
 } from "@frockbot/plugin-admin/shared";
 import { gatewayAuth } from "./auth.js";
+import type { DebugGatewaySurface } from "./debug.js";
+import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
@@ -200,6 +202,28 @@ interface Env {
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
+  /** Authorizes `/api/debug/*`. Absent disables the surface entirely. */
+  DEBUG_TOKEN?: string;
+}
+
+/**
+ * The `/api/debug` surface, over the same Bot RPCs the gateway already holds.
+ * Without `DEBUG_TOKEN` it carries no token, and the routes 404.
+ */
+function debugSurface(env: Env): DebugGatewaySurface {
+  return {
+    ...(env.DEBUG_TOKEN ? { token: env.DEBUG_TOKEN } : {}),
+    listUsers: async () => {
+      const result = await env.AUTH_DB.prepare(
+        'select "id", "email", "name", "createdAt" from "user" order by "createdAt" desc limit 50',
+      ).all<{ id: string; email: string; name: string; createdAt: string }>();
+      return result.results ?? [];
+    },
+    listBots: (userId) =>
+      userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
+    snapshot: (userId, botId, query) =>
+      botStateStub(env, userId, botId).debugSnapshot(query),
+  };
 }
 
 function allowedClientOrigins(env: Env): string[] | undefined {
@@ -217,6 +241,7 @@ interface UserScopedProps {
 interface BotStateRpc extends BotConfigurationBinding {
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
+  debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   fenceRunAdmission(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   listSkills(): Promise<ClientSkillCatalogV1>;
@@ -312,6 +337,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       }),
     listRuns: (query) =>
       rpc.listRuns({ schemaVersion: 1, userId, botId, query }),
+    debugSnapshot: (query) =>
+      rpc.debugSnapshot({ schemaVersion: 1, userId, botId, query }),
     lookupRun: (query) =>
       rpc.lookupRun({ schemaVersion: 1, userId, botId, query }),
     fenceRunAdmission: (query) =>
@@ -1517,6 +1544,7 @@ export default {
         ? { catalog: new R2PackageCatalog(env.PACKAGE_CATALOG) }
         : {}),
       backendContributions: [...mountedBackend.contributions],
+      debug: debugSurface(env),
       allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });

@@ -46,6 +46,7 @@ import {
   type BotLifecycleCommandV1,
   type BotRegistrationV1,
 } from "@frockbot/plugin-flock/shared";
+import { decodeBotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
@@ -1376,6 +1377,26 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.listRuns(request.query as ClientRunListQueryV1);
+  }
+
+  /**
+   * The operator snapshot behind `/api/debug`. Bot-scoped like every other
+   * Bot RPC — the debug token authorizes the *caller*, it does not widen what
+   * a Bot will answer about itself.
+   */
+  async debugSnapshot(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      query: rpcDecoded(decodeBotDebugQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.debugSnapshot(identity, request.query);
   }
 
   async lookupRun(input: unknown) {

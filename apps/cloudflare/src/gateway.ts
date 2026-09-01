@@ -19,6 +19,7 @@ import type {
   UserApplicationIdentity,
   WorkerCode,
 } from "./contracts.js";
+import { createDebugRoute } from "./debug.js";
 
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
 const PUBLIC_ASSET_PATHS = new Set([
@@ -269,6 +270,7 @@ function withClientOrigin(response: Response, origin: string): Response {
 
 export function createGateway(dependencies: GatewayDependencies) {
   const compatibilityDate = dependencies.compatibilityDate ?? "2026-08-27";
+  const debugRoute = createDebugRoute(dependencies.debug);
 
   const route = async (request: Request, url: URL): Promise<Response> => {
     if (url.pathname.startsWith("/api/auth/")) {
@@ -277,6 +279,11 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (url.pathname === "/sign-out") {
       return routeSignOut(request, url, dependencies);
     }
+
+    // Ahead of authentication: the operator surface is authorized by its own
+    // token, and is readable when no session can be established at all.
+    const debugResponse = await debugRoute(request, url);
+    if (debugResponse) return debugResponse;
 
     for (const contribution of dependencies.backendContributions ?? []) {
       const response = await contribution.publicRoute?.(request, url, {

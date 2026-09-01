@@ -373,6 +373,9 @@ jobs:
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
+          # Optional: authorizes the read-only /api/debug operator surface.
+          # Absent and the deployed Worker simply 404s those routes.
+          DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"
@@ -395,9 +398,15 @@ jobs:
             'ROUTINE_HOOK_SECRET',
             'MACHINE_TOKEN_SECRET',
           ];
+          // `--secrets-file` replaces the Worker's whole secret set, so an
+          // optional secret has to be carried here or a deploy would delete
+          // it. Omitted when unset, rather than written empty.
+          const optional = ['DEBUG_TOKEN'].filter((name) => process.env[name]);
           console.log(
             JSON.stringify(
-              Object.fromEntries(names.map((name) => [name, process.env[name]])),
+              Object.fromEntries(
+                [...names, ...optional].map((name) => [name, process.env[name]]),
+              ),
             ),
           );
           NODE
