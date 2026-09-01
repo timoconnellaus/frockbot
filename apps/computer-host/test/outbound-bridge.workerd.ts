@@ -60,6 +60,27 @@ function collect(socket: WebSocket, count: number): Promise<string[]> {
   });
 }
 
+/** Frames as they actually arrive, so a Blob cannot pass for its own bytes. */
+function collectRaw(
+  socket: WebSocket,
+  count: number,
+): Promise<Array<string | ArrayBuffer>> {
+  const frames: Array<string | ArrayBuffer> = [];
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`only ${frames.length} of ${count} frames`)),
+      10_000,
+    );
+    socket.addEventListener("message", (event: MessageEvent) => {
+      frames.push(event.data as string | ArrayBuffer);
+      if (frames.length >= count) {
+        clearTimeout(timer);
+        resolve(frames);
+      }
+    });
+  });
+}
+
 async function openExec(): Promise<WebSocket> {
   const response = await SELF.fetch(EXEC_URL, execUpgrade());
   expect(response.status).toBe(101);
@@ -117,6 +138,29 @@ describe("the outbound bridge under workerd", () => {
     expect(seen.path).toBe(
       "/v1/sprites/frockbot-test/exec?cmd=bash&cmd=-s&path=bash&stdin=true",
     );
+  });
+
+  test("carries a binary frame through with its bytes intact", async () => {
+    // What `exec` actually sends: a StreamID byte then payload, never text.
+    // Forwarded without asking for `arraybuffer`, each frame arrived as a
+    // `Blob` and `send` stringified it to the literal `[object Blob]`, so
+    // Sprites never received a readable stdin and answered nothing at all.
+    const response = await SELF.fetch(EXEC_URL, execUpgrade());
+    const socket = response.webSocket;
+    if (!socket) throw new Error("the bridge returned no socket");
+    socket.binaryType = "arraybuffer";
+    socket.accept();
+
+    const frames = collectRaw(socket, 2);
+    const stdin = new Uint8Array([0, ...new TextEncoder().encode("echo hi\n")]);
+    socket.send(stdin.buffer as ArrayBuffer);
+
+    const answer = (await frames)[1];
+    expect(answer).toBeInstanceOf(ArrayBuffer);
+    expect(Array.from(new Uint8Array(answer as ArrayBuffer))).toEqual([
+      1,
+      ...stdin,
+    ]);
   });
 
   test("leaves a request that is not an upgrade alone", async () => {

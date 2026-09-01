@@ -24,6 +24,9 @@ export const SPRITES_ORIGIN_GREETING = "sprites:open";
 /** Echoes carry this prefix, so a test can tell direction apart. */
 export const SPRITES_ORIGIN_ECHO_PREFIX = "sprites:echo:";
 
+/** The StreamID byte the origin prefixes to a binary answer, as stdout does. */
+export const SPRITES_ORIGIN_STDOUT_STREAM_ID = 1;
+
 /**
  * Reported back over the socket on request, so a test can assert what actually
  * crossed the wire — in particular that `authorization` survived and that the
@@ -50,7 +53,19 @@ export default {
     const [client, server] = Object.values(new WebSocketPair());
     server.accept();
 
+    server.binaryType = "arraybuffer";
     server.addEventListener("message", (event) => {
+      // A binary frame is answered in kind, with the payload's bytes
+      // untouched. This is the shape \`exec\` actually uses: a StreamID byte
+      // then payload, never text.
+      if (event.data instanceof ArrayBuffer) {
+        const payload = new Uint8Array(event.data);
+        const answer = new Uint8Array(payload.length + 1);
+        answer[0] = ${JSON.stringify(1)};
+        answer.set(payload, 1);
+        server.send(answer.buffer);
+        return;
+      }
       if (event.data === ${JSON.stringify(SPRITES_ORIGIN_HEADERS_PROBE)}) {
         server.send(JSON.stringify(seen));
         return;
