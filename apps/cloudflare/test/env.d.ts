@@ -10,6 +10,7 @@ import type { UserConfiguration } from "../src/user-configuration.ts";
 
 interface FlyTestEnv {
   AUTHORING: DurableObjectNamespace<AuthoringProbe>;
+  AI: Ai;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
   CREDENTIAL_KEYRING: string;

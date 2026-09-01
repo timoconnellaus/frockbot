@@ -1618,7 +1618,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const current = settings.newBotModelTemplate;
       if (
         current?.connectionId === model?.connectionId &&
-        current?.providerModelId === model?.providerModelId
+        current?.providerModelId === model?.providerModelId &&
+        settings.newBotModelTemplateSource === "user"
       ) {
         return;
       }
@@ -1628,6 +1629,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         commandId: crypto.randomUUID(),
         expectedRevision: settings.revision,
         ...(model ? { model } : {}),
+        source: "user",
       });
       await web.value.loadUserSettings();
       if (receipt.status === "rejected") throw new Error(receipt.failure);

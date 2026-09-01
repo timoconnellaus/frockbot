@@ -1,13 +1,12 @@
 // The browser end-to-end project.
 //
-// One browser, one worker, one `wrangler dev`: the specs share a Worker and a
-// fake provider, and each takes a fresh `?as_user=` identity so no two ever
-// meet in one User Durable Object. `e2e/harness.ts` is the `webServer`.
+// One browser, one app Worker, and one auxiliary Workers AI RPC Worker: the
+// specs share those processes and the fake providers, and each takes a fresh
+// `?as_user=` identity so no two ever meet in one User Durable Object.
+// `e2e/harness.ts` is the `webServer`.
 //
-// The two ports are reserved here rather than inside the harness so the specs
-// know the fake provider's address without the harness reporting back: this
-// process picks them, hands them to the harness through the environment, and
-// hands them to the specs through `use`.
+// The ports are reserved here rather than inside the harness so this process
+// can hand stable addresses to the harness and the specs.
 import { defineConfig, devices } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { reserveFreePort } from "./harness.ts";
@@ -32,6 +31,7 @@ async function stablePort(name: string): Promise<number> {
 
 const port = await stablePort("FROCKBOT_E2E_PORT");
 const ollamaPort = await stablePort("FROCKBOT_E2E_OLLAMA_PORT");
+const workersAiPort = await stablePort("FROCKBOT_E2E_WORKERS_AI_PORT");
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig<E2EOptions>({
@@ -90,6 +90,7 @@ export default defineConfig<E2EOptions>({
     env: {
       FROCKBOT_E2E_PORT: String(port),
       FROCKBOT_E2E_OLLAMA_PORT: String(ollamaPort),
+      FROCKBOT_E2E_WORKERS_AI_PORT: String(workersAiPort),
     },
   },
 });

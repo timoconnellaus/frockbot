@@ -58,6 +58,7 @@ describe("foundation application", () => {
       "provider-foundation",
       "web",
       "provider-ollama-cloud",
+      "provider-workers-ai",
       "routines",
       "search",
       "skills",
@@ -75,6 +76,7 @@ describe("foundation application", () => {
         "mcp",
         "package-publisher",
         "provider-ollama-cloud",
+        "provider-workers-ai",
         "routines",
         "search",
         "subagents",
@@ -99,6 +101,7 @@ describe("foundation application", () => {
         "provider-foundation",
         "web",
         "provider-ollama-cloud",
+        "provider-workers-ai",
         "routines",
         "skills",
         "subagents",
@@ -206,6 +209,42 @@ describe("foundation application", () => {
         },
       ),
     ).toThrow('Bot model provider "foundation" is unavailable');
+  });
+
+  test("mounts an assigned Workers AI model through the native host seam", async () => {
+    const plan = await compileFoundationApplication();
+    const runtimePackage = createFoundationModelRuntimePackage(
+      plan,
+      {
+        assignment: {
+          connectionId: "workers-ai-ambient",
+          providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+        },
+        state: "ready",
+        packageId: "provider-workers-ai",
+        providerType: "workers-ai",
+        connection: {
+          connectionId: "workers-ai-ambient",
+          packageId: "provider-workers-ai",
+          connectionTypeId: "workers-ai-account",
+          displayName: "Cloudflare Workers AI",
+          state: "ready",
+          generation: "workers-ai-ambient-v1",
+          providerType: "workers-ai",
+          safeMetadata: {},
+        },
+      },
+      {
+        accountId: "account-1",
+        connectionId: "workers-ai-ambient",
+        runWorkersAi: () => Promise.reject(new Error("not executed")),
+      },
+    );
+
+    expect(runtimePackage).toMatchObject({
+      specifier: "@frockbot/plugin-provider-workers-ai",
+      contributionSpecifier: "@frockbot/plugin-provider-workers-ai/runtime",
+    });
   });
 
   test("exposes only compiled runtime packages to the runtime host", async () => {
@@ -438,7 +477,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(10);
+    expect(userBackend.contributions).toHaveLength(11);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
@@ -446,6 +485,11 @@ describe("foundation application", () => {
       userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
     ).toBeLessThan(
       userSpecifiers.indexOf("@frockbot/plugin-provider-ollama-cloud/user"),
+    );
+    expect(
+      userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
+    ).toBeLessThan(
+      userSpecifiers.indexOf("@frockbot/plugin-provider-workers-ai/user"),
     );
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-credentials/user"),

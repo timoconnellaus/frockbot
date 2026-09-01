@@ -207,6 +207,30 @@ describe("configuration DTO seam", () => {
     }
   });
 
+  test("requires a source for new-Bot defaults and forbids an empty automatic choice", () => {
+    const command = {
+      schemaVersion: 1,
+      type: "user/set-new-bot-model",
+      commandId: "choose-default",
+      expectedRevision: 0,
+    } as const;
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...command,
+        model: { connectionId: "connection-1", providerModelId: "model-1" },
+      }),
+    ).toThrow("invalid fields");
+    expect(() =>
+      decodeConfigurationCommandV1({ ...command, source: "provider" }),
+    ).toThrow("source must be user or auto");
+    expect(() =>
+      decodeConfigurationCommandV1({ ...command, source: "auto" }),
+    ).toThrow("must name a model");
+    expect(
+      decodeConfigurationCommandV1({ ...command, source: "user" }),
+    ).toMatchObject({ source: "user", model: undefined });
+  });
+
   test("rejects unknown fields throughout configuration commands", () => {
     const meta = {
       schemaVersion: 1,
@@ -222,6 +246,7 @@ describe("configuration DTO seam", () => {
       {
         ...meta,
         type: "user/set-new-bot-model",
+        source: "user",
         model: {
           connectionId: "provider-1",
           providerModelId: "model-1",
@@ -1122,7 +1147,9 @@ describe("effective Bot model resolution", () => {
           safeMetadata: {},
         },
       ],
-      ...(newBotModelTemplate ? { newBotModelTemplate } : {}),
+      ...(newBotModelTemplate
+        ? { newBotModelTemplate, newBotModelTemplateSource: "auto" as const }
+        : {}),
     };
   }
   const assignments = [

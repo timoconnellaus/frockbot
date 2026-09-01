@@ -167,6 +167,8 @@ import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
+import workersAiManifest from "@frockbot/plugin-provider-workers-ai/manifest";
+import { createWorkersAiRuntimePlugin } from "@frockbot/plugin-provider-workers-ai/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 // The Routines gateway Contribution carries the Bot-scoped Routine routes.
 import {
@@ -296,6 +298,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-credentials", credentialsManifest],
   ["@frockbot/plugin-web", webManifest],
   ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
+  ["@frockbot/plugin-provider-workers-ai", workersAiManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
@@ -449,11 +452,16 @@ const assignedRuntimeContributionFactories = new Map<
 interface ModelRuntimeContributionConfig {
   accountId: string;
   connectionId: string;
-  leaseCredential(
+  connectionGeneration?: string;
+  leaseCredential?(
     effectId: string,
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
-  settleCredential(effectId: string): Promise<void>;
+  settleCredential?(effectId: string): Promise<void>;
+  runWorkersAi?: (
+    model: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
   fetch?: typeof fetch;
   /**
    * Endpoint root carried on the Connection's settings bag, when its User
@@ -475,12 +483,39 @@ const modelRuntimeContributionFactories = new Map<
     "@frockbot/plugin-provider-ollama-cloud/runtime",
     {
       providerType: "ollama-cloud",
-      create: ({ apiBaseUrl, ...config }) =>
-        createOllamaCloudRuntimePlugin({
+      create: ({
+        apiBaseUrl,
+        leaseCredential,
+        settleCredential,
+        ...config
+      }) => {
+        if (!leaseCredential || !settleCredential) {
+          throw new Error("Ollama Cloud credential host is unavailable");
+        }
+        return createOllamaCloudRuntimePlugin({
           ...config,
           packageId: "provider-ollama-cloud",
+          leaseCredential,
+          settleCredential,
           chatBaseUrl: ollamaChatBaseUrl(apiBaseUrl),
-        } as Parameters<typeof createOllamaCloudRuntimePlugin>[0]),
+        });
+      },
+    },
+  ],
+  [
+    "@frockbot/plugin-provider-workers-ai/runtime",
+    {
+      providerType: "workers-ai",
+      create: ({ connectionId, connectionGeneration, runWorkersAi }) => {
+        if (!connectionGeneration || !runWorkersAi) {
+          throw new Error("Workers AI binding host is unavailable");
+        }
+        return createWorkersAiRuntimePlugin({
+          connectionId,
+          connectionGeneration,
+          run: runWorkersAi,
+        });
+      },
     },
   ],
 ]);
@@ -1185,6 +1220,9 @@ export function createFoundationModelRuntimePackage(
     plugin: factory.create({
       ...host,
       connectionId: binding.connection.connectionId,
+      ...(binding.connection.generation
+        ? { connectionGeneration: binding.connection.generation }
+        : {}),
       // Every inbound value is decoded at its seam: the provider Package
       // validates the endpoint root before it composes a request URL.
       ...(typeof binding.connection.settings?.["api-base-url"] === "string"
@@ -1283,6 +1321,7 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // its handshake resolve.
   runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
+  runtimeIds.delete("provider-workers-ai");
   // The Web Package's `web_fetch` mounts only for a Bot whose User assigned
   // the `web-fetch` Capability to it.
   runtimeIds.delete("web");

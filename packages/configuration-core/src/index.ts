@@ -146,6 +146,9 @@ export interface ModelAssignment {
   providerModelId: string;
 }
 
+/** Whether the User chose the default model or a provider selected it safely. */
+export type NewBotModelTemplateSourceV1 = "user" | "auto";
+
 /**
  * Where an installed Package came from. `first-party` is a Package compiled
  * into the running application; `catalog` is one admitted from a pinned remote
@@ -238,6 +241,11 @@ export interface UserSettingsViewV1 {
   connections: ConnectionView[];
   newBotModelTemplate?: ModelAssignment;
   /**
+   * `user` is sticky, including when the User explicitly clears the default.
+   * Providers may replace only an `auto` default (or the untouched absence).
+   */
+  newBotModelTemplateSource?: NewBotModelTemplateSourceV1;
+  /**
    * The remote Catalog generation this User is pinned to, and the content hash
    * of that generation's index. Pinned on the first read that finds a Catalog
    * and never moved by an install, so a Catalog install is always validated
@@ -319,6 +327,7 @@ export type ConfigurationCommandV1 =
   | (CommandMetaV1 & {
       type: "user/set-new-bot-model";
       model?: ModelAssignment;
+      source: NewBotModelTemplateSourceV1;
     })
   | (CommandMetaV1 & {
       type: "user/install-package";
@@ -1244,11 +1253,22 @@ export function decodeConfigurationCommandV1(
       };
     }
     case "user/set-new-bot-model": {
-      const command = exactCommand(input, [], ["model"]);
+      const command = exactCommand(input, ["source"], ["model"]);
+      if (command.source !== "user" && command.source !== "auto") {
+        throw new ConfigurationDecodeError(
+          "new Bot model source must be user or auto",
+        );
+      }
+      if (command.source === "auto" && command.model === undefined) {
+        throw new ConfigurationDecodeError(
+          "an automatic new Bot model must name a model",
+        );
+      }
       return {
         ...commandMeta(command),
         type: value.type,
         model: command.model === undefined ? undefined : model(command.model),
+        source: command.source,
       };
     }
     case "user/install-package": {
@@ -1856,7 +1876,12 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     input,
     "User settings",
     ["schemaVersion", "revision", "profile", "packages", "connections"],
-    ["newBotModelTemplate", "catalogGeneration", "catalogIndexHash"],
+    [
+      "newBotModelTemplate",
+      "newBotModelTemplateSource",
+      "catalogGeneration",
+      "catalogIndexHash",
+    ],
   );
   schemaVersion(value);
   const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
@@ -1867,6 +1892,31 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
   ) {
     throw new ConfigurationDecodeError(
       "User settings Packages and Connections must be bounded arrays",
+    );
+  }
+  if (
+    value.newBotModelTemplateSource !== undefined &&
+    value.newBotModelTemplateSource !== "user" &&
+    value.newBotModelTemplateSource !== "auto"
+  ) {
+    throw new ConfigurationDecodeError(
+      "new Bot model source must be user or auto",
+    );
+  }
+  if (
+    value.newBotModelTemplate !== undefined &&
+    value.newBotModelTemplateSource === undefined
+  ) {
+    throw new ConfigurationDecodeError(
+      "a new Bot model must record its source",
+    );
+  }
+  if (
+    value.newBotModelTemplate === undefined &&
+    value.newBotModelTemplateSource === "auto"
+  ) {
+    throw new ConfigurationDecodeError(
+      "an automatic new Bot model must name a model",
     );
   }
   return {
@@ -1882,6 +1932,7 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
       value.newBotModelTemplate === undefined
         ? undefined
         : model(value.newBotModelTemplate),
+    newBotModelTemplateSource: value.newBotModelTemplateSource,
     // The pin is optional — a deployment with no Catalog has none — but never
     // half present: one field alone is a corrupt pin, not a pin.
     ...(value.catalogGeneration === undefined &&

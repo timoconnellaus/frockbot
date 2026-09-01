@@ -686,6 +686,7 @@ describe("Bot selection", () => {
       connectionId: "ollama-work",
       providerModelId: "llama-3:cloud",
     };
+    user.newBotModelTemplateSource = "auto";
     await provided.value.loadUserSettings();
     await provided.value.loadBotSettings();
     expect(provided.value.modelSource).toBe("default");
@@ -693,6 +694,7 @@ describe("Bot selection", () => {
     expect(provided.value.modelReady).toBe(true);
 
     user.newBotModelTemplate = undefined;
+    user.newBotModelTemplateSource = undefined;
     await provided.value.loadUserSettings();
     expect(provided.value.modelSource).toBe("none");
     expect(provided.value.modelLabel).toBe("No default model");

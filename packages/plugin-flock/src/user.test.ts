@@ -55,6 +55,7 @@ const settings = {
   ],
   connections: [],
   newBotModelTemplate: { connectionId: "provider", providerModelId: "model" },
+  newBotModelTemplateSource: "auto" as const,
 };
 function command(commandId = "create-1", expectedRevision = 0) {
   return {

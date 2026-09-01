@@ -55,6 +55,10 @@ import {
   type OllamaCloudUserBackendContribution,
 } from "@frockbot/plugin-provider-ollama-cloud/user";
 import {
+  createWorkersAiUserBackendPlugin,
+  type WorkersAiUserBackendContribution,
+} from "@frockbot/plugin-provider-workers-ai/user";
+import {
   createUserSettingsBackendPlugin,
   type UserPackageCatalogHost,
   type UserSettingsBackendContribution,
@@ -221,6 +225,7 @@ export async function createFoundationUserBackendContributions(
   let settings: UserSettingsBackendContribution | undefined;
   let credentials: CredentialUserBackendContribution | undefined;
   let ollama: OllamaCloudUserBackendContribution | undefined;
+  let workersAi: WorkersAiUserBackendContribution | undefined;
   let mcp: McpUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
   let botTemplate: BotTemplateUserBackendContribution | undefined;
@@ -239,6 +244,7 @@ export async function createFoundationUserBackendContributions(
         | UserSettingsBackendContribution
         | CredentialUserBackendContribution
         | OllamaCloudUserBackendContribution
+        | WorkersAiUserBackendContribution
         | McpUserBackendContribution
         | FlockUserBackendContribution
         | BotTemplateUserBackendContribution
@@ -308,6 +314,32 @@ export async function createFoundationUserBackendContributions(
           {
             mount(value: OllamaCloudUserBackendContribution) {
               ollama = value;
+              connections.set(value.packageId, value);
+              const unregister =
+                userSettings.registerConnectionCommandOwner(value);
+              const dispose = lifecycle.mount(value);
+              return () => {
+                connections.delete(value.packageId);
+                unregister();
+                dispose();
+              };
+            },
+          },
+        );
+      },
+    ],
+    [
+      "@frockbot/plugin-provider-workers-ai/user",
+      (lifecycle) => {
+        if (!settings) {
+          throw new Error("Workers AI requires the Settings Contribution");
+        }
+        const userSettings = settings;
+        return createWorkersAiUserBackendPlugin(
+          { storage: host.storage, settings },
+          {
+            mount(value: WorkersAiUserBackendContribution) {
+              workersAi = value;
               connections.set(value.packageId, value);
               const unregister =
                 userSettings.registerConnectionCommandOwner(value);
@@ -587,6 +619,7 @@ export async function createFoundationUserBackendContributions(
     | UserSettingsBackendContribution
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
+    | WorkersAiUserBackendContribution
     | McpUserBackendContribution
     | FlockUserBackendContribution
     | BotTemplateUserBackendContribution
@@ -608,6 +641,7 @@ export async function createFoundationUserBackendContributions(
     !settings ||
     !credentials ||
     !ollama ||
+    !workersAi ||
     !mcp ||
     !flock ||
     !botTemplate ||
@@ -618,7 +652,7 @@ export async function createFoundationUserBackendContributions(
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Workers AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
     );
   }
   return {

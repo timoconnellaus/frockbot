@@ -279,6 +279,7 @@ export async function provisionThroughGateway(options: {
         connectionId: receipt.connectionId,
         providerModelId: PROVISIONED_MODEL.providerModelId,
       },
+      source: "user",
     }),
   );
 
