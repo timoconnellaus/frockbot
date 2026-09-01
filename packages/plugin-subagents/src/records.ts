@@ -77,6 +77,18 @@ export const TASK_DEADLINE_MS_V1 = 30 * 60_000;
  * indefinitely (plan §2, flow 3).
  */
 export const TASK_BLOCKING_TIMEOUT_MS_V1 = 120_000;
+
+/**
+ * How long the User-wide `desktop-gui` lease a `computerUse` task holds stays
+ * fresh at the Computer host without a renewal.
+ *
+ * It is the task's own lifetime plus a minute: a lease that lapsed while its
+ * task was still running would let a second `computerUse` subagent onto the
+ * same screen, and a lease that outlived a task whose Durable Object was
+ * destroyed would hold the desktop for ever. Bounded above by the host's own
+ * `controlMaxAgeSeconds` (3600).
+ */
+export const TASK_DESKTOP_LEASE_MAX_AGE_SECONDS_V1 = 1_860;
 /**
  * How often that wait re-reads durable state.
  *
@@ -499,6 +511,13 @@ export interface TaskMessageRecordV1 {
   seq: number;
   message: string;
   createdAt: string;
+  /**
+   * When the child folded this message into a step of its own Turn. Present is
+   * "consumed": the queue is drained by *marking*, not by deleting, so a
+   * redelivery after an interrupted claim reads the mark back and hands the
+   * child nothing a second time.
+   */
+  deliveredAt?: string;
 }
 
 export function decodeTaskMessageRecordV1(value: unknown): TaskMessageRecordV1 {
@@ -507,7 +526,7 @@ export function decodeTaskMessageRecordV1(value: unknown): TaskMessageRecordV1 {
   subagentExactKeys(
     candidate,
     ["schemaVersion", "taskId", "seq", "message", "createdAt"],
-    [],
+    ["deliveredAt"],
     label,
   );
   if (candidate.schemaVersion !== 1) {
@@ -529,20 +548,48 @@ export function decodeTaskMessageRecordV1(value: unknown): TaskMessageRecordV1 {
       `${label} message`,
     ),
     createdAt: subagentTimestamp(candidate.createdAt, `${label} createdAt`),
+    ...(candidate.deliveredAt === undefined
+      ? {}
+      : {
+          deliveredAt: subagentTimestamp(
+            candidate.deliveredAt,
+            `${label} deliveredAt`,
+          ),
+        }),
   };
 }
 
 /**
  * The intent record written before the desktop lease is acquired: the effect is
  * named durably before the host call, so an interrupted dispatch is read back
- * rather than repeated. Acquiring the lease itself is G3 — this Package records
- * the intent and nothing else today.
+ * rather than repeated.
+ *
+ * The acquisition fields arrive *after* the host call succeeds, on the same
+ * key: a record with a `taskId` and no `expiresAt` is an intent whose effect
+ * may or may not have happened, and one with an `expiresAt` is a lease this
+ * Bot's task is holding until then.
  */
 export interface TaskDesktopLeaseIntentV1 {
   schemaVersion: 1;
   taskId: string;
   scope: "desktop-gui";
   recordedAt: string;
+  /** The lease owner the host serializes on; `task:<taskId>`. */
+  ownerId?: string;
+  /** When the host said the lease lapses, if the acquire landed. */
+  expiresAt?: string;
+}
+
+/**
+ * The lease owner one task holds the User-wide desktop under.
+ *
+ * It names the Bot as well as the task, because the desktop is shared across a
+ * User's Bots and a task id is only unique within one: two Bots dispatching on
+ * the same Turn ordinal mint the same task id, and an owner that could not tell
+ * them apart would hand the second one the first one's lease.
+ */
+export function taskDesktopLeaseOwnerV1(botId: string, taskId: string): string {
+  return `task-${botId}-${taskId}`;
 }
 
 export function decodeTaskDesktopLeaseIntentV1(
@@ -553,7 +600,7 @@ export function decodeTaskDesktopLeaseIntentV1(
   subagentExactKeys(
     candidate,
     ["schemaVersion", "taskId", "scope", "recordedAt"],
-    [],
+    ["ownerId", "expiresAt"],
     label,
   );
   if (candidate.schemaVersion !== 1) {
@@ -570,6 +617,17 @@ export function decodeTaskDesktopLeaseIntentV1(
     taskId: candidate.taskId,
     scope: "desktop-gui",
     recordedAt: subagentTimestamp(candidate.recordedAt, `${label} recordedAt`),
+    ...(candidate.ownerId === undefined
+      ? {}
+      : { ownerId: subagentText(candidate.ownerId, 256, `${label} ownerId`) }),
+    ...(candidate.expiresAt === undefined
+      ? {}
+      : {
+          expiresAt: subagentTimestamp(
+            candidate.expiresAt,
+            `${label} expiresAt`,
+          ),
+        }),
   };
 }
 

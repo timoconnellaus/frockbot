@@ -427,6 +427,10 @@ function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
 export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
   return {
     name: "skill_load",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Read one of your Skills in full. Pass the path listed in <agent_skills>. Only Skills listed there can be loaded.",
     inputSchema: SKILL_LOAD_INPUT_SCHEMA as unknown as Record<string, unknown>,
@@ -501,6 +505,10 @@ export function createSkillWriteTool(
   const quota = host.quota ?? SKILL_QUOTA_DEFAULTS_V1;
   return {
     name: "skill_write",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Write a Skill: a Markdown recipe stored under your own instruction root, or under your User's shared root where all of their Bots can read it. It becomes visible to you on your next Turn, not this one.",
     inputSchema: SKILL_WRITE_INPUT_SCHEMA as unknown as Record<string, unknown>,

@@ -166,6 +166,35 @@ export function botIsolateAdmissionCeilingV1(
 }
 
 /**
+ * The same durable ceiling on the second dimension: the subagent roles a
+ * Package's tools may be offered to. Union over the tool Capabilities, and
+ * absent unless *every* one of them names roles — a Package bounds its tools
+ * only when it has bounded all of them.
+ */
+export function botIsolateSubagentRoleCeilingV1(
+  manifest: FrockBotManifest,
+): readonly string[] | undefined {
+  const capabilities = (manifest.configuration?.capabilities ?? []).filter(
+    (capability) => capability.kind === "tool",
+  );
+  if (
+    capabilities.length === 0 ||
+    capabilities.some(
+      (capability) => capability.admission?.subagentRoles === undefined,
+    )
+  ) {
+    return undefined;
+  }
+  const roles = new Set<string>();
+  for (const capability of capabilities) {
+    for (const role of capability.admission?.subagentRoles ?? []) {
+      roles.add(role);
+    }
+  }
+  return [...roles];
+}
+
+/**
  * A Composition member projected onto the descriptor a contribution host
  * consumes. The durable record keeps the member's `manifestHash`, not its
  * manifest, so the projection carries only what the isolate host reads: the
@@ -269,11 +298,21 @@ export class BotIsolateContributionHost implements ContributionHost {
         // The manifest ceiling is applied at registration, so the catalog the
         // model is offered and the call the loop admits cannot disagree.
         const admissionCeiling = botIsolateAdmissionCeilingV1(pkg.manifest);
+        const subagentRoleCeiling = botIsolateSubagentRoleCeilingV1(
+          pkg.manifest,
+        );
+        const options =
+          admissionCeiling || subagentRoleCeiling
+            ? {
+                ...(admissionCeiling ? { admissionCeiling } : {}),
+                ...(subagentRoleCeiling ? { subagentRoleCeiling } : {}),
+              }
+            : undefined;
         for (const descriptor of health.tools) {
           registered.push(
             this.options.tools.register(
               this.definition(packageId, entrypoint, descriptor),
-              admissionCeiling ? { admissionCeiling } : undefined,
+              options,
             ),
           );
         }

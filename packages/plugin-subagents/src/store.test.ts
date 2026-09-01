@@ -115,6 +115,86 @@ describe("admitting a task", () => {
     expect(await storage.get(TASK_DESKTOP_LEASE_KEY)).toBeUndefined();
   });
 
+  test("refuses a second computerUse task, naming the holder", async () => {
+    const storage = createMemorySubagentStorageV1();
+    const store = new TaskStore(storage);
+    await store.admit(request("tk-gui", { type: "computerUse" }));
+    await store.markRunning("tk-gui");
+    await store.recordDesktopLease("bot", "tk-gui", "2026-09-01T00:31:00.000Z");
+
+    const second = await store.admit(
+      request("tk-gui-2", { type: "computerUse" }),
+    );
+    expect(second.status).toBe("refused");
+    expect(second.status === "refused" && second.reason).toContain("tk-gui");
+    expect(second.status === "refused" && second.reason).toContain(
+      "2026-09-01T00:31:00.000Z",
+    );
+    // The refused dispatch wrote nothing: the holder still holds the key.
+    expect(await storage.get(TASK_DESKTOP_LEASE_KEY)).toMatchObject({
+      taskId: "tk-gui",
+    });
+    expect(storage.keys()).not.toContain("task:tk-gui-2");
+  });
+
+  test("the intent is durable before the lease is, and the acquire lands on it", async () => {
+    const storage = createMemorySubagentStorageV1();
+    const store = new TaskStore(storage);
+    await store.admit(request("tk-gui", { type: "computerUse" }));
+    // Intent: the task that asked, with nothing granted yet.
+    expect(await storage.get(TASK_DESKTOP_LEASE_KEY)).toMatchObject({
+      taskId: "tk-gui",
+      scope: "desktop-gui",
+    });
+    expect(
+      (await storage.get<{ expiresAt?: string }>(TASK_DESKTOP_LEASE_KEY))
+        ?.expiresAt,
+    ).toBeUndefined();
+    // Effect: the host granted it, recorded on the same key.
+    const acquired = await store.recordDesktopLease(
+      "bot",
+      "tk-gui",
+      "2026-09-01T00:31:00.000Z",
+    );
+    expect(acquired).toMatchObject({
+      taskId: "tk-gui",
+      ownerId: "task-bot-tk-gui",
+      expiresAt: "2026-09-01T00:31:00.000Z",
+    });
+  });
+
+  test("a lapsed lease holds nothing, so the next computerUse task takes it", async () => {
+    const storage = createMemorySubagentStorageV1();
+    const store = new TaskStore(storage);
+    await store.admit(request("tk-gui", { type: "computerUse" }));
+    await store.markRunning("tk-gui");
+    await store.recordDesktopLease("bot", "tk-gui", "2026-09-01T00:10:00.000Z");
+    expect(
+      await store.desktopLease(new Date("2026-09-01T00:20:00.000Z")),
+    ).toBeUndefined();
+    const second = await store.admit(
+      request("tk-gui-2", {
+        type: "computerUse",
+        now: new Date("2026-09-01T00:20:00.000Z"),
+      }),
+    );
+    expect(second.status).toBe("admitted");
+  });
+
+  test("releasing hands back only the lease this task holds", async () => {
+    const storage = createMemorySubagentStorageV1();
+    const store = new TaskStore(storage);
+    await store.admit(request("tk-gui", { type: "computerUse" }));
+    await store.recordDesktopLease("bot", "tk-gui", "2026-09-01T00:31:00.000Z");
+    expect(await store.releaseDesktopLease("tk-other")).toBeUndefined();
+    expect(await storage.get(TASK_DESKTOP_LEASE_KEY)).toBeDefined();
+    expect(await store.releaseDesktopLease("tk-gui")).toMatchObject({
+      taskId: "tk-gui",
+      ownerId: "task-bot-tk-gui",
+    });
+    expect(await storage.get(TASK_DESKTOP_LEASE_KEY)).toBeUndefined();
+  });
+
   test("refuses an invalid task id without writing anything", async () => {
     const storage = createMemorySubagentStorageV1();
     const store = new TaskStore(storage);
@@ -249,6 +329,40 @@ describe("the bounded message queue", () => {
         (_value, index) => `message ${index}`,
       ),
     );
+  });
+
+  test("a claim delivers each message exactly once, oldest first", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await running(store);
+    await store.appendMessage("tk-1", "first", new Date());
+    await store.appendMessage("tk-1", "second", new Date());
+
+    const claimed = await store.claimMessages(
+      "tk-1",
+      new Date("2026-09-01T00:01:00.000Z"),
+    );
+    expect(claimed.map((entry) => entry.message)).toEqual(["first", "second"]);
+    expect(claimed.map((entry) => entry.seq)).toEqual([0, 1]);
+    // The second claim is the retry a resumed step makes: the marks are read
+    // back and the child is handed nothing a second time.
+    expect(await store.claimMessages("tk-1", new Date())).toEqual([]);
+    expect(await store.pendingMessages("tk-1")).toEqual([]);
+    expect(await store.messages("tk-1")).toHaveLength(2);
+  });
+
+  test("a delivered message frees its place in the bound", async () => {
+    const store = new TaskStore(createMemorySubagentStorageV1());
+    await running(store);
+    for (let index = 0; index < TASK_MESSAGE_QUEUE_LIMIT_V1; index += 1) {
+      await store.appendMessage("tk-1", `message ${index}`, new Date());
+    }
+    expect(
+      (await store.appendMessage("tk-1", "one too many", new Date())).status,
+    ).toBe("refused");
+    await store.claimMessages("tk-1", new Date());
+    expect(
+      await store.appendMessage("tk-1", "room again", new Date()),
+    ).toMatchObject({ status: "queued", depth: 1 });
   });
 
   test("settling drops the queue nobody will drain", async () => {

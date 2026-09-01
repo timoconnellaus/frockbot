@@ -202,6 +202,7 @@ export interface ResidentTurnRuntime {
     text: string;
     skills?: SkillRefV1[];
     turnType: TurnTypeV1;
+    subagentRole?: string;
   }): Promise<AgentHandle>;
 }
 
@@ -237,6 +238,7 @@ export async function executeResidentBotTurn(
       text: command.text,
       ...(command.skills ? { skills: command.skills } : {}),
       turnType: command.turnType ?? "chat",
+      ...(command.subagentRole ? { subagentRole: command.subagentRole } : {}),
     });
     return settleBotTurn(handle, command, previousEvents);
   } catch (error) {

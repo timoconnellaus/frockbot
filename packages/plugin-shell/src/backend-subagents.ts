@@ -16,6 +16,7 @@ import {
   subagentText,
   subagentTimestamp,
   SubagentDecodeError,
+  TASK_MESSAGE_MAX_V1,
   TASK_PROMPT_MAX_BYTES_V1,
   TASK_TYPES_V1,
   decodeTaskModelV1,
@@ -276,7 +277,48 @@ export interface SubagentDurableBindingV1 {
     taskId: string,
     outcome: TaskOutcomeV1,
   ): Promise<void>;
+  /**
+   * Claims the messages the parent has queued for one task, on the child's
+   * behalf, and marks them delivered in the parent's own transaction.
+   *
+   * The queue lives in the parent because the parent is the authority; the
+   * reader is the child, because the child is the one running. This is the one
+   * call that crosses in that direction *during* a Turn, and it is bounded by
+   * the queue's own bound (16).
+   */
+  claimMessagesOnParent(
+    parent: SubagentParentV1,
+    taskId: string,
+  ): Promise<readonly { seq: number; message: string }[]>;
 }
+
+/**
+ * The exact shape a claim answers with, decoded at the child's door: the
+ * parent is trusted, the wire is not, and a message reaches a model.
+ */
+export function decodeClaimedTaskMessagesV1(
+  value: unknown,
+): { seq: number; message: string }[] {
+  const answer = value as { messages?: unknown } | null | undefined;
+  if (!answer || !Array.isArray(answer.messages)) return [];
+  return answer.messages.slice(0, CLAIMED_TASK_MESSAGE_LIMIT).map((entry) => {
+    const candidate = record(entry, "claimed task message");
+    if (!Number.isSafeInteger(candidate.seq) || (candidate.seq as number) < 0) {
+      throw new SubagentDecodeError("claimed task message seq is invalid");
+    }
+    return {
+      seq: candidate.seq as number,
+      message: subagentText(
+        candidate.message,
+        TASK_MESSAGE_MAX_V1,
+        "claimed task message",
+      ),
+    };
+  });
+}
+
+/** The queue's own bound, restated where the wire is decoded. */
+const CLAIMED_TASK_MESSAGE_LIMIT = 16;
 
 const TASK_ID_CHARACTER = /[^a-zA-Z0-9._-]/g;
 
@@ -353,6 +395,7 @@ export function createBotSubagentDurableBindingV1(
       readSubagentTask(input: unknown): Promise<unknown>;
       settleTask(input: unknown): Promise<unknown>;
       stopSubagentTask(input: unknown): Promise<unknown>;
+      claimTaskMessages(input: unknown): Promise<unknown>;
     };
   return {
     accept: async (identity, anchorTaskId, request) => {
@@ -391,6 +434,17 @@ export function createBotSubagentDurableBindingV1(
         botId: identity.botId,
         taskId,
       });
+    },
+    claimMessagesOnParent: async (parent, taskId) => {
+      const answer = (await stub(
+        `${parent.userId}:${parent.botId}`,
+      ).claimTaskMessages({
+        schemaVersion: 1,
+        userId: parent.userId,
+        botId: parent.botId,
+        taskId,
+      })) as { messages?: unknown };
+      return decodeClaimedTaskMessagesV1(answer);
     },
     settleOnParent: async (parent, taskId, outcome) => {
       await stub(`${parent.userId}:${parent.botId}`).settleTask({

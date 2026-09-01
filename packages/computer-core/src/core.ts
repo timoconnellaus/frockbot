@@ -527,14 +527,46 @@ export interface ComputerControlLease {
   expiresAt: string;
 }
 
+/**
+ * What a control lease covers.
+ *
+ * `bot` is the human-takeover lease on one tenant's own desktop slot — the
+ * only scope that existed before subagent roles. `desktop-gui` is User-wide:
+ * one Computer serves all of a User's Bots and there is one screen on it, so
+ * serializing GUI work means holding the *box*, not a tenant directory. It is
+ * what a `computerUse` subagent holds while it runs, and it is why only one of
+ * them runs at a time.
+ */
+export type ComputerControlScopeV1 = "bot" | "desktop-gui";
+
+/**
+ * Who and what a lease is taken for. Absent ⇒ the `bot` scope under the
+ * Computer's own owner identity, which is every caller that existed before.
+ */
+export interface ComputerControlRequestV1 {
+  scope?: ComputerControlScopeV1;
+  /**
+   * The lease owner the host serializes on. Naming it is what lets a refusal
+   * say *which* holder has the desktop, and what lets a lease outlive the
+   * process that took it — a Durable Object that is evicted mid-task still
+   * releases the lease it recorded, because the owner is in the record.
+   */
+  ownerId?: string;
+}
+
 export interface ComputerControl {
-  acquire(options?: ComputerOperationOptions): Promise<ComputerControlLease>;
+  acquire(
+    request?: ComputerControlRequestV1,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerControlLease>;
   renew(
     lease: ComputerControlLease,
+    request?: ComputerControlRequestV1,
     options?: ComputerOperationOptions,
   ): Promise<ComputerControlLease>;
   release(
     lease: ComputerControlLease,
+    request?: ComputerControlRequestV1,
     options?: ComputerOperationOptions,
   ): Promise<void>;
 }
@@ -809,15 +841,17 @@ function guardedHandle(
       : undefined,
     control: control
       ? {
-          acquire: (options) =>
-            guardedOperation(assertCurrent, () => control.acquire(options)),
-          renew: (lease, options) =>
+          acquire: (request, options) =>
             guardedOperation(assertCurrent, () =>
-              control.renew(lease, options),
+              control.acquire(request, options),
             ),
-          release: (lease, options) =>
+          renew: (lease, request, options) =>
             guardedOperation(assertCurrent, () =>
-              control.release(lease, options),
+              control.renew(lease, request, options),
+            ),
+          release: (lease, request, options) =>
+            guardedOperation(assertCurrent, () =>
+              control.release(lease, request, options),
             ),
         }
       : undefined,

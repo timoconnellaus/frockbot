@@ -431,6 +431,16 @@ export function createComputerAgentPlugin(
 
     const execTool: ToolDefinition = {
       name: "computer_exec",
+      // The desktop half of the Computer: the shell, the screen, and the
+      // processes a shell left running. Offered to an `executor` subagent,
+      // which has the full work toolset, and to a `computerUse` one, whose
+      // whole job is the desktop; never to `browserUse`, which drives pages
+      // and not the box, and never to the two video roles, which have no
+      // Computer at all.
+      admission: {
+        turnTypes: ["chat", "automation", "subagent", "channel"],
+        subagentRoles: ["executor", "computerUse"],
+      },
       idempotent: config.idempotentEffects === true,
       description: [
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
@@ -829,6 +839,16 @@ export function createComputerAgentPlugin(
      */
     const screenshotTool: ToolDefinition = {
       name: "computer_screenshot",
+      // The desktop half of the Computer: the shell, the screen, and the
+      // processes a shell left running. Offered to an `executor` subagent,
+      // which has the full work toolset, and to a `computerUse` one, whose
+      // whole job is the desktop; never to `browserUse`, which drives pages
+      // and not the box, and never to the two video roles, which have no
+      // Computer at all.
+      admission: {
+        turnTypes: ["chat", "automation", "subagent", "channel"],
+        subagentRoles: ["executor", "computerUse"],
+      },
       idempotent: true,
       description:
         "Capture a PNG of your own desktop on the Computer and file it in your durable screenshots root. Refused while the user has taken control of the Computer.",
@@ -1025,7 +1045,16 @@ export function createComputerAgentPlugin(
     const doctorTool: ToolDefinition = {
       name: "computer_doctor",
       idempotent: true,
-      admission: { turnTypes: ["chat", "automation", "subagent", "channel"] },
+      // The desktop half of the Computer: the shell, the screen, and the
+      // processes a shell left running. Offered to an `executor` subagent,
+      // which has the full work toolset, and to a `computerUse` one, whose
+      // whole job is the desktop; never to `browserUse`, which drives pages
+      // and not the box, and never to the two video roles, which have no
+      // Computer at all.
+      admission: {
+        turnTypes: ["chat", "automation", "subagent", "channel"],
+        subagentRoles: ["executor", "computerUse"],
+      },
       description:
         "Run the Computer's self-check and read the report: disk, the shared scratch, the desktop gateway, your display, the browser profile and what the browser announces itself as, the durable-root sync and its conflicts, the reference docs, the browser launcher, the clock, and DNS. Read-only; it changes nothing and repairs nothing.",
       inputSchema: {
@@ -1088,7 +1117,16 @@ export function createComputerAgentPlugin(
     const processCheckTool: ToolDefinition = {
       name: "computer_process_check",
       idempotent: true,
-      admission: { turnTypes: ["chat", "automation", "subagent", "channel"] },
+      // The desktop half of the Computer: the shell, the screen, and the
+      // processes a shell left running. Offered to an `executor` subagent,
+      // which has the full work toolset, and to a `computerUse` one, whose
+      // whole job is the desktop; never to `browserUse`, which drives pages
+      // and not the box, and never to the two video roles, which have no
+      // Computer at all.
+      admission: {
+        turnTypes: ["chat", "automation", "subagent", "channel"],
+        subagentRoles: ["executor", "computerUse"],
+      },
       description:
         "Read the status of a background process started with computer_exec{background:true}. Answers running, exited with its code, or unknown when the Computer that held it is gone.",
       inputSchema: {
@@ -1109,7 +1147,16 @@ export function createComputerAgentPlugin(
     const processLogsTool: ToolDefinition = {
       name: "computer_process_logs",
       idempotent: true,
-      admission: { turnTypes: ["chat", "automation", "subagent", "channel"] },
+      // The desktop half of the Computer: the shell, the screen, and the
+      // processes a shell left running. Offered to an `executor` subagent,
+      // which has the full work toolset, and to a `computerUse` one, whose
+      // whole job is the desktop; never to `browserUse`, which drives pages
+      // and not the box, and never to the two video roles, which have no
+      // Computer at all.
+      admission: {
+        turnTypes: ["chat", "automation", "subagent", "channel"],
+        subagentRoles: ["executor", "computerUse"],
+      },
       description:
         "Read the bounded log of a background process. The log keeps its first and last 128 KiB; the middle of a very long run is dropped.",
       inputSchema: {
@@ -1138,6 +1185,16 @@ export function createComputerAgentPlugin(
 
     const processStopTool: ToolDefinition = {
       name: "computer_process_stop",
+      // The desktop half of the Computer: the shell, the screen, and the
+      // processes a shell left running. Offered to an `executor` subagent,
+      // which has the full work toolset, and to a `computerUse` one, whose
+      // whole job is the desktop; never to `browserUse`, which drives pages
+      // and not the box, and never to the two video roles, which have no
+      // Computer at all.
+      admission: {
+        turnTypes: ["chat", "automation", "subagent", "channel"],
+        subagentRoles: ["executor", "computerUse"],
+      },
       idempotent: config.idempotentEffects === true,
       description:
         "End a background process. Its process group is signalled TERM and then KILL after a grace period.",
@@ -1158,6 +1215,11 @@ export function createComputerAgentPlugin(
 
     const browserTool: ToolDefinition = {
       name: "computer_browser",
+      // Page-level browser control, which `browserUse` exists for.
+      admission: {
+        turnTypes: ["chat", "automation", "subagent", "channel"],
+        subagentRoles: ["executor", "browserUse", "computerUse"],
+      },
       idempotent: config.idempotentEffects === true,
       description:
         "Control the browser in the Bot's selected Computer and return an accessibility snapshot.",

@@ -113,7 +113,7 @@ export interface CapabilityDefinition {
    * tools may be admitted onto: a Contribution cannot offer a tool on a turn
    * type its manifest does not list. Absent means the manifest set no bound.
    */
-  admission?: { turnTypes: TurnTypeV1[] };
+  admission?: { turnTypes: TurnTypeV1[]; subagentRoles?: string[] };
 }
 
 export interface PackageConfiguration {
@@ -911,11 +911,16 @@ function safeSchema(value: unknown): PackageSettingSchema {
 
 function decodeCapabilityAdmission(value: unknown): {
   turnTypes: TurnTypeV1[];
+  subagentRoles?: string[];
 } {
   if (!isRecord(value)) {
     throw new Error("manifest capability admission must be an object");
   }
-  exactFields(value, ["turnTypes"], "manifest capability admission");
+  exactFields(
+    value,
+    ["turnTypes", "subagentRoles"],
+    "manifest capability admission",
+  );
   if (!Array.isArray(value.turnTypes)) {
     throw new Error("manifest capability admission turnTypes must be an array");
   }
@@ -930,8 +935,42 @@ function decodeCapabilityAdmission(value: unknown): {
   if (new Set(turnTypes).size !== turnTypes.length) {
     throw new Error("manifest capability admission turnTypes has duplicates");
   }
-  return { turnTypes };
+  if (value.subagentRoles === undefined) return { turnTypes };
+  // The second ceiling dimension. The role names are opaque to the kernel —
+  // bounded strings a Package chose — exactly as the kernel treats them at the
+  // tool registry: what any of them *means* is the Subagents Package's policy.
+  if (
+    !Array.isArray(value.subagentRoles) ||
+    value.subagentRoles.length === 0 ||
+    value.subagentRoles.length > MANIFEST_SUBAGENT_ROLE_LIMIT
+  ) {
+    throw new Error(
+      "manifest capability admission subagentRoles must be a bounded array",
+    );
+  }
+  const subagentRoles = value.subagentRoles.map((role) => {
+    if (
+      typeof role !== "string" ||
+      role.trim().length === 0 ||
+      role.length > MANIFEST_SUBAGENT_ROLE_MAX
+    ) {
+      throw new Error(
+        "manifest capability admission subagentRoles entry is invalid",
+      );
+    }
+    return role;
+  });
+  if (new Set(subagentRoles).size !== subagentRoles.length) {
+    throw new Error(
+      "manifest capability admission subagentRoles has duplicates",
+    );
+  }
+  return { turnTypes, subagentRoles };
 }
+
+/** How many roles a manifest may name, and how long a role name may be. */
+const MANIFEST_SUBAGENT_ROLE_LIMIT = 16;
+const MANIFEST_SUBAGENT_ROLE_MAX = 64;
 
 /**
  * The setting definitions on one manifest record. A Package's own `settings`

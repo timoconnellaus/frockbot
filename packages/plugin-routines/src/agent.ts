@@ -247,6 +247,10 @@ export function createRoutineManageTool(
 ): ToolDefinition {
   return {
     name: "routine_manage",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description: [
       "Create, edit, pause, resume, delete, or immediately run one of your own Routines.",
       "A Routine is a standing instruction that fires on a schedule or on a delivered webhook,",

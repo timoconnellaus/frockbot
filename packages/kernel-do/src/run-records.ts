@@ -98,6 +98,12 @@ const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
 export interface StoredRunAdmissionV1 {
   schemaVersion: 1;
   turnType: TurnTypeV1;
+  /**
+   * The subagent role the Turn was admitted under, when it had one. Recorded
+   * for the same reason the turn type is: recovery after eviction has to
+   * re-mount the *same* catalog, and the role is half of what selects it.
+   */
+  subagentRole?: string;
   origin?: StoredRunOriginV1;
 }
 
@@ -126,6 +132,13 @@ export interface StoredRunV1<Snapshot = unknown> {
   admission?: StoredRunAdmissionV1;
 }
 
+/** The subagent role a stored run re-mounts under, if any. */
+export function storedRunSubagentRoleV1(run: {
+  admission?: StoredRunAdmissionV1;
+}): string | undefined {
+  return run.admission?.subagentRole;
+}
+
 /** The turn type a stored run re-mounts on. */
 export function storedRunTurnTypeV1(run: {
   admission?: StoredRunAdmissionV1;
@@ -141,17 +154,23 @@ export function storedRunTurnTypeV1(run: {
 export function storedRunAdmissionV1(
   turnType: TurnTypeV1 | undefined,
   origin?: StoredRunOriginV1,
+  subagentRole?: string,
 ): { admission?: StoredRunAdmissionV1 } {
   const admitted = turnType ?? "chat";
-  if (admitted === "chat" && origin === undefined) return {};
+  if (admitted === "chat" && origin === undefined && subagentRole === undefined)
+    return {};
   return {
     admission: {
       schemaVersion: 1,
       turnType: admitted,
+      ...(subagentRole ? { subagentRole } : {}),
       ...(origin ? { origin } : {}),
     },
   };
 }
+
+/** How long a recorded subagent role may be. It is an opaque bounded string. */
+const STORED_RUN_SUBAGENT_ROLE_MAX = 64;
 
 const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
   "running",
@@ -291,7 +310,12 @@ function decodeStoredRunAdmission(
     throw new Error(`run "${runId}" has invalid admission`);
   }
   const candidate = value as Record<PropertyKey, unknown>;
-  const allowed = new Set(["schemaVersion", "turnType", "origin"]);
+  const allowed = new Set([
+    "schemaVersion",
+    "turnType",
+    "subagentRole",
+    "origin",
+  ]);
   const ownKeys = Reflect.ownKeys(candidate);
   if (
     ownKeys.length !== Object.keys(candidate).length ||
@@ -308,9 +332,20 @@ function decodeStoredRunAdmission(
   } catch {
     throw new Error(`run "${runId}" has an invalid admission turn type`);
   }
+  if (
+    candidate.subagentRole !== undefined &&
+    (typeof candidate.subagentRole !== "string" ||
+      candidate.subagentRole.trim().length === 0 ||
+      candidate.subagentRole.length > STORED_RUN_SUBAGENT_ROLE_MAX)
+  ) {
+    throw new Error(`run "${runId}" has an invalid admission subagent role`);
+  }
   return {
     schemaVersion: 1,
     turnType,
+    ...(candidate.subagentRole === undefined
+      ? {}
+      : { subagentRole: candidate.subagentRole as string }),
     ...(candidate.origin === undefined
       ? {}
       : { origin: decodeStoredRunOrigin(candidate.origin, runId) }),
@@ -526,6 +561,11 @@ export interface BotTurnCommand {
    */
   turnType?: TurnTypeV1;
   /**
+   * The subagent role this Turn is admitted under. In-Durable-Object producers
+   * only, and only ever on a `subagent` Turn.
+   */
+  subagentRole?: string;
+  /**
    * What produced this Turn. In-Durable-Object producers only; the HTTP Turn
    * path never forwards it.
    */
@@ -553,6 +593,7 @@ export function botTurnCommandFingerprintV1(
   if (
     turnType !== "chat" ||
     command.origin !== undefined ||
+    command.subagentRole !== undefined ||
     skills.length > 0
   ) {
     return `bot-turn-command-v2:${JSON.stringify({
@@ -561,6 +602,7 @@ export function botTurnCommandFingerprintV1(
       sessionId: command.sessionId,
       text: command.text,
       turnType,
+      ...(command.subagentRole ? { subagentRole: command.subagentRole } : {}),
       ...(command.origin ? { origin: command.origin } : {}),
       ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
     })}`;

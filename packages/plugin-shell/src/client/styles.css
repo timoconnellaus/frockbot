@@ -416,6 +416,16 @@
   white-space: pre-wrap;
 }
 
+.task-chip-stop {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  color: var(--frock-danger-text);
+  font-size: var(--frock-text-xs);
+  cursor: pointer;
+  border: 1px solid var(--frock-danger-border);
+  border-radius: 8px;
+}
+
 /* Jump to latest */
 
 .jump-latest {

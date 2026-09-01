@@ -89,6 +89,8 @@ export interface FoundationResidentExecution {
   skills?: SkillRefV1[];
   /** Absent ⇒ `chat`. The resident Agent is created on this turn type. */
   turnType?: TurnTypeV1;
+  /** The subagent role the Agent's catalog is narrowed to; absent ⇒ none. */
+  subagentRole?: string;
 }
 
 /** Narrow cancellation request bound to one exact resident run. */
@@ -146,6 +148,8 @@ export interface FoundationRuntimeOptions {
    * the last word. Absent, and nothing changes for any Turn.
    */
   freshTurnHistory?: readonly LlmMessage[];
+  /** The subagent role this root's Agent is mounted under; defaults to none. */
+  subagentRole?: string;
 }
 
 /** The first-party generation a runtime with no durable Composition starts on. */
@@ -255,6 +259,7 @@ export async function createFoundationResidentRuntime(
   let agent: AgentHandle | undefined;
   let sessionId: string | undefined;
   let residentTurnType: TurnTypeV1 = "chat";
+  let residentSubagentRole: string | undefined;
   let activeRunId: string | undefined;
   let activePersist: PersistSessionEvents | undefined;
   let activeEffectAdmission:
@@ -347,6 +352,11 @@ export async function createFoundationResidentRuntime(
           if ((execution.turnType ?? "chat") !== residentTurnType) {
             throw new Error("resident Bot runtime turn type changed");
           }
+          // The role trims the same catalog the turn type does, so a resident
+          // Agent cannot serve a second role either.
+          if (execution.subagentRole !== residentSubagentRole) {
+            throw new Error("resident Bot runtime subagent role changed");
+          }
           const current = agent.agent.session.events;
           if (
             current.length !== execution.previousEvents.length ||
@@ -365,6 +375,7 @@ export async function createFoundationResidentRuntime(
         } else {
           sessionId = execution.sessionId;
           residentTurnType = execution.turnType ?? "chat";
+          residentSubagentRole = execution.subagentRole;
           activePersist = execution.persistSessionEvents;
           activeEffectAdmission = execution.admitEffect;
           const sessionStore = root.sessions as SessionStore & {
@@ -391,6 +402,9 @@ export async function createFoundationResidentRuntime(
               provider: FOUNDATION_PROVIDER,
               model: FOUNDATION_MODEL,
               ...(execution.turnType ? { turnType: execution.turnType } : {}),
+              ...(execution.subagentRole
+                ? { subagentRole: execution.subagentRole }
+                : {}),
               admitEffect: (effect) => {
                 const admit = activeEffectAdmission;
                 return admit ? admit(effect) : Promise.resolve(false);
@@ -571,6 +585,7 @@ export async function createFoundationRuntime(
     model,
     admitEffect: options.admitEffect,
     ...(options.turnType ? { turnType: options.turnType } : {}),
+    ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),
     ...(selection?.connectionId
       ? {
           modelBinding: {

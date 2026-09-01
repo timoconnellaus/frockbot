@@ -270,6 +270,12 @@ export interface FrockBotWebData {
   /** Refreshes {@link FrockBotWebData.tasks} for the active Bot. */
   loadTasks(): Promise<void>;
   /**
+   * Cancels one subagent, explicitly and with the User's authentication. The
+   * backend is the authority: the task this replaces in the list is the record
+   * it answered with, never what the click assumed.
+   */
+  stopTask(taskId: string): Promise<void>;
+  /**
    * Records one decision on one approval card. The backend is the authority:
    * this submits the command and re-reads what was recorded, so a card already
    * answered elsewhere shows that answer rather than this client's guess.

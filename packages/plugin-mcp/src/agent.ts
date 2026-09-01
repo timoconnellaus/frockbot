@@ -56,6 +56,12 @@ export const MCP_TOOL_TURN_TYPES: readonly TurnTypeV1[] = [
 ];
 
 /**
+ * A remote MCP server's tools are general work tools: an `executor` subagent
+ * gets them, and the narrow roles do not.
+ */
+export const MCP_TOOL_SUBAGENT_ROLES: readonly string[] = ["executor"];
+
+/**
  * The durable per-User ceiling on remote MCP servers. Counted over the enabled
  * Assignments of this Package, so a Bot cannot be handed a seventeenth server
  * by adding one more Assignment.
@@ -496,6 +502,7 @@ export function createMcpToolPlugin(config: {
       };
       return ctx.tools.register(definition, {
         admissionCeiling: MCP_TOOL_TURN_TYPES,
+        subagentRoleCeiling: MCP_TOOL_SUBAGENT_ROLES,
       });
     });
     return () => {

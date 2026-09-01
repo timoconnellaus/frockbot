@@ -166,6 +166,9 @@ export function createWebSearchToolDefinitionV1(
 ): ToolDefinition {
   return {
     name: WEB_SEARCH_TOOL_NAME_V1,
+    // A general work tool: the reach an `executor` subagent has, and not the
+    // narrow reach of `browserUse`, `computerUse`, or the two video roles.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Search the public web and return titles, URLs and short snippets. Use web_fetch to read a result in full.",
     inputSchema: WEB_SEARCH_INPUT_SCHEMA_V1,

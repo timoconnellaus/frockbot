@@ -1095,6 +1095,27 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.readSubagentTaskContext(request.taskId as string);
   }
 
+  /**
+   * The messages a parent has queued for one of its tasks, claimed by the
+   * child that is running it (ADR 0017).
+   *
+   * The claim marks what it hands over in the parent's own transaction, so a
+   * child that retries a step reads the marks back rather than the message.
+   */
+  async claimTaskMessages(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      taskId: rpcString(128),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.claimTaskMessages(identity, request.taskId as string);
+  }
+
   /** One terminal task outcome, recorded on the parent. Idempotent per task. */
   async settleTask(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {

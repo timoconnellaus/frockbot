@@ -52,6 +52,7 @@ import {
   encodeComputerHostRequestV1,
   type ComputerHostCancelResultV1,
   type ComputerHostControlActionV1,
+  type ComputerHostControlScopeV1,
   type ComputerHostControlResultV1,
   type ComputerHostErrorCodeV1,
   type ComputerHostFileDeleteResultV1,
@@ -462,10 +463,20 @@ export class ComputerHostClient {
     action: ComputerHostControlActionV1,
     ownerId: string,
     maxAgeSeconds: number,
-    options?: ComputerHostCallOptions,
+    options?: ComputerHostCallOptions & {
+      scope?: ComputerHostControlScopeV1;
+    },
   ): Promise<ComputerHostControlResultV1> {
     return this.json(
-      { kind: "control", action, ownerId, maxAgeSeconds },
+      {
+        kind: "control",
+        action,
+        ownerId,
+        maxAgeSeconds,
+        // Absent ⇒ `bot`: the per-tenant takeover lease. `desktop-gui` is the
+        // User-wide one a `computerUse` subagent holds the screen under.
+        ...(options?.scope === undefined ? {} : { scope: options.scope }),
+      },
       decodeComputerHostControlResultV1,
       options,
     );

@@ -14,6 +14,7 @@ import { DurableCompositionFailureLog } from "./composition-failures.js";
 import {
   botTurnCommandFingerprintV1,
   storedRunAdmissionV1,
+  storedRunSubagentRoleV1,
   storedRunTurnTypeV1,
   type BotNotificationIntent,
   type BotTurnCommand,
@@ -317,6 +318,9 @@ export class BotDurableAuthority<Snapshot> {
           // Recovery re-mounts on the recorded turn type, so the resumed Turn
           // sees the same trimmed catalog the evicted one did.
           turnType: storedRunTurnTypeV1(run),
+          ...(storedRunSubagentRoleV1(run)
+            ? { subagentRole: storedRunSubagentRoleV1(run) }
+            : {}),
           ...(run.admission?.origin ? { origin: run.admission.origin } : {}),
         },
         previousEvents: latest,
@@ -708,7 +712,11 @@ export class BotDurableAuthority<Snapshot> {
         compositionGenerationId: pin.generationId,
         configurationSnapshot: structuredClone(admittedSettings),
         previousEventCount: latestEvents.length,
-        ...storedRunAdmissionV1(command.turnType, command.origin),
+        ...storedRunAdmissionV1(
+          command.turnType,
+          command.origin,
+          command.subagentRole,
+        ),
       } satisfies StoredRunV1<Snapshot>);
       await transaction.put({
         [key]: admittedRun,
@@ -966,6 +974,9 @@ export class BotDurableAuthority<Snapshot> {
         acceptedAt: recovery.run.acceptedAt,
         text: recovery.run.input,
         turnType: storedRunTurnTypeV1(recovery.run),
+        ...(storedRunSubagentRoleV1(recovery.run)
+          ? { subagentRole: storedRunSubagentRoleV1(recovery.run) }
+          : {}),
         ...(recovery.run.admission?.origin
           ? { origin: recovery.run.admission.origin }
           : {}),

@@ -103,6 +103,31 @@ describe("the Shell's tool admission", () => {
     }
   });
 
+  test("no role widens a subagent turn: chat-only tools are absent for all five", async () => {
+    const mounted = await mount();
+    try {
+      for (const subagentRole of [
+        "executor",
+        "browserUse",
+        "computerUse",
+        "watchVideo",
+        "videoReview",
+      ]) {
+        const names = mounted.root.tools
+          .schemas({ turnType: "subagent", subagentRole })
+          .map((tool) => tool.name);
+        // The turn-type ceiling comes first and no role can reach past it: the
+        // Shell's user-facing tools are chat-only, and the hand-off is the only
+        // thing any subagent role is offered here.
+        expect(names).not.toContain(SEND_TO_USER_TOOL_V1);
+        expect(names).not.toContain(SEND_MESSAGE_ALIAS_V1);
+        expect(names).toEqual([WAKE_PARENT_TOOL_V1]);
+      }
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
   test("denies a hallucinated wake_parent on a chat turn", async () => {
     const mounted = await mount();
     try {

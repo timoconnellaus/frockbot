@@ -79,6 +79,10 @@ export function createComposioRouterPlugin(
   let runtimeContext: Context | undefined;
   const search: ToolDefinition = {
     name: "composio_search_tools",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Search the connected toolkit for exact Composio tool slugs before executing one.",
     inputSchema: {
@@ -102,6 +106,10 @@ export function createComposioRouterPlugin(
   };
   const execute: ToolDefinition = {
     name: "composio_execute_tool",
+    // A general work tool: the full toolset an `executor` subagent gets, and
+    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
+    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
+    admission: { subagentRoles: ["executor"] },
     description:
       "Execute an exact Composio tool slug returned by composio_search_tools.",
     inputSchema: {

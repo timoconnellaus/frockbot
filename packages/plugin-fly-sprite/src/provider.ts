@@ -440,11 +440,15 @@ function handle(
       },
     },
     control: {
-      acquire: async (options) =>
-        lease(await computer.takeControl(options?.signal)),
-      renew: async (_current, options) =>
-        lease(await computer.refreshControl(options?.signal)),
-      release: (_current, options) => computer.releaseControl(options?.signal),
+      // The scope and the owner travel with the call, so one Computer surface
+      // serves both leases: the per-tenant human takeover it always did, and
+      // the User-wide `desktop-gui` lease a `computerUse` subagent holds.
+      acquire: async (request, options) =>
+        lease(await computer.takeControl(options?.signal, request)),
+      renew: async (_current, request, options) =>
+        lease(await computer.refreshControl(options?.signal, request)),
+      release: (_current, request, options) =>
+        computer.releaseControl(options?.signal, request),
     },
     close: () => Promise.resolve(),
   };

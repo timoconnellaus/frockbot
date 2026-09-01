@@ -29,6 +29,17 @@ export const HOME_ROOT = "/home/box";
 export const DATA_ROOT = `${HOME_ROOT}/agent-data`;
 export const RUNTIME_ROOT = `${HOME_ROOT}/.frockbot`;
 export const BOTS_ROOT = `${RUNTIME_ROOT}/bots`;
+
+/**
+ * The lease key a User-wide `desktop-gui` lease is held under.
+ *
+ * It sits beside the tenant directories rather than inside one, because the
+ * desktop it serializes is the box's, not a tenant's: one Computer serves all
+ * of a User's Bots and there is one screen on it. The `.` makes it unreachable
+ * from `computerBotKeyV1`, whose keys are `[a-z0-9-]+` followed by a hex
+ * digest, so no tenant can ever be handed this directory by accident.
+ */
+export const DESKTOP_GUI_LEASE_KEY = "desktop-gui.lease";
 export const WORKSPACES_ROOT = "/workspaces";
 /**
  * The shared scratch every Bot of one User can reach, and the one directory on
@@ -501,7 +512,10 @@ case "$ACTION" in
   acquire)
     EXISTING=$(current_owner)
     if [ "$EXISTING" = "$OWNER" ]; then touch "$LEASE"; exit 0; fi
-    if [ -n "$EXISTING" ] && is_fresh; then echo "This agent's computer is already under human control" >&2; exit 73; fi
+    # The refusal names the holder: "busy" is not something a caller can act on
+    # and "held by <owner>" is — the owner is the task id a computerUse
+    # dispatch leased the desktop under.
+    if [ -n "$EXISTING" ] && is_fresh; then echo "This computer's control lease is held by $EXISTING" >&2; exit 73; fi
     TMP=$(mktemp "$BOT/human-control.XXXXXX")
     printf '%s\n' "$OWNER" > "$TMP"
     chmod 600 "$TMP"

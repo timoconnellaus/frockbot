@@ -185,6 +185,8 @@ import {
   type TaskStorageV1,
 } from "@frockbot/plugin-subagents/store";
 import {
+  taskDesktopLeaseOwnerV1,
+  TASK_DESKTOP_LEASE_MAX_AGE_SECONDS_V1,
   taskPromptDigestV1,
   TASK_BLOCKING_POLL_MS_V1,
   TASK_BLOCKING_TIMEOUT_MS_V1,
@@ -216,6 +218,14 @@ import type {
   SubagentStopOutcomeV1,
   SubagentsRuntimeHostV1,
 } from "@frockbot/plugin-subagents/agent";
+import {
+  COMPUTER_HOST_PROTOCOL_VERSION,
+  COMPUTER_HOST_ROUTES,
+  COMPUTER_HOST_TOKEN_HEADER,
+  decodeComputerHostControlResultV1,
+  decodeComputerHostProblemV1,
+  encodeComputerHostRequestV1,
+} from "@frockbot/computer-host-protocol";
 import {
   taskViewV1,
   type TaskListViewV1,
@@ -2187,6 +2197,16 @@ export class ShellBotBackendContribution {
       // catalog it is offered is narrowed by this turn type.
       compositionGenerationId: input.compositionGenerationId,
       turnType: input.command.turnType ?? "chat",
+      // The role half of the same admission. A `subagent` Turn carries one; no
+      // other turn type ever does.
+      ...(input.command.subagentRole
+        ? { subagentRole: input.command.subagentRole }
+        : {}),
+      // In a Subagent Durable Object, which task this Turn *is*. It is what
+      // lets the child claim the messages its parent queued for it.
+      ...(input.command.origin?.kind === "subagent"
+        ? { subagentTaskId: input.command.origin.taskId }
+        : {}),
     };
     // The message this Turn is answering, when it is a `channel` Turn. It is
     // read back off durable storage rather than carried in the command, so a
@@ -2248,6 +2268,10 @@ export class ShellBotBackendContribution {
                   selfBotId: input.identity.botId,
                 }),
               }
+            : {}),
+          // And the role it was admitted under, read back the same way.
+          ...(input.command.subagentRole
+            ? { subagentRole: input.command.subagentRole }
             : {}),
           // Durable Stop fences every provider and tool effect immediately
           // before it is used, in the Bot Durable Object's own transaction.
@@ -3079,6 +3103,158 @@ export class ShellBotBackendContribution {
     };
   }
 
+  /**
+   * The User-wide `desktop-gui` lease, held at the Computer host.
+   *
+   * The Bot Durable Object cannot serialize across a User's Bots — they are
+   * separate objects — and the User Durable Object owns the Computer
+   * assignment but not the desktop. The host's `control` op is already the
+   * single writer that serializes human takeover, so it is where a second
+   * opinion cannot exist (plan decision 3): the Bot records the intent, the
+   * host grants or refuses, and the refusal names the holder.
+   *
+   * Absent when this deployment has no Computer host — a Bot with no Computer
+   * has no desktop to serialize, and a `computerUse` task is then bounded only
+   * by this Bot's own lease record.
+   */
+  /**
+   * The origin the Computer host service binding is addressed on. A service
+   * binding routes by binding, not by name, so the origin is only a syntactic
+   * requirement of `Request`.
+   */
+  private static readonly COMPUTER_HOST_ORIGIN_V1 =
+    "http://computer-host.internal";
+
+  private async desktopLease(
+    identity: BotIdentity,
+    action: "acquire" | "release",
+    ownerId: string,
+  ): Promise<
+    | { status: "granted"; expiresAt?: string }
+    | { status: "refused"; reason: string }
+    | { status: "unavailable" }
+  > {
+    const fetcher = this.env.COMPUTER_HOST;
+    const hostToken = this.env.COMPUTER_HOST_TOKEN;
+    if (!fetcher || !hostToken) return { status: "unavailable" };
+    const body = JSON.stringify(
+      encodeComputerHostRequestV1({
+        version: COMPUTER_HOST_PROTOCOL_VERSION,
+        effectId: `${action}:${ownerId}`,
+        identity: { userId: identity.userId },
+        tenant: { botId: identity.botId },
+        credentialRef: `sprites:user:${identity.userId}`,
+        operation: {
+          kind: "control",
+          action,
+          ownerId,
+          maxAgeSeconds: TASK_DESKTOP_LEASE_MAX_AGE_SECONDS_V1,
+          scope: "desktop-gui",
+        },
+      }),
+    );
+    let response: Response;
+    try {
+      response = await fetcher.fetch(
+        new Request(
+          `${ShellBotBackendContribution.COMPUTER_HOST_ORIGIN_V1}${COMPUTER_HOST_ROUTES.control}`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              [COMPUTER_HOST_TOKEN_HEADER]: hostToken,
+            },
+            body,
+          },
+        ),
+      );
+    } catch {
+      // A host that cannot be reached has granted nothing and holds nothing.
+      return { status: "unavailable" };
+    }
+    if (!response.ok) {
+      // 409 is the host's "somebody else holds this", and its message names
+      // the holder — which is the whole point of leasing under an owner derived
+      // from the Bot and the task.
+      let message = "";
+      try {
+        message = decodeComputerHostProblemV1(await response.json()).message;
+      } catch {
+        message = "";
+      }
+      if (response.status === 409) {
+        return {
+          status: "refused",
+          reason: message || "the desktop is held by another subagent",
+        };
+      }
+      return { status: "unavailable" };
+    }
+    try {
+      const result = decodeComputerHostControlResultV1(await response.json());
+      return {
+        status: "granted",
+        ...(result.expiresAt === undefined
+          ? {}
+          : { expiresAt: result.expiresAt }),
+      };
+    } catch {
+      return { status: "granted" };
+    }
+  }
+
+  /**
+   * Takes the desktop for one `computerUse` task, in the constitution's order:
+   * the intent is already durable (`admit` wrote `task-lease:desktop`), the
+   * host is asked, and only a granted lease is recorded back onto the intent.
+   */
+  private async acquireDesktopForTask(
+    identity: BotIdentity,
+    taskId: string,
+  ): Promise<{ status: "held" } | { status: "refused"; reason: string }> {
+    const outcome = await this.desktopLease(
+      identity,
+      "acquire",
+      taskDesktopLeaseOwnerV1(identity.botId, taskId),
+    );
+    if (outcome.status === "refused") {
+      return { status: "refused", reason: outcome.reason };
+    }
+    // `unavailable` is a deployment with no Computer host. The Bot's own lease
+    // record still holds — one `computerUse` task per Bot — and there is no
+    // desktop to contend for.
+    await this.tasks.recordDesktopLease(
+      identity.botId,
+      taskId,
+      outcome.status === "granted" ? outcome.expiresAt : undefined,
+    );
+    return { status: "held" };
+  }
+
+  /**
+   * Releases the desktop this task held, if it held it. Called on every path
+   * that settles a task — completion, failure, `task_stop`, and the deadline
+   * reconciliation — so the screen is never held by something that has ended.
+   */
+  private async releaseDesktopForTask(
+    identity: BotIdentity,
+    taskId: string,
+  ): Promise<void> {
+    const released = await this.tasks.releaseDesktopLease(taskId);
+    if (!released) return;
+    try {
+      await this.desktopLease(
+        identity,
+        "release",
+        released.ownerId ?? taskDesktopLeaseOwnerV1(identity.botId, taskId),
+      );
+    } catch {
+      // The host lease lapses on its own. A release that could not be
+      // delivered delays the next `computerUse` task by at most the lease's
+      // own age; it never leaves the record claiming a desktop this Bot holds.
+    }
+  }
+
   /** The Bot's task list, as the gateway route reads it. */
   async listTasks(identity: BotIdentity): Promise<TaskListViewV1> {
     await this.validateIdentity(identity);
@@ -3162,6 +3338,20 @@ export class ShellBotBackendContribution {
         failure: reservation.reason,
       });
       return { status: "refused", reason: reservation.reason };
+    }
+    // The desktop, for a `computerUse` task only, and after the intent this
+    // Bot already recorded: intent → acquire → dispatch. A refusal here is a
+    // refusal of the dispatch, and it names the holder.
+    if (admission.record.type === "computerUse") {
+      const desktop = await this.acquireDesktopForTask(identity, taskId);
+      if (desktop.status === "refused") {
+        await this.settleTask(identity, taskId, {
+          status: "failed",
+          settledAt: new Date().toISOString(),
+          failure: desktop.reason,
+        });
+        return { status: "refused", reason: desktop.reason };
+      }
     }
     const anchorTaskId = taskAnchorIdV1(admission.record.childSessionId);
     const runTask: SubagentRunTaskRequestV1 = {
@@ -3286,6 +3476,12 @@ export class ShellBotBackendContribution {
     outcome: TaskOutcomeV1,
   ): Promise<{ status: "settled" | "replayed" }> {
     await this.authority.assertIdentity(identity);
+    // The desktop goes back *before* the record settles, because the record is
+    // what says this task holds it: settling first would drop the lease record
+    // and leave the host lease held by a task that has ended. A task that held
+    // nothing releases nothing, so this is a no-op on every other path and on
+    // a replayed settle.
+    await this.releaseDesktopForTask(identity, taskId);
     const settled = await this.tasks.settle(taskId, outcome);
     if (settled.status === "settled") {
       try {
@@ -3447,7 +3643,9 @@ export class ShellBotBackendContribution {
       ...(record.outcome?.failure === undefined
         ? {}
         : { failure: record.outcome.failure }),
-      queuedMessages: (await this.tasks.messages(taskId)).length,
+      // What is *waiting*, not what was ever sent: a message the child has
+      // already read is not something the Bot is still waiting on.
+      queuedMessages: (await this.tasks.pendingMessages(taskId)).length,
     };
   }
 
@@ -3642,6 +3840,46 @@ export class ShellBotBackendContribution {
     return { status: "stopped" };
   }
 
+  /**
+   * The parent's half of message delivery: hand the child everything queued
+   * for one task and mark it delivered, in one transaction.
+   *
+   * Authenticated as every other task RPC is. The claim is idempotent by
+   * construction — a second claim reads the marks back and answers nothing —
+   * so a child that retries a step after an eviction does not read the same
+   * instruction twice.
+   */
+  async claimTaskMessages(
+    identity: BotIdentity,
+    taskId: string,
+  ): Promise<{ messages: { seq: number; message: string }[] }> {
+    await this.authority.assertIdentity(identity);
+    const claimed = await this.tasks.claimMessages(taskId, new Date());
+    return {
+      messages: claimed.map((entry) => ({
+        seq: entry.seq,
+        message: entry.message,
+      })),
+    };
+  }
+
+  /**
+   * The child's half: ask the parent for what it has queued, using the parent
+   * this child was handed when it accepted the task.
+   *
+   * A parent that cannot be reached answers nothing; the messages are still
+   * queued, still undelivered, and the next step claims them.
+   */
+  private async claimParentTaskMessages(
+    taskId: string,
+  ): Promise<readonly { seq: number; message: string }[]> {
+    const binding = this.subagentBinding;
+    if (!binding) return [];
+    const context = await this.readSubagentTaskContext(taskId);
+    if (!context) return [];
+    return binding.claimMessagesOnParent(context.parent, taskId);
+  }
+
   /** What a child holds for one task, for the parent's reconciliation. */
   async readSubagentTaskContext(
     taskId: string,
@@ -3689,6 +3927,11 @@ export class ShellBotBackendContribution {
           acceptedAt: new Date().toISOString(),
           text: context.prompt,
           turnType: "subagent",
+          // The role is the task's type. It is the second ceiling on the
+          // child's catalog: a `browserUse` child is never offered
+          // `computer_exec`, and the durable run records the role so a
+          // recovered child re-mounts the same catalog.
+          subagentRole: context.type,
           origin: {
             kind: "subagent",
             taskId: context.taskId,
@@ -3779,12 +4022,23 @@ export class ShellBotBackendContribution {
     compositionGenerationId: string,
     turnType: TurnTypeV1,
     models: () => readonly SubagentModelOptionV1[],
+    /** Present only in a child: the task this Turn is running. */
+    childTaskId?: string,
   ): SubagentsRuntimeHostV1 {
     return {
       botId: identity.botId,
       writer: turn,
       turnType,
       models,
+      ...(childTaskId
+        ? {
+            taskId: childTaskId,
+            // The seam that makes `task_message` delivery rather than
+            // queueing: the child claims what its parent queued on its way
+            // into each step, and the parent marks the claim durably.
+            drainMessages: () => this.claimParentTaskMessages(childTaskId),
+          }
+        : {}),
       dispatch: (request) =>
         this.dispatchSubagentTask(
           identity,
@@ -3865,6 +4119,10 @@ export class ShellBotBackendContribution {
        */
       compositionGenerationId?: string;
       turnType?: TurnTypeV1;
+      /** The subagent role, on a `subagent` Turn that was admitted with one. */
+      subagentRole?: string;
+      /** The task a child Turn is running, in a Subagent Durable Object. */
+      subagentTaskId?: string;
     },
     /**
      * What this Turn is, as the Contributions that care need it. The Channels
@@ -4052,6 +4310,7 @@ export class ShellBotBackendContribution {
                 turn.compositionGenerationId,
                 turn.turnType ?? "chat",
                 () => subagentModels,
+                turn.subagentTaskId,
               ),
             }
           : {}),
