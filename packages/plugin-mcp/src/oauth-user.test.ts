@@ -269,12 +269,13 @@ async function fixture(options: WorldOptions = {}) {
       version: "0.0.1",
     },
   });
+  let id = 0;
+  let clock = Date.parse("2026-09-01T00:00:00.000Z");
   const credentials = createCredentialUserBackendContribution({
     storage,
     keyring: keyring(),
+    now: () => clock,
   });
-  let id = 0;
-  let clock = Date.parse("2026-09-01T00:00:00.000Z");
   const mcp = createMcpUserBackendContribution({
     storage,
     settings,
