@@ -20,9 +20,10 @@
 //     never delivers the same hand-off twice.
 //
 // `PendingBotInputV1` is deliberately wider than Routines. The `wake` variant is
-// the one this slice produces; the `approval` variant is decoded and has no
-// producer, so the approval-card slice adds a second producer rather than a
-// second queue.
+// the one this slice produced; the `approval` variant is the approval card's,
+// and the `machine-result` variant is the registered machine's. Each new
+// producer widens this union rather than opening a second queue: two queues
+// would mean two drains, two receipts, and two chances to double-deliver.
 import {
   isRoutineIdV1,
   RoutineDecodeError,
@@ -120,12 +121,40 @@ export interface RoutinePendingApprovalV1 {
   createdAt: string;
 }
 
+/**
+ * A machine command that has finished, waiting to be told to the Bot.
+ *
+ * The third variant, and the reason there is not a second queue: `plugin-shell`
+ * already drains this one at exactly two points and de-duplicates on an id, so
+ * a machine result rides the same rails a Routine hand-off and an approval
+ * decision do. It carries a *preview* and never the output — the full result is
+ * read on demand with `machine_command_check`, so a megabyte of stdout can
+ * never push a person's own words out of the next Turn's context.
+ */
+export interface RoutinePendingMachineResultV1 {
+  schemaVersion: 1;
+  kind: "machine-result";
+  commandId: string;
+  machineId: string;
+  outcome: "ok" | "error" | "refused" | "timeout";
+  preview: string;
+  createdAt: string;
+}
+
+/** The longest preview a machine-result input carries. */
+export const MACHINE_RESULT_PREVIEW_MAX_V1 = 400;
+
 /** One durable input the Bot's next conversational Turn is owed. */
-export type PendingBotInputV1 = RoutinePendingWakeV1 | RoutinePendingApprovalV1;
+export type PendingBotInputV1 =
+  | RoutinePendingWakeV1
+  | RoutinePendingApprovalV1
+  | RoutinePendingMachineResultV1;
 
 /** The id one pending input is keyed and de-duplicated by. */
 export function pendingBotInputIdV1(input: PendingBotInputV1): string {
-  return input.kind === "wake" ? input.wakeId : input.approvalId;
+  if (input.kind === "wake") return input.wakeId;
+  if (input.kind === "approval") return input.approvalId;
+  return `machine-result:${input.commandId}`;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -231,6 +260,43 @@ export function decodePendingBotInputV1(
       createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
     };
   }
+  if (candidate.kind === "machine-result") {
+    routineExactKeys(
+      candidate,
+      [
+        "schemaVersion",
+        "kind",
+        "commandId",
+        "machineId",
+        "outcome",
+        "preview",
+        "createdAt",
+      ],
+      [],
+      label,
+    );
+    if (
+      candidate.outcome !== "ok" &&
+      candidate.outcome !== "error" &&
+      candidate.outcome !== "refused" &&
+      candidate.outcome !== "timeout"
+    ) {
+      throw new RoutineDecodeError(`${label} outcome is invalid`);
+    }
+    return {
+      schemaVersion: 1,
+      kind: "machine-result",
+      commandId: routineText(candidate.commandId, 256, `${label} commandId`),
+      machineId: routineText(candidate.machineId, 256, `${label} machineId`),
+      outcome: candidate.outcome,
+      preview: routineText(
+        candidate.preview,
+        MACHINE_RESULT_PREVIEW_MAX_V1,
+        `${label} preview`,
+      ),
+      createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
+    };
+  }
   if (candidate.kind !== "wake") {
     throw new RoutineDecodeError(`${label} kind is invalid`);
   }
@@ -322,8 +388,16 @@ export function pendingBotInputPreambleV1(
       );
       continue;
     }
+    if (input.kind === "approval") {
+      lines.push(
+        `[Approval] The decision on "${input.approvalId}" is ${input.decision}.`,
+        "",
+      );
+      continue;
+    }
     lines.push(
-      `[Approval] The decision on "${input.approvalId}" is ${input.decision}.`,
+      `[Machine] Command "${input.commandId}" on machine ${input.machineId} finished ${input.outcome}: ${input.preview}`,
+      `Call machine_command_check with commandId "${input.commandId}" to read the whole result.`,
       "",
     );
   }

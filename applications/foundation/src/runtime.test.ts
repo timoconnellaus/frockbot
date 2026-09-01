@@ -104,6 +104,7 @@ describe("foundation application", () => {
         "routines",
         "skills",
         "subagents",
+        "user-machine",
       ],
       client: [
         "ui-theme",

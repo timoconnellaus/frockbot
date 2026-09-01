@@ -54,10 +54,40 @@ describe("the classifier table", () => {
     });
   }
 
+  test("the registered machine's tools audit against the machine they named", () => {
+    // Register rows 48 and 49. Every `machine_*` tool carries `machineId` on
+    // its input verbatim, which is what lets the table answer `machine:<id>`
+    // without knowing anything about the Package that produced the call.
+    expect(
+      auditKindForToolV1("machine_exec", {
+        machineId: "994dc2ee-1",
+        command: "git status",
+      }),
+    ).toEqual({ kind: "shell", target: "machine:994dc2ee-1" });
+    for (const name of [
+      "machine_read",
+      "machine_copy_to_computer",
+      "machine_copy_from_computer",
+    ]) {
+      expect(
+        auditKindForToolV1(name, { machineId: "994dc2ee-1", path: "/tmp/x" }),
+      ).toEqual({ kind: "file", target: "machine:994dc2ee-1" });
+    }
+    // Reading the registry and reading a command's own result perform no
+    // external effect, so they are not audited at all: an audit surface that
+    // logged every tool call would be a transcript.
+    for (const name of ["machine_list", "machine_command_check"]) {
+      expect(auditKindForToolV1(name, { commandId: "c1" })).toBeUndefined();
+    }
+    // A machine tool that named no machine could not have run; the row says
+    // so by falling back to the target it did name.
+    expect(auditKindForToolV1("machine_exec", { command: "ls" })).toEqual({
+      kind: "shell",
+      target: "computer",
+    });
+  });
+
   test("a call naming a registered machine is audited against that machine", () => {
-    // `machine:<id>` is reserved rather than reachable: nothing writes
-    // `machineId` today, and the shape is honoured now so the table does not
-    // change when registered machines land (register §2.16).
     expect(
       auditKindForToolV1("computer_exec", {
         command: "ls",

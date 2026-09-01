@@ -5,6 +5,10 @@ import type {
 } from "@frockbot/plugin-channels/connect";
 import type { ChannelOutboundReceiptV1 } from "@frockbot/plugin-channels/connector";
 import { WorkerEntrypoint } from "cloudflare:workers";
+import {
+  decodeMachineResultDeliveryV1,
+  type MachineResultDeliveryV1,
+} from "@frockbot/plugin-user-machine/delivery";
 import { decodeSkillRefsV1 } from "@frockbot/kernel-contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import {
@@ -308,6 +312,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     executeRoutineCommand: (request) => rpc.executeRoutineCommand(request),
     listRoutineRuns: (request) => rpc.listRoutineRuns(request),
     deliverRoutineHook: (request) => rpc.deliverRoutineHook(request),
+    deliverMachineResult: (request) => rpc.deliverMachineResult(request),
     readRoutineRun: (request) => rpc.readRoutineRun(request),
     listRoutineInbox: (request) => rpc.listRoutineInbox(request),
     executeRoutineInboxCommand: (request) =>
@@ -454,8 +459,43 @@ interface UserMachineRpc {
   pollMachine(input: unknown): Promise<unknown>;
   claimMachineCommand(input: unknown): Promise<unknown>;
   recordMachineResult(input: unknown): Promise<unknown>;
+  takeMachineDeliveries(input: unknown): Promise<unknown>;
   listMachines(input: unknown): Promise<unknown>;
   revokeMachine(input: unknown): Promise<unknown>;
+}
+
+/**
+ * Drain a User's finished machine commands into the Bots that asked for them.
+ *
+ * Best effort by construction. The result is already durable and
+ * `machine_command_check` reads it in full, so a Bot that has since been
+ * deleted — or one that cannot be reached this second — costs a preamble line
+ * and no fact, and must never fail the machine's own POST.
+ */
+async function deliverMachineResults(env: Env, userId: string): Promise<void> {
+  let deliveries: MachineResultDeliveryV1[];
+  try {
+    deliveries = (
+      (await userMachineStub(env, userId).takeMachineDeliveries({
+        schemaVersion: 1,
+        userId,
+      })) as unknown[]
+    ).map((value) => decodeMachineResultDeliveryV1(value));
+  } catch {
+    return;
+  }
+  for (const delivery of deliveries) {
+    try {
+      await botStateStub(env, userId, delivery.botId).deliverMachineResult({
+        schemaVersion: 1,
+        userId,
+        botId: delivery.botId,
+        delivery,
+      });
+    } catch {
+      // See above: the durable answer is already recorded.
+    }
+  }
 }
 
 function userMachineStub(env: Env, userId: string): UserMachineRpc {
@@ -1385,8 +1425,8 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             }),
           ),
         ),
-      recordMachineResult: async (userId, call) =>
-        decodeMachineResultReceiptV1(
+      recordMachineResult: async (userId, call) => {
+        const receipt = decodeMachineResultReceiptV1(
           rpcJsonSnapshot(
             await userMachineStub(env, userId).recordMachineResult({
               schemaVersion: 1,
@@ -1398,7 +1438,15 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
               result: call.result,
             }),
           ),
-        ),
+        );
+        // The Bot that asked is told here rather than by the User Durable
+        // Object: a Durable Object holding a live reference to another one
+        // cannot be evicted while it does, and this registry is built to
+        // depend on neither presence nor residency. The outbox is durable, so
+        // the hand-off is not lost by being made from out here.
+        await deliverMachineResults(env, userId);
+        return receipt;
+      },
       listMachines: async (userId) =>
         decodeMachineListViewV1(
           rpcJsonSnapshot(

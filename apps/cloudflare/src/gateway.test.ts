@@ -822,6 +822,18 @@ class MemoryConfiguration
     return this.routineStore(request.botId).deliverHook(request.delivery);
   }
 
+  /** Machine deliveries reach a real Bot Durable Object, never this stub. */
+  readonly machineDeliveries: Array<
+    Parameters<BotConfigurationBinding["deliverMachineResult"]>[0]
+  > = [];
+
+  async deliverMachineResult(
+    request: Parameters<BotConfigurationBinding["deliverMachineResult"]>[0],
+  ): Promise<{ status: "accepted" }> {
+    this.machineDeliveries.push(request);
+    return { status: "accepted" };
+  }
+
   private readonly routineInboxes = new Map<string, RoutineInboxStore>();
 
   private routineInbox(botId: string): RoutineInboxStore {

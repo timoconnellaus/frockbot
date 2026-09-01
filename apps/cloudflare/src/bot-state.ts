@@ -104,6 +104,10 @@ import {
   type ChannelInputV1,
 } from "@frockbot/plugin-channels/shared";
 import { channelRunIdV1 } from "@frockbot/plugin-shell/backend-channels";
+import {
+  decodeMachineResultDeliveryV1,
+  type MachineResultDeliveryV1,
+} from "@frockbot/plugin-user-machine/delivery";
 import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import type { BotSkillCatalogReaderV1 } from "@frockbot/plugin-shell/backend-skills";
@@ -1205,6 +1209,30 @@ export class BotState extends DurableObject<BotStateEnv> {
       // which run the delivery is owed to before the Turn has started.
       runId: channelRunIdV1(delivery.messageId),
     };
+  }
+
+  /**
+   * One finished machine command, handed over by the Worker that answered the
+   * machine.
+   *
+   * It names the Bot the command record named — a Bot cannot be told about a
+   * command it never asked for, because it is the command that carries the
+   * `botId`.
+   */
+  async deliverMachineResult(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      delivery: rpcDecoded(decodeMachineResultDeliveryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.deliverMachineResult(
+      request.delivery as MachineResultDeliveryV1,
+    );
   }
 
   /** One Routine's bounded run log, newest first. */

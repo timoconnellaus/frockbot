@@ -5,13 +5,18 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
+    "./approval": "./src/approval.ts",
     "./backend": "./src/backend.ts",
+    "./delivery": "./src/delivery.ts",
     "./frockbot.json": "./frockbot.json",
+    "./intent": "./src/intent.ts",
     "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
     "./pairing": "./src/pairing.ts",
     "./storage-keys": "./src/storage-keys.ts",
     "./store": "./src/store.ts",
+    "./target": "./src/target.ts",
     "./testing": "./src/testing.ts",
     "./user": "./src/user.ts"
   },
@@ -23,10 +28,13 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@frockbot/kernel-agent-loop": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/machine-protocol": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
+    "@frockbot/plugin-tools": "workspace:*",
     "@types/bun": "1.4.0",
     "typescript": "5.9.3"
   },

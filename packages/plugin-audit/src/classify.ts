@@ -45,7 +45,25 @@ const FILE_TOOLS = new Set([
   "memory_forget",
   "skill_write",
   "package_author",
+  // The registered machine's file verbs (register rows 48, 49). They are file
+  // effects on "a separate filesystem" — the User's own laptop — which is why
+  // their target is `machine:<id>` and never `computer`.
+  "machine_read",
+  "machine_copy_to_computer",
+  "machine_copy_from_computer",
 ]);
+
+/**
+ * The registered machine's shell verb.
+ *
+ * It is a `shell` row for the same reason `computer_exec` is: §2.16 says the
+ * machine runs `Shell`, row 30 audits "every shell command … with turn id and
+ * target", and the target is what tells the two apart. It is never
+ * `background`: a machine command outlives its Turn by construction — the
+ * approval ends the Turn before anything runs — so there is no foreground case
+ * for a `process` row to be the exception to.
+ */
+const MACHINE_SHELL_TOOL = "machine_exec";
 
 const MCP_TOOL = /^mcp__([a-zA-Z0-9_]{1,64})__(.{1,96})$/;
 const MACHINE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -59,9 +77,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
  *
  * GrokBot reaches Tim's laptop by passing `machineId` to `Shell`, and its
  * `audit.jsonl` records which target the command ran on
- * (`grokbot-computer.md:361`). FrockBot has no registered-machine Capability
- * yet, so nothing writes `machineId` today — but the shape is honoured now,
- * which is what makes `machine:<id>` a reservation rather than a promise.
+ * (`grokbot-computer.md:361`). `plugin-user-machine` carries `machineId` on
+ * every one of its tool inputs verbatim, for exactly this reason: the target a
+ * command ran on is read off the call, and this function did not have to learn
+ * anything about the Package to say so.
  */
 function machineTarget(input: unknown): string | undefined {
   if (!isObject(input)) return undefined;
@@ -93,6 +112,11 @@ export function auditKindForToolV1(
     const background =
       isObject(input) && input.background === true ? "process" : "shell";
     return { kind: background, target: onComputer };
+  }
+  if (name === MACHINE_SHELL_TOOL) {
+    // No `machineId` on the input is not a machine command; it is a call that
+    // could not have run, and it is audited against the target it named.
+    return { kind: "shell", target: onComputer };
   }
   if (name === "computer_browser") {
     return { kind: "browser", target: onComputer };

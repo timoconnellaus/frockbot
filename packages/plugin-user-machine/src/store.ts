@@ -542,6 +542,13 @@ export async function recordMachineResultV1(
 ): Promise<{
   receipt: MachineResultReceiptV1;
   result: MachineCommandResultV1;
+  /**
+   * The command the result answers, present only on the write that recorded
+   * it. The queue entry is deleted in the same transaction, so this is the one
+   * moment the Bot that asked is still nameable — and a replay must not deliver
+   * a second time, which is exactly why it is absent on one.
+   */
+  command?: MachineCommandV1;
 }> {
   const result = decodeMachineCommandResultV1(input, "machine command result");
   return storage.transaction(async (transaction) => {
@@ -575,8 +582,28 @@ export async function recordMachineResultV1(
         commandId: result.commandId,
       },
       result,
+      command: entry.command,
     };
   });
+}
+
+/**
+ * The two counters a dispatch quota is arithmetic over, for one machine.
+ *
+ * Read by the tool *before* it asks a person anything: a card the User approves
+ * and the queue then refuses is a question that wasted their attention, so the
+ * refusal happens where the Bot can still say something useful about it.
+ */
+export async function machineQuotaSnapshotV1(
+  storage: MachineStorageWritesV1,
+  machineId: string,
+  now: number | Date,
+): Promise<{ queuedCommands: number; commandsToday: number }> {
+  const queue = await readQueueV1(storage, machineId);
+  return {
+    queuedCommands: queue.length,
+    commandsToday: await readUsageV1(storage, now),
+  };
 }
 
 export async function readMachineResultV1(
