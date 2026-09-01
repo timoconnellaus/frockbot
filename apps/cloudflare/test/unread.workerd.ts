@@ -26,6 +26,7 @@ interface UnreadRpc {
     unread: boolean;
     manuallyUnread: boolean;
     lastActivityCursor?: string;
+    lastMessage?: { text: string; at: string; role: "assistant" | "user" };
   }>;
   executeUnreadCommand(input: unknown): Promise<{
     status: string;
@@ -81,6 +82,10 @@ describe("per-Bot unread in Workerd", () => {
     // badge advanced anyway.
     expect(settled).toMatchObject({ count: 2, capped: false, unread: true });
     expect(settled.lastActivityCursor).toContain("run-index:");
+    expect(settled.lastMessage).toMatchObject({
+      text: "Ollama reply",
+      role: "assistant",
+    });
 
     // THE EVICTION. The count is derived from durable state, not from anything
     // the object was holding.
@@ -88,6 +93,7 @@ describe("per-Bot unread in Workerd", () => {
     expect(await unreadRpc(name).readUnread(identity)).toMatchObject({
       count: 2,
       unread: true,
+      lastMessage: { text: "Ollama reply", role: "assistant" },
     });
 
     const receipt = await unreadRpc(name).executeUnreadCommand({
@@ -163,7 +169,10 @@ describe("per-Bot unread in Workerd", () => {
       },
     });
     const before = await unreadRpc(name).readUnread(identity);
-    expect(before).toMatchObject({ count: 1 });
+    expect(before).toMatchObject({
+      count: 1,
+      lastMessage: { text: "Ollama reply", role: "assistant" },
+    });
 
     // Put the settled Turn back where an eviction mid-flight leaves one: an
     // active run, still `running`, with its durable events already recorded.
@@ -189,5 +198,6 @@ describe("per-Bot unread in Workerd", () => {
     const after = await unreadRpc(name).readUnread(identity);
     expect(after).toMatchObject({ count: 1 });
     expect(after.lastActivityCursor).toBe(before.lastActivityCursor);
+    expect(after.lastMessage).toEqual(before.lastMessage);
   });
 });

@@ -37,23 +37,12 @@
   align-self: flex-start;
 }
 
-.flock-sidebar-heading {
+.flock-list-actions {
   display: flex;
-  height: 32px;
+  min-height: 28px;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 4px 0 10px;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-xs);
-  font-weight: 700;
-  letter-spacing: var(--frock-tracking-eyebrow);
-  text-transform: uppercase;
-}
-
-.flock-heading-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  justify-content: flex-end;
+  padding: 0 4px;
 }
 
 .flock-manage,
@@ -74,10 +63,31 @@
   color: var(--frock-text);
 }
 
+.flock-groups,
+.flock-group,
 .flock-rows {
   display: grid;
+}
+
+.flock-groups {
+  gap: 8px;
+}
+
+.flock-group {
   gap: 2px;
-  padding-top: 4px;
+}
+
+.flock-group-heading {
+  margin: 0;
+  padding: 7px 10px 3px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+  font-weight: 600;
+  line-height: var(--frock-leading-tight);
+}
+
+.flock-rows {
+  gap: 2px;
 }
 
 .flock-bot-row {
@@ -140,12 +150,42 @@
   line-height: var(--frock-leading-tight);
 }
 
+.flock-bot-primary {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.flock-bot-primary strong {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.flock-bot-primary time {
+  flex: 0 0 auto;
+  color: var(--frock-text-subtle);
+  font-size: var(--frock-text-xs);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
 .flock-bot-copy strong,
 .flock-bot-copy small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.flock-bot-row.unread .flock-bot-copy strong,
+.flock-bot-row.unread .flock-bot-copy small,
+.flock-bot-row.unread .flock-bot-primary time {
+  font-weight: 700;
+}
+
+.flock-create-button {
+  flex: 0 0 auto;
 }
 
 .flock-bot-copy strong {
@@ -157,6 +197,12 @@
 .flock-bot-copy small {
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
+}
+
+.flock-bot-indicators {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .flock-bot-dot {

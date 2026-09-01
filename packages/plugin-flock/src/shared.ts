@@ -148,6 +148,8 @@ export interface BotIdentityViewV1 {
   name: string;
   namedBy: BotNameProvenanceV1;
   hiddenFromSidebar: boolean;
+  /** Purely organisational sidebar group; never part of Bot instructions. */
+  label?: string;
   title?: string;
 }
 
@@ -662,7 +664,7 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
   exact(
     value,
     ["schemaVersion", "botId", "name", "namedBy", "hiddenFromSidebar"],
-    ["title"],
+    ["label", "title"],
   );
   if (value.schemaVersion !== 1 || typeof value.hiddenFromSidebar !== "boolean")
     throw new FlockDecodeError("Bot identity is invalid");
@@ -672,6 +674,9 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
     name: boundedText(value.name, "name", 100),
     namedBy: nameProvenance(value.namedBy),
     hiddenFromSidebar: value.hiddenFromSidebar,
+    ...(value.label === undefined
+      ? {}
+      : { label: boundedText(value.label, "label", 120) }),
     ...(value.title === undefined
       ? {}
       : { title: boundedText(value.title, "title", 120) }),

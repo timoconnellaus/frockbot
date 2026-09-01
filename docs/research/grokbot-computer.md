@@ -662,6 +662,12 @@ the rows whose status the code moved:
   `initializeBotSettingsV1` now matches it, and the Create Bot gesture asks for
   browser notification permission without blocking or changing that durable
   intent when the browser refuses.
+  The same hosted sidebar now matches GrokBot's
+  organisational shape: Search and Create Bot share its top row, visible Bots
+  group by the case-insensitive trimmed `BotProfile.label` with Unassigned last,
+  and each row reads a bounded `shell:preview` written atomically with settled
+  unread activity for its latest message and time. Labels remain presentation
+  state and are not injected into a Bot's Turn.
 - **5** — **owner decision 2026-09-01: sheep avatars, no image upload.** The
   Flock's generated sheep recipe is the Bot avatar and Tailor sheep is its only
   editor. The former uploaded-image DTO, object-storage route, and client upload

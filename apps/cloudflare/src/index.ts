@@ -773,6 +773,7 @@ function botIdentityView(
     name: profile.name,
     namedBy: profile.namedBy ?? "user",
     hiddenFromSidebar: profile.hiddenFromSidebar === true,
+    ...(profile.label === undefined ? {} : { label: profile.label }),
     ...(profile.title === undefined ? {} : { title: profile.title }),
   };
 }

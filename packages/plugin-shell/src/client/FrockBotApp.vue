@@ -525,6 +525,9 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         <div class="brand" aria-hidden="true">
           <span class="brand-mark">FrockBot</span>
         </div>
+        <div class="sidebar-top">
+          <k-slot name="frockbot.sidebar-top" />
+        </div>
         <div class="bot-list">
           <k-slot name="frockbot.sidebar-bots" />
         </div>

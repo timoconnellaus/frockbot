@@ -19,6 +19,7 @@ import FlockOverlay from "./FlockOverlay.vue";
 import FlockIdentity from "./FlockIdentity.vue";
 import FlockAvatar from "./FlockAvatar.vue";
 import FlockAvatarEditor from "./FlockAvatarEditor.vue";
+import FlockCreateButton from "./FlockCreateButton.vue";
 import {
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadDirectoryViewV1,
@@ -593,6 +594,11 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       component: FlockSidebar,
     }),
     ctx.slot({ slot: "frockbot.overlays", order: 10, component: FlockOverlay }),
+    ctx.slot({
+      slot: "frockbot.sidebar-top",
+      order: 20,
+      component: FlockCreateButton,
+    }),
     ctx.slot({
       slot: "frockbot.bot-identity",
       order: 10,
