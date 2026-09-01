@@ -20,6 +20,7 @@ import {
   shardCount,
   type ComputerEffectJournalEnv,
 } from "./effect-journal.ts";
+import { COMPUTER_HOST_EGRESS_V1 } from "./egress.ts";
 import {
   computerHostShardCountV1,
   routeComputerHostRequestV1,
@@ -62,13 +63,14 @@ export class FlyHostContainer extends Container<ComputerHostEnv> {
   defaultPort = 8080;
   requiredPorts = [8080];
   sleepAfter = "10m";
+  enableInternet = COMPUTER_HOST_EGRESS_V1.enableInternet;
+  allowedHosts = [...COMPUTER_HOST_EGRESS_V1.allowedHosts];
   /**
-   * The container talks to exactly one host. Everything else is unreachable:
-   * this process runs a provider SDK against a User's Computer and has no
-   * business anywhere else on the internet.
+   * Requires the container to trust the CA the platform mints for the
+   * interception; `container/entrypoint.sh` does that at start, because the
+   * certificate is ephemeral and cannot be baked into the image.
    */
-  enableInternet = false;
-  allowedHosts = ["api.sprites.dev"];
+  interceptHttps = COMPUTER_HOST_EGRESS_V1.interceptHttps;
 
   constructor(ctx: DurableObjectState<{}>, env: ComputerHostEnv) {
     super(ctx, env);
