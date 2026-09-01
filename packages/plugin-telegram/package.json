@@ -1,25 +1,15 @@
 {
-  "name": "@frockbot/plugin-channels",
+  "name": "@frockbot/plugin-telegram",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./src/agent.ts",
-    "./agent-host": "./src/agent-host.ts",
-    "./backend": "./src/backend.ts",
-    "./connect": "./src/connect.ts",
     "./connector": "./src/connector.ts",
     "./frockbot.json": "./frockbot.json",
     "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
-    "./prompt": "./src/prompt.ts",
-    "./records": "./src/records.ts",
-    "./shared": "./src/shared.ts",
-    "./storage-keys": "./src/storage-keys.ts",
-    "./store": "./src/store.ts",
-    "./token": "./src/token.ts",
-    "./testing": "./src/testing.ts"
+    "./user": "./src/user.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"
@@ -31,13 +21,12 @@
   "dependencies": {
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
-    "@frockbot/kernel-agent-loop": "workspace:*",
-    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/plugin-channels": "workspace:*",
+    "@frockbot/plugin-credentials": "workspace:*",
+    "@frockbot/plugin-settings": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
-    "@frockbot/plugin-prompt": "workspace:*",
-    "@frockbot/plugin-tools": "workspace:*",
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",
     "typescript": "5.9.3"
@@ -48,6 +37,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
-    "directory": "packages/plugin-channels"
+    "directory": "packages/plugin-telegram"
   }
 }

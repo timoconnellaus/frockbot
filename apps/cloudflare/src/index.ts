@@ -1,3 +1,9 @@
+import { channelTokenSecretV1 } from "@frockbot/plugin-channels/token";
+import type {
+  ChannelConnectResultV1,
+  ChannelDeliveryOutcomeV1,
+} from "@frockbot/plugin-channels/connect";
+import type { ChannelOutboundReceiptV1 } from "@frockbot/plugin-channels/connector";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { decodeSkillRefsV1 } from "@frockbot/kernel-contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
@@ -233,7 +239,43 @@ interface BotStateRpc extends BotConfigurationBinding {
   ): Promise<"applied" | "stale">;
 }
 
-interface UserConfigurationRpc extends UserConfigurationBinding {}
+/**
+ * The User Durable Object's RPC surface as this Worker uses it: the binding the
+ * gateway shares, plus the Channels connector methods, which are this adapter's
+ * own seam and not part of the gateway's contract with a Configuration.
+ */
+interface UserConfigurationRpc extends UserConfigurationBinding {
+  /** Connect one Bot to one external platform. Mints the webhook key. */
+  connectChannel(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    platform: string;
+    connectionId: string;
+    commandId: string;
+    name: string;
+    origin: string;
+  }): Promise<ChannelConnectResultV1>;
+  /** One webhook delivery, after the gateway proved the token was minted here. */
+  deliverChannelWebhook(request: {
+    schemaVersion: 1;
+    userId: string;
+    platform: string;
+    token: string;
+    presentedSecret: string | null;
+    body: unknown;
+  }): Promise<ChannelDeliveryOutcomeV1>;
+  /** What one `channel` Turn said, carried to the platform it was said in. */
+  deliverChannelOutbound(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    channelId: string;
+    inReplyTo: string;
+    hop: number;
+    texts: string[];
+  }): Promise<{ schemaVersion: 1; receipts: ChannelOutboundReceiptV1[] }>;
+}
 
 type RpcBoundary<T> = {
   [Key in keyof T]: T[Key] extends (...args: never[]) => infer Result
@@ -357,6 +399,9 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     createBot: (request) => rpc.createBot(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
+    connectChannel: (request) => rpc.connectChannel(request),
+    deliverChannelWebhook: (request) => rpc.deliverChannelWebhook(request),
+    deliverChannelOutbound: (request) => rpc.deliverChannelOutbound(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
@@ -1373,6 +1418,25 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             }),
           ),
         ),
+      // The Channels door. The gateway verifies the signature so it can address
+      // a Durable Object at all; the User Durable Object re-checks the durable
+      // digest, so a token the edge accepted is still refused once revoked.
+      channelTokenSecret: async () =>
+        typeof env.CREDENTIAL_KEYRING === "string"
+          ? channelTokenSecretV1(env.CREDENTIAL_KEYRING)
+          : undefined,
+      deliverChannelWebhook: (userId, request) =>
+        userConfigurationStub(env, userId).deliverChannelWebhook({
+          schemaVersion: 1,
+          userId,
+          ...request,
+        }),
+      connectChannel: (userId, request) =>
+        userConfigurationStub(env, userId).connectChannel({
+          schemaVersion: 1,
+          userId,
+          ...request,
+        }),
       // The secret the gateway verifies a presented webhook key against. It
       // never leaves the Worker; a Bot only ever sees a digest.
       ...(typeof env.ROUTINE_HOOK_SECRET === "string"

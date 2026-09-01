@@ -53,6 +53,7 @@
     "@frockbot/plugin-shell": "workspace:*",
     "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-subagents": "workspace:*",
+    "@frockbot/plugin-telegram": "workspace:*",
     "@frockbot/plugin-ui-theme": "workspace:*",
     "@frockbot/plugin-user-machine": "workspace:*",
     "@frockbot/plugin-web": "workspace:*",

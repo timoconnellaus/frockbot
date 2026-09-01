@@ -62,6 +62,16 @@
       "grants": ["credentials:manage"]
     },
     {
+      "specifier": "@frockbot/plugin-telegram",
+      "version": "0.0.1",
+      "grants": [
+        "connections:manage",
+        "channels:read",
+        "channels:write",
+        "network:telegram"
+      ]
+    },
+    {
       "specifier": "@frockbot/plugin-web",
       "version": "0.0.1",
       "grants": ["network:web"]

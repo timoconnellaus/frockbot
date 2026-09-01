@@ -36,6 +36,10 @@ export default defineConfig({
           // The Channel authority, over real Durable Object storage: the point
           // is that a message and its deliveries survive an eviction.
           CHANNEL_STORE: "ChannelStoreProbe",
+          // The external connector, over real storage and the real keyring:
+          // the point is that the bot token reaches Telegram only through a
+          // lease, and is nowhere in this object's durable state.
+          CHANNEL_CONNECTOR: "ChannelConnectorProbe",
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",

@@ -53,6 +53,7 @@
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/plugin-subagents": "workspace:*",
+        "@frockbot/plugin-telegram": "workspace:*",
         "@frockbot/plugin-ui-theme": "workspace:*",
         "@frockbot/plugin-user-machine": "workspace:*",
         "@frockbot/plugin-web": "workspace:*",
@@ -121,6 +122,7 @@
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/plugin-subagents": "workspace:*",
+        "@frockbot/plugin-telegram": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
         "@frockbot/plugin-user-machine": "workspace:*",
         "@frockbot/template-core": "workspace:*",
@@ -542,6 +544,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@frockbot/configuration-core": "workspace:*",
+        "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-agent-loop": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -1024,6 +1027,23 @@
         "typescript": "5.9.3",
       },
     },
+    "packages/plugin-telegram": {
+      "name": "@frockbot/plugin-telegram",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/configuration-core": "workspace:*",
+        "@frockbot/connection-core": "workspace:*",
+        "@frockbot/plugin-channels": "workspace:*",
+        "@frockbot/plugin-credentials": "workspace:*",
+        "@frockbot/plugin-settings": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "@types/node": "26.2.0",
+        "typescript": "5.9.3",
+      },
+    },
     "packages/plugin-testkit": {
       "name": "@frockbot/plugin-testkit",
       "version": "0.0.1",
@@ -1458,6 +1478,8 @@
     "@frockbot/plugin-skills": ["@frockbot/plugin-skills@workspace:packages/plugin-skills"],
 
     "@frockbot/plugin-subagents": ["@frockbot/plugin-subagents@workspace:packages/plugin-subagents"],
+
+    "@frockbot/plugin-telegram": ["@frockbot/plugin-telegram@workspace:packages/plugin-telegram"],
 
     "@frockbot/plugin-testkit": ["@frockbot/plugin-testkit@workspace:packages/plugin-testkit"],
 
@@ -3094,6 +3116,8 @@
     "@frockbot/plugin-shell/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-subagents/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "@frockbot/plugin-telegram/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-ui-theme/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

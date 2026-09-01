@@ -168,6 +168,22 @@ import {
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
 import channelsManifest from "@frockbot/plugin-channels/manifest";
+import telegramManifest from "@frockbot/plugin-telegram/manifest";
+// The Channels gateway Contribution carries the connect route and the webhook
+// door an external platform delivers on.
+import {
+  createChannelsBackendContribution,
+  type ChannelsGatewayHost,
+} from "@frockbot/plugin-channels/backend";
+export type { ChannelsGatewayHost } from "@frockbot/plugin-channels/backend";
+const createChannelsGatewayPlugin = (
+  createChannelsBackendContribution as typeof createChannelsBackendContribution & {
+    plugin(
+      host: ChannelsGatewayHost,
+      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
+    ): Plugin;
+  }
+).plugin;
 import { createChannelsRuntimePlugin } from "@frockbot/plugin-channels/agent";
 import type { ChannelsRuntimeHostV1 } from "@frockbot/plugin-channels/agent-host";
 export type { ChannelsRuntimeHostV1 } from "@frockbot/plugin-channels/agent-host";
@@ -312,6 +328,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-subagents", subagentsManifest],
   ["@frockbot/plugin-user-machine", userMachineManifest],
   ["@frockbot/plugin-channels", channelsManifest],
+  ["@frockbot/plugin-telegram", telegramManifest],
 ]);
 
 const runtimeContributions = new Map([
@@ -573,6 +590,7 @@ export type FoundationGatewayHost = {
   RoutinesGatewayHost &
   SubagentsGatewayHost &
   MachineGatewayHostV1 &
+  ChannelsGatewayHost &
   SearchGatewayHost &
   AuditGatewayHost &
   PackagePublisherGatewayHost;
@@ -650,6 +668,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-user-machine/backend"
         ) {
           plugin = createMachineGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-channels/backend"
+        ) {
+          plugin = createChannelsGatewayPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-search/backend"
@@ -1244,6 +1267,7 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Turn that produced it — and so the tools are absent where there is no Turn
   // to attribute them to.
   runtimeIds.delete("channels");
+  runtimeIds.delete("telegram");
   runtimeIds.delete("computer");
   runtimeIds.delete("credentials");
   runtimeIds.delete("fly-sprite");

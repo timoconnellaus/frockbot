@@ -377,8 +377,116 @@ async function webSearchStub(request: Request, key: string): Promise<Response> {
   });
 }
 
+/**
+ * The Telegram Bot API, stubbed at the same outbound seam as everything else.
+ *
+ * It is the real origin name, because the connector holds it as a constant —
+ * a Bot API root that a Connection could override would be one more place a
+ * bot token could be sent somewhere it was never meant to go. Nothing leaves
+ * the machine: this handler runs in Node and answers every call.
+ */
+export const TELEGRAM_ORIGIN = "https://api.telegram.org";
+
+/** The bot token the stub accepts. */
+export const TELEGRAM_GOOD_BOT_TOKEN = "111111:workerd-telegram-token";
+/** A token the stub accepts and then rate-limits on every `sendMessage`. */
+export const TELEGRAM_LIMITED_BOT_TOKEN = "429429:workerd-telegram-limited";
+/** A token Telegram itself rejects, so `getMe` fails and the Connection does. */
+export const TELEGRAM_BAD_BOT_TOKEN = "000000:workerd-telegram-not-a-token";
+
+/** Where a test reads what the stub was asked to do, and resets it. */
+export const TELEGRAM_LEDGER_ENDPOINT = `${TELEGRAM_ORIGIN}/control/ledger`;
+
+interface TelegramCall {
+  method: string;
+  /** Whether the caller presented the good token. Never the token itself. */
+  token: "good" | "limited" | "bad" | "unknown";
+  body: unknown;
+}
+
+const telegramCalls: TelegramCall[] = [];
+let telegramMessageId = 1_000;
+
+function telegramTokenKind(token: string): TelegramCall["token"] {
+  if (token === TELEGRAM_GOOD_BOT_TOKEN) return "good";
+  if (token === TELEGRAM_LIMITED_BOT_TOKEN) return "limited";
+  if (token === TELEGRAM_BAD_BOT_TOKEN) return "bad";
+  return "unknown";
+}
+
+async function telegramStub(request: Request, url: URL): Promise<Response> {
+  if (url.pathname === "/control/ledger") {
+    if (request.method === "DELETE") {
+      telegramCalls.length = 0;
+      return Response.json({ cleared: true });
+    }
+    return Response.json({ calls: telegramCalls });
+  }
+  const match = /^\/bot([^/]+)\/([A-Za-z]+)$/.exec(url.pathname);
+  if (!match) {
+    return Response.json(
+      { ok: false, description: "Not Found" },
+      { status: 404 },
+    );
+  }
+  const token = decodeURIComponent(match[1]!);
+  const method = match[2]!;
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    body = undefined;
+  }
+  const kind = telegramTokenKind(token);
+  telegramCalls.push({ method, token: kind, body });
+  if (kind === "unknown" || kind === "bad") {
+    return Response.json(
+      { ok: false, error_code: 401, description: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+  if (method === "getMe") {
+    return Response.json({
+      ok: true,
+      result: {
+        id: 111111,
+        is_bot: true,
+        first_name: "Stub",
+        username: "stub_bot",
+      },
+    });
+  }
+  if (method === "setWebhook" || method === "deleteWebhook") {
+    return Response.json({ ok: true, result: true });
+  }
+  if (method === "sendMessage") {
+    if (kind === "limited") {
+      // The ordinary way Telegram says "not now". The Channel has to record it.
+      return Response.json(
+        {
+          ok: false,
+          error_code: 429,
+          description: "Too Many Requests: retry after 30",
+          parameters: { retry_after: 30 },
+        },
+        { status: 429 },
+      );
+    }
+    telegramMessageId += 1;
+    return Response.json({
+      ok: true,
+      result: { message_id: telegramMessageId },
+    });
+  }
+  return Response.json(
+    { ok: false, description: `unexpected Telegram method ${method}` },
+    { status: 400 },
+  );
+}
+
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
+  if (url.origin === TELEGRAM_ORIGIN) return telegramStub(request, url);
   if (url.origin === MCP_ORIGIN) return mcpServerStub(request);
   if (url.origin === MCP_OAUTH_ORIGIN) {
     return mcpAuthorizationServerStub(request);

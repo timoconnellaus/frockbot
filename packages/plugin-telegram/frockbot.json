@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 5,
+  "id": "telegram",
+  "displayName": "Telegram",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "channels": ">=0.0.1",
+    "credentials": ">=0.0.1",
+    "settings": ">=0.0.1"
+  },
+  "contributions": {
+    "backend": [{ "entry": "./user", "host": "user" }]
+  },
+  "permissions": [
+    "connections:manage",
+    "channels:read",
+    "channels:write",
+    "network:telegram"
+  ],
+  "configuration": {
+    "settings": [],
+    "connectionTypes": [
+      {
+        "id": "telegram-bot",
+        "displayName": "Telegram bot",
+        "allowMultiple": true,
+        "authorization": { "kind": "api-key", "driverId": "telegram" },
+        "capabilities": ["telegram-channel"],
+        "settings": []
+      }
+    ],
+    "capabilities": [
+      {
+        "id": "telegram-channel",
+        "kind": "channel",
+        "connectionTypes": ["telegram-bot"],
+        "admission": {
+          "turnTypes": ["chat", "channel"]
+        }
+      }
+    ]
+  }
+}
