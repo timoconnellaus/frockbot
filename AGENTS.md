@@ -41,7 +41,7 @@ These rules govern production features and architecture. Treat them as invariant
 ## Minimal kernel
 
 - The kernel is the only production code that is not a Package. It has exactly three parts: Durable Object authority (admission, event log, cursor, idempotency, cancellation, scheduling, and storage), the Agent loop (claim input, call the model, run the tools, record events, repeat), and Package composition (resolve durable desired state into a pinned generation set, mount it, verify it, commit or roll back, and bootstrap and dispose the host that does so).
-- The kernel declares the narrow interfaces it consumes, including model invocation, tool execution, and Memory access, and owns no implementation of them. Model providers, the tool registry, Memory, Computers, Skills, Routines, Channels, notifications, credentials, settings, and every UI surface are Packages.
+- The kernel declares the narrow interfaces it consumes, including model invocation, tool execution, and Memory access, and owns no implementation of them. Model providers, the tool registry, Memory, Computers, Skills, Routines, notifications, credentials, settings, and every UI surface are Packages.
 - The kernel imports no Package and contains no product policy.
 - The kernel treats every Workspace file as data. Only Skills under a Bot's instruction roots — its own and its User's — written under the Bot's own authority or its User's, are loaded as instructions.
 
@@ -86,7 +86,7 @@ These rules govern production features and architecture. Treat them as invariant
 
 ## Plugin-owned integrations
 
-- Models, Computers, Memory, Channels, and other external systems are backend capabilities exposed through narrow interfaces.
+- Models, Computers, Memory, and other external systems are backend capabilities exposed through narrow interfaces.
 - Every model provider is a runtime Plugin behind the shared model interface. Provider-specific authentication, request translation, streaming normalization, usage reporting, and errors stay inside that Plugin.
 - Provider and model settings are durable cloud state scoped to their User or Bot.
 - Secrets remain server-side and cross interfaces only as opaque references when necessary.
