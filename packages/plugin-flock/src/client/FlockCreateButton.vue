@@ -12,7 +12,7 @@ if (!flock) throw new Error("Flock client data was not provided");
     class="flock-create-button"
     icon="plus"
     label="Create Bot"
-    size="sm"
+    size="md"
     @click="flock.openCreate"
   />
 </template>

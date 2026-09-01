@@ -7,7 +7,7 @@
 .search-box {
   display: flex;
   width: 100%;
-  height: 34px;
+  height: var(--frock-control-md);
   min-width: 0;
   -webkit-app-region: no-drag;
   gap: 8px;
