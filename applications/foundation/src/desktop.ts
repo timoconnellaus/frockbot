@@ -4,6 +4,7 @@ import clockHostPlugin from "@frockbot/plugin-clock/host";
 import clipboardPlugin from "@frockbot/plugin-desktop-clipboard/desktop";
 import directoryPickerPlugin from "@frockbot/plugin-desktop-directory-picker/desktop";
 import notificationsPlugin from "@frockbot/plugin-desktop-notifications/desktop";
+import machineDesktopPlugin from "@frockbot/plugin-user-machine/desktop";
 import flySpriteHostPlugin from "@frockbot/plugin-fly-sprite/host";
 import type { Plugin } from "cordis";
 
@@ -14,6 +15,7 @@ const trustedDesktopPlugins = new Map<string, Plugin>([
   ["@frockbot/plugin-desktop-directory-picker/desktop", directoryPickerPlugin],
   ["@frockbot/plugin-desktop-clipboard/desktop", clipboardPlugin],
   ["@frockbot/plugin-fly-sprite/host", flySpriteHostPlugin],
+  ["@frockbot/plugin-user-machine/desktop", machineDesktopPlugin],
 ]);
 
 export interface FoundationTrustedDesktopContribution {

@@ -6,7 +6,10 @@
   "compatibility": {
     "frockbot": ">=0.0.1"
   },
-  "dependencies": {},
+  "dependencies": {
+    "shell": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
+  },
   "contributions": {
     "backend": [
       {
@@ -20,6 +23,21 @@
     ],
     "runtime": {
       "entry": "./agent"
+    },
+    "client": {
+      "entry": "./client",
+      "mounts": [
+        {
+          "slot": "frockbot.user-settings-sections",
+          "order": 30
+        }
+      ],
+      "outlets": []
+    },
+    "desktop": {
+      "entry": "./desktop",
+      "execution": "trusted-main",
+      "commands": []
     }
   },
   "configuration": {

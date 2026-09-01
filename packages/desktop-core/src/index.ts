@@ -119,6 +119,97 @@ export abstract class DesktopDirectoryPickerCapability extends Service {
   ): Promise<DesktopDirectoryPickerResult>;
 }
 
+/**
+ * What one shell command on the machine asks for, and what came back.
+ *
+ * These live here rather than in `@frockbot/machine-protocol` because they are
+ * the *host's* vocabulary, not the wire's: the protocol says what a Bot asked
+ * the machine to do, and this says what the Electron main process was asked to
+ * run. Keeping them apart is what lets the agent loop be tested with no host
+ * at all, and the host be implemented with no protocol knowledge.
+ */
+export interface DesktopMachineExecRequest {
+  command: string;
+  cwd?: string;
+  timeoutMs: number;
+  /** Each stream is cut at this many bytes; `truncated` says whether it was. */
+  maxOutputBytes: number;
+}
+
+export interface DesktopMachineExecResult {
+  /** Absent when the process was killed rather than exiting. */
+  exitCode?: number;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  /** The command outlived `timeoutMs` and was killed. */
+  timedOut: boolean;
+}
+
+export interface DesktopMachineFileRequest {
+  path: string;
+  maxBytes: number;
+}
+
+export interface DesktopMachineFileResult {
+  bytesBase64: string;
+  truncated: boolean;
+}
+
+export interface DesktopMachineIdentity {
+  /** The machine's own name for itself. A hostname. */
+  label: string;
+  platform: "macos" | "windows" | "linux";
+}
+
+/**
+ * The only authority a registered machine's agent has over the laptop.
+ *
+ * Deliberately two verbs and one fact. Everything the agent *decides* — which
+ * command to claim, what a timeout means, when to back off, when to forget its
+ * token — lives in `@frockbot/plugin-user-machine`, where it runs in CI. This
+ * seam holds the parts that can only run inside Electron's main process.
+ */
+export abstract class DesktopMachineHostCapability extends Service {
+  constructor(ctx: Context) {
+    super(ctx, "desktopMachineHost");
+  }
+
+  abstract identity(): DesktopMachineIdentity;
+
+  abstract exec(
+    request: DesktopMachineExecRequest,
+    signal: AbortSignal,
+  ): Promise<DesktopMachineExecResult>;
+
+  abstract readFile(
+    request: DesktopMachineFileRequest,
+    signal: AbortSignal,
+  ): Promise<DesktopMachineFileResult>;
+}
+
+/**
+ * The OS secure store — the login keychain on macOS, DPAPI on Windows, the
+ * platform's secret service on Linux — behind three verbs.
+ *
+ * A machine token is the one long-lived secret the desktop app holds, and the
+ * constitution's "no secrets client-side" has exactly one exemption: a secret
+ * the OS itself protects at rest. `read` answering `undefined` is a normal
+ * state (nothing stored yet, or a store this platform cannot encrypt to), not
+ * an error — the caller pairs again rather than crashing.
+ */
+export abstract class DesktopSecretStoreCapability extends Service {
+  constructor(ctx: Context) {
+    super(ctx, "desktopSecretStore");
+  }
+
+  abstract read(key: string): Promise<string | undefined>;
+
+  abstract write(key: string, value: string): Promise<void>;
+
+  abstract clear(key: string): Promise<void>;
+}
+
 export abstract class DesktopClipboardCapability extends Service {
   constructor(ctx: Context) {
     super(ctx, "desktopClipboard");
@@ -136,5 +227,7 @@ declare module "cordis" {
     desktopNotifications: DesktopNotificationCapability;
     desktopDirectoryPicker: DesktopDirectoryPickerCapability;
     desktopClipboard: DesktopClipboardCapability;
+    desktopMachineHost: DesktopMachineHostCapability;
+    desktopSecretStore: DesktopSecretStoreCapability;
   }
 }

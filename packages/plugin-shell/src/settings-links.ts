@@ -172,6 +172,12 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "user",
   },
   {
+    anchor: "user-machines",
+    surface: "user-settings",
+    label: "Registered machines",
+    scope: "user",
+  },
+  {
     anchor: "user-packages",
     surface: "plugins",
     label: "Packages",

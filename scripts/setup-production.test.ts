@@ -328,6 +328,15 @@ exit 0
       "${{ secrets.ROUTINE_HOOK_SECRET }}",
     );
     expect(deploy?.run).toContain("'ROUTINE_HOOK_SECRET'");
+    // Every registered-machine token and pairing code is signed with it, so a
+    // deploy that forgot it would leave the enrollment door answering 503.
+    expect(validation?.env?.MACHINE_TOKEN_SECRET).toBe(
+      "${{ secrets.MACHINE_TOKEN_SECRET }}",
+    );
+    expect(deploy?.env?.MACHINE_TOKEN_SECRET).toBe(
+      "${{ secrets.MACHINE_TOKEN_SECRET }}",
+    );
+    expect(deploy?.run).toContain("'MACHINE_TOKEN_SECRET'");
 
     const productionEnvironment = {
       ...process.env,
@@ -345,6 +354,8 @@ exit 0
         '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
       ROUTINE_HOOK_SECRET:
         "5c1b7b0e5b0b4d1a9e6f3c2d8a7b6e5f4d3c2b1a0f9e8d7c6b5a4938271605f4",
+      MACHINE_TOKEN_SECRET:
+        "9f2c4a6e8d0b1357913579bdf02468ace13579bdf02468ace13579bdf02468ac",
     };
     const validConfiguration = Bun.spawnSync(
       ["bash", "-c", validation?.run ?? ""],
@@ -376,6 +387,19 @@ exit 0
     expect(missingHookSecret.exitCode).toBe(1);
     expect(missingHookSecret.stderr.toString()).toContain(
       "Missing production configuration: ROUTINE_HOOK_SECRET",
+    );
+
+    const missingMachineSecret = Bun.spawnSync(
+      ["bash", "-c", validation?.run ?? ""],
+      {
+        env: { ...productionEnvironment, MACHINE_TOKEN_SECRET: "" },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    expect(missingMachineSecret.exitCode).toBe(1);
+    expect(missingMachineSecret.stderr.toString()).toContain(
+      "Missing production configuration: MACHINE_TOKEN_SECRET",
     );
 
     for (const invalidKeyring of [

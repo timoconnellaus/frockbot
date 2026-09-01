@@ -239,6 +239,21 @@ manifest arriving at runtime through the catalog, is closed by the third row
 instead: the Electron main map is a static import table, so an unreviewed
 Contribution has nowhere to land whatever its manifest says.
 
+## Provider adapters
+
+One rule, for the two imports that carry the widest authority the tree has.
+Electron is the main process's, and a process to spawn is the machine agent's
+host's — neither belongs to a Package, which is what keeps the registered
+machine's agent loop testable in CI rather than only on a laptop. In
+`packages/architecture-checks/src/desktop-provider-boundaries.test.ts`.
+
+| Constitutional check                                                                                          | File                                                                   | Test name                                                        | Runner |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------- | ------ |
+| provider types stay in their adapter: `electron` only in the Electron app's own source                        | `packages/architecture-checks/src/desktop-provider-boundaries.test.ts` | `Electron and child_process are imported only where they may be` | Bun    |
+| — and `child_process` only in the Electron main process and the end-to-end harness that starts the dev server | `packages/architecture-checks/src/desktop-provider-boundaries.test.ts` | `Electron and child_process are imported only where they may be` | Bun    |
+| no Package may reach either, whatever its manifest declares                                                   | `packages/architecture-checks/src/desktop-provider-boundaries.test.ts` | `no Package under packages/ reaches either of them`              | Bun    |
+| — and the rule bites on a staged violation, and not on a lookalike specifier                                  | `packages/architecture-checks/src/desktop-provider-boundaries.test.ts` | `the rule bites on a staged violation`                           | Bun    |
+
 ## Open
 
 Rules in `AGENTS.md` § Architecture checks that no named test proves yet. They

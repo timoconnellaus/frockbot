@@ -311,6 +311,22 @@ function pluginConnectionRoute(path: string, revoke: boolean): boolean {
   return !revoke || isConnectionIdentifier(match?.[2]);
 }
 
+/**
+ * A machine id as it appears in a path segment.
+ *
+ * The same rule `machineRoutePathV1` enforces on the way out, restated here
+ * rather than imported, because this file is the renderer's *allowlist* and
+ * must not widen because a protocol constant moved.
+ */
+function isMachineIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 200 &&
+    /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/.test(value)
+  );
+}
+
 const API_ROUTES: Array<{
   matches(path: string): boolean;
   methods: ReadonlySet<DesktopApiRequest["method"]>;
@@ -375,6 +391,21 @@ const API_ROUTES: Array<{
   },
   {
     matches: (path) => pluginConnectionRoute(path, true),
+    methods: new Set(["POST"]),
+  },
+  // The registered-machine registry, as the Computer settings section reads
+  // it. Only the three browser-audience routes: the machine's own four carry
+  // a machine token rather than this session and never come from a renderer.
+  { matches: exactRoute(/^\/api\/machines$/), methods: new Set(["GET"]) },
+  {
+    matches: exactRoute(/^\/api\/machines\/pair$/),
+    methods: new Set(["POST"]),
+  },
+  {
+    matches: (path) => {
+      const match = /^\/api\/machines\/([^/]+)\/revoke$/.exec(path);
+      return isMachineIdentifier(match?.[1]);
+    },
     methods: new Set(["POST"]),
   },
 ];
@@ -445,4 +476,83 @@ export function decodeExternalAuthorizationAcknowledgement(
     throw new Error("invalid external authorization acknowledgement");
   }
   return { schemaVersion: 1, status: "accepted" };
+}
+
+// ---------------------------------------------------------------------------
+// The registered-machine agent bridge
+// ---------------------------------------------------------------------------
+
+/**
+ * What the renderer may ask the device agent to do.
+ *
+ * Three verbs and one string. The agent runs in the main process because it
+ * holds a machine token, and the renderer is a remote page: it may hand the
+ * agent a pairing code it just minted through the session, and it may ask what
+ * the agent's state is, and that is all. It can never read the token back.
+ */
+export type DesktopMachineRequestV1 =
+  | { schemaVersion: 1; type: "machine/status" }
+  | { schemaVersion: 1; type: "machine/pair"; code: string }
+  | { schemaVersion: 1; type: "machine/unpair" };
+
+export function decodeDesktopMachineRequest(
+  value: unknown,
+): DesktopMachineRequestV1 {
+  const request = record(value);
+  if (!request || request.schemaVersion !== 1) {
+    throw new Error("invalid machine agent request");
+  }
+  if (request.type === "machine/status" || request.type === "machine/unpair") {
+    if (!hasExactKeys(request, ["schemaVersion", "type"])) {
+      throw new Error("invalid machine agent request");
+    }
+    return { schemaVersion: 1, type: request.type };
+  }
+  if (
+    request.type !== "machine/pair" ||
+    !hasExactKeys(request, ["schemaVersion", "type", "code"]) ||
+    !boundedString(request.code, 1, 512)
+  ) {
+    throw new Error("invalid machine agent request");
+  }
+  return { schemaVersion: 1, type: "machine/pair", code: request.code };
+}
+
+/**
+ * The agent's status on its way back to the renderer.
+ *
+ * Decoded on both sides of the bridge: the main process proves it is handing
+ * over nothing but a status, and the preload proves it received one.
+ */
+export function decodeDesktopMachineStatus(
+  value: unknown,
+): Record<string, unknown> {
+  const status = record(value);
+  if (
+    !status ||
+    status.schemaVersion !== 1 ||
+    typeof status.enrolled !== "boolean" ||
+    typeof status.running !== "boolean" ||
+    !hasExactKeys(
+      status,
+      ["schemaVersion", "enrolled", "running", "failures"],
+      ["machineId", "label", "origin", "lastPollAt", "lastError"],
+    )
+  ) {
+    throw new Error("invalid machine agent status");
+  }
+  return status;
+}
+
+/** Whether a renderer frame is the application this shell hosts. */
+export function isTrustedRendererUrl(
+  value: string | undefined,
+  applicationOrigin: string,
+): boolean {
+  if (!value) return false;
+  try {
+    return new URL(value).origin === applicationOrigin;
+  } catch {
+    return false;
+  }
 }

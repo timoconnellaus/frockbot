@@ -13,6 +13,7 @@ import computerClientPlugin from "../../../packages/plugin-computer/src/client/a
 import flockClientPlugin from "@frockbot/plugin-flock/client";
 import auditClientPlugin from "@frockbot/plugin-audit/client";
 import searchClientPlugin from "@frockbot/plugin-search/client";
+import userMachineClientPlugin from "@frockbot/plugin-user-machine/client";
 import shellClientPlugin from "@frockbot/plugin-shell/client";
 
 export const foundationClientPlugins: readonly ClientPlugin[] = [
@@ -31,4 +32,7 @@ export const foundationClientPlugins: readonly ClientPlugin[] = [
   // Settings declares.
   auditClientPlugin,
   packagePublisherClientPlugin,
+  // After Settings: the Computer section mounts into the User settings slot
+  // Settings declares.
+  userMachineClientPlugin,
 ];

@@ -6,11 +6,76 @@ import {
   decodeDesktopAuthRequest,
   decodeDesktopAuthUserResponse,
   decodeDesktopApiRequest,
+  type DesktopApiRequest,
   decodeDesktopApiResponse,
   decodeDesktopExternalAuthorizationRequest,
   decodeExternalAuthorizationAcknowledgement,
   decodeExternalAuthorizationUrl,
 } from "./desktop-api.js";
+
+describe("desktop hosted protocol: registered machines", () => {
+  test("admits the three browser machine routes and nothing the machine uses", () => {
+    const admitted: DesktopApiRequest[] = [
+      { schemaVersion: 1, path: "/api/machines", method: "GET" },
+      {
+        schemaVersion: 1,
+        path: "/api/machines/pair",
+        method: "POST",
+        body: "{}",
+      },
+      {
+        schemaVersion: 1,
+        path: "/api/machines/994dc2ee/revoke",
+        method: "POST",
+        body: "{}",
+      },
+    ];
+    for (const request of admitted) {
+      expect(decodeDesktopApiRequest(request)).toEqual(request);
+    }
+    // The machine's own four carry a machine token rather than this session,
+    // so a renderer may not reach them at all.
+    const refused: DesktopApiRequest[] = [
+      {
+        schemaVersion: 1,
+        path: "/api/machines/enroll",
+        method: "POST",
+        body: "{}",
+      },
+      { schemaVersion: 1, path: "/api/machines/m-1/poll", method: "GET" },
+      {
+        schemaVersion: 1,
+        path: "/api/machines/m-1/commands/tool-0-1-0/claim",
+        method: "POST",
+        body: "{}",
+      },
+      {
+        schemaVersion: 1,
+        path: "/api/machines/m-1/commands/tool-0-1-0/result",
+        method: "POST",
+        body: "{}",
+      },
+      { schemaVersion: 1, path: "/api/machines", method: "POST", body: "{}" },
+      {
+        schemaVersion: 1,
+        path: "/api/machines/bad%2Fid/revoke",
+        method: "POST",
+        body: "{}",
+      },
+      {
+        schemaVersion: 1,
+        path: "/api/machines//revoke",
+        method: "POST",
+        body: "{}",
+      },
+    ];
+    for (const request of refused) {
+      expect(() => decodeDesktopApiRequest(request)).toThrow(
+        "invalid API request",
+      );
+    }
+  });
+});
 
 describe("desktop hosted protocol", () => {
   test("admits only the hosted Bot, settings, Connection, notification, manifest, and Turn routes", () => {

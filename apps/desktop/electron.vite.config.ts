@@ -9,8 +9,12 @@ const workspaceMainDependencies = [
   "@frockbot/application-foundation",
   "@frockbot/configuration-core",
   "@frockbot/desktop-core",
+  "@frockbot/kernel-agent-loop",
+  "@frockbot/kernel-contracts",
+  "@frockbot/machine-protocol",
   "@frockbot/plugin-auth",
   "@frockbot/plugin-shell",
+  "@frockbot/plugin-user-machine",
   "@frockbot/protocol",
 ];
 
