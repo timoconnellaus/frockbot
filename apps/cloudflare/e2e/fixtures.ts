@@ -152,7 +152,16 @@ export async function createBot(page: Page, name: string): Promise<void> {
     await expect(dialog).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel("Bot name").fill(name);
+  // And the name has to stick. A User with no Bots gets the dialog opened for
+  // them at the end of every flock load, and a load that lands while the name
+  // is being typed reopens the dialog on an empty draft — the field clears,
+  // the required input refuses to submit, and the dialog never closes. Retry
+  // until the value survives, which is also what a person would do.
+  const nameField = dialog.getByLabel("Bot name");
+  await expect(async () => {
+    await nameField.fill(name);
+    await expect(nameField).toHaveValue(name, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
   await dialog.getByRole("button", { name: "Create Bot" }).click();
   await expect(dialog).toBeHidden();
 }

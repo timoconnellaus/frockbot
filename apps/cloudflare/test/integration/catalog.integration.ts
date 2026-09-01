@@ -158,8 +158,11 @@ describe("the remote Package Catalog", () => {
     expect((await refused.json()) as { error: string }).toMatchObject({
       error: expect.stringContaining("is not the pinned generation"),
     });
-    // The refusal changed nothing.
-    expect((await readUserSettings(userId)).packages).toEqual([]);
+    // The refusal changed nothing: the Package list is still the one the
+    // User's first configuration read bootstrapped.
+    expect((await readUserSettings(userId)).packages).toEqual(
+      settings.packages,
+    );
   });
 
   it("installs from the pinned generation and uninstalls to a tombstone", async () => {
@@ -180,8 +183,15 @@ describe("the remote Package Catalog", () => {
       }),
     );
 
+    // The bootstrap already installed this first-party Package; installing it
+    // from the pinned generation restates the one row with the Catalog's own
+    // provenance rather than adding a second.
     const installed = await readUserSettings(userId);
-    expect(installed.packages).toEqual([
+    expect(
+      installed.packages.filter(
+        (pkg) => pkg.packageId === PROVISIONED_MODEL.packageId,
+      ),
+    ).toEqual([
       {
         packageId: PROVISIONED_MODEL.packageId,
         version: "0.0.1",
@@ -268,7 +278,9 @@ describe("the remote Package Catalog", () => {
     );
 
     const uninstalled = await readUserSettings(userId);
-    expect(uninstalled.packages).toEqual([]);
+    expect(uninstalled.packages.map((pkg) => pkg.packageId)).not.toContain(
+      PROVISIONED_MODEL.packageId,
+    );
     // The Connection is the User's own account and is untouched.
     expect(uninstalled.connections.map((item) => item.connectionId)).toContain(
       connection.connectionId,

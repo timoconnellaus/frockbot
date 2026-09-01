@@ -84,6 +84,71 @@ async function installOllama(
 }
 
 describe("User settings backend Contribution", () => {
+  test("bootstraps first-party Packages once and preserves a later uninstall", async () => {
+    const storage = new MemoryStorage();
+    const settings = createUserSettingsBackendContribution({
+      storage,
+      availablePackages: [
+        {
+          packageId: "web",
+          version: "0.0.1",
+          installByDefault: true,
+        },
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          installByDefault: true,
+        },
+        { packageId: "settings", version: "0.0.1" },
+      ],
+    });
+
+    const first = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+    });
+    expect(first).toMatchObject({
+      revision: 1,
+      packages: [
+        {
+          packageId: "web",
+          version: "0.0.1",
+          state: "installed",
+          provenance: "first-party",
+        },
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+          provenance: "first-party",
+        },
+      ],
+    });
+    expect(
+      await settings.readConfiguration({ schemaVersion: 1, userId: "user-1" }),
+    ).toEqual(first);
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/uninstall-package",
+        commandId: "uninstall-web",
+        expectedRevision: 1,
+        packageId: "web",
+      },
+    });
+    const afterUninstall = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+    });
+    expect(afterUninstall.revision).toBe(2);
+    expect(afterUninstall.packages.map((pkg) => pkg.packageId)).toEqual([
+      "provider-ollama-cloud",
+    ]);
+  });
+
   test("owns durable User configuration independently of providers", async () => {
     const storage = new MemoryStorage();
     const settings = contribution(storage);

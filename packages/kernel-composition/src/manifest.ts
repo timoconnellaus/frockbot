@@ -90,7 +90,8 @@ export interface ConnectionTypeDefinition {
   allowMultiple: boolean;
   authorization: {
     kind: "none" | "api-key" | "ambient-native" | "grant";
-    driverId: string;
+    /** Ambient native bindings have no credential or authorization driver. */
+    driverId?: string;
   };
   capabilities: string[];
   /**
@@ -106,7 +107,7 @@ export interface ConnectionTypeDefinition {
 
 export interface CapabilityDefinition {
   id: string;
-  kind: "tool" | "model" | "memory" | "notification" | "computer" | "channel";
+  kind: "tool" | "model" | "memory" | "notification" | "computer";
   connectionTypes: string[];
   /**
    * Manifest v4. The durable ceiling on the turn types this Capability's
@@ -123,7 +124,7 @@ export interface PackageConfiguration {
 }
 
 export interface FrockBotManifest {
-  schemaVersion: 2 | 3 | 4 | 5;
+  schemaVersion: 2 | 3 | 4;
   id: string;
   displayName: string;
   version: string;
@@ -292,15 +293,10 @@ function decodeV1(value: Record<string, unknown>): FrockBotManifest {
 }
 
 /**
- * Manifest v4 extends v3 and v5 extends v4, so every v3 rule applies unchanged
- * to a v4 or v5 body.
+ * Manifest v4 extends v3, so every v3 rule applies unchanged to a v4 body.
  */
 function isV3OrLater(value: Record<string, unknown>): boolean {
-  return (
-    value.schemaVersion === 3 ||
-    value.schemaVersion === 4 ||
-    value.schemaVersion === 5
-  );
+  return value.schemaVersion === 3 || value.schemaVersion === 4;
 }
 
 function decodeV2(value: Record<string, unknown>): FrockBotManifest {
@@ -1035,7 +1031,6 @@ function settingDefinitions(
 function decodeConfiguration(
   value: unknown,
   allowV4: boolean,
-  allowV5: boolean,
 ): PackageConfiguration {
   if (value === undefined) {
     return { settings: [], connectionTypes: [], capabilities: [] };
@@ -1067,7 +1062,12 @@ function decodeConfiguration(
       }
       exactFields(
         connection.authorization,
-        ["kind", "driverId"],
+        [
+          "kind",
+          ...(Object.hasOwn(connection.authorization, "driverId")
+            ? ["driverId"]
+            : []),
+        ],
         "manifest connection authorization",
       );
       const rawKind = requiredString(connection.authorization, "kind");
@@ -1082,6 +1082,20 @@ function decodeConfiguration(
         );
       }
       const kind: ConnectionTypeDefinition["authorization"]["kind"] = rawKind;
+      const driverId =
+        connection.authorization.driverId === undefined
+          ? undefined
+          : requiredString(connection.authorization, "driverId");
+      if (kind !== "ambient-native" && driverId === undefined) {
+        throw new Error(
+          "manifest connection authorization driverId is required",
+        );
+      }
+      if (kind === "ambient-native" && driverId !== undefined) {
+        throw new Error(
+          "manifest ambient-native authorization must not name a driver",
+        );
+      }
       if (typeof connection.allowMultiple !== "boolean") {
         throw new Error("manifest connection allowMultiple must be boolean");
       }
@@ -1091,7 +1105,7 @@ function decodeConfiguration(
         allowMultiple: connection.allowMultiple,
         authorization: {
           kind,
-          driverId: requiredString(connection.authorization, "driverId"),
+          ...(driverId ? { driverId } : {}),
         },
         capabilities: optionalStringArray(connection, "capabilities"),
         ...(allowV4 && connection.settings !== undefined
@@ -1113,10 +1127,7 @@ function decodeConfiguration(
         rawKind !== "model" &&
         rawKind !== "memory" &&
         rawKind !== "notification" &&
-        rawKind !== "computer" &&
-        // Manifest v5. Channels are a Package-implemented narrow interface;
-        // the kernel needs the kind to exist so an Assignment can name one.
-        !(allowV5 && rawKind === "channel")
+        rawKind !== "computer"
       ) {
         throw new Error("manifest capability kind is unsupported");
       }
@@ -1139,7 +1150,7 @@ function decodeV3(value: Record<string, unknown>): FrockBotManifest {
   return {
     ...base,
     schemaVersion: 3,
-    configuration: decodeConfiguration(value.configuration, false, false),
+    configuration: decodeConfiguration(value.configuration, false),
   };
 }
 
@@ -1149,24 +1160,7 @@ function decodeV4(value: Record<string, unknown>): FrockBotManifest {
   return {
     ...base,
     schemaVersion: 4,
-    configuration: decodeConfiguration(value.configuration, true, false),
-  };
-}
-
-/**
- * v5 is v4 plus the `channel` Capability kind, and nothing else.
- *
- * Channels are a narrow interface a Package implements; the kernel only needs
- * to know the kind exists so an Assignment can name it. A v4 body that declares
- * `channel` is refused, exactly as a v3 body that declares `admission` is: the
- * version a manifest states is the version it is read at.
- */
-function decodeV5(value: Record<string, unknown>): FrockBotManifest {
-  const base = decodeV2(value);
-  return {
-    ...base,
-    schemaVersion: 5,
-    configuration: decodeConfiguration(value.configuration, true, true),
+    configuration: decodeConfiguration(value.configuration, true),
   };
 }
 
@@ -1190,8 +1184,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
   if (
     value.schemaVersion === 2 ||
     value.schemaVersion === 3 ||
-    value.schemaVersion === 4 ||
-    value.schemaVersion === 5
+    value.schemaVersion === 4
   ) {
     exactFields(
       value,
@@ -1210,7 +1203,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
     );
     if (value.schemaVersion === 2) return decodeV2(value);
     if (value.schemaVersion === 3) return decodeV3(value);
-    return value.schemaVersion === 4 ? decodeV4(value) : decodeV5(value);
+    return decodeV4(value);
   }
   throw new Error("unsupported FrockBot manifest version");
 }

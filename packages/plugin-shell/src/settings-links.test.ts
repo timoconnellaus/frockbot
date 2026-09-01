@@ -47,10 +47,10 @@ describe("settings link scheme", () => {
   test("decodes an absolute link back to its surface, anchor and Bot", () => {
     expect(
       decodeSettingsLinkV1(
-        "https://app.example/?bot=alpha&settings=bot-info#bot-info-computer",
+        "https://app.example/?bot=alpha&settings=bot-panel#bot-info-computer",
       ),
     ).toEqual({
-      surface: "bot-info",
+      surface: "bot-panel",
       anchor: "bot-info-computer",
       botId: "alpha",
     });
@@ -72,7 +72,7 @@ describe("settings link scheme", () => {
 
   test("drops a fragment belonging to another surface", () => {
     expect(
-      decodeSettingsLinkV1("/?settings=bot-settings#bot-info-channels"),
+      decodeSettingsLinkV1("/?settings=bot-settings#bot-info-computer"),
     ).toEqual({ surface: "bot-settings" });
   });
 

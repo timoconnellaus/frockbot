@@ -1,18 +1,21 @@
-/* The Search surface and its header control. */
+/* The Search surface and its sidebar control. */
 
 /*
- * The header control sits at the end of the topbar, which is a drag region in
- * the desktop shell; a button inside one has to opt out or it cannot be
- * clicked.
+ * The shell gives the search control the flexible half of the sidebar's top
+ * row; the Flock's create button occupies the fixed half.
  */
 .search-box {
-  display: inline-flex;
-  margin-left: auto;
+  display: flex;
+  width: 100%;
+  height: 34px;
+  min-width: 0;
   -webkit-app-region: no-drag;
   gap: 8px;
   align-items: center;
-  padding: 6px 10px;
+  padding: 0 10px;
   color: var(--frock-text-muted);
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   background: var(--frock-surface-subtle);
   border: 1px solid var(--frock-border);
@@ -29,17 +32,10 @@
 }
 
 .search-box-label {
+  overflow: hidden;
+  flex: 1 1 auto;
   font-size: var(--frock-text-sm);
-}
-
-.search-box-shortcut {
-  padding: 1px 5px;
-  font-family: var(--frock-font-mono);
-  font-size: var(--frock-text-xs);
-  color: var(--frock-text-subtle);
-  background: var(--frock-surface);
-  border: 1px solid var(--frock-border);
-  border-radius: 5px;
+  white-space: nowrap;
 }
 
 .search-surface {
@@ -55,7 +51,7 @@
   padding: 8px 10px;
   color: var(--frock-text-muted);
   background: var(--frock-surface-subtle);
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: var(--frock-radius-control);
 }
 

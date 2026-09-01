@@ -166,7 +166,7 @@ describe("admission", () => {
         harness.root.tools.schemas({ turnType }).map((tool) => tool.name);
       for (const tool of MACHINE_MESSAGES_TOOL_NAMES_V1) {
         expect(names("chat")).toContain(tool);
-        for (const turnType of ["automation", "subagent", "channel"] as const) {
+        for (const turnType of ["automation", "subagent"] as const) {
           expect(names(turnType)).not.toContain(tool);
         }
       }

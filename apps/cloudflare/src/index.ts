@@ -1,22 +1,3 @@
-import { channelTokenSecretV1 } from "@frockbot/plugin-channels/token";
-import type {
-  ChannelConnectResultV1,
-  ChannelDeliveryOutcomeV1,
-} from "@frockbot/plugin-channels/connect";
-import type { ChannelOutboundReceiptV1 } from "@frockbot/plugin-channels/connector";
-import { CHANNEL_USER_PEER_V1 } from "@frockbot/plugin-channels/backend";
-import {
-  decodeChannelCommandReceiptV1,
-  decodeChannelListViewV1,
-  decodeChannelThreadPageViewV1,
-  type ChannelCommandV1,
-} from "@frockbot/plugin-channels/shared";
-import {
-  decodeChannelReadReceiptV1,
-  decodeChannelUnreadDirectoryViewV1,
-  type ChannelReadCommandV1,
-} from "@frockbot/plugin-channels/unread";
-import type { ChannelWriterV1 } from "@frockbot/plugin-channels/records";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import {
   decodeMachineResultDeliveryV1,
@@ -75,12 +56,8 @@ import {
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
-  botAvatarObjectKeyV1,
-  decodeBotAvatarBytesV1,
   decodeBotIdV1,
-  type BotAvatarUploadReceiptV1,
   type BotSettingsViewV1,
-  type UploadBotAvatarCommandV1,
 } from "@frockbot/configuration-core";
 import {
   decodeRoutineCommandReceiptV1,
@@ -131,6 +108,11 @@ import {
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
 } from "@frockbot/connection-core";
+import {
+  decodeDeploymentPolicyV1,
+  type DeploymentPolicyV1,
+  type SetSignupsCommandV1,
+} from "@frockbot/plugin-admin/shared";
 import { gatewayAuth } from "./auth.js";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
@@ -160,9 +142,13 @@ import {
 import { createImmutablePlanRequestFactory } from "./immutable-application.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import { UserConfiguration } from "./user-configuration.js";
+import {
+  DEPLOYMENT_POLICY_SINGLETON_NAME,
+  DeploymentPolicy,
+} from "./deployment-policy.js";
 
 export { BotCapabilities } from "./bot-capabilities.js";
-export { BotState, UserConfiguration };
+export { BotState, DeploymentPolicy, UserConfiguration };
 
 interface Env {
   USER_APPLICATIONS: WorkerLoader;
@@ -185,6 +171,7 @@ interface Env {
   AI: Ai;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
+  DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
   COMPUTER_HOST: Fetcher;
   /** Shared secret presented on every Computer host call. */
   COMPUTER_HOST_TOKEN?: string;
@@ -211,6 +198,7 @@ interface Env {
    */
   FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
+  FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
 }
 
@@ -258,71 +246,14 @@ interface BotStateRpc extends BotConfigurationBinding {
 
 /**
  * The User Durable Object's RPC surface as this Worker uses it: the binding the
- * gateway shares, plus the Channels connector methods, which are this adapter's
- * own seam and not part of the gateway's contract with a Configuration.
+ * gateway shares, plus this adapter's own seams.
  */
 interface UserConfigurationRpc extends UserConfigurationBinding {
-  /** Connect one Bot to one external platform. Mints the webhook key. */
-  connectChannel(request: {
+  /** Read-only signup-gate probe; unlike configuration reads, it pins nothing. */
+  isProvisioned(request: {
     schemaVersion: 1;
     userId: string;
-    botId: string;
-    platform: string;
-    connectionId: string;
-    commandId: string;
-    name: string;
-    origin: string;
-  }): Promise<ChannelConnectResultV1>;
-  /** One webhook delivery, after the gateway proved the token was minted here. */
-  deliverChannelWebhook(request: {
-    schemaVersion: 1;
-    userId: string;
-    platform: string;
-    token: string;
-    presentedSecret: string | null;
-    body: unknown;
-  }): Promise<ChannelDeliveryOutcomeV1>;
-  /** What one `channel` Turn said, carried to the platform it was said in. */
-  deliverChannelOutbound(request: {
-    schemaVersion: 1;
-    userId: string;
-    botId: string;
-    channelId: string;
-    inReplyTo: string;
-    hop: number;
-    texts: string[];
-  }): Promise<{ schemaVersion: 1; receipts: ChannelOutboundReceiptV1[] }>;
-  /** Every Channel one Bot is a member of. */
-  listChannels(request: {
-    schemaVersion: 1;
-    userId: string;
-    botId: string;
-  }): Promise<unknown>;
-  /** One Channel: the record, its members, its thread, a Connection's label. */
-  readChannelThreadPage(request: {
-    schemaVersion: 1;
-    userId: string;
-    channelId: string;
-  }): Promise<unknown>;
-  /** Per-Channel unread for one Bot's rows, in one round trip. */
-  listChannelUnread(request: {
-    schemaVersion: 1;
-    userId: string;
-    botId: string;
-  }): Promise<unknown>;
-  /** The User's own read position in one Channel. */
-  markChannelRead(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: ChannelReadCommandV1;
-  }): Promise<unknown>;
-  /** One Channel command applied as the User rather than as a Bot. */
-  executeChannelCommand(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: ChannelCommandV1;
-    writer: ChannelWriterV1;
-  }): Promise<unknown>;
+  }): Promise<boolean>;
 }
 
 type RpcBoundary<T> = {
@@ -442,20 +373,13 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     id,
   ) as unknown as RpcBoundary<UserConfigurationRpc>;
   return {
+    isProvisioned: (request) => rpc.isProvisioned(request),
     listBots: (request) => rpc.listBots(request),
     listBotLifecycles: (request) => rpc.listBotLifecycles(request),
     executeBotLifecycle: (request) => rpc.executeBotLifecycle(request),
     createBot: (request) => rpc.createBot(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
-    connectChannel: (request) => rpc.connectChannel(request),
-    deliverChannelWebhook: (request) => rpc.deliverChannelWebhook(request),
-    deliverChannelOutbound: (request) => rpc.deliverChannelOutbound(request),
-    listChannels: (request) => rpc.listChannels(request),
-    readChannelThreadPage: (request) => rpc.readChannelThreadPage(request),
-    listChannelUnread: (request) => rpc.listChannelUnread(request),
-    markChannelRead: (request) => rpc.markChannelRead(request),
-    executeChannelCommand: (request) => rpc.executeChannelCommand(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
@@ -480,6 +404,17 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     listTemplateImports: (request) => rpc.listTemplateImports(request),
     executeTemplateImport: (request) => rpc.executeTemplateImport(request),
   };
+}
+
+interface DeploymentPolicyRpc {
+  readPolicy(input: unknown): Promise<unknown>;
+  setSignups(input: unknown): Promise<unknown>;
+}
+
+function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
+  return env.DEPLOYMENT_POLICY.getByName(
+    DEPLOYMENT_POLICY_SINGLETON_NAME,
+  ) as unknown as DeploymentPolicyRpc;
 }
 
 /**
@@ -871,8 +806,8 @@ function botIdentityView(
     name: profile.name,
     namedBy: profile.namedBy ?? "user",
     hiddenFromSidebar: profile.hiddenFromSidebar === true,
+    ...(profile.label === undefined ? {} : { label: profile.label }),
     ...(profile.title === undefined ? {} : { title: profile.title }),
-    ...(profile.avatar?.kind === "image" ? { avatar: profile.avatar } : {}),
   };
 }
 
@@ -997,72 +932,6 @@ async function executeBotUnreadCommand(
   );
 }
 
-async function readBotAvatar(
-  env: Env,
-  userId: string,
-  botId: string,
-): Promise<{ bytes: Uint8Array; contentType: string } | undefined> {
-  const settings = (await botStateStub(env, userId, botId).readConfiguration({
-    schemaVersion: 1,
-    userId,
-    botId,
-  })) as BotSettingsViewV1;
-  const avatar = settings.profile.avatar;
-  if (avatar?.kind !== "image") return undefined;
-  const object = await env.APPLICATION_ARTIFACTS.get(
-    botAvatarObjectKeyV1(userId, avatar.digest),
-  );
-  if (!object) return undefined;
-  return {
-    bytes: new Uint8Array(await object.arrayBuffer()),
-    contentType: avatar.contentType,
-  };
-}
-
-async function uploadBotAvatar(
-  env: Env,
-  userId: string,
-  botId: string,
-  command: UploadBotAvatarCommandV1,
-): Promise<BotAvatarUploadReceiptV1> {
-  // Membership before storage: an unregistered Bot never causes a write.
-  const membership = decodeBotMembershipViewV1(
-    rpcJsonSnapshot(
-      await userConfigurationStub(env, userId).hasBot({
-        schemaVersion: 1,
-        userId,
-        botId,
-      }),
-    ),
-  );
-  if (!membership.registered) {
-    throw new BotNotFoundError(botId);
-  }
-  const bytes = decodeBotAvatarBytesV1(command.bytes);
-  const digest = [
-    ...new Uint8Array(
-      await crypto.subtle.digest("SHA-256", bytes as unknown as BufferSource),
-    ),
-  ]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  await env.APPLICATION_ARTIFACTS.put(
-    botAvatarObjectKeyV1(userId, digest),
-    bytes,
-    { httpMetadata: { contentType: command.contentType } },
-  );
-  return {
-    schemaVersion: 1,
-    botId,
-    avatar: {
-      kind: "image",
-      digest,
-      contentType: command.contentType,
-      size: bytes.byteLength,
-    },
-  };
-}
-
 /**
  * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
  *
@@ -1118,6 +987,25 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
   (application, env: Env) =>
     createFoundationBackendContributions(application, {
       backendHost: "gateway",
+      readDeploymentPolicy: async (): Promise<DeploymentPolicyV1> =>
+        decodeDeploymentPolicyV1(
+          rpcJsonSnapshot(
+            await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+          ),
+        ),
+      setDeploymentSignups: async (
+        command: SetSignupsCommandV1,
+        updatedBy: string,
+      ): Promise<DeploymentPolicyV1> =>
+        decodeDeploymentPolicyV1(
+          rpcJsonSnapshot(
+            await deploymentPolicyStub(env).setSignups({
+              schemaVersion: 1,
+              command,
+              updatedBy,
+            }),
+          ),
+        ),
       listTemplateShares: async (userId: string) =>
         decodeTemplateShareListViewV1(
           rpcJsonSnapshot(
@@ -1256,13 +1144,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         botId: string,
         command: BotUnreadCommandV1,
       ) => executeBotUnreadCommand(env, userId, botId, command),
-      readBotAvatar: (userId: string, botId: string) =>
-        readBotAvatar(env, userId, botId),
-      uploadBotAvatar: (
-        userId: string,
-        botId: string,
-        command: UploadBotAvatarCommandV1,
-      ) => uploadBotAvatar(env, userId, botId, command),
       readSheep: async (userId, botId) =>
         decodeSheepIdentityViewV1(
           rpcJsonSnapshot(
@@ -1515,100 +1396,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             }),
           ),
         ),
-      // The Channels door. The gateway verifies the signature so it can address
-      // a Durable Object at all; the User Durable Object re-checks the durable
-      // digest, so a token the edge accepted is still refused once revoked.
-      channelTokenSecret: async () =>
-        typeof env.CREDENTIAL_KEYRING === "string"
-          ? channelTokenSecretV1(env.CREDENTIAL_KEYRING)
-          : undefined,
-      deliverChannelWebhook: (userId, request) =>
-        userConfigurationStub(env, userId).deliverChannelWebhook({
-          schemaVersion: 1,
-          userId,
-          ...request,
-        }),
-      connectChannel: (userId, request) =>
-        userConfigurationStub(env, userId).connectChannel({
-          schemaVersion: 1,
-          userId,
-          ...request,
-        }),
-      // The WebUI's reads. Channel state crosses a Durable Object seam, so it
-      // decodes on arrival rather than being trusted in the shape RPC happened
-      // to return.
-      listChannels: async (userId, botId) =>
-        decodeChannelListViewV1(
-          await userConfigurationStub(env, userId).listChannels({
-            schemaVersion: 1,
-            userId,
-            botId,
-          }),
-        ),
-      readChannelThreadPage: async (userId, channelId) =>
-        decodeChannelThreadPageViewV1(
-          await userConfigurationStub(env, userId).readChannelThreadPage({
-            schemaVersion: 1,
-            userId,
-            channelId,
-          }),
-        ),
-      listChannelUnread: async (userId, botId) =>
-        decodeChannelUnreadDirectoryViewV1(
-          await userConfigurationStub(env, userId).listChannelUnread({
-            schemaVersion: 1,
-            userId,
-            botId,
-          }),
-        ),
-      markChannelRead: async (userId, command) =>
-        decodeChannelReadReceiptV1(
-          await userConfigurationStub(env, userId).markChannelRead({
-            schemaVersion: 1,
-            userId,
-            command: {
-              schemaVersion: 1,
-              type: "channel/mark-read",
-              ...command,
-            },
-          }),
-        ),
-      postChannelMessage: async (userId, command) =>
-        decodeChannelCommandReceiptV1(
-          await userConfigurationStub(env, userId).executeChannelCommand({
-            schemaVersion: 1,
-            userId,
-            command: {
-              schemaVersion: 1,
-              type: "channel/post",
-              commandId: command.commandId,
-              channelId: command.channelId,
-              botId: command.botId,
-              text: command.text,
-              // The person is a peer, not a member: what they say is owed to
-              // every Bot in the room, the one they were looking at included.
-              senderPeer: CHANNEL_USER_PEER_V1,
-            },
-            writer: { kind: "user" },
-          }),
-        ),
-      // Disconnect is the same `channel/disconnect` the `channel_manage` tool
-      // applies. The User is the writer, because the User asked.
-      disconnectChannel: async (userId, command) =>
-        decodeChannelCommandReceiptV1(
-          await userConfigurationStub(env, userId).executeChannelCommand({
-            schemaVersion: 1,
-            userId,
-            command: {
-              schemaVersion: 1,
-              type: "channel/disconnect",
-              commandId: command.commandId,
-              channelId: command.channelId,
-              botId: command.botId,
-            },
-            writer: { kind: "user" },
-          }),
-        ),
       // The secret the gateway verifies a presented webhook key against. It
       // never leaves the Worker; a Bot only ever sees a digest.
       ...(typeof env.ROUTINE_HOOK_SECRET === "string"
@@ -1701,6 +1488,20 @@ export default {
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
       auth: gatewayAuth(env),
+      userExists: (userId) =>
+        userConfigurationStub(env, userId).isProvisioned({
+          schemaVersion: 1,
+          userId,
+        }),
+      readDeploymentPolicy: async () =>
+        decodeDeploymentPolicyV1(
+          rpcJsonSnapshot(
+            await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+          ),
+        ),
+      ...(env.FROCKBOT_ADMIN_EMAILS
+        ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
+        : {}),
       applicationHashFor: async (userId) =>
         (await userConfigurationStub(env, userId).activeApplicationHash({
           schemaVersion: 1,

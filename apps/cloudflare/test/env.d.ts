@@ -1,6 +1,4 @@
 import type { AuthoringProbe } from "./authoring-probe.ts";
-import type { ChannelStoreProbe } from "./channel-store-probe.ts";
-import type { ChannelConnectorProbe } from "./channel-connector-probe.ts";
 import type { BotIsolateProbe } from "./bot-isolate-probe.ts";
 import type { ComputerHostClientProbe } from "./computer-host-probe.ts";
 import type {
@@ -9,13 +7,13 @@ import type {
   WorkerdBotState,
 } from "./fly-compatibility-worker.ts";
 import type { UserConfiguration } from "../src/user-configuration.ts";
+import type { DeploymentPolicy } from "../src/deployment-policy.ts";
 
 interface FlyTestEnv {
   AUTHORING: DurableObjectNamespace<AuthoringProbe>;
+  AI: Ai;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
-  CHANNEL_STORE: DurableObjectNamespace<ChannelStoreProbe>;
-  CHANNEL_CONNECTOR: DurableObjectNamespace<ChannelConnectorProbe>;
   CREDENTIAL_KEYRING: string;
   SECRET_TOKEN: string;
   COMPOSITIONS: DurableObjectNamespace<CompositionProbe>;
@@ -29,6 +27,7 @@ interface FlyTestEnv {
   ROUTINE_HOOK_SECRET: string;
   MACHINE_TOKEN_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
+  DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
 }
 
 declare global {

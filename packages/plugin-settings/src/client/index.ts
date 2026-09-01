@@ -4,13 +4,13 @@ import {
   clientSurfaceRegistryKey,
   type ClientPlugin,
 } from "@frockbot/client-core";
-import BotInfoSurface from "./BotInfoSurface.vue";
-import BotInfoTrigger from "./BotInfoTrigger.vue";
+import BotPanel from "./BotPanel.vue";
 import BotSettingsSurface from "./BotSettingsSurface.vue";
 import BotSettingsTrigger from "./BotSettingsTrigger.vue";
 import ConnectionsSurface from "./ConnectionsSurface.vue";
 import ModelsSurface from "./ModelsSurface.vue";
 import PluginsSurface from "./PluginsSurface.vue";
+import PackageCatalogSurface from "./PackageCatalogSurface.vue";
 import PluginsTrigger from "./PluginsTrigger.vue";
 import UserProfileTrigger from "./UserProfileTrigger.vue";
 import UserSettingsSurface from "./UserSettingsSurface.vue";
@@ -20,16 +20,8 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
   return [
     surfaces.register({
       id: "bot-settings",
-      title: "Bot settings",
+      title: "Settings",
       component: BotSettingsSurface,
-      placement: "panel",
-    }),
-    // The per-Bot info pane takes the right panel the same way Bot settings
-    // does, so the conversation stays beside it.
-    surfaces.register({
-      id: "bot-info",
-      title: "Bot info",
-      component: BotInfoSurface,
       placement: "panel",
     }),
     // Enablement and configuration are separate surfaces: Plugins turns a
@@ -51,6 +43,11 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       component: ConnectionsSurface,
     }),
     surfaces.register({
+      id: "package-catalog",
+      title: "Package Catalog",
+      component: PackageCatalogSurface,
+    }),
+    surfaces.register({
       id: "user-settings",
       title: "Application settings",
       component: UserSettingsSurface,
@@ -66,9 +63,9 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       component: UserProfileTrigger,
     }),
     ctx.slot({
-      slot: "frockbot.bot-actions",
-      order: 5,
-      component: BotInfoTrigger,
+      slot: "frockbot.right-panel",
+      order: 10,
+      component: BotPanel,
     }),
     ctx.slot({
       slot: "frockbot.bot-actions",

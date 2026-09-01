@@ -25,11 +25,16 @@ export interface HostedAuthAdapterInput {
   location: URL;
   embeddedUserId?: string;
   embeddedMode?: "anonymous" | "better-auth" | "development";
+  embeddedIsAdmin?: boolean;
   betterAuth: HostedBetterAuthAdapter;
   desktop?: HostedDesktopAuthAdapter;
 }
 
-function userProjection(user: AuthUserLike, fallbackName = "FrockBot user") {
+function userProjection(
+  user: AuthUserLike,
+  isAdmin: boolean,
+  fallbackName = "FrockBot user",
+) {
   if (typeof user.id !== "string" || user.id.length === 0) {
     throw new Error("Authenticated user id is invalid");
   }
@@ -40,6 +45,7 @@ function userProjection(user: AuthUserLike, fallbackName = "FrockBot user") {
         ? user.name
         : fallbackName,
     email: typeof user.email === "string" ? user.email : "",
+    isAdmin,
   };
 }
 
@@ -56,7 +62,7 @@ function embeddedDevelopmentUser(
   return input.embeddedUserId;
 }
 
-function developmentProjection(userId: string) {
+function developmentProjection(userId: string, isAdmin: boolean) {
   return {
     schemaVersion: 1 as const,
     status: "authenticated" as const,
@@ -65,6 +71,7 @@ function developmentProjection(userId: string) {
       id: userId,
       name: "Local developer",
       email: "dev@localhost",
+      isAdmin,
     },
   };
 }
@@ -90,11 +97,19 @@ export function createHostedAuthAdapter(input: HostedAuthAdapterInput) {
   return {
     async read(): Promise<unknown> {
       const developmentUser = developmentUserFromUrl(input.location);
-      if (developmentUser) return developmentProjection(developmentUser);
+      if (developmentUser) {
+        return developmentProjection(
+          developmentUser,
+          input.embeddedIsAdmin === true,
+        );
+      }
 
       const embeddedDevelopment = embeddedDevelopmentUser(input);
       if (embeddedDevelopment) {
-        return developmentProjection(embeddedDevelopment);
+        return developmentProjection(
+          embeddedDevelopment,
+          input.embeddedIsAdmin === true,
+        );
       }
 
       if (input.desktop) {
@@ -104,7 +119,7 @@ export function createHostedAuthAdapter(input: HostedAuthAdapterInput) {
               schemaVersion: 1,
               status: "authenticated",
               mode: "desktop",
-              user: userProjection(user),
+              user: userProjection(user, input.embeddedIsAdmin === true),
             }
           : { schemaVersion: 1, status: "anonymous" };
       }
@@ -115,7 +130,7 @@ export function createHostedAuthAdapter(input: HostedAuthAdapterInput) {
           schemaVersion: 1,
           status: "authenticated",
           mode: "better-auth",
-          user: userProjection(user),
+          user: userProjection(user, input.embeddedIsAdmin === true),
         };
       }
       return { schemaVersion: 1, status: "anonymous" };

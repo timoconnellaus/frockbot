@@ -26,6 +26,8 @@
 import {
   advanceUnreadActivityV1,
   optionalUnreadStateV1,
+  sidebarMessagePreviewForTurnV1,
+  SIDEBAR_PREVIEW_KEY,
   UNREAD_STATE_KEY,
 } from "./unread.js";
 import { approvalTerminalRecordsV1 } from "./approvals.js";
@@ -35,13 +37,15 @@ import { routineTerminalRecordsForRunV1 } from "./backend-routines.js";
 export interface ShellTerminalRunV1 {
   runId: string;
   sessionId: string;
+  acceptedAt: string;
+  input: string;
   events: readonly { type: string }[];
   responseText?: string;
   admission?: {
     turnType?: string;
     // Wide on purpose: the kernel records one origin shape per producer, and
     // this module only asks which producer it was.
-    origin?: { kind: string; routineId?: string; channelId?: string };
+    origin?: { kind: string; routineId?: string };
   };
 }
 
@@ -68,11 +72,19 @@ async function unreadRecordsV1(
   const current = optionalUnreadStateV1(
     await input.read<unknown>(UNREAD_STATE_KEY),
   );
+  const next = advanceUnreadActivityV1(current, {
+    cursor: input.cursor,
+    at: input.now,
+  });
+  const preview = sidebarMessagePreviewForTurnV1(input.run, input.now);
   return {
-    [UNREAD_STATE_KEY]: advanceUnreadActivityV1(current, {
-      cursor: input.cursor,
-      at: input.now,
-    }),
+    [UNREAD_STATE_KEY]: next,
+    // `advanceUnreadActivityV1` returns the current object for a replay or an
+    // older settlement. The preview follows that same monotonic decision, so
+    // recovery cannot replace a newer row with an older Turn.
+    ...(next === current || preview === undefined
+      ? {}
+      : { [SIDEBAR_PREVIEW_KEY]: preview }),
   };
 }
 

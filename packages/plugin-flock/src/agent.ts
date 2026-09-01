@@ -281,11 +281,9 @@ function sameProfile(left: BotProfile, right: BotProfile): boolean {
 function canonicalProfile(profile: BotProfile): unknown[] {
   return [
     profile.name,
-    profile.label ?? null,
     profile.description ?? null,
     profile.title ?? null,
     profile.namedBy ?? null,
-    profile.avatar ?? null,
     profile.hiddenFromSidebar === true,
   ];
 }

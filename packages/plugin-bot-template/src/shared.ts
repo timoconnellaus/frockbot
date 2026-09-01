@@ -32,7 +32,6 @@ export const TEMPLATE_OMISSION_REASONS_V1 = [
   "connection",
   "assignment",
   "model",
-  "avatar-image",
   "memory",
   "private-network-server",
 ] as const;

@@ -166,12 +166,7 @@ describe("machine tool admission", () => {
     try {
       const names = (turnType: TurnTypeV1) =>
         harness.root.tools.schemas({ turnType }).map((tool) => tool.name);
-      for (const turnType of [
-        "chat",
-        "automation",
-        "subagent",
-        "channel",
-      ] as const) {
+      for (const turnType of ["chat", "automation", "subagent"] as const) {
         expect(names(turnType)).toContain(MACHINE_LIST_TOOL_V1);
         expect(names(turnType)).toContain(MACHINE_COMMAND_CHECK_TOOL_V1);
       }
@@ -181,7 +176,6 @@ describe("machine tool admission", () => {
         // approval with, so it does not get a tool that needs one.
         expect(names("automation")).not.toContain(tool);
         expect(names("subagent")).not.toContain(tool);
-        expect(names("channel")).not.toContain(tool);
       }
     } finally {
       await harness.dispose();
@@ -193,7 +187,6 @@ describe("machine tool admission", () => {
       "chat",
       "automation",
       "subagent",
-      "channel",
     ]);
     expect(machineAdmissionCeilingV1(MACHINE_CONTROL_CAPABILITY_V1)).toEqual([
       "chat",

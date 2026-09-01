@@ -387,7 +387,7 @@ interface AuthorPackageInputV1 {
 | `composition:failure:<generationId>:<attempt>` | `{ attempt, at, phase: "resolve"\|"mount"\|"health", message, diagnostics }` |
 | `composition:failure-count:<generationId>`     | integer                                                                      |
 | `composition:quarantine:<generationId>`        | `{ quarantinedAt, reason, failures: 3 }`                                     |
-| `notification:<id>`                            | reuses the existing visible-failure channel (`backend.ts:1815`)              |
+| `notification:<id>`                            | reuses the existing visible-failure surface (`backend.ts:1815`)              |
 
 ```ts
 export interface CompositionFailureV1 {

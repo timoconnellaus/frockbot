@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   advanceUnreadActivityV1,
   botUnreadCommandFingerprintV1,
+  decodeSidebarMessagePreviewV1,
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadCommandV1,
   decodeBotUnreadDirectoryViewV1,
@@ -11,6 +12,7 @@ import {
   markUnreadV1,
   optionalUnreadStateV1,
   projectBotUnreadViewV1,
+  sidebarMessagePreviewForTurnV1,
   UNREAD_COUNT_CAP,
   type UnreadStateV1,
 } from "./unread.js";
@@ -71,6 +73,55 @@ describe("the unread codec", () => {
   test("reads an absent record as the empty one", () => {
     expect(optionalUnreadStateV1(undefined)).toEqual(emptyUnreadStateV1());
     expect(() => optionalUnreadStateV1({ schemaVersion: 3 })).toThrow();
+  });
+});
+
+describe("the sidebar message preview", () => {
+  const preview = {
+    schemaVersion: 1 as const,
+    text: "Done",
+    at: "2026-08-31T00:02:00.000Z",
+    role: "assistant" as const,
+  };
+
+  test("decodes the exact bounded projection", () => {
+    expect(decodeSidebarMessagePreviewV1(preview)).toEqual(preview);
+    for (const invalid of [
+      { ...preview, extra: true },
+      { ...preview, text: "" },
+      { ...preview, text: "x".repeat(121) },
+      { ...preview, at: "yesterday" },
+      { ...preview, role: "system" },
+    ]) {
+      expect(() => decodeSidebarMessagePreviewV1(invalid)).toThrow();
+    }
+  });
+
+  test("prefers assistant text, falls back to the User, and bounds both", () => {
+    expect(
+      sidebarMessagePreviewForTurnV1(
+        {
+          acceptedAt: "2026-08-31T00:01:00.000Z",
+          input: "Question",
+          responseText: "Answer",
+        },
+        preview.at,
+      ),
+    ).toMatchObject({ text: "Answer", at: preview.at, role: "assistant" });
+    expect(
+      sidebarMessagePreviewForTurnV1(
+        {
+          acceptedAt: "2026-08-31T00:01:00.000Z",
+          input: "Q".repeat(140),
+          responseText: "",
+        },
+        preview.at,
+      ),
+    ).toMatchObject({
+      text: "Q".repeat(120),
+      at: "2026-08-31T00:01:00.000Z",
+      role: "user",
+    });
   });
 });
 
@@ -182,6 +233,33 @@ describe("the unread projection", () => {
       index(3),
     );
     expect(view).toMatchObject({ count: 0, capped: false, unread: false });
+  });
+
+  test("carries the already-bounded latest message without deriving it", () => {
+    const preview = decodeSidebarMessagePreviewV1({
+      schemaVersion: 1,
+      text: "Latest answer",
+      at: "2026-08-31T00:03:00.000Z",
+      role: "assistant",
+    });
+    const projected = projectBotUnreadViewV1(
+      "alpha",
+      emptyUnreadStateV1(),
+      [],
+      preview,
+    );
+    expect(
+      decodeBotUnreadDirectoryViewV1({
+        schemaVersion: 1,
+        unread: [projected],
+      }).unread[0]?.lastMessage,
+    ).toEqual(preview);
+    expect(() =>
+      decodeBotUnreadDirectoryViewV1({
+        schemaVersion: 1,
+        unread: [{ ...projected, lastMessage: { ...preview, extra: true } }],
+      }),
+    ).toThrow();
   });
 });
 

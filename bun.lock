@@ -25,10 +25,10 @@
         "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-composition": "workspace:*",
         "@frockbot/plugin-audit": "workspace:*",
+        "@frockbot/plugin-admin": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
-        "@frockbot/plugin-channels": "workspace:*",
         "@frockbot/plugin-clock": "workspace:*",
         "@frockbot/plugin-computer": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
@@ -48,13 +48,13 @@
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-foundation": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
+        "@frockbot/plugin-provider-workers-ai": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-search": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/plugin-subagents": "workspace:*",
-        "@frockbot/plugin-telegram": "workspace:*",
         "@frockbot/plugin-ui-theme": "workspace:*",
         "@frockbot/plugin-user-machine": "workspace:*",
         "@frockbot/plugin-web": "workspace:*",
@@ -107,9 +107,9 @@
         "@frockbot/machine-protocol": "workspace:*",
         "@frockbot/mobile": "workspace:*",
         "@frockbot/plugin-audit": "workspace:*",
+        "@frockbot/plugin-admin": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
-        "@frockbot/plugin-channels": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-image": "workspace:*",
@@ -117,13 +117,13 @@
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
+        "@frockbot/plugin-provider-workers-ai": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-search": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/plugin-skills": "workspace:*",
         "@frockbot/plugin-subagents": "workspace:*",
-        "@frockbot/plugin-telegram": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
         "@frockbot/plugin-user-machine": "workspace:*",
         "@frockbot/template-core": "workspace:*",
@@ -487,6 +487,22 @@
         "vue-tsc": "3.3.10",
       },
     },
+    "packages/plugin-admin": {
+      "name": "@frockbot/plugin-admin",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/client-core": "workspace:*",
+        "@frockbot/client-ui": "workspace:*",
+        "@frockbot/plugin-shell": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+        "vue": "3.5.41",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "5.9.3",
+        "vue-tsc": "3.3.10",
+      },
+    },
     "packages/plugin-auth": {
       "name": "@frockbot/plugin-auth",
       "version": "0.0.1",
@@ -543,49 +559,16 @@
         "vue-tsc": "3.3.10",
       },
     },
-    "packages/plugin-channels": {
-      "name": "@frockbot/plugin-channels",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/configuration-core": "workspace:*",
-        "@frockbot/connection-core": "workspace:*",
-        "@frockbot/kernel-agent-loop": "workspace:*",
-        "@frockbot/kernel-contracts": "workspace:*",
-        "@frockbot/plugin-flock": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "cordis": "4.0.0-rc.8",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@frockbot/plugin-prompt": "workspace:*",
-        "@frockbot/plugin-tools": "workspace:*",
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "5.9.3",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
     "packages/plugin-clock": {
       "name": "@frockbot/plugin-clock",
       "version": "0.0.1",
       "dependencies": {
-        "@cordisjs/plugin-webui": "0.8.2",
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "cordis": "4.0.0-rc.8",
-        "vue": "3.5.41",
       },
       "devDependencies": {
         "@types/node": "26.2.0",
-        "@vitejs/plugin-vue": "6.0.8",
         "typescript": "5.9.3",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
       },
     },
     "packages/plugin-composio": {
@@ -921,6 +904,23 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/plugin-provider-workers-ai": {
+      "name": "@frockbot/plugin-provider-workers-ai",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/configuration-core": "workspace:*",
+        "@frockbot/connection-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-models": "workspace:*",
+        "@frockbot/plugin-settings": "workspace:*",
+        "@frockbot/provider-openai-compatible": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-routines": {
       "name": "@frockbot/plugin-routines",
       "version": "0.0.1",
@@ -1008,7 +1008,6 @@
         "@frockbot/machine-protocol": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
-        "@frockbot/plugin-channels": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-image": "workspace:*",
         "@frockbot/plugin-machine-messages": "workspace:*",
@@ -1056,23 +1055,6 @@
       },
       "devDependencies": {
         "@types/bun": "1.4.0",
-        "typescript": "5.9.3",
-      },
-    },
-    "packages/plugin-telegram": {
-      "name": "@frockbot/plugin-telegram",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/configuration-core": "workspace:*",
-        "@frockbot/connection-core": "workspace:*",
-        "@frockbot/plugin-channels": "workspace:*",
-        "@frockbot/plugin-credentials": "workspace:*",
-        "@frockbot/plugin-settings": "workspace:*",
-        "cordis": "4.0.0-rc.8",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@types/node": "26.2.0",
         "typescript": "5.9.3",
       },
     },
@@ -1460,13 +1442,13 @@
 
     "@frockbot/plugin-audit": ["@frockbot/plugin-audit@workspace:packages/plugin-audit"],
 
+    "@frockbot/plugin-admin": ["@frockbot/plugin-admin@workspace:packages/plugin-admin"],
+
     "@frockbot/plugin-auth": ["@frockbot/plugin-auth@workspace:packages/plugin-auth"],
 
     "@frockbot/plugin-authoring": ["@frockbot/plugin-authoring@workspace:packages/plugin-authoring"],
 
     "@frockbot/plugin-bot-template": ["@frockbot/plugin-bot-template@workspace:packages/plugin-bot-template"],
-
-    "@frockbot/plugin-channels": ["@frockbot/plugin-channels@workspace:packages/plugin-channels"],
 
     "@frockbot/plugin-clock": ["@frockbot/plugin-clock@workspace:packages/plugin-clock"],
 
@@ -1512,6 +1494,8 @@
 
     "@frockbot/plugin-provider-ollama-cloud": ["@frockbot/plugin-provider-ollama-cloud@workspace:packages/plugin-provider-ollama-cloud"],
 
+    "@frockbot/plugin-provider-workers-ai": ["@frockbot/plugin-provider-workers-ai@workspace:packages/plugin-provider-workers-ai"],
+
     "@frockbot/plugin-routines": ["@frockbot/plugin-routines@workspace:packages/plugin-routines"],
 
     "@frockbot/plugin-search": ["@frockbot/plugin-search@workspace:packages/plugin-search"],
@@ -1523,8 +1507,6 @@
     "@frockbot/plugin-skills": ["@frockbot/plugin-skills@workspace:packages/plugin-skills"],
 
     "@frockbot/plugin-subagents": ["@frockbot/plugin-subagents@workspace:packages/plugin-subagents"],
-
-    "@frockbot/plugin-telegram": ["@frockbot/plugin-telegram@workspace:packages/plugin-telegram"],
 
     "@frockbot/plugin-testkit": ["@frockbot/plugin-testkit@workspace:packages/plugin-testkit"],
 
@@ -3126,11 +3108,11 @@
 
     "@frockbot/plugin-audit/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
+    "@frockbot/plugin-admin/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
     "@frockbot/plugin-auth/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-bot-template/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
-
-    "@frockbot/plugin-channels/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-clock/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
@@ -3165,8 +3147,6 @@
     "@frockbot/plugin-shell/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-subagents/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
-
-    "@frockbot/plugin-telegram/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-ui-theme/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

@@ -1,5 +1,0 @@
-/*
- * The Channels Package owns no global theme. Its components carry their own
- * scoped styles; this sheet exists so the client entry has one import to make
- * and so a future shared rule has somewhere honest to live.
- */

@@ -10,6 +10,8 @@ import {
   isApplicationDeploymentHash,
   isPublicIdentifier,
 } from "@frockbot/configuration-core";
+import { decodeDeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
+import { isDeploymentAdminV1 } from "./admin-identities.js";
 import type {
   CatalogGatewayDocument,
   CatalogGatewayStore,
@@ -19,7 +21,14 @@ import type {
 } from "./contracts.js";
 
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
-const PUBLIC_ASSET_PATHS = new Set(["/", "/app.js", "/app.css"]);
+const PUBLIC_ASSET_PATHS = new Set([
+  "/",
+  "/app.js",
+  "/app.css",
+  "/favicon.ico",
+]);
+export const SIGNUPS_CLOSED_MESSAGE =
+  "FrockBot isn't taking new signups right now.";
 
 export function applicationDeploymentId(
   identity: UserApplicationIdentity,
@@ -35,6 +44,64 @@ export function applicationDeploymentId(
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+function signupClosedResponse(request: Request, url: URL): Response {
+  if (request.method !== "GET" || url.pathname !== "/") {
+    return jsonError(403, SIGNUPS_CLOSED_MESSAGE);
+  }
+  return new Response(
+    `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FrockBot</title>
+</head>
+<body>
+  <main>
+    <p>FrockBot</p>
+    <h1>${SIGNUPS_CLOSED_MESSAGE}</h1>
+    <p>If you already have access, ask the deployment owner to check your sign-in email.</p>
+    <a href="/sign-out">Sign out</a>
+  </main>
+</body>
+</html>`,
+    {
+      status: 403,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "content-security-policy":
+          "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        "x-content-type-options": "nosniff",
+      },
+    },
+  );
+}
+
+async function routeSignOut(
+  request: Request,
+  url: URL,
+  dependencies: GatewayDependencies,
+): Promise<Response> {
+  if (request.method !== "GET") return jsonError(405, "method not allowed");
+  const headers = new Headers(request.headers);
+  headers.set("content-type", "application/json");
+  const response = await dependencies.auth.handler(
+    new Request(new URL("/api/auth/sign-out", url), {
+      method: "POST",
+      headers,
+      body: "{}",
+    }),
+  );
+  if (!response.ok) return response;
+  const redirect = new Response(null, {
+    status: 303,
+    headers: response.headers,
+  });
+  redirect.headers.set("location", "/");
+  return redirect;
 }
 
 function decodeBotPathSegment(value: string): string {
@@ -207,6 +274,9 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (url.pathname.startsWith("/api/auth/")) {
       return dependencies.auth.handler(request);
     }
+    if (url.pathname === "/sign-out") {
+      return routeSignOut(request, url, dependencies);
+    }
 
     for (const contribution of dependencies.backendContributions ?? []) {
       const response = await contribution.publicRoute?.(request, url, {
@@ -234,8 +304,42 @@ export function createGateway(dependencies: GatewayDependencies) {
       request.method === "GET" && PUBLIC_ASSET_PATHS.has(url.pathname);
     if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
     if (!userId) return jsonError(401, "authentication required");
+    const isAdmin =
+      userId !== PUBLIC_APPLICATION_USER_ID &&
+      isDeploymentAdminV1(
+        {
+          id: userId,
+          ...(session?.user.email ? { email: session.user.email } : {}),
+          mode: development.userId ? "development" : "better-auth",
+        },
+        dependencies.adminEmails,
+      );
+    if (
+      userId !== PUBLIC_APPLICATION_USER_ID &&
+      !development.userId &&
+      !isAdmin
+    ) {
+      try {
+        const exists = await dependencies.userExists(userId);
+        if (!exists) {
+          const policy = decodeDeploymentPolicyV1(
+            await dependencies.readDeploymentPolicy(),
+          );
+          if (!policy.signups.open) {
+            return signupClosedResponse(request, url);
+          }
+        }
+      } catch (error) {
+        return jsonError(
+          503,
+          error instanceof Error
+            ? error.message
+            : "Signup policy is unavailable",
+        );
+      }
+    }
     if (request.method === "GET" && url.pathname === "/api/identity") {
-      return Response.json({ schemaVersion: 1, userId });
+      return Response.json({ schemaVersion: 1, userId, isAdmin });
     }
 
     if (
@@ -248,6 +352,7 @@ export function createGateway(dependencies: GatewayDependencies) {
     for (const contribution of dependencies.backendContributions ?? []) {
       const response = await contribution.route(request, url, {
         userId,
+        isAdmin,
         client:
           request.headers.get("x-frockbot-client") === "desktop"
             ? "desktop"
@@ -429,6 +534,7 @@ export function createGateway(dependencies: GatewayDependencies) {
     forwardedHeaders.delete("x-frockbot-user-id");
     forwardedHeaders.set("x-frockbot-deployment", workerId);
     forwardedHeaders.set("x-frockbot-auth-session-v1", authMode);
+    forwardedHeaders.set("x-frockbot-is-admin-v1", String(isAdmin));
     const forwardedUrl = URL.parse(request.url);
     if (!forwardedUrl) return jsonError(400, "invalid request URL");
     if (development.persist) forwardedUrl.searchParams.delete("as_user");

@@ -102,6 +102,31 @@ const credentialKeyring =
   '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}';
 
 describe("UserConfiguration Connection routing", () => {
+  test("reports provisioning without pinning a first-time User", async () => {
+    const bound = identity("new-user");
+    const configuration = new UserConfiguration(
+      bound.ctx(new MemoryStorage()),
+      { ...bound.env, CREDENTIAL_KEYRING: credentialKeyring },
+    );
+
+    await expect(
+      configuration.isProvisioned({
+        schemaVersion: 1,
+        userId: "new-user",
+      }),
+    ).resolves.toBe(false);
+    await configuration.readConfiguration({
+      schemaVersion: 1,
+      userId: "new-user",
+    });
+    await expect(
+      configuration.isProvisioned({
+        schemaVersion: 1,
+        userId: "new-user",
+      }),
+    ).resolves.toBe(true);
+  });
+
   test("mounts declared User Contributions through the application registry", async () => {
     const bound = identity("user-1");
     const configuration = new UserConfiguration(
@@ -112,17 +137,39 @@ describe("UserConfiguration Connection routing", () => {
       },
     );
 
-    await expect(
-      configuration.readConfiguration({
-        schemaVersion: 1,
-        userId: "user-1",
-      }),
-    ).resolves.toMatchObject({
+    const first = await configuration.readConfiguration({
       schemaVersion: 1,
-      revision: 0,
-      packages: expect.any(Array),
-      connections: [],
+      userId: "user-1",
     });
+    expect(first).toMatchObject({
+      schemaVersion: 1,
+      revision: 3,
+      connections: [
+        expect.objectContaining({
+          connectionId: "workers-ai-ambient",
+          providerType: "workers-ai",
+          state: "ready",
+        }),
+      ],
+      newBotModelTemplate: {
+        connectionId: "workers-ai-ambient",
+        providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      },
+      newBotModelTemplateSource: "auto",
+    });
+    expect(first.packages).toContainEqual(
+      expect.objectContaining({
+        packageId: "provider-workers-ai",
+        state: "installed",
+      }),
+    );
+    expect(first.packages.length).toBeGreaterThan(0);
+    expect(
+      first.packages.every(
+        (pkg) => pkg.state === "installed" && pkg.provenance === "first-party",
+      ),
+    ).toBe(true);
+    expect(first.packages.map((pkg) => pkg.packageId)).toContain("web");
   });
   test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {
     const executed: unknown[] = [];

@@ -36,13 +36,18 @@
         {
           "slot": "frockbot.bot-actions",
           "order": 10
+        },
+        {
+          "slot": "frockbot.right-panel",
+          "order": 10
         }
       ],
       "outlets": [
         "frockbot.user-settings-sections",
         "frockbot.bot-settings-sections",
-        "frockbot.bot-info-sections",
-        "frockbot.bot-info-channels"
+        "frockbot.bot-settings-primary-sections",
+        "frockbot.bot-panel-sections",
+        "frockbot.bot-avatar-editor"
       ]
     }
   },

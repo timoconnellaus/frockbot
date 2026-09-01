@@ -104,7 +104,7 @@ describe("bot_export_template", () => {
       const names = (turnType: TurnTypeV1) =>
         mounted.root.tools.schemas({ turnType }).map((tool) => tool.name);
       expect(names("chat")).toContain(BOT_EXPORT_TEMPLATE_TOOL_V1);
-      for (const turnType of ["automation", "subagent", "channel"] as const) {
+      for (const turnType of ["automation", "subagent"] as const) {
         expect(names(turnType)).not.toContain(BOT_EXPORT_TEMPLATE_TOOL_V1);
       }
     } finally {

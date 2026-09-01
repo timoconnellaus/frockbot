@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { UiIconButton, UiSkeleton } from "@frockbot/client-ui";
+import { UiSkeleton } from "@frockbot/client-ui";
 import { computed, inject, onMounted } from "vue";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { flockWebDataKey } from "./state.js";
+import { formatSidebarMessageTimeV1, groupSidebarBotsV1 } from "./sidebar.js";
 import BotAvatar from "./BotAvatar.vue";
+
 const injectedFlock = inject(flockWebDataKey);
 const injectedShell = inject(frockBotWebDataKey);
 if (!injectedFlock || !injectedShell)
@@ -12,6 +14,7 @@ const flock = injectedFlock;
 const shell = injectedShell;
 flock.value.bindShell(shell);
 const active = computed(() => shell.value.activeBotId);
+
 /*
  * Hidden and archived are different states. Archiving stops a Bot working;
  * hiding only takes it out of this list, so a hidden Bot stays selectable and
@@ -30,9 +33,13 @@ const listedBots = computed(() =>
 const visibleBots = computed(() =>
   listedBots.value.filter((bot) => !isHidden(bot.botId)),
 );
+const groupedVisibleBots = computed(() =>
+  groupSidebarBotsV1(visibleBots.value, flock.value.profiles),
+);
 const hiddenBots = computed(() =>
   listedBots.value.filter((bot) => isHidden(bot.botId)),
 );
+
 /** The live name the Bot's own settings hold, not the registration seed. */
 function botName(botId: string, fallback: string): string {
   return flock.value.profiles[botId]?.name ?? fallback;
@@ -40,6 +47,17 @@ function botName(botId: string, fallback: string): string {
 function botSubtitle(botId: string): string {
   return flock.value.profiles[botId]?.title ?? botId;
 }
+function previewText(botId: string): string {
+  return flock.value.unread[botId]?.lastMessage?.text ?? botSubtitle(botId);
+}
+function previewAt(botId: string): string | undefined {
+  return flock.value.unread[botId]?.lastMessage?.at;
+}
+function previewTime(botId: string): string {
+  const at = previewAt(botId);
+  return at ? formatSidebarMessageTimeV1(at) : "";
+}
+
 /*
  * Unread is backend state: the Bot Durable Object derives the count and the
  * gateway fans it out. Nothing here computes one — these read the projection.
@@ -49,8 +67,7 @@ function isUnread(botId: string): boolean {
 }
 function unreadLabel(botId: string): string | undefined {
   const view = flock.value.unread[botId];
-  if (!view?.unread) return undefined;
-  if (view.count === 0) return undefined;
+  if (!view?.unread || view.count === 0) return undefined;
   return view.capped ? `${view.count}+` : String(view.count);
 }
 /** Hidden Bots contribute no row, so their unread arrives as one badge. */
@@ -65,20 +82,12 @@ const hiddenUnread = computed(() =>
 );
 onMounted(() => void flock.value.load());
 </script>
+
 <template>
-  <div class="flock-sidebar-heading">
-    <span>Your flock</span>
-    <span class="flock-heading-actions">
-      <button type="button" class="flock-manage" @click="flock.toggleArchived">
-        {{ flock.showArchived ? "Hide archived" : "Manage" }}
-      </button>
-      <UiIconButton
-        icon="plus"
-        label="Create Bot"
-        size="sm"
-        @click="flock.openCreate"
-      />
-    </span>
+  <div class="flock-list-actions">
+    <button type="button" class="flock-manage" @click="flock.toggleArchived">
+      {{ flock.showArchived ? "Hide archived" : "Manage" }}
+    </button>
   </div>
   <div v-if="flock.loading" class="flock-skeleton" aria-busy="true">
     <span class="flock-skeleton-label">Loading your flock…</span>
@@ -94,65 +103,89 @@ onMounted(() => void flock.value.load());
     No Bots yet. Add your first sheep.
   </p>
   <template v-else>
-    <TransitionGroup name="flock-row" tag="div" class="flock-rows">
-      <div
-        v-for="bot in visibleBots"
-        :key="bot.botId"
-        class="flock-bot-row"
-        :class="{
-          active: active === bot.botId,
-          archived: flock.lifecycles[bot.botId] === 'archived',
-          unread: isUnread(bot.botId),
-        }"
+    <div class="flock-groups">
+      <section
+        v-for="group in groupedVisibleBots.groups"
+        :key="group.key"
+        class="flock-group"
       >
-        <button
-          type="button"
-          class="flock-bot-select"
-          :disabled="flock.lifecycles[bot.botId] === 'archived'"
-          :aria-current="active === bot.botId ? 'true' : undefined"
-          @click="flock.select(bot.botId)"
-        >
-          <BotAvatar
-            :bot-id="bot.botId"
-            :sheep="flock.identities[bot.botId]?.sheep ?? bot.sheep"
-            :label="`${botName(bot.botId, bot.initialName)} avatar`"
-          />
-          <span class="flock-bot-copy"
-            ><strong>{{ botName(bot.botId, bot.initialName) }}</strong
-            ><small>{{ botSubtitle(bot.botId) }}</small></span
+        <h2 v-if="groupedVisibleBots.showHeadings" class="flock-group-heading">
+          {{ group.label }}
+        </h2>
+        <TransitionGroup name="flock-row" tag="div" class="flock-rows">
+          <div
+            v-for="bot in group.bots"
+            :key="bot.botId"
+            class="flock-bot-row"
+            :class="{
+              active: active === bot.botId,
+              archived: flock.lifecycles[bot.botId] === 'archived',
+              unread: isUnread(bot.botId),
+            }"
           >
-          <span
-            v-if="unreadLabel(bot.botId)"
-            class="flock-unread-badge"
-            :aria-label="`${unreadLabel(bot.botId)} unread`"
-            >{{ unreadLabel(bot.botId) }}</span
-          >
-          <i
-            v-if="active === bot.botId"
-            class="flock-bot-dot"
-            aria-hidden="true"
-          />
-        </button>
-        <button
-          v-if="
-            flock.showArchived && flock.lifecycles[bot.botId] === 'archived'
-          "
-          type="button"
-          class="flock-lifecycle"
-          @click="flock.restore(bot.botId)"
-        >
-          Restore
-        </button>
-        <button
-          v-else-if="flock.showArchived"
-          type="button"
-          class="flock-lifecycle"
-          @click="flock.openArchive(bot.botId)"
-        >
-          Archive
-        </button>
-      </div>
-    </TransitionGroup>
+            <button
+              type="button"
+              class="flock-bot-select"
+              :disabled="flock.lifecycles[bot.botId] === 'archived'"
+              :aria-current="active === bot.botId ? 'true' : undefined"
+              @click="flock.select(bot.botId)"
+            >
+              <BotAvatar
+                :bot-id="bot.botId"
+                :sheep="flock.identities[bot.botId]?.sheep ?? bot.sheep"
+                :label="`${botName(bot.botId, bot.initialName)} avatar`"
+              />
+              <span class="flock-bot-copy">
+                <span class="flock-bot-primary">
+                  <strong>{{ botName(bot.botId, bot.initialName) }}</strong>
+                  <time
+                    v-if="previewAt(bot.botId)"
+                    :datetime="previewAt(bot.botId)"
+                  >
+                    {{ previewTime(bot.botId) }}
+                  </time>
+                </span>
+                <small>{{ previewText(bot.botId) }}</small>
+              </span>
+              <span
+                v-if="unreadLabel(bot.botId) || active === bot.botId"
+                class="flock-bot-indicators"
+              >
+                <span
+                  v-if="unreadLabel(bot.botId)"
+                  class="flock-unread-badge"
+                  :aria-label="`${unreadLabel(bot.botId)} unread`"
+                  >{{ unreadLabel(bot.botId) }}</span
+                >
+                <i
+                  v-if="active === bot.botId"
+                  class="flock-bot-dot"
+                  aria-hidden="true"
+                />
+              </span>
+            </button>
+            <button
+              v-if="
+                flock.showArchived && flock.lifecycles[bot.botId] === 'archived'
+              "
+              type="button"
+              class="flock-lifecycle"
+              @click="flock.restore(bot.botId)"
+            >
+              Restore
+            </button>
+            <button
+              v-else-if="flock.showArchived"
+              type="button"
+              class="flock-lifecycle"
+              @click="flock.openArchive(bot.botId)"
+            >
+              Archive
+            </button>
+          </div>
+        </TransitionGroup>
+      </section>
+    </div>
     <div v-if="hiddenBots.length" class="flock-hidden-group">
       <button
         type="button"
@@ -200,10 +233,18 @@ onMounted(() => void flock.value.load());
               :sheep="flock.identities[bot.botId]?.sheep ?? bot.sheep"
               :label="`${botName(bot.botId, bot.initialName)} avatar`"
             />
-            <span class="flock-bot-copy"
-              ><strong>{{ botName(bot.botId, bot.initialName) }}</strong
-              ><small>{{ botSubtitle(bot.botId) }}</small></span
-            >
+            <span class="flock-bot-copy">
+              <span class="flock-bot-primary">
+                <strong>{{ botName(bot.botId, bot.initialName) }}</strong>
+                <time
+                  v-if="previewAt(bot.botId)"
+                  :datetime="previewAt(bot.botId)"
+                >
+                  {{ previewTime(bot.botId) }}
+                </time>
+              </span>
+              <small>{{ previewText(bot.botId) }}</small>
+            </span>
           </button>
         </div>
       </TransitionGroup>

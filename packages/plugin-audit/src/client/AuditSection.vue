@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The Bot's Activity: every audited effect it has performed, newest first.
+// The Bot's audit log: every audited effect it has performed, newest first.
 //
 // It renders durable state and decides nothing. In particular it never infers
 // an outcome: an effect the durable event log cannot explain is shown as
@@ -8,8 +8,9 @@
 // reconciliation rule forbids. The same goes for truncation — a table trimmed
 // to its retention bound says so above the rows rather than quietly answering
 // with fewer.
-import { UiButton, UiIcon } from "@frockbot/client-ui";
+import { UiAnchor, UiButton, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, watch } from "vue";
 import {
   AUDIT_KINDS_V1,
@@ -27,6 +28,9 @@ const web = providedWeb;
 const audit = providedState;
 
 const botId = computed(() => web.value.activeBotId);
+const anchorHref = computed(() =>
+  settingsLinkV1({ anchor: "bot-audit", botId: botId.value }),
+);
 const kinds = AUDIT_KINDS_V1;
 
 watch(
@@ -65,13 +69,19 @@ function when(entry: AuditEntryV1): string {
 </script>
 
 <template>
-  <section class="audit">
+  <UiAnchor
+    as="section"
+    anchor="bot-audit"
+    label="Audit log"
+    :href="anchorHref"
+    class="audit"
+  >
     <header class="audit__header">
       <span class="audit__icon" aria-hidden="true"
         ><UiIcon name="history"
       /></span>
       <span class="audit__intro">
-        <strong>Activity</strong>
+        <strong>Audit log</strong>
         <small>
           Every shell command, browser action, remote tool call and Workspace
           write this Bot has made. Arguments are never kept — only a digest and
@@ -182,7 +192,7 @@ function when(entry: AuditEntryV1): string {
       </UiButton>
       <small>{{ audit.entries.length }} of {{ audit.total }}</small>
     </div>
-  </section>
+  </UiAnchor>
 </template>
 
 <style scoped>

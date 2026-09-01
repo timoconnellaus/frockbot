@@ -132,13 +132,7 @@ function whenLabel(at: string): string {
     <ol v-else-if="results" class="search-groups">
       <li v-for="group in groups" :key="group.botId" class="search-group">
         <div class="search-group-head">
-          <img
-            v-if="group.avatarUrl"
-            class="search-group-avatar"
-            :src="group.avatarUrl"
-            :alt="`${group.botName} avatar`"
-          />
-          <span v-else class="search-group-avatar search-group-monogram">{{
+          <span class="search-group-avatar search-group-monogram">{{
             monogram(group.botName)
           }}</span>
           <span class="search-group-name">{{ group.botName }}</span>

@@ -9,6 +9,10 @@ import {
   createOutboundService,
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
+import {
+  createWorkersAiFakeWorker,
+  WORKERS_AI_FAKE_SERVICE,
+} from "./test/workers-ai-fake.ts";
 
 // One instance for the whole project. It runs in Node, so the suites reach its
 // state over the same binding, under `/__fake/*`.
@@ -29,17 +33,12 @@ export default defineConfig({
         // a service binding, decoding the real v1 protocol.
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
+          AI: WORKERS_AI_FAKE_SERVICE,
         },
+        workers: [createWorkersAiFakeWorker("2026-08-27")],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         durableObjects: {
           AUTHORING: "AuthoringProbe",
-          // The Channel authority, over real Durable Object storage: the point
-          // is that a message and its deliveries survive an eviction.
-          CHANNEL_STORE: "ChannelStoreProbe",
-          // The external connector, over real storage and the real keyring:
-          // the point is that the bot token reaches Telegram only through a
-          // lease, and is nowhere in this object's durable state.
-          CHANNEL_CONNECTOR: "ChannelConnectorProbe",
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",
           COMPOSITIONS: "CompositionProbe",
@@ -55,6 +54,10 @@ export default defineConfig({
           // live in this suite.
           USER_CONFIGURATIONS: {
             className: "UserConfiguration",
+            useSQLite: true,
+          },
+          DEPLOYMENT_POLICY: {
+            className: "DeploymentPolicy",
             useSQLite: true,
           },
         },

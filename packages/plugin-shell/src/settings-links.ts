@@ -10,8 +10,8 @@
  *     <origin>/?bot=<botId>&settings=<surface>#<anchor>
  *
  * `bot` is the shell's existing Bot selector, already read by the Flock client
- * and written by every selection. `settings` names a registered client surface,
- * and the fragment names one row inside it. Every part is optional in the
+ * and written by every selection. `settings` names a registered client surface
+ * or the default Bot panel, and the fragment names one row inside it. Every part is optional in the
  * decode and refused when unknown: a link that names a surface nobody
  * registered, or an anchor this build does not ship, decodes to `undefined`
  * rather than opening the wrong thing. That is the whole point of holding the
@@ -25,7 +25,7 @@
 /** A client surface a settings link may open. */
 export type SettingsSurfaceIdV1 =
   | "bot-settings"
-  | "bot-info"
+  | "bot-panel"
   | "user-settings"
   | "plugins"
   | "models"
@@ -33,7 +33,7 @@ export type SettingsSurfaceIdV1 =
 
 export const SETTINGS_SURFACE_IDS_V1: readonly SettingsSurfaceIdV1[] = [
   "bot-settings",
-  "bot-info",
+  "bot-panel",
   "user-settings",
   "plugins",
   "models",
@@ -126,41 +126,41 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     label: "Routines",
     scope: "bot",
   },
+  {
+    anchor: "bot-audit",
+    surface: "bot-settings",
+    label: "Audit log",
+    scope: "bot",
+  },
 
-  // The per-Bot info pane.
+  // Former info-pane anchors keep working at their new homes.
   {
     anchor: "bot-info-identity",
-    surface: "bot-info",
+    surface: "bot-settings",
     label: "Identity",
     scope: "bot",
   },
   {
     anchor: "bot-info-members",
-    surface: "bot-info",
+    surface: "bot-settings",
     label: "Members",
     scope: "bot",
   },
   {
     anchor: "bot-info-computer",
-    surface: "bot-info",
+    surface: "bot-panel",
     label: "Computer",
     scope: "bot",
   },
   {
     anchor: "bot-info-routines",
-    surface: "bot-info",
+    surface: "bot-panel",
     label: "Routines",
     scope: "bot",
   },
   {
-    anchor: "bot-info-channels",
-    surface: "bot-info",
-    label: "Channels",
-    scope: "bot",
-  },
-  {
     anchor: "bot-info-notifications",
-    surface: "bot-info",
+    surface: "bot-settings",
     label: "Notifications",
     scope: "bot",
   },
@@ -269,7 +269,7 @@ function surfaceId(value: string | null): SettingsSurfaceIdV1 | undefined {
  *
  * A fragment naming an anchor that belongs to another surface is dropped
  * rather than honoured: opening `bot-settings` and then scrolling to a row that
- * only exists in the info pane would leave the User looking at nothing.
+ * only exists in another panel would leave the User looking at nothing.
  */
 export function decodeSettingsLinkV1(
   href: string,

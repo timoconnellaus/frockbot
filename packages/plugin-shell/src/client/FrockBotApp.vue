@@ -2,6 +2,7 @@
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import {
   announceUiAnchor,
+  UiButton,
   UiIcon,
   UiIconButton,
   UiMarkdown,
@@ -98,6 +99,33 @@ const botName = computed(
 );
 const isRunning = computed(() => Boolean(state.value.activeRunId));
 const isConnecting = computed(() => state.value.connection !== "ready");
+const needsModel = computed(() => state.value.modelSource === "none");
+const hasConnectedModelProvider = computed(() => {
+  const user = state.value.userSettings;
+  if (!user) return false;
+  return user.connections.some((connection) => {
+    if (connection.state !== "ready") return false;
+    const installed = user.packages.some(
+      (pkg) =>
+        pkg.packageId === connection.packageId && pkg.state === "installed",
+    );
+    const pkg = state.value.pluginCatalog.find(
+      (candidate) => candidate.packageId === connection.packageId,
+    );
+    const connectionType = pkg?.connectionTypes.find(
+      (candidate) => candidate.id === connection.connectionTypeId,
+    );
+    return Boolean(
+      installed &&
+      pkg?.capabilities.some(
+        (capability) =>
+          capability.kind === "model" &&
+          connectionType?.capabilities.includes(capability.id) &&
+          capability.connectionTypes.includes(connectionType.id),
+      ),
+    );
+  });
+});
 const canSend = computed(
   () =>
     state.value.connection === "ready" &&
@@ -189,20 +217,22 @@ function isVisible(message: WebChatMessage): boolean {
 }
 /*
  * System lines happen between Turns, so the thread orders by when each line
- * happened. A line with no timestamp keeps the position the projection gave
- * it, which is what makes the sort stable for a Turn still streaming.
+ * happened. A line with no timestamp is treated as arriving now, so an
+ * incomplete projection can never jump above the durable history.
  */
-const messages = computed(() =>
-  state.value.messages
+const messages = computed(() => {
+  const missingAt = new Date().toISOString();
+  return state.value.messages
     .filter(isVisible)
     .map((message, index) => ({ message, index }))
     .sort(
       (left, right) =>
-        (left.message.at ?? "").localeCompare(right.message.at ?? "") ||
-        left.index - right.index,
+        (left.message.at ?? missingAt).localeCompare(
+          right.message.at ?? missingAt,
+        ) || left.index - right.index,
     )
-    .map((entry) => entry.message),
-);
+    .map((entry) => entry.message);
+});
 
 /*
  * One anchor per Turn, on its first visible line, so a deep link resolves to
@@ -260,7 +290,7 @@ async function scrollToLatest(
 
 /*
  * Settings deep links. `?settings=<surface>#<anchor>` names a registered
- * surface and one row inside it; the shell opens the surface and announces the
+ * surface or the default Bot panel and one row inside it; the shell opens it and announces the
  * anchor, and the anchored row highlights itself. The row is deliberately not
  * hunted for here: a panel loads its state after it mounts, so `UiAnchor` also
  * reads the fragment on its own mount and the two paths cover a link followed
@@ -268,15 +298,34 @@ async function scrollToLatest(
  */
 const applySettingsDeepLink = (): void => {
   const target = decodeSettingsLinkV1(window.location.href);
-  if (!target || !surfaces.has(target.surface)) return;
-  if (surfaces.activeId.value !== target.surface) surfaces.open(target.surface);
+  if (!target) return;
+  if (target.surface === "bot-panel") {
+    surfaces.close();
+    rightPanelOpen.value = true;
+  } else {
+    if (!surfaces.has(target.surface)) return;
+    if (surfaces.activeId.value !== target.surface)
+      surfaces.open(target.surface);
+  }
   const anchor = target.anchor;
   if (anchor) void nextTick(() => announceUiAnchor(anchor));
 };
 
+function openModelSetup(): void {
+  const registry = surfaces;
+  if (!registry) return;
+  if (hasConnectedModelProvider.value && registry.has("user-settings")) {
+    registry.open("user-settings");
+    void nextTick(() => announceUiAnchor("user-default-model"));
+    return;
+  }
+  if (registry.has("plugins")) registry.open("plugins");
+}
+
 onMounted(() => {
   void web.value.loadPluginCatalog();
   void scrollToLatest("auto");
+  void nextTick(syncComposerHeight);
   applySettingsDeepLink();
   window.addEventListener("popstate", applySettingsDeepLink);
   window.addEventListener("hashchange", applySettingsDeepLink);
@@ -327,9 +376,31 @@ watch(
 watch(draft, (value) => draftStore.setDraft(composerContext.value, value), {
   flush: "sync",
 });
+watch(
+  draft,
+  () => {
+    void nextTick(syncComposerHeight);
+  },
+  { flush: "post" },
+);
 watch(panelSurface, (surface) => {
   if (surface) rightPanelOpen.value = true;
 });
+
+/** Keep the textarea at its content height until its CSS maximum takes over. */
+function syncComposerHeight(): void {
+  const input = composerInput.value;
+  if (!input) return;
+  input.style.height = "auto";
+  const maxHeight = Number.parseFloat(getComputedStyle(input).maxHeight);
+  const contentHeight = input.scrollHeight;
+  const height = Number.isFinite(maxHeight)
+    ? Math.min(contentHeight, maxHeight)
+    : contentHeight;
+  input.style.height = `${height}px`;
+  input.style.overflowY =
+    Number.isFinite(maxHeight) && contentHeight > maxHeight ? "auto" : "hidden";
+}
 
 function syncAttachedSkills(): void {
   attachedSkills.value = [...skillStore.attached()];
@@ -382,6 +453,7 @@ async function sendMessage(): Promise<void> {
   syncAttachedSkills();
   const submission = draftStore.begin(composerContext.value, text);
   draft.value = "";
+  void nextTick(syncComposerHeight);
   // Sending is an explicit request to follow along again.
   pinnedToLatest.value = true;
   void scrollToLatest();
@@ -453,6 +525,9 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         <div class="brand" aria-hidden="true">
           <span class="brand-mark">FrockBot</span>
         </div>
+        <div class="sidebar-top">
+          <k-slot name="frockbot.sidebar-top" />
+        </div>
         <div class="bot-list">
           <k-slot name="frockbot.sidebar-bots" />
         </div>
@@ -470,7 +545,15 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           /></span>
           <div class="workspace-title">
             <strong>{{ botName }}</strong>
-            <small>{{ state.modelLabel }}</small>
+            <small v-if="!needsModel">{{ state.modelLabel }}</small>
+            <button
+              v-else
+              type="button"
+              class="model-setup-link"
+              @click="openModelSetup"
+            >
+              Choose a model
+            </button>
           </div>
           <k-slot name="frockbot.header-actions" />
         </header>
@@ -484,15 +567,30 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           <div v-if="messages.length === 0" class="empty-thread">
             <div class="empty-mark"><UiIcon name="sparkle" size="lg" /></div>
             <h1>
-              {{ state.modelReady ? `${botName} is ready.` : "Choose a model" }}
+              {{
+                state.modelReady
+                  ? `${botName} is ready.`
+                  : needsModel
+                    ? `${botName} needs a model.`
+                    : `${botName} isn't ready.`
+              }}
             </h1>
             <p>
               {{
                 state.modelReady
                   ? "Start with a conversation. Cordis plugins can add the rest."
-                  : "Choose a default model in Settings to begin."
+                  : needsModel
+                    ? "Pick a default to start chatting."
+                    : "Check this Bot's model Connection."
               }}
             </p>
+            <UiButton
+              v-if="needsModel"
+              variant="primary"
+              @click="openModelSetup"
+            >
+              Choose a model
+            </UiButton>
           </div>
           <article
             v-for="message in messages"
@@ -676,7 +774,16 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               </span>
             </li>
           </ul>
-          <div class="composer-body">
+          <UiButton
+            v-if="!isRunning && !isConnecting && needsModel"
+            type="button"
+            class="composer-model-setup"
+            variant="primary"
+            @click="openModelSetup"
+          >
+            Choose a model
+          </UiButton>
+          <div v-else class="composer-body">
             <ul v-if="attachedSkills.length > 0" class="skill-chips">
               <li v-for="entry in attachedSkills" :key="entry.ref">
                 <button
@@ -699,7 +806,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                 isConnecting
                   ? 'Connecting…'
                   : !state.modelReady
-                    ? 'Choose a default model in Settings'
+                    ? 'Model unavailable'
                     : `Message ${botName}`
               "
               :disabled="isConnecting || !state.modelReady || isRunning"
@@ -707,6 +814,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               role="combobox"
               :aria-expanded="skillPopoverOpen"
               aria-controls="skill-popover"
+              @input="syncComposerHeight"
               @keydown="handleComposerKeydown"
               @keyup="refreshSkillPopover"
               @click="refreshSkillPopover"
@@ -722,7 +830,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             @click="web.stopRun()"
           />
           <UiIconButton
-            v-else
+            v-else-if="!needsModel || isConnecting"
             type="submit"
             icon="arrow-up"
             label="Send message"
@@ -744,7 +852,12 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         <div class="right-panel-stack">
           <Transition name="panel-swap">
             <div v-show="!panelSurface" class="right-panel-content">
-              <k-slot name="frockbot.right-panel" />
+              <header class="right-panel-header">
+                <k-slot name="frockbot.bot-actions" />
+              </header>
+              <div class="right-panel-body">
+                <k-slot name="frockbot.right-panel" />
+              </div>
             </div>
           </Transition>
           <Transition name="panel-swap">
@@ -755,8 +868,8 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             >
               <header class="panel-surface-header">
                 <UiIconButton
-                  icon="close"
-                  label="Close settings"
+                  icon="chevron-left"
+                  label="Back to Bot panel"
                   size="sm"
                   @click="surfaces.close()"
                 />
@@ -771,7 +884,6 @@ function handleComposerKeydown(event: KeyboardEvent): void {
       </aside>
 
       <div class="window-actions">
-        <k-slot name="frockbot.bot-actions" />
         <UiIconButton
           class="panel-toggle"
           :icon="rightPanelOpen ? 'chevrons-right' : 'chevrons-left'"

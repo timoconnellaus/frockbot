@@ -89,12 +89,12 @@ function mount(
 }
 
 describe("Routines client contribution", () => {
-  test("mounts into the settings outlet, the header and the info pane", () => {
+  test("mounts into the settings outlet, the header and the Bot panel", () => {
     const mounted = mount();
     expect(mounted.slots.map((slot) => slot.slot)).toEqual([
       "frockbot.bot-settings-sections",
       "frockbot.header-actions",
-      "frockbot.bot-info-sections",
+      "frockbot.bot-panel-sections",
     ]);
     mounted.dispose();
   });

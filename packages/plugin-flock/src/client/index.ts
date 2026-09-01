@@ -18,6 +18,8 @@ import FlockSidebar from "./FlockSidebar.vue";
 import FlockOverlay from "./FlockOverlay.vue";
 import FlockIdentity from "./FlockIdentity.vue";
 import FlockAvatar from "./FlockAvatar.vue";
+import FlockAvatarEditor from "./FlockAvatarEditor.vue";
+import FlockCreateButton from "./FlockCreateButton.vue";
 import {
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadDirectoryViewV1,
@@ -66,6 +68,22 @@ function replacePreferredBot(botId?: string): void {
  * "read" is an authenticated command the User's own selection sends.
  */
 const UNREAD_POLL_INTERVAL_MS = 15_000;
+
+/**
+ * Notification permission has to start inside a browser gesture. Bot creation
+ * records notification intent regardless of the browser's answer, so this
+ * progressive enhancement is deliberately fire-and-forget.
+ */
+function requestNotificationPermissionFromCreateGesture(): void {
+  if (
+    typeof window === "undefined" ||
+    !("Notification" in window) ||
+    Notification.permission !== "default"
+  ) {
+    return;
+  }
+  void Notification.requestPermission().catch(() => undefined);
+}
 
 export const flockClientPlugin: ClientPlugin = (ctx) => {
   if (!ctx.transport.hostedRequest)
@@ -419,6 +437,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       state.value.draftSheep = randomSheepRecipeV1();
     },
     async create() {
+      requestNotificationPermissionFromCreateGesture();
       try {
         const userId = await requireAuthenticatedUserId();
         authenticatedUserId = userId;
@@ -537,20 +556,10 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       );
     for (const intent of directory.notifications) {
       // The open Bot's intents belong to the Shell: it projects the Turn into
-      // the conversation and acknowledges it there. A Channel's do not — a
-      // room the open Bot is in is not the conversation on screen, so it is
-      // told about here whichever Bot the User is looking at.
-      if (!intent.channelId && intent.botId === shell?.value.activeBotId)
-        continue;
-      // One Channel message is owed to every member but its sender, so it
-      // arrives here once per recipient Bot. The person is told about the
-      // room, once — and every Bot's copy is still acknowledged, or the ones
-      // that were folded away are re-listed for ever.
-      const key = intent.channelId
-        ? `channel:${intent.channelId}:${intent.notificationId}`
-        : `${intent.botId}:${intent.notificationId}`;
+      // the conversation and acknowledges it there.
+      if (intent.botId === shell?.value.activeBotId) continue;
+      const key = `${intent.botId}:${intent.notificationId}`;
       if (deliveredNotifications.has(key)) {
-        if (intent.channelId) await acknowledge(intent);
         continue;
       }
       const delivery = await showClientNotificationV1({
@@ -586,6 +595,11 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     }),
     ctx.slot({ slot: "frockbot.overlays", order: 10, component: FlockOverlay }),
     ctx.slot({
+      slot: "frockbot.sidebar-top",
+      order: 20,
+      component: FlockCreateButton,
+    }),
+    ctx.slot({
       slot: "frockbot.bot-identity",
       order: 10,
       component: FlockIdentity,
@@ -594,6 +608,11 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       slot: "frockbot.bot-avatar",
       order: 10,
       component: FlockAvatar,
+    }),
+    ctx.slot({
+      slot: "frockbot.bot-avatar-editor",
+      order: 10,
+      component: FlockAvatarEditor,
     }),
   ];
 };

@@ -46,11 +46,6 @@ import {
 } from "@frockbot/plugin-user-machine/user";
 import type { MachineStorageV1 } from "@frockbot/plugin-user-machine/store";
 import {
-  createTelegramUserBackendPlugin,
-  TelegramUserBackendContribution,
-} from "@frockbot/plugin-telegram/user";
-export { TelegramUserBackendContribution } from "@frockbot/plugin-telegram/user";
-import {
   createSearchUserBackendPlugin,
   type SearchUserBackendContribution,
   type SearchUserBackendHost,
@@ -59,6 +54,10 @@ import {
   createOllamaCloudUserBackendPlugin,
   type OllamaCloudUserBackendContribution,
 } from "@frockbot/plugin-provider-ollama-cloud/user";
+import {
+  createWorkersAiUserBackendPlugin,
+  type WorkersAiUserBackendContribution,
+} from "@frockbot/plugin-provider-workers-ai/user";
 import {
   createUserSettingsBackendPlugin,
   type UserPackageCatalogHost,
@@ -124,13 +123,6 @@ export interface MountedFoundationUserBackend {
    * protocol every provider answers.
    */
   mcp: McpUserBackendContribution;
-  /**
-   * The Telegram Contribution, exposed by name as well as by Connection
-   * ownership: the external Channel connector needs its `openConnectionKey`,
-   * which is not part of the Connection command protocol every provider
-   * answers.
-   */
-  telegram: TelegramUserBackendContribution;
   /**
    * The User's transcript index. It is User-scoped state like every other
    * Contribution here, and it is the only one that is a *projection*: the rows
@@ -233,8 +225,8 @@ export async function createFoundationUserBackendContributions(
   let settings: UserSettingsBackendContribution | undefined;
   let credentials: CredentialUserBackendContribution | undefined;
   let ollama: OllamaCloudUserBackendContribution | undefined;
+  let workersAi: WorkersAiUserBackendContribution | undefined;
   let mcp: McpUserBackendContribution | undefined;
-  let telegram: TelegramUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
   let botTemplate: BotTemplateUserBackendContribution | undefined;
   let publisher: PackagePublisherUserContribution | undefined;
@@ -252,8 +244,8 @@ export async function createFoundationUserBackendContributions(
         | UserSettingsBackendContribution
         | CredentialUserBackendContribution
         | OllamaCloudUserBackendContribution
+        | WorkersAiUserBackendContribution
         | McpUserBackendContribution
-        | TelegramUserBackendContribution
         | FlockUserBackendContribution
         | BotTemplateUserBackendContribution
         | PackagePublisherUserContribution
@@ -276,6 +268,9 @@ export async function createFoundationUserBackendContributions(
               packageId: pkg.id,
               version: pkg.version,
               settings: pkg.manifest.configuration?.settings ?? [],
+              installByDefault:
+                (pkg.manifest.configuration?.connectionTypes.length ?? 0) > 0 ||
+                (pkg.manifest.configuration?.capabilities.length ?? 0) > 0,
             })),
             ...(host.catalog ? { catalog: host.catalog } : {}),
           },
@@ -334,17 +329,17 @@ export async function createFoundationUserBackendContributions(
       },
     ],
     [
-      "@frockbot/plugin-mcp/user",
+      "@frockbot/plugin-provider-workers-ai/user",
       (lifecycle) => {
-        if (!settings || !credentials) {
-          throw new Error("MCP requires Settings and Credential Contributions");
+        if (!settings) {
+          throw new Error("Workers AI requires the Settings Contribution");
         }
         const userSettings = settings;
-        return createMcpUserBackendPlugin(
-          { storage: host.storage, settings, credentials },
+        return createWorkersAiUserBackendPlugin(
+          { storage: host.storage, settings },
           {
-            mount(value: McpUserBackendContribution) {
-              mcp = value;
+            mount(value: WorkersAiUserBackendContribution) {
+              workersAi = value;
               connections.set(value.packageId, value);
               const unregister =
                 userSettings.registerConnectionCommandOwner(value);
@@ -360,19 +355,17 @@ export async function createFoundationUserBackendContributions(
       },
     ],
     [
-      "@frockbot/plugin-telegram/user",
+      "@frockbot/plugin-mcp/user",
       (lifecycle) => {
         if (!settings || !credentials) {
-          throw new Error(
-            "Telegram requires Settings and Credential Contributions",
-          );
+          throw new Error("MCP requires Settings and Credential Contributions");
         }
         const userSettings = settings;
-        return createTelegramUserBackendPlugin(
+        return createMcpUserBackendPlugin(
           { storage: host.storage, settings, credentials },
           {
-            mount(value: TelegramUserBackendContribution) {
-              telegram = value;
+            mount(value: McpUserBackendContribution) {
+              mcp = value;
               connections.set(value.packageId, value);
               const unregister =
                 userSettings.registerConnectionCommandOwner(value);
@@ -537,12 +530,19 @@ export async function createFoundationUserBackendContributions(
             storage: host.storage,
             commandBotLifecycle: host.commandBotLifecycle,
             readBotLifecycle: host.readBotLifecycle,
-            readUserSettings: (storage) => {
+            readUserSettings: (storage, userId) => {
               if (!settings) {
                 throw new Error("User settings Contribution is unavailable");
               }
-              return settings.readSnapshot(storage);
+              return settings.read(userId, storage);
             },
+            availablePackages: plan.packages.map((pkg) => ({
+              packageId: pkg.id,
+              version: pkg.version,
+              capabilities: pkg.manifest.configuration?.capabilities ?? [],
+              connectionTypes:
+                pkg.manifest.configuration?.connectionTypes ?? [],
+            })),
             claimInitialModelBinding: async (storage, input) => {
               if (!settings) {
                 throw new Error("User settings Contribution is unavailable");
@@ -619,6 +619,7 @@ export async function createFoundationUserBackendContributions(
     | UserSettingsBackendContribution
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
+    | WorkersAiUserBackendContribution
     | McpUserBackendContribution
     | FlockUserBackendContribution
     | BotTemplateUserBackendContribution
@@ -640,8 +641,8 @@ export async function createFoundationUserBackendContributions(
     !settings ||
     !credentials ||
     !ollama ||
+    !workersAi ||
     !mcp ||
-    !telegram ||
     !flock ||
     !botTemplate ||
     !publisher ||
@@ -651,7 +652,7 @@ export async function createFoundationUserBackendContributions(
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, MCP, Telegram, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Workers AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
     );
   }
   return {
@@ -659,7 +660,6 @@ export async function createFoundationUserBackendContributions(
     credentials,
     connections,
     mcp,
-    telegram,
     flock,
     botTemplate,
     publisher,

@@ -6,7 +6,7 @@ import type {
   AuditRebuildReceiptV1,
 } from "../shared.js";
 
-/** The filters the Activity section can apply, as the chips set them. */
+/** The filters the Audit log can apply, as the chips set them. */
 export interface AuditFiltersV1 {
   kind?: AuditKindV1;
   target?: string;

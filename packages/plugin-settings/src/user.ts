@@ -14,6 +14,7 @@ import {
   type ConnectionView,
   type JsonValue,
   type OperationReceiptV1,
+  type PackageInstallationView,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -29,6 +30,7 @@ import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { Plugin } from "cordis";
 
 const STATE_KEY = "user-configuration";
+const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
 /**
  * The pinned Catalog generation lives beside the settings view rather than in
  * it, so pinning on a read never bumps the settings revision a client is
@@ -80,6 +82,16 @@ export interface ConnectionCommandOwner {
 }
 
 /**
+ * A Package-owned, idempotent bootstrap that runs before the User settings
+ * projection is returned. The Package keeps its own marker and durable state;
+ * Settings supplies only the read lifecycle that makes first use deterministic.
+ */
+export interface UserConfigurationReadBootstrap {
+  readonly packageId: string;
+  bootstrap(userId: string): Promise<void>;
+}
+
+/**
  * The remote Package Catalog, as the User Durable Object sees it. A host that
  * omits it keeps the compiled-in behaviour exactly: `availablePackages` is
  * still the only source of installable Packages.
@@ -118,6 +130,12 @@ export interface UserPackageCatalogHost {
 export interface AvailableUserPackage {
   packageId: string;
   version: string;
+  /**
+   * True when the immutable application manifest declares a Connection Type
+   * or Capability for this Package. These are the Packages a new User owns
+   * from their first configuration read.
+   */
+  installByDefault?: boolean;
   /**
    * `configuration.settings` from this version's manifest. Absent is the same
    * as empty and means the Package offers no User-level setting, so every
@@ -299,7 +317,12 @@ function applyUserCommand(
     case "user/update-profile":
       return { ...current, revision, profile: command.profile };
     case "user/set-new-bot-model":
-      return { ...current, revision, newBotModelTemplate: command.model };
+      return {
+        ...current,
+        revision,
+        newBotModelTemplate: command.model,
+        newBotModelTemplateSource: command.source,
+      };
     case "user/install-package": {
       const existing = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
@@ -411,6 +434,9 @@ function applyUserCommand(
 export class UserSettingsBackendContribution {
   private readonly availablePackages: ReadonlySet<string>;
 
+  /** The immutable first-party installation rows written on first read. */
+  private readonly defaultPackages: readonly PackageInstallationView[];
+
   /** Declared User-level settings, by Package id and version. */
   private readonly packageSettingDefinitions: ReadonlyMap<
     string,
@@ -418,6 +444,11 @@ export class UserSettingsBackendContribution {
   >;
 
   private readonly connectionOwners = new Map<string, ConnectionCommandOwner>();
+
+  private readonly readBootstraps = new Map<
+    string,
+    UserConfigurationReadBootstrap
+  >();
 
   constructor(private readonly host: UserSettingsBackendHost) {
     this.availablePackages = new Set(
@@ -431,6 +462,76 @@ export class UserSettingsBackendContribution {
         pkg.settings ?? [],
       ]),
     );
+    this.defaultPackages = host.availablePackages.flatMap((pkg) =>
+      pkg.installByDefault
+        ? [
+            {
+              packageId: pkg.packageId,
+              version: pkg.version,
+              state: "installed" as const,
+              provenance: "first-party" as const,
+            },
+          ]
+        : [],
+    );
+  }
+
+  /**
+   * Persist the application's first-party Package availability exactly once.
+   *
+   * The marker, rows, and revision bump share one transaction. A later
+   * uninstall therefore leaves the marker behind and cannot be undone by a
+   * read, while concurrent first reads converge on the same durable state.
+   */
+  private async bootstrapDefaultPackages(
+    userId: string,
+    storage?: UserSettingsTransaction,
+  ): Promise<UserSettingsViewV1> {
+    if (this.defaultPackages.length === 0) {
+      await this.assertIdentity(userId, storage ?? this.host.storage);
+      return this.readSnapshot(storage ?? this.host.storage);
+    }
+    const bootstrap = async (transaction: UserSettingsTransaction) => {
+      await this.assertIdentity(userId, transaction);
+      const marker = await transaction.get<unknown>(
+        DEFAULT_PACKAGES_BOOTSTRAP_KEY,
+      );
+      if (marker !== undefined) {
+        if (
+          !marker ||
+          typeof marker !== "object" ||
+          Array.isArray(marker) ||
+          Object.keys(marker).length !== 1 ||
+          (marker as { schemaVersion?: unknown }).schemaVersion !== 1
+        ) {
+          throw new Error("Stored default Package bootstrap is invalid");
+        }
+        return this.readSnapshot(transaction);
+      }
+      const current = await this.readSnapshot(transaction);
+      const installedPackageIds = new Set(
+        current.packages.map((pkg) => pkg.packageId),
+      );
+      const additions = this.defaultPackages.filter(
+        (pkg) => !installedPackageIds.has(pkg.packageId),
+      );
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        packages: [
+          ...current.packages,
+          ...additions.map((pkg) => structuredClone(pkg)),
+        ],
+      } satisfies UserSettingsViewV1;
+      await transaction.put({
+        [STATE_KEY]: next,
+        [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: { schemaVersion: 1 },
+      });
+      return structuredClone(next);
+    };
+    return storage
+      ? bootstrap(storage)
+      : this.host.storage.transaction(bootstrap);
   }
 
   /**
@@ -449,6 +550,9 @@ export class UserSettingsBackendContribution {
 
   async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
     const request = decodeUserConfigurationReadRpcV1(input);
+    for (const bootstrap of this.readBootstraps.values()) {
+      await bootstrap.bootstrap(request.userId);
+    }
     // The first read that finds a Catalog pins its generation, so every later
     // install is validated against one immutable, content-addressed set of
     // artifacts rather than whatever the pointer happens to name that second.
@@ -560,68 +664,110 @@ export class UserSettingsBackendContribution {
             catalogGeneration: command.catalogGeneration,
           })
         : undefined;
-    return this.host.storage.transaction(async (storage) => {
-      const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
-      const storedReceipt = await storage.get<unknown>(receiptKey);
-      if (storedReceipt !== undefined) {
-        return requireMatchingConfigurationReceipt(
-          decodeStoredConfigurationReceipt(storedReceipt),
-          commandFingerprint,
-          command.commandId,
-        );
-      }
-      if (command.type === "user/install-package") {
-        if (catalogInstall) {
-          // The pin is re-read inside the transaction: the entry above was
-          // resolved against a generation this User may have moved off since.
-          assertPinnedGeneration(
-            command.catalogGeneration,
-            (await this.readCatalogPin(storage))?.generation,
-          );
-        } else if (
-          !this.availablePackages.has(
-            `${command.packageId}\u0000${command.version}`,
-          )
-        ) {
-          throw new Error("Package is not available in this application");
-        }
-      }
-      const storedSettings = await storage.get<unknown>(STATE_KEY);
-      const current =
-        storedSettings === undefined
-          ? initialState()
-          : decodeUserSettingsViewV1(storedSettings);
-      if (command.type === "user/set-package-enabled" && command.enabled) {
-        const installed = current.packages.find(
-          (pkg) => pkg.packageId === command.packageId,
-        );
-        if (
-          installed &&
-          !this.availablePackages.has(
-            `${installed.packageId}\u0000${installed.version}`,
-          )
-        ) {
-          throw new Error("Package is not available in this application");
-        }
-      }
-      if (command.expectedRevision !== current.revision) {
-        throw new ConfigurationConflictError(current.revision);
-      }
-      const next = applyUserCommand(current, command, (packageId, version) =>
-        this.settingDefinitions(packageId, version),
+    return this.host.storage.transaction((storage) =>
+      this.applyConfigurationCommand(
+        request.userId,
+        command,
+        storage,
+        commandFingerprint,
+        catalogInstall,
+      ),
+    );
+  }
+
+  /**
+   * Apply one already-decoded built-in User command inside a caller-owned
+   * transaction. Provider bootstraps use this so their Connection, marker and
+   * default-model change commit atomically through the normal reducer and
+   * receipt path.
+   */
+  async executeConfigurationCommand(
+    userId: string,
+    command: UserConfigurationCommandV1,
+    storage: UserSettingsTransaction,
+  ): Promise<OperationReceiptV1> {
+    if (
+      command.type === "user/install-package" &&
+      command.catalogId !== undefined
+    ) {
+      throw new Error(
+        "Catalog installs must be resolved through executeConfiguration",
       );
-      const receipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId: command.commandId,
-        revision: next.revision,
-        status: "applied",
-      };
-      await storage.put({
-        [STATE_KEY]: next,
-        [receiptKey]: { commandFingerprint, receipt },
-      });
-      return receipt;
+    }
+    return this.applyConfigurationCommand(
+      userId,
+      command,
+      storage,
+      configurationCommandFingerprintV1(command),
+    );
+  }
+
+  private async applyConfigurationCommand(
+    userId: string,
+    command: UserConfigurationCommandV1,
+    storage: UserSettingsTransaction,
+    commandFingerprint: string,
+    catalogInstall?: CatalogEntryV1,
+  ): Promise<OperationReceiptV1> {
+    await this.assertIdentity(userId, storage);
+    const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
+    const storedReceipt = await storage.get<unknown>(receiptKey);
+    if (storedReceipt !== undefined) {
+      return requireMatchingConfigurationReceipt(
+        decodeStoredConfigurationReceipt(storedReceipt),
+        commandFingerprint,
+        command.commandId,
+      );
+    }
+    if (command.type === "user/install-package") {
+      if (catalogInstall) {
+        assertPinnedGeneration(
+          command.catalogGeneration,
+          (await this.readCatalogPin(storage))?.generation,
+        );
+      } else if (
+        !this.availablePackages.has(
+          `${command.packageId}\u0000${command.version}`,
+        )
+      ) {
+        throw new Error("Package is not available in this application");
+      }
+    }
+    const storedSettings = await storage.get<unknown>(STATE_KEY);
+    const current =
+      storedSettings === undefined
+        ? initialState()
+        : decodeUserSettingsViewV1(storedSettings);
+    if (command.type === "user/set-package-enabled" && command.enabled) {
+      const installed = current.packages.find(
+        (pkg) => pkg.packageId === command.packageId,
+      );
+      if (
+        installed &&
+        !this.availablePackages.has(
+          `${installed.packageId}\u0000${installed.version}`,
+        )
+      ) {
+        throw new Error("Package is not available in this application");
+      }
+    }
+    if (command.expectedRevision !== current.revision) {
+      throw new ConfigurationConflictError(current.revision);
+    }
+    const next = applyUserCommand(current, command, (packageId, version) =>
+      this.settingDefinitions(packageId, version),
+    );
+    const receipt: OperationReceiptV1 = {
+      schemaVersion: 1,
+      commandId: command.commandId,
+      revision: next.revision,
+      status: "applied",
+    };
+    await storage.put({
+      [STATE_KEY]: next,
+      [receiptKey]: { commandFingerprint, receipt },
     });
+    return receipt;
   }
 
   async readSnapshot(
@@ -635,10 +781,9 @@ export class UserSettingsBackendContribution {
 
   async read(
     userId: string,
-    storage: UserSettingsTransaction = this.host.storage,
+    storage?: UserSettingsTransaction,
   ): Promise<UserSettingsViewV1> {
-    await this.assertIdentity(userId, storage);
-    return this.readSnapshot(storage);
+    return this.bootstrapDefaultPackages(userId, storage);
   }
 
   async createConnection(
@@ -710,13 +855,29 @@ export class UserSettingsBackendContribution {
   async getConnection(
     userId: string,
     connectionId: string,
-    storage: UserSettingsTransaction = this.host.storage,
+    storage?: UserSettingsTransaction,
   ): Promise<ConnectionView | undefined> {
     const settings = await this.read(userId, storage);
     const connection = settings.connections.find(
       (candidate) => candidate.connectionId === connectionId,
     );
     return connection ? structuredClone(connection) : undefined;
+  }
+
+  registerConfigurationReadBootstrap(
+    bootstrap: UserConfigurationReadBootstrap,
+  ): () => void {
+    if (this.readBootstraps.has(bootstrap.packageId)) {
+      throw new Error(
+        `Package "${bootstrap.packageId}" already registered a User bootstrap`,
+      );
+    }
+    this.readBootstraps.set(bootstrap.packageId, bootstrap);
+    return () => {
+      if (this.readBootstraps.get(bootstrap.packageId) === bootstrap) {
+        this.readBootstraps.delete(bootstrap.packageId);
+      }
+    };
   }
 
   registerConnectionCommandOwner(owner: ConnectionCommandOwner): () => void {

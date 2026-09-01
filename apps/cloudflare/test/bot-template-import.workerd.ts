@@ -218,21 +218,28 @@ describe("importing a Bot template in workerd", () => {
 
     // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not
     // represented by workers-types.
-    const bot = env.BOT_STATES.getByName(
-      `${importerId}:${planned.botId}`,
-    ) as unknown as {
-      readConfiguration(input: unknown): Promise<{
-        assignments: unknown[];
-        model?: unknown;
-      }>;
-    };
-    const botSettings = await bot.readConfiguration({
-      schemaVersion: 1,
-      userId: importerId,
-      botId: planned.botId,
-    });
+    const settingsOf = async (
+      botId: string,
+    ): Promise<{ assignments: { connectionId?: string }[]; model?: unknown }> =>
+      (
+        env.BOT_STATES.getByName(`${importerId}:${botId}`) as unknown as {
+          readConfiguration(input: unknown): Promise<{
+            assignments: { connectionId?: string }[];
+            model?: unknown;
+          }>;
+        }
+      ).readConfiguration({ schemaVersion: 1, userId: importerId, botId });
+    const botSettings = await settingsOf(planned.botId);
     // The Bot follows its User's default model like any newly created Bot, and
-    // holds no Assignment the template put there.
-    expect(botSettings.assignments).toEqual([]);
+    // holds no Assignment the template put there: it carries exactly what the
+    // importer's own Bot carries, and none of it names a Connection, because
+    // an import never brings a Connection across.
+    const ownBot = await settingsOf("importer-home");
+    expect(botSettings.assignments).toEqual(ownBot.assignments);
+    expect(
+      botSettings.assignments.every(
+        (assignment) => assignment.connectionId === undefined,
+      ),
+    ).toBe(true);
   });
 });

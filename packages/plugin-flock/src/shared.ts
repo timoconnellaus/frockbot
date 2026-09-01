@@ -1,27 +1,15 @@
 // Shared configuration types remain provider-neutral at this package seam.
 import {
-  decodeBotAvatarV1,
+  decodeCapabilityAssignmentV1,
   decodeBotIdV1,
   decodeBotSelfWriterV1,
   isPublicIdentifier,
-  type BotAvatarV1,
   type BotNameProvenanceV1,
   type BotSelfWriterV1,
   type CapabilityAssignmentView,
   type ModelAssignment,
 } from "@frockbot/configuration-core";
 export type { BotSelfWriterV1 } from "@frockbot/configuration-core";
-export {
-  BOT_AVATAR_CONTENT_TYPES,
-  BOT_AVATAR_MAX_BYTES,
-  botAvatarObjectKeyV1,
-  decodeBotAvatarBytesV1,
-  decodeBotAvatarUploadReceiptV1,
-  decodeUploadBotAvatarCommandV1,
-  type BotAvatarContentTypeV1,
-  type BotAvatarUploadReceiptV1,
-  type UploadBotAvatarCommandV1,
-} from "@frockbot/configuration-core";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
 
 export const FLOCK_DIRECTORY_LIMIT = 100;
@@ -56,6 +44,11 @@ export interface BotRegistrationV1 {
   initialDescription?: string;
   initialModel?: ModelAssignment;
   initialModelBinding?: InitialModelBindingV1;
+  /**
+   * Connection-less Capability authority snapshotted from the User's installed
+   * Packages when this Bot was admitted.
+   */
+  initialAssignments?: CapabilityAssignmentView[];
   /**
    * The Bot and Turn that created this Bot, when a Bot created it. Absent for
    * a User-created Bot and for every registration written before this existed.
@@ -146,7 +139,7 @@ export interface StoredFlockReceiptV1 {
  *
  * The registration seed in the User Durable Object is immutable (ADR 0006), so
  * the mutable half of a Bot's identity — the current name, its provenance, a
- * title, an uploaded avatar, and whether the sidebar hides it — is read through
+ * title and whether the sidebar hides it — is read through
  * from the Bot Durable Object that owns it rather than copied into the seed.
  */
 export interface BotIdentityViewV1 {
@@ -155,9 +148,9 @@ export interface BotIdentityViewV1 {
   name: string;
   namedBy: BotNameProvenanceV1;
   hiddenFromSidebar: boolean;
+  /** Purely organisational sidebar group; never part of Bot instructions. */
+  label?: string;
   title?: string;
-  /** Present only for an uploaded image; absent means the sheep recipe. */
-  avatar?: Extract<BotAvatarV1, { kind: "image" }>;
 }
 
 export interface BotIdentityDirectoryViewV1 {
@@ -412,7 +405,13 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "sheep"],
-    ["initialDescription", "initialModel", "initialModelBinding", "createdBy"],
+    [
+      "initialDescription",
+      "initialModel",
+      "initialModelBinding",
+      "initialAssignments",
+      "createdBy",
+    ],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
@@ -424,6 +423,26 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
     bot.initialModelBinding === undefined
       ? undefined
       : initialModelBinding(bot.initialModelBinding);
+  if (
+    bot.initialAssignments !== undefined &&
+    !Array.isArray(bot.initialAssignments)
+  )
+    throw new FlockDecodeError("initial Assignments are invalid");
+  const initialAssignments =
+    bot.initialAssignments === undefined
+      ? undefined
+      : bot.initialAssignments.map(decodeCapabilityAssignmentV1);
+  if (
+    new Set(
+      (initialAssignments ?? []).map((assignment) => assignment.assignmentId),
+    ).size !== (initialAssignments ?? []).length ||
+    (initialAssignments ?? []).some(
+      (assignment) =>
+        assignment.connectionId !== undefined || assignment.state !== "enabled",
+    )
+  ) {
+    throw new FlockDecodeError("initial Assignments are invalid");
+  }
   if (
     binding &&
     (!initialModel ||
@@ -451,6 +470,7 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
         }),
     initialModel,
     initialModelBinding: binding,
+    ...(initialAssignments ? { initialAssignments } : {}),
     ...(createdBy ? { createdBy } : {}),
     sheep: decodeSheepRecipeV1(bot.sheep),
   };
@@ -644,34 +664,22 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
   exact(
     value,
     ["schemaVersion", "botId", "name", "namedBy", "hiddenFromSidebar"],
-    ["title", "avatar"],
+    ["label", "title"],
   );
   if (value.schemaVersion !== 1 || typeof value.hiddenFromSidebar !== "boolean")
     throw new FlockDecodeError("Bot identity is invalid");
-  let avatar: Extract<BotAvatarV1, { kind: "image" }> | undefined;
-  if (value.avatar !== undefined) {
-    let decoded: BotAvatarV1;
-    try {
-      decoded = decodeBotAvatarV1(value.avatar, "avatar");
-    } catch (error) {
-      throw new FlockDecodeError(
-        error instanceof Error ? error.message : "avatar is invalid",
-      );
-    }
-    if (decoded.kind !== "image")
-      throw new FlockDecodeError("Bot identity avatar is invalid");
-    avatar = decoded;
-  }
   return {
     schemaVersion: 1,
     botId: botIdentifier(value.botId),
     name: boundedText(value.name, "name", 100),
     namedBy: nameProvenance(value.namedBy),
     hiddenFromSidebar: value.hiddenFromSidebar,
+    ...(value.label === undefined
+      ? {}
+      : { label: boundedText(value.label, "label", 120) }),
     ...(value.title === undefined
       ? {}
       : { title: boundedText(value.title, "title", 120) }),
-    ...(avatar ? { avatar } : {}),
   };
 }
 

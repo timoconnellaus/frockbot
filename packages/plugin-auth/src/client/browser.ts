@@ -28,6 +28,14 @@ function embeddedAuthMode(): "anonymous" | "better-auth" | "development" {
   return mode;
 }
 
+function embeddedIsAdmin(): boolean {
+  const value = document.body.dataset.frockbotIsAdmin;
+  if (value !== "true" && value !== "false") {
+    throw new Error("Hosted admin projection is invalid");
+  }
+  return value === "true";
+}
+
 export function createBrowserAuthSessionClient() {
   const desktop = window.frockbotDesktop
     ? {
@@ -39,6 +47,7 @@ export function createBrowserAuthSessionClient() {
     location: new URL(window.location.href),
     embeddedUserId: document.body.dataset.frockbotUserId,
     embeddedMode: embeddedAuthMode(),
+    embeddedIsAdmin: embeddedIsAdmin(),
     desktop,
     betterAuth: {
       getSession: async () => {

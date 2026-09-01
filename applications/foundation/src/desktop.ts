@@ -1,6 +1,5 @@
 import type { ApplicationDeclarationPlan } from "@frockbot/kernel-composition/compiler";
 import authPlugin from "@frockbot/plugin-auth/desktop";
-import clockHostPlugin from "@frockbot/plugin-clock/host";
 import clipboardPlugin from "@frockbot/plugin-desktop-clipboard/desktop";
 import directoryPickerPlugin from "@frockbot/plugin-desktop-directory-picker/desktop";
 import notificationsPlugin from "@frockbot/plugin-desktop-notifications/desktop";
@@ -10,7 +9,6 @@ import type { Plugin } from "cordis";
 
 const trustedDesktopPlugins = new Map<string, Plugin>([
   ["@frockbot/plugin-auth/desktop", authPlugin],
-  ["@frockbot/plugin-clock/host", clockHostPlugin],
   ["@frockbot/plugin-desktop-notifications/desktop", notificationsPlugin],
   ["@frockbot/plugin-desktop-directory-picker/desktop", directoryPickerPlugin],
   ["@frockbot/plugin-desktop-clipboard/desktop", clipboardPlugin],

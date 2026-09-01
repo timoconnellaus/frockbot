@@ -30,8 +30,6 @@ describe("Flock gateway Contribution", () => {
       listBotNotifications: () =>
         Promise.resolve({ schemaVersion: 1 as const, notifications: [] }),
       executeBotUnreadCommand: () => Promise.reject(new Error("not used")),
-      readBotAvatar: () => Promise.resolve(undefined),
-      uploadBotAvatar: () => Promise.reject(new Error("not used")),
     });
     const response = await contribution.route(
       request("/api/bots", {
@@ -125,22 +123,6 @@ describe("Flock gateway Contribution", () => {
             manuallyUnread: command.type === "bot/mark-unread",
           },
         }),
-      readBotAvatar: () =>
-        Promise.resolve({
-          bytes: new Uint8Array([1, 2, 3]),
-          contentType: "image/png",
-        }),
-      uploadBotAvatar: (_user, botId, command) =>
-        Promise.resolve({
-          schemaVersion: 1 as const,
-          botId,
-          avatar: {
-            kind: "image" as const,
-            digest: "a".repeat(64),
-            contentType: command.contentType,
-            size: 3,
-          },
-        }),
     });
     const context = { userId: "user-1", client: "browser" as const };
     expect(
@@ -218,66 +200,6 @@ describe("Flock gateway Contribution", () => {
     expect(identities?.status).toBe(200);
     expect(await identities?.json()).toMatchObject({
       identities: [{ botId: "alpha", name: "Alpha", namedBy: "user" }],
-    });
-
-    // The served avatar is bytes with their own content type, never JSON.
-    const served = await contribution.route(
-      request("/api/bots/alpha/avatar"),
-      new URL("https://bot.example/api/bots/alpha/avatar"),
-      context,
-    );
-    expect(served?.status).toBe(200);
-    expect(served?.headers.get("content-type")).toBe("image/png");
-    expect(new Uint8Array(await served!.arrayBuffer())).toEqual(
-      new Uint8Array([1, 2, 3]),
-    );
-
-    const uploaded = await contribution.route(
-      request("/api/bots/alpha/avatar", {
-        schemaVersion: 1,
-        type: "bot/upload-avatar",
-        botId: "alpha",
-        contentType: "image/png",
-        bytes: "AAEC",
-      }),
-      new URL("https://bot.example/api/bots/alpha/avatar"),
-      context,
-    );
-    expect(uploaded?.status).toBe(201);
-    expect(await uploaded?.json()).toMatchObject({
-      botId: "alpha",
-      avatar: { kind: "image", contentType: "image/png" },
-    });
-
-    const mismatched = await contribution.route(
-      request("/api/bots/alpha/avatar", {
-        schemaVersion: 1,
-        type: "bot/upload-avatar",
-        botId: "beta",
-        contentType: "image/png",
-        bytes: "AAEC",
-      }),
-      new URL("https://bot.example/api/bots/alpha/avatar"),
-      context,
-    );
-    expect(mismatched?.status).toBe(400);
-
-    // A Configuration decode failure is as definitive as a Flock one.
-    const badType = await contribution.route(
-      request("/api/bots/alpha/avatar", {
-        schemaVersion: 1,
-        type: "bot/upload-avatar",
-        botId: "alpha",
-        contentType: "text/html",
-        bytes: "AAEC",
-      }),
-      new URL("https://bot.example/api/bots/alpha/avatar"),
-      context,
-    );
-    expect(badType?.status).toBe(400);
-    expect(await badType?.json()).toMatchObject({
-      code: "invalid-request",
-      definitive: true,
     });
   });
 });

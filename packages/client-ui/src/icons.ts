@@ -7,6 +7,7 @@ export type UiIconName =
   | "arrow-down"
   | "arrow-up"
   | "check"
+  | "chevron-left"
   | "chevrons-left"
   | "chevrons-right"
   | "close"
@@ -26,6 +27,7 @@ export const uiIconPaths: Record<UiIconName, string[]> = {
   "arrow-down": ["m19 12-7 7-7-7", "M12 5v14"],
   "arrow-up": ["m5 12 7-7 7 7", "M12 19V5"],
   check: ["M20 6 9 17l-5-5"],
+  "chevron-left": ["m15 18-6-6 6-6"],
   "chevrons-left": ["m11 17-5-5 5-5", "m18 17-5-5 5-5"],
   "chevrons-right": ["m6 17 5-5-5-5", "m13 17 5-5-5-5"],
   close: ["M18 6 6 18", "m6 6 12 12"],

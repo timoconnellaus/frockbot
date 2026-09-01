@@ -54,13 +54,16 @@ describe("user application security headers", () => {
     const fetchUserApplication = createUserApplication();
     const response = await fetchUserApplication(
       new Request("https://app.example/", {
-        headers: { "x-frockbot-auth-session-v1": "development" },
+        headers: {
+          "x-frockbot-auth-session-v1": "development",
+          "x-frockbot-is-admin-v1": "true",
+        },
       }),
       securityEnv,
     );
-    expect(await response.text()).toContain(
-      'data-frockbot-auth-mode="development"',
-    );
+    const html = await response.text();
+    expect(html).toContain('data-frockbot-auth-mode="development"');
+    expect(html).toContain('data-frockbot-is-admin="true"');
 
     for (const mode of [undefined, "desktop", "development,better-auth"]) {
       const headers = mode ? { "x-frockbot-auth-session-v1": mode } : undefined;
@@ -91,6 +94,35 @@ describe("user application security headers", () => {
     expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
     expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
+  });
+
+  test("serves the site icon the hosted shell links", async () => {
+    const fetchUserApplication = createUserApplication();
+
+    const shell = await fetchUserApplication(
+      new Request("https://app.example/", {
+        headers: {
+          "x-frockbot-auth-session-v1": "development",
+          "x-frockbot-is-admin-v1": "false",
+        },
+      }),
+      securityEnv,
+    );
+    const html = await shell.text();
+    expect(html).toContain(
+      '<link rel="icon" type="image/png" href="/favicon.ico">',
+    );
+
+    const icon = await fetchUserApplication(
+      new Request("https://app.example/favicon.ico"),
+      securityEnv,
+    );
+
+    expect(icon.status).toBe(200);
+    // The icon rides the artifact as a PNG, so the declared type must stay PNG
+    // under the `nosniff` header the security wrapper always sets.
+    expect(icon.headers.get("content-type")).toBe("image/png");
+    expect(icon.headers.get("x-content-type-options")).toBe("nosniff");
   });
 });
 

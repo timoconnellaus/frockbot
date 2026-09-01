@@ -32,13 +32,13 @@ describe("foundation application", () => {
     expect(first.packages.map((pkg) => pkg.id)).toEqual([
       "ui-theme",
       "shell",
+      "admin",
       "flock",
       "audit",
       "auth",
       "authoring",
       "settings",
       "bot-template",
-      "channels",
       "clock",
       "computer",
       "credentials",
@@ -59,36 +59,35 @@ describe("foundation application", () => {
       "provider-foundation",
       "web",
       "provider-ollama-cloud",
+      "provider-workers-ai",
       "routines",
       "search",
       "skills",
       "subagents",
-      "telegram",
     ]);
     expect(first.contributions).toEqual({
       backend: [
         "shell",
+        "admin",
         "flock",
         "audit",
         "settings",
         "bot-template",
-        "channels",
         "credentials",
         "user-machine",
         "mcp",
         "package-publisher",
         "provider-ollama-cloud",
+        "provider-workers-ai",
         "routines",
         "search",
         "subagents",
-        "telegram",
       ],
       runtime: [
         "shell",
         "flock",
         "authoring",
         "bot-template",
-        "channels",
         "clock",
         "computer",
         "credentials",
@@ -104,6 +103,7 @@ describe("foundation application", () => {
         "provider-foundation",
         "web",
         "provider-ollama-cloud",
+        "provider-workers-ai",
         "routines",
         "skills",
         "subagents",
@@ -111,13 +111,12 @@ describe("foundation application", () => {
       client: [
         "ui-theme",
         "shell",
+        "admin",
         "flock",
         "audit",
         "auth",
         "settings",
         "bot-template",
-        "channels",
-        "clock",
         "computer",
         "user-machine",
         "package-publisher",
@@ -126,7 +125,6 @@ describe("foundation application", () => {
       ],
       desktop: [
         "auth",
-        "clock",
         "desktop-clipboard",
         "desktop-directory-picker",
         "desktop-notifications",
@@ -212,6 +210,42 @@ describe("foundation application", () => {
         },
       ),
     ).toThrow('Bot model provider "foundation" is unavailable');
+  });
+
+  test("mounts an assigned Workers AI model through the native host seam", async () => {
+    const plan = await compileFoundationApplication();
+    const runtimePackage = createFoundationModelRuntimePackage(
+      plan,
+      {
+        assignment: {
+          connectionId: "workers-ai-ambient",
+          providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+        },
+        state: "ready",
+        packageId: "provider-workers-ai",
+        providerType: "workers-ai",
+        connection: {
+          connectionId: "workers-ai-ambient",
+          packageId: "provider-workers-ai",
+          connectionTypeId: "workers-ai-account",
+          displayName: "Cloudflare Workers AI",
+          state: "ready",
+          generation: "workers-ai-ambient-v1",
+          providerType: "workers-ai",
+          safeMetadata: {},
+        },
+      },
+      {
+        accountId: "account-1",
+        connectionId: "workers-ai-ambient",
+        runWorkersAi: () => Promise.reject(new Error("not executed")),
+      },
+    );
+
+    expect(runtimePackage).toMatchObject({
+      specifier: "@frockbot/plugin-provider-workers-ai",
+      contributionSpecifier: "@frockbot/plugin-provider-workers-ai/runtime",
+    });
   });
 
   test("exposes only compiled runtime packages to the runtime host", async () => {
@@ -307,6 +341,16 @@ describe("foundation application", () => {
     const plan = await compileFoundationApplication();
     const backend = await createFoundationBackendContributions(plan, {
       backendHost: "gateway",
+      readDeploymentPolicy: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          revision: 0,
+          signups: { open: false },
+          updatedAt: "2026-09-01T00:00:00.000Z",
+          updatedBy: "deployment-default",
+        }),
+      setDeploymentSignups: () =>
+        Promise.reject(new Error("not used while composing")),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       listTemplateShares: () =>
@@ -359,9 +403,6 @@ describe("foundation application", () => {
         Promise.resolve({ schemaVersion: 1 as const, notifications: [] }),
       executeBotUnreadCommand: () =>
         Promise.reject(new Error("not used while composing")),
-      readBotAvatar: () => Promise.resolve(undefined),
-      uploadBotAvatar: () =>
-        Promise.reject(new Error("not used while composing")),
       executeConnection: () =>
         Promise.reject(new Error("not used while composing")),
       lookupConnectionCommand: () =>
@@ -409,31 +450,15 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readTask: () => Promise.reject(new Error("not used while composing")),
       stopTask: () => Promise.reject(new Error("not used while composing")),
-      channelTokenSecret: () => Promise.resolve(undefined),
-      deliverChannelWebhook: () =>
-        Promise.reject(new Error("not used while composing")),
-      connectChannel: () =>
-        Promise.reject(new Error("not used while composing")),
-      listChannels: () => Promise.reject(new Error("not used while composing")),
-      readChannelThreadPage: () =>
-        Promise.reject(new Error("not used while composing")),
-      listChannelUnread: () =>
-        Promise.reject(new Error("not used while composing")),
-      markChannelRead: () =>
-        Promise.reject(new Error("not used while composing")),
-      postChannelMessage: () =>
-        Promise.reject(new Error("not used while composing")),
-      disconnectChannel: () =>
-        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions
         .map((contribution) => contribution.packageId)
         .sort(),
     ).toEqual([
+      "admin",
       "audit",
       "bot-template",
-      "channels",
       "flock",
       "mcp",
       "package-publisher",
@@ -469,6 +494,11 @@ describe("foundation application", () => {
       userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
     ).toBeLessThan(
       userSpecifiers.indexOf("@frockbot/plugin-provider-ollama-cloud/user"),
+    );
+    expect(
+      userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
+    ).toBeLessThan(
+      userSpecifiers.indexOf("@frockbot/plugin-provider-workers-ai/user"),
     );
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-credentials/user"),
@@ -576,6 +606,42 @@ describe("foundation application", () => {
       },
     );
     expect(runtime).toEqual([]);
+
+    const webAssignment = {
+      assignmentId: "default-0-0",
+      packageId: "web",
+      capabilityId: "web-fetch",
+      state: "enabled" as const,
+    };
+    const freshBotRuntime = await createFoundationAssignedRuntimePackages(
+      plan,
+      {
+        schemaVersion: 1,
+        botId: "fresh",
+        revision: 0,
+        profile: { name: "Fresh" },
+        notifications: { enabled: true },
+        assignments: [webAssignment],
+        assignmentOperations: [],
+      },
+      {
+        schemaVersion: 1,
+        botId: "fresh",
+        revision: 0,
+        assignments: [webAssignment],
+      },
+      {
+        userId: "user-1",
+        readSecret: () => undefined,
+        authorizeConnection: () =>
+          Promise.reject(
+            new Error("connection-less Web Assignment must not authorize"),
+          ),
+      },
+    );
+    expect(freshBotRuntime.map((pkg) => pkg.specifier)).toEqual([
+      "@frockbot/plugin-web",
+    ]);
   });
 });
 

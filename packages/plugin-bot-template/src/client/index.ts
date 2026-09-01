@@ -2,9 +2,9 @@
 
 // The Bot Template hosted client Contribution.
 //
-// It mounts one section into `frockbot.bot-settings-sections`, the outlet the
-// Settings Package already declares, so nothing in the settings surface has to
-// know this Package exists. Every write is one `POST` of one versioned command
+// Export mounts as the last primary row, while import stays under Advanced.
+// Nothing in the settings surface has to know this Package exists. Every write
+// is one `POST` of one versioned command
 // with its own idempotency key, and every read is decoded at the seam before a
 // component sees it: "The hosted client renders backend state and submits
 // commands. It does not become an alternate authority."
@@ -195,7 +195,7 @@ export const botTemplateClientPlugin: ClientPlugin = (ctx) => {
   return [
     ctx.provide(botTemplateStateKey, state),
     ctx.slot({
-      slot: "frockbot.bot-settings-sections",
+      slot: "frockbot.bot-settings-primary-sections",
       order: 20,
       component: BotTemplateSection,
     }),

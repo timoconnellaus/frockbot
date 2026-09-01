@@ -254,12 +254,7 @@ describe("the web-fetch Capability Assignment", () => {
     expect(plugin).toBeDefined();
     await root.plugin(plugin!);
 
-    for (const turnType of [
-      "chat",
-      "automation",
-      "subagent",
-      "channel",
-    ] as const) {
+    for (const turnType of ["chat", "automation", "subagent"] as const) {
       expect({
         turnType,
         names: root.tools.schemas({ turnType }).map((schema) => schema.name),

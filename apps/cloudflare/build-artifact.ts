@@ -22,9 +22,15 @@ const clientStyle = Object.values(manifest).find((entry) =>
 if (!clientEntry || !clientStyle) {
   throw new Error("Worker renderer assets were not emitted");
 }
-const [clientJavaScript, clientCss] = await Promise.all([
+const [clientJavaScript, clientCss, clientIcon] = await Promise.all([
   readFile(resolve(clientOutdir, clientEntry.file), "utf8"),
   readFile(resolve(clientOutdir, clientStyle.file), "utf8"),
+  // The hosted shell serves the site icon the marketing site already serves,
+  // read from the one canonical brand icon the app-icon script also renders.
+  readFile(
+    resolve(root, "../../assets/marketing/app-icon/frockbot-icon-64.png"),
+    "base64",
+  ),
 ]);
 
 const result = await Bun.build({
@@ -41,6 +47,7 @@ const result = await Bun.build({
   define: {
     __FROCKBOT_CLIENT_JS__: JSON.stringify(clientJavaScript),
     __FROCKBOT_CLIENT_CSS__: JSON.stringify(clientCss),
+    __FROCKBOT_CLIENT_ICON__: JSON.stringify(clientIcon),
   },
 });
 
