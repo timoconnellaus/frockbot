@@ -240,7 +240,7 @@ export function createOllamaWebSearchRuntimePlugin(
       new ConnectionBackedWebSearch(config, ctx.credentialLease, client),
     );
     return ctx.tools.register(definition, {
-      admissionCeiling: ["chat", "automation", "subagent", "channel"],
+      admissionCeiling: ["chat", "automation", "subagent"],
       subagentRoleCeiling: ["executor"],
     });
   };

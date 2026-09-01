@@ -395,7 +395,7 @@ if [ ! -s "$BOT/slot" ]; then
       break
     done
     if [ -z "$VICTIM" ]; then
-      # Said on both channels: the exit code is for a caller that gets one, and
+      # Said both ways: the exit code is for a caller that gets one, and
       # the marker is for a transport that hands back output instead.
       echo ${NO_SLOTS_MARKER}
       echo "no desktop slots available" >&2

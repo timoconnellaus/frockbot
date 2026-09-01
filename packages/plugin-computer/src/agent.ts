@@ -438,7 +438,7 @@ export function createComputerAgentPlugin(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent", "channel"],
+        turnTypes: ["chat", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,
@@ -846,7 +846,7 @@ export function createComputerAgentPlugin(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent", "channel"],
+        turnTypes: ["chat", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       idempotent: true,
@@ -1052,7 +1052,7 @@ export function createComputerAgentPlugin(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent", "channel"],
+        turnTypes: ["chat", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       description:
@@ -1124,7 +1124,7 @@ export function createComputerAgentPlugin(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent", "channel"],
+        turnTypes: ["chat", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       description:
@@ -1154,7 +1154,7 @@ export function createComputerAgentPlugin(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent", "channel"],
+        turnTypes: ["chat", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       description:
@@ -1192,7 +1192,7 @@ export function createComputerAgentPlugin(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent", "channel"],
+        turnTypes: ["chat", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,
@@ -1217,7 +1217,7 @@ export function createComputerAgentPlugin(
       name: "computer_browser",
       // Page-level browser control, which `browserUse` exists for.
       admission: {
-        turnTypes: ["chat", "automation", "subagent", "channel"],
+        turnTypes: ["chat", "automation", "subagent"],
         subagentRoles: ["executor", "browserUse", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,

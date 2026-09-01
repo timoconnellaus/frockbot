@@ -2,10 +2,10 @@
  * The per-Bot info pane's projection.
  *
  * Register row 51: GrokBot's info pane shows a live preview of the agent's
- * computer over its routines, plus channels and members. The Computer preview
- * and the Routines summary are their own Packages' Contributions; what this
- * module owns is the part that is Bot configuration — who the Bot is, how it
- * was named, and what authority it holds.
+ * computer over its routines and members. The Computer preview and the
+ * Routines summary are their own Packages' Contributions; what this module owns
+ * is the part that is Bot configuration — who the Bot is, how it was named,
+ * and what authority it holds.
  *
  * It is a pure projection of durable state the client already read, with no
  * Vue and no DOM, so the shape the pane renders can be tested without mounting

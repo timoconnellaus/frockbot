@@ -89,12 +89,7 @@ describe("the MCP lifecycle tools", () => {
   test("offers status, instructions and restart on every turn type", async () => {
     const { root, ready } = context({});
     await ready;
-    for (const turnType of [
-      "chat",
-      "automation",
-      "subagent",
-      "channel",
-    ] as const) {
+    for (const turnType of ["chat", "automation", "subagent"] as const) {
       const names = root.tools.schemas({ turnType }).map((tool) => tool.name);
       expect(names).toContain("mcp_server_status");
       expect(names).toContain("mcp_set_instructions");
@@ -108,7 +103,7 @@ describe("the MCP lifecycle tools", () => {
     expect(
       root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
     ).toContain("mcp_add_server");
-    for (const turnType of ["automation", "subagent", "channel"] as const) {
+    for (const turnType of ["automation", "subagent"] as const) {
       expect(
         root.tools.schemas({ turnType }).map((tool) => tool.name),
       ).not.toContain("mcp_add_server");

@@ -1,6 +1,4 @@
 import type { AuthoringProbe } from "./authoring-probe.ts";
-import type { ChannelStoreProbe } from "./channel-store-probe.ts";
-import type { ChannelConnectorProbe } from "./channel-connector-probe.ts";
 import type { BotIsolateProbe } from "./bot-isolate-probe.ts";
 import type { ComputerHostClientProbe } from "./computer-host-probe.ts";
 import type {
@@ -14,8 +12,6 @@ interface FlyTestEnv {
   AUTHORING: DurableObjectNamespace<AuthoringProbe>;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
-  CHANNEL_STORE: DurableObjectNamespace<ChannelStoreProbe>;
-  CHANNEL_CONNECTOR: DurableObjectNamespace<ChannelConnectorProbe>;
   CREDENTIAL_KEYRING: string;
   SECRET_TOKEN: string;
   COMPOSITIONS: DurableObjectNamespace<CompositionProbe>;

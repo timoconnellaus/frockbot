@@ -3,19 +3,12 @@
  * The per-Bot info pane (parity register row 51).
  *
  * GrokBot opens it from the chat header and shows a live preview of the
- * agent's computer over its routines, plus channels when a channel connector
- * is available and members in group chats. FrockBot assembles the same pane
- * out of Contributions rather than one component: the Computer preview is the
- * Computer Package's `frockbot.computer` slot, the Routines glance and anything
- * later arrive through `frockbot.bot-info-sections` and
- * `frockbot.bot-info-channels`, and what this surface owns
- * is the Bot itself — identity, name provenance, the authority it holds, and
- * whether it may interrupt you.
- *
- * Channels are not built yet, so the pane says so in the place they will
- * mount rather than pretending the section does not exist. "Production
- * controls represent implemented backend behavior": the slot is labelled and
- * empty, and it offers nothing to click.
+ * agent's computer over its routines and members. FrockBot assembles the same
+ * pane out of Contributions rather than one component: the Computer preview is
+ * the Computer Package's `frockbot.computer` slot, the Routines glance and
+ * anything later arrive through `frockbot.bot-info-sections`, and what this
+ * surface owns is the Bot itself — identity, name provenance, the authority it
+ * holds, and whether it may interrupt you.
  */
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiAnchor, UiButton, UiIcon } from "@frockbot/client-ui";
@@ -176,25 +169,6 @@ async function setNotifications(event: Event): Promise<void> {
         Routines arrive here, and so will anything a later Package contributes.
       -->
       <k-slot name="frockbot.bot-info-sections" />
-
-      <UiAnchor
-        as="section"
-        anchor="bot-info-channels"
-        label="Channels"
-        :href="link('bot-info-channels')"
-        class="bot-info__card"
-      >
-        <header class="bot-info__head"><h3>Channels</h3></header>
-        <p class="bot-info__hint">
-          The rooms this Bot is in, and the platforms it is connected to.
-        </p>
-        <!--
-          The Channels Package's own Contribution. The pane gives it a place, a
-          heading and the anchor a deep link cites, and knows nothing about
-          rooms, connectors or keys — exactly as it does for the Computer.
-        -->
-        <k-slot name="frockbot.bot-info-channels" />
-      </UiAnchor>
 
       <UiAnchor
         as="section"

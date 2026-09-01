@@ -52,7 +52,6 @@ export const MCP_TOOL_TURN_TYPES: readonly TurnTypeV1[] = [
   "chat",
   "automation",
   "subagent",
-  "channel",
 ];
 
 /**

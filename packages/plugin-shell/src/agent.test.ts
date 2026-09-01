@@ -70,7 +70,7 @@ async function invoke(
 }
 
 describe("the Shell's tool admission", () => {
-  test("offers the send tool and its alias on chat and channel turns only", async () => {
+  test("offers the send tool and its alias on chat turns only", async () => {
     const mounted = await mount();
     try {
       const chat = mounted.root.tools
@@ -88,16 +88,6 @@ describe("the Shell's tool admission", () => {
       expect(chat).not.toContain(WAKE_PARENT_TOOL_V1);
       expect(automation).toEqual([WAKE_PARENT_TOOL_V1]);
       expect(subagent).toEqual([WAKE_PARENT_TOOL_V1]);
-      // A `channel` Turn has the Bot's voice and nothing else. In an external
-      // Channel that voice is carried to the remote platform by the connector;
-      // in a group Channel it is recorded and reaches nobody. Nothing hands off
-      // from a Channel Turn either way.
-      const channel = mounted.root.tools
-        .schemas({ turnType: "channel" })
-        .map((tool: { name: string }) => tool.name);
-      expect(channel).toContain(SEND_TO_USER_TOOL_V1);
-      expect(channel).toContain(SEND_MESSAGE_ALIAS_V1);
-      expect(channel).not.toContain(WAKE_PARENT_TOOL_V1);
     } finally {
       await mounted.dispose();
     }
@@ -173,10 +163,7 @@ describe("the Shell's tool admission", () => {
   });
 
   test("bounds each tool by the turn types its manifest Capability declares", () => {
-    expect(shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1)).toEqual([
-      "chat",
-      "channel",
-    ]);
+    expect(shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1)).toEqual(["chat"]);
     expect(shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1)).toEqual([
       "automation",
       "subagent",

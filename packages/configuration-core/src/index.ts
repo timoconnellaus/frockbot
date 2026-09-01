@@ -528,8 +528,7 @@ export interface ExecutionPackageDefinition {
   version: string;
   capabilities: Array<{
     id: string;
-    kind?:
-      "tool" | "model" | "memory" | "notification" | "computer" | "channel";
+    kind?: "tool" | "model" | "memory" | "notification" | "computer";
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{

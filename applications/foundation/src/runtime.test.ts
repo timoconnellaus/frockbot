@@ -38,7 +38,6 @@ describe("foundation application", () => {
       "authoring",
       "settings",
       "bot-template",
-      "channels",
       "clock",
       "computer",
       "credentials",
@@ -63,7 +62,6 @@ describe("foundation application", () => {
       "search",
       "skills",
       "subagents",
-      "telegram",
     ]);
     expect(first.contributions).toEqual({
       backend: [
@@ -72,7 +70,6 @@ describe("foundation application", () => {
         "audit",
         "settings",
         "bot-template",
-        "channels",
         "credentials",
         "user-machine",
         "mcp",
@@ -81,14 +78,12 @@ describe("foundation application", () => {
         "routines",
         "search",
         "subagents",
-        "telegram",
       ],
       runtime: [
         "shell",
         "flock",
         "authoring",
         "bot-template",
-        "channels",
         "clock",
         "computer",
         "credentials",
@@ -116,7 +111,6 @@ describe("foundation application", () => {
         "auth",
         "settings",
         "bot-template",
-        "channels",
         "clock",
         "computer",
         "user-machine",
@@ -409,22 +403,6 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readTask: () => Promise.reject(new Error("not used while composing")),
       stopTask: () => Promise.reject(new Error("not used while composing")),
-      channelTokenSecret: () => Promise.resolve(undefined),
-      deliverChannelWebhook: () =>
-        Promise.reject(new Error("not used while composing")),
-      connectChannel: () =>
-        Promise.reject(new Error("not used while composing")),
-      listChannels: () => Promise.reject(new Error("not used while composing")),
-      readChannelThreadPage: () =>
-        Promise.reject(new Error("not used while composing")),
-      listChannelUnread: () =>
-        Promise.reject(new Error("not used while composing")),
-      markChannelRead: () =>
-        Promise.reject(new Error("not used while composing")),
-      postChannelMessage: () =>
-        Promise.reject(new Error("not used while composing")),
-      disconnectChannel: () =>
-        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions
@@ -433,7 +411,6 @@ describe("foundation application", () => {
     ).toEqual([
       "audit",
       "bot-template",
-      "channels",
       "flock",
       "mcp",
       "package-publisher",
@@ -461,7 +438,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(11);
+    expect(userBackend.contributions).toHaveLength(10);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

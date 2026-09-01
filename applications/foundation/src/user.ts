@@ -46,11 +46,6 @@ import {
 } from "@frockbot/plugin-user-machine/user";
 import type { MachineStorageV1 } from "@frockbot/plugin-user-machine/store";
 import {
-  createTelegramUserBackendPlugin,
-  TelegramUserBackendContribution,
-} from "@frockbot/plugin-telegram/user";
-export { TelegramUserBackendContribution } from "@frockbot/plugin-telegram/user";
-import {
   createSearchUserBackendPlugin,
   type SearchUserBackendContribution,
   type SearchUserBackendHost,
@@ -124,13 +119,6 @@ export interface MountedFoundationUserBackend {
    * protocol every provider answers.
    */
   mcp: McpUserBackendContribution;
-  /**
-   * The Telegram Contribution, exposed by name as well as by Connection
-   * ownership: the external Channel connector needs its `openConnectionKey`,
-   * which is not part of the Connection command protocol every provider
-   * answers.
-   */
-  telegram: TelegramUserBackendContribution;
   /**
    * The User's transcript index. It is User-scoped state like every other
    * Contribution here, and it is the only one that is a *projection*: the rows
@@ -234,7 +222,6 @@ export async function createFoundationUserBackendContributions(
   let credentials: CredentialUserBackendContribution | undefined;
   let ollama: OllamaCloudUserBackendContribution | undefined;
   let mcp: McpUserBackendContribution | undefined;
-  let telegram: TelegramUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
   let botTemplate: BotTemplateUserBackendContribution | undefined;
   let publisher: PackagePublisherUserContribution | undefined;
@@ -253,7 +240,6 @@ export async function createFoundationUserBackendContributions(
         | CredentialUserBackendContribution
         | OllamaCloudUserBackendContribution
         | McpUserBackendContribution
-        | TelegramUserBackendContribution
         | FlockUserBackendContribution
         | BotTemplateUserBackendContribution
         | PackagePublisherUserContribution
@@ -348,34 +334,6 @@ export async function createFoundationUserBackendContributions(
           {
             mount(value: McpUserBackendContribution) {
               mcp = value;
-              connections.set(value.packageId, value);
-              const unregister =
-                userSettings.registerConnectionCommandOwner(value);
-              const dispose = lifecycle.mount(value);
-              return () => {
-                connections.delete(value.packageId);
-                unregister();
-                dispose();
-              };
-            },
-          },
-        );
-      },
-    ],
-    [
-      "@frockbot/plugin-telegram/user",
-      (lifecycle) => {
-        if (!settings || !credentials) {
-          throw new Error(
-            "Telegram requires Settings and Credential Contributions",
-          );
-        }
-        const userSettings = settings;
-        return createTelegramUserBackendPlugin(
-          { storage: host.storage, settings, credentials },
-          {
-            mount(value: TelegramUserBackendContribution) {
-              telegram = value;
               connections.set(value.packageId, value);
               const unregister =
                 userSettings.registerConnectionCommandOwner(value);
@@ -651,7 +609,6 @@ export async function createFoundationUserBackendContributions(
     !credentials ||
     !ollama ||
     !mcp ||
-    !telegram ||
     !flock ||
     !botTemplate ||
     !publisher ||
@@ -661,7 +618,7 @@ export async function createFoundationUserBackendContributions(
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, MCP, Telegram, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
     );
   }
   return {
@@ -669,7 +626,6 @@ export async function createFoundationUserBackendContributions(
     credentials,
     connections,
     mcp,
-    telegram,
     flock,
     botTemplate,
     publisher,

@@ -76,8 +76,6 @@ export interface ClientNotificationIntent {
   body: string;
   /** `critical` for an intent the Bot's notification policy does not gate. */
   urgency?: "normal" | "critical";
-  /** The Channel a group message raised this intent in, when one did. */
-  channelId?: string;
 }
 
 export interface ClientNotificationListV1 {
@@ -289,7 +287,7 @@ function decodeNotification(value: unknown): ClientNotificationIntent {
     !hasExactKeys(
       notification,
       ["notificationId", "runId", "createdAt", "title", "body"],
-      ["urgency", "channelId"],
+      ["urgency"],
     )
   ) {
     throw new Error("notification is invalid");
@@ -306,9 +304,6 @@ function decodeNotification(value: unknown): ClientNotificationIntent {
     body: responseString(notification, "body", "notification"),
     ...(notification.urgency === "critical" || notification.urgency === "normal"
       ? { urgency: notification.urgency }
-      : {}),
-    ...(typeof notification.channelId === "string"
-      ? { channelId: notification.channelId }
       : {}),
   };
 }

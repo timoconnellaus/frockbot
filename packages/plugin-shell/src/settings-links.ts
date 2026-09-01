@@ -146,12 +146,6 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "bot",
   },
   {
-    anchor: "bot-info-channels",
-    surface: "bot-info",
-    label: "Channels",
-    scope: "bot",
-  },
-  {
     anchor: "bot-info-notifications",
     surface: "bot-info",
     label: "Notifications",

@@ -89,15 +89,7 @@ export interface IsolateIdentityV1 {
 }
 
 export type IsolateCapabilityKindV1 =
-  | "tool"
-  | "model"
-  | "memory"
-  | "notification"
-  | "computer"
-  // Manifest v5. An isolate is offered no Channel authority today — the
-  // isolate host mounts `tool` Capabilities only — but the kind crosses this
-  // contract on the Assignment projection, so it is named rather than dropped.
-  | "channel";
+  "tool" | "model" | "memory" | "notification" | "computer";
 
 export interface IsolateCapabilityDescriptorV1 {
   capabilityId: string;
@@ -538,7 +530,6 @@ const CAPABILITY_KINDS: readonly IsolateCapabilityKindV1[] = [
   "memory",
   "notification",
   "computer",
-  "channel",
 ];
 
 export function decodeIsolateCapabilityDescriptorV1(

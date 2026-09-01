@@ -22,7 +22,7 @@
 // is declared here because the constitution's *Self-modification* rule — "a
 // request for more becomes a durable pending decision for the User, never a
 // grant" — needs one shape to carry that request, and a card the Bot sends is
-// the only channel a Turn has to a person. Like `widget` it ends the Turn: the
+// the only path a Turn has to a person. Like `widget` it ends the Turn: the
 // Bot has nothing to do until a human answers.
 
 /** The widget shape, verbatim from §4.2: `options` holds 1–6 entries. */

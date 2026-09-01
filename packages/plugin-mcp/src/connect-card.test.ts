@@ -175,7 +175,7 @@ describe("mcp_authenticate_server", () => {
     expect(
       root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
     ).toContain("mcp_authenticate_server");
-    for (const turnType of ["automation", "subagent", "channel"] as const) {
+    for (const turnType of ["automation", "subagent"] as const) {
       expect(
         root.tools.schemas({ turnType }).map((tool) => tool.name),
       ).not.toContain("mcp_authenticate_server");

@@ -252,12 +252,7 @@ describe("ToolRegistry turn admission", () => {
   test("offers a tool with no declaration on every turn type", async () => {
     const root = await admissionRoot();
     root.tools.register(work);
-    for (const turnType of [
-      "chat",
-      "automation",
-      "subagent",
-      "channel",
-    ] as const) {
+    for (const turnType of ["chat", "automation", "subagent"] as const) {
       expect(root.tools.schemas({ turnType }).map((s) => s.name)).toEqual([
         "work",
       ]);
@@ -276,9 +271,6 @@ describe("ToolRegistry turn admission", () => {
     expect(
       root.tools.schemas({ turnType: "automation" }).map((s) => s.name),
     ).toEqual(["work", "wake_parent"]);
-    expect(
-      root.tools.schemas({ turnType: "channel" }).map((s) => s.name),
-    ).toEqual(["work"]);
   });
 
   test("bounds a tool declaration by the manifest ceiling", async () => {
@@ -382,7 +374,7 @@ describe("ToolRegistry turn admission", () => {
     description: "Runs a shell command on the Computer.",
     inputSchema: { type: "object" },
     admission: {
-      turnTypes: ["chat", "automation", "subagent", "channel"],
+      turnTypes: ["chat", "automation", "subagent"],
       subagentRoles: ["executor", "computerUse"],
     },
     execute: () => Promise.resolve({ content: "ran", isError: false }),
@@ -392,7 +384,7 @@ describe("ToolRegistry turn admission", () => {
     description: "Drives the browser on the Computer.",
     inputSchema: { type: "object" },
     admission: {
-      turnTypes: ["chat", "automation", "subagent", "channel"],
+      turnTypes: ["chat", "automation", "subagent"],
       subagentRoles: ["executor", "browserUse", "computerUse"],
     },
     execute: () => Promise.resolve({ content: "snapshot", isError: false }),

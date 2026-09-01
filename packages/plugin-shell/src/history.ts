@@ -14,15 +14,7 @@
 //     the parent transcript is a pointer, not copied into the prompt". The
 //     parent's messages are never copied, at any length.
 //
-//  3. **A `channel` Turn is given a history that is not this Bot's at all.**
-//     It falls under rule 2 here — it is not a chat Turn, so it sees its own
-//     Turn and nothing of the conversation — and the Channels Package then
-//     supplies the Channel's own recent messages in place of the pointer,
-//     through the Agent runtime's fresh-history mode. That substitution happens
-//     outside this module, and this module is what makes it safe: whatever the
-//     Turn is given, none of the Bot's personal transcript is in it.
-//
-// Memory is deliberately untouched by all three rules. "The parent agent's shared
+// Memory is deliberately untouched by both rules. "The parent agent's shared
 // durable memories are available": Memory is injected as a prompt section, not
 // as history, so a firing keeps every tier the parent has.
 import {

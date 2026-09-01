@@ -1,22 +1,3 @@
-import { channelTokenSecretV1 } from "@frockbot/plugin-channels/token";
-import type {
-  ChannelConnectResultV1,
-  ChannelDeliveryOutcomeV1,
-} from "@frockbot/plugin-channels/connect";
-import type { ChannelOutboundReceiptV1 } from "@frockbot/plugin-channels/connector";
-import { CHANNEL_USER_PEER_V1 } from "@frockbot/plugin-channels/backend";
-import {
-  decodeChannelCommandReceiptV1,
-  decodeChannelListViewV1,
-  decodeChannelThreadPageViewV1,
-  type ChannelCommandV1,
-} from "@frockbot/plugin-channels/shared";
-import {
-  decodeChannelReadReceiptV1,
-  decodeChannelUnreadDirectoryViewV1,
-  type ChannelReadCommandV1,
-} from "@frockbot/plugin-channels/unread";
-import type { ChannelWriterV1 } from "@frockbot/plugin-channels/records";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import {
   decodeMachineResultDeliveryV1,
@@ -256,74 +237,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   ): Promise<"applied" | "stale">;
 }
 
-/**
- * The User Durable Object's RPC surface as this Worker uses it: the binding the
- * gateway shares, plus the Channels connector methods, which are this adapter's
- * own seam and not part of the gateway's contract with a Configuration.
- */
-interface UserConfigurationRpc extends UserConfigurationBinding {
-  /** Connect one Bot to one external platform. Mints the webhook key. */
-  connectChannel(request: {
-    schemaVersion: 1;
-    userId: string;
-    botId: string;
-    platform: string;
-    connectionId: string;
-    commandId: string;
-    name: string;
-    origin: string;
-  }): Promise<ChannelConnectResultV1>;
-  /** One webhook delivery, after the gateway proved the token was minted here. */
-  deliverChannelWebhook(request: {
-    schemaVersion: 1;
-    userId: string;
-    platform: string;
-    token: string;
-    presentedSecret: string | null;
-    body: unknown;
-  }): Promise<ChannelDeliveryOutcomeV1>;
-  /** What one `channel` Turn said, carried to the platform it was said in. */
-  deliverChannelOutbound(request: {
-    schemaVersion: 1;
-    userId: string;
-    botId: string;
-    channelId: string;
-    inReplyTo: string;
-    hop: number;
-    texts: string[];
-  }): Promise<{ schemaVersion: 1; receipts: ChannelOutboundReceiptV1[] }>;
-  /** Every Channel one Bot is a member of. */
-  listChannels(request: {
-    schemaVersion: 1;
-    userId: string;
-    botId: string;
-  }): Promise<unknown>;
-  /** One Channel: the record, its members, its thread, a Connection's label. */
-  readChannelThreadPage(request: {
-    schemaVersion: 1;
-    userId: string;
-    channelId: string;
-  }): Promise<unknown>;
-  /** Per-Channel unread for one Bot's rows, in one round trip. */
-  listChannelUnread(request: {
-    schemaVersion: 1;
-    userId: string;
-    botId: string;
-  }): Promise<unknown>;
-  /** The User's own read position in one Channel. */
-  markChannelRead(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: ChannelReadCommandV1;
-  }): Promise<unknown>;
-  /** One Channel command applied as the User rather than as a Bot. */
-  executeChannelCommand(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: ChannelCommandV1;
-    writer: ChannelWriterV1;
-  }): Promise<unknown>;
-}
+type UserConfigurationRpc = UserConfigurationBinding;
 
 type RpcBoundary<T> = {
   [Key in keyof T]: T[Key] extends (...args: never[]) => infer Result
@@ -448,14 +362,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     createBot: (request) => rpc.createBot(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
-    connectChannel: (request) => rpc.connectChannel(request),
-    deliverChannelWebhook: (request) => rpc.deliverChannelWebhook(request),
-    deliverChannelOutbound: (request) => rpc.deliverChannelOutbound(request),
-    listChannels: (request) => rpc.listChannels(request),
-    readChannelThreadPage: (request) => rpc.readChannelThreadPage(request),
-    listChannelUnread: (request) => rpc.listChannelUnread(request),
-    markChannelRead: (request) => rpc.markChannelRead(request),
-    executeChannelCommand: (request) => rpc.executeChannelCommand(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
@@ -1514,100 +1420,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
               machineId,
             }),
           ),
-        ),
-      // The Channels door. The gateway verifies the signature so it can address
-      // a Durable Object at all; the User Durable Object re-checks the durable
-      // digest, so a token the edge accepted is still refused once revoked.
-      channelTokenSecret: async () =>
-        typeof env.CREDENTIAL_KEYRING === "string"
-          ? channelTokenSecretV1(env.CREDENTIAL_KEYRING)
-          : undefined,
-      deliverChannelWebhook: (userId, request) =>
-        userConfigurationStub(env, userId).deliverChannelWebhook({
-          schemaVersion: 1,
-          userId,
-          ...request,
-        }),
-      connectChannel: (userId, request) =>
-        userConfigurationStub(env, userId).connectChannel({
-          schemaVersion: 1,
-          userId,
-          ...request,
-        }),
-      // The WebUI's reads. Channel state crosses a Durable Object seam, so it
-      // decodes on arrival rather than being trusted in the shape RPC happened
-      // to return.
-      listChannels: async (userId, botId) =>
-        decodeChannelListViewV1(
-          await userConfigurationStub(env, userId).listChannels({
-            schemaVersion: 1,
-            userId,
-            botId,
-          }),
-        ),
-      readChannelThreadPage: async (userId, channelId) =>
-        decodeChannelThreadPageViewV1(
-          await userConfigurationStub(env, userId).readChannelThreadPage({
-            schemaVersion: 1,
-            userId,
-            channelId,
-          }),
-        ),
-      listChannelUnread: async (userId, botId) =>
-        decodeChannelUnreadDirectoryViewV1(
-          await userConfigurationStub(env, userId).listChannelUnread({
-            schemaVersion: 1,
-            userId,
-            botId,
-          }),
-        ),
-      markChannelRead: async (userId, command) =>
-        decodeChannelReadReceiptV1(
-          await userConfigurationStub(env, userId).markChannelRead({
-            schemaVersion: 1,
-            userId,
-            command: {
-              schemaVersion: 1,
-              type: "channel/mark-read",
-              ...command,
-            },
-          }),
-        ),
-      postChannelMessage: async (userId, command) =>
-        decodeChannelCommandReceiptV1(
-          await userConfigurationStub(env, userId).executeChannelCommand({
-            schemaVersion: 1,
-            userId,
-            command: {
-              schemaVersion: 1,
-              type: "channel/post",
-              commandId: command.commandId,
-              channelId: command.channelId,
-              botId: command.botId,
-              text: command.text,
-              // The person is a peer, not a member: what they say is owed to
-              // every Bot in the room, the one they were looking at included.
-              senderPeer: CHANNEL_USER_PEER_V1,
-            },
-            writer: { kind: "user" },
-          }),
-        ),
-      // Disconnect is the same `channel/disconnect` the `channel_manage` tool
-      // applies. The User is the writer, because the User asked.
-      disconnectChannel: async (userId, command) =>
-        decodeChannelCommandReceiptV1(
-          await userConfigurationStub(env, userId).executeChannelCommand({
-            schemaVersion: 1,
-            userId,
-            command: {
-              schemaVersion: 1,
-              type: "channel/disconnect",
-              commandId: command.commandId,
-              channelId: command.channelId,
-              botId: command.botId,
-            },
-            writer: { kind: "user" },
-          }),
         ),
       // The secret the gateway verifies a presented webhook key against. It
       // never leaves the Worker; a Bot only ever sees a digest.

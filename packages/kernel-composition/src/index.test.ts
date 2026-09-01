@@ -537,48 +537,6 @@ describe("decodeFrockBotManifest", () => {
     expect({ ...v4, schemaVersion: 3 }).toEqual(v3);
   });
 
-  test("v5 admits the `channel` Capability kind and v4 does not", () => {
-    const body = (schemaVersion: number) => ({
-      schemaVersion,
-      id: "channels",
-      displayName: "Channels",
-      version: "0.0.1",
-      compatibility: { frockbot: "*" },
-      dependencies: {},
-      contributions: { runtime: { entry: "./agent" } },
-      permissions: [],
-      configuration: {
-        settings: [],
-        connectionTypes: [],
-        capabilities: [
-          {
-            id: "channel-tools",
-            kind: "channel",
-            connectionTypes: [],
-            admission: { turnTypes: ["chat", "channel"] },
-          },
-        ],
-      },
-    });
-    expect(decodeFrockBotManifest(body(5))).toMatchObject({
-      schemaVersion: 5,
-      configuration: {
-        capabilities: [
-          {
-            id: "channel-tools",
-            kind: "channel",
-            admission: { turnTypes: ["chat", "channel"] },
-          },
-        ],
-      },
-    });
-    // The version a manifest states is the version it is read at: `channel` is
-    // a v5 kind, and a v4 body that claims it is refused rather than widened.
-    expect(() => decodeFrockBotManifest(body(4))).toThrow(
-      /capability kind is unsupported/,
-    );
-  });
-
   test("v4 still decodes exactly as it did", () => {
     expect(
       decodeFrockBotManifest({
@@ -598,7 +556,7 @@ describe("decodeFrockBotManifest", () => {
               id: "routine-tools",
               kind: "tool",
               connectionTypes: [],
-              admission: { turnTypes: ["chat", "channel"] },
+              admission: { turnTypes: ["chat", "subagent"] },
             },
           ],
         },
@@ -609,7 +567,7 @@ describe("decodeFrockBotManifest", () => {
   test("rejects an unsupported manifest version", () => {
     expect(() =>
       decodeFrockBotManifest({
-        schemaVersion: 6,
+        schemaVersion: 5,
         id: "future",
         displayName: "Future",
         version: "1.0.0",

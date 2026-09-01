@@ -49,7 +49,7 @@
         "kind": "tool",
         "connectionTypes": [],
         "admission": {
-          "turnTypes": ["chat", "automation", "subagent", "channel"]
+          "turnTypes": ["chat", "automation", "subagent"]
         }
       },
       {

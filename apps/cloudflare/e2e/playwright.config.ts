@@ -20,7 +20,7 @@ const cloudflareRoot = fileURLToPath(new URL("..", import.meta.url));
  * worker process, so a port reserved unconditionally would differ between the
  * server the harness starts and the address the specs navigate to. The first
  * load records its choice in the environment the workers inherit, which is the
- * same channel the harness reads.
+ * same environment the harness reads.
  */
 async function stablePort(name: string): Promise<number> {
   const existing = Number(process.env[name]);
