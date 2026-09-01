@@ -20,7 +20,8 @@ import {
   shardCount,
   type ComputerEffectJournalEnv,
 } from "./effect-journal.ts";
-import { COMPUTER_HOST_EGRESS_V1 } from "./egress.ts";
+import { COMPUTER_HOST_EGRESS_V1, SPRITES_API_HOST } from "./egress.ts";
+import { createOutboundWebSocketProxyV1 } from "./outbound.ts";
 import {
   computerHostShardCountV1,
   routeComputerHostRequestV1,
@@ -65,6 +66,17 @@ export class FlyHostContainer extends Container<ComputerHostEnv> {
   sleepAfter = "10m";
   enableInternet = COMPUTER_HOST_EGRESS_V1.enableInternet;
   allowedHosts = [...COMPUTER_HOST_EGRESS_V1.allowedHosts];
+  /**
+   * The interception proxy's own fallback is a plain `fetch`, which cannot
+   * complete a proxied WebSocket upgrade — and `exec` is a WebSocket, so
+   * without this every shell command fails at the handshake. Runs after the
+   * allowlist gate, so it widens nothing: it only carries the one host the
+   * allowlist already admits.
+   */
+  static outboundByHost = {
+    [SPRITES_API_HOST]: (request: Request) =>
+      createOutboundWebSocketProxyV1()(request),
+  };
   /**
    * Requires the container to trust the CA the platform mints for the
    * interception; `container/entrypoint.sh` does that at start, because the
