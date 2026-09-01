@@ -88,6 +88,8 @@ describe("settings client contribution", () => {
     for (const id of [
       "bot-settings",
       "plugins",
+      "models",
+      "connections",
       "package-catalog",
       "user-settings",
     ]) {
@@ -100,6 +102,8 @@ describe("settings client contribution", () => {
     for (const id of [
       "bot-settings",
       "plugins",
+      "models",
+      "connections",
       "package-catalog",
       "user-settings",
     ]) {

@@ -13,7 +13,6 @@
 import {
   test,
   expect,
-  closeOverlay,
   connectOllama,
   createBot,
   E2E_CONNECTION_LABEL,
@@ -39,16 +38,11 @@ test("a good key reaches ready and lists the endpoint's models", async ({
 
   const card = ollamaCard(page);
   await expect(card.getByText("ready · models fresh")).toBeVisible();
-  await expect(
-    card.getByRole("button", { name: /Ollama Cloud accounts, Connected/ }),
-  ).toBeVisible();
   await expect(card.getByText(E2E_CONNECTION_LABEL)).toBeVisible();
 
   // The catalog the Connection resolved is the one the configured endpoint
-  // serves, and it is what the model choosers offer.
-  await closeOverlay(page);
-  await page.getByRole("button", { name: "FrockBot user" }).click();
-  await page.getByRole("menuitem", { name: "Settings" }).click();
+  // serves, and it is what the model choosers offer — on the same surface the
+  // account was connected on, because Models owns both.
   const models = page.getByLabel(/^Default model/);
   await expect(models).toBeVisible();
   await expect(

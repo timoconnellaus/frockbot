@@ -8,7 +8,7 @@ The authoritative current system shape is in [`docs/architecture.md`](../archite
 
 ## Deferred work
 
-- Ollama Cloud model-provider Connections now use **Profile → Plugins** for account-scoped credentials and catalogs, Bot settings for exact Connection and model binding, and User defaults only for newly created Bots. Codex Connections remain outside this change.
+- Ollama Cloud model-provider Connections now use **Profile → Models** for account-scoped credentials, endpoints, catalogs, and the User's default model, and Bot settings for exact Connection and model binding. **Profile → Plugins** enables and disables Packages and configures none of them. Codex Connections remain outside this change.
 - Mobile exposes hosted API-key Connection workflows. OAuth-based Packages still require a native deep-link return adapter before their authorization controls can be enabled.
 - External Package discovery, signed distribution, sandboxed third-party settings views, and production secret-vault/KMS support for future write-only credentials remain separate vertical slices.
 

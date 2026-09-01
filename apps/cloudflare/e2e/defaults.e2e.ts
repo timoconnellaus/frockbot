@@ -33,7 +33,9 @@ test("a fresh User and Bot start with first-party capabilities", async ({
     const card = page.locator("article.plugin-card", {
       has: page.getByText(displayName, { exact: true }),
     });
-    await expect(card).toContainText("Added");
+    // Plugins says whether a Package is on and nothing else: no Connect
+    // control appears here even for a Package that has accounts elsewhere.
+    await expect(card).toContainText("Enabled");
     await expect(
       card.getByRole("button", { name: "Connect", exact: true }),
     ).toHaveCount(0);
