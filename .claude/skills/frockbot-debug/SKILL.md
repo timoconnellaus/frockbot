@@ -23,9 +23,14 @@ effect, or writes storage. Looking at a stuck Bot must not be what unsticks it.
 
 Defaults to production (`https://bot.frockbot.com`). Override with
 `FROCKBOT_DEBUG_URL=http://127.0.0.1:8787` for a local `bun run dev:cloudflare`.
-The token is read from `apps/cloudflare/.dev.vars` (`DEBUG_TOKEN=`) unless
-`FROCKBOT_DEBUG_TOKEN` is set — the local and deployed tokens are the same value
-today, so the same command works against both.
+The token is read from `DEBUG_TOKEN=` in `.dev.vars` at the **repository root**,
+falling back to `apps/cloudflare/.dev.vars`, unless `FROCKBOT_DEBUG_TOKEN` is
+set. The root file is the one to edit: this token is operator tooling rather
+than one Worker's configuration, so it belongs where any command in the
+monorepo finds it. Keep a copy in `apps/cloudflare/.dev.vars` only if you serve
+the endpoint locally — that is the only copy wrangler loads. The local and
+deployed tokens are the same value today, so the same command works against
+both.
 
 Raw, if you prefer curl:
 
@@ -104,5 +109,6 @@ Use them together: `wrangler tail` catches what never got written down;
 cd apps/cloudflare && bunx wrangler secret put DEBUG_TOKEN --env=""
 ```
 
-Then update `DEBUG_TOKEN` in `apps/cloudflare/.dev.vars`. Removing the secret
+Then update `DEBUG_TOKEN` in `.dev.vars` at the repository root (and in
+`apps/cloudflare/.dev.vars` if you serve the endpoint locally). Removing the secret
 disables the surface entirely — the routes 404, and do not admit they exist.
