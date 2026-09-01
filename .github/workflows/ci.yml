@@ -63,6 +63,13 @@ jobs:
       - name: Test Computer host
         run: bun run --filter @frockbot/computer-host test
 
+      # The outbound WebSocket bridge in workerd, against a Worker
+      # impersonating the Sprites API at the outbound seam. No Docker, no
+      # Sprites cloud: the handshake, the socket pair and the pumping are the
+      # runtime's own, which is the part the injected fakes cannot model.
+      - name: Test Computer host runtime
+        run: bun run --filter @frockbot/computer-host test:workerd
+
       - name: Build
         run: bun run build
 

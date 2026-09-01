@@ -94,6 +94,15 @@ export function createOutboundWebSocketProxyV1(
     if (!origin) return response;
 
     const { client, server } = deps.webSocketPair();
+    // `exec` multiplexes stdin and stdout as binary frames — a StreamID byte
+    // then payload — and a binary frame arrives as a `Blob` unless this asks
+    // otherwise. A `Blob` handed to `send` stringifies: every frame became the
+    // literal text `[object Blob]`, so Sprites never received a readable
+    // stdin, never ran the command, and never sent anything back. The SDK
+    // reports that silence as `WebSocket keepalive timeout`, which it raises
+    // after 45s without a message rather than on any protocol error.
+    origin.binaryType = "arraybuffer";
+    server.binaryType = "arraybuffer";
     origin.accept();
     server.accept();
 
