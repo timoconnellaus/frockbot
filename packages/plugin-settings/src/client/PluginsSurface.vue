@@ -1456,7 +1456,7 @@ async function disconnect(connectionId: string): Promise<void> {
   align-items: center;
   gap: 9px;
   padding: 0 13px;
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: 999px;
   color: var(--frock-text-subtle);
   background: var(--frock-surface-raised);
@@ -1727,7 +1727,7 @@ async function disconnect(connectionId: string): Promise<void> {
 .inline-form input {
   min-width: 0;
   padding: 8px 11px;
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: 9px;
   background: var(--frock-surface-raised);
   color: var(--frock-text);
@@ -1787,7 +1787,7 @@ async function disconnect(connectionId: string): Promise<void> {
 .api-key-form textarea {
   min-width: 0;
   padding: 8px 11px;
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: 9px;
   background: var(--frock-surface-raised);
   color: var(--frock-text);

@@ -76,6 +76,15 @@
     --paper: #fff;
     --muted: #6d6974;
     --line: #e7e0d9;
+    --product-window: #1f1e24;
+    --product-thread: #211f26;
+    --product-sidebar: #1a191e;
+    --product-raised: #2c2a33;
+    --product-text: #f4f2f6;
+    --product-muted: #aaa6b1;
+    --product-subtle: #8d8896;
+    --product-border: #3a3742;
+    --product-border-strong: #6c6874;
     --container: 1280px;
   }
 
@@ -599,9 +608,10 @@
   .workspace {
     min-height: 430px;
     padding: 18px;
+    border: 1px solid var(--product-border-strong);
     border-radius: 26px;
-    background: #f8f4ef;
-    color: var(--ink);
+    background: var(--product-window);
+    color: var(--product-text);
     box-shadow: 0 35px 70px rgb(0 0 0 / 35%);
     transform: rotate(1deg);
   }
@@ -616,37 +626,38 @@
     height: 7px;
     margin-right: 5px;
     border-radius: 50%;
-    background: #d8d2cc;
+    background: var(--product-border-strong);
   }
   .workspace-bar strong {
     margin: auto;
   }
   .workspace-bar span {
-    color: var(--muted);
+    color: var(--product-subtle);
   }
   .workspace-body {
     min-height: 365px;
     display: grid;
-    grid-template-columns: 150px 1fr;
+    grid-template-columns: 130px minmax(0, 1fr) 132px;
     gap: 10px;
   }
   .workspace aside {
     padding: 16px 12px;
+    border: 1px solid var(--product-border);
     border-radius: 14px;
-    background: #eee8e2;
+    background: var(--product-sidebar);
     font-size: 0.73rem;
   }
   .bot-row {
     margin-top: 8px;
     padding: 9px 10px;
     border-radius: 8px;
-    color: var(--muted);
+    color: var(--product-muted);
   }
   .bot-row.active {
     display: flex;
     align-items: center;
-    background: #fff;
-    color: var(--ink);
+    background: var(--product-raised);
+    color: var(--product-text);
     font-weight: 700;
   }
   .bot-row img {
@@ -656,45 +667,141 @@
     border-radius: 7px;
     object-fit: cover;
   }
-  .activity-feed {
-    padding: 20px;
-    border-radius: 14px;
-    background: #fff;
-  }
-  .activity-feed h3 {
-    font-size: 1.2rem;
-  }
-  .activity-feed > small,
-  .activity-feed li small {
-    display: block;
-    color: var(--muted);
-    font-size: 0.63rem;
-  }
-  .activity-feed ol {
-    margin: 20px 0 4px;
-    padding: 0 0 0 17px;
-    border-left: 2px solid var(--blush);
-    list-style: none;
-  }
-  .activity-feed li {
+  .workspace-thread {
+    min-width: 0;
     display: flex;
-    gap: 11px;
-    padding-bottom: 14px;
+    flex-direction: column;
+    padding: 14px;
+    border: 1px solid var(--product-border);
+    border-radius: 14px;
+    background: var(--product-thread);
   }
-  .activity-feed li i {
-    width: 23px;
-    height: 23px;
+  .workspace-thread-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--product-border);
+  }
+  .workspace-thread-head img {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    object-fit: cover;
+  }
+  .workspace-thread-head span,
+  .workspace-thread-head strong,
+  .workspace-thread-head small {
+    display: block;
+  }
+  .workspace-thread-head strong {
+    color: var(--product-text);
+    font-size: 0.72rem;
+  }
+  .workspace-thread-head small {
+    color: var(--product-muted);
+    font-size: 0.58rem;
+  }
+  .workspace-messages {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 9px;
+    padding: 18px 0 12px;
+  }
+  .workspace-bubble {
+    max-width: 86%;
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--product-border);
+    border-radius: 12px 12px 12px 4px;
+    background: var(--product-raised);
+    color: var(--product-text);
+    font-size: 0.62rem;
+    line-height: 1.45;
+  }
+  .workspace-bubble-user {
+    align-self: flex-end;
+    border-color: var(--pink);
+    border-radius: 12px 12px 4px;
+    background: var(--pink);
+    color: #fff;
+  }
+  .workspace-composer {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    padding-left: 12px;
+    border: 1px solid var(--product-border-strong);
+    border-radius: 999px;
+    background: var(--product-raised);
+    color: var(--product-subtle);
+    font-size: 0.62rem;
+  }
+  .workspace-composer i {
+    width: 28px;
+    height: 28px;
     display: grid;
-    flex: none;
     place-items: center;
+    margin: 0 4px 0 auto;
     border-radius: 50%;
-    background: var(--blush);
-    color: var(--pink);
-    font-size: 0.67rem;
+    background: var(--pink);
+    color: #fff;
+    font-size: 0.8rem;
     font-style: normal;
   }
-  .activity-feed li strong {
-    font-size: 0.72rem;
+  .workspace-panel {
+    padding: 10px;
+    border: 1px solid var(--product-border);
+    border-radius: 14px;
+    background: var(--product-sidebar);
+  }
+  .workspace-screen {
+    aspect-ratio: 16 / 10;
+    display: flex;
+    align-items: flex-end;
+    padding: 7px;
+    border: 1px solid var(--product-border);
+    border-radius: 8px;
+    background:
+      radial-gradient(circle at 68% 34%, var(--pink), transparent 12%),
+      linear-gradient(145deg, var(--product-raised), var(--product-window));
+  }
+  .workspace-screen span {
+    color: var(--product-muted);
+    font-size: 0.55rem;
+  }
+  .workspace-panel-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 17px;
+    color: var(--product-text);
+    font-size: 0.67rem;
+  }
+  .workspace-panel-title b {
+    color: var(--pink);
+    font-size: 0.85rem;
+  }
+  .workspace-routine {
+    margin-top: 8px;
+    padding: 8px;
+    border: 1px solid var(--product-border);
+    border-radius: 8px;
+    background: var(--product-raised);
+  }
+  .workspace-routine strong,
+  .workspace-routine small {
+    display: block;
+  }
+  .workspace-routine strong {
+    color: var(--product-text);
+    font-size: 0.62rem;
+  }
+  .workspace-routine small {
+    margin-top: 3px;
+    color: var(--product-muted);
+    font-size: 0.54rem;
   }
 
   .split-heading-bottom {
@@ -1047,7 +1154,8 @@
       gap: 42px;
     }
     .workspace-body {
-      grid-template-columns: 125px 1fr;
+      grid-template-columns: 108px minmax(0, 1fr) 104px;
+      gap: 7px;
     }
   }
 
@@ -1222,7 +1330,10 @@
     .workspace aside {
       display: none;
     }
-    .activity-feed {
+    .workspace-panel {
+      display: none;
+    }
+    .workspace-thread {
       padding: 16px;
     }
     .split-heading h2,

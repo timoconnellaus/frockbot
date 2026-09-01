@@ -466,7 +466,7 @@
 }
 
 .computer-screenshots {
-  border-top: 1px solid var(--frockbot-border, rgba(0, 0, 0, 0.12));
+  border-top: 1px solid var(--frock-border);
   padding: var(--frockbot-space-2, 0.5rem);
 }
 
@@ -502,7 +502,7 @@
 }
 
 .computer-doctor {
-  border-top: 1px solid var(--frockbot-border, rgba(0, 0, 0, 0.12));
+  border-top: 1px solid var(--frock-border);
   padding: var(--frockbot-space-2, 0.5rem);
 }
 
@@ -549,9 +549,9 @@
 }
 
 .computer-doctor .doctor-pass .doctor-mark {
-  color: var(--frockbot-success, #2e7d32);
+  color: var(--frock-success);
 }
 
 .computer-doctor .doctor-fail .doctor-mark {
-  color: var(--frockbot-danger, #c62828);
+  color: var(--frock-danger-text);
 }

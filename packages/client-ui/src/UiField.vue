@@ -33,7 +33,7 @@ defineProps<{
 .ui-field :deep(textarea),
 .ui-field :deep(select) {
   width: 100%;
-  border: 1px solid var(--frock-border);
+  border: 1px solid var(--frock-border-strong);
   border-radius: var(--frock-radius-control);
   outline: none;
   padding: 10px 12px;
