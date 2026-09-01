@@ -8,12 +8,24 @@ import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import type { BotStateEnv } from "./bot-state.js";
 
+// `mock.module` is process-global and the first registration in a suite run
+// fixes the module's shape, so this stub has to satisfy every consumer the run
+// loads — not only this file's. `@cloudflare/containers` imports both names.
 mock.module("cloudflare:workers", () => ({
   DurableObject: class<Env> {
     readonly ctx: DurableObjectState;
     readonly env: Env;
 
     constructor(ctx: DurableObjectState, env: Env) {
+      this.ctx = ctx;
+      this.env = env;
+    }
+  },
+  WorkerEntrypoint: class<Env> {
+    readonly ctx: unknown;
+    readonly env: Env;
+
+    constructor(ctx: unknown, env: Env) {
       this.ctx = ctx;
       this.env = env;
     }
