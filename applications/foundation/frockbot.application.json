@@ -12,6 +12,11 @@
       "grants": ["identity:authenticate"]
     },
     {
+      "specifier": "@frockbot/plugin-admin",
+      "version": "0.0.1",
+      "grants": []
+    },
+    {
       "specifier": "@frockbot/plugin-identity",
       "version": "0.0.1",
       "grants": []

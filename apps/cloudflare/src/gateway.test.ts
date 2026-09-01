@@ -18,6 +18,7 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
+import type { DeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
 import { createFlockBackendContribution } from "@frockbot/plugin-flock/backend";
 import {
   bootstrapCompositionGeneration,
@@ -970,6 +971,14 @@ const unauthenticatedAuth: GatewayAuth = {
   getSession: () => Promise.resolve(null),
 };
 
+const closedDeploymentPolicy: DeploymentPolicyV1 = {
+  schemaVersion: 1,
+  revision: 0,
+  signups: { open: false },
+  updatedAt: "2026-09-01T00:00:00.000Z",
+  updatedBy: "deployment-default",
+};
+
 function createTestGateway(
   applicationHashFor: (userId: string) => Promise<string> = () =>
     Promise.resolve("foundation-v1"),
@@ -977,6 +986,11 @@ function createTestGateway(
   allowDevelopmentIdentity = true,
   allowedClientOrigins?: string[],
   catalog?: CatalogGatewayStore,
+  signup?: {
+    userExists?: (userId: string) => Promise<boolean>;
+    policy?: DeploymentPolicyV1;
+    adminEmails?: string;
+  },
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
@@ -993,6 +1007,10 @@ function createTestGateway(
     loader,
     artifacts: { load: () => Promise.resolve("export default {}") },
     auth,
+    userExists: signup?.userExists ?? (() => Promise.resolve(true)),
+    readDeploymentPolicy: () =>
+      Promise.resolve(signup?.policy ?? closedDeploymentPolicy),
+    ...(signup?.adminEmails ? { adminEmails: signup.adminEmails } : {}),
     applicationHashFor,
     botStateFor: (userId) => {
       const state = states.get(userId) ?? new MemoryBotState();
@@ -2091,8 +2109,170 @@ describe("Cloudflare user application gateway", () => {
     expect(identity).toEqual({
       schemaVersion: 1,
       userId: "signed-in-user",
+      isAdmin: false,
     });
     expect(loader.ids).toEqual([]);
+  });
+
+  test("refuses a first-time signed-in User while signups are closed", async () => {
+    const auth: GatewayAuth = {
+      handler: unauthenticatedAuth.handler,
+      getSession: () =>
+        Promise.resolve({
+          user: { id: "new-user", email: "new@example.com" },
+        }),
+    };
+    let applicationHashReads = 0;
+    const { gateway, loader } = createTestGateway(
+      () => {
+        applicationHashReads += 1;
+        return Promise.resolve("foundation-v1");
+      },
+      auth,
+      false,
+      undefined,
+      undefined,
+      { userExists: () => Promise.resolve(false) },
+    );
+
+    const response = await gateway(new Request("https://frockbot.test/"));
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toContain(
+      "FrockBot isn't taking new signups right now.",
+    );
+    expect(applicationHashReads).toBe(0);
+    expect(loader.ids).toEqual([]);
+  });
+
+  test("admits a first-time signed-in User while signups are open", async () => {
+    const auth: GatewayAuth = {
+      handler: unauthenticatedAuth.handler,
+      getSession: () =>
+        Promise.resolve({
+          user: { id: "new-user", email: "new@example.com" },
+        }),
+    };
+    const { gateway, loader } = createTestGateway(
+      undefined,
+      auth,
+      false,
+      undefined,
+      undefined,
+      {
+        userExists: () => Promise.resolve(false),
+        policy: {
+          ...closedDeploymentPolicy,
+          revision: 1,
+          signups: { open: true },
+        },
+      },
+    );
+
+    const response = await gateway(new Request("https://frockbot.test/"));
+
+    expect(response.status).toBe(200);
+    expect(loader.ids).toEqual(["new-user:foundation-v1"]);
+  });
+
+  test("admits existing Users and configured admins while signups are closed", async () => {
+    const users = [
+      { id: "existing-user", email: "member@example.com", exists: true },
+      { id: "owner-user", email: "OWNER@example.com", exists: false },
+    ];
+    for (const user of users) {
+      const auth: GatewayAuth = {
+        handler: unauthenticatedAuth.handler,
+        getSession: () => Promise.resolve({ user }),
+      };
+      let existenceChecks = 0;
+      const { gateway, loader } = createTestGateway(
+        undefined,
+        auth,
+        false,
+        undefined,
+        undefined,
+        {
+          userExists: () => {
+            existenceChecks += 1;
+            return Promise.resolve(user.exists);
+          },
+          adminEmails: "owner@example.com",
+        },
+      );
+
+      const response = await gateway(new Request("https://frockbot.test/"));
+
+      expect(response.status).toBe(200);
+      expect(loader.ids).toEqual([`${user.id}:foundation-v1`]);
+      expect(existenceChecks).toBe(user.exists ? 1 : 0);
+    }
+  });
+
+  test("admits development identities regardless of signup policy", async () => {
+    let existenceChecks = 0;
+    const { gateway, loader } = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      true,
+      undefined,
+      undefined,
+      {
+        userExists: () => {
+          existenceChecks += 1;
+          return Promise.resolve(false);
+        },
+        adminEmails: "owner@example.com",
+      },
+    );
+
+    const response = await gateway(
+      new Request("https://frockbot.test/?as_user=developer"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(loader.ids).toEqual(["developer:foundation-v1"]);
+    expect(existenceChecks).toBe(0);
+  });
+
+  test("turns the closed-signup page link into a Better Auth sign-out", async () => {
+    const requests: Array<{ method: string; pathname: string }> = [];
+    const auth: GatewayAuth = {
+      handler: (request) => {
+        const url = new URL(request.url);
+        requests.push({ method: request.method, pathname: url.pathname });
+        return Promise.resolve(
+          Response.json(
+            { success: true },
+            { headers: { "set-cookie": "session=; Max-Age=0" } },
+          ),
+        );
+      },
+      getSession: () =>
+        Promise.resolve({
+          user: { id: "new-user", email: "new@example.com" },
+        }),
+    };
+    const { gateway } = createTestGateway(
+      undefined,
+      auth,
+      false,
+      undefined,
+      undefined,
+      { userExists: () => Promise.resolve(false) },
+    );
+
+    const response = await gateway(
+      new Request("https://frockbot.test/sign-out"),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(requests).toEqual([
+      { method: "POST", pathname: "/api/auth/sign-out" },
+    ]);
   });
 });
 

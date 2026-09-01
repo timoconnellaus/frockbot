@@ -49,8 +49,9 @@ function decodeAuthenticatedIdentity(value: unknown): string {
   const identity = value as Record<string, unknown>;
   if (
     identity.schemaVersion !== 1 ||
-    Object.keys(identity).length !== 2 ||
-    !("userId" in identity)
+    Object.keys(identity).length !== 3 ||
+    !("userId" in identity) ||
+    typeof identity.isAdmin !== "boolean"
   ) {
     throw new Error("Authenticated User identity is unavailable");
   }

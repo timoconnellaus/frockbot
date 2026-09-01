@@ -54,13 +54,16 @@ describe("user application security headers", () => {
     const fetchUserApplication = createUserApplication();
     const response = await fetchUserApplication(
       new Request("https://app.example/", {
-        headers: { "x-frockbot-auth-session-v1": "development" },
+        headers: {
+          "x-frockbot-auth-session-v1": "development",
+          "x-frockbot-is-admin-v1": "true",
+        },
       }),
       securityEnv,
     );
-    expect(await response.text()).toContain(
-      'data-frockbot-auth-mode="development"',
-    );
+    const html = await response.text();
+    expect(html).toContain('data-frockbot-auth-mode="development"');
+    expect(html).toContain('data-frockbot-is-admin="true"');
 
     for (const mode of [undefined, "desktop", "development,better-auth"]) {
       const headers = mode ? { "x-frockbot-auth-session-v1": mode } : undefined;

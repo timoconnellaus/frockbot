@@ -7,6 +7,7 @@ import type {
   WorkerdBotState,
 } from "./fly-compatibility-worker.ts";
 import type { UserConfiguration } from "../src/user-configuration.ts";
+import type { DeploymentPolicy } from "../src/deployment-policy.ts";
 
 interface FlyTestEnv {
   AUTHORING: DurableObjectNamespace<AuthoringProbe>;
@@ -26,6 +27,7 @@ interface FlyTestEnv {
   ROUTINE_HOOK_SECRET: string;
   MACHINE_TOKEN_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
+  DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
 }
 
 declare global {

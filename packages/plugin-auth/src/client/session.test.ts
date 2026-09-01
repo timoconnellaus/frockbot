@@ -6,7 +6,12 @@ const authenticated = {
   schemaVersion: 1,
   status: "authenticated",
   mode: "better-auth",
-  user: { id: "alice", name: "Alice", email: "alice@example.com" },
+  user: {
+    id: "alice",
+    name: "Alice",
+    email: "alice@example.com",
+    isAdmin: false,
+  },
 } as const;
 
 describe("auth session projection", () => {

@@ -31,6 +31,7 @@
     "@frockbot/machine-protocol": "workspace:*",
     "@frockbot/mobile": "workspace:*",
     "@frockbot/plugin-audit": "workspace:*",
+    "@frockbot/plugin-admin": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-bot-template": "workspace:*",
     "@frockbot/plugin-credentials": "workspace:*",

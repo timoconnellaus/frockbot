@@ -25,6 +25,7 @@
         "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-composition": "workspace:*",
         "@frockbot/plugin-audit": "workspace:*",
+        "@frockbot/plugin-admin": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
@@ -106,6 +107,7 @@
         "@frockbot/machine-protocol": "workspace:*",
         "@frockbot/mobile": "workspace:*",
         "@frockbot/plugin-audit": "workspace:*",
+        "@frockbot/plugin-admin": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
@@ -482,6 +484,22 @@
         "@vitejs/plugin-vue": "6.0.8",
         "typescript": "5.9.3",
         "vite": "8.2.2",
+        "vue-tsc": "3.3.10",
+      },
+    },
+    "packages/plugin-admin": {
+      "name": "@frockbot/plugin-admin",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/client-core": "workspace:*",
+        "@frockbot/client-ui": "workspace:*",
+        "@frockbot/plugin-shell": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+        "vue": "3.5.41",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "5.9.3",
         "vue-tsc": "3.3.10",
       },
     },
@@ -1423,6 +1441,8 @@
     "@frockbot/mobile-core": ["@frockbot/mobile-core@workspace:packages/mobile-core"],
 
     "@frockbot/plugin-audit": ["@frockbot/plugin-audit@workspace:packages/plugin-audit"],
+
+    "@frockbot/plugin-admin": ["@frockbot/plugin-admin@workspace:packages/plugin-admin"],
 
     "@frockbot/plugin-auth": ["@frockbot/plugin-auth@workspace:packages/plugin-auth"],
 
@@ -3087,6 +3107,8 @@
     "@frockbot/mobile/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-audit/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "@frockbot/plugin-admin/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@frockbot/plugin-auth/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

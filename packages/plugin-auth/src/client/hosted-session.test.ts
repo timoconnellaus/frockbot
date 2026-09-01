@@ -10,6 +10,7 @@ function browser(
     location: new URL("https://frockbot.test/"),
     embeddedUserId: "alice",
     embeddedMode: "better-auth",
+    embeddedIsAdmin: true,
     betterAuth: {
       getSession: () => Promise.resolve({ data: { user }, error: null }),
       signOut: () => Promise.resolve({ data: { success: true }, error: null }),
@@ -35,7 +36,7 @@ describe("hosted auth adapter", () => {
       schemaVersion: 1,
       status: "authenticated",
       mode: "better-auth",
-      user,
+      user: { ...user, isAdmin: true },
     });
     expect(await adapter.signOut()).toEqual({
       schemaVersion: 1,
@@ -59,7 +60,7 @@ describe("hosted auth adapter", () => {
     expect(await adapter.read()).toMatchObject({
       status: "authenticated",
       mode: "desktop",
-      user,
+      user: { ...user, isAdmin: true },
     });
     expect(await adapter.signOut()).toEqual({
       schemaVersion: 1,
@@ -150,6 +151,7 @@ describe("hosted auth adapter", () => {
         id: "development",
         name: "Local developer",
         email: "dev@localhost",
+        isAdmin: true,
       },
     });
     expect(desktopReads).toBe(0);
@@ -173,5 +175,11 @@ describe("hosted auth adapter", () => {
       },
     });
     await expect(adapter.signOut()).rejects.toThrow("server unavailable");
+  });
+
+  test("projects only the gateway-owned admin boolean", async () => {
+    expect(await browser({ embeddedIsAdmin: false }).read()).toMatchObject({
+      user: { id: "alice", isAdmin: false },
+    });
   });
 });

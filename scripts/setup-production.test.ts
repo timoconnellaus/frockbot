@@ -337,6 +337,13 @@ exit 0
       "${{ secrets.MACHINE_TOKEN_SECRET }}",
     );
     expect(deploy?.run).toContain("'MACHINE_TOKEN_SECRET'");
+    expect(validation?.env?.FROCKBOT_ADMIN_EMAILS).toBe(
+      "${{ secrets.FROCKBOT_ADMIN_EMAILS }}",
+    );
+    expect(deploy?.env?.FROCKBOT_ADMIN_EMAILS).toBe(
+      "${{ secrets.FROCKBOT_ADMIN_EMAILS }}",
+    );
+    expect(deploy?.run).toContain("'FROCKBOT_ADMIN_EMAILS'");
 
     const productionEnvironment = {
       ...process.env,
@@ -348,6 +355,7 @@ exit 0
         "a87ad4f95378b32a7954573d8f0933e07bc99a6d3c58ae2b61d85fd43ac424eb",
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
+      FROCKBOT_ADMIN_EMAILS: "owner@example.com",
       SPRITES_TOKEN: "sprites-production",
       COMPUTER_HOST_TOKEN: "computer-host-production",
       CREDENTIAL_KEYRING:
@@ -488,6 +496,7 @@ exit 1
     expect(forwarded.CREDENTIAL_KEYRING).toBe(
       productionEnvironment.CREDENTIAL_KEYRING,
     );
+    expect(forwarded.FROCKBOT_ADMIN_EMAILS).toBe("owner@example.com");
     expect(forwarded).not.toHaveProperty("COMPOSIO_API_KEY");
     expect(forwarded).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
     expect(forwarded).not.toHaveProperty("FROCKBOT_AUTHORIZATION_STATE_SECRET");

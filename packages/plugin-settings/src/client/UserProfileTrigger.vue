@@ -17,6 +17,11 @@ const developmentIdentity = computed(
     auth.projection.value.status === "authenticated" &&
     auth.projection.value.mode === "development",
 );
+const isAdmin = computed(
+  () =>
+    auth.projection.value.status === "authenticated" &&
+    auth.projection.value.user.isAdmin,
+);
 
 function closeMenu(): void {
   menuOpen.value = false;
@@ -25,6 +30,11 @@ function closeMenu(): void {
 function openSettings(): void {
   closeMenu();
   surfaces?.open("user-settings");
+}
+
+function openAdmin(): void {
+  closeMenu();
+  surfaces?.open("admin");
 }
 
 async function signOut(): Promise<void> {
@@ -55,6 +65,9 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
       {{ web.userSettings?.profile.name ?? "FrockBot user" }}
     </button>
     <div v-if="menuOpen" class="profile-menu" role="menu">
+      <button v-if="isAdmin" type="button" role="menuitem" @click="openAdmin">
+        Admin
+      </button>
       <button type="button" role="menuitem" @click="openSettings">
         Settings
       </button>
