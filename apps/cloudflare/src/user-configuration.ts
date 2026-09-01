@@ -105,6 +105,21 @@ import {
   decodeChannelWriterV1,
   type ChannelWriterV1,
 } from "@frockbot/plugin-channels/records";
+import {
+  ChannelConnectorService,
+  type ChannelConnectResultV1,
+  type ChannelDeliveryOutcomeV1,
+} from "@frockbot/plugin-channels/connect";
+import type {
+  ChannelConnectorV1,
+  ChannelOutboundReceiptV1,
+} from "@frockbot/plugin-channels/connector";
+import { channelTokenSecretV1 } from "@frockbot/plugin-channels/token";
+import {
+  createTelegramConnectorV1,
+  TELEGRAM_PACKAGE_ID_V1,
+  TELEGRAM_PLATFORM_V1,
+} from "@frockbot/plugin-telegram/connector";
 import type {
   McpAuthorizationCompletionRequestV1,
   McpAuthorizationStartRequestV1,
@@ -2087,6 +2102,188 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    */
   private readonly channels = new ChannelStore(this.ctx.storage);
 
+  /**
+   * The connectors this deployment carries, by platform.
+   *
+   * One entry today. The map is the seam: adding a platform is adding a
+   * `ChannelConnector`, a Connection Type and a row here, and nothing else in
+   * this object changes.
+   */
+  private readonly channelConnectorRegistry: ReadonlyMap<
+    string,
+    ChannelConnectorV1
+  > = new Map([[TELEGRAM_PLATFORM_V1, createTelegramConnectorV1()]]);
+
+  /**
+   * The external Channel lifecycle, bound to one proven User.
+   *
+   * Constructed per call rather than held, because every seam it needs is
+   * scoped to the User whose identity the caller has just proved: a service
+   * that outlived one proof could open another User's credential.
+   */
+  private async channelConnectors(
+    userId: string,
+  ): Promise<ChannelConnectorService> {
+    const contributions = await this.contributions();
+    const keyring = this.env.CREDENTIAL_KEYRING;
+    return new ChannelConnectorService({
+      store: this.channels,
+      connectors: this.channelConnectorRegistry,
+      execute: (command, writer) =>
+        this.applyChannelCommand(userId, command, writer),
+      openConnectionKey: (input) =>
+        contributions.telegram.openConnectionKey({
+          accountId: userId,
+          connectionId: input.connectionId,
+          effectId: input.effectId,
+        }),
+      resolvePlatform: async (connectionId) => {
+        const connection = await contributions.settings.getConnection(
+          userId,
+          connectionId,
+        );
+        return connection?.packageId === TELEGRAM_PACKAGE_ID_V1
+          ? TELEGRAM_PLATFORM_V1
+          : undefined;
+      },
+      tokenSecret: async () => {
+        if (!keyring) {
+          throw new Error("Channel tokens are not configured");
+        }
+        return channelTokenSecretV1(keyring);
+      },
+    });
+  }
+
+  /** Connect one Bot to one external platform. */
+  async connectChannel(input: unknown): Promise<ChannelConnectResultV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      platform: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      commandId: rpcIdentifier,
+      name: rpcString(100),
+      origin: rpcString(2_048),
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    const service = await this.channelConnectors(userId);
+    return service.connect({
+      userId,
+      botId: request.botId as string,
+      platform: request.platform as string,
+      connectionId: request.connectionId as string,
+      commandId: request.commandId as string,
+      name: request.name as string,
+      origin: request.origin as string,
+    });
+  }
+
+  /**
+   * One webhook delivery, after the gateway proved the token was minted here.
+   *
+   * This object proves the rest: that the Channel still holds the key, that it
+   * is still active, and that the delivery decodes. The gateway's verification
+   * is not trusted as an answer to any of those.
+   */
+  async deliverChannelWebhook(
+    input: unknown,
+  ): Promise<ChannelDeliveryOutcomeV1> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        platform: rpcIdentifier,
+        token: rpcString(2_048),
+      },
+      {
+        // The echoed header may be absent, and the body is whatever the platform
+        // sent — neither is an identifier, and the connector is the only thing
+        // entitled to an opinion about the body's shape.
+        presentedSecret: (value, label) => {
+          if (value !== null && typeof value !== "string") {
+            throw new Error(`${label} must be a string or null`);
+          }
+          return value;
+        },
+        body: (value) => value,
+      },
+    );
+    const payload = request as { presentedSecret?: unknown; body?: unknown };
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    const service = await this.channelConnectors(userId);
+    try {
+      return await service.deliver({
+        platform: request.platform as string,
+        token: request.token as string,
+        presentedSecret:
+          typeof payload.presentedSecret === "string"
+            ? payload.presentedSecret
+            : null,
+        body: payload.body,
+      });
+    } catch (error) {
+      // A refusal is an answer, not a thrown RPC: the gateway turns it into the
+      // one 404 every refusal on this door shares.
+      return {
+        status: "refused",
+        reason: error instanceof Error ? error.message : "refused",
+      };
+    }
+  }
+
+  /**
+   * What one `channel` Turn said, carried to the platform it was said in.
+   *
+   * The Bot Durable Object observed its own `send/to-user` events and handed
+   * them here; this object holds the Connection, so this object is where the
+   * key is opened and the request made. No secret crosses back.
+   */
+  async deliverChannelOutbound(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; receipts: ChannelOutboundReceiptV1[] }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      channelId: rpcIdentifier,
+      inReplyTo: rpcIdentifier,
+      hop: rpcInteger({ minimum: 1, maximum: 64 }),
+      texts: (value, label) => {
+        if (
+          !Array.isArray(value) ||
+          value.some((entry) => typeof entry !== "string")
+        ) {
+          throw new Error(`${label} must be an array of strings`);
+        }
+        return value;
+      },
+    });
+    const payload = request as { texts?: unknown; hop?: unknown };
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    const texts = Array.isArray(payload.texts)
+      ? payload.texts.filter((text): text is string => typeof text === "string")
+      : [];
+    const hop = Number.isSafeInteger(payload.hop) ? (payload.hop as number) : 1;
+    const service = await this.channelConnectors(userId);
+    const receipts: ChannelOutboundReceiptV1[] = [];
+    for (const [index, text] of texts.entries()) {
+      receipts.push(
+        await service.reply({
+          channelId: request.channelId as string,
+          botId: request.botId as string,
+          text,
+          inReplyTo: request.inReplyTo as string,
+          ordinal: index,
+          hop,
+        }),
+      );
+    }
+    return { schemaVersion: 1, receipts };
+  }
+
   /** Every Channel one of this User's Bots is a member of. */
   async listChannels(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
@@ -2126,10 +2323,45 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     const userId = request.userId as string;
     await this.assertFlockIdentity(userId);
     const command = request.command as ChannelCommandV1;
-    const receipt = await this.channels.execute(
-      command,
-      request.writer as ChannelWriterV1,
-    );
+    const writer = request.writer as ChannelWriterV1;
+    // Disconnecting an *external* Channel is more than a record write: the
+    // platform has to be told to stop and the webhook key has to be revoked, or
+    // the door stays open on a Channel that no longer answers. Every other
+    // command is the record and nothing else.
+    if (command.type === "channel/disconnect") {
+      const channel = await this.channels.read(command.channelId);
+      if (channel?.kind === "external") {
+        const service = await this.channelConnectors(userId);
+        const outcome = await service.disconnect({
+          channelId: command.channelId,
+          botId: command.botId,
+          commandId: command.commandId,
+        });
+        return {
+          schemaVersion: 1 as const,
+          commandId: command.commandId,
+          status: "applied" as const,
+          channel: outcome.channel,
+        };
+      }
+    }
+    return this.applyChannelCommand(userId, command, writer);
+  }
+
+  /**
+   * One Channel command against the durable record, then its fan-out.
+   *
+   * The seam the connector service is handed, and the body of the RPC above:
+   * both reach the record through this and through nothing else, so a message
+   * a platform delivered and a message a Bot posted produce the same record
+   * with different recorded provenance.
+   */
+  private async applyChannelCommand(
+    userId: string,
+    command: ChannelCommandV1,
+    writer: ChannelWriterV1,
+  ): Promise<ChannelCommandReceiptV1> {
+    const receipt = await this.channels.execute(command, writer);
     if (receipt.status === "posted") {
       await this.fanOutChannelMessage(userId, receipt);
     }
@@ -2163,6 +2395,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         hop: receipt.message.hop,
         at: receipt.message.at,
         history,
+        ...(receipt.channel.kind === "external" ? { external: true } : {}),
         ...(receipt.message.senderBotId === undefined
           ? {}
           : { senderBotId: receipt.message.senderBotId }),

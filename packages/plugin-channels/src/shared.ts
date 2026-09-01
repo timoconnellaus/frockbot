@@ -58,6 +58,10 @@ export type ChannelCommandV1 =
       channelId?: string;
       name: string;
       members: string[];
+      /** Absent is `group`. An `external` Channel is one Bot and one peer. */
+      kind?: Exclude<ChannelKindV1, "webui">;
+      /** The Connection an external Channel speaks through. */
+      connectionId?: string;
     })
   | (ChannelCommandMetaV1 & {
       type: "channel/update";
@@ -78,6 +82,13 @@ export type ChannelCommandV1 =
       text: string;
       /** The hop this post is at. Absent is 1: a post from a chat Turn. */
       hop?: number;
+      /**
+       * The remote peer that said it, when a connector delivered this post.
+       * A peer is not a member, so `botId` still names the Channel member whose
+       * authority the write runs under, and the post *is* owed to that member:
+       * the sender-is-never-a-recipient rule is about Bots, not about peers.
+       */
+      senderPeer?: string;
     })
   | (ChannelCommandMetaV1 & {
       type: "channel/react";
@@ -265,9 +276,26 @@ export function decodeChannelCommandV1(value: unknown): ChannelCommandV1 {
     channelExactKeys(
       candidate,
       ["schemaVersion", "type", "commandId", "botId", "name", "members"],
-      ["channelId"],
+      ["channelId", "kind", "connectionId"],
       "channel/create",
     );
+    if (
+      candidate.kind !== undefined &&
+      candidate.kind !== "group" &&
+      candidate.kind !== "external"
+    ) {
+      throw new ChannelDecodeError("channel/create kind is unsupported");
+    }
+    if (candidate.kind === "external" && candidate.connectionId === undefined) {
+      throw new ChannelDecodeError(
+        "an external Channel names the Connection it speaks through",
+      );
+    }
+    if (candidate.kind !== "external" && candidate.connectionId !== undefined) {
+      throw new ChannelDecodeError(
+        "only an external Channel names a Connection",
+      );
+    }
     return {
       ...meta,
       type,
@@ -277,6 +305,17 @@ export function decodeChannelCommandV1(value: unknown): ChannelCommandV1 {
         ? {}
         : {
             channelId: commandIdentifier(candidate.channelId, "channelId"),
+          }),
+      ...(candidate.kind === undefined
+        ? {}
+        : { kind: candidate.kind as "group" | "external" }),
+      ...(candidate.connectionId === undefined
+        ? {}
+        : {
+            connectionId: commandIdentifier(
+              candidate.connectionId,
+              "connectionId",
+            ),
           }),
     };
   }
@@ -329,7 +368,7 @@ export function decodeChannelCommandV1(value: unknown): ChannelCommandV1 {
     channelExactKeys(
       candidate,
       ["schemaVersion", "type", "commandId", "botId", "channelId", "text"],
-      ["messageId", "hop"],
+      ["messageId", "hop", "senderPeer"],
       "channel/post",
     );
     if (
@@ -349,6 +388,15 @@ export function decodeChannelCommandV1(value: unknown): ChannelCommandV1 {
             messageId: commandIdentifier(candidate.messageId, "messageId"),
           }),
       ...(candidate.hop === undefined ? {} : { hop: candidate.hop as number }),
+      ...(candidate.senderPeer === undefined
+        ? {}
+        : {
+            senderPeer: channelText(
+              candidate.senderPeer,
+              CHANNEL_ID_MAX,
+              "senderPeer",
+            ),
+          }),
     };
   }
   channelExactKeys(
@@ -395,6 +443,14 @@ export interface ChannelInputV1 {
   at: string;
   /** The Channel's last messages, oldest first, this message included. */
   history: ChannelMessageViewV1[];
+  /**
+   * Whether this Channel speaks to a remote platform.
+   *
+   * The recipient needs it to know what its own `send_to_user` means: in an
+   * external Channel a send is carried to a person on another service, and in a
+   * group Channel it is recorded and reaches nobody. Absent is a group.
+   */
+  external?: boolean;
 }
 
 export function decodeChannelInputV1(
@@ -415,11 +471,17 @@ export function decodeChannelInputV1(
       "at",
       "history",
     ],
-    ["senderBotId", "senderPeer"],
+    ["senderBotId", "senderPeer", "external"],
     label,
   );
   if (candidate.schemaVersion !== 1) {
     throw new ChannelDecodeError(`${label} schemaVersion is unsupported`);
+  }
+  if (
+    candidate.external !== undefined &&
+    typeof candidate.external !== "boolean"
+  ) {
+    throw new ChannelDecodeError(`${label} external must be a boolean`);
   }
   if (!Number.isSafeInteger(candidate.hop) || (candidate.hop as number) < 1) {
     throw new ChannelDecodeError(`${label} hop must be at least 1`);
@@ -443,6 +505,9 @@ export function decodeChannelInputV1(
     history: candidate.history.map((message, index) =>
       decodeChannelMessageViewV1(message, `${label} history[${index}]`),
     ),
+    ...(candidate.external === undefined
+      ? {}
+      : { external: candidate.external as boolean }),
     ...(candidate.senderBotId === undefined
       ? {}
       : {

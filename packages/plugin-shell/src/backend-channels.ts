@@ -34,7 +34,11 @@ import type {
   ChannelListViewV1,
 } from "@frockbot/plugin-channels/shared";
 import type { ChannelWriterV1 } from "@frockbot/plugin-channels/records";
-import type { LlmMessage, TurnTypeV1 } from "@frockbot/kernel-contracts";
+import type {
+  LlmMessage,
+  SessionEvent,
+  TurnTypeV1,
+} from "@frockbot/kernel-contracts";
 
 /** One queued Channel input, in this Bot's own Durable Object storage. */
 export const CHANNEL_PENDING_PREFIX = "channel-pending:";
@@ -139,6 +143,32 @@ export function channelTurnHistoryV1(input: {
           content: `${senderLabelV1(message)}: ${message.text}`,
         },
   );
+}
+
+/**
+ * What one settled `channel` Turn said out loud.
+ *
+ * A Bot in an external Channel speaks with `send_to_user`, exactly as it does
+ * to its own User — there is no second tool and no key in the Turn. The
+ * connector observes what was *recorded*, so what reaches the platform is
+ * whatever the durable log says the Bot said, in the order it said it, and a
+ * Turn that failed after speaking still has its sends carried.
+ *
+ * Only `text` payloads travel. A widget, an approval or an attachment is a
+ * WebUI affordance with no meaning on a remote platform, and a connector that
+ * silently flattened one into prose would be inventing a message.
+ */
+export function channelOutboundSendsV1(
+  events: readonly SessionEvent[],
+): string[] {
+  const sends: string[] = [];
+  for (const event of events) {
+    if (event.type !== "send/to-user") continue;
+    if (event.payload.type !== "text") continue;
+    const text = event.payload.text.trim();
+    if (text.length > 0) sends.push(text);
+  }
+  return sends;
 }
 
 /**

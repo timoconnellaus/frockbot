@@ -154,6 +154,7 @@ import {
   settledRoutineOriginV1,
 } from "./backend-routines.js";
 import {
+  channelOutboundSendsV1,
   channelPendingKeyV1,
   channelTurnCommandV1,
   channelTurnHistoryV1,
@@ -2887,12 +2888,17 @@ export class ShellBotBackendContribution {
       // is re-read on every iteration rather than once at the top.
       if (await this.authority.readActiveRunId()) return;
       try {
-        await this.authority.run(
+        const completion = await this.authority.run(
           channelTurnCommandV1(
             identity,
             pending.input,
             new Date().toISOString(),
           ),
+        );
+        await this.carryChannelSends(
+          identity,
+          pending.input,
+          completion.events,
         );
       } catch (error) {
         // The run record is the authority for what happened; this object's job
@@ -2903,6 +2909,46 @@ export class ShellBotBackendContribution {
         );
       }
       await this.ctx.storage.delete(pending.key);
+    }
+  }
+
+  /**
+   * Carry what an external Channel's Turn said to the platform it was said in.
+   *
+   * The Bot Durable Object observed its own recorded sends; it does not hold
+   * the Connection and never sees a key. The User Durable Object does both, so
+   * the text crosses the seam and the credential does not — which is the whole
+   * of "no secret leaves the backend" on this path.
+   *
+   * A failure here is logged and dropped rather than retried. The reply is
+   * already in the Channel's durable log, the platform's own refusal is
+   * recorded by the User Durable Object, and re-running the Turn would say the
+   * same thing twice.
+   */
+  private async carryChannelSends(
+    identity: BotIdentity,
+    input: ChannelInputV1,
+    events: readonly SessionEvent[],
+  ): Promise<void> {
+    if (!input.external) return;
+    const texts = channelOutboundSendsV1(events);
+    if (texts.length === 0) return;
+    try {
+      await this.userConfiguration(identity).deliverChannelOutbound(
+        identity.userId,
+        {
+          botId: identity.botId,
+          channelId: input.channelId,
+          inReplyTo: input.messageId,
+          hop: input.hop + 1,
+          texts,
+        },
+      );
+    } catch (error) {
+      console.error(
+        "Channel reply was recorded but not carried to its platform",
+        error instanceof Error ? error.message : "unknown failure",
+      );
     }
   }
 
@@ -5134,6 +5180,16 @@ export class ShellBotBackendContribution {
       writer: ChannelWriterV1,
     ): Promise<ChannelCommandReceiptV1>;
     listChannels(userId: string, botId: string): Promise<ChannelListViewV1>;
+    deliverChannelOutbound(
+      userId: string,
+      request: {
+        botId: string;
+        channelId: string;
+        inReplyTo: string;
+        hop: number;
+        texts: string[];
+      },
+    ): Promise<unknown>;
   } {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
@@ -5170,6 +5226,7 @@ export class ShellBotBackendContribution {
       executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
       executeChannelCommand(input: unknown): Promise<unknown>;
       listChannels(input: unknown): Promise<unknown>;
+      deliverChannelOutbound(input: unknown): Promise<unknown>;
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
@@ -5212,6 +5269,8 @@ export class ShellBotBackendContribution {
         decodeChannelListViewV1(
           await rpc.listChannels({ schemaVersion: 1, userId, botId }),
         ),
+      deliverChannelOutbound: (userId, request) =>
+        rpc.deliverChannelOutbound({ schemaVersion: 1, userId, ...request }),
       executeConnectionDependency: (input) =>
         rpc.executeConnectionDependency(input),
       claimConnectionDependency: (

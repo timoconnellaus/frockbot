@@ -22,6 +22,13 @@ export const CHANNEL_DELIVERY_PREFIX = "channel-delivery:";
 export const CHANNEL_RECEIPT_PREFIX = "channel-receipt:";
 /** One Channel's durable token bucket. */
 export const CHANNEL_BUCKET_PREFIX = "channel-bucket:";
+/**
+ * One external Channel's webhook key, as a digest. Never the token: the token
+ * is derived from the deployment secret and the claims, and what is kept here
+ * is only enough to recognise it again. `disconnect` deletes this key, which is
+ * what revocation *is*.
+ */
+export const CHANNEL_TOKEN_PREFIX = "channel-token:";
 
 /** Sequence keys are zero-padded so a lexical listing is a numeric one. */
 const SEQUENCE_WIDTH = 12;
@@ -59,6 +66,10 @@ export function channelReceiptKeyV1(commandId: string): string {
 
 export function channelBucketKeyV1(channelId: string): string {
   return `${CHANNEL_BUCKET_PREFIX}${channelId}`;
+}
+
+export function channelTokenStorageKeyV1(channelId: string): string {
+  return `${CHANNEL_TOKEN_PREFIX}${channelId}`;
 }
 
 /** The next `seq` a Channel owes, read off its cursor record. */

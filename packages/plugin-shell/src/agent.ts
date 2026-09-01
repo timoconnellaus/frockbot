@@ -169,7 +169,13 @@ function createSendToUserTool(
       string,
       unknown
     >,
-    admission: { turnTypes: ["chat"] },
+    // Chat, and a Channel. A `channel` Turn inside an *external* Channel is a
+    // Bot talking to a person who is not on this deployment, and this tool is
+    // the only way a Bot says anything at all — the connector observes the
+    // recorded `send/to-user` and carries it to the platform, so the Bot needs
+    // no second tool and no key. In a group Channel the send records and
+    // reaches nobody, which is the honest answer for a room with no User in it.
+    admission: { turnTypes: ["chat", "channel"] },
     validate: (input: unknown) =>
       typeof input === "object" && input !== null && !Array.isArray(input),
     execute: async (

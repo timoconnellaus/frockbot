@@ -51,8 +51,14 @@ import {
   channelReceiptKeyV1,
   channelSequenceCursorV1,
   channelSequenceKeyV1,
+  channelTokenStorageKeyV1,
   CHANNEL_PREFIX,
 } from "./storage-keys.js";
+import {
+  channelConstantTimeEqualsV1,
+  decodeChannelTokenKeyV1,
+  type ChannelTokenKeyV1,
+} from "./token.js";
 import {
   channelCommandFingerprintV1,
   channelMessageViewV1,
@@ -174,6 +180,55 @@ export class ChannelStore {
       channelId,
       messages: messages.slice(-limit),
     };
+  }
+
+  /**
+   * Record one external Channel's webhook key.
+   *
+   * A digest, never the token. Writing it is what makes a minted token usable;
+   * deleting it is what revocation is, and both are single durable facts so a
+   * connect that fails halfway leaves either a Channel with no key — which
+   * takes no delivery — or a key with no Channel, which resolves to nothing.
+   */
+  async putTokenKey(record: ChannelTokenKeyV1): Promise<void> {
+    await this.#storage.put(
+      channelTokenStorageKeyV1(record.channelId),
+      decodeChannelTokenKeyV1(record),
+    );
+  }
+
+  async readTokenKey(
+    channelId: string,
+  ): Promise<ChannelTokenKeyV1 | undefined> {
+    const stored = await this.#storage.get<unknown>(
+      channelTokenStorageKeyV1(channelId),
+    );
+    return stored === undefined ? undefined : decodeChannelTokenKeyV1(stored);
+  }
+
+  /** Revoke one Channel's webhook key. Idempotent. */
+  async revokeTokenKey(channelId: string): Promise<void> {
+    await this.#storage.delete(channelTokenStorageKeyV1(channelId));
+  }
+
+  /**
+   * Whether a presented token is still this Channel's key.
+   *
+   * The edge proved the token was minted by this deployment; this proves the
+   * Channel has not since revoked or rotated it. The comparison is
+   * constant-time for the same reason the signature check is.
+   */
+  async holdsTokenDigest(
+    channelId: string,
+    digest: string,
+    keyVersion: number,
+  ): Promise<boolean> {
+    const key = await this.readTokenKey(channelId);
+    if (!key) return false;
+    return (
+      key.keyVersion === keyVersion &&
+      channelConstantTimeEqualsV1(key.digest, digest)
+    );
   }
 
   /** Every delivery one message owes, in member order. */
@@ -354,8 +409,11 @@ export class ChannelStore {
     const record = decodeChannelRecordV1({
       schemaVersion: 1,
       channelId,
-      kind: "group",
+      kind: command.kind ?? "group",
       name: command.name,
+      ...(command.connectionId === undefined
+        ? {}
+        : { connectionId: command.connectionId }),
       members: command.members,
       revision: 1,
       active: true,
@@ -510,7 +568,11 @@ export class ChannelStore {
       messageId,
       channelId: current.channelId,
       seq: cursor.nextSeq,
-      senderBotId: command.botId,
+      // Exactly one sender. A connector delivering a remote peer's message
+      // records the peer; every other post records the Bot that made it.
+      ...(command.senderPeer === undefined
+        ? { senderBotId: command.botId }
+        : { senderPeer: command.senderPeer }),
       text: command.text,
       hop,
       at,
@@ -518,10 +580,14 @@ export class ChannelStore {
     } satisfies ChannelMessageV1);
     // The sender is never a recipient of its own post. This is the first of the
     // loop bounds and the cheapest: without it every post would wake the Bot
-    // that made it.
-    const recipients = current.members.filter(
-      (member) => member !== command.botId,
-    );
+    // that made it. A *peer* is not a member, so a delivered message is owed to
+    // every member including the one whose authority carried it in — otherwise
+    // an external Channel, whose only member is the Bot being spoken to, would
+    // deliver nothing at all.
+    const recipients =
+      command.senderPeer === undefined
+        ? current.members.filter((member) => member !== command.botId)
+        : [...current.members];
     await transaction.put(
       channelMessageKeyV1(current.channelId, message.seq),
       message,

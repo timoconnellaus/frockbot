@@ -61,6 +61,7 @@ describe("foundation application", () => {
       "search",
       "skills",
       "subagents",
+      "telegram",
       "user-machine",
     ]);
     expect(first.contributions).toEqual({
@@ -70,6 +71,7 @@ describe("foundation application", () => {
         "audit",
         "settings",
         "bot-template",
+        "channels",
         "credentials",
         "mcp",
         "package-publisher",
@@ -77,6 +79,7 @@ describe("foundation application", () => {
         "routines",
         "search",
         "subagents",
+        "telegram",
         "user-machine",
       ],
       runtime: [
@@ -400,6 +403,11 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readTask: () => Promise.reject(new Error("not used while composing")),
       stopTask: () => Promise.reject(new Error("not used while composing")),
+      channelTokenSecret: () => Promise.resolve(undefined),
+      deliverChannelWebhook: () =>
+        Promise.reject(new Error("not used while composing")),
+      connectChannel: () =>
+        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions
@@ -408,6 +416,7 @@ describe("foundation application", () => {
     ).toEqual([
       "audit",
       "bot-template",
+      "channels",
       "flock",
       "mcp",
       "package-publisher",
@@ -435,7 +444,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(2);
-    expect(userBackend.contributions).toHaveLength(10);
+    expect(userBackend.contributions).toHaveLength(11);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
