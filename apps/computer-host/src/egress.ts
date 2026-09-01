@@ -18,8 +18,10 @@
  * Its own module so it can be read without the Worker runtime the host
  * entrypoint needs.
  */
+export const SPRITES_API_HOST = "api.sprites.dev";
+
 export const COMPUTER_HOST_EGRESS_V1 = {
   enableInternet: false,
-  allowedHosts: ["api.sprites.dev"],
+  allowedHosts: [SPRITES_API_HOST],
   interceptHttps: true,
 } as const;
