@@ -120,6 +120,7 @@ describe("foundation application", () => {
         "package-publisher",
         "routines",
         "search",
+        "user-machine",
       ],
       desktop: [
         "auth",
@@ -128,6 +129,7 @@ describe("foundation application", () => {
         "desktop-directory-picker",
         "desktop-notifications",
         "fly-sprite",
+        "user-machine",
       ],
       mobile: ["mobile-clipboard", "mobile-notifications"],
     });

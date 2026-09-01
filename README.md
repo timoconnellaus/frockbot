@@ -113,23 +113,26 @@ Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first 
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                        | Purpose                                                                       |
-| -------- | --------------------------- | ----------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                        |
-| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                               |
-| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                             |
-| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                         |
-| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                        |
-| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                    |
-| Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                  |
-| Secret   | `COMPUTER_HOST_TOKEN`       | Shared secret the app Worker presents to the Computer host; generate it       |
-| Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-User Connection credentials                 |
-| Secret   | `ROUTINE_HOOK_SECRET`       | HMAC secret every Routine webhook key is signed with; generate it             |
+| Type     | Name                        | Purpose                                                                                 |
+| -------- | --------------------------- | --------------------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account           |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                                  |
+| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                                         |
+| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                                       |
+| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                                   |
+| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                                  |
+| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                              |
+| Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                            |
+| Secret   | `COMPUTER_HOST_TOKEN`       | Shared secret the app Worker presents to the Computer host; generate it                 |
+| Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-User Connection credentials                           |
+| Secret   | `ROUTINE_HOOK_SECRET`       | HMAC secret every Routine webhook key is signed with; generate it                       |
+| Secret   | `MACHINE_TOKEN_SECRET`      | HMAC secret every registered-machine token and pairing code is signed with; generate it |
 
 Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
 
 `ROUTINE_HOOK_SECRET` is generated too, once, with `openssl rand -hex 32` — `./scripts/setup-production.sh` does it if the secret is absent and preserves it if it is not. Every Routine webhook key is `HMAC-SHA256` over its own claims under this secret, and the gateway verifies that signature before any Durable Object is addressed. Rotating it invalidates every webhook key already handed out, which each Routine's owner then has to re-mint; without it set, the delivery route answers `503` and a webhook Routine is recorded without a key rather than given one nothing could verify.
+
+`MACHINE_TOKEN_SECRET` is generated the same way and on the same terms. Every registered machine's token and every pairing code is `HMAC-SHA256` over its own claims under this secret, verified at the edge before any Durable Object is addressed. Rotating it un-enrols every registered machine, which then has to be paired again; without it set, enrollment and every machine route answer `503` rather than admitting a caller nothing could verify.
 
 `COMPUTER_HOST_TOKEN` is not obtained from anywhere — generate it, once, with `openssl rand -hex 32`, and add it as a GitHub `production` secret. It is checked inside the container as well as at the host Worker, because the service binding is not the only route to that port. Rotating it means redeploying both Workers together.
 

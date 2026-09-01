@@ -10,10 +10,14 @@ import {
 // These trusted adapters are the only Electron authority exposed to plugins.
 import type { Context } from "cordis";
 import {
+  app,
   clipboard,
   dialog,
   Notification as ElectronNotification,
+  safeStorage,
 } from "electron";
+import { FileSecretStoreCapability } from "./machine-secrets.js";
+import { NodeMachineHostCapability } from "./machine-host.js";
 
 export class ElectronNotificationCapability extends DesktopNotificationCapability {
   async show(
@@ -61,8 +65,39 @@ export class ElectronClipboardCapability extends DesktopClipboardCapability {
   }
 }
 
+/**
+ * Electron's `safeStorage`, as the cipher the secret store is built on.
+ *
+ * This indirection is the whole reason `machine-secrets.ts` can be tested:
+ * everything about the file — its shape, what a failed decrypt does, what an
+ * unavailable keychain does — is exercised against a fake cipher, and the real
+ * one is these three lines.
+ */
+export const electronSecretCipher = {
+  isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+  encryptString: (value: string) => safeStorage.encryptString(value),
+  decryptString: (value: Uint8Array) =>
+    safeStorage.decryptString(Buffer.from(value)),
+};
+
 export async function installDesktopCapabilities(ctx: Context): Promise<void> {
   await ctx.plugin(ElectronNotificationCapability);
   await ctx.plugin(ElectronDirectoryPickerCapability);
   await ctx.plugin(ElectronClipboardCapability);
+}
+
+/**
+ * The two capabilities the registered-machine agent runs on.
+ *
+ * Kept apart from `installDesktopCapabilities` because they are mounted at a
+ * different moment: the agent's contribution needs them before it starts its
+ * loop, and the loop starts as soon as the host is built rather than when a
+ * window appears.
+ */
+export async function installMachineCapabilities(ctx: Context): Promise<void> {
+  await ctx.plugin(NodeMachineHostCapability, {});
+  await ctx.plugin(FileSecretStoreCapability, {
+    directory: app.getPath("userData"),
+    cipher: electronSecretCipher,
+  });
 }

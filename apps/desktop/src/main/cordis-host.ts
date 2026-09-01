@@ -3,13 +3,19 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveFoundationTrustedDesktopContribution } from "@frockbot/application-foundation/desktop";
 import { compileFoundationApplicationDeclarations } from "@frockbot/application-foundation/runtime";
+import { DesktopCommandRegistry } from "@frockbot/desktop-core";
 import { type Context, Context as CordisContext, Service } from "cordis";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import {
   ElectronDesktopAuthCapability,
   prepareElectronDesktopAuthRuntime,
 } from "./auth-client.js";
+import { installMachineCapabilities } from "./desktop-capabilities.js";
 import { startHostedDesktopApplication } from "./hosted-application.js";
+import {
+  createMachineBridgeHandlerV1,
+  MACHINE_CHANNEL,
+} from "./machine-bridge.js";
 
 interface DesktopWindowConfig {
   baseUrl: string;
@@ -165,6 +171,11 @@ export async function createCordisDesktopHost(): Promise<Context> {
     declarations,
     "auth",
   );
+  // The device agent for row 48: the registered machine is this app.
+  const machineContribution = resolveFoundationTrustedDesktopContribution(
+    declarations,
+    "user-machine",
+  );
   const authRuntime = prepareElectronDesktopAuthRuntime();
   return startHostedDesktopApplication(
     process.env.FROCKBOT_APPLICATION_URL,
@@ -174,6 +185,22 @@ export async function createCordisDesktopHost(): Promise<Context> {
       try {
         await root.plugin(ElectronDesktopAuthCapability, authRuntime);
         await root.plugin(authContribution.plugin);
+        await root.plugin(DesktopCommandRegistry);
+        await installMachineCapabilities(root);
+        await root.plugin(machineContribution.plugin, {
+          origin: applicationUrl,
+          agentVersion: app.getVersion(),
+        });
+        // The settings section reaches the agent over one channel, and only
+        // from the hosted application's own origin. Registered as a plugin so
+        // the handler is removed by the same disposal that stops the agent.
+        await root.plugin((ctx) => {
+          const handle = createMachineBridgeHandlerV1(ctx, applicationUrl);
+          ipcMain.handle(MACHINE_CHANNEL, (event, value: unknown) =>
+            handle(event.senderFrame?.url, value),
+          );
+          return () => ipcMain.removeHandler(MACHINE_CHANNEL);
+        });
         await root.plugin(DesktopWindowService, { baseUrl: applicationUrl });
         return root;
       } catch (error) {

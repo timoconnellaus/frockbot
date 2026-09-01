@@ -2,6 +2,8 @@ export * from "./agent.js";
 export * from "./approval.js";
 export * from "./backend.js";
 export * from "./delivery.js";
+export * from "./device.js";
+export * from "./device-runner.js";
 export * from "./intent.js";
 export * from "./pairing.js";
 export * from "./storage-keys.js";

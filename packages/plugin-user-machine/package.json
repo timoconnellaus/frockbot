@@ -8,7 +8,12 @@
     "./agent": "./src/agent.ts",
     "./approval": "./src/approval.ts",
     "./backend": "./src/backend.ts",
+    "./client": "./src/client/index.ts",
+    "./client/state": "./src/client/state.ts",
     "./delivery": "./src/delivery.ts",
+    "./desktop": "./src/desktop.ts",
+    "./device": "./src/device.ts",
+    "./device-runner": "./src/device-runner.ts",
     "./frockbot.json": "./frockbot.json",
     "./intent": "./src/intent.ts",
     "./manifest": "./src/manifest.ts",
@@ -25,18 +30,26 @@
   },
   "scripts": {
     "test": "bun test src",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@frockbot/client-core": "workspace:*",
+    "@frockbot/client-ui": "workspace:*",
+    "@frockbot/desktop-core": "workspace:*",
     "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/machine-protocol": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@frockbot/plugin-shell": "workspace:*",
+    "cordis": "4.0.0-rc.8",
+    "vue": "3.5.41"
   },
   "devDependencies": {
     "@frockbot/plugin-tools": "workspace:*",
     "@types/bun": "1.4.0",
-    "typescript": "5.9.3"
+    "@vitejs/plugin-vue": "6.0.8",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "vue-tsc": "3.3.10"
   },
   "publishConfig": {
     "access": "public"

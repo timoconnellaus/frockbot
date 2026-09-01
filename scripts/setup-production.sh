@@ -354,6 +354,18 @@ else
   set_required_production_secret ROUTINE_HOOK_SECRET "$ROUTINE_HOOK_SECRET"
   unset ROUTINE_HOOK_SECRET
 fi
+if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx MACHINE_TOKEN_SECRET; then
+  note "Preserving the existing MACHINE_TOKEN_SECRET so enrolled machines keep their tokens."
+else
+  say "Provision the secret every registered-machine token and pairing code is signed with."
+  MACHINE_TOKEN_SECRET="$(openssl rand -hex 32)"
+  [[ -n "$MACHINE_TOKEN_SECRET" ]] || {
+    warn "Machine token secret generation failed"
+    exit 1
+  }
+  set_required_production_secret MACHINE_TOKEN_SECRET "$MACHINE_TOKEN_SECRET"
+  unset MACHINE_TOKEN_SECRET
+fi
 unset PRODUCTION_SECRETS
 
 stage "GitHub: verify production configuration"
