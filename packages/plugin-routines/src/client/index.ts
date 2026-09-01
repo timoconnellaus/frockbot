@@ -276,10 +276,10 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
       order: 20,
       component: RoutineInboxBadge,
     }),
-    // The info pane gets the glance; the section above stays the place a
+    // The default Bot panel gets the glance; the section above stays the place a
     // Routine is written.
     ctx.slot({
-      slot: "frockbot.bot-info-sections",
+      slot: "frockbot.bot-panel-sections",
       order: 10,
       component: RoutinesSummary,
     }),

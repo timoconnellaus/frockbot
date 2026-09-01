@@ -285,7 +285,6 @@ function canonicalProfile(profile: BotProfile): unknown[] {
     profile.description ?? null,
     profile.title ?? null,
     profile.namedBy ?? null,
-    profile.avatar ?? null,
     profile.hiddenFromSidebar === true,
   ];
 }

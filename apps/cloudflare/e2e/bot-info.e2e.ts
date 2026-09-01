@@ -1,27 +1,16 @@
-// The per-Bot info pane and the settings deep-link scheme (register rows 50
-// and 51).
-//
-// The pane is assembled out of four Packages' Contributions — Settings owns the
-// identity and Members sections, Computer fills `frockbot.computer`, Routines
-// fills `frockbot.bot-info-sections`, and the shell owns the panel they land
-// in. Nothing below the browser can prove that assembly: a unit test sees one
-// component, and the failure mode this layer exists for is a Contribution that
-// mounts against a state it did not expect and throws into the console. The
-// `page` fixture fails the test on exactly that.
-//
-// The deep link is the other half. `?settings=<surface>#<anchor>` is a
-// contract a Bot may cite in a payload, so a link that opens the wrong surface
-// or lands on nothing is a product bug, not a UI detail.
+// The Package-composed default Bot panel and settings deep links (register
+// rows 50 and 51). The page fixture also fails on any console or request error,
+// which proves the Contributions can mount together rather than only that their
+// individual components compile.
 import { test, expect, provisionThroughUi } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 
-test("the info pane assembles every Package's section without a console error", async ({
+test("the default panel composes Computer and Routines and swaps to Settings", async ({
   page,
   userId,
   ollamaBaseUrl,
 }) => {
-  // The GrokBot window size, so the pane is proved at the geometry it copies.
-  await page.setViewportSize({ width: 1351, height: 831 });
+  await page.setViewportSize({ width: 1351, height: 859 });
   await provisionThroughUi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
@@ -29,53 +18,36 @@ test("the info pane assembles every Package's section without a console error", 
     botName: "Observed",
   });
 
-  await page.getByRole("button", { name: "Bot info" }).click();
-  const pane = page.getByRole("region", { name: "Bot info" });
-  await expect(pane).toBeVisible();
+  const panel = page.getByRole("region", { name: "Bot panel" });
+  await expect(panel).toBeVisible();
+  await expect(panel.locator("section.computer-card")).toBeVisible();
+  await expect(panel.getByText("Observed's screen")).toBeVisible();
+  await expect(panel.getByText("Routines", { exact: true })).toBeVisible();
+  await expect(panel.getByText("No Routines yet.")).toBeVisible();
+  const routinesEditor = panel.getByRole("link", {
+    name: "Open Routines editor",
+  });
+  await expect(routinesEditor).toBeVisible();
+  await routinesEditor.click();
 
-  // Identity, from the Bot's own durable profile.
-  await expect(pane.getByRole("heading", { name: "Observed" })).toBeVisible();
-  // Name provenance, however the durable record spells it.
-  await expect(pane.locator(".bot-info__provenance").first()).toHaveText(
-    /Named by|provenance/u,
-  );
+  const settings = page.getByRole("region", { name: "Settings" });
+  await expect(settings.locator("#bot-routines")).toBeVisible();
+  await settings.getByRole("button", { name: "Back to Bot panel" }).click();
+  await expect(panel).toBeVisible();
 
-  // Members: the Bot itself plus the Capability it was assigned when the model
-  // was chosen. Settings owns this section.
-  await expect(pane.getByRole("heading", { name: "Members" })).toBeVisible();
-  await expect(pane.locator(".bot-info__member-note")).toHaveText(/^Bot · /u);
-
-  // The Computer Package's own preview, through `frockbot.computer`.
-  await expect(pane.getByRole("heading", { name: "Computer" })).toBeVisible();
-  await expect(pane.locator("section.computer-card")).toBeVisible();
-
-  // The Routines Package, through `frockbot.bot-info-sections`. Its heading is
-  // the proof the outlet resolved.
-  await expect(pane.getByRole("heading", { name: "Routines" })).toBeVisible();
+  await page.getByRole("button", { name: "Bot settings" }).click();
+  await expect(settings).toBeVisible();
   await expect(
-    pane.locator("#bot-info-routines").getByText("0/0 enabled"),
+    settings.getByRole("heading", { name: "Settings" }),
   ).toBeVisible();
-
-  // The Channels Package, through `frockbot.bot-info-channels`. The pane owns
-  // the card and its heading; the Package fills it, so exactly one heading
-  // named "Channels" exists in the region and the connect form is inside it.
-  await expect(pane.getByRole("heading", { name: "Channels" })).toBeVisible();
-  await expect(pane.locator("#bot-info-channels")).toBeVisible();
   await expect(
-    pane.locator("#bot-info-channels").getByLabel("Connection"),
+    settings.getByRole("button", { name: "Back to Bot panel" }),
   ).toBeVisible();
+  await expect(panel).toBeHidden();
 
-  // The notification toggle writes on change, with no Save button.
-  const notifications = pane
-    .locator("#bot-info-notifications")
-    .getByRole("checkbox");
-  await expect(notifications).not.toBeChecked();
-  await notifications.check();
-  await expect(notifications).toBeChecked();
+  await settings.getByRole("button", { name: "Back to Bot panel" }).click();
+  await expect(panel).toBeVisible();
 
-  await expect(pane.locator("p.settings-error")).toHaveCount(0);
-
-  // Nothing in the pane pushes the workspace sideways at the window size.
   const overflow = await page.evaluate(
     () =>
       document.documentElement.scrollWidth -
@@ -84,13 +56,11 @@ test("the info pane assembles every Package's section without a console error", 
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("the pane fits the mobile shell", async ({
+test("the default panel and Settings fit the mobile shell", async ({
   page,
   userId,
   ollamaBaseUrl,
 }) => {
-  // Provisioned at the desktop size and then narrowed: the flow being proved
-  // here is the pane at 390px, not the Plugins overlay at 390px.
   await provisionThroughUi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
@@ -99,12 +69,12 @@ test("the pane fits the mobile shell", async ({
   });
   await page.setViewportSize({ width: 390, height: 844 });
 
-  await page.getByRole("button", { name: "Bot info" }).click();
-  const pane = page.getByRole("region", { name: "Bot info" });
-  await expect(pane).toBeVisible();
-  await expect(pane.getByRole("heading", { name: "Channels" })).toBeVisible();
+  const panel = page.getByRole("region", { name: "Bot panel" });
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText("Pocket's screen")).toBeVisible();
+  await page.getByRole("button", { name: "Bot settings" }).click();
+  await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
 
-  // Nothing inside the pane may push the document sideways.
   const overflow = await page.evaluate(
     () =>
       document.documentElement.scrollWidth -
@@ -113,7 +83,7 @@ test("the pane fits the mobile shell", async ({
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("a settings deep link opens the surface and highlights the row", async ({
+test("settings and retired info-pane deep links resolve at their new homes", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -130,43 +100,40 @@ test("a settings deep link opens the surface and highlights the row", async ({
   );
   expect(botId).not.toBe("");
 
-  // A cold load of a link a Bot could have cited: the Bot settings panel opens
-  // by itself and the Description row is the highlighted target.
   await page.goto(
     `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-description`,
   );
-  const panel = page.getByRole("region", { name: "Bot settings" });
-  await expect(panel).toBeVisible();
-  const row = panel.locator("#bot-description");
-  await expect(row).toBeVisible();
-  await expect(row).toHaveAttribute("data-anchor-target", "true");
-  await expect(row.getByRole("textbox", { name: "Description" })).toHaveValue(
-    "",
-  );
+  const settings = page.getByRole("region", { name: "Settings" });
+  const description = settings.locator("#bot-description");
+  await expect(description).toBeVisible();
+  await expect(description).toHaveAttribute("data-anchor-target", "true");
 
-  // A row under the Advanced disclosure: the link has to open it, or it would
-  // resolve to a collapsed element nobody can see.
   await page.goto(
     `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-capabilities`,
   );
-  await expect(panel).toBeVisible();
-  await expect(panel.locator("#bot-capabilities")).toBeVisible();
-  await expect(panel.getByText("Capability Assignments")).toBeVisible();
+  await expect(settings.locator("#bot-capabilities")).toBeVisible();
 
-  // And a link into the info pane, which is a different surface entirely.
   await page.goto(
-    `/?bot=${encodeURIComponent(botId)}&settings=bot-info#bot-info-computer`,
+    `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-audit`,
   );
-  const pane = page.getByRole("region", { name: "Bot info" });
-  await expect(pane).toBeVisible();
-  await expect(pane.locator("#bot-info-computer")).toHaveAttribute(
+  await expect(settings.locator("#bot-audit")).toBeVisible();
+
+  await page.goto(
+    `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-info-members`,
+  );
+  await expect(settings.locator("#bot-info-members")).toBeVisible();
+  await expect(settings.getByText("Named by user")).toBeVisible();
+
+  await page.goto(
+    `/?bot=${encodeURIComponent(botId)}&settings=bot-panel#bot-info-computer`,
+  );
+  const panel = page.getByRole("region", { name: "Bot panel" });
+  await expect(panel).toBeVisible();
+  await expect(panel.locator("#bot-info-computer")).toHaveAttribute(
     "data-anchor-target",
     "true",
   );
-
-  // Every section offers its own copy control, which is what makes the link
-  // citable by a person as well as by a Bot.
   await expect(
-    pane.getByRole("button", { name: "Copy link to Computer" }),
+    panel.getByRole("button", { name: "Copy link to Computer" }),
   ).toBeAttached();
 });

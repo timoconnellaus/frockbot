@@ -7,8 +7,6 @@ import routinesClientPlugin from "@frockbot/plugin-routines/client";
 import settingsClientPlugin from "@frockbot/plugin-settings/client";
 
 // The immutable application owns the concrete client contribution list.
-// pi-lens-ignore: ts:2307
-import clockClientPlugin from "@frockbot/plugin-clock/client";
 import computerClientPlugin from "../../../packages/plugin-computer/src/client/application.js";
 import flockClientPlugin from "@frockbot/plugin-flock/client";
 import channelsClientPlugin from "@frockbot/plugin-channels/client";
@@ -21,7 +19,6 @@ export const foundationClientPlugins: readonly ClientPlugin[] = [
   uiThemeClientPlugin,
   authClientPlugin,
   shellClientPlugin,
-  clockClientPlugin,
   computerClientPlugin,
   flockClientPlugin,
   // After Flock: a Channel thread draws each sender with the Flock Package's
@@ -32,7 +29,7 @@ export const foundationClientPlugins: readonly ClientPlugin[] = [
   settingsClientPlugin,
   routinesClientPlugin,
   botTemplateClientPlugin,
-  // After Settings: the Activity section mounts into the Bot settings slot
+  // After Settings: the Audit log mounts into the Advanced Bot settings slot
   // Settings declares.
   auditClientPlugin,
   packagePublisherClientPlugin,

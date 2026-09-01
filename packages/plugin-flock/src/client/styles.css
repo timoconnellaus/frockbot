@@ -9,12 +9,6 @@
   background: var(--frock-surface-accent);
 }
 
-/* An uploaded image fills the same tile the sheep layers do. */
-img.flock-avatar {
-  display: block;
-  object-fit: cover;
-}
-
 /* The message-thread size: one avatar token, matching a small control. */
 .flock-avatar--mini {
   width: var(--frock-avatar-sm);

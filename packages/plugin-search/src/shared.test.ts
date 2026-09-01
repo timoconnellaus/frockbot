@@ -128,7 +128,6 @@ describe("client search results decoding", () => {
         botName: "Site foreman",
         archived: false,
         hidden: true,
-        avatarUrl: "/api/bots/bot-a/avatar?v=abc",
         hits: [
           {
             runId: "run-1",

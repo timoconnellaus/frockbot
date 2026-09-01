@@ -167,12 +167,6 @@ describe("Flock v1 contracts", () => {
       namedBy: "bot" as const,
       hiddenFromSidebar: true,
       title: "Chief of staff",
-      avatar: {
-        kind: "image" as const,
-        digest: "b".repeat(64),
-        contentType: "image/webp" as const,
-        size: 900,
-      },
     };
     expect(decodeBotIdentityViewV1(structuredClone(identity))).toEqual(
       identity,
@@ -186,10 +180,9 @@ describe("Flock v1 contracts", () => {
     expect(() =>
       decodeBotIdentityViewV1({ ...identity, namedBy: "admin" }),
     ).toThrow("namedBy is invalid");
-    // A sheep avatar is the absence of an uploaded one, never a directory row.
     expect(() =>
-      decodeBotIdentityViewV1({ ...identity, avatar: { kind: "sheep" } }),
-    ).toThrow("Bot identity avatar is invalid");
+      decodeBotIdentityViewV1({ ...identity, avatar: { kind: "image" } }),
+    ).toThrow("unknown or missing field");
     expect(() =>
       decodeBotIdentityDirectoryViewV1({
         schemaVersion: 1,

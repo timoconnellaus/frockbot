@@ -60,7 +60,7 @@ export interface TemplateSheepRecipeV1 {
   lower: string;
 }
 
-/** The profile a template carries. The avatar is always a fresh sheep (D1). */
+/** The profile a template carries. Its avatar is the Bot's sheep recipe (D1). */
 export interface TemplateProfileV1 {
   name: string;
   title?: string;
@@ -326,9 +326,8 @@ function decodeTemplateProfileV1(value: unknown): TemplateProfileV1 {
     "recipe",
   ]);
   if (avatar.kind !== "sheep") {
-    // Uploaded avatar bytes are keyed per-User and never travel (D1). A
-    // template that claims any other avatar kind is refused rather than
-    // silently downgraded, so a hostile blob cannot smuggle a digest.
+    // Sheep recipes are the only Bot avatar. A template claiming another kind
+    // is refused rather than silently downgraded.
     throw new TemplateDecodeError("template avatar must be a sheep recipe");
   }
   return withOptional(

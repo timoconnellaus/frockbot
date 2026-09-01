@@ -260,7 +260,7 @@ async function scrollToLatest(
 
 /*
  * Settings deep links. `?settings=<surface>#<anchor>` names a registered
- * surface and one row inside it; the shell opens the surface and announces the
+ * surface or the default Bot panel and one row inside it; the shell opens it and announces the
  * anchor, and the anchored row highlights itself. The row is deliberately not
  * hunted for here: a panel loads its state after it mounts, so `UiAnchor` also
  * reads the fragment on its own mount and the two paths cover a link followed
@@ -268,8 +268,15 @@ async function scrollToLatest(
  */
 const applySettingsDeepLink = (): void => {
   const target = decodeSettingsLinkV1(window.location.href);
-  if (!target || !surfaces.has(target.surface)) return;
-  if (surfaces.activeId.value !== target.surface) surfaces.open(target.surface);
+  if (!target) return;
+  if (target.surface === "bot-panel") {
+    surfaces.close();
+    rightPanelOpen.value = true;
+  } else {
+    if (!surfaces.has(target.surface)) return;
+    if (surfaces.activeId.value !== target.surface)
+      surfaces.open(target.surface);
+  }
   const anchor = target.anchor;
   if (anchor) void nextTick(() => announceUiAnchor(anchor));
 };
@@ -744,7 +751,12 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         <div class="right-panel-stack">
           <Transition name="panel-swap">
             <div v-show="!panelSurface" class="right-panel-content">
-              <k-slot name="frockbot.right-panel" />
+              <header class="right-panel-header">
+                <k-slot name="frockbot.bot-actions" />
+              </header>
+              <div class="right-panel-body">
+                <k-slot name="frockbot.right-panel" />
+              </div>
             </div>
           </Transition>
           <Transition name="panel-swap">
@@ -755,8 +767,8 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             >
               <header class="panel-surface-header">
                 <UiIconButton
-                  icon="close"
-                  label="Close settings"
+                  icon="chevron-left"
+                  label="Back to Bot panel"
                   size="sm"
                   @click="surfaces.close()"
                 />
@@ -771,7 +783,6 @@ function handleComposerKeydown(event: KeyboardEvent): void {
       </aside>
 
       <div class="window-actions">
-        <k-slot name="frockbot.bot-actions" />
         <UiIconButton
           class="panel-toggle"
           :icon="rightPanelOpen ? 'chevrons-right' : 'chevrons-left'"
