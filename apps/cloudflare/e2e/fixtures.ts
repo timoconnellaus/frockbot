@@ -165,12 +165,19 @@ export async function createBot(page: Page, name: string): Promise<void> {
   // is being typed reopens the dialog on an empty draft — the field clears,
   // the required input refuses to submit, and the dialog never closes. Retry
   // until the value survives, which is also what a person would do.
+  // The same reopen also lands between the value settling and the submit, and
+  // then the click meets an empty draft: the required input refuses, and the
+  // dialog stays open for the rest of the run. So the fill and the submit
+  // retry together. A reopened draft submits nothing, so a retry cannot leave
+  // a second Bot behind.
   const nameField = dialog.getByLabel("Bot name");
   await expect(async () => {
+    if (await dialog.isHidden()) return;
     await nameField.fill(name);
     await expect(nameField).toHaveValue(name, { timeout: 2_000 });
+    await dialog.getByRole("button", { name: "Create Bot" }).click();
+    await expect(dialog).toBeHidden({ timeout: 5_000 });
   }).toPass({ timeout: 30_000 });
-  await dialog.getByRole("button", { name: "Create Bot" }).click();
   await expect(dialog).toBeHidden();
 }
 
