@@ -6,7 +6,12 @@
 // immutable artifact and a pending Composition generation. Activation is a
 // separate event, at the next admitted Turn. A model never overwrites a
 // version; re-authoring the same `packageId` appends the next one.
-import { PACKAGE_BUNDLE_MAX_SOURCE_BYTES } from "@frockbot/kernel-contracts";
+import {
+  BOT_ISOLATE_HOOK_EVENTS_V1,
+  isBotIsolateHookEventNameV1,
+  PACKAGE_BUNDLE_MAX_SOURCE_BYTES,
+  type BotIsolateHookEventNameV1,
+} from "@frockbot/kernel-contracts";
 
 /** The `package_author` tool input. */
 export interface AuthorPackageInputV1 {
@@ -15,6 +20,8 @@ export interface AuthorPackageInputV1 {
   displayName: string;
   /** Every tool the immutable Package artifact is expected to export. */
   tools: Array<{ name: string; description: string; inputSchema: unknown }>;
+  /** Waterfall events the immutable artifact is expected to hook. */
+  hooks?: BotIsolateHookEventNameV1[];
   /** TypeScript text; exactly one `package.ts`. */
   source: string;
 }
@@ -164,7 +171,7 @@ export function decodeAuthorPackageInputV1(
   exactKeys(
     value,
     ["packageId", "displayName", "source"],
-    ["tools", "tool"],
+    ["tools", "tool", "hooks"],
     label,
   );
   if (
@@ -214,6 +221,25 @@ export function decodeAuthorPackageInputV1(
   if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
     throw new Error(`${label}.tools contains duplicate names`);
   }
+  let hooks: BotIsolateHookEventNameV1[] | undefined;
+  if (value.hooks !== undefined) {
+    if (
+      !Array.isArray(value.hooks) ||
+      value.hooks.length === 0 ||
+      value.hooks.length > BOT_ISOLATE_HOOK_EVENTS_V1.length
+    ) {
+      throw new Error(`${label}.hooks must be a non-empty bounded array`);
+    }
+    hooks = value.hooks.map((hook, index) => {
+      if (!isBotIsolateHookEventNameV1(hook)) {
+        throw new Error(`${label}.hooks[${index}] is invalid`);
+      }
+      return hook;
+    });
+    if (new Set(hooks).size !== hooks.length) {
+      throw new Error(`${label}.hooks contains duplicate events`);
+    }
+  }
   const source = boundedString(
     value.source,
     `${label}.source`,
@@ -229,6 +255,7 @@ export function decodeAuthorPackageInputV1(
     packageId,
     displayName,
     tools,
+    ...(hooks === undefined ? {} : { hooks }),
     source,
   };
 }
@@ -259,6 +286,15 @@ export const AUTHOR_PACKAGE_INPUT_SCHEMA_V1 = {
           inputSchema: { type: "object" },
         },
       },
+    },
+    hooks: {
+      type: "array",
+      minItems: 1,
+      maxItems: BOT_ISOLATE_HOOK_EVENTS_V1.length,
+      uniqueItems: true,
+      items: { type: "string", enum: BOT_ISOLATE_HOOK_EVENTS_V1 },
+      description:
+        "Waterfall loop events exported from `hooks`; names must match exactly.",
     },
     source: {
       type: "string",
@@ -359,6 +395,7 @@ export function authoredManifestV1(input: {
   displayName: string;
   version: string;
   tools: AuthorPackageInputV1["tools"];
+  hooks?: AuthorPackageInputV1["hooks"];
 }): Record<string, unknown> {
   return {
     schemaVersion: 3,
@@ -371,6 +408,7 @@ export function authoredManifestV1(input: {
       runtime: { entry: "./package.js", host: "bot-isolate" },
     },
     tools: input.tools.map((tool) => ({ ...tool })),
+    ...(input.hooks === undefined ? {} : { hooks: [...input.hooks] }),
     permissions: [],
   };
 }

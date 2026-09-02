@@ -8,7 +8,12 @@
 // `BOT_ISOLATE_WRAPPER_SOURCE`, `BotCapabilities`), and only the Turn's
 // surrounding configuration is fixture.
 import { DurableObject } from "cloudflare:workers";
-import type { LlmProvider, LlmStreamEvent } from "@frockbot/kernel-contracts";
+import type {
+  LlmProvider,
+  LlmStreamEvent,
+  NormalizedModelRequest,
+  SessionEvent,
+} from "@frockbot/kernel-contracts";
 import {
   bootstrapGeneration,
   compositionArtifactSetHashV1,
@@ -58,6 +63,12 @@ async function sha256Hex(value: string): Promise<string> {
     .join("");
 }
 
+const PROBE_HOOK_BODY = `return [...payload.tools, {
+    name: "hook_marker",
+    description: "Added by the Bot-authored hook for this step",
+    inputSchema: { type: "object" },
+  }];`;
+
 /** A hand-seeded Bot Package. No authoring tool exists until Step 5. */
 export const PROBE_PACKAGE_SOURCE = `
 export const tools = [
@@ -70,6 +81,16 @@ export const tools = [
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
   { name: "list_capabilities", description: "Lists Assignment-derived capabilities", inputSchema: {}, idempotent: true },
 ];
+
+export const hooks = {
+  "agent/tool-exposure": async function (payload, ctx) {
+    if (ctx.event !== "agent/tool-exposure" || ctx.tool !== undefined) {
+      throw new Error("hook received the wrong narrowed context");
+    }
+    if (payload.step.step !== 1) return undefined;
+    ${PROBE_HOOK_BODY}
+  },
+};
 
 export async function execute(tool, input, ctx) {
   switch (tool) {
@@ -116,6 +137,26 @@ export async function execute(tool, input, ctx) {
 }
 `;
 
+export const PROBE_THROWING_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
+  PROBE_HOOK_BODY,
+  `throw new Error("probe hook exploded");`,
+);
+
+export const PROBE_TIMEOUT_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
+  PROBE_HOOK_BODY,
+  `await new Promise(function () {});`,
+);
+
+export const PROBE_UNDECODABLE_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
+  PROBE_HOOK_BODY,
+  `return [{
+    name: "not_exact",
+    description: "Carries an executable field across a schema-only seam",
+    inputSchema: {},
+    execute: "undeclared",
+  }];`,
+);
+
 const PROBE_PACKAGE_MANIFEST = {
   schemaVersion: 3,
   id: "bot-authored",
@@ -136,6 +177,7 @@ const PROBE_PACKAGE_MANIFEST = {
     "call_model",
     "list_capabilities",
   ].map((name) => ({ name, description: name, inputSchema: {} })),
+  hooks: ["agent/tool-exposure"],
   permissions: [],
 } as const;
 
@@ -150,10 +192,14 @@ export async function execute(tool, input, ctx) {
  * A provider that scripts one tool-call turn, so an isolate tool is reached
  * through `ctx.tools` by the Agent loop rather than by the test.
  */
-function scriptedProviderPackage(toolName: string): FoundationAgentPackage {
+function scriptedProviderPackage(
+  toolName: string,
+  requests: NormalizedModelRequest[],
+): FoundationAgentPackage {
   const provider: LlmProvider = {
     id: "scripted",
     async *stream(request): AsyncGenerator<LlmStreamEvent> {
+      requests.push(structuredClone(request));
       const latest = request.messages.at(-1);
       if (latest?.role === "tool") {
         yield { type: "text-delta", text: `tool:${latest.content}` };
@@ -196,6 +242,7 @@ function scriptedProviderPackage(toolName: string): FoundationAgentPackage {
 export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
   private loaderIds: string[] = [];
   private loadedCode: BotIsolateWorkerCode[] = [];
+  private providerRequests: NormalizedModelRequest[] = [];
 
   /** Counts every `.get()` on the Bot Package loader for this probe. */
   private countingLoader(): BotIsolateLoader {
@@ -312,6 +359,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     assignments?: IsolateAssignmentV1[];
     /** Varies the generation without varying the artifact. */
     generationCreatedAt?: string;
+    deadlineMs?: number;
   }): Promise<{
     composition: ShellMountedComposition;
     generation: CompositionGenerationV1;
@@ -328,7 +376,14 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       botId: input.botId,
       sessionId: `${input.userId}:${input.botId}`,
       sessionEvents: [],
-      agentPackages: [scriptedProviderPackage("reverse_text")],
+      persistSessionEvents: async (_sessionId, events) => {
+        const durable =
+          (await this.ctx.storage.get<SessionEvent[]>("session-events")) ?? [];
+        await this.ctx.storage.put("session-events", [...durable, ...events]);
+      },
+      agentPackages: [
+        scriptedProviderPackage("reverse_text", this.providerRequests),
+      ],
       modelSelection: { provider: "scripted", model: "scripted-v1" },
       isolate: {
         userId: input.userId,
@@ -368,6 +423,9 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
           generation.generationId,
         ),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+        ...(input.deadlineMs === undefined
+          ? {}
+          : { deadlineMs: input.deadlineMs }),
       },
     }).mount(generation, new AbortController().signal);
     return { composition, generation };
@@ -427,8 +485,25 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     botId: string;
     artifact?: ArtifactRefV1;
     text: string;
-  }): Promise<{ text: string; loaderCalls: number }> {
+    deadlineMs?: number;
+  }): Promise<{
+    text: string;
+    loaderCalls: number;
+    providerRequestsJson: string;
+    loggedRequestsJson: string;
+    firstStepToolNames: string[];
+    secondStepToolNames: string[];
+    durableHookFailures: Array<{
+      type: "package/hook-failed";
+      packageId: string;
+      event: string;
+      generationId: string;
+      message: string;
+    }>;
+  }> {
     this.loaderIds = [];
+    this.providerRequests = [];
+    await this.ctx.storage.delete("session-events");
     const { composition } = await this.mount(input);
     try {
       await composition.verify(new AbortController().signal);
@@ -437,9 +512,33 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       const message = composition.runtime.agent.agent.session
         .deriveMessages()
         .at(-1);
+      const loggedRequests = composition.runtime.agent.agent.session.events
+        .filter((event) => event.type === "model/request")
+        .map((event) => structuredClone(event.request));
+      const durableHookFailures = (
+        (await this.ctx.storage.get<SessionEvent[]>("session-events")) ?? []
+      ).filter(
+        (
+          event,
+        ): event is Extract<SessionEvent, { type: "package/hook-failed" }> =>
+          event.type === "package/hook-failed",
+      );
       return {
         text: message?.role === "assistant" ? message.content : "",
         loaderCalls: this.loaderIds.length,
+        providerRequestsJson: JSON.stringify(this.providerRequests),
+        loggedRequestsJson: JSON.stringify(loggedRequests),
+        firstStepToolNames:
+          this.providerRequests[0]?.tools.map((tool) => tool.name) ?? [],
+        secondStepToolNames:
+          this.providerRequests[1]?.tools.map((tool) => tool.name) ?? [],
+        durableHookFailures: durableHookFailures.map((event) => ({
+          type: event.type,
+          packageId: event.packageId,
+          event: event.event,
+          generationId: event.generationId,
+          message: event.message,
+        })),
       };
     } finally {
       await composition.dispose();

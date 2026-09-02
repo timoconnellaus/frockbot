@@ -9,7 +9,7 @@
 //     `widget` payload ends the Turn; row 53's `approval` payload is the only
 //     other one that does, and for the same reason — the Bot has nothing left
 //     to do until a person answers.
-//  3. One `agent/request` handler, which is where the transcript seam is: a
+//  3. One `agent/message-window` handler, which is where the transcript seam is: a
 //     chat Turn's request carries only chat Turns, and an automation Turn's
 //     carries its own Turn and a pointer to the parent it may not read. See
 //     `history.ts`.
@@ -313,18 +313,18 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
     // Applied after the rest of the chain, so this Package has the last word on
     // what history a request carries — the one rule the visible transcript
     // rests on.
-    ctx.on("agent/request", async (agent, _request, _signal, next) => {
-      const proposed = await next();
-      return {
-        ...proposed,
-        messages: turnScopedMessagesV1({
+    ctx.on(
+      "agent/message-window",
+      async (agent, _messages, _turn, _step, _signal, next) => {
+        const proposed = await next();
+        return turnScopedMessagesV1({
           events: agent.session.events,
-          messages: proposed.messages,
+          messages: proposed,
           pointer: automationParentPointerV1,
           sessionId: agent.session.id,
-        }),
-      };
-    }),
+        });
+      },
+    ),
   ];
   return () => {
     for (const dispose of disposers.toReversed()) dispose();

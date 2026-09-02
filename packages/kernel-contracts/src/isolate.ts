@@ -20,6 +20,12 @@
 // and the capability requests, and the isolate produces the health report.
 import type { TurnAdmissionV1 } from "./tool-execution.js";
 import {
+  BOT_ISOLATE_HOOK_EVENTS_V1,
+  isBotIsolateHookEventNameV1,
+  type BotIsolateHookEventNameV1,
+  type LoopEventPayloadMapV1,
+} from "./loop-events.js";
+import {
   decodeTurnTypeV1,
   type LlmStreamEvent,
   type NormalizedModelRequest,
@@ -28,15 +34,14 @@ import {
 
 /**
  * The wire contract version the kernel wrapper emits. Version 2 added
- * per-tool turn admission; a version 1 isolate declares no admission and its
- * tools are therefore offered on every turn type.
+ * per-tool turn admission. Version 3 added declared loop hooks and hook RPC.
  */
-export const ISOLATE_CONTRACT_VERSION = 2;
+export const ISOLATE_CONTRACT_VERSION = 3;
 
 /** Every contract version the kernel still decodes. */
-export type IsolateContractVersion = 1 | 2;
+export type IsolateContractVersion = 1 | 2 | 3;
 
-const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [1, 2];
+const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [1, 2, 3];
 
 /** The upper bound on a single isolate invocation, enforced on both sides. */
 export const ISOLATE_MAX_DEADLINE_MS = 60_000;
@@ -73,12 +78,32 @@ export interface IsolateToolResultV1 {
   isError: boolean;
 }
 
+export interface IsolateHookInvocationV1<
+  Event extends BotIsolateHookEventNameV1 = BotIsolateHookEventNameV1,
+> {
+  schemaVersion: 1;
+  event: Event;
+  payload: LoopEventPayloadMapV1[Event];
+  botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  generationId: string;
+  deadlineMs: number;
+}
+
+export type IsolateHookResultV1 =
+  | { schemaVersion: 1; status: "unchanged" }
+  | { schemaVersion: 1; status: "replaced"; replacement: unknown };
+
 export interface IsolateHealthV1 {
   schemaVersion: 1;
   ok: boolean;
   packageId: string;
   contractVersion: IsolateContractVersion;
   tools: IsolateToolDescriptorV1[];
+  /** Contract version 3 and later. */
+  hooks?: BotIsolateHookEventNameV1[];
 }
 
 /** What `IDENTITY` carries into the isolate. Structured-clonable, never a stub. */
@@ -148,6 +173,7 @@ export type IsolateModelOutcomeV1 =
 export interface BotIsolateEntrypoint {
   health(): Promise<IsolateHealthV1>;
   execute(invocation: IsolateToolInvocationV1): Promise<IsolateToolResultV1>;
+  hook(invocation: IsolateHookInvocationV1): Promise<IsolateHookResultV1>;
 }
 
 /**
@@ -180,13 +206,14 @@ export type BotPackageModelOutcomeV1 =
   | IsolateCapabilityFailureV1;
 
 /**
- * The exact `ctx` passed to a Bot-authored Package's
- * `execute(tool, input, ctx)`. The model-facing declaration is generated from
- * this interface, and the wrapper's implementation is compile- and test-
- * checked against the same keys.
+ * The common exact `ctx` passed to a Bot-authored Package's tool and hook.
+ * The model-facing declarations are generated from these interfaces, and the
+ * wrapper's implementation is compile- and test-checked against the same
+ * keys.
  */
-export interface BotPackageExecutionContextV1 {
-  readonly tool: string;
+export interface BotPackageContextV1 {
+  readonly tool?: string;
+  readonly event?: BotIsolateHookEventNameV1;
   readonly botId: string;
   readonly sessionId: string;
   readonly runId: string;
@@ -202,6 +229,16 @@ export interface BotPackageExecutionContextV1 {
   invokeModel(
     request: NormalizedModelRequest,
   ): Promise<BotPackageModelOutcomeV1>;
+}
+
+export interface BotPackageExecutionContextV1 extends BotPackageContextV1 {
+  readonly tool: string;
+  readonly event?: never;
+}
+
+export interface BotPackageHookContextV1 extends BotPackageContextV1 {
+  readonly tool?: never;
+  readonly event: BotIsolateHookEventNameV1;
 }
 
 /**
@@ -495,16 +532,93 @@ export function decodeIsolateToolResultV1(
   };
 }
 
+export function decodeIsolateHookInvocationV1(
+  input: unknown,
+  label = "isolate hook invocation",
+): IsolateHookInvocationV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    [
+      "schemaVersion",
+      "event",
+      "payload",
+      "botId",
+      "sessionId",
+      "runId",
+      "turnId",
+      "generationId",
+      "deadlineMs",
+    ],
+    label,
+  );
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (!isBotIsolateHookEventNameV1(value.event)) {
+    throw new Error(`${label}.event is invalid`);
+  }
+  // The host authored the event snapshot. The event-specific replacement is
+  // decoded on the return seam; here JSON validation prevents a live object
+  // from being smuggled into Bot code by a future host caller.
+  jsonValue(value.payload, `${label}.payload`);
+  const deadlineMs = value.deadlineMs;
+  if (
+    !Number.isSafeInteger(deadlineMs) ||
+    (deadlineMs as number) <= 0 ||
+    (deadlineMs as number) > ISOLATE_MAX_DEADLINE_MS
+  ) {
+    throw new Error(`${label}.deadlineMs is out of range`);
+  }
+  return {
+    schemaVersion: 1,
+    event: value.event,
+    payload: value.payload as LoopEventPayloadMapV1[BotIsolateHookEventNameV1],
+    botId: boundedString(value.botId, `${label}.botId`, 256),
+    sessionId: boundedString(value.sessionId, `${label}.sessionId`, 257),
+    runId: boundedString(value.runId, `${label}.runId`, 128),
+    turnId: boundedString(value.turnId, `${label}.turnId`, 128),
+    generationId: boundedString(
+      value.generationId,
+      `${label}.generationId`,
+      256,
+    ),
+    deadlineMs: deadlineMs as number,
+  };
+}
+
+export function decodeIsolateHookResultV1(
+  input: unknown,
+  label = "isolate hook result",
+): IsolateHookResultV1 {
+  const value = record(input, label);
+  if (value.status === "unchanged") {
+    exactKeys(value, ["schemaVersion", "status"], label);
+    if (value.schemaVersion !== 1) {
+      throw new Error(`${label}.schemaVersion is unsupported`);
+    }
+    return { schemaVersion: 1, status: "unchanged" };
+  }
+  exactKeys(value, ["schemaVersion", "status", "replacement"], label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (value.status !== "replaced") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  jsonValue(value.replacement, `${label}.replacement`);
+  return {
+    schemaVersion: 1,
+    status: "replaced",
+    replacement: value.replacement,
+  };
+}
+
 export function decodeIsolateHealthV1(
   input: unknown,
   label = "isolate health",
 ): IsolateHealthV1 {
   const value = record(input, label);
-  exactKeys(
-    value,
-    ["schemaVersion", "ok", "packageId", "contractVersion", "tools"],
-    label,
-  );
   if (value.schemaVersion !== 1) {
     throw new Error(`${label}.schemaVersion is unsupported`);
   }
@@ -514,6 +628,18 @@ export function decodeIsolateHealthV1(
   if (contractVersion === undefined) {
     throw new Error(`${label}.contractVersion is unsupported`);
   }
+  exactKeys(
+    value,
+    [
+      "schemaVersion",
+      "ok",
+      "packageId",
+      "contractVersion",
+      "tools",
+      ...(contractVersion >= 3 ? ["hooks"] : []),
+    ],
+    label,
+  );
   if (typeof value.ok !== "boolean") {
     throw new Error(`${label}.ok must be a boolean`);
   }
@@ -533,12 +659,32 @@ export function decodeIsolateHealthV1(
   if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
     throw new Error(`${label}.tools contains duplicate names`);
   }
+  if (
+    contractVersion >= 3 &&
+    (!Array.isArray(value.hooks) ||
+      value.hooks.length > BOT_ISOLATE_HOOK_EVENTS_V1.length)
+  ) {
+    throw new Error(`${label}.hooks must be a bounded array`);
+  }
+  const hooks =
+    contractVersion < 3
+      ? []
+      : (value.hooks as unknown[]).map((hook, index) => {
+          if (!isBotIsolateHookEventNameV1(hook)) {
+            throw new Error(`${label}.hooks[${index}] is invalid`);
+          }
+          return hook;
+        });
+  if (new Set(hooks).size !== hooks.length) {
+    throw new Error(`${label}.hooks contains duplicates`);
+  }
   return {
     schemaVersion: 1,
     ok: value.ok,
     packageId: boundedString(value.packageId, `${label}.packageId`, 128),
     contractVersion,
     tools,
+    hooks,
   };
 }
 

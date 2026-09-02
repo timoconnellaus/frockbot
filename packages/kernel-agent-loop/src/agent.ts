@@ -1,6 +1,8 @@
 import { type Context, Service } from "cordis";
 import type {
   ModelBindingSnapshot,
+  LoopAgentInputV1,
+  LoopAgentRuntimeV1,
   NormalizedModelRequest,
   Session,
   SkillRefV1,
@@ -38,7 +40,7 @@ export interface AgentOptions {
   modelBinding?: ModelBindingSnapshot;
 }
 
-export interface AgentInput {
+export interface AgentInput extends LoopAgentInputV1 {
   messageId: string;
   text: string;
   /**
@@ -61,7 +63,7 @@ export type PreStepDecision =
 
 export type RequestErrorAction = { kind: "retry" } | { kind: "fail" };
 
-export interface Agent {
+export interface Agent extends LoopAgentRuntimeV1 {
   readonly id: string;
   readonly botId: string;
   readonly session: Session;
@@ -87,22 +89,6 @@ declare module "cordis" {
   }
 
   interface Events {
-    "agent/created": (agent: Agent) => void;
-    "agent/disposed": (agent: Agent) => void;
-    "agent/status": (agent: Agent, status: AgentStatus) => void;
-    "agent/inbox/inserted": (agent: Agent, input: AgentInput) => void;
-    "agent/inbox/claimed": (
-      agent: Agent,
-      inputs: AgentInput[],
-      turn: number,
-    ) => void;
-    "agent/pre-step": (
-      agent: Agent,
-      inputs: AgentInput[],
-      turn: number,
-      step: number,
-      next: () => Promise<PreStepDecision>,
-    ) => Promise<PreStepDecision>;
     "agent/request": (
       agent: Agent,
       request: NormalizedModelRequest,
@@ -121,11 +107,6 @@ declare module "cordis" {
       outcome: "completed" | "not-started",
     ) => Promise<void>;
     "agent/turn-stopping": (agent: Agent, turn: number) => Promise<void>;
-    "agent/cancel-requested": (
-      agent: Agent,
-      reason: "user" | "shutdown",
-    ) => void;
-    "agent/error": (agent: Agent, error: unknown) => void;
   }
 }
 

@@ -187,6 +187,7 @@ skill/injected
 skill/invoked
 skill/write-intent
 skill/written
+package/hook-failed
 step/end
 turn/end
 session/disposed
@@ -207,16 +208,25 @@ agent/status
 agent/inbox/inserted
 agent/inbox/claimed
 agent/pre-step
+agent/message-window
+agent/tool-exposure
 agent/request
 agent/request-error
+agent/step-continuation
 agent/turn-stopping
 agent/cancel-requested
 agent/error
 ```
 
+`@frockbot/kernel-contracts/loop-events` is the single public inventory. It
+names every loop event, its dispatch mode, its structured payload DTO, its
+waterfall return, and whether a Bot isolate may hook it. In-process listeners
+retain the richer Cordis arguments, but isolate payloads contain no live Agent,
+Session, Context, AbortSignal, storage handle, credential, or binding.
+
 Cordis dispatch modes are deliberate:
 
-- waterfall for `agent/pre-step`, `agent/request`, `agent/request-error`, and guarded tool execution;
+- waterfall for admission, prompt assembly, message-window shaping, tool exposure, request policy, tool execution and results, and per-step continuation;
 - serial for terminal checkpoints such as `agent/turn-stopping`;
 - emit for lifecycle, inbox, status, and error observations;
 - parallel only for checkpoints where every independent listener must settle, such as a persistence flush.
@@ -229,14 +239,16 @@ input/queued wakes agent
   → agent/pre-step waterfall
   → if rejected: append turn/end(blocked)
   → append step/start and user/message for newly admitted input
-  → assemble system prompt and tool schemas
-  → derive model history from session log
+  → assemble system prompt
+  → derive model history, then agent/message-window
+  → derive tool schemas, then agent/tool-exposure
   → agent/request waterfall
   → append the final normalized model/request
   → stream through the selected LLM provider
   → append assistant/chunk events
   → append assistant/message
   → journal and execute any guarded tool calls
+  → agent/step-continuation decides continue-or-stop
   → append step/end in a finally path
   → repeat from agent/pre-step while work remains
   → run agent/turn-stopping
@@ -252,9 +264,9 @@ The Durable Object bindings remain authority, transactional storage, and schedul
 
 Bundling Bot-authored Package source into an immutable module runs outside the Durable Object, in the dedicated `apps/cloudflare-bundler` Worker reached through the `PACKAGE_BUNDLER` service binding. That Worker has no bindings at all: it accepts exactly one 256 KB `package.ts`, refuses a `package.json` and any surviving import specifier so Bot-authored text can never drive a network subrequest, and never throws across the binding — every rejection is a decoded `status: "failed"` result with diagnostics. It returns the module bytes and a content-addressed `ArtifactRefV1` rather than writing storage itself, so the Durable Object keeps ownership of the durable effect: it records its authorship intent, calls the bundler, then writes `packages/<contentHash>.mjs` and the original `packages/<sourceHash>.ts` to the artifact bucket. Both readers verify the content hash before returning bytes; the artifact record names both immutable keys, and generation inspection reads source through that record.
 
-A Composition member that carries an artifact is mounted in a Bot isolate rather than the kernel isolate. `BotIsolateContributionHost` in `@frockbot/kernel-composition` reads the hash-verified module from the artifact bucket, loads it through the Bot Durable Object's second `worker_loaders` binding `BOT_PACKAGES` with `globalOutbound: null`, a CPU and subrequest limit, and a two-entry module map — the kernel-generated wrapper `index.js` and the Package's `package.js` — and calls `health()` inside the same guarded phase, because `.get()` is lazy and a broken artifact only fails on the first RPC. The loader id is `bot-package:<userId>:<botId>:<hash>`, where the hash content-addresses the wrapper text, the Package artifact, and the digest of the Assignment-derived bindings together: a loader id is served from cache, so anything baked into the isolate must change the id or a stale isolate would keep answering. Each `health().tools` entry becomes one `ToolDefinition` whose `execute` RPCs into the isolate with a `deadlineMs` and a Durable-Object-side race, since an `AbortSignal` cannot cross the boundary. Bot code sees exactly two bindings: `IDENTITY`, a plain object, and `CAPABILITIES`, a loopback service binding minted with `ctx.exports.BotCapabilities({ props })` — an `RpcTarget` placed in a loaded Worker's `env` is rejected by workerd, so per-invocation narrowed objects are returned from the stub's methods instead. `list` is Assignment-derived, `requestAuthority` always records a durable pending decision and never grants, and `invokeModel` refuses with a pending decision unless an enabled model Assignment matches; when one does, the Bot Durable Object records the normalized request and streams the completion back through the mounted provider path as an NDJSON byte stream, the only stream shape workerd RPC carries. `verify()` surfaces an isolate member that failed to resolve, mount, or answer `health()`, tagging each with the load site it failed at.
+A Composition member that carries an artifact is mounted in a Bot isolate rather than the kernel isolate. `BotIsolateContributionHost` in `@frockbot/kernel-composition` reads the hash-verified module from the artifact bucket, loads it through the Bot Durable Object's second `worker_loaders` binding `BOT_PACKAGES` with `globalOutbound: null`, a CPU and subrequest limit, and a two-entry module map — the kernel-generated wrapper `index.js` and the Package's `package.js` — and calls `health()` inside the same guarded phase, because `.get()` is lazy and a broken artifact only fails on the first RPC. The loader id is `bot-package:<userId>:<botId>:<hash>`, where the hash content-addresses the wrapper text, the Package artifact, and the digest of the Assignment-derived bindings together: a loader id is served from cache, so anything baked into the isolate must change the id or a stale isolate would keep answering. Each `health().tools` entry becomes one `ToolDefinition` whose `execute` RPCs into the isolate with a `deadlineMs` and a Durable-Object-side race, since an `AbortSignal` cannot cross the boundary. Each `health().hooks` name must match the manifest exactly and becomes one listener on this Bot generation's Cordis root, appended after first-party listeners. The listener snapshots only the public event DTO, invokes the isolate under the same two-sided deadline, and exactly decodes an optional replacement. A throw, timeout, or undecodable result passes the current waterfall value through and appends durable `package/hook-failed`; it never wedges the loop. Bot code sees exactly two bindings: `IDENTITY`, a plain object, and `CAPABILITIES`, a loopback service binding minted with `ctx.exports.BotCapabilities({ props })` — an `RpcTarget` placed in a loaded Worker's `env` is rejected by workerd, so per-invocation narrowed objects are returned from the stub's methods instead. Tools and hooks receive the same generated narrow context and no live loop object; `tool` and `event` are mutually exclusive selectors. `list` is Assignment-derived, `requestAuthority` always records a durable pending decision and never grants, and `invokeModel` refuses with a pending decision unless an enabled model Assignment matches; when one does, the Bot Durable Object records the normalized request and streams the completion back through the mounted provider path as an NDJSON byte stream, the only stream shape workerd RPC carries. `verify()` surfaces an isolate member that failed to resolve, mount, or answer `health()`, tagging each with the load site it failed at.
 
-Composition fails closed at the next admitted Turn. `activateCompositionV1` in `@frockbot/kernel-composition` reads the pin, mounts it, and verifies it — every isolate member answering `health()` with `contractVersion: 1` and a non-empty tool list inside a deadline — then commits it, records it as the new last known good, and supersedes its parent; on failure it records a `CompositionFailureV1` naming the phase (`resolve` for the artifact read, `bundle` for the authoring-time site, `mount` for `LOADER.get` and the first RPC, `health` for a mounted isolate that failed its declared check), marks the generation `failed`, mounts the last known good, raises a notification on the Bot's existing visible-failure surface, re-pins the admitted run to what it actually ran under, and admits the Turn anyway. The third consecutive failure of one generation writes `composition:quarantine:<generationId>`, marks it `quarantined`, and moves `composition:current` back to the last known good, so it is never retried until a User reverts or the Bot authors a new generation. Quarantine is per generation, not per Bot: a later, unrelated generation activates normally. `DurableCompositionFailureLog` in `@frockbot/kernel-do` owns `composition:failure:<generationId>:<attempt>`, `composition:failure-count:<generationId>`, and the quarantine record; a generation that finally activates clears its consecutive count while its recorded failures survive as repair history, and both reach the hosted client through `CompositionGenerationViewV1` with diagnostics stripped.
+Composition fails closed at the next admitted Turn. `activateCompositionV1` in `@frockbot/kernel-composition` reads the pin, mounts it, and verifies it — every isolate member answers `health()` with a supported contract version, a non-empty manifest-matching tool list, and a manifest-matching hook list inside a deadline — then commits it, records it as the new last known good, and supersedes its parent; on failure it records a `CompositionFailureV1` naming the phase (`resolve` for the artifact read, `bundle` for the authoring-time site, `mount` for `LOADER.get` and the first RPC, `health` for a mounted isolate that failed its declared check), marks the generation `failed`, mounts the last known good, raises a notification on the Bot's existing visible-failure surface, re-pins the admitted run to what it actually ran under, and admits the Turn anyway. The third consecutive failure of one generation writes `composition:quarantine:<generationId>`, marks it `quarantined`, and moves `composition:current` back to the last known good, so it is never retried until a User reverts or the Bot authors a new generation. Quarantine is per generation, not per Bot: a later, unrelated generation activates normally. `DurableCompositionFailureLog` in `@frockbot/kernel-do` owns `composition:failure:<generationId>:<attempt>`, `composition:failure-count:<generationId>`, and the quarantine record; a generation that finally activates clears its consecutive count while its recorded failures survive as repair history, and both reach the hosted client through `CompositionGenerationViewV1` with diagnostics stripped.
 
 A Bot changes its Package setup through the first-party Authoring Package's three tools. `package_author` takes a `packageId`, display name, the complete declared `tools` array, and one TypeScript `package.ts`; model access is the Assignment-gated `ctx.invokeModel`, not a manifest field. Before quota reservation the host refuses a non-Bot package id or a tool name already mounted by another Package. It generates and strictly decodes a schema-3 manifest with runtime `{ entry: "./package.js", host: "bot-isolate" }` and the exact tool declarations, stores that manifest by hash, appends `package/author-intent`, records the Durable Object intent, bundles, stores source and artifact, and proposes a Bot-provenance member. Every new authored generation starts from last-known-good and replaces only the package being authored, so a failed or quarantined proposal is never inherited and re-authoring the same id repairs it. Mount reads the stored manifest, verifies its hash and identity, then requires isolate health to report exactly the declared tool names; descriptions and schemas still come from the running isolate. A failed activation prepends generation, Package, phase, message, diagnostics, and quarantine state to the same fallback Turn's durable `user/message`, so the exact `model/request` records what the Bot learned.
 
@@ -273,6 +285,7 @@ Tool execution is a pipeline rather than a direct function call:
 ```text
 tools/pre-execute
   → validate permission and arguments
+  → evaluate ctx.tools.guard deny-only listeners
   → append durable tool/call execution intent
   → tools/execute
   → tools/post-execute
@@ -281,7 +294,7 @@ tools/pre-execute
   → tools/result observation
 ```
 
-No side-effecting tool implementation runs before its `tool/call` intent is durable. A crash before effect admission is structurally repaired as interrupted. After admission, an uncertain tool effect remains reconciling: an idempotent tool may retry with the same `effectId`, while other tools use provider-neutral reconciliation and remain resumable when the outcome is unavailable.
+No side-effecting tool implementation runs before its `tool/call` intent is durable. `ctx.tools.guard(fn)` is a first-party-only seam between `tools/pre-execute` and `tools/execute`; a guard returns only a denial reason, so the first denial is monotonic and a later listener has no vocabulary to lift it. An isolate `tools/pre-execute` hook is decoded under the same monotonic rule: it may turn `ready` into `denied`, never the reverse or a changed call. A crash before effect admission is structurally repaired as interrupted. After admission, an uncertain tool effect remains reconciling: an idempotent tool may retry with the same `effectId`, while other tools use provider-neutral reconciliation and remain resumable when the outcome is unavailable.
 
 A tool definition declares whether calls may run concurrently, which resources they mutate, and whether it supports idempotent retry. The loop may use bounded parallelism only when definitions and policy allow it. Permission prompts and sandbox selection are plugins at the tool seam, not branches in the loop.
 

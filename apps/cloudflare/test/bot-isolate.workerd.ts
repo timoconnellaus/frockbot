@@ -3,6 +3,9 @@ import { describe, expect, test } from "vitest";
 import {
   PROBE_BROKEN_SOURCE,
   PROBE_PACKAGE_SOURCE,
+  PROBE_THROWING_HOOK_SOURCE,
+  PROBE_TIMEOUT_HOOK_SOURCE,
+  PROBE_UNDECODABLE_HOOK_SOURCE,
 } from "./bot-isolate-probe.ts";
 import { provisionBot, PROVISIONED_MODEL } from "./provision-bot.ts";
 
@@ -62,6 +65,62 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.text).toBe("tool:dcba");
     expect(result.loaderCalls).toBe(1);
   });
+
+  test("a Bot-authored hook shapes one step and the log equals the provider request", async () => {
+    const stub = probe(`hook-request-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const result = await stub.runTurn({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      text: "abcd",
+    });
+
+    expect(result.providerRequestsJson).toBe(result.loggedRequestsJson);
+    expect(result.firstStepToolNames).toContain("hook_marker");
+    expect(result.secondStepToolNames).not.toContain("hook_marker");
+    expect(result.durableHookFailures).toEqual([]);
+  });
+
+  test.each([
+    ["throws", PROBE_THROWING_HOOK_SOURCE, /probe hook exploded/],
+    ["times out", PROBE_TIMEOUT_HOOK_SOURCE, /exceeded its deadline/],
+    [
+      "returns an undecodable value",
+      PROBE_UNDECODABLE_HOOK_SOURCE,
+      /invalid fields/,
+    ],
+  ])(
+    "a hook that %s is skipped and recorded",
+    async (_label, source, message) => {
+      const stub = probe(`hook-failure-${crypto.randomUUID()}`);
+      const artifact = await stub.seedArtifact(source);
+
+      const result = await stub.runTurn({
+        userId: "user-1",
+        botId: "bot-1",
+        artifact,
+        text: "abcd",
+        deadlineMs: 10,
+      });
+
+      expect(result.text).toBe("tool:dcba");
+      expect(result.providerRequestsJson).toBe(result.loggedRequestsJson);
+      expect(result.firstStepToolNames).not.toContain("hook_marker");
+      expect(result.durableHookFailures).toHaveLength(1);
+      expect(result.durableHookFailures[0]).toMatchObject({
+        type: "package/hook-failed",
+        packageId: "bot-authored",
+        event: "agent/tool-exposure",
+      });
+      expect(
+        result.durableHookFailures[0]?.type === "package/hook-failed"
+          ? result.durableHookFailures[0].message
+          : "",
+      ).toMatch(message);
+    },
+  );
 
   test("a Turn that uses no isolate tool makes no loader call", async () => {
     const stub = probe(`no-isolate-${crypto.randomUUID()}`);

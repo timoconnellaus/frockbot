@@ -1061,11 +1061,16 @@ describe("decodeFrockBotManifest", () => {
           inputSchema: { type: "object" },
         },
       ],
+      hooks: ["agent/tool-exposure", "tools/post-execute"],
       permissions: [],
     });
 
     expect(decoded.contributions.runtime?.host).toBe("bot-isolate");
     expect(decoded.tools?.map((tool) => tool.name)).toEqual(["look_up"]);
+    expect(decoded.hooks).toEqual([
+      "agent/tool-exposure",
+      "tools/post-execute",
+    ]);
   });
 
   test("requires Bot isolate runtime and tools declarations together", () => {
@@ -1086,6 +1091,13 @@ describe("decodeFrockBotManifest", () => {
         },
       }),
     ).toThrow(/must appear together/);
+    expect(() =>
+      decodeFrockBotManifest({
+        ...base,
+        contributions: { runtime: { entry: "./package.js" } },
+        hooks: ["agent/tool-exposure"],
+      }),
+    ).toThrow(/hooks require a bot-isolate/);
     expect(() =>
       decodeFrockBotManifest({
         ...base,
