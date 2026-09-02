@@ -925,6 +925,46 @@ describe("Bot selection", () => {
     ).rejects.toThrow(failure);
     expect(provided.value.settingsError).toBe(failure);
   });
+
+  test("shows the backend reason when adding a Package is refused", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const failure =
+      'Package "custom-models" requires Package "settings" to be installed and enabled; enable "settings" first';
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        executeConfiguration: (command) =>
+          Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            revision: command.expectedRevision,
+            status: "rejected",
+            failure,
+          }),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.userSettings = {
+      schemaVersion: 1,
+      revision: 2,
+      profile: { name: "User" },
+      packages: [],
+      connections: [],
+    };
+
+    await expect(
+      provided.value.installPackage("custom-models", "0.0.1"),
+    ).rejects.toThrow(failure);
+    expect(provided.value.settingsError).toBe(failure);
+  });
 });
 
 describe("detached Turn projection", () => {

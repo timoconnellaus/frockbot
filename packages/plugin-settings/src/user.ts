@@ -17,6 +17,7 @@ import {
   type PackageSettingValueV1,
   type OperationReceiptV1,
   type PackageInstallationView,
+  type StoredUserSettingsPackageV1,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -33,6 +34,7 @@ import type { Plugin } from "cordis";
 
 const STATE_KEY = "user-configuration";
 const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
+const DEFAULT_PACKAGES_BOOTSTRAP_VERSION = 2;
 /**
  * The pinned Catalog generation lives beside the settings view rather than in
  * it, so pinning on a read never bumps the settings revision a client is
@@ -397,6 +399,9 @@ function applyUserCommand(
 export class UserSettingsBackendContribution {
   private readonly availablePackages: ReadonlySet<string>;
 
+  /** Catalog-relative facts supplied to the raw stored-settings migration. */
+  private readonly storedSettingsPackages: readonly StoredUserSettingsPackageV1[];
+
   /** Declared Package dependencies, by Package id and version. */
   private readonly packageDependencies: ReadonlyMap<
     string,
@@ -405,6 +410,13 @@ export class UserSettingsBackendContribution {
 
   /** The immutable first-party installation rows written on first read. */
   private readonly defaultPackages: readonly PackageInstallationView[];
+
+  /**
+   * Packages introduced by the default-enablement rollout, plus their
+   * dependency closure. A v1 marker predates those rows, so this is the one
+   * bounded set that marker migration may add without replaying every default.
+   */
+  private readonly enablementRolloutPackages: readonly PackageInstallationView[];
 
   /** Declared User-level settings, by Package id and version. */
   private readonly packageSettingDefinitions: ReadonlyMap<
@@ -420,6 +432,11 @@ export class UserSettingsBackendContribution {
   >();
 
   constructor(private readonly host: UserSettingsBackendHost) {
+    this.storedSettingsPackages = host.availablePackages.map((pkg) => ({
+      packageId: pkg.packageId,
+      version: pkg.version,
+      ...(pkg.dependencies ? { dependencies: pkg.dependencies } : {}),
+    }));
     this.availablePackages = new Set(
       host.availablePackages.map(
         ({ packageId, version }) => `${packageId}\u0000${version}`,
@@ -452,6 +469,26 @@ export class UserSettingsBackendContribution {
           ]
         : [],
     );
+    const byPackageId = new Map(
+      host.availablePackages.map((pkg) => [pkg.packageId, pkg]),
+    );
+    const rolloutPackageIds = new Set(
+      host.availablePackages
+        .filter(
+          (pkg) => pkg.installByDefault && pkg.defaultEnablement !== undefined,
+        )
+        .map((pkg) => pkg.packageId),
+    );
+    for (const packageId of rolloutPackageIds) {
+      for (const dependencyId of Object.keys(
+        byPackageId.get(packageId)?.dependencies ?? {},
+      )) {
+        if (byPackageId.has(dependencyId)) rolloutPackageIds.add(dependencyId);
+      }
+    }
+    this.enablementRolloutPackages = this.defaultPackages.filter((pkg) =>
+      rolloutPackageIds.has(pkg.packageId),
+    );
   }
 
   /**
@@ -480,11 +517,49 @@ export class UserSettingsBackendContribution {
           typeof marker !== "object" ||
           Array.isArray(marker) ||
           Object.keys(marker).length !== 1 ||
-          (marker as { schemaVersion?: unknown }).schemaVersion !== 1
+          ((marker as { schemaVersion?: unknown }).schemaVersion !== 1 &&
+            (marker as { schemaVersion?: unknown }).schemaVersion !==
+              DEFAULT_PACKAGES_BOOTSTRAP_VERSION)
         ) {
           throw new Error("Stored default Package bootstrap is invalid");
         }
-        return this.readSnapshot(transaction);
+        if (
+          (marker as { schemaVersion: number }).schemaVersion ===
+          DEFAULT_PACKAGES_BOOTSTRAP_VERSION
+        ) {
+          return this.readSnapshot(transaction);
+        }
+        const stored = await transaction.get<unknown>(STATE_KEY);
+        const current =
+          stored === undefined
+            ? initialState()
+            : decodeUserSettingsViewV1(
+                migrateStoredUserSettingsV1(
+                  stored,
+                  this.storedSettingsPackages,
+                ),
+              );
+        const installedPackageIds = new Set(
+          current.packages.map((pkg) => pkg.packageId),
+        );
+        const additions = this.enablementRolloutPackages.filter(
+          (pkg) => !installedPackageIds.has(pkg.packageId),
+        );
+        const next = {
+          ...current,
+          revision: current.revision + 1,
+          packages: [
+            ...current.packages,
+            ...additions.map((pkg) => structuredClone(pkg)),
+          ],
+        } satisfies UserSettingsViewV1;
+        await transaction.put({
+          [STATE_KEY]: next,
+          [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: {
+            schemaVersion: DEFAULT_PACKAGES_BOOTSTRAP_VERSION,
+          },
+        });
+        return structuredClone(next);
       }
       const current = await this.readSnapshot(transaction);
       const installedPackageIds = new Set(
@@ -503,7 +578,9 @@ export class UserSettingsBackendContribution {
       } satisfies UserSettingsViewV1;
       await transaction.put({
         [STATE_KEY]: next,
-        [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: { schemaVersion: 1 },
+        [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: {
+          schemaVersion: DEFAULT_PACKAGES_BOOTSTRAP_VERSION,
+        },
       });
       return structuredClone(next);
     };

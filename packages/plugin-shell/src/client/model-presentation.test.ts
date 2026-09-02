@@ -44,5 +44,14 @@ describe("model runtime presentation", () => {
         failure: 'Connection "work" is revoked; enable or reconnect it',
       }),
     ).toBe('Connection "work" is revoked; enable or reconnect it');
+    const disabledProvider =
+      'Package "provider-ollama-cloud" is not installed and enabled; enable it to use Connection "ollama-legacy"';
+    expect(
+      modelRuntimeLabel({
+        source: "account",
+        providerModelId: "glm-5.3-flash:cloud",
+        failure: disabledProvider,
+      }),
+    ).toBe(disabledProvider);
   });
 });

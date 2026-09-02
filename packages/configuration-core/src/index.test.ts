@@ -98,6 +98,137 @@ describe("stored configuration migrations", () => {
     );
   });
 
+  test("retires Catalog-orphaned platform state and disables inconsistent dependents", () => {
+    const stored = {
+      schemaVersion: 1,
+      revision: 12,
+      profile: { name: "Legacy User" },
+      packages: [
+        {
+          packageId: "retired-provider",
+          version: "0.0.1",
+          state: "installed" as const,
+        },
+        {
+          packageId: "current-provider",
+          version: "0.0.1",
+          state: "installed" as const,
+        },
+      ],
+      connections: [
+        {
+          connectionId: "retired-connection",
+          packageId: "retired-provider",
+          connectionTypeId: "retired-account",
+          displayName: "Retired",
+          state: "ready" as const,
+          safeMetadata: {},
+        },
+        {
+          connectionId: "current-connection",
+          packageId: "current-provider",
+          connectionTypeId: "current-account",
+          displayName: "Current",
+          state: "ready" as const,
+          safeMetadata: {},
+        },
+      ],
+      platformModel: {
+        connectionId: "retired-connection",
+        providerModelId: "retired-model",
+      },
+    };
+    const migrated = decodeUserSettingsViewV1(
+      migrateStoredUserSettingsV1(stored, [
+        {
+          packageId: "current-provider",
+          version: "0.0.1",
+          dependencies: { "model-choice": ">=0.0.1" },
+        },
+        { packageId: "model-choice", version: "0.0.1" },
+      ]),
+    );
+
+    expect(migrated.packages).toEqual([
+      {
+        packageId: "current-provider",
+        version: "0.0.1",
+        state: "disabled",
+      },
+    ]);
+    expect(migrated.connections).toEqual([stored.connections[1]]);
+    expect(migrated.platformModel).toBeUndefined();
+    expect(stored.packages).toHaveLength(2);
+    expect(stored.connections).toHaveLength(2);
+    expect(stored.platformModel).toBeDefined();
+  });
+
+  test("keeps version mismatches and malformed platform bindings visible", () => {
+    const versionMismatch = {
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "Existing User" },
+      packages: [
+        {
+          packageId: "provider",
+          version: "0.0.1",
+          state: "installed" as const,
+        },
+      ],
+      connections: [],
+    };
+    expect(
+      migrateStoredUserSettingsV1(versionMismatch, [
+        { packageId: "provider", version: "0.0.2" },
+      ]),
+    ).toBe(versionMismatch);
+
+    const remoteCatalogInstall = {
+      ...versionMismatch,
+      packages: [
+        {
+          packageId: "remote-provider",
+          version: "1.2.3",
+          state: "installed" as const,
+          provenance: "catalog" as const,
+          catalogId: "remote-provider",
+          catalogGeneration: "generation-1",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "remote-connection",
+          packageId: "remote-provider",
+          connectionTypeId: "remote-account",
+          displayName: "Remote",
+          state: "ready" as const,
+          safeMetadata: {},
+        },
+      ],
+    };
+    expect(
+      migrateStoredUserSettingsV1(remoteCatalogInstall, [
+        { packageId: "provider", version: "0.0.2" },
+      ]),
+    ).toBe(remoteCatalogInstall);
+
+    const malformedPlatform = {
+      ...versionMismatch,
+      platformModel: {
+        connectionId: "provider-connection",
+        providerModelId: "model",
+        unknown: true,
+      },
+    };
+    expect(() =>
+      decodeUserSettingsViewV1(
+        migrateStoredUserSettingsV1(malformedPlatform, [
+          { packageId: "provider", version: "0.0.1" },
+        ]),
+      ),
+    ).toThrow(ConfigurationDecodeError);
+  });
+
   test("keeps unknown User, Package, and Connection fields strict", () => {
     const current = {
       schemaVersion: 1,
