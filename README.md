@@ -114,15 +114,26 @@ Releases publish to npm through GitHub OIDC. There is no `NPM_TOKEN`, and no reg
 
 Trusted publishing cannot bootstrap itself. npm will only attach a trusted publisher to a package that already exists, so the very first publication of a name cannot come from a workflow that holds no token. `scripts/bootstrap-npm-trust.ts` breaks that loop once, from a maintainer's own npm session:
 
+It runs in two phases, because the halves need different credentials and only one of them can be automated:
+
 ```
-npm login                                     # a 2FA session; npm trust rejects tokens
-bun scripts/bootstrap-npm-trust.ts            # show the plan, change nothing
-NPM_BOOTSTRAP_TOKEN=npm_… bun scripts/bootstrap-npm-trust.ts --confirm
+bun scripts/bootstrap-npm-trust.ts                 # show the plan, change nothing
+
+# Phase one: claim the names. Unattended, with a bypass-2FA token.
+NPM_BOOTSTRAP_TOKEN=npm_… bun scripts/bootstrap-npm-trust.ts --publish-only --confirm
+
+# Phase two: name the publisher. Interactive, at a real terminal.
+npm login
+bun scripts/bootstrap-npm-trust.ts --trust-only --confirm
 ```
 
-It publishes a deprecated `0.0.0` placeholder under any name the registry does not have yet, then configures that package's trusted publisher. It is idempotent, so a name that already exists is never republished and a package that is already trusted is skipped. It needs npm 11.15.0 or later, which is what `npm trust` requires; the workflow itself only needs 11.5.1 and checks that before publishing.
+Phase one publishes a deprecated `0.0.0` placeholder under any name the registry does not have yet. `NPM_BOOTSTRAP_TOKEN` should be a granular access token with **bypass two-factor authentication** enabled and write access to the `@frockbot` scope, because npm otherwise asks for confirmation on every write and there are sixty names to claim. The script keeps the token in a throwaway config file so `~/.npmrc` is untouched, and it should be revoked the moment the phase finishes.
 
-Two-factor authentication is why the token is there. npm asks for confirmation on every write, and there are sixty names to claim. `NPM_BOOTSTRAP_TOKEN` should be a granular access token with **bypass two-factor authentication** enabled and write access to the `@frockbot` scope; the script keeps it in a throwaway config file so `~/.npmrc` is untouched, and it should be revoked as soon as the run finishes. Without it the placeholders still publish, but npm stops for a confirmation each time. Configuring the publishers never uses the token, because `npm trust` rejects tokens by design and needs the `npm login` session.
+Phase two configures each package's trusted publisher, and it cannot be automated at all. `npm trust` rejects tokens by design and demands a one-time password per call, so it needs a human at a terminal answering npm's browser prompt. Setting the account's two-factor mode to "authorization only" for the duration is what makes this bearable; set it back afterwards.
+
+The whole thing is idempotent and resumable. A name that already exists is never republished, a package that is already trusted is skipped, and a phase that stops halfway can simply be run again.
+
+Phase two needs npm 11.15.0 or later, which is where `npm trust` was added, and the script refuses to start without it — an older npm prints "Unknown command" and can still exit zero, which would silently record sixty configurations that do not exist. Watch out for a version manager leaving an older npm on `PATH`. The workflow itself only needs 11.5.1, and checks that before publishing.
 
 Once it has run, nothing about a release is manual again. A failure in the publish step reporting a 404 from the token exchange means the trusted publisher for that package is missing or misconfigured, not that the package is absent — re-run the bootstrap to reconcile it.
 

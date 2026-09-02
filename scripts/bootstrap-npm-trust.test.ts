@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import {
   bootstrap,
+  MINIMUM_TRUST_NPM,
   publishArguments,
   readWorkspacePackages,
+  supportsTrust,
   trustArguments,
   WORKFLOW_FILE,
   type CommandRunner,
@@ -19,6 +21,7 @@ function stubNpm(options: {
   trusted?: Set<string>;
   calls: string[][];
   invocations?: Invocation[];
+  npmVersion?: string;
 }): CommandRunner {
   return async (command, args, runOptions) => {
     options.calls.push([command, ...args]);
@@ -27,6 +30,9 @@ function stubNpm(options: {
       interactive: runOptions?.interactive === true,
     });
     const ok = { exitCode: 0, stdout: "", stderr: "" };
+    if (args[0] === "--version") {
+      return { ...ok, stdout: `${options.npmVersion ?? MINIMUM_TRUST_NPM}\n` };
+    }
     if (args[0] === "view") {
       const name = args[1] ?? "";
       return options.existing?.has(name)
@@ -171,6 +177,44 @@ describe("npm trusted publishing bootstrap", () => {
       expect(publish.interactive).toBe(true);
       expect(publish.args).not.toContain("--userconfig");
     }
+  });
+
+  test("an npm without the trust command is refused, not trusted blindly", async () => {
+    const calls: string[][] = [];
+    // 11.6.0 prints "Unknown command: trust" and can still exit zero, which
+    // would otherwise be recorded as sixty successful configurations.
+    const attempt = bootstrap({
+      root,
+      confirm: true,
+      phase: "trust",
+      run: stubNpm({ calls, npmVersion: "11.6.0" }),
+      log: () => {},
+    });
+    expect(attempt).rejects.toThrow(/has no `trust` command/);
+    expect(
+      calls.some((call) => call.includes("trust") && call.includes("github")),
+    ).toBe(false);
+  });
+
+  test("the npm version gate matches what npm trust needs", () => {
+    expect(supportsTrust("11.6.0")).toBe(false);
+    expect(supportsTrust("11.14.9")).toBe(false);
+    expect(supportsTrust(MINIMUM_TRUST_NPM)).toBe(true);
+    expect(supportsTrust("11.19.1")).toBe(true);
+    expect(supportsTrust("12.0.2")).toBe(true);
+    expect(supportsTrust("")).toBe(false);
+  });
+
+  test("the trust phase refuses a package that was never published", async () => {
+    const calls: string[][] = [];
+    const attempt = bootstrap({
+      root,
+      confirm: true,
+      phase: "trust",
+      run: stubNpm({ calls }),
+      log: () => {},
+    });
+    expect(attempt).rejects.toThrow(/not published yet/);
   });
 
   test("publish arguments carry the config only when there is one", () => {

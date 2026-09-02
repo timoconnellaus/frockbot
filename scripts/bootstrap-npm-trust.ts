@@ -126,6 +126,38 @@ const runCommand: CommandRunner = async (command, args, options) => {
   return { exitCode: await child.exited, stdout, stderr };
 };
 
+/** The npm that introduced `npm trust`. Older ones do not have the command. */
+export const MINIMUM_TRUST_NPM = "11.15.0";
+
+export function supportsTrust(version: string) {
+  const parse = (value: string) =>
+    value
+      .trim()
+      .split(".")
+      .map((part) => Number.parseInt(part, 10) || 0);
+  const [major, minor, patch] = parse(version);
+  const [wantMajor, wantMinor, wantPatch] = parse(MINIMUM_TRUST_NPM);
+  if (major !== wantMajor) return major > wantMajor;
+  if (minor !== wantMinor) return minor > wantMinor;
+  return patch >= wantPatch;
+}
+
+/**
+ * An npm without `trust` does not fail loudly — it prints "Unknown command"
+ * and can still exit zero, which would record sixty packages as trusted when
+ * none of them are. Refuse to start the phase instead.
+ */
+async function assertTrustSupported(run: CommandRunner) {
+  const result = await run("npm", ["--version"]);
+  const version = result.stdout.trim().split("\n").pop() ?? "";
+  if (!supportsTrust(version)) {
+    throw new Error(
+      `npm ${version || "(unknown)"} has no \`trust\` command; ${MINIMUM_TRUST_NPM} or later is required. ` +
+        "Check which npm is on PATH — a version manager may be pointing at an older one.",
+    );
+  }
+}
+
 async function packageExists(name: string, run: CommandRunner) {
   const result = await run("npm", ["view", name, "version"]);
   return result.exitCode === 0;
@@ -199,13 +231,24 @@ async function writeTokenConfig(token: string) {
   return { file, directory };
 }
 
+/**
+ * The two halves need different credentials, so they can be run apart. A
+ * token publishes unattended but `npm trust` refuses it, and the interactive
+ * session that `npm trust` needs cannot be driven from a script. Running
+ * `publish` first and `trust` second lets each half have the terminal, or
+ * not, as it requires.
+ */
+export type Phase = "publish" | "trust" | "both";
+
 export async function bootstrap(options: {
   root: string;
   confirm: boolean;
   token?: string;
+  phase?: Phase;
   run?: CommandRunner;
   log?: (line: string) => void;
 }) {
+  const phase = options.phase ?? "both";
   const run = options.run ?? runCommand;
   const log = options.log ?? ((line: string) => console.log(line));
   const packages = readWorkspacePackages(options.root);
@@ -228,26 +271,43 @@ export async function bootstrap(options: {
   let publishedCount = 0;
   let trustedCount = 0;
 
+  const publishing = phase === "publish" || phase === "both";
+  const trusting = phase === "trust" || phase === "both";
+
+  if (trusting && options.confirm) await assertTrustSupported(run);
+
   try {
     for (const entry of packages) {
       const exists = await packageExists(entry.name, run);
-      const trusted = exists && (await hasTrustedPublisher(entry.name, run));
+      const trusted =
+        exists && trusting && (await hasTrustedPublisher(entry.name, run));
 
-      if (exists && trusted) {
-        log(`  ${entry.name}: already published and trusted`);
+      if ((exists || !publishing) && (trusted || !trusting)) {
+        log(`  ${entry.name}: nothing to do`);
         continue;
       }
 
       if (!options.confirm) {
-        if (!exists) log(`  ${entry.name}: publish placeholder, then trust`);
+        if (!exists && publishing)
+          log(
+            `  ${entry.name}: publish placeholder${trusting ? ", then trust" : ""}`,
+          );
         else log(`  ${entry.name}: trust`);
         continue;
       }
 
-      if (!exists) {
+      if (!exists && publishing) {
         log(`  ${entry.name}: publishing placeholder`);
         await publishPlaceholder(entry, run, config?.file);
         publishedCount += 1;
+      }
+
+      if (!trusting) continue;
+
+      if (!exists && !publishing) {
+        throw new Error(
+          `${entry.name} is not published yet, so it cannot be trusted; run the publish phase first`,
+        );
       }
 
       log(`  ${entry.name}: configuring trusted publisher`);
@@ -287,6 +347,16 @@ export async function bootstrap(options: {
 
 if (import.meta.main) {
   const confirm = process.argv.includes("--confirm");
+  const phase: Phase = process.argv.includes("--publish-only")
+    ? "publish"
+    : process.argv.includes("--trust-only")
+      ? "trust"
+      : "both";
   const root = fileURLToPath(new URL("..", import.meta.url));
-  await bootstrap({ root, confirm, token: process.env[TOKEN_VARIABLE] });
+  await bootstrap({
+    root,
+    confirm,
+    phase,
+    token: process.env[TOKEN_VARIABLE],
+  });
 }
