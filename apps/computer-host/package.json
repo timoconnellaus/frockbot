@@ -22,6 +22,7 @@
     "container:start": "node container/server.ts",
     "dev": "wrangler dev --port 8790",
     "test": "bun test src container",
+    "test:workerd": "vitest run --config vitest.config.ts",
     "test:live": "bun run live-test.ts",
     "test:live:desktop": "bun run live-desktop-lease.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p container/tsconfig.json"
@@ -35,11 +36,13 @@
     "ws": "8.21.3"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.1.1",
     "@cloudflare/workers-types": "latest",
     "@types/bun": "1.4.0",
     "@types/node": "26.2.0",
     "@types/ws": "8.18.1",
     "typescript": "5.9.3",
+    "vitest": "^4.1.0",
     "wrangler": "latest"
   }
 }

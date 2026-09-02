@@ -19,6 +19,22 @@ test("the sidebar searches from the top and groups Bots only after a label exist
     name: "Search every Bot's conversations",
   });
   await expect(search).toBeVisible();
+  const createButton = sidebar.getByTitle("Create Bot");
+  const [searchBox, createButtonBox] = await Promise.all([
+    search.boundingBox(),
+    createButton.boundingBox(),
+  ]);
+  expect(searchBox).not.toBeNull();
+  expect(createButtonBox).not.toBeNull();
+  if (!searchBox || !createButtonBox) {
+    throw new Error("the sidebar controls are missing geometry");
+  }
+  expect(
+    Math.abs(searchBox.height - createButtonBox.height),
+  ).toBeLessThanOrEqual(1);
+  const searchCenter = searchBox.y + searchBox.height / 2;
+  const createButtonCenter = createButtonBox.y + createButtonBox.height / 2;
+  expect(Math.abs(searchCenter - createButtonCenter)).toBeLessThanOrEqual(1);
   await expect(
     page.locator("header.topbar").getByRole("button", { name: /Search/ }),
   ).toHaveCount(0);

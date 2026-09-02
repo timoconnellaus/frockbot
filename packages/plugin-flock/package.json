@@ -43,5 +43,13 @@
     "typescript": "5.9.3",
     "vite": "8.2.2",
     "vue-tsc": "3.3.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/plugin-flock"
   }
 }

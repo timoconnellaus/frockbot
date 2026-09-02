@@ -1,4 +1,7 @@
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
+import {
+  USER_PROFILE_PLACEHOLDER_NAME_V1,
+  type UserSettingsViewV1,
+} from "@frockbot/configuration-core";
 import {
   createUserSettingsBackendContribution,
   type UserSettingsBackendContribution,
@@ -156,7 +159,7 @@ function hasUnresolvedLinkEffect(
 const initialState = (): UserSettingsViewV1 => ({
   schemaVersion: 1,
   revision: 0,
-  profile: { name: "FrockBot user" },
+  profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1 },
   packages: [],
   connections: [],
 });

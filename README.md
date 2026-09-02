@@ -90,13 +90,74 @@ The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and nei
 
 ## Releases
 
-Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, and creates a GitHub release with generated notes. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
+Merging integrates; tagging ships. A pull request is queued to merge itself as soon as CI is green (`auto-merge.yml`), so `main` stays continuously integrated and nothing about landing a change touches production. Production moves only when a maintainer pushes a version tag.
 
-For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
+Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, creates a GitHub release with generated notes, and then deploys production. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
+
+Auto-merge waits on the branch ruleset for `main`, which requires the `Validate` and `Browser end-to-end` checks. That ruleset is what holds a queued pull request back; without it GitHub has nothing to wait for and would merge on open. **Allow auto-merge** must also be enabled in the repository's settings.
+
+One pull request cannot queue itself: GitHub refuses to let `GITHUB_TOKEN` auto-merge anything that edits `.github/workflows/`, since that needs a `workflows` scope the Actions token cannot hold. A pull request that changes CI is merged by hand and the workflow logs a warning saying so.
+
+Neither leg is finished when it starts, so `scripts/ci-watch.ts` watches each to a terminal state and reduces it to an exit code — `0` landed, `1` failed, `2` still pending:
+
+```
+bun scripts/ci-watch.ts pr 128           # polls until merged, or names the red check
+bun scripts/ci-watch.ts release v0.2.0   # polls until production deployed
+bun scripts/ci-watch.ts pr 128 --once    # report now and exit, for a caller that paces itself
+```
+
+It reports the two quiet failures by name rather than waiting them out: a pull request whose checks all passed but whose merge was never queued, and a release whose packages published while `Deploy FrockBot app` failed — a GitHub release standing in front of a production that never moved.
+
+### Trusted publishing
+
+Releases publish to npm through GitHub OIDC. There is no `NPM_TOKEN`, and no registry credential exists in this repository at all: each package names `timoconnellaus/frockbot` and the workflow file `release.yml` as its trusted publisher, and npm exchanges the job's OIDC identity for a credential that expires with the job. Provenance attestation comes with it, so `--provenance` is never passed.
+
+Trusted publishing cannot bootstrap itself. npm will only attach a trusted publisher to a package that already exists, so the very first publication of a name cannot come from a workflow that holds no token. `scripts/bootstrap-npm-trust.ts` breaks that loop once, from a maintainer's own npm session:
+
+```
+npm login                                     # a 2FA session; npm trust rejects tokens
+bun scripts/bootstrap-npm-trust.ts            # show the plan, change nothing
+bun scripts/bootstrap-npm-trust.ts --confirm  # publish placeholders, then trust each
+```
+
+It publishes a deprecated `0.0.0` placeholder under any name the registry does not have yet, then configures that package's trusted publisher. It is idempotent, so a name that already exists is never republished and a package that is already trusted is skipped. It needs npm 11.15.0 or later, which is what `npm trust` requires; the workflow itself only needs 11.5.1 and checks that before publishing.
+
+Once it has run, nothing about a release is manual again. A failure in the publish step reporting a 404 from the token exchange means the trusted publisher for that package is missing or misconfigured, not that the package is absent — re-run the bootstrap to reconcile it.
+
+## Staging deployment
+
+Staging follows the branch as production follows the tag. Every push to `main` that passes `validate` and the browser end-to-end job runs `ci.yml`'s `deploy-staging`, which deploys `apps/cloudflare` to `https://staging-bot.frockbot.com` through the GitHub `staging` environment. It is the same Worker code production runs, in Wrangler's `staging` environment, with none of production's data.
+
+Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the two stateless service Workers, `frockbot-cloudflare-bundler` and `frockbot-computer-host`: the bundler has no bindings at all and the Computer host owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to either Worker's contract ships with a tag, so staging sees it only once that tag lands.
+
+Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the three R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
+
+**Staging admits exactly one identity.** Signups default to closed and nothing in the deploy opens them, so the only way in is the admin allowlist: `FROCKBOT_ADMIN_EMAILS` is a **required** staging secret, and the deploy fails without it rather than publishing a deployment nobody can sign in to. Anyone else who completes Google sign-in is refused at the gateway — the signup gate turns on whether a User has been provisioned, not on whether Better Auth has a row — so no Durable Object is ever created for them.
+
+Configure these GitHub `staging` environment values. They are the production set minus `CLOUDFLARE_D1_DATABASE_ID`, which staging resolves for itself:
+
+| Type     | Name                    | Purpose                                                                         |
+| -------- | ----------------------- | ------------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`  | Cloudflare token permitted to edit Workers, D1, R2, and Vectorize               |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account containing the staging resources                             |
+| Variable | `BETTER_AUTH_URL`       | Set to `https://staging-bot.frockbot.com`                                       |
+| Secret   | `BETTER_AUTH_SECRET`    | Better Auth secret with at least 32 random characters; distinct from production |
+| Secret   | `GOOGLE_CLIENT_ID`      | Google Web application OAuth client ID                                          |
+| Secret   | `GOOGLE_CLIENT_SECRET`  | Google Web application OAuth client secret                                      |
+| Secret   | `FROCKBOT_ADMIN_EMAILS` | **Required.** The only identities that can sign in to staging                   |
+| Secret   | `SPRITES_TOKEN`         | Fly Sprites token used only by the backend Computer provider                    |
+| Secret   | `COMPUTER_HOST_TOKEN`   | Must equal production's, because staging binds the production host              |
+| Secret   | `CREDENTIAL_KEYRING`    | Versioned AES-GCM keyring; generate a fresh one, never production's             |
+| Secret   | `ROUTINE_HOOK_SECRET`   | HMAC secret for Routine webhook keys; generate it                               |
+| Secret   | `MACHINE_TOKEN_SECRET`  | HMAC secret for machine tokens and pairing codes; generate it                   |
+
+The three generated secrets are `openssl rand -hex 32`, and `CREDENTIAL_KEYRING` is the same JSON keyring `scripts/setup-production.sh` builds. `COMPUTER_HOST_TOKEN` is the exception that must be copied from production rather than generated, because the host it authenticates against is production's.
+
+Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an authorized Google redirect URI and `https://staging-bot.frockbot.com` as an authorized JavaScript origin — either on the production OAuth client or on a separate staging one. The `frockbot.com` zone must be active in the same Cloudflare account and the deploy token must cover it, since Wrangler creates the custom domain's proxied DNS record on the first deploy.
 
 ## Production deployment
 
-After CI succeeds on a push to `main`, `ci.yml` deploys four Cloudflare Workers through the GitHub `production` environment:
+After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
 - `apps/cloudflare-bundler` is the binding-less Package bundler the app reaches through its `PACKAGE_BUNDLER` service binding; it deploys before the app because that binding must resolve;

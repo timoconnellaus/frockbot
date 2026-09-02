@@ -193,6 +193,101 @@
         "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
       },
     },
+    // Staging follows main: every merge deploys here, and only a version tag
+    // deploys production. It is production's shape with production's code and
+    // none of production's data — its own D1, its own buckets, its own
+    // Vectorize index, and its own Durable Object namespaces, because a
+    // Durable Object namespace is per-Worker and this is a different Worker.
+    //
+    // `PACKAGE_BUNDLER` and `COMPUTER_HOST` are deliberately the production
+    // Workers. Both are stateless request handlers holding no per-user data —
+    // the bundler has no bindings at all, and the Computer host owns only the
+    // Sprites credential — so staging exercises the same host production does
+    // rather than paying for a second container deployment. The consequence is
+    // the same ordering constraint production has: a change to either Worker's
+    // contract ships with a tag, so staging sees it only once that tag lands.
+    "staging": {
+      "name": "frockbot-cloudflare-staging",
+      "routes": [
+        {
+          "pattern": "staging-bot.frockbot.com",
+          "custom_domain": true,
+        },
+      ],
+      "worker_loaders": [
+        {
+          "binding": "USER_APPLICATIONS",
+        },
+        {
+          "binding": "BOT_PACKAGES",
+        },
+      ],
+      "services": [
+        {
+          "binding": "PACKAGE_BUNDLER",
+          "service": "frockbot-cloudflare-bundler",
+        },
+        {
+          "binding": "COMPUTER_HOST",
+          "service": "frockbot-computer-host",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "APPLICATION_ARTIFACTS",
+          "bucket_name": "frockbot-application-artifacts-staging",
+        },
+        {
+          "binding": "MEMORY_FILES",
+          "bucket_name": "frockbot-memory-files-staging",
+        },
+        {
+          "binding": "PACKAGE_CATALOG",
+          "bucket_name": "frockbot-package-catalog-staging",
+        },
+      ],
+      // The staging deploy replaces `database_id` with the identifier of the
+      // `frockbot-auth-staging` database, creating that database first when
+      // the account does not already have one. The placeholder is never
+      // deployed, and the two keys stay adjacent for the deploy to rewrite.
+      "d1_databases": [
+        {
+          "binding": "AUTH_DB",
+          "database_name": "frockbot-auth-staging",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+        },
+      ],
+      "vectorize": [
+        {
+          "binding": "MEMORY_INDEX",
+          "index_name": "frockbot-memory-staging",
+        },
+      ],
+      "ai": {
+        "binding": "AI",
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "BOT_STATES",
+            "class_name": "BotState",
+          },
+          {
+            "name": "USER_CONFIGURATIONS",
+            "class_name": "UserConfiguration",
+          },
+          {
+            "name": "DEPLOYMENT_POLICY",
+            "class_name": "DeploymentPolicy",
+          },
+        ],
+      },
+      "vars": {
+        "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
+      },
+    },
     // The browser end-to-end harness (`apps/cloudflare/e2e/harness.ts`) runs
     // `src/index.ts` — the deployed Worker, unmodified — under `wrangler dev`.
     // It cannot use `development`: that environment marks `MEMORY_FILES`,

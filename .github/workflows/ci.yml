@@ -63,6 +63,13 @@ jobs:
       - name: Test Computer host
         run: bun run --filter @frockbot/computer-host test
 
+      # The outbound WebSocket bridge in workerd, against a Worker
+      # impersonating the Sprites API at the outbound seam. No Docker, no
+      # Sprites cloud: the handshake, the socket pair and the pumping are the
+      # runtime's own, which is the part the injected fakes cannot model.
+      - name: Test Computer host runtime
+        run: bun run --filter @frockbot/computer-host test:workerd
+
       - name: Build
         run: bun run build
 
@@ -114,64 +121,23 @@ jobs:
             apps/cloudflare/e2e/test-results
           retention-days: 7
 
-  deploy-marketing:
-    name: Deploy marketing site
-    needs: validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment:
-      name: production
-      url: https://frockbot.com
-
-    steps:
-      - name: Check out validated revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Bun # zizmor: ignore[cache-poisoning] trusted main deployment
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.3.6
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Validate Cloudflare credentials
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          missing=()
-          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
-            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing production configuration: %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-
-      - name: Deploy frockbot.com
-        working-directory: apps/marketing
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bunx wrangler deploy
-
-  deploy-backend:
-    name: Deploy FrockBot app
-    needs: validate
+  deploy-staging:
+    name: Deploy staging
+    # Staging follows the branch: merging to main integrates code and shows it
+    # running at staging-bot.frockbot.com. Production still follows the tag
+    # (`release.yml`), so nothing here can ship to bot.frockbot.com.
+    needs: [validate, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     environment:
-      name: production
+      name: staging
       url: ${{ vars.BETTER_AUTH_URL }}
 
     steps:
-      - name: Check out validated revision
+      - name: Check out the validated revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -188,7 +154,6 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
           BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -202,14 +167,18 @@ jobs:
         shell: bash
         run: |
           missing=()
+          # FROCKBOT_ADMIN_EMAILS is required here, unlike production. Staging
+          # signups are closed and stay closed, so the admin allowlist is the
+          # only way any identity reaches the deployment: without it, nobody
+          # can sign in and nobody can open Admin to change that.
           for name in \
             CLOUDFLARE_API_TOKEN \
             CLOUDFLARE_ACCOUNT_ID \
-            CLOUDFLARE_D1_DATABASE_ID \
             BETTER_AUTH_URL \
             BETTER_AUTH_SECRET \
             GOOGLE_CLIENT_ID \
             GOOGLE_CLIENT_SECRET \
+            FROCKBOT_ADMIN_EMAILS \
             SPRITES_TOKEN \
             COMPUTER_HOST_TOKEN \
             CREDENTIAL_KEYRING \
@@ -219,38 +188,96 @@ jobs:
           done
 
           if (( ${#missing[@]} > 0 )); then
-            printf 'Missing production configuration: %s\n' "${missing[*]}" >&2
+            printf 'Missing staging configuration: %s\n' "${missing[*]}" >&2
             exit 1
-          fi
-
-          # Optional: without it nobody can open Admin, but signups stay closed
-          # and existing Users keep signing in, so the deploy still proceeds.
-          if [[ -z "$FROCKBOT_ADMIN_EMAILS" ]]; then
-            echo '::warning::FROCKBOT_ADMIN_EMAILS is unset; no identity can administer the signup policy until it is added to the production environment.'
           fi
 
           bun -e '
             import { parseCredentialKeyringV1 } from "./packages/connection-core/src/index.ts";
             parseCredentialKeyringV1(process.env.CREDENTIAL_KEYRING ?? "");
           '
-      - name: Configure production D1 database
+
+      - name: Provision staging resources
+        # Staging is disposable, so it provisions itself rather than depending
+        # on a human having run a wizard first. Every step is create-if-absent,
+        # so re-running a deploy neither fails nor recreates anything. The
+        # Durable Object namespaces need no step: they are created with the
+        # Worker, and belong to it.
+        id: resources
         working-directory: apps/cloudflare
         env:
-          CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          for bucket in \
+            frockbot-application-artifacts-staging \
+            frockbot-memory-files-staging \
+            frockbot-package-catalog-staging; do
+            if bunx wrangler r2 bucket info "$bucket" >/dev/null 2>&1; then
+              echo "R2 bucket $bucket already exists"
+            else
+              bunx wrangler r2 bucket create "$bucket"
+            fi
+          done
+
+          # 768 cosine dimensions, matching @cf/baai/bge-base-en-v1.5 — the
+          # embedding model the memory Package uses on Cloudflare.
+          if bunx wrangler vectorize get frockbot-memory-staging >/dev/null 2>&1; then
+            echo "Vectorize index frockbot-memory-staging already exists"
+          else
+            bunx wrangler vectorize create frockbot-memory-staging \
+              --preset @cf/baai/bge-base-en-v1.5
+          fi
+
+          # `d1 list` is the single authority on whether the database exists and
+          # on its identifier, so creation and lookup cannot disagree: an `info`
+          # probe would have to guess an exit code, and guessing wrong either
+          # creates a database twice or never creates it at all.
+          staging_database_id() {
+            bunx wrangler d1 list --json |
+              node -e '
+                const chunks = [];
+                process.stdin.on("data", (chunk) => chunks.push(chunk));
+                process.stdin.on("end", () => {
+                  const parsed = JSON.parse(chunks.join(""));
+                  const databases = Array.isArray(parsed) ? parsed : parsed.result;
+                  const match = (databases ?? []).find(
+                    (database) => database.name === "frockbot-auth-staging",
+                  );
+                  process.stdout.write(match ? match.uuid : "");
+                });
+              '
+          }
+
+          database_id="$(staging_database_id)"
+          if [[ -z "$database_id" ]]; then
+            bunx wrangler d1 create frockbot-auth-staging
+            database_id="$(staging_database_id)"
+          else
+            echo "D1 database frockbot-auth-staging already exists"
+          fi
+          if [[ ! "$database_id" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+            printf 'Resolved staging D1 identifier is not an identifier: %s\n' "$database_id" >&2
+            exit 1
+          fi
+          echo "database_id=$database_id" >> "$GITHUB_OUTPUT"
+
+      - name: Configure staging D1 database
+        working-directory: apps/cloudflare
+        env:
+          STAGING_D1_DATABASE_ID: ${{ steps.resources.outputs.database_id }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
           const file = 'wrangler.jsonc';
-          const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
-          if (!/^[0-9a-fA-F-]{36}$/.test(databaseId)) {
-            throw new Error(`CLOUDFLARE_D1_DATABASE_ID is not a database identifier: ${databaseId}`);
-          }
-          const production = /("database_name":\s*"frockbot-auth",\s*"database_id":\s*")[^"]*(")/;
+          const databaseId = process.env.STAGING_D1_DATABASE_ID;
+          const staging = /("database_name":\s*"frockbot-auth-staging",\s*"database_id":\s*")[^"]*(")/;
           const source = fs.readFileSync(file, 'utf8');
-          if (!production.test(source)) {
-            throw new Error(`${file} no longer contains a production frockbot-auth database_id`);
+          if (!staging.test(source)) {
+            throw new Error(`${file} no longer contains a staging frockbot-auth-staging database_id`);
           }
-          fs.writeFileSync(file, source.replace(production, `$1${databaseId}$2`));
+          fs.writeFileSync(file, source.replace(staging, `$1${databaseId}$2`));
           NODE
 
       - name: Build application artifact
@@ -279,7 +306,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bunx wrangler d1 migrations apply frockbot-auth --remote
+        run: >-
+          bunx wrangler d1 migrations apply frockbot-auth-staging
+          --env staging --remote
 
       - name: Upload application artifact
         working-directory: apps/cloudflare
@@ -288,27 +317,21 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
           bunx wrangler r2 object put
-          frockbot-application-artifacts/applications/${{ steps.artifact.outputs.hash }}.mjs
+          frockbot-application-artifacts-staging/applications/${{ steps.artifact.outputs.hash }}.mjs
           --file dist/artifacts/foundation-v1.mjs
           --remote
 
       - name: Publish Package Catalog
-        # The remote Catalog: immutable generations plus one mutable pointer.
-        # The bucket is created here, not by hand, so a fresh account needs no
-        # manual provisioning step. Every generation object is uploaded before
-        # `catalog/current` names it, because the pointer is the only mutable
-        # object and must never name a half-written generation.
+        # As production publishes it, into staging's own bucket: every
+        # generation object first, then the one mutable pointer that names it.
         working-directory: apps/cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
-          bucket=frockbot-package-catalog
-          if ! bunx wrangler r2 bucket info "$bucket" >/dev/null 2>&1; then
-            bunx wrangler r2 bucket create "$bucket"
-          fi
-          catalog_dir="$RUNNER_TEMP/frockbot-catalog"
+          bucket=frockbot-package-catalog-staging
+          catalog_dir="$RUNNER_TEMP/frockbot-catalog-staging"
           rm -rf "$catalog_dir"
           bun ../../scripts/publish-catalog.ts --out "$catalog_dir"
           while IFS= read -r file; do
@@ -320,43 +343,6 @@ jobs:
           bunx wrangler r2 object put "$bucket/catalog/current" \
             --file "$catalog_dir/catalog/current" \
             --content-type application/json --remote
-
-      - name: Deploy bundler Worker
-        # The app's PACKAGE_BUNDLER service binding names this Worker, so it
-        # must exist before the app version can be created.
-        working-directory: apps/cloudflare-bundler
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bunx wrangler deploy
-
-      - name: Deploy computer host
-        # The app's COMPUTER_HOST service binding names this Worker, so it
-        # must exist before the app version can be created; and the host must
-        # be current before the app that calls it (ADR 0004, risk v). Wrangler
-        # builds and pushes the container image here, which needs Docker — the
-        # hosted runner has it.
-        working-directory: apps/computer-host
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
-          COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
-        shell: bash
-        run: |
-          secrets_file="$RUNNER_TEMP/frockbot-computer-host.env"
-          trap 'rm -f "$secrets_file"' EXIT
-
-          node <<'NODE' > "$secrets_file"
-          const names = ['SPRITES_TOKEN', 'COMPUTER_HOST_TOKEN'];
-          console.log(
-            JSON.stringify(
-              Object.fromEntries(names.map((name) => [name, process.env[name]])),
-            ),
-          );
-          NODE
-
-          bunx wrangler deploy --secrets-file "$secrets_file"
 
       - name: Deploy Worker
         working-directory: apps/cloudflare
@@ -373,18 +359,14 @@ jobs:
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
-          # Optional: authorizes the read-only /api/debug operator surface.
-          # Absent and the deployed Worker simply 404s those routes.
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
         shell: bash
         run: |
-          secrets_file="$RUNNER_TEMP/frockbot-production.env"
+          secrets_file="$RUNNER_TEMP/frockbot-staging.env"
           trap 'rm -f "$secrets_file"' EXIT
 
-          # Wrangler reads a secrets file as JSON first and only falls back
-          # to dotenv. A dotenv line keeps the backslash escapes inside a
-          # double-quoted value, so a secret that is itself JSON (the
-          # credential keyring) would reach the Worker mangled. Write JSON.
+          # JSON, not dotenv: see the production deploy in `release.yml` for
+          # why a secret that is itself JSON would otherwise arrive mangled.
           node <<'NODE' > "$secrets_file"
           const names = [
             'BETTER_AUTH_URL',
@@ -398,9 +380,6 @@ jobs:
             'ROUTINE_HOOK_SECRET',
             'MACHINE_TOKEN_SECRET',
           ];
-          // `--secrets-file` replaces the Worker's whole secret set, so an
-          // optional secret has to be carried here or a deploy would delete
-          // it. Omitted when unset, rather than written empty.
           const optional = ['DEBUG_TOKEN'].filter((name) => process.env[name]);
           console.log(
             JSON.stringify(
@@ -411,4 +390,4 @@ jobs:
           );
           NODE
 
-          bunx wrangler deploy --secrets-file "$secrets_file"
+          bunx wrangler deploy --env staging --secrets-file "$secrets_file"

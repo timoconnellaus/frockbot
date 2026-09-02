@@ -1091,6 +1091,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     approvals: [],
     tasks: [],
     async selectBot(botId: string): Promise<void> {
+      // Re-selecting the open Bot is not a switch: aborting the live Turn and
+      // clearing the transcript would discard state the User is watching.
+      if (web.value.activeBotId === botId) return;
       activeRequest?.abort();
       admissionObserver?.abort();
       runObserver?.abort();

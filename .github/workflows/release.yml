@@ -101,16 +101,31 @@ jobs:
           }
           NODE
 
-      - name: Configure npm token when provided
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Check npm can publish through OIDC
+        # Publishing carries no registry token. npm exchanges this job's OIDC
+        # identity for a short-lived credential, which it only does from
+        # 11.5.1 onward; an older npm would fall back to unauthenticated
+        # publishing and fail one package at a time. Fail here instead, where
+        # the reason is legible, if a Node image ever ships an older npm.
         shell: bash
         run: |
-          if [[ -n "$NODE_AUTH_TOKEN" ]]; then
-            npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          required=11.5.1
+          installed="$(npm --version)"
+          if [[ "$(printf '%s\n%s\n' "$required" "$installed" | sort -V | head -n 1)" != "$required" ]]; then
+            echo "npm $installed cannot publish through OIDC; $required or later is required" >&2
+            exit 1
           fi
+          echo "npm $installed supports trusted publishing"
 
       - name: Publish packages
+        # No NPM_TOKEN: each package names this repository and this workflow
+        # file as its trusted publisher, and npm mints a short-lived
+        # credential from the job's OIDC identity. A package whose trusted
+        # publisher is unconfigured fails here with a 404 from the token
+        # exchange, which reads as "package not found" but means "this
+        # workflow is not trusted to publish it" — see the release runbook.
+        # Provenance attestation is automatic under trusted publishing, so
+        # --provenance is not passed.
         env:
           VERSION: ${{ steps.version.outputs.version }}
         shell: bash
@@ -136,3 +151,307 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+
+  deploy-marketing:
+    name: Deploy marketing site
+    # Production follows the tag, not the branch: merging to main integrates
+    # code, and pushing a version tag is what ships it. Both deploys run after
+    # the release is published, so the riskiest step of a release is its last.
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment:
+      name: production
+      url: https://frockbot.com
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun # zizmor: ignore[cache-poisoning] tag-only release job
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          missing=()
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing production configuration: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Deploy frockbot.com
+        working-directory: apps/marketing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bunx wrangler deploy
+
+  deploy-backend:
+    name: Deploy FrockBot app
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    environment:
+      name: production
+      url: ${{ vars.BETTER_AUTH_URL }}
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun # zizmor: ignore[cache-poisoning] tag-only release job
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate deployment configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+          BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          FROCKBOT_ADMIN_EMAILS: ${{ secrets.FROCKBOT_ADMIN_EMAILS }}
+          SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
+          COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
+          CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
+          ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
+          MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
+        shell: bash
+        run: |
+          missing=()
+          for name in \
+            CLOUDFLARE_API_TOKEN \
+            CLOUDFLARE_ACCOUNT_ID \
+            CLOUDFLARE_D1_DATABASE_ID \
+            BETTER_AUTH_URL \
+            BETTER_AUTH_SECRET \
+            GOOGLE_CLIENT_ID \
+            GOOGLE_CLIENT_SECRET \
+            SPRITES_TOKEN \
+            COMPUTER_HOST_TOKEN \
+            CREDENTIAL_KEYRING \
+            ROUTINE_HOOK_SECRET \
+            MACHINE_TOKEN_SECRET; do
+            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing production configuration: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+          # Optional: without it nobody can open Admin, but signups stay closed
+          # and existing Users keep signing in, so the deploy still proceeds.
+          if [[ -z "$FROCKBOT_ADMIN_EMAILS" ]]; then
+            echo '::warning::FROCKBOT_ADMIN_EMAILS is unset; no identity can administer the signup policy until it is added to the production environment.'
+          fi
+
+          bun -e '
+            import { parseCredentialKeyringV1 } from "./packages/connection-core/src/index.ts";
+            parseCredentialKeyringV1(process.env.CREDENTIAL_KEYRING ?? "");
+          '
+      - name: Configure production D1 database
+        working-directory: apps/cloudflare
+        env:
+          CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'wrangler.jsonc';
+          const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+          if (!/^[0-9a-fA-F-]{36}$/.test(databaseId)) {
+            throw new Error(`CLOUDFLARE_D1_DATABASE_ID is not a database identifier: ${databaseId}`);
+          }
+          const production = /("database_name":\s*"frockbot-auth",\s*"database_id":\s*")[^"]*(")/;
+          const source = fs.readFileSync(file, 'utf8');
+          if (!production.test(source)) {
+            throw new Error(`${file} no longer contains a production frockbot-auth database_id`);
+          }
+          fs.writeFileSync(file, source.replace(production, `$1${databaseId}$2`));
+          NODE
+
+      - name: Build application artifact
+        working-directory: apps/cloudflare
+        run: bun run artifact:build
+
+      - name: Configure application artifact
+        id: artifact
+        working-directory: apps/cloudflare
+        run: |
+          artifact_hash="$(sha256sum dist/artifacts/foundation-v1.mjs | cut -d ' ' -f 1)"
+          echo "hash=$artifact_hash" >> "$GITHUB_OUTPUT"
+          ARTIFACT_HASH="$artifact_hash" node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'wrangler.jsonc';
+          const placeholder = 'foundation-v1';
+          const source = fs.readFileSync(file, 'utf8');
+          if (!source.includes(placeholder)) {
+            throw new Error(`${file} no longer contains the default application hash ${placeholder}`);
+          }
+          fs.writeFileSync(file, source.replaceAll(placeholder, process.env.ARTIFACT_HASH));
+          NODE
+
+      - name: Apply D1 migrations
+        working-directory: apps/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bunx wrangler d1 migrations apply frockbot-auth --remote
+
+      - name: Upload application artifact
+        working-directory: apps/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: >-
+          bunx wrangler r2 object put
+          frockbot-application-artifacts/applications/${{ steps.artifact.outputs.hash }}.mjs
+          --file dist/artifacts/foundation-v1.mjs
+          --remote
+
+      - name: Publish Package Catalog
+        # The remote Catalog: immutable generations plus one mutable pointer.
+        # The bucket is created here, not by hand, so a fresh account needs no
+        # manual provisioning step. Every generation object is uploaded before
+        # `catalog/current` names it, because the pointer is the only mutable
+        # object and must never name a half-written generation.
+        working-directory: apps/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          bucket=frockbot-package-catalog
+          if ! bunx wrangler r2 bucket info "$bucket" >/dev/null 2>&1; then
+            bunx wrangler r2 bucket create "$bucket"
+          fi
+          catalog_dir="$RUNNER_TEMP/frockbot-catalog"
+          rm -rf "$catalog_dir"
+          bun ../../scripts/publish-catalog.ts --out "$catalog_dir"
+          while IFS= read -r file; do
+            key="${file#"$catalog_dir"/}"
+            if [[ "$key" == "catalog/current" ]]; then continue; fi
+            bunx wrangler r2 object put "$bucket/$key" \
+              --file "$file" --content-type application/json --remote
+          done < <(find "$catalog_dir" -type f | sort)
+          bunx wrangler r2 object put "$bucket/catalog/current" \
+            --file "$catalog_dir/catalog/current" \
+            --content-type application/json --remote
+
+      - name: Deploy bundler Worker
+        # The app's PACKAGE_BUNDLER service binding names this Worker, so it
+        # must exist before the app version can be created.
+        working-directory: apps/cloudflare-bundler
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bunx wrangler deploy
+
+      - name: Deploy computer host
+        # The app's COMPUTER_HOST service binding names this Worker, so it
+        # must exist before the app version can be created; and the host must
+        # be current before the app that calls it (ADR 0004, risk v). Wrangler
+        # builds and pushes the container image here, which needs Docker — the
+        # hosted runner has it.
+        working-directory: apps/computer-host
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
+          COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
+        shell: bash
+        run: |
+          secrets_file="$RUNNER_TEMP/frockbot-computer-host.env"
+          trap 'rm -f "$secrets_file"' EXIT
+
+          node <<'NODE' > "$secrets_file"
+          const names = ['SPRITES_TOKEN', 'COMPUTER_HOST_TOKEN'];
+          console.log(
+            JSON.stringify(
+              Object.fromEntries(names.map((name) => [name, process.env[name]])),
+            ),
+          );
+          NODE
+
+          bunx wrangler deploy --secrets-file "$secrets_file"
+
+      - name: Deploy Worker
+        working-directory: apps/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          FROCKBOT_ADMIN_EMAILS: ${{ secrets.FROCKBOT_ADMIN_EMAILS }}
+          SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
+          COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
+          CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
+          ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
+          MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
+          # Optional: authorizes the read-only /api/debug operator surface.
+          # Absent and the deployed Worker simply 404s those routes.
+          DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
+        shell: bash
+        run: |
+          secrets_file="$RUNNER_TEMP/frockbot-production.env"
+          trap 'rm -f "$secrets_file"' EXIT
+
+          # Wrangler reads a secrets file as JSON first and only falls back
+          # to dotenv. A dotenv line keeps the backslash escapes inside a
+          # double-quoted value, so a secret that is itself JSON (the
+          # credential keyring) would reach the Worker mangled. Write JSON.
+          node <<'NODE' > "$secrets_file"
+          const names = [
+            'BETTER_AUTH_URL',
+            'BETTER_AUTH_SECRET',
+            'GOOGLE_CLIENT_ID',
+            'GOOGLE_CLIENT_SECRET',
+            'FROCKBOT_ADMIN_EMAILS',
+            'SPRITES_TOKEN',
+            'COMPUTER_HOST_TOKEN',
+            'CREDENTIAL_KEYRING',
+            'ROUTINE_HOOK_SECRET',
+            'MACHINE_TOKEN_SECRET',
+          ];
+          // `--secrets-file` replaces the Worker's whole secret set, so an
+          // optional secret has to be carried here or a deploy would delete
+          // it. Omitted when unset, rather than written empty.
+          const optional = ['DEBUG_TOKEN'].filter((name) => process.env[name]);
+          console.log(
+            JSON.stringify(
+              Object.fromEntries(
+                [...names, ...optional].map((name) => [name, process.env[name]]),
+              ),
+            ),
+          );
+          NODE
+
+          bunx wrangler deploy --secrets-file "$secrets_file"

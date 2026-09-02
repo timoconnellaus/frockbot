@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { CatalogEntryV1, CatalogIndexV1 } from "@frockbot/catalog-core";
-import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
+import {
+  USER_PROFILE_PLACEHOLDER_NAME_V1,
+  type UserSettingsViewV1,
+} from "@frockbot/configuration-core";
 import {
   createUserSettingsBackendContribution,
   type UserPackageCatalogHost,
@@ -376,7 +379,7 @@ describe("User settings backend Contribution", () => {
     ).toEqual({
       schemaVersion: 1,
       revision: 0,
-      profile: { name: "FrockBot user" },
+      profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1 },
       packages: [],
       connections: [],
     });

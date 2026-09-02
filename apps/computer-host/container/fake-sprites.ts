@@ -236,6 +236,14 @@ export class FakeSpritesClient implements SpritesClientHandle {
   readonly created: string[] = [];
   readonly deleted: string[] = [];
   /**
+   * Every `getSprite`, in order.
+   *
+   * The host used to look a Sprite up once per operation, which a Turn pays
+   * for a dozen times over. Counting the calls is the only way a test can hold
+   * that down, since the answer is identical either way.
+   */
+  readonly lookups: string[] = [];
+  /**
    * Seeds a Sprite the host creates for itself.
    *
    * Provisioning creates its own Sprite, so a test that wants to script what
@@ -249,6 +257,7 @@ export class FakeSpritesClient implements SpritesClientHandle {
   }
 
   async getSprite(name: string): Promise<SpriteHandle> {
+    this.lookups.push(name);
     const sprite = this.sprites.get(name);
     if (!sprite) throw new FakeApiError(404, `no such sprite: ${name}`);
     return sprite;

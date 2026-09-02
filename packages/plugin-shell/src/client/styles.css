@@ -83,9 +83,8 @@
 
 .sidebar-top {
   display: flex;
-  height: 34px;
   flex: 0 0 auto;
-  align-items: stretch;
+  align-items: center;
   gap: 6px;
   margin: 0 2px 6px;
   -webkit-app-region: no-drag;

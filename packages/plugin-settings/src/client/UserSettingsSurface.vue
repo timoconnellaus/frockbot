@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiAnchor, UiButton, UiField, UiIcon } from "@frockbot/client-ui";
+import { authSessionClientKey } from "@frockbot/plugin-auth/shared";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { inject, onMounted, ref } from "vue";
 import PackageSettingsSection from "./PackageSettingsSection.vue";
+import { resolveUserDisplayName } from "./user-display-name.js";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
+const providedAuth = inject(authSessionClientKey);
 const providedWeb = inject(frockBotWebDataKey);
-if (!providedSurfaces || !providedWeb) {
+if (!providedSurfaces || !providedAuth || !providedWeb) {
   throw new Error("settings client services were not provided");
 }
 const surfaces = providedSurfaces;
+const auth = providedAuth;
 const web = providedWeb;
 // Application settings rows are User-scoped, so their links name no Bot.
 const profileLink = settingsLinkV1({ anchor: "user-profile" });
@@ -25,8 +29,16 @@ onMounted(async () => {
   await web.value.loadUserSettings();
   const settings = web.value.userSettings;
   if (!settings) return;
-  name.value = settings.profile.name;
-  email.value = settings.profile.email ?? "";
+  const sessionUser =
+    auth.projection.value.status === "authenticated"
+      ? auth.projection.value.user
+      : undefined;
+  name.value = resolveUserDisplayName({
+    savedName: settings.profile.name,
+    sessionName: sessionUser?.name,
+    sessionEmail: sessionUser?.email,
+  });
+  email.value = settings.profile.email ?? sessionUser?.email ?? "";
 });
 
 async function save(): Promise<void> {
