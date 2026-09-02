@@ -35,7 +35,7 @@ import {
   computerHostExecScriptV1,
   readProvisionObservation,
 } from "./computer.ts";
-import { FakeSprite, FakeSpritesClient } from "./fake-sprites.ts";
+import { FakeApiError, FakeSprite, FakeSpritesClient } from "./fake-sprites.ts";
 
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -539,6 +539,52 @@ describe("exec", () => {
     expect(result.outputTruncated).toBe(false);
     expect(sprite.commands.at(-1)?.stdin).toContain("printf hello");
     expect(sprite.commands.at(-1)?.args).toEqual(["-s"]);
+  });
+
+  test("looks the Sprite up once, however many operations a Turn makes", async () => {
+    // Measured against production: one tool call fanned out to 14 lookups
+    // costing ~1.35s of an 11.7s call, every one of them answering with what
+    // the first already knew. A handle is a name bound to a client, so the
+    // repeat buys nothing.
+    const { host, client, sprite } = provisioned();
+    sprite.scripts = [
+      { stdout: ["one"], exitCode: 0 },
+      { stdout: ["two"], exitCode: 0 },
+      { stdout: ["three"], exitCode: 0 },
+    ];
+
+    await host.handle(request(exec({ script: "printf one" })));
+    await host.handle(request(exec({ script: "printf two" })));
+    await host.handle(request(exec({ script: "printf three" })));
+
+    expect(client.lookups.length).toBe(1);
+  });
+
+  test("asks again after a lookup fails, rather than remembering the failure", async () => {
+    // A cache that keeps a rejection turns one bad moment at the Sprites API
+    // into a Computer that stays broken until the container restarts.
+    const { host, client, sprite } = provisioned();
+    sprite.scripts = [{ stdout: ["after"], exitCode: 0 }];
+    const lookup = client.getSprite.bind(client);
+    let failNext = true;
+    client.getSprite = async (name: string) => {
+      if (failNext) {
+        failNext = false;
+        client.lookups.push(name);
+        throw new FakeApiError(500, "sprites is having a moment");
+      }
+      return lookup(name);
+    };
+
+    await host.handle(request(exec({ script: "true" }))).catch(() => undefined);
+    const response = await host.handle(
+      request(exec({ script: "printf after" })),
+    );
+
+    // The second attempt looked again and succeeded.
+    expect(client.lookups.length).toBeGreaterThan(1);
+    const result = decodeComputerHostExecResultV1(await response.json());
+    expect(result.exitCode).toBe(0);
   });
 
   test("carries a script far larger than the argv limit", async () => {
