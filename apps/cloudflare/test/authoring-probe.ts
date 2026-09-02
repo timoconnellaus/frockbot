@@ -51,6 +51,19 @@ import {
   type PackageAuthoringHost,
 } from "@frockbot/plugin-authoring";
 import {
+  createPackageCatalogRuntimePlugin,
+  packageCatalogManifest,
+} from "@frockbot/plugin-package-catalog";
+import {
+  createPackageCatalogHost,
+  createR2BotPackageCatalogReader,
+  type CatalogAwarePackageCatalogHost,
+} from "@frockbot/plugin-shell/backend-package-catalog";
+import {
+  decodeOperationReceiptV1,
+  decodeUserSettingsViewV1,
+} from "@frockbot/configuration-core";
+import {
   decodeAuthoringQuotaReceiptV1,
   type AuthoringQuotaBinding,
 } from "@frockbot/plugin-authoring/quota";
@@ -62,6 +75,7 @@ import { createCountingBundlerBinding } from "./package-bundler-fake.ts";
 export interface AuthoringProbeEnv {
   BOT_PACKAGES: BotIsolateLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
+  PACKAGE_CATALOG: R2Bucket;
   USER_CONFIGURATIONS: DurableObjectNamespace;
 }
 
@@ -129,6 +143,17 @@ function authoringPackage(host: PackageAuthoringHost): FoundationAgentPackage {
     contributionSpecifier: "@frockbot/plugin-authoring/agent",
     manifest: authoringManifest,
     plugin: createAuthoringRuntimePlugin(host),
+  };
+}
+
+function catalogPackage(
+  host: CatalogAwarePackageCatalogHost,
+): FoundationAgentPackage {
+  return {
+    specifier: "@frockbot/plugin-package-catalog",
+    contributionSpecifier: "@frockbot/plugin-package-catalog/agent",
+    manifest: packageCatalogManifest,
+    plugin: createPackageCatalogRuntimePlugin(host),
   };
 }
 
@@ -217,6 +242,48 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     });
   }
 
+  private catalogHost(
+    turn: AuthoringProbeTurn,
+  ): CatalogAwarePackageCatalogHost {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(turn.userId);
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      readConfiguration(input: unknown): Promise<unknown>;
+      executeConfiguration(input: unknown): Promise<unknown>;
+    };
+    return createPackageCatalogHost({
+      storage: {
+        get: (key) => this.ctx.storage.get(key),
+        put: (entries) => this.ctx.storage.put(entries),
+      },
+      composition: this.authority.composition,
+      catalog: createR2BotPackageCatalogReader(
+        this.env.PACKAGE_CATALOG,
+        this.env.APPLICATION_ARTIFACTS,
+      ),
+      user: {
+        read: async () =>
+          decodeUserSettingsViewV1(
+            await rpc.readConfiguration({
+              schemaVersion: 1,
+              userId: turn.userId,
+            }),
+          ),
+        execute: async (command) =>
+          decodeOperationReceiptV1(
+            await rpc.executeConfiguration({
+              schemaVersion: 1,
+              userId: turn.userId,
+              command,
+            }),
+          ),
+      },
+      userId: turn.userId,
+      botId: turn.botId,
+      runId: turn.runId,
+      turnId: turn.runId,
+    });
+  }
+
   private async executeTurn(input: BotTurnExecutionInput<undefined>) {
     const turn = this.turn;
     if (!turn) throw new Error("the authoring probe has no scripted turn");
@@ -233,6 +300,14 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     // workers-types cannot infer the generated local RPC stubs.
     const exports = this.ctx.exports as unknown as ProbeExports;
     const assignments = turn.assignments ?? [];
+    const catalog = this.catalogHost(turn);
+    const baseAuthoring = this.authoringHost(turn);
+    const authoring: PackageAuthoringHost = {
+      ...baseAuthoring,
+      undo: async (request) =>
+        (await catalog.undoCatalogChange(request)) ??
+        baseAuthoring.undo(request),
+    };
     const host = createShellCompositionHost({
       admitEffect: () => Promise.resolve(true),
       botId: turn.botId,
@@ -241,7 +316,8 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       persistSessionEvents: input.persistSessionEvents,
       agentPackages: [
         scriptedProviderPackage(turn.tool, turn.input),
-        authoringPackage(this.authoringHost(turn)),
+        authoringPackage(authoring),
+        catalogPackage(catalog),
       ],
       modelSelection: { provider: "scripted", model: "scripted-v1" },
       isolate: {

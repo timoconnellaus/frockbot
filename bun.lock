@@ -45,6 +45,7 @@
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-mobile-clipboard": "workspace:*",
         "@frockbot/plugin-mobile-notifications": "workspace:*",
+        "@frockbot/plugin-package-catalog": "workspace:*",
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-foundation": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
@@ -115,6 +116,7 @@
         "@frockbot/plugin-image": "workspace:*",
         "@frockbot/plugin-mcp": "workspace:*",
         "@frockbot/plugin-memory": "workspace:*",
+        "@frockbot/plugin-package-catalog": "workspace:*",
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
         "@frockbot/plugin-provider-workers-ai": "workspace:*",
@@ -859,6 +861,20 @@
         "vue-tsc": "3.3.10",
       },
     },
+    "packages/plugin-package-catalog": {
+      "name": "@frockbot/plugin-package-catalog",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/catalog-core": "workspace:*",
+        "@frockbot/configuration-core": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-prompt": {
       "name": "@frockbot/plugin-prompt",
       "version": "0.0.1",
@@ -1009,6 +1025,7 @@
         "@frockbot/kernel-do": "workspace:*",
         "@frockbot/machine-protocol": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
+        "@frockbot/plugin-package-catalog": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
         "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-image": "workspace:*",
@@ -1449,6 +1466,8 @@
     "@frockbot/plugin-auth": ["@frockbot/plugin-auth@workspace:packages/plugin-auth"],
 
     "@frockbot/plugin-authoring": ["@frockbot/plugin-authoring@workspace:packages/plugin-authoring"],
+
+    "@frockbot/plugin-package-catalog": ["@frockbot/plugin-package-catalog@workspace:packages/plugin-package-catalog"],
 
     "@frockbot/plugin-bot-template": ["@frockbot/plugin-bot-template@workspace:packages/plugin-bot-template"],
 

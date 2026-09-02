@@ -34,6 +34,13 @@ function provenanceView(
 ): CompositionProvenanceViewV1 {
   const provenance = member.provenance;
   if (provenance.kind === "first-party") return { kind: "first-party" };
+  if (provenance.kind === "catalog") {
+    return {
+      kind: "catalog",
+      catalogId: provenance.catalogId,
+      catalogGeneration: provenance.catalogGeneration,
+    };
+  }
   if (provenance.kind === "user") {
     return {
       kind: "user",
@@ -102,6 +109,9 @@ export async function projectCompositionGenerationV1(
     isCurrent: input.generation.generationId === input.currentGenerationId,
     members,
     failures,
+    ...(input.generation.summary === undefined
+      ? {}
+      : { summary: input.generation.summary }),
     ...(input.quarantine === undefined
       ? {}
       : {

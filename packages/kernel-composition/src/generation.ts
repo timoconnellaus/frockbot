@@ -8,6 +8,14 @@ import { canonicalJson, sha256 } from "./compiler.ts";
 export type PackageProvenanceV1 =
   | { kind: "first-party"; packageId: string; version: string }
   | {
+      kind: "catalog";
+      packageId: string;
+      version: string;
+      catalogId: string;
+      catalogGeneration: string;
+      contentHash: string;
+    }
+  | {
       kind: "user";
       packageId: string;
       version: string;
@@ -46,6 +54,16 @@ export interface CompositionMemberV1 {
 export type CompositionOriginV1 =
   | { kind: "bootstrap" }
   | { kind: "bot-authored"; runId: string; sessionId: string; turnId: string }
+  | {
+      kind: "bot-catalog";
+      action: "install" | "update" | "remove";
+      packageId: string;
+      catalogId: string;
+      botId: string;
+      runId: string;
+      sessionId: string;
+      turnId: string;
+    }
   | { kind: "user-install"; userId: string }
   | { kind: "revert"; revertsTo: string; userId: string }
   | {
@@ -66,6 +84,8 @@ export interface CompositionGenerationV1 {
   /** sha-256 over the canonical member list — the loader identity. */
   artifactSetHash: string;
   parentGenerationId?: string;
+  /** Bot-written one-line audit copy for a setup change. */
+  summary?: string;
   createdAt: string;
   origin: CompositionOriginV1;
   members: CompositionMemberV1[];
@@ -123,7 +143,7 @@ const GENERATION_REQUIRED_KEYS = [
   "members",
   "status",
 ] as const;
-const GENERATION_OPTIONAL_KEYS = ["parentGenerationId"] as const;
+const GENERATION_OPTIONAL_KEYS = ["parentGenerationId", "summary"] as const;
 const MEMBER_REQUIRED_KEYS = [
   "packageId",
   "specifier",
@@ -140,6 +160,7 @@ const ARTIFACT_KEYS = [
 ] as const;
 const MAX_COMPOSITION_MEMBERS = 512;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+export const MAX_COMPOSITION_SUMMARY_V1 = 160;
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -203,6 +224,17 @@ function decodePackageProvenanceV1(
   if (kind === "first-party") {
     exactKeys(value, common, [], label);
     identity();
+  } else if (kind === "catalog") {
+    exactKeys(
+      value,
+      [...common, "catalogId", "catalogGeneration", "contentHash"],
+      [],
+      label,
+    );
+    identity();
+    boundedString(value.catalogId, `${label}.catalogId`, 64);
+    boundedString(value.catalogGeneration, `${label}.catalogGeneration`, 64);
+    hashString(value.contentHash, `${label}.contentHash`);
   } else if (kind === "user") {
     exactKeys(value, [...common, "userId", "authoredAt"], [], label);
     identity();
@@ -259,15 +291,25 @@ function decodeCompositionMemberV1(
   if (provenance.packageId !== packageId || provenance.version !== version) {
     throw new Error(`${label}.provenance does not match its member`);
   }
+  const artifact =
+    value.artifact === undefined
+      ? undefined
+      : decodeArtifactRefV1(value.artifact, `${label}.artifact`);
+  if (
+    provenance.kind === "catalog" &&
+    (!artifact || artifact.contentHash !== provenance.contentHash)
+  ) {
+    throw new Error(
+      `${label}.catalog provenance must match its Bot-isolate artifact`,
+    );
+  }
   return {
     packageId,
     specifier,
     version,
     manifestHash,
     provenance,
-    ...(value.artifact === undefined
-      ? {}
-      : { artifact: decodeArtifactRefV1(value.artifact, `${label}.artifact`) }),
+    ...(artifact === undefined ? {} : { artifact }),
   };
 }
 
@@ -281,6 +323,35 @@ function decodeCompositionOriginV1(
     exactKeys(value, ["kind"], [], label);
   } else if (kind === "bot-authored") {
     exactKeys(value, ["kind", "runId", "sessionId", "turnId"], [], label);
+    boundedString(value.runId, `${label}.runId`, 128);
+    boundedString(value.sessionId, `${label}.sessionId`, 257);
+    boundedString(value.turnId, `${label}.turnId`, 128);
+  } else if (kind === "bot-catalog") {
+    exactKeys(
+      value,
+      [
+        "kind",
+        "action",
+        "packageId",
+        "catalogId",
+        "botId",
+        "runId",
+        "sessionId",
+        "turnId",
+      ],
+      [],
+      label,
+    );
+    if (
+      value.action !== "install" &&
+      value.action !== "update" &&
+      value.action !== "remove"
+    ) {
+      throw new Error(`${label}.action is invalid`);
+    }
+    boundedString(value.packageId, `${label}.packageId`, 128);
+    boundedString(value.catalogId, `${label}.catalogId`, 64);
+    boundedString(value.botId, `${label}.botId`, 256);
     boundedString(value.runId, `${label}.runId`, 128);
     boundedString(value.sessionId, `${label}.sessionId`, 257);
     boundedString(value.turnId, `${label}.turnId`, 128);
@@ -351,6 +422,16 @@ export function decodeCompositionGenerationV1(
   if (value.parentGenerationId !== undefined) {
     boundedString(value.parentGenerationId, `${label}.parentGenerationId`, 256);
   }
+  if (value.summary !== undefined) {
+    const summary = boundedString(
+      value.summary,
+      `${label}.summary`,
+      MAX_COMPOSITION_SUMMARY_V1,
+    );
+    if (summary.trim() !== summary || /[\r\n]/u.test(summary)) {
+      throw new Error(`${label}.summary must be one trimmed line`);
+    }
+  }
   return {
     schemaVersion: 1,
     generationId,
@@ -362,6 +443,9 @@ export function decodeCompositionGenerationV1(
     ...(value.parentGenerationId === undefined
       ? {}
       : { parentGenerationId: value.parentGenerationId as string }),
+    ...(value.summary === undefined
+      ? {}
+      : { summary: value.summary as string }),
   };
 }
 

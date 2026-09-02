@@ -1020,6 +1020,53 @@ describe("Composition generation views", () => {
     }
   });
 
+  test("projects Catalog provenance, change origin, and an audit summary", () => {
+    const view = decodeCompositionGenerationViewV1({
+      ...authoredGenerationView,
+      summary: "Added parcel tracking",
+      origin: {
+        kind: "bot-catalog",
+        action: "install",
+        packageId: "parcel-tracking",
+        catalogId: "parcel-tracking",
+        botId: "alpha",
+        runId: "run-2",
+        sessionId: "alice:alpha",
+        turnId: "turn-2",
+      },
+      members: [
+        authoredGenerationView.members[0],
+        {
+          packageId: "parcel-tracking",
+          version: "0.0.1",
+          contentHash: "c".repeat(64),
+          provenance: {
+            kind: "catalog",
+            catalogId: "parcel-tracking",
+            catalogGeneration: "catalog-1",
+          },
+        },
+      ],
+    });
+
+    expect(view.summary).toBe("Added parcel tracking");
+    expect(view.origin).toMatchObject({
+      kind: "bot-catalog",
+      action: "install",
+    });
+    expect(view.members[1]?.provenance).toEqual({
+      kind: "catalog",
+      catalogId: "parcel-tracking",
+      catalogGeneration: "catalog-1",
+    });
+    expect(() =>
+      decodeCompositionGenerationViewV1({
+        ...authoredGenerationView,
+        summary: "Added\nparcel tracking",
+      }),
+    ).toThrow("must be one trimmed line");
+  });
+
   test("decodes a list and refuses a generation belonging to another Bot", () => {
     const list = decodeCompositionGenerationListViewV1({
       schemaVersion: 1,
