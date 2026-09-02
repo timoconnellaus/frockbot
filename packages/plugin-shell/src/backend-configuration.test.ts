@@ -489,6 +489,13 @@ describe("generic per-Turn model resolution", () => {
     });
 
     expect(result.text).toBe("Cordis runtime: hello");
+    const durableEvents = storage.values.get("latest-events") as
+      | Array<{ seq: number }>
+      | undefined;
+    expect(durableEvents?.length).toBeGreaterThan(0);
+    expect(durableEvents?.map((event) => event.seq)).toEqual(
+      durableEvents?.map((_, index) => index),
+    );
     const settings = await contribution.getSettings(identity);
     expect(settings).toMatchObject({ revision: 0, packageValues: {} });
     expect(Object.hasOwn(settings, "model")).toBe(false);
