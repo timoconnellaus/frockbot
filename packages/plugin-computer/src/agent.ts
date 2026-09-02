@@ -216,6 +216,13 @@ function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
 
 function failure(error: unknown): { content: string; isError: true } {
   if (error instanceof ComputerError) {
+    if (error.code === "updating") {
+      const label = error.message.trim();
+      return {
+        content: `The Computer is updating (${label}); try again shortly`,
+        isError: true,
+      };
+    }
     return { content: error.message, isError: true };
   }
   return {

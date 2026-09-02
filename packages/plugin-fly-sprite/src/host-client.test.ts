@@ -339,6 +339,27 @@ describe("ComputerHostClient exec", () => {
 });
 
 describe("ComputerHostClient failures", () => {
+  test("computer-updating is provider-neutral updating and retryable", async () => {
+    const { fetcher } = recorder(() =>
+      Response.json(
+        computerHostProblemV1(
+          "computer-updating",
+          "Updating the Computer runtime",
+        ),
+        { status: 409 },
+      ),
+    );
+    const error = await client(fetcher)
+      .exec({ script: "true" })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ComputerError);
+    expect((error as ComputerError).code).toBe("updating");
+    expect((error as ComputerError).retryable).toBe(true);
+    expect((error as ComputerError).message).toBe(
+      "Updating the Computer runtime",
+    );
+  });
+
   test("429 is limit-exceeded and retryable", async () => {
     const { fetcher } = recorder(() =>
       Response.json(

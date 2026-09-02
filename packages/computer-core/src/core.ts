@@ -38,6 +38,7 @@ export type ComputerErrorCode =
   | "capability-unavailable"
   | "stale-assignment"
   | "human-control-active"
+  | "updating"
   | "invalid-request"
   | "conflict"
   | "limit-exceeded"
@@ -515,6 +516,8 @@ export interface ComputerViewerSession {
   id: string;
   url: string;
   expiresAt?: string;
+  /** Provider progress from the wake that minted this viewer, when there was any. */
+  message?: string;
 }
 
 export interface ComputerViewer {

@@ -173,6 +173,31 @@ describe("Fly Sprite computer", () => {
     ]);
   });
 
+  test("describes an in-place runtime update in the provider message", async () => {
+    const host = fakeHost();
+    host.provisioning = {
+      kind: "update",
+      phase: "runtime",
+      label: "Updating the Computer runtime",
+      index: 1,
+      total: 2,
+      status: "complete",
+      resumed: false,
+    };
+
+    const provider = new FlySpriteComputerProvider(attach(host));
+    const computer = await provider.open(
+      { userId: "owner" },
+      { botId: "general" },
+      { providerId: "fly-sprite", generation: 1 },
+    );
+    const connected = await computer.presence?.connect();
+
+    expect(connected?.message).toBe(
+      "Updating the Computer: Updating the Computer runtime",
+    );
+  });
+
   test("an unconfigured Computer refuses rather than pretending", async () => {
     const computer = new FlySpriteComputer({ spriteName: "frockbot-test" });
     expect(computer.configured).toBe(false);

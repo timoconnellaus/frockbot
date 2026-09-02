@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
+  ComputerError,
   ComputerRegistry,
   type ComputerProvider,
 } from "@frockbot/computer-core";
@@ -100,6 +101,49 @@ describe("computer agent contribution", () => {
       "open:user-1:bot-1",
       "browser:snapshot",
     ]);
+    await harness.dispose();
+  });
+
+  test("computer_exec during an update returns an actionable tool failure", async () => {
+    const provider: ComputerProvider = {
+      id: "fixture",
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        exec: {
+          execute: async () => {
+            throw new ComputerError(
+              "updating",
+              "Updating the Computer runtime",
+              true,
+            );
+          },
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const harness = await createPluginHarness([
+      ComputerRegistry,
+      ToolRegistry,
+      SystemPromptRegistry,
+      SessionStore,
+    ]);
+    harness.root.computers.register(provider);
+    await harness.mount(
+      createComputerAgentPlugin({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+      }),
+    );
+
+    const result = await execute(harness, "computer_exec", { command: "pwd" });
+
+    expect(result).toEqual({
+      content:
+        "The Computer is updating (Updating the Computer runtime); try again shortly",
+      isError: true,
+    });
     await harness.dispose();
   });
 

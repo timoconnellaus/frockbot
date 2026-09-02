@@ -381,6 +381,7 @@ function handle(
           ...(connected.viewerExpiresAt
             ? { expiresAt: connected.viewerExpiresAt }
             : {}),
+          ...(connected.message ? { message: connected.message } : {}),
         };
       },
     },

@@ -20,6 +20,7 @@ import type {
   ComputerHostControlResultV1,
   ComputerHostFileReadResultV1,
   ComputerHostOpenResultV1,
+  ComputerHostProvisioningV1,
   ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
 import {
@@ -81,6 +82,7 @@ export class FakeComputerHost {
     "https://frockbot-test-123.sprites.app/vnc.html#autoconnect=1&password=secret-pass";
   display: string | undefined = ":100";
   generation = 1;
+  provisioning?: ComputerHostProvisioningV1;
   /** Set to refuse the next `open`, the way an exhausted slot pool does. */
   openFailure?: Error;
   /** The bytes `file/read` answers with, by absolute path on the Computer. */
@@ -119,6 +121,7 @@ export class FakeComputerHost {
           directory: `/home/box/agent-data/agents/${botKey}`,
           ...(host.display ? { display: host.display } : {}),
           generation: host.generation,
+          ...(host.provisioning ? { provisioning: host.provisioning } : {}),
         });
       },
 

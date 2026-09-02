@@ -174,6 +174,7 @@ const ERROR_CODES: Record<ComputerHostErrorCodeV1, ComputerErrorCode> = {
   conflict: "conflict",
   "limit-exceeded": "limit-exceeded",
   "human-control-active": "human-control-active",
+  "computer-updating": "updating",
   aborted: "aborted",
   timeout: "provider-unavailable",
   "provider-unavailable": "provider-unavailable",
