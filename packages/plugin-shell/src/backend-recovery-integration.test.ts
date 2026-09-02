@@ -140,6 +140,10 @@ describe("Bot recovery", () => {
           },
         },
       ],
+      platformModel: {
+        connectionId: "ollama-1",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
     };
     const leasedRequests: Array<Record<string, unknown>> = [];
     const settledEffects: string[] = [];
@@ -148,35 +152,6 @@ describe("Bot recovery", () => {
       readConfiguration: () => Promise.resolve(structuredClone(userSettings)),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1 as const, revision: 0, bots: [] }),
-      getConnection: () =>
-        Promise.resolve(structuredClone(userSettings.connections[0])),
-      executeConnectionDependency: (request: { action: string }) => {
-        if (request.action === "claim") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "claimed" as const,
-          });
-        }
-        if (request.action === "acknowledge") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "released" as const,
-        });
-      },
-      claimConnectionDependency: () => Promise.resolve(true),
-      acknowledgeConnectionDependency: () => Promise.resolve(true),
-      compensateConnectionDependency: () => Promise.resolve(true),
       leaseModelCredential: (input: unknown) => {
         leasedRequests.push(input as Record<string, unknown>);
         const request = input as { effectId: string };
@@ -241,32 +216,8 @@ describe("Bot recovery", () => {
     const configured = host();
     await configured.materializeSettings(
       { userId: "user-1", botId: "primary" },
-      {
-        name: "Ollama Bot",
-        model: {
-          connectionId: "ollama-1",
-          providerModelId: "glm-5.3-flash:cloud",
-        },
-      },
+      { name: "Ollama Bot" },
     );
-    await configured.executeConfiguration({
-      schemaVersion: 1,
-      userId: "user-1",
-      botId: "primary",
-      command: {
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "assign-ollama-model",
-        botId: "primary",
-        expectedRevision: 0,
-        assignment: {
-          assignmentId: "ollama-model",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-1",
-        },
-      },
-    });
     const first = await host().run({
       userId: "user-1",
       botId: "primary",
@@ -1371,23 +1322,12 @@ describe("Bot recovery", () => {
           safeMetadata: {},
         },
       ],
-    };
-    const settings = {
-      ...initializeBotSettingsV1("primary"),
-      model: {
+      platformModel: {
         connectionId: "ollama-race",
         providerModelId: "model:cloud",
       },
-      assignments: [
-        {
-          assignmentId: "model-race",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-race",
-          state: "enabled" as const,
-        },
-      ],
     };
+    const settings = initializeBotSettingsV1("primary");
     await storage.put("bot-configuration", settings);
     const contribution = createShellBotBackendContribution({
       state: { storage } as unknown as DurableObjectState,

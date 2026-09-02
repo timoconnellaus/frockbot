@@ -6,7 +6,7 @@
 // `ctx.exports.BotCapabilities({ props })`. Per-Bot and per-generation state
 // therefore travels in `ctx.props`, which is structured-clonable.
 //
-// `list` answers from those props alone — the Assignments the Bot's Durable
+// `list` answers from those props alone — the User enablement the Bot's Durable
 // Object resolved — so nothing here can widen authority. `requestAuthority`
 // and `invokeModel` go back to the Bot's Durable Object, which is the only
 // authority for the Bot's durable state and the only place a credential lease
@@ -64,17 +64,17 @@ export class BotCapabilities extends WorkerEntrypoint<
   }
 
   /**
-   * Assignment-derived only: the enabled Assignments the Bot's Durable Object
-   * resolved, projected onto their manifest-declared capability kind. Nothing
-   * is read here, so nothing here can widen what the Bot holds.
+   * User-enabled only: the account-wide set the Bot's Durable Object resolved,
+   * projected onto each manifest-declared capability kind. Nothing is read
+   * here, so nothing here can widen what the User granted.
    */
   list(): Promise<IsolateCapabilityListOutcomeV1> {
     try {
       return Promise.resolve(
         decodeIsolateCapabilityListV1(
-          this.ctx.props.assignments.map((assignment) => ({
-            capabilityId: assignment.capabilityId,
-            kind: assignment.kind,
+          this.ctx.props.capabilities.map((capability) => ({
+            capabilityId: capability.capabilityId,
+            kind: capability.kind,
           })),
         ),
       );
@@ -103,7 +103,7 @@ export class BotCapabilities extends WorkerEntrypoint<
   }
 
   /**
-   * D6. The Bot Durable Object checks the model Assignment, records the
+   * D6. The Bot Durable Object checks the enabled model Capability, records the
    * normalized request and takes the credential lease through the existing
    * provider path before a byte is forwarded; the events come back as an
    * NDJSON byte stream, the only stream shape workerd RPC will carry.

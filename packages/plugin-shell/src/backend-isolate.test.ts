@@ -5,26 +5,24 @@ import type {
 } from "@frockbot/kernel-contracts";
 import {
   createIsolateCapabilityHost,
+  isolateBindingDigestV1,
   isolateModelEventStreamV1,
   ISOLATE_MODEL_FAILURE_MESSAGE,
   ISOLATE_MODEL_REQUEST_PREFIX,
-  matchingModelAssignmentV1,
-  type IsolateAssignmentV1,
+  matchingModelCapabilityV1,
+  type IsolateCapabilityV1,
   type IsolateModelBindingV1,
   type IsolateModelRequestRecordV1,
 } from "./backend-isolate.ts";
 
-const ASSIGNMENT: IsolateAssignmentV1 = {
-  assignmentId: "model-assignment",
+const CAPABILITY: IsolateCapabilityV1 = {
   packageId: "provider-ollama-cloud",
   capabilityId: "ollama-cloud-models",
   kind: "model",
   connectionId: "connection-1",
-  providerModelId: "glm-5.3-flash:cloud",
 };
 
 const BINDING: IsolateModelBindingV1 = {
-  assignmentId: "model-assignment",
   packageId: "provider-ollama-cloud",
   capabilityId: "ollama-cloud-models",
   connectionId: "connection-1",
@@ -85,7 +83,7 @@ function host(
       botId: "bot-1",
       packageId: "bot-authored",
       generationId: "generation-1",
-      assignments: [ASSIGNMENT],
+      capabilities: [CAPABILITY],
       modelBinding: binding,
       modelPath: {
         stream: (value) => {
@@ -104,36 +102,36 @@ function host(
   };
 }
 
-describe("an isolate model request is bound to its Assignment", () => {
-  test("matches only the exact assigned provider and model", () => {
+describe("an isolate model request is bound to its enabled Capability", () => {
+  test("matches only the exact authoritative provider and model", () => {
+    expect(matchingModelCapabilityV1([CAPABILITY], BINDING, request())).toEqual(
+      CAPABILITY,
+    );
     expect(
-      matchingModelAssignmentV1([ASSIGNMENT], BINDING, request()),
-    ).toMatchObject({ assignmentId: "model-assignment" });
-    expect(
-      matchingModelAssignmentV1(
-        [ASSIGNMENT],
+      matchingModelCapabilityV1(
+        [CAPABILITY],
         BINDING,
         request({ provider: "foundation" }),
       ),
     ).toBeUndefined();
     expect(
-      matchingModelAssignmentV1(
-        [ASSIGNMENT],
+      matchingModelCapabilityV1(
+        [CAPABILITY],
         BINDING,
         request({ model: "some-other-model" }),
       ),
     ).toBeUndefined();
-    // No durable binding at all: an enabled Assignment on its own authorizes
+    // No authoritative binding at all: an enabled Capability on its own authorizes
     // nothing.
     expect(
-      matchingModelAssignmentV1([ASSIGNMENT], undefined, request()),
+      matchingModelCapabilityV1([CAPABILITY], undefined, request()),
     ).toBeUndefined();
   });
 
   test("ignores a Bot-supplied model binding", () => {
     expect(
-      matchingModelAssignmentV1(
-        [ASSIGNMENT],
+      matchingModelCapabilityV1(
+        [CAPABILITY],
         BINDING,
         request({
           provider: "foundation",
@@ -144,7 +142,7 @@ describe("an isolate model request is bound to its Assignment", () => {
     ).toBeUndefined();
   });
 
-  test("a request for an unassigned provider is a pending decision", async () => {
+  test("a request outside the effective binding is a pending decision", async () => {
     const subject = host();
     const outcome = await subject.host.invokeModel(
       request({ provider: "foundation", model: "deterministic-v1" }),
@@ -170,6 +168,52 @@ describe("an isolate model request is bound to its Assignment", () => {
       connectionId: "connection-1",
       connectionGeneration: "generation-1",
     });
+  });
+});
+
+describe("User-enabled isolate bindings", () => {
+  test("list projects the complete enabled set", async () => {
+    const subject = host();
+
+    await expect(subject.host.list()).resolves.toEqual([
+      { capabilityId: "ollama-cloud-models", kind: "model" },
+    ]);
+  });
+
+  test("two Bots share a digest and a changed grant changes it", async () => {
+    const firstBot = await isolateBindingDigestV1([CAPABILITY], "generation-1");
+    const secondBot = await isolateBindingDigestV1(
+      [structuredClone(CAPABILITY)],
+      "generation-1",
+    );
+    const widened = await isolateBindingDigestV1(
+      [
+        CAPABILITY,
+        {
+          packageId: "clock",
+          capabilityId: "clock",
+          kind: "tool",
+        },
+      ],
+      "generation-1",
+    );
+
+    expect(secondBot).toBe(firstBot);
+    expect(widened).not.toBe(firstBot);
+  });
+
+  test("ordering does not change the digest", async () => {
+    const clock: IsolateCapabilityV1 = {
+      packageId: "clock",
+      capabilityId: "clock",
+      kind: "tool",
+    };
+
+    await expect(
+      isolateBindingDigestV1([CAPABILITY, clock], "generation-1"),
+    ).resolves.toBe(
+      await isolateBindingDigestV1([clock, CAPABILITY], "generation-1"),
+    );
   });
 });
 
