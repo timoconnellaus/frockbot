@@ -2131,6 +2131,16 @@ export class ShellBotBackendContribution {
         candidate.generation,
     );
     if (!connection?.generation) {
+      await this.authority.recordNotification({
+        notificationId: `package-connection-unavailable:${input.runId}:${input.packageId}:${input.request}`,
+        runId: input.runId,
+        createdAt: new Date().toISOString(),
+        title: "Connection unavailable",
+        body: `Package "${input.packageId}" could not use Connection "${input.request}". The User can enable or repair it on Connections.`.slice(
+          0,
+          240,
+        ),
+      });
       return { status: "unavailable", reason: "the Connection is unavailable" };
     }
     return {

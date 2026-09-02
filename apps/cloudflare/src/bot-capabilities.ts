@@ -237,7 +237,6 @@ export class BotCapabilities extends WorkerEntrypoint<
     const admitted = this.ctx.props.connections.find(
       (connection) => connection.connectionId === connectionId,
     );
-    if (!admitted) return unavailable("the Connection is unavailable");
     try {
       const outcome = await this.rpc.isolateConnection(
         this.scope(connectionId),
