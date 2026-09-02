@@ -1,0 +1,61 @@
+name: Auto-merge
+
+# Queues every pull request to merge itself once CI is green, so main
+# integrates continuously and a release is a deliberate, separate act — see
+# `release.yml`, which is what actually ships production.
+#
+# This only queues the merge. What holds it back is the branch ruleset on main
+# requiring the `Validate` and `Browser end-to-end` checks: GitHub merges the
+# pull request when they pass, and leaves it open when they do not. Without
+# that ruleset auto-merge has nothing to wait for and a pull request would
+# merge the moment it opened, so the ruleset is load-bearing, not decoration.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enable:
+    name: Enable auto-merge
+    # A draft is explicitly not ready, and a fork's pull request is untrusted
+    # code that a person should look at before it can reach main on a timer.
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Queue the pull request to merge when checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        # Merge commits, matching the history this repository already keeps.
+        #
+        # Not a failure worth failing the run over, and one refusal is routine:
+        # GitHub will not let `GITHUB_TOKEN` queue a pull request that edits
+        # anything under `.github/workflows/`, because that needs the
+        # `workflows` scope and the Actions token cannot hold it. So a pull
+        # request that changes CI is merged by hand — including the one that
+        # added this file — while every other pull request queues normally.
+        # Only a personal access token or GitHub App token would lift that,
+        # which is a bigger credential than merging CI changes by hand is worth.
+        #
+        # Auto-merge is also refused when the pull request is already mergeable
+        # with nothing left to wait for. Either way a person merges it.
+        run: |
+          if ! gh pr merge "$PR_NUMBER" --auto --merge; then
+            echo "::warning::Could not enable auto-merge on #$PR_NUMBER; merge it by hand."
+          fi
