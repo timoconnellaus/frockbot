@@ -447,6 +447,23 @@ function handle(
             : {}),
         };
       },
+      renew: async (sessionId, options) => {
+        const result = await computer.refreshViewer(sessionId, options);
+        if (!result.session) {
+          throw new ComputerError(
+            "provider-unavailable",
+            "The Computer host did not renew the viewer session",
+            true,
+          );
+        }
+        return {
+          id: result.session.id,
+          url: result.session.url,
+          ...(result.session.expiresAt
+            ? { expiresAt: result.session.expiresAt }
+            : {}),
+        };
+      },
       revoke: async (sessionId, options) => {
         await computer.revokeViewer(sessionId, options);
       },

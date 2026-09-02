@@ -17,6 +17,7 @@ import {
   type ComputerHostRequestV1,
 } from "@frockbot/computer-host-protocol";
 import {
+  BOTS_ROOT,
   CONTROL_SCRIPT,
   DESKTOP_SERVICE,
   ENSURE_AGENT_SCRIPT,
@@ -1001,6 +1002,39 @@ describe("viewer", () => {
     expect(body.session?.id).toBe("opaque-token");
     expect(body.session?.url).toContain("vnc.html");
     expect(body.session?.url).toContain("websockify%3Ftoken%3Dopaque-token");
+    expect(body.session?.url).toContain("view_only=1");
+    expect(sprite.commands.at(-1)?.stdin).toContain(
+      `touch '${BOTS_ROOT}/${botKey}/last-seen'`,
+    );
+  });
+
+  test("renewing a known viewer touches last-seen and returns the same session", async () => {
+    const { host, sprite } = provisioned();
+    const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    for (const [name, value] of [
+      ["viewer-token", "opaque-token\n"],
+      ["vnc-password", "secret\n"],
+    ]) {
+      writeFile(sprite, `${BOTS_ROOT}/${botKey}/${name}`, value!);
+    }
+
+    const response = await host.handle(
+      request({
+        kind: "viewer",
+        action: "renew",
+        sessionId: "opaque-token",
+      }),
+    );
+    const body = (await response.json()) as {
+      session?: { id: string; url: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.session?.id).toBe("opaque-token");
+    expect(body.session?.url).toContain("view_only=1");
+    expect(sprite.commands.at(-1)?.stdin).toContain(
+      `touch '${BOTS_ROOT}/${botKey}/last-seen'`,
+    );
   });
 
   test("revoking removes the token from the gateway's file", async () => {

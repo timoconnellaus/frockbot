@@ -209,7 +209,7 @@ export class FakeComputerHost {
       },
 
       viewer(
-        action: "open" | "revoke",
+        action: "open" | "renew" | "revoke",
         options?: ComputerHostCallOptions & { sessionId?: string },
       ): Promise<ComputerHostViewerResultV1> {
         options?.signal?.throwIfAborted();

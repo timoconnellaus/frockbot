@@ -549,8 +549,8 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 21  | User skills global across a user's Bots; managed skills read-only; plugin-borne skills indexed not copied                                             | `workflows/`; `managed-skills/`; `plugin-skills/cache.json`                                                                                                     | §2.9             | `plugin-skills`                                                                                                                                                                                                                     | landed                                              |
 | 22  | Catalog of path + description injected each turn; bodies read on demand; `/` or `@` invocation                                                        | the `<agent_skills>` block                                                                                                                                      | §2.8             | `plugin-skills` + WebUI                                                                                                                                                                                                             | landed                                              |
 | 23  | **Computer** — one persistent Linux computer per user shared by all Bots, per-Bot durable roots, shared scratch                                       | one container, 14 agents; `agent-data/agents/<uuid>/` vs `/workspace`                                                                                           | §B8, §A1         | `plugin-computer` + provider; `/workspace` scratch                                                                                                                                                                                  | done                                                |
-| 24  | Desktops allocated on demand, not one per Bot: own display, VNC/noVNC route, owner token, exec port                                                   | 7 live displays for 14 agents; `sand-window-router.mjs` `14000 + display`, `:1` primary                                                                         | §C12, §3.8       | `plugin-fly-sprite`                                                                                                                                                                                                                 | partial                                             |
-| 25  | Screenshot of the Bot's own desktop; human takeover for a login or captcha                                                                            | native `Screenshot`; `request_box_help`                                                                                                                         | §16, §2A         | `computer_screenshot`; the hosted `plugin-computer` path now publishes durable captures, the viewer session and the `plugin-fly-sprite` lease                                                                                       | landed                                              |
+| 24  | Desktops allocated on demand, not one per Bot: own display, VNC/noVNC route, owner token, exec port                                                   | 7 live displays for 14 agents; `sand-window-router.mjs` `14000 + display`, `:1` primary                                                                         | §C12, §3.8       | `plugin-fly-sprite`; viewer open/renew now touches the tenant's existing `last-seen`, so watching protects its allocated slot without a second activity marker                                                                      | partial                                             |
+| 25  | Screenshot of the Bot's own desktop; human takeover for a login or captcha                                                                            | native `Screenshot`; `request_box_help`                                                                                                                         | §16, §2A         | `computer_screenshot`; the hosted Computer strip shows the newest durable capture without waking, expands one view-only noVNC session, and requires confirmation before switching that session to human control                     | landed                                              |
 | 26  | "Update Computer" (fresh instance, keep files+logins, lose packages) and "Reset" (snapshot restore)                                                   | settings `update-computer` two-click confirm; `reset-computer`                                                                                                  | §2A, §9          | `plugin-computer`                                                                                                                                                                                                                   | not started                                         |
 | 26b | **Durability** — snapshot-out-only sync of the per-Bot state DBs on a debounce + tick, control files excluded                                         | `box-store-sync`: 120 s tick, 5 s DB debounce, 15 min Chrome, `AGENT_STORE_DB_BASENAMES`, `box-store-sync.lock`                                                 | §3.3             | `plugin-computer`                                                                                                                                                                                                                   | partial                                             |
 | 27  | A self-check the Bot runs and reads a log from, plus in-box reference docs it reads to debug itself and the UI                                        | `box-doctor` + `/tmp/box-doctor.log`; `reference/*.md`                                                                                                          | §2A              | `computer_doctor`; versioned `reference/`                                                                                                                                                                                           | done                                                |
@@ -857,21 +857,26 @@ the rows whose status the code moved:
   `/v1/computer/control`), which they were not while the provider needed the
   Sprites SDK. **Row 25 is now `landed`**: `computer_screenshot`
   (`plugin-computer/src/agent.ts`) captures the Bot's own desktop through one
-  guarded `exec` and writes the PNG back through `ComputerWorkspace.write`, and
-  the hosted client has the human-takeover flow the earlier text said it
-  lacked — `ComputerCard.vue` renders the noVNC viewer, **Take control**,
-  **Release control** and a full-window overlay, and the same card is a section
-  of the per-Bot info pane (row 51). What is still absent is the _Bot-initiated_
-  ask, `request_box_help`, and that is row 57d rather than this row.
+  guarded `exec` and writes the PNG back through `ComputerWorkspace.write`.
+  The hosted client's sidebar strip and Bot-panel card render that durable
+  capture without opening a viewer or waking the Computer. An explicit click
+  opens the shared full-window noVNC session with `view_only=1`; **Take control**
+  first confirms that the Bot will be fenced, then makes the same session
+  interactive, while Release, Escape, and close submit `releaseControl` through
+  the Bot Durable Object. What is still absent is the _Bot-initiated_ ask,
+  `request_box_help`, and that is row 57d rather than this row.
 
   **Row 24 stays `partial`.** The allocator, the per-tenant display, the
   `websockify` token route and the idle-reclaim rule are all there
   (`apps/computer-host/container/computer.ts`,
   `plugin-fly-sprite/src/computer.ts`), and an exec-only tenant holds its slot
-  through a `tenantStamp` refreshed on every guarded command. Nothing has been
-  measured against a live Sprite under contention, and there is no
-  per-Bot exec port of GrokBot's kind — the host is one port and the tenant is
-  a field in the request.
+  through a `tenantStamp` refreshed on every guarded command. Viewer open and
+  the Bot-DO-routed `refreshViewer` command now touch that same tenant's
+  `last-seen`, so the existing reclaim scan also preserves a recently watched
+  desktop; renewal runs only while the overlay is expanded, never from the
+  sidebar. Nothing has been measured against a live Sprite under contention,
+  and there is no per-Bot exec port of GrokBot's kind — the host is one port
+  and the tenant is a field in the request.
 
 - **28** — the interchangeable seam exists and has two implementations in
   tests, but only one is a Computer: `packages/computer-host-protocol` is the

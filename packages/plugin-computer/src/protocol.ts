@@ -8,6 +8,7 @@ export const COMPUTER_COMMAND_TYPES = [
   "takeControl",
   "releaseControl",
   "refreshControl",
+  "refreshViewer",
   "runDoctor",
 ] as const;
 
@@ -67,6 +68,7 @@ export const COMPUTER_PHASES = [
   "ready",
   "taking-control",
   "human-control",
+  "disconnected",
   "error",
 ] as const;
 

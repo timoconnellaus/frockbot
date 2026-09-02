@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type {
   ClientPluginContext,
   ClientSlotRegistration,
@@ -6,12 +6,72 @@ import type {
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { nextTick, ref } from "vue";
 import { computerKey, type ComputerState } from "../shared.js";
-import { computerClientPlugin } from "./application.js";
+import {
+  createComputerClientPlugin,
+  PROJECTION_POLL_INTERVAL_MS,
+  VIEWER_REFRESH_INTERVAL_MS,
+  type ComputerClientRuntime,
+} from "./application.js";
 
-test("the hosted Computer provider drives the card through a fake transport", async () => {
+class FakeRuntime implements ComputerClientRuntime {
+  visible = true;
+  readonly intervals = new Map<
+    number,
+    { callback: () => void; milliseconds: number }
+  >();
+  private visibilityListener?: () => void;
+  private nextTimer = 0;
+
+  setInterval(callback: () => void, milliseconds: number): unknown {
+    const id = ++this.nextTimer;
+    this.intervals.set(id, { callback, milliseconds });
+    return id;
+  }
+
+  clearInterval(handle: unknown): void {
+    this.intervals.delete(handle as number);
+  }
+
+  isVisible(): boolean {
+    return this.visible;
+  }
+
+  onVisibilityChange(listener: () => void): () => void {
+    this.visibilityListener = listener;
+    return () => {
+      if (this.visibilityListener === listener) {
+        this.visibilityListener = undefined;
+      }
+    };
+  }
+
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    this.visibilityListener?.();
+  }
+
+  tick(milliseconds: number): void {
+    for (const interval of [...this.intervals.values()]) {
+      if (interval.milliseconds === milliseconds) interval.callback();
+    }
+  }
+
+  count(milliseconds: number): number {
+    return [...this.intervals.values()].filter(
+      (interval) => interval.milliseconds === milliseconds,
+    ).length;
+  }
+}
+
+type Phase = "idle" | "ready" | "human-control" | "disconnected";
+
+function mountHostedProvider() {
   const shell = ref({ activeBotId: "scout" });
   const calls: Array<[string, string | undefined, string | undefined]> = [];
-  let phase: "idle" | "ready" | "human-control" = "idle";
+  const runtime = new FakeRuntime();
+  let phase: Phase = "idle";
+  let controlHeld = false;
+  let renewFails = false;
   let state: { value: ComputerState } | undefined;
   const slots: ClientSlotRegistration[] = [];
   const context: ClientPluginContext = {
@@ -22,17 +82,33 @@ test("the hosted Computer provider drives the card through a fake transport", as
         if (method === "POST") {
           const command = JSON.parse(body ?? "{}") as {
             commandId: string;
-            type: "connect" | "takeControl" | "releaseControl";
+            type:
+              "connect" | "takeControl" | "releaseControl" | "refreshViewer";
           };
           if (command.type === "connect") phase = "ready";
-          if (command.type === "takeControl") phase = "human-control";
-          if (command.type === "releaseControl") phase = "ready";
+          if (command.type === "takeControl") {
+            phase = "human-control";
+            controlHeld = true;
+          }
+          if (command.type === "releaseControl") {
+            controlHeld = false;
+            if (phase !== "disconnected") phase = "ready";
+          }
+          if (command.type === "refreshViewer" && renewFails) {
+            phase = "disconnected";
+          }
           return Promise.resolve({
             version: 1,
             commandId: command.commandId,
             type: command.type,
-            status: "applied",
+            status:
+              command.type === "refreshViewer" && renewFails
+                ? "rejected"
+                : "applied",
             completedAt: "2026-09-02T00:00:00.000Z",
+            ...(command.type === "refreshViewer" && renewFails
+              ? { failure: "viewer session expired" }
+              : {}),
           });
         }
         return Promise.resolve({
@@ -44,17 +120,17 @@ test("the hosted Computer provider drives the card through a fake transport", as
             phase === "idle"
               ? "Persistent Computer available"
               : "Computer ready",
-          ...(phase === "idle"
+          ...(phase === "idle" || phase === "disconnected"
             ? {}
             : {
                 viewerSession: {
                   version: 1,
                   id: "viewer-1",
-                  url: "https://viewer.invalid/secret",
+                  url: "https://viewer.invalid/secret#view_only=1",
                   expiresAt: "2099-09-02T00:01:30.000Z",
                 },
               }),
-          ...(phase === "human-control"
+          ...(controlHeld
             ? {
                 controlLease: {
                   version: 1,
@@ -81,31 +157,166 @@ test("the hosted Computer provider drives the card through a fake transport", as
       return () => {};
     },
   };
-  const disposers = computerClientPlugin(context);
+  const disposers = createComputerClientPlugin(runtime)(context);
+  return {
+    calls,
+    runtime,
+    shell,
+    slots,
+    get state() {
+      if (!state) throw new Error("Computer state was not provided");
+      return state.value;
+    },
+    failRenewal() {
+      renewFails = true;
+    },
+    dispose() {
+      if (Array.isArray(disposers)) {
+        for (const dispose of disposers.toReversed()) dispose();
+      } else if (typeof disposers === "function") disposers();
+    },
+  };
+}
+
+async function flush(): Promise<void> {
   await nextTick();
   await Promise.resolve();
-  expect(state?.value.phase).toBe("idle");
-  await state?.value.connect();
-  expect(state?.value).toMatchObject({
-    phase: "ready",
-    viewerUrl: "https://viewer.invalid/secret",
+  await Promise.resolve();
+}
+
+function postedTypes(
+  calls: Array<[string, string | undefined, string | undefined]>,
+): string[] {
+  return calls
+    .filter(([, method]) => method === "POST")
+    .map(([, , body]) => (JSON.parse(body ?? "{}") as { type: string }).type);
+}
+
+describe("hosted Computer provider", () => {
+  test("mounts the card and strip without connecting the Computer", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+
+    expect(mounted.state.phase).toBe("idle");
+    expect(mounted.slots.map((slot) => slot.slot)).toEqual([
+      "frockbot.computer",
+      "frockbot.sidebar-computer",
+      "frockbot.overlays",
+    ]);
+    expect(postedTypes(mounted.calls)).toEqual([]);
+
+    await mounted.state.openViewer();
+    expect(mounted.state).toMatchObject({ phase: "ready", expanded: true });
+    expect(postedTypes(mounted.calls)).toEqual(["connect"]);
+    mounted.dispose();
   });
-  await state?.value.takeControl();
-  expect(state?.value.phase).toBe("human-control");
-  await state?.value.releaseControl();
-  expect(state?.value.phase).toBe("ready");
-  expect(
-    calls
-      .filter(([, method]) => method === "POST")
-      .map(([, , body]) => (JSON.parse(body ?? "{}") as { type: string }).type),
-  ).toEqual(["connect", "takeControl", "releaseControl"]);
-  if (Array.isArray(disposers)) {
-    for (const dispose of disposers.toReversed()) dispose();
-  }
+
+  test("refreshes the viewer only while the overlay is expanded", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(0);
+
+    await mounted.state.openViewer();
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(1);
+    mounted.runtime.tick(VIEWER_REFRESH_INTERVAL_MS);
+    await flush();
+    expect(postedTypes(mounted.calls)).toEqual(["connect", "refreshViewer"]);
+
+    await mounted.state.closeViewer();
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(0);
+    mounted.runtime.tick(VIEWER_REFRESH_INTERVAL_MS);
+    await flush();
+    expect(postedTypes(mounted.calls)).toEqual(["connect", "refreshViewer"]);
+    mounted.dispose();
+  });
+
+  test("moves a failed viewer renewal to disconnected", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    await mounted.state.openViewer();
+    mounted.failRenewal();
+
+    mounted.runtime.tick(VIEWER_REFRESH_INTERVAL_MS);
+    await flush();
+
+    expect(mounted.state).toMatchObject({
+      phase: "disconnected",
+      viewerUrl: undefined,
+      takingControl: false,
+    });
+    mounted.dispose();
+  });
+
+  test("a viewer failure under human control still releases on close", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    await mounted.state.openViewer();
+    await mounted.state.takeControl();
+    mounted.failRenewal();
+
+    mounted.runtime.tick(VIEWER_REFRESH_INTERVAL_MS);
+    await flush();
+    expect(mounted.state).toMatchObject({
+      phase: "disconnected",
+      takingControl: true,
+    });
+
+    await mounted.state.closeViewer();
+    expect(
+      postedTypes(mounted.calls).filter((type) => type !== "refreshControl"),
+    ).toEqual(["connect", "takeControl", "refreshViewer", "releaseControl"]);
+    expect(mounted.state.expanded).toBe(false);
+    mounted.dispose();
+  });
+
+  test("closing the overlay releases control before it collapses", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    await mounted.state.openViewer();
+    await mounted.state.takeControl();
+
+    await mounted.state.closeViewer();
+
+    expect(mounted.state).toMatchObject({
+      phase: "ready",
+      takingControl: false,
+      expanded: false,
+    });
+    expect(postedTypes(mounted.calls)).toEqual([
+      "connect",
+      "takeControl",
+      "releaseControl",
+    ]);
+    mounted.dispose();
+  });
+
+  test("polls the wake-free projection only while the tab is visible", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    const initialReads = mounted.calls.filter(([, method]) => !method).length;
+    expect(mounted.runtime.count(PROJECTION_POLL_INTERVAL_MS)).toBe(1);
+
+    mounted.runtime.setVisible(false);
+    expect(mounted.runtime.count(PROJECTION_POLL_INTERVAL_MS)).toBe(0);
+    mounted.runtime.tick(PROJECTION_POLL_INTERVAL_MS);
+    await flush();
+    expect(mounted.calls.filter(([, method]) => !method)).toHaveLength(
+      initialReads,
+    );
+
+    mounted.runtime.setVisible(true);
+    await flush();
+    expect(mounted.runtime.count(PROJECTION_POLL_INTERVAL_MS)).toBe(1);
+    expect(
+      mounted.calls.filter(([, method]) => !method).length,
+    ).toBeGreaterThan(initialReads);
+    mounted.dispose();
+  });
 });
 
 test("the hosted provider stays absent when only the local RPC transport exists", () => {
   let provides = 0;
+  const slots: string[] = [];
   const context: ClientPluginContext = {
     transport: {
       turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
@@ -117,11 +328,19 @@ test("the hosted provider stays absent when only the local RPC transport exists"
       provides += 1;
       return () => {};
     },
-    slot: () => () => {},
+    slot: (registration) => {
+      slots.push(registration.slot);
+      return () => {};
+    },
   };
 
-  const dispose = computerClientPlugin(context);
+  const dispose = createComputerClientPlugin(new FakeRuntime())(context);
 
   expect(provides).toBe(0);
+  expect(slots).toEqual([
+    "frockbot.computer",
+    "frockbot.sidebar-computer",
+    "frockbot.overlays",
+  ]);
   if (typeof dispose === "function") dispose();
 });

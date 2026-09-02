@@ -172,7 +172,7 @@ export interface ComputerHostControlOperationV1 {
 
 export interface ComputerHostViewerOperationV1 {
   kind: "viewer";
-  action: "open" | "revoke";
+  action: "open" | "renew" | "revoke";
   sessionId?: string;
 }
 
@@ -689,11 +689,11 @@ function decodeOperation(
     }
     case "viewer": {
       const action = value.action;
-      if (action !== "open" && action !== "revoke") {
+      if (action !== "open" && action !== "renew" && action !== "revoke") {
         fail("Computer viewer action is invalid");
       }
-      if (action === "revoke" && value.sessionId === undefined) {
-        fail("Computer viewer revoke requires a session id");
+      if (action !== "open" && value.sessionId === undefined) {
+        fail(`Computer viewer ${action} requires a session id`);
       }
       return {
         kind,

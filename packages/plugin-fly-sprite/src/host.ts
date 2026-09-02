@@ -28,7 +28,10 @@ class FlySpriteHostController {
   private readonly entry: Entry<ComputerState>;
   private readonly data: ComputerState;
   private machine: ComputerMachineState;
-  private heartbeat?: ReturnType<typeof setInterval>;
+  private controlHeartbeat?: ReturnType<typeof setInterval>;
+  private viewerHeartbeat?: ReturnType<typeof setInterval>;
+  private viewerSessionId?: string;
+  private controlRequest?: Promise<void>;
   private takingControl = false;
 
   constructor(
@@ -50,6 +53,8 @@ class FlySpriteHostController {
     const data: ComputerState = {
       ...this.machine,
       connect: () => this.connect(),
+      openViewer: () => this.openViewer(),
+      closeViewer: () => this.closeViewer(),
       takeControl: () => this.takeOver(),
       releaseControl: () => this.release(),
       runDoctor: () => this.runDoctor(),
@@ -68,7 +73,8 @@ class FlySpriteHostController {
   }
 
   async dispose(): Promise<void> {
-    this.stopHeartbeat();
+    this.stopControlHeartbeat();
+    this.stopViewerHeartbeat();
     if (this.takingControl) {
       try {
         await this.computer.releaseControl();
@@ -83,14 +89,44 @@ class FlySpriteHostController {
     if (!this.configured) return;
     this.apply({ type: "connect-requested" });
     try {
-      const connection = await this.computer.ensure();
+      const connection = await this.computer.connect();
+      this.viewerSessionId = connection.viewerSessionId;
       this.apply({ type: "connected", viewerUrl: connection.viewerUrl });
     } catch (error) {
       this.fail(error);
     }
   }
 
-  private async takeOver(): Promise<void> {
+  private async openViewer(): Promise<void> {
+    if (this.machine.expanded) return;
+    const wake = this.machine.phase === "idle";
+    this.apply({ type: "viewer-expanded" });
+    if (wake) await this.connect();
+  }
+
+  private async closeViewer(): Promise<void> {
+    if (!this.machine.expanded) return;
+    if (this.controlRequest) {
+      try {
+        await this.controlRequest;
+      } catch {
+        // The acquisition failure is already the visible machine state.
+      }
+    }
+    if (this.takingControl) await this.release();
+    this.apply({ type: "viewer-collapsed" });
+  }
+
+  private takeOver(): Promise<void> {
+    if (this.controlRequest) return this.controlRequest;
+    const pending = this.acquireControl();
+    this.controlRequest = pending.finally(() => {
+      this.controlRequest = undefined;
+    });
+    return this.controlRequest;
+  }
+
+  private async acquireControl(): Promise<void> {
     if (!this.configured || this.takingControl) return;
     if (!this.current().viewerUrl) await this.connect();
     if (!this.current().viewerUrl) return;
@@ -98,7 +134,7 @@ class FlySpriteHostController {
     try {
       await this.computer.takeControl();
       this.takingControl = true;
-      this.startHeartbeat();
+      this.startControlHeartbeat();
       this.apply({ type: "control-acquired" });
     } catch (error) {
       this.fail(error);
@@ -109,11 +145,12 @@ class FlySpriteHostController {
     if (!this.takingControl) return;
     try {
       await this.computer.releaseControl();
-      this.stopHeartbeat();
+      this.stopControlHeartbeat();
       this.takingControl = false;
       this.apply({ type: "control-released" });
     } catch (error) {
       this.fail(error);
+      throw error;
     }
   }
 
@@ -161,21 +198,57 @@ class FlySpriteHostController {
     return this.data;
   }
 
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.heartbeat = setInterval(() => void this.refreshControl(), 30_000);
+  private startControlHeartbeat(): void {
+    this.stopControlHeartbeat();
+    this.controlHeartbeat = setInterval(
+      () => void this.refreshControl(),
+      30_000,
+    );
   }
 
-  private stopHeartbeat(): void {
-    if (this.heartbeat) clearInterval(this.heartbeat);
-    this.heartbeat = undefined;
+  private stopControlHeartbeat(): void {
+    if (this.controlHeartbeat) clearInterval(this.controlHeartbeat);
+    this.controlHeartbeat = undefined;
+  }
+
+  private syncViewerHeartbeat(): void {
+    if (!this.machine.expanded || !this.viewerSessionId) {
+      this.stopViewerHeartbeat();
+      return;
+    }
+    if (!this.viewerHeartbeat) {
+      this.viewerHeartbeat = setInterval(
+        () => void this.refreshViewer(),
+        30_000,
+      );
+    }
+  }
+
+  private stopViewerHeartbeat(): void {
+    if (this.viewerHeartbeat) clearInterval(this.viewerHeartbeat);
+    this.viewerHeartbeat = undefined;
+  }
+
+  private async refreshViewer(): Promise<void> {
+    const sessionId = this.viewerSessionId;
+    if (!sessionId) return;
+    try {
+      await this.computer.refreshViewer(sessionId);
+    } catch (error) {
+      this.viewerSessionId = undefined;
+      const detail = error instanceof Error ? error.message : String(error);
+      this.apply({
+        type: "viewer-disconnected",
+        message: `Viewer disconnected: ${detail}`,
+      });
+    }
   }
 
   private async refreshControl(): Promise<void> {
     try {
       await this.computer.refreshControl();
     } catch (error) {
-      this.stopHeartbeat();
+      this.stopControlHeartbeat();
       this.takingControl = false;
       const detail = error instanceof Error ? error.message : String(error);
       this.apply({
@@ -190,6 +263,7 @@ class FlySpriteHostController {
     this.machine = transitionComputerState(this.machine, event);
     Object.assign(this.data, this.machine);
     this.entry.mutate((data) => Object.assign(data, this.machine));
+    this.syncViewerHeartbeat();
   }
 
   private fail(error: unknown): void {

@@ -31,6 +31,8 @@ export interface ComputerState {
   providerLabel: string;
   message: string;
   viewerUrl?: string;
+  /** Whether the one live viewer is open over the hosted shell. */
+  expanded: boolean;
   takingControl: boolean;
   /** Newest first. Empty where the host publishes no captures. */
   screenshots?: ComputerScreenshotViewV1[];
@@ -39,6 +41,10 @@ export interface ComputerState {
   /** Absent where the host cannot run one; the card hides the button. */
   runDoctor?(): Promise<void>;
   connect(): Promise<void>;
+  /** Explicit User open. An idle Computer may wake; rendering never does. */
+  openViewer(): Promise<void>;
+  /** Closes the viewer, releasing human control before it disappears. */
+  closeViewer(): Promise<void>;
   takeControl(): Promise<void>;
   releaseControl(): Promise<void>;
   retry(): Promise<void>;

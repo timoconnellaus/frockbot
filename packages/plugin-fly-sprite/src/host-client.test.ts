@@ -546,6 +546,11 @@ describe("ComputerHostClient operations", () => {
 
     const viewer = await host.viewer("open");
     expect(viewer.session?.url).toBe("https://sprite.example/vnc.html");
+    await host.viewer("renew", { sessionId: "token-1" });
+    expect(calls.at(-1)?.body).toMatchObject({
+      action: "renew",
+      sessionId: "token-1",
+    });
   });
 
   test("a declared service reattach reports its status", async () => {

@@ -519,6 +519,10 @@ export interface ComputerViewerSession {
 
 export interface ComputerViewer {
   open(options?: ComputerOperationOptions): Promise<ComputerViewerSession>;
+  renew(
+    sessionId: string,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerViewerSession>;
   revoke(sessionId: string, options?: ComputerOperationOptions): Promise<void>;
 }
 
@@ -853,6 +857,10 @@ function guardedHandle(
       ? {
           open: (options) =>
             guardedOperation(assertCurrent, () => viewer.open(options)),
+          renew: (sessionId, options) =>
+            guardedOperation(assertCurrent, () =>
+              viewer.renew(sessionId, options),
+            ),
           revoke: (sessionId, options) =>
             guardedOperation(assertCurrent, () =>
               viewer.revoke(sessionId, options),

@@ -64,6 +64,106 @@ describe("Computer client state machine", () => {
     });
   });
 
+  test("marks a dead viewer disconnected and clears the frozen session", () => {
+    const disconnected = transitionComputerState(
+      {
+        ...initialComputerMachineState(),
+        phase: "ready",
+        viewerUrl: "https://viewer.invalid/secret",
+      },
+      { type: "viewer-disconnected", message: "Viewer session expired" },
+    );
+
+    expect(disconnected).toMatchObject({
+      phase: "disconnected",
+      message: "Viewer session expired",
+      viewerUrl: undefined,
+      takingControl: false,
+    });
+  });
+
+  test("a dead viewer preserves a held control lease so close can release it", () => {
+    const disconnected = transitionComputerState(
+      {
+        ...initialComputerMachineState(),
+        phase: "human-control",
+        viewerUrl: "https://viewer.invalid/secret",
+        takingControl: true,
+      },
+      { type: "viewer-disconnected", message: "Viewer session expired" },
+    );
+
+    expect(disconnected).toMatchObject({
+      phase: "disconnected",
+      viewerUrl: undefined,
+      takingControl: true,
+    });
+  });
+
+  test("an idle strip click expands before its connect request", () => {
+    const idle = {
+      ...initialComputerMachineState(),
+      phase: "idle" as const,
+    };
+    const expanded = transitionComputerState(idle, {
+      type: "viewer-expanded",
+    });
+    const connecting = transitionComputerState(expanded, {
+      type: "connect-requested",
+    });
+
+    expect(expanded).toMatchObject({ phase: "idle", expanded: true });
+    expect(connecting).toMatchObject({
+      phase: "provisioning",
+      expanded: true,
+    });
+  });
+
+  test("keeps the durable capture object until its content hash changes", () => {
+    const first = {
+      version: 1 as const,
+      path: "scout/first.png",
+      capturedAt: "2026-09-02T00:00:00.000Z",
+      contentHash: "sha256:first",
+      url: "/workspace/first",
+    };
+    const state = {
+      ...initialComputerMachineState(),
+      screenshots: [first],
+    };
+    const unchanged = transitionComputerState(state, {
+      type: "projection-received",
+      projection: {
+        version: 1,
+        botId: "scout",
+        providerLabel: "Fake Computer",
+        phase: "idle",
+        message: "Computer available",
+        screenshots: [{ ...first, url: "/workspace/reissued" }],
+      },
+    });
+    const changed = transitionComputerState(unchanged, {
+      type: "projection-received",
+      projection: {
+        version: 1,
+        botId: "scout",
+        providerLabel: "Fake Computer",
+        phase: "idle",
+        message: "Computer available",
+        screenshots: [
+          {
+            ...first,
+            contentHash: "sha256:second",
+            url: "/workspace/second",
+          },
+        ],
+      },
+    });
+
+    expect(unchanged.screenshots[0]).toBe(first);
+    expect(changed.screenshots[0]).not.toBe(first);
+  });
+
   test("reset explicitly clears viewer secrets from an existing projection", () => {
     const projected = {
       ...initialComputerMachineState(),

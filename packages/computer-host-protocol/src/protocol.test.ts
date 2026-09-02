@@ -312,6 +312,23 @@ describe("control, viewer, service, cancel", () => {
     ).toThrow(/revoke requires a session id/);
   });
 
+  test("round-trips viewer renewal and requires its existing session", () => {
+    const operation: ComputerHostOperationV1 = {
+      kind: "viewer",
+      action: "renew",
+      sessionId: "viewer-1",
+    };
+    expect(
+      decodeComputerHostRequestV1("viewer", request(operation)).operation,
+    ).toEqual(operation);
+    expect(() =>
+      decodeComputerHostRequestV1("viewer", {
+        ...envelope,
+        action: "renew",
+      }),
+    ).toThrow(/renew requires a session id/);
+  });
+
   test("a cancel names its effect through the envelope alone", () => {
     const decoded = decodeComputerHostRequestV1(
       "cancel",

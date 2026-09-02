@@ -30,6 +30,7 @@
   "dependencies": {
     "@cordisjs/client": "0.8.2",
     "@frockbot/client-core": "workspace:*",
+    "@frockbot/client-ui": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/computer-host-runtime": "workspace:*",
     "@frockbot/kernel-agent-loop": "workspace:*",

@@ -59,6 +59,9 @@ function command(
 
 function fakeHandle(options: {
   presence?(): Promise<{ id: string; url: string; expiresAt: string }>;
+  renewViewer?(
+    sessionId: string,
+  ): Promise<{ id: string; url: string; expiresAt: string }>;
   acquire?(ownerId: string): Promise<ComputerControlLease>;
   renew?(lease: ComputerControlLease): Promise<ComputerControlLease>;
   release?(lease: ComputerControlLease): Promise<void>;
@@ -68,6 +71,15 @@ function fakeHandle(options: {
     identity: { userId: "user-1" },
     tenant: { botId: "scout" },
     ...(options.presence ? { presence: { connect: options.presence } } : {}),
+    ...(options.renewViewer
+      ? {
+          viewer: {
+            open: () => Promise.reject(new Error("not used")),
+            renew: options.renewViewer,
+            revoke: () => Promise.resolve(),
+          },
+        }
+      : {}),
     control: {
       acquire: (request) => options.acquire!(request?.ownerId ?? "missing"),
       renew: (lease) => options.renew!(lease),
@@ -115,6 +127,62 @@ describe("Computer Bot Durable Object Contribution", () => {
     );
     expect(replay).toEqual(first);
     expect(calls).toBe(1);
+    expect(JSON.stringify([...storage.values.values()])).not.toContain(
+      "viewer.invalid",
+    );
+  });
+
+  test("records and replays one viewer renewal without storing its bearer URL", async () => {
+    const storage = new MemoryStorage();
+    let renewals = 0;
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () =>
+              Promise.resolve({
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-02T00:01:30.000Z",
+              }),
+            renewViewer: (sessionId) => {
+              renewals += 1;
+              expect(sessionId).toBe("viewer-1");
+              expect(
+                storage.values.has(`${COMPUTER_INTENT_PREFIX}viewer-renew-1`),
+              ).toBe(true);
+              return Promise.resolve({
+                id: sessionId,
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-02T00:02:00.000Z",
+              });
+            },
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:00:00.000Z"),
+    });
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-viewer"),
+    );
+    const first = await contribution.execute(
+      "user-1",
+      "scout",
+      command("refreshViewer", "viewer-renew-1"),
+    );
+    const replay = await contribution.execute(
+      "user-1",
+      "scout",
+      command("refreshViewer", "viewer-renew-1"),
+    );
+
+    expect(first.status).toBe("applied");
+    expect(replay).toEqual(first);
+    expect(renewals).toBe(1);
     expect(JSON.stringify([...storage.values.values()])).not.toContain(
       "viewer.invalid",
     );

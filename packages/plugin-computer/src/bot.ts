@@ -82,7 +82,7 @@ interface StoredControlV1 {
 
 interface StoredProviderAnswerV1 {
   version: 1;
-  phase: "provisioning" | "ready" | "error";
+  phase: "provisioning" | "ready" | "disconnected" | "error";
   message: string;
   recordedAt: string;
 }
@@ -192,6 +192,7 @@ function decodeStoredProvider(value: unknown): StoredProviderAnswerV1 {
     record.version !== 1 ||
     (record.phase !== "provisioning" &&
       record.phase !== "ready" &&
+      record.phase !== "disconnected" &&
       record.phase !== "error")
   ) {
     throw new Error("Computer provider record is corrupt");
@@ -410,6 +411,9 @@ export class ComputerBotBackendContribution {
         case "refreshControl":
           await this.refreshControl(userId, command);
           break;
+        case "refreshViewer":
+          await this.refreshViewer(userId, command);
+          break;
         case "releaseControl":
           await this.releaseControl(userId, command);
           break;
@@ -420,10 +424,17 @@ export class ComputerBotBackendContribution {
       return this.settle(command, admitted.fingerprint, "applied");
     } catch (error) {
       const failure = failureText(error);
+      if (command.type === "refreshViewer") {
+        this.#liveViewer = undefined;
+        await this.host.storage.delete(COMPUTER_VIEWER_RECORD_KEY);
+      }
       await this.host.storage.put(COMPUTER_PROVIDER_RECORD_KEY, {
         version: 1,
-        phase: "error",
-        message: failure,
+        phase: command.type === "refreshViewer" ? "disconnected" : "error",
+        message:
+          command.type === "refreshViewer"
+            ? `Viewer disconnected: ${failure}`
+            : failure,
         recordedAt: this.now().toISOString(),
       } satisfies StoredProviderAnswerV1);
       return this.settle(command, admitted.fingerprint, "rejected", failure);
@@ -548,6 +559,51 @@ export class ComputerBotBackendContribution {
       ...current,
       expiresAt: renewed.expiresAt,
     } satisfies StoredControlV1);
+  }
+
+  private async refreshViewer(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const currentValue = await this.host.storage.get<unknown>(
+      COMPUTER_VIEWER_RECORD_KEY,
+    );
+    if (currentValue === undefined)
+      throw new Error("No viewer session is active");
+    const current = decodeStoredViewer(currentValue);
+    const renewed = await this.withComputer(
+      userId,
+      command,
+      async (computer) => {
+        if (!computer.viewer) {
+          throw new Error("The selected Computer does not support a viewer");
+        }
+        return computer.viewer.renew(current.id, {
+          effectId: `computer:${command.commandId}:refresh-viewer`,
+        });
+      },
+    );
+    if (renewed.id !== current.id || !renewed.expiresAt) {
+      throw new Error("The Computer returned an invalid viewer renewal");
+    }
+    await this.host.storage.put({
+      [COMPUTER_VIEWER_RECORD_KEY]: {
+        version: 1,
+        id: renewed.id,
+        expiresAt: renewed.expiresAt,
+      } satisfies StoredViewerV1,
+      [COMPUTER_PROVIDER_RECORD_KEY]: {
+        version: 1,
+        phase: "ready",
+        message: "Computer ready",
+        recordedAt: this.now().toISOString(),
+      } satisfies StoredProviderAnswerV1,
+    });
+    this.#liveViewer = {
+      id: renewed.id,
+      url: renewed.url,
+      expiresAt: renewed.expiresAt,
+    };
   }
 
   private async releaseControl(
@@ -710,6 +766,9 @@ export class ComputerBotBackendContribution {
     if (!this.host.configured) {
       phase = "unconfigured";
       message = "No Computer provider is configured for this host";
+    } else if (provider?.phase === "disconnected") {
+      phase = "disconnected";
+      message = provider.message;
     } else if (activeControl) {
       phase = "human-control";
       message = "You have control. Release when finished with private data.";

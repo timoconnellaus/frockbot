@@ -483,7 +483,7 @@ export class ComputerHostClient {
   }
 
   viewer(
-    action: "open" | "revoke",
+    action: "open" | "renew" | "revoke",
     options?: ComputerHostCallOptions & { sessionId?: string },
   ): Promise<ComputerHostViewerResultV1> {
     return this.json(

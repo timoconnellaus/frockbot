@@ -603,6 +603,27 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  test("skips a tenant whose viewer just renewed last-seen", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        await seedTenant(runtimeRoot, slot, SLOT_IDLE_SECONDS + 600);
+      }
+      // Viewer open/renew touches this existing registry fact. The reclaim
+      // scan needs no viewer-specific file: a watcher is simply a live tenant.
+      const watched = join(runtimeRoot, "bots/tenant-003/last-seen");
+      const renewedAt = new Date();
+      await utimes(watched, renewedAt, renewedAt);
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(0);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe("the background-process logger", () => {

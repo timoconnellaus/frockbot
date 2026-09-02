@@ -146,9 +146,8 @@ describe("Fly Sprite computer", () => {
     const host = fakeHost();
     const computer = attach(host);
 
-    const general = await computer
-      .bot({ id: "general", name: "General" })
-      .ensure();
+    const generalComputer = computer.bot({ id: "general", name: "General" });
+    const general = await generalComputer.ensure();
     const health = await computer.bot("health").ensure();
 
     expect(general.botKey).not.toBe(health.botKey);
@@ -166,6 +165,12 @@ describe("Fly Sprite computer", () => {
       "open",
     ]);
     expect(computer.displayForTenant(computerBotKey("general"))).toBe(":100");
+    await generalComputer.refreshViewer(general.viewerSessionId);
+    expect(host.viewerSessions.map(({ action }) => action)).toEqual([
+      "open",
+      "open",
+      "renew",
+    ]);
   });
 
   test("an unconfigured Computer refuses rather than pretending", async () => {

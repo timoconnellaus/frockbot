@@ -98,7 +98,7 @@ export interface ComputerHostSurfaceV1 {
     options?: ComputerHostCallOptions & { scope?: "bot" | "desktop-gui" },
   ): Promise<ComputerHostControlResultV1>;
   viewer(
-    action: "open" | "revoke",
+    action: "open" | "renew" | "revoke",
     options?: ComputerHostCallOptions & { sessionId?: string },
   ): Promise<ComputerHostViewerResultV1>;
 }
@@ -415,6 +415,19 @@ export class FlySpriteAgentComputer {
     return this.computer.viewerForAgent(
       this.layout,
       "revoke",
+      options?.signal,
+      sessionId,
+      options?.effectId,
+    );
+  }
+
+  refreshViewer(
+    sessionId: string,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerHostViewerResultV1> {
+    return this.computer.viewerForAgent(
+      this.layout,
+      "renew",
       options?.signal,
       sessionId,
       options?.effectId,
@@ -1082,7 +1095,7 @@ export class FlySpriteComputer {
 
   viewerForAgent(
     layout: AgentLayout,
-    action: "open" | "revoke",
+    action: "open" | "renew" | "revoke",
     signal?: AbortSignal,
     sessionId?: string,
     effectId?: string,

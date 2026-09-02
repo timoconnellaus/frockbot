@@ -107,4 +107,43 @@ describe("Computer gateway Contribution", () => {
     expect(await one?.json()).toEqual(await two?.json());
     expect(effects).toBe(1);
   });
+
+  test("decodes refreshViewer and returns the authority's replayed receipt", async () => {
+    let effects = 0;
+    const receipts = new Map<string, ComputerCommandReceiptV1>();
+    const contribution = createComputerBackendContribution({
+      readComputer: () => Promise.resolve(projection),
+      executeComputerCommand: (_userId, _botId, decoded) => {
+        const replay = receipts.get(decoded.commandId);
+        if (replay) return Promise.resolve(replay);
+        effects += 1;
+        const receipt: ComputerCommandReceiptV1 = {
+          version: 1,
+          commandId: decoded.commandId,
+          type: decoded.type,
+          status: "applied",
+          completedAt: "2026-09-02T00:00:00.000Z",
+        };
+        receipts.set(decoded.commandId, receipt);
+        return Promise.resolve(receipt);
+      },
+    });
+    const execute = () =>
+      contribution.route(
+        request({
+          version: 1,
+          commandId: "viewer-renew-1",
+          botId: "scout",
+          type: "refreshViewer",
+        }),
+        new URL("https://app.test/api/bots/scout/computer/commands"),
+        { userId: "user-1", client: "browser" },
+      );
+
+    const first = await execute();
+    const duplicate = await execute();
+
+    expect(await first?.json()).toEqual(await duplicate?.json());
+    expect(effects).toBe(1);
+  });
 });

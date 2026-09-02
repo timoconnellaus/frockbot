@@ -89,12 +89,14 @@ host fake.
 
 ## Step 2 — the sidebar strip, view-only expand, confirm-to-control
 
+**Status:** landed.
+
 **Goal.** P1–P4.
 
 **Owns.** A `frockbot.sidebar-computer` (or the nearest existing sidebar slot;
 check `packages/plugin-shell` for what the shell exposes and add one if none
 fits) mount in `@frockbot/plugin-computer`'s client Contribution; `ComputerCard`
-grows `disconnected` and `updating` phases; the viewer session refreshes
+grows the `disconnected` phase; the viewer session refreshes
 `last-seen` (Computer host `viewer open` touches it, and the hosted client
 renews the session on an interval while expanded).
 

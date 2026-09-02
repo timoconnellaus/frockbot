@@ -1683,6 +1683,23 @@ export class ComputerHost {
       this.readText(sprite, `${BOTS_ROOT}/${botKey}/viewer-token`),
       this.readText(sprite, `${BOTS_ROOT}/${botKey}/vnc-password`),
     ]);
+    const sessionId = token.trim();
+    if (operation.action === "renew" && operation.sessionId !== sessionId) {
+      throw new ComputerHostError(
+        "not-found",
+        "The Computer viewer session has expired",
+        404,
+      );
+    }
+    // Watching is Computer activity (P3). The reclaim scan already treats a
+    // fresh last-seen as live, so viewer open/renew updates the same registry
+    // fact instead of creating a second lease or another source of truth.
+    await this.run(
+      sprite,
+      `mkdir -p ${shellQuote(`${BOTS_ROOT}/${botKey}`)} && touch ${shellQuote(`${BOTS_ROOT}/${botKey}/last-seen`)}\n`,
+      `viewer ${operation.action}`,
+      COMPUTER_HOST_PHASE_TIMEOUTS.control,
+    );
     const base =
       (await this.client.getSprite(record.spriteName)).url ?? sprite.url;
     if (!base) {
@@ -1698,14 +1715,15 @@ export class ComputerHost {
       autoconnect: "1",
       reconnect: "1",
       resize: "scale",
-      path: `websockify?token=${token.trim()}`,
+      view_only: "1",
+      path: `websockify?token=${sessionId}`,
       password: password.trim(),
     }).toString();
     return Response.json({
       version: 1,
       effectId: request.effectId,
       session: {
-        id: token.trim(),
+        id: sessionId,
         url: viewer.toString(),
         expiresAt: new Date(
           this.now() + CONTROL_LEASE_SECONDS * 1_000,
