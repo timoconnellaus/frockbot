@@ -180,7 +180,7 @@ describe("production setup", () => {
 
   test("publishes the Package Catalog after the artifact, pointer last", async () => {
     const source = await Bun.file(
-      new URL("../.github/workflows/ci.yml", import.meta.url),
+      new URL("../.github/workflows/release.yml", import.meta.url),
     ).text();
     const workflow = Bun.YAML.parse(source) as {
       jobs: {
@@ -264,7 +264,7 @@ exit 0
 
   test("deploys without Composio configuration and forwards active secrets", async () => {
     const source = await Bun.file(
-      new URL("../.github/workflows/ci.yml", import.meta.url),
+      new URL("../.github/workflows/release.yml", import.meta.url),
     ).text();
     const workflow = Bun.YAML.parse(source) as {
       jobs: {

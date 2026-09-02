@@ -48,4 +48,4 @@ bun run --filter @frockbot/computer-host test:live
 
 ## Deployment
 
-`ci.yml` deploys this Worker after the bundler and **before** the app Worker, because the app's `COMPUTER_HOST` binding must resolve and a stale host must not serve a current app. Secrets: `SPRITES_TOKEN` and `COMPUTER_HOST_TOKEN`. Containers require the Workers Paid plan, and `wrangler deploy` builds the image, so the runner needs Docker.
+`release.yml` deploys this Worker on a version tag, after the bundler and **before** the app Worker, because the app's `COMPUTER_HOST` binding must resolve and a stale host must not serve a current app. Secrets: `SPRITES_TOKEN` and `COMPUTER_HOST_TOKEN`. Containers require the Workers Paid plan, and `wrangler deploy` builds the image, so the runner needs Docker.

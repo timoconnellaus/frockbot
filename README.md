@@ -90,13 +90,17 @@ The suffixes matter: root `bun test` matches `*.test.ts` and `*.spec.ts` and nei
 
 ## Releases
 
-Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, and creates a GitHub release with generated notes. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
+Merging integrates; tagging ships. A pull request is queued to merge itself as soon as CI is green (`auto-merge.yml`), so `main` stays continuously integrated and nothing about landing a change touches production. Production moves only when a maintainer pushes a version tag.
+
+Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata such as `+build.1` is rejected because npm does not accept it in package versions) validates the monorepo, publishes every workspace under `packages/` to npm with the tag's version, creates a GitHub release with generated notes, and then deploys production. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
+
+Auto-merge waits on the branch ruleset for `main`, which requires the `Validate` and `Browser end-to-end` checks. That ruleset is what holds a queued pull request back; without it GitHub has nothing to wait for and would merge on open. **Allow auto-merge** must also be enabled in the repository's settings.
 
 For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
 
 ## Production deployment
 
-After CI succeeds on a push to `main`, `ci.yml` deploys four Cloudflare Workers through the GitHub `production` environment:
+After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
 - `apps/cloudflare-bundler` is the binding-less Package bundler the app reaches through its `PACKAGE_BUNDLER` service binding; it deploys before the app because that binding must resolve;
