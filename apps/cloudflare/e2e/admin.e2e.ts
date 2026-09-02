@@ -47,7 +47,7 @@ test("an admin changes the durable signup policy", async ({ page }) => {
 
   await page.reload();
   await expect(
-    page.getByRole("button", { name: "Plugins", exact: true }),
+    page.getByRole("button", { name: "Connectors", exact: true }),
   ).toBeVisible();
   await openAdmin(page);
   await expect(page.getByLabel("Accept new signups")).toBeChecked({

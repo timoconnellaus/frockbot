@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * The accounts of one Package: every Connection it owns, with the durable
- * actions each one offers.
+ * The accounts of one Package: every Connection it owns and the actions each
+ * one offers.
  *
  * Shared by Models and Connections, which differ in what they add around it —
  * a provider catalog and a model choice on one, an authorization handoff on
@@ -40,20 +40,6 @@ const connections = computed<ConnectionView[]>(() =>
 );
 
 type StatusTone = "ready" | "muted" | "attention";
-
-/**
- * The User's default model, when this account is the one serving it. Shown on
- * the account it belongs to; changing it is the row at the top of Models.
- */
-function defaultModelName(connection: ConnectionView): string | undefined {
-  const selected = web.value.userSettings?.newBotModelTemplate;
-  if (selected?.connectionId !== connection.connectionId) return undefined;
-  return (
-    connection.modelCatalog?.models.find(
-      (model) => model.providerModelId === selected.providerModelId,
-    )?.displayName ?? selected.providerModelId
-  );
-}
 
 function connectionTone(connection: ConnectionView): StatusTone {
   if (connection.state === "ready") return "ready";
@@ -194,9 +180,6 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
           Revoke
         </UiButton>
       </div>
-      <p v-if="defaultModelName(connection)" class="account-default">
-        Default model: {{ defaultModelName(connection) }}
-      </p>
       <p v-if="connection.failure" class="connection-failure" role="alert">
         {{ connection.failure }}
       </p>
@@ -314,12 +297,6 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
   background: var(--frock-surface-raised);
   color: var(--frock-text);
   font-size: var(--frock-text-base);
-}
-
-.account-default {
-  margin: 0;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
 }
 
 .connection-failure {

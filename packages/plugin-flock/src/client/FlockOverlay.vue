@@ -73,7 +73,7 @@ onBeforeUnmount(() => restoreFocus?.focus());
         <h1 id="flock-title">Archive this Bot?</h1>
         <p>
           Archiving stops new work and hides the Bot from your active flock.
-          History, settings, and Assignments are preserved for restoration.
+          History and settings are preserved for restoration.
         </p>
         <p
           v-if="flock.error"
@@ -185,8 +185,8 @@ onBeforeUnmount(() => restoreFocus?.focus());
             </div>
           </fieldset>
           <div class="flock-note">
-            This identity is durable. Refreshing or switching devices won’t
-            re-roll it.
+            This identity stays with your Bot. Refreshing or switching devices
+            won’t re-roll it.
           </div>
           <p
             v-if="flock.error"

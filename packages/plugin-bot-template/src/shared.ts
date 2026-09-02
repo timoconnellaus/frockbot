@@ -7,9 +7,9 @@
 // is the traffic around it: the commands a User issues, the receipts they get
 // back, and the summary of what an export packed and what it scrubbed.
 //
-// Nothing here carries a credential, a `connectionId`, an Assignment, or a
-// webhook key, and the decoders refuse an unknown key, so a shape that grew one
-// would fail at the seam rather than travel.
+// Nothing here carries a credential, a `connectionId`, or a webhook key, and
+// the decoders refuse an unknown key, so a shape that grew one would fail at
+// the seam rather than travel.
 import {
   decodeTemplateShareRecordV1,
   decodeTemplateVisibilityV1,
@@ -30,8 +30,6 @@ export const TEMPLATE_OMISSION_REASONS_V1 = [
   "first-party-package",
   "package-values",
   "connection",
-  "assignment",
-  "model",
   "memory",
   "private-network-server",
 ] as const;

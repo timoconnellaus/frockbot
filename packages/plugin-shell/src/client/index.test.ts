@@ -289,121 +289,6 @@ describe("composer hydration context", () => {
   });
 });
 
-describe("hosted Assignment commands", () => {
-  test("uses distinct atomic Assign, Replace, and Unassign commands", async () => {
-    let provided: Ref<FrockBotWebData> | undefined;
-    const commands: unknown[] = [];
-    await shellClientPlugin({
-      transport: {
-        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: () =>
-          Promise.resolve(initializeBotSettingsV1("primary")),
-        executeConfiguration: (command) => {
-          commands.push(command);
-          return Promise.resolve({
-            schemaVersion: 1,
-            commandId: command.commandId,
-            revision: command.expectedRevision + 1,
-            status: "applied",
-          });
-        },
-      },
-      slot: () => () => {},
-      inject: () => {
-        throw new Error("unexpected client provider injection");
-      },
-      provide: (_key, value) => {
-        provided = value as Ref<FrockBotWebData>;
-        return () => {};
-      },
-    });
-    if (!provided) throw new Error("shell data was not provided");
-    provided.value.activeBotId = "primary";
-    provided.value.botSettings = initializeBotSettingsV1("primary");
-    const assignment = {
-      assignmentId: "mail",
-      packageId: "mail",
-      capabilityId: "send",
-      connectionId: "mail-1",
-    };
-    await provided.value.assignCapability(assignment);
-    provided.value.botSettings = {
-      ...initializeBotSettingsV1("primary"),
-      revision: 1,
-    };
-    await provided.value.replaceCapability(assignment);
-    provided.value.botSettings = {
-      ...initializeBotSettingsV1("primary"),
-      revision: 2,
-    };
-    await provided.value.unassignCapability("mail");
-    expect(commands).toMatchObject([
-      { type: "bot/assign-capability", expectedRevision: 0, assignment },
-      { type: "bot/replace-capability", expectedRevision: 1, assignment },
-      {
-        type: "bot/unassign-capability",
-        expectedRevision: 2,
-        assignmentId: "mail",
-      },
-    ]);
-  });
-
-  test("surfaces rejected and retrying Assignment receipts", async () => {
-    let provided: Ref<FrockBotWebData> | undefined;
-    const receipts = [
-      {
-        schemaVersion: 1 as const,
-        commandId: "rejected",
-        revision: 0,
-        status: "rejected" as const,
-        failure: "Connection is unavailable",
-      },
-      {
-        schemaVersion: 1 as const,
-        commandId: "pending",
-        revision: 0,
-        status: "pending" as const,
-      },
-    ];
-    await shellClientPlugin({
-      transport: {
-        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: () =>
-          Promise.resolve(initializeBotSettingsV1("primary")),
-        executeConfiguration: () => Promise.resolve(receipts.shift()!),
-      },
-      slot: () => () => {},
-      inject: () => {
-        throw new Error("unexpected client provider injection");
-      },
-      provide: (_key, value) => {
-        provided = value as Ref<FrockBotWebData>;
-        return () => {};
-      },
-    });
-    if (!provided) throw new Error("shell data was not provided");
-    provided.value.activeBotId = "primary";
-    provided.value.botSettings = initializeBotSettingsV1("primary");
-    const assignment = {
-      assignmentId: "mail",
-      packageId: "mail",
-      capabilityId: "send",
-      connectionId: "mail-1",
-    };
-
-    await expect(provided.value.assignCapability(assignment)).rejects.toThrow(
-      "Connection is unavailable",
-    );
-    expect(provided.value.settingsError).toBe("Connection is unavailable");
-    await expect(provided.value.assignCapability(assignment)).resolves.toBe(
-      undefined,
-    );
-    expect(provided.value.settingsError).toBe(
-      "Assignment operation is retrying.",
-    );
-  });
-});
-
 describe("Bot selection", () => {
   test("passes explicit Bot IDs and ignores stale hydration", async () => {
     Object.defineProperty(globalThis, "window", {
@@ -576,197 +461,218 @@ describe("Bot selection", () => {
     expect(provided.value.userSettings?.profile.name).toBe("Newer");
   });
 
-  test("labels an explicitly bound Ollama Bot by its provider", async () => {
-    let provided: Ref<FrockBotWebData> | undefined;
-    const bot = {
-      ...initializeBotSettingsV1("ollama-bot"),
-      model: {
-        connectionId: "ollama-work",
-        providerModelId: "glm-5.3-flash:cloud",
+  test.each([
+    {
+      source: "bot" as const,
+      botValues: {
+        "custom-models": {
+          model: {
+            connectionId: "model-connection",
+            providerModelId: "model-id",
+          },
+        },
       },
-      assignments: [
-        {
-          assignmentId: "ollama-model",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-work",
-          state: "enabled" as const,
+      accountValues: undefined,
+      platformModel: undefined,
+      expectedLabel: "Model name · Model provider · Bot override",
+      expectedProjection: "bot",
+      ready: true,
+    },
+    {
+      source: "account" as const,
+      botValues: {},
+      accountValues: {
+        model: {
+          connectionId: "model-connection",
+          providerModelId: "model-id",
         },
-      ],
-    };
-    const user: UserSettingsViewV1 = {
-      schemaVersion: 1,
-      revision: 1,
-      profile: { name: "User" },
-      packages: [
+      },
+      platformModel: undefined,
+      expectedLabel: "Model name · Model provider · Account model",
+      expectedProjection: "default",
+      ready: true,
+    },
+    {
+      source: "platform" as const,
+      botValues: {},
+      accountValues: undefined,
+      platformModel: {
+        connectionId: "model-connection",
+        providerModelId: "model-id",
+      },
+      expectedLabel: "Model name · Model provider",
+      expectedProjection: "default",
+      ready: true,
+    },
+    {
+      source: "none" as const,
+      botValues: {},
+      accountValues: undefined,
+      platformModel: undefined,
+      expectedLabel: "Model unavailable",
+      expectedProjection: "none",
+      ready: false,
+    },
+  ])(
+    "labels the $source effective model",
+    async ({
+      botValues,
+      accountValues,
+      platformModel,
+      expectedLabel,
+      expectedProjection,
+      ready,
+    }) => {
+      let provided: Ref<FrockBotWebData> | undefined;
+      const bot = {
+        ...initializeBotSettingsV1("model-bot"),
+        packageValues: structuredClone(botValues) as Record<
+          string,
+          Record<string, unknown>
+        >,
+      };
+      const user: UserSettingsViewV1 = {
+        schemaVersion: 1,
+        revision: 1,
+        profile: { name: "User" },
+        packages: [
+          {
+            packageId: "custom-models",
+            version: "0.0.1",
+            state: "installed",
+            ...(accountValues ? { values: accountValues } : {}),
+          },
+          {
+            packageId: "model-provider",
+            version: "0.0.1",
+            state: "installed",
+          },
+        ],
+        connections: [
+          {
+            connectionId: "model-connection",
+            packageId: "model-provider",
+            connectionTypeId: "model-account",
+            displayName: "Work",
+            state: "ready",
+            providerType: "model-provider",
+            safeMetadata: {},
+            modelCatalog: {
+              schemaVersion: 1,
+              generation: "catalog-1",
+              state: "fresh",
+              models: [
+                {
+                  providerModelId: "model-id",
+                  displayName: "Model name",
+                  capabilities: {
+                    tools: true,
+                    vision: false,
+                    reasoning: false,
+                  },
+                  source: "discovered",
+                },
+              ],
+            },
+          },
+        ],
+        ...(platformModel ? { platformModel } : {}),
+      };
+      await shellClientPlugin({
+        transport: {
+          turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+          readConfiguration: (query) =>
+            Promise.resolve(query.type === "user/get" ? user : bot),
+        },
+        slot: () => () => {},
+        inject: () => {
+          throw new Error("unexpected client provider injection");
+        },
+        provide: (_key, value) => {
+          provided = value as Ref<FrockBotWebData>;
+          return () => {};
+        },
+      });
+      if (!provided) throw new Error("shell data was not provided");
+      provided.value.activeBotId = bot.botId;
+      provided.value.pluginCatalog = [
         {
-          packageId: "provider-ollama-cloud",
+          packageId: "custom-models",
+          displayName: "Custom models",
           version: "0.0.1",
-          state: "installed",
+          capabilities: [],
+          connectionTypes: [],
+          settings: [
+            {
+              id: "model",
+              schemaVersion: 1,
+              scopes: ["user", "bot"],
+              role: "model",
+              schema: {
+                type: "object",
+                properties: {
+                  connectionId: { type: "string" },
+                  providerModelId: { type: "string" },
+                },
+                required: ["connectionId", "providerModelId"],
+                additionalProperties: false,
+              },
+            },
+          ],
         },
-      ],
-      connections: [
         {
-          connectionId: "ollama-work",
-          packageId: "provider-ollama-cloud",
-          connectionTypeId: "ollama-cloud-account",
-          displayName: "Work",
-          state: "ready",
-          providerType: "ollama-cloud",
-          safeMetadata: {},
+          packageId: "model-provider",
+          displayName: "Model provider",
+          version: "0.0.1",
+          capabilities: [
+            {
+              id: "models",
+              kind: "model",
+              connectionTypes: ["model-account"],
+            },
+          ],
+          connectionTypes: [
+            {
+              id: "model-account",
+              displayName: "Model account",
+              allowMultiple: false,
+              authorizationKind: "api-key",
+              capabilities: ["models"],
+            },
+          ],
+          settings: [],
         },
-      ],
+      ];
+
+      await provided.value.loadBotSettings();
+
+      expect(provided.value.modelLabel).toBe(expectedLabel);
+      expect(provided.value.modelReady).toBe(ready);
+      expect(provided.value.modelSource).toBe(expectedProjection);
+    },
+  );
+
+  test("saves Bot-scoped Package settings through the generic command", async () => {
+    type PackageSettingsWebData = FrockBotWebData & {
+      saveBotPackageSettings(
+        packageId: string,
+        values: Record<string, unknown>,
+      ): Promise<void>;
     };
+    let provided: Ref<PackageSettingsWebData> | undefined;
+    const commands: unknown[] = [];
+    const bot = initializeBotSettingsV1("package-bot");
     await shellClientPlugin({
       transport: {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: (query) =>
-          Promise.resolve(query.type === "user/get" ? user : bot),
-      },
-      slot: () => () => {},
-      inject: () => {
-        throw new Error("unexpected client provider injection");
-      },
-      provide: (_key, value) => {
-        provided = value as Ref<FrockBotWebData>;
-        return () => {};
-      },
-    });
-    if (!provided) throw new Error("shell data was not provided");
-    provided.value.activeBotId = bot.botId;
-    provided.value.pluginCatalog = [
-      {
-        packageId: "provider-ollama-cloud",
-        displayName: "Ollama Cloud",
-        version: "0.0.1",
-        capabilities: [
-          {
-            id: "ollama-cloud-models",
-            kind: "model",
-            connectionTypes: ["ollama-cloud-account"],
-          },
-          {
-            id: "ollama-cloud-tools",
-            kind: "tool",
-            connectionTypes: ["ollama-cloud-account"],
-          },
-        ],
-        connectionTypes: [
-          {
-            id: "ollama-cloud-account",
-            displayName: "Ollama Cloud account",
-            allowMultiple: true,
-            authorizationKind: "api-key",
-            capabilities: ["ollama-cloud-models", "ollama-cloud-tools"],
-          },
-        ],
-      },
-    ];
-
-    await provided.value.loadBotSettings();
-    await provided.value.loadUserSettings();
-
-    expect(provided.value.modelLabel).toBe(
-      "glm-5.3-flash:cloud · Ollama Cloud",
-    );
-    expect(provided.value.modelReady).toBe(true);
-    expect(provided.value.modelSource).toBe("bot");
-
-    bot.assignments[0] = {
-      ...bot.assignments[0]!,
-      capabilityId: "ollama-cloud-tools",
-    };
-    await provided.value.loadBotSettings();
-    expect(provided.value.modelReady).toBe(false);
-
-    // A Bot without a model of its own follows the User's default, and the
-    // label never says so: the Bot simply runs on that model.
-    bot.model = undefined as unknown as typeof bot.model;
-    user.newBotModelTemplate = {
-      connectionId: "ollama-work",
-      providerModelId: "llama-3:cloud",
-    };
-    user.newBotModelTemplateSource = "auto";
-    await provided.value.loadUserSettings();
-    await provided.value.loadBotSettings();
-    expect(provided.value.modelSource).toBe("default");
-    expect(provided.value.modelLabel).toBe("llama-3:cloud · Ollama Cloud");
-    expect(provided.value.modelReady).toBe(true);
-
-    user.newBotModelTemplate = undefined;
-    user.newBotModelTemplateSource = undefined;
-    await provided.value.loadUserSettings();
-    expect(provided.value.modelSource).toBe("none");
-    expect(provided.value.modelLabel).toBe("No default model");
-    expect(provided.value.modelReady).toBe(false);
-  });
-
-  test("assigns a newly connected model capability before model selection", async () => {
-    let provided: Ref<FrockBotWebData> | undefined;
-    let bot = initializeBotSettingsV1("ollama-bot");
-    const commands: Array<{ type: string; expectedRevision: number }> = [];
-    const user: UserSettingsViewV1 = {
-      schemaVersion: 1,
-      revision: 1,
-      profile: { name: "User" },
-      packages: [
-        {
-          packageId: "provider-ollama-cloud",
-          version: "0.0.1",
-          state: "installed",
-        },
-      ],
-      connections: [
-        {
-          connectionId: "ollama-work",
-          packageId: "provider-ollama-cloud",
-          connectionTypeId: "ollama-cloud-account",
-          displayName: "Work",
-          state: "ready",
-          providerType: "ollama-cloud",
-          safeMetadata: {},
-        },
-      ],
-    };
-    await shellClientPlugin({
-      transport: {
-        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: (query) =>
-          Promise.resolve(query.type === "user/get" ? user : bot),
+        readConfiguration: () => Promise.resolve(bot),
         executeConfiguration: (command) => {
-          if (!("botId" in command)) throw new Error("unexpected User command");
-          commands.push({
-            type: command.type,
-            expectedRevision: command.expectedRevision,
-          });
-          if (command.type === "bot/assign-capability") {
-            bot = {
-              ...bot,
-              revision: 1,
-              model: command.model,
-              assignments: [{ ...command.assignment, state: "enabled" }],
-            };
-          } else if (command.type === "bot/select-model") {
-            bot = { ...bot, revision: bot.revision + 1, model: command.model };
-          } else if (command.type === "bot/unbind-model") {
-            bot = {
-              ...bot,
-              revision: bot.revision + 1,
-              model: undefined,
-              assignments: bot.assignments.map((assignment) =>
-                assignment.assignmentId === command.assignmentId
-                  ? { ...assignment, state: "unavailable" }
-                  : assignment,
-              ),
-            };
-          } else {
-            throw new Error("unexpected Bot command");
-          }
+          commands.push(command);
           return Promise.resolve({
             schemaVersion: 1,
             commandId: command.commandId,
-            revision: bot.revision,
-            status: "applied" as const,
+            revision: command.expectedRevision + 1,
+            status: "applied",
           });
         },
       },
@@ -775,102 +681,52 @@ describe("Bot selection", () => {
         throw new Error("unexpected client provider injection");
       },
       provide: (_key, value) => {
-        provided = value as Ref<FrockBotWebData>;
+        provided = value as Ref<PackageSettingsWebData>;
         return () => {};
       },
     });
     if (!provided) throw new Error("shell data was not provided");
     provided.value.activeBotId = bot.botId;
     provided.value.botSettings = bot;
-    provided.value.userSettings = user;
-    provided.value.pluginCatalog = [
-      {
-        packageId: "provider-ollama-cloud",
-        displayName: "Ollama Cloud",
-        version: "0.0.1",
-        capabilities: [
-          {
-            id: "ollama-cloud-models",
-            kind: "model",
-            connectionTypes: ["ollama-cloud-account"],
-          },
-        ],
-        connectionTypes: [
-          {
-            id: "ollama-cloud-account",
-            displayName: "Ollama Cloud account",
-            allowMultiple: true,
-            authorizationKind: "api-key",
-            capabilities: ["ollama-cloud-models"],
-          },
-        ],
-      },
-    ];
 
-    await provided.value.saveBotModel({
-      connectionId: "ollama-work",
-      providerModelId: "glm-5.3-flash:cloud",
-    });
-
-    expect(commands).toEqual([
-      { type: "bot/assign-capability", expectedRevision: 0 },
-    ]);
-    expect(bot).toMatchObject({
-      revision: 1,
+    await provided.value.saveBotPackageSettings("custom-models", {
       model: {
-        connectionId: "ollama-work",
-        providerModelId: "glm-5.3-flash:cloud",
+        connectionId: "model-connection",
+        providerModelId: "model-id",
       },
-      assignments: [
-        {
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-work",
-          state: "enabled",
+    });
+
+    expect(commands).toMatchObject([
+      {
+        type: "bot/set-package-settings",
+        botId: "package-bot",
+        packageId: "custom-models",
+        expectedRevision: 0,
+        values: {
+          model: {
+            connectionId: "model-connection",
+            providerModelId: "model-id",
+          },
         },
-      ],
-    });
-
-    bot = {
-      ...bot,
-      assignments: bot.assignments.map((assignment) => ({
-        ...assignment,
-        state: "unavailable",
-      })),
-    };
-    provided.value.botSettings = bot;
-
-    await provided.value.clearBotModel();
-
-    expect(commands.at(-1)).toEqual({
-      type: "bot/unbind-model",
-      expectedRevision: 1,
-    });
-    expect(bot).toMatchObject({
-      revision: 2,
-      model: undefined,
-      assignments: [{ state: "unavailable" }],
-    });
+      },
+    ]);
   });
 
-  test("does not resubmit an unchanged unavailable model", async () => {
+  test("shows the backend reason when Package enablement is refused", async () => {
     let provided: Ref<FrockBotWebData> | undefined;
-    const bot = {
-      ...initializeBotSettingsV1("ollama-bot"),
-      model: {
-        connectionId: "revoked-connection",
-        providerModelId: "glm-5.3-flash:cloud",
-      },
-      assignments: [],
-    };
-    let executed = false;
+    const failure =
+      'Enable dependency "custom-models" before enabling "provider-ollama-cloud"';
     await shellClientPlugin({
       transport: {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        executeConfiguration: () => {
-          executed = true;
-          throw new Error("model was resubmitted");
-        },
+        executeConfiguration: (command) =>
+          Promise.resolve({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            revision: command.expectedRevision,
+            status: "rejected",
+            failure,
+          }),
       },
       slot: () => () => {},
       inject: () => {
@@ -882,19 +738,24 @@ describe("Bot selection", () => {
       },
     });
     if (!provided) throw new Error("shell data was not provided");
-    provided.value.activeBotId = bot.botId;
-    provided.value.botSettings = bot;
     provided.value.userSettings = {
       schemaVersion: 1,
-      revision: 1,
+      revision: 2,
       profile: { name: "User" },
-      packages: [],
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "disabled",
+        },
+      ],
       connections: [],
     };
 
-    await provided.value.saveBotModel(bot.model);
-
-    expect(executed).toBe(false);
+    await expect(
+      provided.value.setPackageEnabled("provider-ollama-cloud", true),
+    ).rejects.toThrow(failure);
+    expect(provided.value.settingsError).toBe(failure);
   });
 });
 
@@ -984,7 +845,7 @@ describe("detached Turn projection", () => {
           input: "Keep working",
           events: [],
           status: "completed",
-          responseText: "Finished durably.",
+          responseText: "Finished successfully.",
         },
       ],
     );
@@ -992,7 +853,7 @@ describe("detached Turn projection", () => {
     expect(messages).toHaveLength(2);
     expect(messages[1]).toMatchObject({
       role: "assistant",
-      text: "Finished durably.",
+      text: "Finished successfully.",
       status: "completed",
     });
   });
@@ -1423,8 +1284,18 @@ describe("active durable Turn projection", () => {
     await shellClientPlugin({
       transport: {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: () =>
-          Promise.resolve(initializeBotSettingsV1("default")),
+        readConfiguration: (query) =>
+          Promise.resolve(
+            query.type === "bot/get"
+              ? initializeBotSettingsV1("default")
+              : {
+                  schemaVersion: 1 as const,
+                  revision: 0,
+                  profile: { name: "User" },
+                  packages: [],
+                  connections: [],
+                },
+          ),
         listRuns: () =>
           Promise.resolve([
             {
@@ -1513,8 +1384,18 @@ describe("hosted Stop", () => {
     await shellClientPlugin({
       transport: {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: () =>
-          Promise.resolve(initializeBotSettingsV1("default")),
+        readConfiguration: (query) =>
+          Promise.resolve(
+            query.type === "bot/get"
+              ? initializeBotSettingsV1("default")
+              : {
+                  schemaVersion: 1 as const,
+                  revision: 0,
+                  profile: { name: "User" },
+                  packages: [],
+                  connections: [],
+                },
+          ),
         listRuns: () =>
           Promise.resolve([
             {
@@ -1549,7 +1430,7 @@ describe("hosted Stop", () => {
     expect(provided.value.activeRun).toMatchObject({
       runId: "run-1",
       status: "running",
-      message: "Stop accepted; waiting for durable settlement.",
+      message: "Stop requested; finishing up.",
       canResume: false,
     });
 
@@ -1645,8 +1526,18 @@ describe("hosted Stop", () => {
     await shellClientPlugin({
       transport: {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: () =>
-          Promise.resolve(initializeBotSettingsV1("other")),
+        readConfiguration: (query) =>
+          Promise.resolve(
+            query.type === "bot/get"
+              ? initializeBotSettingsV1("other")
+              : {
+                  schemaVersion: 1 as const,
+                  revision: 0,
+                  profile: { name: "User" },
+                  packages: [],
+                  connections: [],
+                },
+          ),
         listRuns: () => Promise.resolve([]),
         listNotifications: () => Promise.resolve([]),
         stopRun: () => {
@@ -1718,7 +1609,7 @@ describe("uncertain Turn admission", () => {
             input: "continue",
             status: lookups === 2 ? "running" : "completed",
             events: [],
-            ...(lookups === 2 ? {} : { responseText: "Done durably" }),
+            ...(lookups === 2 ? {} : { responseText: "Done successfully" }),
           });
         },
         fenceRunAdmission: () =>
@@ -1752,7 +1643,7 @@ describe("uncertain Turn admission", () => {
     expect(provided.value.settingsError).toBeUndefined();
     expect(outstandingAbortListeners).toBe(0);
     expect(provided.value.messages.at(-1)).toMatchObject({
-      text: "Done durably",
+      text: "Done successfully",
       status: "completed",
     });
   });

@@ -109,18 +109,6 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "bot",
   },
   {
-    anchor: "bot-model",
-    surface: "bot-settings",
-    label: "Model",
-    scope: "bot",
-  },
-  {
-    anchor: "bot-capabilities",
-    surface: "bot-settings",
-    label: "Capability Assignments",
-    scope: "bot",
-  },
-  {
     anchor: "bot-routines",
     surface: "bot-settings",
     label: "Routines",
@@ -194,7 +182,7 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
   {
     anchor: "user-connections",
     surface: "connections",
-    label: "Connections",
+    label: "Connectors",
     scope: "user",
   },
   {

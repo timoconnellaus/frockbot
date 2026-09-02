@@ -26,9 +26,18 @@ export function declaresConnections(item: PluginCatalogItem): boolean {
 export function packageConfigurationHome(
   item: PluginCatalogItem,
 ): PackageConfigurationHome {
-  if (isModelProviderPackage(item)) return "models";
+  if (
+    isModelProviderPackage(item) ||
+    item.settings?.some((setting) => setting.role === "model")
+  )
+    return "models";
   if (declaresConnections(item)) return "connections";
-  if ((item.settings ?? []).length > 0) return "user-settings";
+  if (
+    item.settings?.some(
+      (setting) => setting.role !== "model" && setting.scopes.includes("user"),
+    )
+  )
+    return "user-settings";
   return "none";
 }
 
@@ -87,7 +96,7 @@ export function configurationHomeLabel(
   home: PackageConfigurationHome,
 ): string | undefined {
   if (home === "models") return "Models";
-  if (home === "connections") return "Connections";
+  if (home === "connections") return "Connectors";
   if (home === "user-settings") return "Application settings";
   return undefined;
 }

@@ -102,8 +102,8 @@ async function copyLink(share: TemplateShareRecordV1): Promise<void> {
           <strong>Share this Bot</strong>
           <small>
             Packs the profile, Bot-authored Skills, Routines, and required
-            Packages. Memory, credentials, Connections, Assignments, and
-            Computer files stay private.
+            Packages. Memory, credentials, Connections, and Computer files stay
+            private.
           </small>
         </span>
         <UiButton
@@ -131,7 +131,7 @@ async function copyLink(share: TemplateShareRecordV1): Promise<void> {
           {{ templates.summary.needsConnection }} server(s) are left as a
           placeholder the importer fills with their own Connection.
         </template>
-        Memory, credentials, Connections and Assignments were not included.
+        Memory, credentials, and Connections were not included.
       </p>
 
       <p
