@@ -114,9 +114,10 @@ export type NewBotModelTemplateSourceV1 = "user" | "auto";
 /**
  * Where an installed Package came from. `first-party` is a Package compiled
  * into the running application; `catalog` is one admitted from a pinned remote
- * Catalog generation, whose manifest is data and whose executing code is still
- * a reviewed first-party Package (ADR 0014). Absent means `first-party`, so
- * every installation recorded before the Catalog existed keeps its meaning.
+ * Catalog generation. A Catalog entry can refer to reviewed first-party code
+ * or an immutable bundle hosted in the Bot isolate. Absent means
+ * `first-party`, so every installation recorded before the Catalog existed
+ * keeps its meaning.
  */
 export type PackageProvenanceV1 = "first-party" | "catalog";
 
@@ -129,6 +130,8 @@ export interface PackageInstallationView {
   catalogId?: string;
   /** The immutable Catalog generation `catalogId` was read from. */
   catalogGeneration?: string;
+  /** Exact non-first-party bundle admitted from the Catalog, when it carries code. */
+  contentHash?: string;
   provenance?: PackageProvenanceV1;
   /** The setup values the install carried, as GrokBot's `InstallPlugin{values}`. */
   values?: Record<string, JsonValue>;
@@ -315,6 +318,7 @@ export type ConfigurationCommandV1 =
        */
       catalogId?: string;
       catalogGeneration?: string;
+      contentHash?: string;
       values?: Record<string, JsonValue>;
     })
   | (CommandMetaV1 & {
@@ -924,6 +928,13 @@ function commandMeta(value: Record<string, unknown>): CommandMetaV1 {
   };
 }
 
+function sha256Hex(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new ConfigurationDecodeError(`${label} is invalid`);
+  }
+  return value;
+}
+
 function nameProvenance(value: unknown, label: string): BotNameProvenanceV1 {
   if (value !== "user" && value !== "bot") {
     throw new ConfigurationDecodeError(`${label} is invalid`);
@@ -1184,7 +1195,7 @@ export function decodeConfigurationCommandV1(
       const command = exactCommand(
         input,
         ["packageId", "version"],
-        ["catalogId", "catalogGeneration", "values"],
+        ["catalogId", "catalogGeneration", "contentHash", "values"],
       );
       // A Catalog install is all three of identity, generation and (optional)
       // values or none of them: half a Catalog install would be an install
@@ -1202,6 +1213,14 @@ export function decodeConfigurationCommandV1(
           "install values require a Catalog entry",
         );
       }
+      if (
+        command.catalogId === undefined &&
+        command.contentHash !== undefined
+      ) {
+        throw new ConfigurationDecodeError(
+          "install contentHash requires a Catalog entry",
+        );
+      }
       return {
         ...commandMeta(command),
         type: value.type,
@@ -1215,6 +1234,11 @@ export function decodeConfigurationCommandV1(
                 command.catalogGeneration,
                 "catalogGeneration",
               ),
+              ...(command.contentHash === undefined
+                ? {}
+                : {
+                    contentHash: sha256Hex(command.contentHash, "contentHash"),
+                  }),
             }),
         ...(command.values === undefined
           ? {}
@@ -1522,7 +1546,14 @@ function packageInstallation(value: unknown): PackageInstallationView {
     value,
     "Package installation",
     ["packageId", "version", "state"],
-    ["failure", "catalogId", "catalogGeneration", "provenance", "values"],
+    [
+      "failure",
+      "catalogId",
+      "catalogGeneration",
+      "contentHash",
+      "provenance",
+      "values",
+    ],
   );
   if (
     installation.state !== "installed" &&
@@ -1556,6 +1587,9 @@ function packageInstallation(value: unknown): PackageInstallationView {
             "catalogGeneration",
           ),
         }),
+    ...(installation.contentHash === undefined
+      ? {}
+      : { contentHash: sha256Hex(installation.contentHash, "contentHash") }),
     ...(installation.provenance === undefined
       ? {}
       : { provenance: installation.provenance }),
@@ -1958,6 +1992,11 @@ const COMPOSITION_GENERATION_STATUSES_V1: readonly CompositionGenerationStatusVi
 
 export type CompositionProvenanceViewV1 =
   | { kind: "first-party" }
+  | {
+      kind: "catalog";
+      catalogId: string;
+      catalogGeneration: string;
+    }
   | { kind: "user"; userId: string; authoredAt: string }
   | {
       kind: "bot";
@@ -1971,8 +2010,25 @@ export type CompositionProvenanceViewV1 =
 export type CompositionOriginViewV1 =
   | { kind: "bootstrap" }
   | { kind: "bot-authored"; runId: string; sessionId: string; turnId: string }
+  | {
+      kind: "bot-catalog";
+      action: "install" | "update" | "remove";
+      packageId: string;
+      catalogId: string;
+      botId: string;
+      runId: string;
+      sessionId: string;
+      turnId: string;
+    }
   | { kind: "user-install"; userId: string }
-  | { kind: "revert"; revertsTo: string; userId: string };
+  | { kind: "revert"; revertsTo: string; userId: string }
+  | {
+      kind: "revert";
+      revertsTo: string;
+      botId: string;
+      runId: string;
+      turnId: string;
+    };
 
 export interface CompositionMemberViewV1 {
   packageId: string;
@@ -2017,6 +2073,7 @@ export interface CompositionGenerationViewV1 {
   status: CompositionGenerationStatusViewV1;
   origin: CompositionOriginViewV1;
   parentGenerationId?: string;
+  summary?: string;
   isCurrent: boolean;
   members: CompositionMemberViewV1[];
   /** Oldest attempt first; empty for a generation that never failed. */
@@ -2096,10 +2153,7 @@ function compositionTimestamp(value: unknown, label: string): string {
 }
 
 function compositionHash(value: unknown, label: string): string {
-  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
-    throw new ConfigurationDecodeError(`${label} is invalid`);
-  }
-  return value;
+  return sha256Hex(value, label);
 }
 
 function compositionProvenanceView(
@@ -2109,6 +2163,24 @@ function compositionProvenanceView(
   if (kind === "first-party") {
     exactRecord(input, "Composition provenance", ["kind"]);
     return { kind: "first-party" };
+  }
+  if (kind === "catalog") {
+    const value = exactRecord(input, "Composition provenance", [
+      "kind",
+      "catalogId",
+      "catalogGeneration",
+    ]);
+    return {
+      kind: "catalog",
+      catalogId: identifier(
+        value.catalogId,
+        "Composition provenance catalogId",
+      ),
+      catalogGeneration: identifier(
+        value.catalogGeneration,
+        "Composition provenance catalogGeneration",
+      ),
+    };
   }
   if (kind === "user") {
     const value = exactRecord(input, "Composition provenance", [
@@ -2169,6 +2241,37 @@ function compositionOriginView(input: unknown): CompositionOriginViewV1 {
       turnId: text(value.turnId, "Composition origin turnId", 128),
     };
   }
+  if (kind === "bot-catalog") {
+    const value = exactRecord(input, "Composition origin", [
+      "kind",
+      "action",
+      "packageId",
+      "catalogId",
+      "botId",
+      "runId",
+      "sessionId",
+      "turnId",
+    ]);
+    if (
+      value.action !== "install" &&
+      value.action !== "update" &&
+      value.action !== "remove"
+    ) {
+      throw new ConfigurationDecodeError(
+        "Composition origin action is invalid",
+      );
+    }
+    return {
+      kind: "bot-catalog",
+      action: value.action,
+      packageId: identifier(value.packageId, "Composition origin packageId"),
+      catalogId: identifier(value.catalogId, "Composition origin catalogId"),
+      botId: decodeBotIdV1(value.botId),
+      runId: text(value.runId, "Composition origin runId", 128),
+      sessionId: text(value.sessionId, "Composition origin sessionId", 257),
+      turnId: text(value.turnId, "Composition origin turnId", 128),
+    };
+  }
   if (kind === "user-install") {
     const value = exactRecord(input, "Composition origin", ["kind", "userId"]);
     return {
@@ -2177,18 +2280,36 @@ function compositionOriginView(input: unknown): CompositionOriginViewV1 {
     };
   }
   if (kind === "revert") {
+    const source = record(input, "Composition origin");
+    const revertsTo = decodeCompositionGenerationIdV1(
+      source.revertsTo,
+      "Composition origin revertsTo",
+    );
+    if (Object.hasOwn(source, "userId")) {
+      const value = exactRecord(input, "Composition origin", [
+        "kind",
+        "revertsTo",
+        "userId",
+      ]);
+      return {
+        kind: "revert",
+        revertsTo,
+        userId: text(value.userId, "Composition origin userId", 256),
+      };
+    }
     const value = exactRecord(input, "Composition origin", [
       "kind",
       "revertsTo",
-      "userId",
+      "botId",
+      "runId",
+      "turnId",
     ]);
     return {
       kind: "revert",
-      revertsTo: decodeCompositionGenerationIdV1(
-        value.revertsTo,
-        "Composition origin revertsTo",
-      ),
-      userId: text(value.userId, "Composition origin userId", 256),
+      revertsTo,
+      botId: decodeBotIdV1(value.botId),
+      runId: text(value.runId, "Composition origin runId", 128),
+      turnId: text(value.turnId, "Composition origin turnId", 128),
     };
   }
   throw new ConfigurationDecodeError("Composition origin kind is invalid");
@@ -2300,7 +2421,7 @@ export function decodeCompositionGenerationViewV1(
       "members",
       "failures",
     ],
-    ["parentGenerationId", "quarantine"],
+    ["parentGenerationId", "summary", "quarantine"],
   );
   if (
     !Array.isArray(value.failures) ||
@@ -2340,6 +2461,18 @@ export function decodeCompositionGenerationViewV1(
     throw new ConfigurationDecodeError(
       "Composition generation members are invalid",
     );
+  const summary =
+    value.summary === undefined
+      ? undefined
+      : text(value.summary, "Composition generation summary", 160);
+  if (
+    summary !== undefined &&
+    (summary.trim() !== summary || /[\r\n]/u.test(summary))
+  ) {
+    throw new ConfigurationDecodeError(
+      "Composition generation summary must be one trimmed line",
+    );
+  }
   return {
     schemaVersion: 1,
     botId: decodeBotIdV1(value.botId),
@@ -2352,6 +2485,7 @@ export function decodeCompositionGenerationViewV1(
     origin: compositionOriginView(value.origin),
     isCurrent: value.isCurrent,
     members,
+    ...(summary === undefined ? {} : { summary }),
     failures: value.failures.map(compositionFailureView),
     ...(value.quarantine === undefined
       ? {}

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   MAX_CATALOG_SKILL_BODY_BYTES_V1,
+  assertCatalogPackageBundleV1,
   assertCatalogEntryMatchesIndexV1,
   catalogContentHashV1,
   catalogEntryKeyV1,
+  catalogPackageArtifactKeyV1,
+  catalogPackageSourceKeyV1,
   catalogSetupFieldKeyV1,
   catalogIndexKeyV1,
   CATALOG_POINTER_KEY_V1,
@@ -19,6 +22,28 @@ import {
 } from "./index.ts";
 
 const MANIFEST_HASH = "a".repeat(64);
+
+function isolateManifest() {
+  return {
+    schemaVersion: 3 as const,
+    id: "parcel-tracking",
+    displayName: "Parcel tracking",
+    version: "0.0.1",
+    compatibility: { frockbot: ">=0.0.1" },
+    dependencies: {},
+    contributions: {
+      runtime: { entry: "./package.js", host: "bot-isolate" as const },
+    },
+    tools: [
+      {
+        name: "track_parcel",
+        description: "Tracks a parcel.",
+        inputSchema: { type: "object" },
+      },
+    ],
+    permissions: [],
+  };
+}
 
 function indexEntry(
   overrides: Partial<CatalogIndexEntryV1> = {},
@@ -228,6 +253,70 @@ describe("catalog entry decoding", () => {
       decodeCatalogEntryV1({ ...entryDetail(), installs: 12 }),
     ).toThrow('unknown field "installs"');
   });
+
+  test("decodes an immutable Bot-isolate bundle with the authored manifest shape", async () => {
+    const manifest = isolateManifest();
+    const manifestHash = await catalogContentHashV1(
+      JSON.stringify(manifest, Object.keys(manifest).sort()),
+    );
+    const entry = decodeCatalogEntryV1({
+      ...entryDetail({
+        catalogId: "parcel-tracking",
+        packageId: "parcel-tracking",
+        displayName: "Parcel tracking",
+        description: "Tracks deliveries.",
+        kind: "package",
+        manifestHash,
+      }),
+      tags: ["shipping", "parcels"],
+      bundle: {
+        contentHash: "b".repeat(64),
+        size: 512,
+        mediaType: "application/javascript",
+        bundlerVersion: "catalog-test@1",
+        manifest,
+        sourceHash: "c".repeat(64),
+      },
+    });
+
+    expect(entry.bundle?.manifest.tools?.[0]?.name).toBe("track_parcel");
+    expect(entry.tags).toEqual(["shipping", "parcels"]);
+    // The decoder validates shape synchronously; the reader additionally
+    // verifies the exact manifest bytes against the entry's hash.
+    await expect(assertCatalogPackageBundleV1(entry)).rejects.toThrow(
+      "manifest failed content hash verification",
+    );
+  });
+
+  test("refuses code on a connector or a manifest that does not target the Bot isolate", () => {
+    const bundle = {
+      contentHash: "b".repeat(64),
+      size: 512,
+      mediaType: "application/javascript" as const,
+      bundlerVersion: "catalog-test@1",
+      manifest: isolateManifest(),
+    };
+    expect(() => decodeCatalogEntryV1({ ...entryDetail(), bundle })).toThrow(
+      "only a package Catalog entry may carry a bundle",
+    );
+    expect(() =>
+      decodeCatalogEntryV1({
+        ...entryDetail({
+          catalogId: "parcel-tracking",
+          packageId: "parcel-tracking",
+          kind: "package",
+        }),
+        bundle: {
+          ...bundle,
+          manifest: {
+            ...isolateManifest(),
+            contributions: { runtime: { entry: "./runtime.js" } },
+            tools: undefined,
+          },
+        },
+      }),
+    ).toThrow("must declare a Bot isolate runtime");
+  });
 });
 
 describe("content addressing", () => {
@@ -278,6 +367,12 @@ describe("object layout", () => {
       "catalog/gen-0001/entry/mcp-weather.json",
     );
     expect(CATALOG_POINTER_KEY_V1).toBe("catalog/current");
+    expect(catalogPackageArtifactKeyV1("b".repeat(64))).toBe(
+      `packages/${"b".repeat(64)}.mjs`,
+    );
+    expect(catalogPackageSourceKeyV1("c".repeat(64))).toBe(
+      `packages/${"c".repeat(64)}.ts`,
+    );
   });
 
   test("refuses a generation or catalogId that could escape its prefix", () => {

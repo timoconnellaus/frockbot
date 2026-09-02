@@ -15,6 +15,7 @@
  */
 import {
   assertCatalogEntryMatchesIndexV1,
+  assertCatalogPackageBundleV1,
   catalogContentHashV1,
   catalogEntryKeyV1,
   catalogIndexKeyV1,
@@ -126,10 +127,9 @@ export class R2PackageCatalog implements PackageCatalogStore {
         `catalog entry "${row.catalogId}" is indexed but absent from generation "${index.generation}"`,
       );
     }
-    assertCatalogEntryMatchesIndexV1(
-      parseCatalogEntryDocumentV1(document),
-      row,
-    );
+    const entry = parseCatalogEntryDocumentV1(document);
+    assertCatalogEntryMatchesIndexV1(entry, row);
+    await assertCatalogPackageBundleV1(entry);
     return {
       generation: index.generation,
       hash: await catalogContentHashV1(document),

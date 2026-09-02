@@ -1242,6 +1242,7 @@ describe("Catalog installs and uninstall", () => {
         version: "0.0.1",
         catalogId: "mcp-weather",
         catalogGeneration: "gen-one",
+        contentHash: "a".repeat(64),
         values: { region: "au" },
       }),
     ).toEqual({
@@ -1251,6 +1252,7 @@ describe("Catalog installs and uninstall", () => {
       version: "0.0.1",
       catalogId: "mcp-weather",
       catalogGeneration: "gen-one",
+      contentHash: "a".repeat(64),
       values: { region: "au" },
     });
   });
@@ -1290,6 +1292,26 @@ describe("Catalog installs and uninstall", () => {
         values: { region: "au" },
       }),
     ).toThrow("install values require a Catalog entry");
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "user/install-package",
+        packageId: "clock",
+        version: "0.0.1",
+        contentHash: "a".repeat(64),
+      }),
+    ).toThrow("install contentHash requires a Catalog entry");
+    expect(() =>
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "user/install-package",
+        packageId: "mcp-weather",
+        version: "0.0.1",
+        catalogId: "mcp-weather",
+        catalogGeneration: "gen-one",
+        contentHash: "not-a-hash",
+      }),
+    ).toThrow("contentHash is invalid");
   });
 
   test("refuses install values that are not bounded JSON", () => {
