@@ -97,6 +97,11 @@ export function planBotRunRecovery<Snapshot>(
         lastAssistant?.type === "assistant/message" ? lastAssistant.text : "",
     };
   }
+  // A direct tool Turn has no model request by construction. Its single
+  // synthetic assistant/tool occurrence is nevertheless resumable at every
+  // durable boundary: before intent it can start, after intent it reconciles,
+  // and after result it only needs its terminal events appended.
+  if (run.directTool) return { kind: "resume" };
   const modelState = latestModelRequestJournalState(run.events);
   if (modelState.status === "no-effect") {
     try {

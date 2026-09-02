@@ -31,6 +31,19 @@ describe("decodeBundleRequestV1", () => {
     });
   });
 
+  it("accepts exactly one optional raw ui.html page", () => {
+    expect(
+      decodeBundleRequestV1(
+        request({ ui: { path: "ui.html", html: "<!doctype html>" } }),
+      ).ui,
+    ).toEqual({ path: "ui.html", html: "<!doctype html>" });
+    expect(() =>
+      decodeBundleRequestV1(
+        request({ ui: { path: "page.html", html: "<!doctype html>" } }),
+      ),
+    ).toThrow("ui must contain one non-empty ui.html");
+  });
+
   it("rejects an unknown field", () => {
     expect(() =>
       decodeBundleRequestV1(

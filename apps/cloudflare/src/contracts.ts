@@ -251,6 +251,15 @@ export interface UserBotStateBinding {
     schemaVersion: 1;
     botId: string;
   }): Promise<ClientSkillCatalogV1>;
+  listPackageUi(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<import("@frockbot/kernel-contracts").PackageIframeCompositionV1>;
+  runPackageUiTool(input: {
+    schemaVersion: 1;
+    botId: string;
+    command: import("@frockbot/kernel-contracts").PackageIframeToolCommandV1;
+  }): Promise<BotTurnResult>;
   readWorkspaceFileV1(input: {
     schemaVersion: 1;
     botId: string;
@@ -336,6 +345,8 @@ export type BotPackageLoader = WorkerLoader<
 
 export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;
+  /** Hash-verified immutable HTML for the anonymous UI artifact hostname. */
+  loadPackageUiArtifact?(contentHash: string): Promise<string | undefined>;
 }
 
 /** One verified Catalog object, as `/catalog/v1/*` serves it. */
@@ -387,6 +398,13 @@ export interface ArtifactRefV1 {
   bundlerVersion: string;
 }
 
+export interface UiArtifactRefV1 {
+  contentHash: string;
+  size: number;
+  mediaType: "text/html";
+  bundlerVersion: string;
+}
+
 export interface BundleRequestV1 {
   schemaVersion: 1;
   effectId: string;
@@ -394,6 +412,7 @@ export interface BundleRequestV1 {
   compatibilityDate: string;
   entry: "package.ts";
   sources: { path: string; text: string }[];
+  ui?: { path: "ui.html"; html: string };
 }
 
 export type BundleResultV1 =
@@ -402,6 +421,8 @@ export type BundleResultV1 =
       effectId: string;
       status: "bundled";
       artifact: ArtifactRefV1;
+      uiArtifact?: UiArtifactRefV1;
+      uiHtml?: string;
       module: string;
       diagnostics: string[];
     }
@@ -717,6 +738,8 @@ export interface BotConfigurationBinding {
 export interface GatewayDependencies {
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
+  /** Dedicated anonymous hostnames that serve only immutable iframe pages. */
+  uiArtifactHosts?: readonly string[];
   auth: GatewayAuth;
   userExists(userId: string): Promise<boolean>;
   readDeploymentPolicy(): Promise<DeploymentPolicyV1>;

@@ -15,6 +15,8 @@ import type {} from "cordis";
 export const PACKAGE_BUNDLE_MAX_SOURCE_BYTES = 256 * 1024;
 /** The only entry a Bot-authored Package may declare in this slice. */
 export const PACKAGE_BUNDLE_ENTRY = "package.ts";
+/** Raw HTML is content-addressed without transforming it. */
+export const PACKAGE_UI_ARTIFACT_VERSION = "frockbot-inline-html@1";
 
 export interface PackageBundleSourceV1 {
   path: string;
@@ -29,6 +31,8 @@ export interface PackageBundleRequestV1 {
   compatibilityDate: string;
   entry: "package.ts";
   sources: PackageBundleSourceV1[];
+  /** Optional immutable inline-only HTML page; never compiled into app code. */
+  ui?: { path: "ui.html"; html: string };
 }
 
 export interface PackageBundleArtifactV1 {
@@ -39,12 +43,23 @@ export interface PackageBundleArtifactV1 {
   bundlerVersion: string;
 }
 
+export interface PackageUiArtifactV1 {
+  /** sha-256 hex of the exact HTML bytes. */
+  contentHash: string;
+  size: number;
+  mediaType: "text/html";
+  bundlerVersion: string;
+}
+
 export type PackageBundleResultV1 =
   | {
       schemaVersion: 1;
       effectId: string;
       status: "bundled";
       artifact: PackageBundleArtifactV1;
+      uiArtifact?: PackageUiArtifactV1;
+      /** Exact HTML bytes; the Durable Object owns the immutable write. */
+      uiHtml?: string;
       /** The module bytes as text; the Durable Object owns the artifact write. */
       module: string;
       diagnostics: string[];
@@ -130,6 +145,38 @@ export function decodePackageBundleArtifactV1(
   };
 }
 
+export function decodePackageUiArtifactV1(
+  input: unknown,
+  label = "package UI artifact",
+): PackageUiArtifactV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    ["contentHash", "size", "mediaType", "bundlerVersion"],
+    label,
+  );
+  if (
+    typeof value.contentHash !== "string" ||
+    !SHA256_HEX.test(value.contentHash)
+  )
+    throw new Error(`${label}.contentHash must be a sha-256 hex digest`);
+  if (!Number.isSafeInteger(value.size) || (value.size as number) < 0)
+    throw new Error(`${label}.size must be a non-negative integer`);
+  if (value.mediaType !== "text/html")
+    throw new Error(`${label}.mediaType is invalid`);
+  const bundlerVersion = boundedString(
+    value.bundlerVersion,
+    `${label}.bundlerVersion`,
+    128,
+  );
+  return {
+    contentHash: value.contentHash,
+    size: value.size as number,
+    mediaType: "text/html",
+    bundlerVersion,
+  };
+}
+
 /**
  * The exact v1 decoder for what comes back across the bundler binding. The
  * bundler is a separate Worker, so its answer is an inbound value at a
@@ -144,6 +191,12 @@ export function decodePackageBundleResultV1(
     throw new Error(`${label}.schemaVersion is unsupported`);
   const effectId = boundedString(value.effectId, `${label}.effectId`, 200);
   if (value.status === "bundled") {
+    const hasUi = value.uiArtifact !== undefined || value.uiHtml !== undefined;
+    if ((value.uiArtifact === undefined) !== (value.uiHtml === undefined)) {
+      throw new Error(
+        `${label} must return UI artifact metadata and HTML together`,
+      );
+    }
     exactKeys(
       value,
       [
@@ -153,6 +206,7 @@ export function decodePackageBundleResultV1(
         "artifact",
         "module",
         "diagnostics",
+        ...(hasUi ? ["uiArtifact", "uiHtml"] : []),
       ],
       label,
     );
@@ -162,12 +216,22 @@ export function decodePackageBundleResultV1(
     );
     if (typeof value.module !== "string" || value.module.length === 0)
       throw new Error(`${label}.module must be a non-empty string`);
+    const uiArtifact = hasUi
+      ? decodePackageUiArtifactV1(value.uiArtifact, `${label}.uiArtifact`)
+      : undefined;
+    if (
+      hasUi &&
+      (typeof value.uiHtml !== "string" || value.uiHtml.length === 0)
+    ) {
+      throw new Error(`${label}.uiHtml must be a non-empty string`);
+    }
     return {
       schemaVersion: 1,
       effectId,
       status: "bundled",
       artifact,
       module: value.module,
+      ...(uiArtifact ? { uiArtifact, uiHtml: value.uiHtml as string } : {}),
       diagnostics: diagnostics(value.diagnostics, `${label}.diagnostics`),
     };
   }

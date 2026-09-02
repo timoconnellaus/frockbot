@@ -82,10 +82,39 @@ describe("decodeAuthorPackageInputV1", () => {
       }),
     ).toThrow();
   });
+
+  test("accepts one inline iframe page and refuses external resources or an oversized page", () => {
+    const ui = {
+      html: "<!doctype html><style>body{color:red}</style><script>window.frockbot.resize()</script>",
+      mounts: [
+        { slot: "frockbot.tool-result:weather_lookup", order: 10 },
+        { slot: "frockbot.bot-settings-sections" },
+      ],
+    };
+    expect(
+      decodeAuthorPackageInputV1({
+        ...VALID,
+        hooks: ["agent/tool-exposure"],
+        ui,
+      }),
+    ).toMatchObject({ hooks: ["agent/tool-exposure"], ui });
+    expect(() =>
+      decodeAuthorPackageInputV1({
+        ...VALID,
+        ui: { ...ui, html: '<script src="https://example.com/x.js"></script>' },
+      }),
+    ).toThrow("inline resources only");
+    expect(() =>
+      decodeAuthorPackageInputV1({
+        ...VALID,
+        ui: { ...ui, html: "a".repeat(256 * 1024 + 1) },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("authoring identity", () => {
-  test("the effect id is deterministic in the run and the exact source", async () => {
+  test("the effect id is deterministic in the run, source, UI, and hooks", async () => {
     const sourceHash = await sha256HexV1(VALID.source);
     const first = await authoringEffectIdV1({
       runId: "run-1",
@@ -107,10 +136,25 @@ describe("authoring identity", () => {
       packageId: VALID.packageId,
       sourceHash: await sha256HexV1(`${VALID.source}//`),
     });
+    const otherUi = await authoringEffectIdV1({
+      runId: "run-1",
+      packageId: VALID.packageId,
+      sourceHash,
+      uiHtmlHash: await sha256HexV1("<!doctype html><h1>Weather</h1>"),
+    });
+    const otherHooks = await authoringEffectIdV1({
+      runId: "run-1",
+      packageId: VALID.packageId,
+      sourceHash,
+      hooks: ["agent/tool-exposure"],
+    });
 
     expect(first).toBe(second);
     expect(first).not.toBe(otherRun);
     expect(first).not.toBe(otherSource);
+    expect(first).not.toBe(otherUi);
+    expect(first).not.toBe(otherHooks);
+    expect(otherUi).not.toBe(otherHooks);
     expect(first.length).toBeLessThanOrEqual(200);
   });
 
@@ -156,5 +200,35 @@ describe("authoring identity", () => {
       ],
     });
     expect(JSON.stringify(base)).not.toBe(JSON.stringify(withModel));
+  });
+
+  test("extends the same manifest with a content-addressed iframe contribution", () => {
+    const artifact = {
+      contentHash: "a".repeat(64),
+      size: 42,
+      mediaType: "text/html" as const,
+      bundlerVersion: "frockbot-inline-html@1",
+    };
+    const manifest = authoredManifestV1({
+      packageId: VALID.packageId,
+      displayName: VALID.displayName,
+      version: "0.0.1",
+      tools: VALID.tools,
+      ui: {
+        artifact,
+        mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+      },
+    });
+    expect(manifest).toMatchObject({
+      schemaVersion: 3,
+      contributions: {
+        runtime: { host: "bot-isolate" },
+        client: {
+          kind: "iframe",
+          artifact,
+          mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+        },
+      },
+    });
   });
 });

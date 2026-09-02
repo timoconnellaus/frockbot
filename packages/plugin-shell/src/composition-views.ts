@@ -9,6 +9,11 @@ import {
   type CompositionMemberViewV1,
   type CompositionProvenanceViewV1,
 } from "@frockbot/configuration-core";
+import type { PackageIframeCompositionV1 } from "@frockbot/kernel-contracts";
+import {
+  isClientIframeContribution,
+  type FrockBotManifest,
+} from "@frockbot/kernel-composition";
 import type {
   CompositionFailureV1,
   CompositionQuarantineV1,
@@ -28,6 +33,45 @@ import type {
 export type CompositionMemberSourceReaderV1 = (
   member: CompositionMemberV1,
 ) => Promise<string | undefined>;
+
+/** One decoded manifest lookup shared by isolate mount and hosted UI views. */
+export type CompositionMemberManifestReaderV1 = (
+  member: CompositionMemberV1,
+) => Promise<FrockBotManifest | undefined>;
+
+/** Project iframe Contributions from either Bot or Catalog provenance. */
+export async function projectPackageIframeCompositionV1(input: {
+  botId: string;
+  generation: CompositionGenerationV1;
+  readMemberManifest: CompositionMemberManifestReaderV1;
+}): Promise<PackageIframeCompositionV1> {
+  const contributions: PackageIframeCompositionV1["contributions"] = [];
+  for (const member of input.generation.members) {
+    if (member.provenance.kind === "first-party") continue;
+    const manifest = await input.readMemberManifest(member);
+    if (!manifest) continue;
+    const client = manifest.contributions.client;
+    if (!client || !isClientIframeContribution(client)) continue;
+    contributions.push({
+      packageId: member.packageId,
+      displayName: manifest.displayName,
+      provenance:
+        member.provenance.kind === "bot" ? "Bot-authored" : "User-installed",
+      artifact: { ...client.artifact },
+      mounts: client.mounts.map((mount) => ({ ...mount })),
+      declaredTools: (manifest.tools ?? []).map((tool) => tool.name),
+    });
+  }
+  contributions.sort((left, right) =>
+    left.packageId.localeCompare(right.packageId),
+  );
+  return {
+    schemaVersion: 1,
+    botId: input.botId,
+    generationId: input.generation.generationId,
+    contributions,
+  };
+}
 
 function provenanceView(
   member: CompositionMemberV1,

@@ -17,6 +17,9 @@
 import {
   BOT_ISOLATE_CONTEXT_DTS_V1,
   decodePackageBundleResultV1,
+  PACKAGE_UI_ARTIFACT_VERSION,
+  PACKAGE_IFRAME_BRIDGE_DTS_V1,
+  PACKAGE_IFRAME_HELPER_JS_V1,
   type PackageBundleRequestV1,
   type PackageBundlerBinding,
 } from "@frockbot/kernel-contracts";
@@ -107,6 +110,7 @@ export interface AuthoringCompositionStore {
 /** Immutable content, written once and addressed by hash. */
 export interface AuthoringArtifactStore {
   putPackageArtifact(contentHash: string, module: string): Promise<void>;
+  putPackageUiArtifact?(contentHash: string, html: string): Promise<void>;
   putPackageSource(sourceHash: string, source: string): Promise<void>;
   loadPackageSource(sourceHash: string): Promise<string | undefined>;
   headPackageArtifact(
@@ -433,6 +437,10 @@ export function createPackageAuthoringHost(
         runId: options.runId,
         packageId: input.packageId,
         sourceHash: input.sourceHash,
+        ...(input.uiHtmlHash === undefined
+          ? {}
+          : { uiHtmlHash: input.uiHtmlHash }),
+        ...(input.hooks === undefined ? {} : { hooks: input.hooks }),
       }),
 
     undoEffectIdFor: (input) =>
@@ -531,14 +539,18 @@ export function createPackageAuthoringHost(
         });
       }
 
-      if (!options.bundler || !options.artifacts) {
+      if (
+        !options.bundler ||
+        !options.artifacts ||
+        (request.input.ui && !options.artifacts.putPackageUiArtifact)
+      ) {
         return refused(
           await recordFailure({
             effectId,
             packageId,
             phase: "compose",
             reason:
-              "this host cannot author Packages: it has no Package bundler or artifact store",
+              "this host cannot author Packages: it has no required Package bundler or artifact store",
           }),
         );
       }
@@ -548,12 +560,28 @@ export function createPackageAuthoringHost(
       );
       const ordinal = (previous?.ordinal ?? 0) + 1;
       const version = authoredVersionV1(ordinal);
+      const uiArtifact = request.input.ui
+        ? {
+            contentHash: await sha256(request.input.ui.html),
+            size: new TextEncoder().encode(request.input.ui.html).byteLength,
+            mediaType: "text/html" as const,
+            bundlerVersion: PACKAGE_UI_ARTIFACT_VERSION,
+          }
+        : undefined;
       const rawManifest = authoredManifestV1({
         packageId,
         displayName: request.input.displayName,
         version,
         tools: request.input.tools,
         hooks: request.input.hooks,
+        ...(request.input.ui && uiArtifact
+          ? {
+              ui: {
+                artifact: uiArtifact,
+                mounts: request.input.ui.mounts,
+              },
+            }
+          : {}),
       });
       // The generated document crosses the same strict seam as every other
       // manifest before it becomes durable or participates in a generation.
@@ -625,6 +653,9 @@ export function createPackageAuthoringHost(
         compatibilityDate: options.compatibilityDate,
         entry: "package.ts",
         sources: [{ path: "package.ts", text: request.input.source }],
+        ...(request.input.ui
+          ? { ui: { path: "ui.html" as const, html: request.input.ui.html } }
+          : {}),
       };
       let bundled;
       try {
@@ -665,12 +696,37 @@ export function createPackageAuthoringHost(
       }
 
       const { artifact } = bundled;
+      if (
+        uiArtifact &&
+        (!bundled.uiArtifact ||
+          bundled.uiHtml !== request.input.ui?.html ||
+          bundled.uiArtifact.contentHash !== uiArtifact.contentHash ||
+          bundled.uiArtifact.size !== uiArtifact.size ||
+          bundled.uiArtifact.mediaType !== uiArtifact.mediaType ||
+          bundled.uiArtifact.bundlerVersion !== uiArtifact.bundlerVersion)
+      ) {
+        return refused(
+          await recordFailure({
+            effectId,
+            packageId,
+            phase: "bundle",
+            reason:
+              "the Package bundler returned UI bytes that do not match the recorded manifest",
+          }),
+        );
+      }
       // Content-addressed and immutable: writing the same hash twice is a
       // no-op, so the object write is safe to repeat and the record is not.
       await options.artifacts.putPackageArtifact(
         artifact.contentHash,
         bundled.module,
       );
+      if (bundled.uiArtifact && bundled.uiHtml) {
+        await options.artifacts.putPackageUiArtifact!(
+          bundled.uiArtifact.contentHash,
+          bundled.uiHtml,
+        );
+      }
       await options.artifacts.putPackageSource(
         request.sourceHash,
         request.input.source,
@@ -965,7 +1021,7 @@ export function createPackageAuthoringHost(
         });
       }
       return {
-        contextContract: BOT_ISOLATE_CONTEXT_DTS_V1,
+        contextContract: `${BOT_ISOLATE_CONTEXT_DTS_V1}\n\n${PACKAGE_IFRAME_BRIDGE_DTS_V1}\nInline ui.html helper:\n<script>${PACKAGE_IFRAME_HELPER_JS_V1}</script>`,
         composition: {
           generationId: composition.generationId,
           status: composition.status,
@@ -988,6 +1044,11 @@ export function createR2AuthoringArtifactStore(
     async putPackageArtifact(contentHash: string, module: string) {
       await bucket.put(artifactR2KeyV1(contentHash), module, {
         httpMetadata: { contentType: "application/javascript" },
+      });
+    },
+    async putPackageUiArtifact(contentHash: string, html: string) {
+      await bucket.put(`packages/${contentHash}.html`, html, {
+        httpMetadata: { contentType: "text/html; charset=utf-8" },
       });
     },
     async putPackageSource(sourceHash: string, source: string) {

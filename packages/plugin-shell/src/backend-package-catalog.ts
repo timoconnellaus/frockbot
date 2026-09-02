@@ -9,7 +9,9 @@ import {
   catalogContentHashV1,
   catalogEntryKeyV1,
   catalogIndexKeyV1,
+  catalogPackageArtifactKeyV1,
   catalogPackageSourceKeyV1,
+  catalogPackageUiArtifactKeyV1,
   decodeCatalogIndexDocumentV1,
   parseCatalogEntryDocumentV1,
   type CatalogEntryV1,
@@ -20,6 +22,7 @@ import {
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import { isClientIframeContribution } from "@frockbot/kernel-composition";
 import { canonicalJson } from "@frockbot/kernel-composition/compiler";
 import {
   compositionArtifactSetHashV1,
@@ -102,6 +105,7 @@ export interface BotPackageCatalogReader {
   }): Promise<CatalogEntryV1 | undefined>;
   readSource(sourceHash: string): Promise<string | undefined>;
   headArtifact(contentHash: string): Promise<{ size: number } | undefined>;
+  headUiArtifact(contentHash: string): Promise<{ size: number } | undefined>;
 }
 
 export interface PackageCatalogHostOptions {
@@ -252,6 +256,17 @@ export function createPackageCatalogHost(
       throw new Error(
         `Catalog bundle "${entry.bundle.contentHash}" is absent or has the wrong size`,
       );
+    }
+    const client = entry.bundle.manifest.contributions.client;
+    if (client && isClientIframeContribution(client)) {
+      const uiArtifact = await options.catalog.headUiArtifact(
+        client.artifact.contentHash,
+      );
+      if (!uiArtifact || uiArtifact.size !== client.artifact.size) {
+        throw new Error(
+          `Catalog iframe artifact "${client.artifact.contentHash}" is absent or has the wrong size`,
+        );
+      }
     }
   }
 
@@ -893,7 +908,15 @@ export function createR2BotPackageCatalogReader(
       return value;
     },
     async headArtifact(contentHash) {
-      const object = await artifacts.head(`packages/${contentHash}.mjs`);
+      const object = await artifacts.head(
+        catalogPackageArtifactKeyV1(contentHash),
+      );
+      return object ? { size: object.size } : undefined;
+    },
+    async headUiArtifact(contentHash) {
+      const object = await artifacts.head(
+        catalogPackageUiArtifactKeyV1(contentHash),
+      );
       return object ? { size: object.size } : undefined;
     },
   };

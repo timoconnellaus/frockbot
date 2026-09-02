@@ -322,6 +322,7 @@ export class BotDurableAuthority<Snapshot> {
             ? { subagentRole: storedRunSubagentRoleV1(run) }
             : {}),
           ...(run.admission?.origin ? { origin: run.admission.origin } : {}),
+          ...(run.directTool ? { directTool: run.directTool } : {}),
         },
         previousEvents: latest,
         configurationSnapshot: settings,
@@ -717,6 +718,9 @@ export class BotDurableAuthority<Snapshot> {
           command.origin,
           command.subagentRole,
         ),
+        ...(command.directTool
+          ? { directTool: structuredClone(command.directTool) }
+          : {}),
       } satisfies StoredRunV1<Snapshot>);
       await transaction.put({
         [key]: admittedRun,
@@ -979,6 +983,9 @@ export class BotDurableAuthority<Snapshot> {
           : {}),
         ...(recovery.run.admission?.origin
           ? { origin: recovery.run.admission.origin }
+          : {}),
+        ...(recovery.run.directTool
+          ? { directTool: recovery.run.directTool }
           : {}),
       },
       recovery.previous,

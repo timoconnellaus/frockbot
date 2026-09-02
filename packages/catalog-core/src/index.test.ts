@@ -7,6 +7,7 @@ import {
   catalogEntryKeyV1,
   catalogPackageArtifactKeyV1,
   catalogPackageSourceKeyV1,
+  catalogPackageUiArtifactKeyV1,
   catalogSetupFieldKeyV1,
   catalogIndexKeyV1,
   CATALOG_POINTER_KEY_V1,
@@ -288,6 +289,48 @@ describe("catalog entry decoding", () => {
     );
   });
 
+  test("keeps an iframe artifact reference in the bundle's verified manifest", () => {
+    const uiArtifact = {
+      contentHash: "d".repeat(64),
+      size: 42,
+      mediaType: "text/html" as const,
+      bundlerVersion: "frockbot-inline-html@1",
+    };
+    const manifest = isolateManifest();
+    const decoded = decodeCatalogEntryV1({
+      ...entryDetail({
+        catalogId: "parcel-tracking",
+        packageId: "parcel-tracking",
+        displayName: "Parcel tracking",
+        description: "Tracks deliveries.",
+        kind: "package",
+      }),
+      bundle: {
+        contentHash: "b".repeat(64),
+        size: 512,
+        mediaType: "application/javascript",
+        bundlerVersion: "catalog-test@1",
+        manifest: {
+          ...manifest,
+          contributions: {
+            ...manifest.contributions,
+            client: {
+              kind: "iframe",
+              artifact: uiArtifact,
+              mounts: [{ slot: "frockbot.tool-result:track_parcel" }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(decoded.bundle?.manifest.contributions.client).toEqual({
+      kind: "iframe",
+      artifact: uiArtifact,
+      mounts: [{ slot: "frockbot.tool-result:track_parcel" }],
+    });
+  });
+
   test("refuses code on a connector or a manifest that does not target the Bot isolate", () => {
     const bundle = {
       contentHash: "b".repeat(64),
@@ -372,6 +415,9 @@ describe("object layout", () => {
     );
     expect(catalogPackageSourceKeyV1("c".repeat(64))).toBe(
       `packages/${"c".repeat(64)}.ts`,
+    );
+    expect(catalogPackageUiArtifactKeyV1("d".repeat(64))).toBe(
+      `packages/${"d".repeat(64)}.html`,
     );
   });
 

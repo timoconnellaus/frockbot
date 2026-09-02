@@ -25,6 +25,10 @@
         {
           "slot": "authenticated-root",
           "order": 10000
+        },
+        {
+          "slot": "frockbot.bot-settings-sections",
+          "order": 10000
         }
       ],
       "outlets": [
