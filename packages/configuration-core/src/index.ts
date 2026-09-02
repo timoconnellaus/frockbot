@@ -1193,13 +1193,7 @@ export function decodeConfigurationCommandV1(
       const command = exactCommand(
         input,
         ["packageId", "version"],
-        [
-          "catalogId",
-          "catalogGeneration",
-          "contentHash",
-          "values",
-          "enabled",
-        ],
+        ["catalogId", "catalogGeneration", "contentHash", "values", "enabled"],
       );
       // A Catalog install is all three of identity, generation and (optional)
       // values or none of them: half a Catalog install would be an install
@@ -1683,10 +1677,7 @@ function packageInstallation(value: unknown): PackageInstallationView {
     ...(installation.contentHash === undefined
       ? {}
       : {
-          contentHash: compositionHash(
-            installation.contentHash,
-            "contentHash",
-          ),
+          contentHash: compositionHash(installation.contentHash, "contentHash"),
         }),
     ...(installation.provenance === undefined
       ? {}

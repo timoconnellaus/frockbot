@@ -394,9 +394,7 @@ export interface McpRestartCommandV1 {
 }
 
 export type McpLifecycleCommandV1 =
-  | McpAddServerCommandV1
-  | McpSetInstructionsCommandV1
-  | McpRestartCommandV1;
+  McpAddServerCommandV1 | McpSetInstructionsCommandV1 | McpRestartCommandV1;
 
 export function decodeMcpLifecycleCommandV1(
   input: unknown,

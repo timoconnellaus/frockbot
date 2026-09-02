@@ -9,10 +9,7 @@ import {
   type AuthorPackageRequestV1,
   type PackageAuthoringHost,
 } from "./agent.ts";
-import {
-  sha256HexV1,
-  type AuthorPackageOutcomeV1,
-} from "./shared.ts";
+import { sha256HexV1, type AuthorPackageOutcomeV1 } from "./shared.ts";
 
 const INPUT = {
   packageId: "weather-lookup",
@@ -120,9 +117,8 @@ describe("the package_author tool", () => {
 
   test("includes the UI HTML hash and declared hooks in the effect identity", async () => {
     const { sessions, dispose } = await openSession();
-    const effectInputs: Parameters<
-      PackageAuthoringHost["effectIdFor"]
-    >[0][] = [];
+    const effectInputs: Parameters<PackageAuthoringHost["effectIdFor"]>[0][] =
+      [];
     const host = stubHost({
       status: "authored",
       packageId: "weather-lookup",

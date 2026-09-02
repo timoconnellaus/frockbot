@@ -14,10 +14,7 @@
  * records through the host the Bot's Durable Object supplies, which is why
  * this Contribution mounts for a Turn rather than for one Capability.
  */
-import type {
-  ToolDefinition,
-  TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+import type { ToolDefinition, TurnTypeV1 } from "@frockbot/kernel-contracts";
 import type { Context, Plugin } from "cordis";
 import type {
   McpLifecycleReceiptV1,

@@ -8,7 +8,7 @@ Accepted by the owner on 2026-09-02.
 
 FrockBot will make conversation with a Bot the primary — and for most Users the only — way its setup changes: the Bot authors, installs, revises, and undoes its own Packages, Skills, and settings, immediately and without approval, and the User's whole share of the model is to connect accounts, chat, and say "undo". This follows DeepSeek Harness's experience (`docs/research/deepseek-harness-extension.md`) while closing the hole it leaves open: there, agent-authored host code runs with the process's full ambient authority and no durable record; here, every non-first-party Package runs in an isolate with only the Bot's own bindings, and every change is a recorded, revertible generation.
 
-Authority is deliberately one-dimensional. A Bot's authority is exactly the set of Connections its User has made; a Package the Bot authors or installs holds exactly the Bot's authority, never more and never a narrower per-Package grant. Connecting is a User act performed out of band on the Connections surface; the Bot does not request, prompt for, or render a way to connect anything — it discovers a capability only after the User has connected it. A Package may make a service *connectable* (it ships the integration and a Connection Type); the User still connects it.
+Authority is deliberately one-dimensional. A Bot's authority is exactly the set of Connections its User has made; a Package the Bot authors or installs holds exactly the Bot's authority, never more and never a narrower per-Package grant. Connecting is a User act performed out of band on the Connections surface; the Bot does not request, prompt for, or render a way to connect anything — it discovers a capability only after the User has connected it. A Package may make a service _connectable_ (it ships the integration and a Connection Type); the User still connects it.
 
 Relationship to ADR 0019: account-wide enablement is the authority model; this ADR adds the Bot as the primary path for change on top of it.
 
@@ -17,7 +17,7 @@ Relationship to ADR 0019: account-wide enablement is the authority model; this A
 - **Per-Package capability grants with an approval card in the conversation:** narrows the blast radius of a bad Package or a prompt-injected Bot, but introduces a permission vocabulary a non-technical User must read and answer, and grant fatigue makes the answers meaningless. Rejected: the product's point is that nothing needs explaining.
 - **Effect classes on tools with a User-only confirmation guard, and a scoped Computer connection:** enforceable "ask before you send", and a bounded desktop. Rejected for now for the same reason; "confirm before an irreversible external action" is a system-prompt behaviour, and the Computer connection is whole. Both can be tightened later without changing the model.
 - **Approval before activation:** the safest gate and the one DeepSeek's browser half uses; removes the autonomy that makes self-modification useful. Already rejected in ADR 0011.
-- **Change is free; authority is the invariant:** chosen. The Bot may change anything above the kernel for itself at will; what a change may *reach* is bounded by the Bot's Connections, which only the User can change and the Bot cannot ask for.
+- **Change is free; authority is the invariant:** chosen. The Bot may change anything above the kernel for itself at will; what a change may _reach_ is bounded by the Bot's Connections, which only the User can change and the Bot cannot ask for.
 
 ## Consequences
 

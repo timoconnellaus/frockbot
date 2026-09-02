@@ -335,9 +335,7 @@ export interface BotPackageContextV1 {
     list(): Promise<IsolateCapabilityListOutcomeV1>;
   };
   readonly model: {
-    invoke(
-      request: NormalizedModelRequest,
-    ): Promise<BotPackageModelOutcomeV1>;
+    invoke(request: NormalizedModelRequest): Promise<BotPackageModelOutcomeV1>;
   };
   readonly tools: {
     /** Runs through the trusted registry's active-Composition and deny guards. */
@@ -369,7 +367,9 @@ export interface BotPackageContextV1 {
   notify(
     request: IsolateNotificationRequestV1,
   ): Promise<IsolateNotificationOutcomeV1>;
-  schedule(request: IsolateScheduleRequestV1): Promise<IsolateScheduleOutcomeV1>;
+  schedule(
+    request: IsolateScheduleRequestV1,
+  ): Promise<IsolateScheduleOutcomeV1>;
 }
 
 export interface BotPackageExecutionContextV1 extends BotPackageContextV1 {

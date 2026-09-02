@@ -327,9 +327,7 @@ describe("decodeFrockBotManifest", () => {
     };
     const decoded = decodeFrockBotManifest(manifest);
     const client = decoded.contributions.client;
-    expect(client && "kind" in client ? client.kind : undefined).toBe(
-      "iframe",
-    );
+    expect(client && "kind" in client ? client.kind : undefined).toBe("iframe");
     expect(client?.mounts[0]).toEqual({
       slot: "frockbot.tool-result:weather_lookup",
     });
