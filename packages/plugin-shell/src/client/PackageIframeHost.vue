@@ -7,6 +7,7 @@ import {
 } from "@frockbot/kernel-contracts";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { frockBotWebDataKey } from "../shared.js";
+import { postPackageIframeHostMessage } from "./package-iframe-host-message.js";
 
 const props = defineProps<{
   contribution: PackageIframeContributionViewV1;
@@ -20,6 +21,7 @@ const web = providedWeb;
 const frame = ref<HTMLIFrameElement>();
 const height = ref(240);
 const failure = ref<string>();
+const lastStateWireByName = new Map<string, string>();
 const catalog = computed(() => web.value.packageUi);
 const source = computed(() => {
   const origin = catalog.value?.artifactOrigin;
@@ -54,13 +56,7 @@ function post(message: PackageIframeHostMessageV1): void {
   const target = frame.value?.contentWindow;
   if (!target) return;
   try {
-    const wire = JSON.stringify(message);
-    if (new TextEncoder().encode(wire).byteLength > 64 * 1024) {
-      throw new Error("Package page state exceeds the bridge limit");
-    }
-    // Vue settings values may be reactive proxies, which structured clone
-    // rejects. JSON is also the bridge's declared value domain.
-    target.postMessage(JSON.parse(wire) as PackageIframeHostMessageV1, "*");
+    postPackageIframeHostMessage(target, message, lastStateWireByName);
   } catch (error) {
     failure.value =
       error instanceof Error ? error.message : "Package page state is invalid";
@@ -70,6 +66,7 @@ function post(message: PackageIframeHostMessageV1): void {
 function initialize(): void {
   const botId = web.value.activeBotId;
   if (!botId) return;
+  lastStateWireByName.clear();
   post({
     schemaVersion: 1,
     type: "init",

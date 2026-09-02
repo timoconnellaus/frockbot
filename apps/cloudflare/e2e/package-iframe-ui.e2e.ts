@@ -15,14 +15,15 @@ const PHONE = { width: 390, height: 844 } as const;
 
 function artifactHtml(): string {
   return `<!doctype html>
-<html><body><output id="view">waiting</output>
+<html><body><output id="settings">waiting</output><output id="view">waiting</output>
 <script>${PACKAGE_IFRAME_HELPER_JS_V1}</script>
 <script>
 window.frockbot.ready.then(({ slot }) => {
   const view = document.getElementById('view');
   if (slot === 'frockbot.bot-settings-sections') {
+    const settings = document.getElementById('settings');
     window.frockbot.subscribe('settings', value => {
-      view.textContent = 'settings:' + JSON.stringify(value);
+      settings.textContent = 'settings:' + JSON.stringify(value);
     });
     window.frockbot.subscribe('tool:${TOOL_NAME}', value => {
       view.textContent = 'bridge:' + JSON.parse(value.content).temperature;
