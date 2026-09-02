@@ -64,8 +64,6 @@ export const tools = [
   { name: "env_keys", description: "Reports the bindings this isolate can see", inputSchema: {}, idempotent: true },
   { name: "leak_probe", description: "Reports whether host state leaked in", inputSchema: {}, idempotent: true },
   { name: "reach_network", description: "Attempts egress", inputSchema: {}, idempotent: false },
-  { name: "ask_authority", description: "Asks for authority it does not hold", inputSchema: {}, idempotent: false },
-  { name: "ask_bad_authority", description: "Sends a request the contract refuses", inputSchema: {}, idempotent: false },
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
   { name: "list_capabilities", description: "Lists User-enabled capabilities", inputSchema: {}, idempotent: true },
 ];
@@ -90,14 +88,6 @@ export async function execute(tool, input, ctx) {
     case "reach_network":
       await fetch("https://example.com");
       return "egress-allowed";
-    case "ask_authority":
-      return JSON.stringify(
-        await ctx.requestAuthority({ capabilityId: "memory:write", reason: "probe" }),
-      );
-    case "ask_bad_authority":
-      return JSON.stringify(
-        await ctx.requestAuthority({ capabilityId: 42, reason: "probe" }),
-      );
     case "list_capabilities":
       return JSON.stringify(await ctx.listCapabilities());
     case "call_model": {

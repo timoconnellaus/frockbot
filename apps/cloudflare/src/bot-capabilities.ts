@@ -7,23 +7,20 @@
 // therefore travels in `ctx.props`, which is structured-clonable.
 //
 // `list` answers from those props alone — the User enablement the Bot's Durable
-// Object resolved — so nothing here can widen authority. `requestAuthority`
-// and `invokeModel` go back to the Bot's Durable Object, which is the only
+// Object resolved — so nothing here can widen authority. `invokeModel` goes
+// back to the Bot's Durable Object, which is the only
 // authority for the Bot's durable state and the only place a credential lease
 // is taken.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
-  IsolateAuthorityOutcomeV1,
   IsolateCapabilityListOutcomeV1,
   IsolateModelOutcomeV1,
   NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import {
-  decodeIsolateAuthorityRequestV1,
   decodeIsolateCapabilityFailureV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateModelInvocationV1,
-  decodeIsolatePendingDecisionV1,
 } from "@frockbot/kernel-contracts";
 import type { BotCapabilitiesPropsV1 } from "@frockbot/plugin-shell/backend-isolate";
 import type { BotState } from "./bot-state.js";
@@ -48,7 +45,6 @@ export interface BotCapabilitiesEnv {
 }
 
 interface BotIsolateRpc {
-  isolateRequestAuthority(input: unknown): Promise<unknown>;
   isolateInvokeModel(input: unknown): Promise<unknown>;
 }
 
@@ -81,25 +77,6 @@ export class BotCapabilities extends WorkerEntrypoint<
       );
     } catch {
       return Promise.resolve(unavailable("capabilities are unavailable"));
-    }
-  }
-
-  /** Never a grant. A durable pending decision, recorded in the Bot's authority. */
-  async requestAuthority(request: unknown): Promise<IsolateAuthorityOutcomeV1> {
-    const props = this.ctx.props;
-    try {
-      return decodeIsolatePendingDecisionV1(
-        await this.rpc.isolateRequestAuthority({
-          schemaVersion: 1,
-          userId: props.userId,
-          botId: props.botId,
-          packageId: props.packageId,
-          generationId: props.generationId,
-          request: decodeIsolateAuthorityRequestV1(request),
-        }),
-      );
-    } catch {
-      return unavailable("the authority request could not be recorded");
     }
   }
 

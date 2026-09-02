@@ -145,9 +145,9 @@ export interface PackageInstallationView {
  * A durable pending decision for the User: this Connection needs authorizing
  * before it will do anything again.
  *
- * It carries **no URL**, and that is the whole design. A Bot may write one —
- * `mcp_authenticate_server` does, and so does a mount that met a 401 — but a
- * redirect is minted only by an authenticated User action. A single-use
+ * It carries **no URL**, and that is the whole design. A mount that meets a
+ * 401 may write one, but a Bot has no command that requests authorization and
+ * a redirect is minted only by an authenticated User action. A single-use
  * ten-minute link stored in a projection every client reads, and replayed into
  * every transcript, would outlive the decision it belonged to and would let a
  * Bot hand its User a link it authored. The card is drawn from this record and

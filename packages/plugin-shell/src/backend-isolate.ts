@@ -3,23 +3,17 @@
 // A loaded Bot Package sees exactly two bindings: `IDENTITY` (a plain object)
 // and `CAPABILITIES` (a loopback service binding). Every method behind
 // `CAPABILITIES` ends up here, in the authority that owns the Bot's durable
-// state — so an authority-widening request becomes a durable pending decision
-// rather than a grant, and a model call records its normalized request and
+// state. Missing authority is a declared unavailable outcome, and a model call records its normalized request and
 // acquires its credential lease through the existing provider path before a
 // single byte leaves the account.
 import type {
   IsolateCapabilityFailureV1,
-  IsolateAuthorityRequestV1,
   IsolateCapabilityDescriptorV1,
   IsolateModelOutcomeV1,
-  IsolatePendingDecisionV1,
   LlmStreamEvent,
   NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import {
-  decodeIsolateAuthorityRequestV1,
-  encodeIsolateModelEventLineV1,
-} from "@frockbot/kernel-contracts";
+import { encodeIsolateModelEventLineV1 } from "@frockbot/kernel-contracts";
 import type { BotIsolateArtifactStore } from "@frockbot/kernel-composition/isolate";
 import type { EnabledCapabilityV1 } from "@frockbot/configuration-core";
 
@@ -42,21 +36,7 @@ export interface BotCapabilitiesPropsV1 {
   capabilities: IsolateCapabilityV1[];
 }
 
-export const ISOLATE_DECISION_PREFIX = "isolate:decision:";
 export const ISOLATE_MODEL_REQUEST_PREFIX = "isolate:model-request:";
-
-/** A durable record that the Bot asked for authority it does not hold. */
-export interface IsolatePendingAuthorityDecisionV1 {
-  schemaVersion: 1;
-  decisionId: string;
-  botId: string;
-  packageId: string;
-  generationId: string;
-  capabilityId: string;
-  reason: string;
-  requestedAt: string;
-  status: "pending";
-}
 
 /** The intent recorded before a Bot-authored adapter's model call is forwarded. */
 export interface IsolateModelRequestRecordV1 {
@@ -128,9 +108,8 @@ export interface IsolateCapabilityHostOptions {
   /** User-enabled and nothing else. */
   capabilities: readonly IsolateCapabilityV1[];
   /**
-   * The one ready model binding resolved for this Bot. Absent without an
-   * unavailable binding means every model request is an authority-widening
-   * pending decision.
+   * The one ready model binding resolved for this Bot. Absent means model
+   * invocation is unavailable; there is no authority-request path.
    */
   modelBinding?: IsolateModelBindingV1;
   /** Present when the configured binding is held but its Connection is unavailable. */
@@ -143,9 +122,7 @@ export interface IsolateCapabilityHostOptions {
 
 export interface IsolateCapabilityHost {
   list(): Promise<IsolateCapabilityDescriptorV1[]>;
-  requestAuthority(request: unknown): Promise<IsolatePendingDecisionV1>;
   invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
-  pendingDecisions(): Promise<IsolatePendingAuthorityDecisionV1[]>;
   recordedModelRequests(): Promise<IsolateModelRequestRecordV1[]>;
 }
 
@@ -184,29 +161,6 @@ export function createIsolateCapabilityHost(
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => crypto.randomUUID());
 
-  async function recordDecision(
-    capabilityId: string,
-    reason: string,
-  ): Promise<IsolatePendingDecisionV1> {
-    const decisionId = `decision-${newId()}`;
-    const record: IsolatePendingAuthorityDecisionV1 = {
-      schemaVersion: 1,
-      decisionId,
-      botId: options.botId,
-      packageId: options.packageId,
-      generationId: options.generationId,
-      capabilityId,
-      reason,
-      requestedAt: now().toISOString(),
-      status: "pending",
-    };
-    await options.storage.put(
-      `${ISOLATE_DECISION_PREFIX}${decisionId}`,
-      record,
-    );
-    return { status: "pending-user-decision", decisionId };
-  }
-
   return {
     list(): Promise<IsolateCapabilityDescriptorV1[]> {
       return Promise.resolve(
@@ -215,16 +169,6 @@ export function createIsolateCapabilityHost(
           kind: capability.kind,
         })),
       );
-    },
-
-    async requestAuthority(
-      request: unknown,
-    ): Promise<IsolatePendingDecisionV1> {
-      const decoded: IsolateAuthorityRequestV1 =
-        decodeIsolateAuthorityRequestV1(request);
-      // Self-modification never widens authority, even when the capability is
-      // already enabled: the answer is a decision the User makes.
-      return await recordDecision(decoded.capabilityId, decoded.reason);
     },
 
     async invokeModel(
@@ -258,10 +202,10 @@ export function createIsolateCapabilityHost(
         } satisfies IsolateCapabilityFailureV1;
       }
       if (!capability || !binding || !options.modelPath) {
-        return await recordDecision(
-          `models:${request.provider}:${request.model}`,
-          `Bot Package "${options.packageId}" asked to invoke a model with no matching enabled Capability`,
-        );
+        return {
+          status: "unavailable",
+          reason: "the model is unavailable",
+        } satisfies IsolateCapabilityFailureV1;
       }
       // The binding the provider path receives is the authority's, never the
       // Bot's: a Bot-composed request carries no Connection authority.
@@ -304,14 +248,6 @@ export function createIsolateCapabilityHost(
         requestId: request.requestId,
         events: isolateModelEventStreamV1(events, controller),
       };
-    },
-
-    async pendingDecisions(): Promise<IsolatePendingAuthorityDecisionV1[]> {
-      const stored =
-        await options.storage.list<IsolatePendingAuthorityDecisionV1>({
-          prefix: ISOLATE_DECISION_PREFIX,
-        });
-      return [...stored.values()];
     },
 
     async recordedModelRequests(): Promise<IsolateModelRequestRecordV1[]> {

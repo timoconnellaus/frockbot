@@ -71,7 +71,6 @@ import {
   type ApprovalDecisionCommandV1,
 } from "@frockbot/plugin-shell/approvals";
 import {
-  decodeIsolateAuthorityRequestV1,
   decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
 import type {
@@ -659,32 +658,8 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   /**
-   * The Bot isolate asked for authority it does not hold. The answer is never
-   * a grant: the Bot Durable Object records a durable pending decision and
-   * returns its id (plan Step 4, "Self-modification never widens authority").
-   */
-  async isolateRequestAuthority(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      packageId: rpcIdentifier,
-      generationId: rpcIdentifier,
-      request: rpcDecoded(decodeIsolateAuthorityRequestV1),
-    });
-    // The isolate capability path needs the Bot's own authority, not its Flock
-    // projection, so it does not materialize the Sheep record.
-    const shell = await this.contribution();
-    return shell.isolateRequestAuthority({
-      botId: request.botId as string,
-      packageId: request.packageId as string,
-      generationId: request.generationId as string,
-      request: request.request,
-    });
-  }
-
-  /**
-   * D6: model invocation as a User-enabled binding. Without a matching
-   * enabled model Capability the answer is a pending decision; with one, the
+   * D6: model invocation as a User-enabled binding. Without the resolved
+   * model binding the answer is unavailable; with one, the
    * request is recorded and the credential lease taken through the existing
    * provider path before any event is streamed back.
    */

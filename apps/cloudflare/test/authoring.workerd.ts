@@ -387,7 +387,7 @@ describe("a Bot authoring a Package", () => {
     expect(streamed.text).toBe("Ollama reply");
   });
 
-  test("an authored model adapter with no matching capability gets a pending decision", async () => {
+  test("an authored model adapter with no matching binding gets unavailable", async () => {
     const id = suffix();
     const userId = `user-${id}`;
     const botId = `bot-${id}`;
@@ -429,9 +429,10 @@ describe("a Bot authoring a Package", () => {
       },
     });
 
-    // Self-modification never widens authority: the answer is a decision.
-    expect(JSON.parse(used.text.replace(/^ok:/, ""))).toMatchObject({
-      status: "pending-user-decision",
+    // Self-modification never widens authority and cannot request a grant.
+    expect(JSON.parse(used.text.replace(/^ok:/, ""))).toEqual({
+      status: "unavailable",
+      reason: "the model is unavailable",
     });
   });
 });

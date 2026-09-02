@@ -203,65 +203,6 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 });
 
 describe("the isolate capability binding", () => {
-  test("requestAuthority returns a pending decision and records it durably", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`authority-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `authority-bot-${suffix}`;
-
-    const result = await stub.callTool({
-      userId: "user-1",
-      botId,
-      artifact,
-      tool: "ask_authority",
-    });
-
-    const answer = JSON.parse(result.content) as {
-      status: string;
-      decisionId: string;
-    };
-    expect(result.isError).toBe(false);
-    expect(answer.status).toBe("pending-user-decision");
-    expect(answer.decisionId).toMatch(/^decision-/);
-
-    const decisions = (await botState("user-1", botId).isolateDecisions()) as {
-      decisionId: string;
-      capabilityId: string;
-      status: string;
-      packageId: string;
-    }[];
-    expect(decisions).toHaveLength(1);
-    expect(decisions[0]).toMatchObject({
-      decisionId: answer.decisionId,
-      capabilityId: "memory:write",
-      packageId: "bot-authored",
-      status: "pending",
-    });
-  });
-
-  test("a refused capability request is a declared variant, not a throw", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`bad-authority-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `bad-authority-bot-${suffix}`;
-
-    const result = await stub.callTool({
-      userId: "user-1",
-      botId,
-      artifact,
-      tool: "ask_bad_authority",
-    });
-
-    // Bot code has a contract for this answer; it has none for a host
-    // exception, and a host exception can carry host text.
-    expect(result.isError).toBe(false);
-    expect(JSON.parse(result.content)).toEqual({
-      status: "unavailable",
-      reason: "the authority request could not be recorded",
-    });
-    expect(await botState("user-1", botId).isolateDecisions()).toHaveLength(0);
-  });
-
   test("list reports the User-enabled capability set", async () => {
     const stub = probe(`list-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -286,7 +227,7 @@ describe("the isolate capability binding", () => {
     ]);
   });
 
-  test("invokeModel with no durable model binding is a pending decision", async () => {
+  test("invokeModel with no resolved model binding is unavailable", async () => {
     const suffix = crypto.randomUUID();
     const stub = probe(`model-denied-${suffix}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -307,15 +248,16 @@ describe("the isolate capability binding", () => {
       },
     });
 
-    expect(JSON.parse(result.content)).toMatchObject({
-      status: "pending-user-decision",
+    expect(JSON.parse(result.content)).toEqual({
+      status: "unavailable",
+      reason: "the model is unavailable",
     });
     expect(
       await botState("user-1", botId).isolateModelRequestRecords(),
     ).toHaveLength(0);
   });
 
-  test("invokeModel for a provider the Bot's binding does not name is a pending decision", async () => {
+  test("invokeModel for a provider the Bot's binding does not name is unavailable", async () => {
     const suffix = crypto.randomUUID();
     const stub = probe(`model-mismatch-${suffix}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -352,15 +294,16 @@ describe("the isolate capability binding", () => {
       },
     });
 
-    expect(JSON.parse(result.content)).toMatchObject({
-      status: "pending-user-decision",
+    expect(JSON.parse(result.content)).toEqual({
+      status: "unavailable",
+      reason: "the model is unavailable",
     });
     expect(
       await botState(userId, botId).isolateModelRequestRecords(),
     ).toHaveLength(0);
   });
 
-  test("invokeModel for the enabled model but another Package's provider is a pending decision", async () => {
+  test("invokeModel for the enabled model but another Package's provider is unavailable", async () => {
     const suffix = crypto.randomUUID();
     const stub = probe(`model-provider-${suffix}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -394,8 +337,9 @@ describe("the isolate capability binding", () => {
       },
     });
 
-    expect(JSON.parse(result.content)).toMatchObject({
-      status: "pending-user-decision",
+    expect(JSON.parse(result.content)).toEqual({
+      status: "unavailable",
+      reason: "the model is unavailable",
     });
   });
 
@@ -459,33 +403,4 @@ describe("the isolate capability binding", () => {
     });
   });
 
-  test("a new generation with the same artifact never answers under the old one", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`generation-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `generation-bot-${suffix}`;
-
-    await stub.callTool({
-      userId: "user-1",
-      botId,
-      artifact,
-      tool: "ask_authority",
-    });
-    await stub.callTool({
-      userId: "user-1",
-      botId,
-      artifact,
-      tool: "ask_authority",
-      generationCreatedAt: "2026-09-01T00:00:00.000Z",
-    });
-
-    // The `CAPABILITIES` stub is baked into the isolate's `env`, so a cached
-    // isolate would keep recording under the generation it was first loaded
-    // for.
-    const decisions = (await botState("user-1", botId).isolateDecisions()) as {
-      generationId: string;
-    }[];
-    expect(decisions).toHaveLength(2);
-    expect(new Set(decisions.map((entry) => entry.generationId)).size).toBe(2);
-  });
 });

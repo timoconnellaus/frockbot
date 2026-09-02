@@ -17,7 +17,7 @@
 //     from the content address of the mounted modules and nothing else.
 //
 // Everything decoded here is untrusted: Bot-authored code produces the results
-// and the capability requests, and the isolate produces the health report.
+// and the isolate produces the health report.
 import type { TurnAdmissionV1 } from "./tool-execution.js";
 import {
   decodeTurnTypeV1,
@@ -96,17 +96,6 @@ export interface IsolateCapabilityDescriptorV1 {
   kind: IsolateCapabilityKindV1;
 }
 
-export interface IsolateAuthorityRequestV1 {
-  capabilityId: string;
-  reason: string;
-}
-
-/** Self-modification never widens authority: the answer is always pending. */
-export interface IsolatePendingDecisionV1 {
-  status: "pending-user-decision";
-  decisionId: string;
-}
-
 /**
  * A capability call the authority could not serve. It is a declared variant,
  * not an exception: an error thrown across the loopback binding would surface
@@ -118,9 +107,6 @@ export interface IsolateCapabilityFailureV1 {
   reason: string;
 }
 
-export type IsolateAuthorityOutcomeV1 =
-  IsolatePendingDecisionV1 | IsolateCapabilityFailureV1;
-
 export type IsolateCapabilityListOutcomeV1 =
   IsolateCapabilityDescriptorV1[] | IsolateCapabilityFailureV1;
 
@@ -130,13 +116,11 @@ export type IsolateCapabilityListOutcomeV1 =
  * `ReadableStream` of JavaScript objects is not transferable over workerd RPC;
  * a byte stream is, so the kernel encodes and the isolate decodes.
  */
-export type IsolateModelInvocationV1 =
-  | {
-      status: "streaming";
-      requestId: string;
-      events: ReadableStream<Uint8Array>;
-    }
-  | IsolatePendingDecisionV1;
+export interface IsolateModelInvocationV1 {
+  status: "streaming";
+  requestId: string;
+  events: ReadableStream<Uint8Array>;
+}
 
 export type IsolateModelOutcomeV1 =
   IsolateModelInvocationV1 | IsolateCapabilityFailureV1;
@@ -160,13 +144,10 @@ export interface BotCapabilitiesStub {
   /**
    * D6 addendum. The kernel records the normalized request and acquires the
    * credential lease through the existing provider path *before* forwarding.
-   * Without a matching enabled model capability the answer is a pending
-   * decision, never a grant.
+   * Without the resolved model binding the answer is `unavailable`; Bot code
+   * has no authority-request path.
    */
   invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
-  requestAuthority(
-    request: IsolateAuthorityRequestV1,
-  ): Promise<IsolateAuthorityOutcomeV1>;
 }
 
 /**
@@ -560,37 +541,6 @@ export function decodeIsolateCapabilityListV1(
   );
 }
 
-export function decodeIsolateAuthorityRequestV1(
-  input: unknown,
-  label = "isolate authority request",
-): IsolateAuthorityRequestV1 {
-  const value = record(input, label);
-  exactKeys(value, ["capabilityId", "reason"], label);
-  return {
-    capabilityId: boundedString(
-      value.capabilityId,
-      `${label}.capabilityId`,
-      256,
-    ),
-    reason: boundedString(value.reason, `${label}.reason`, 2048, true),
-  };
-}
-
-export function decodeIsolatePendingDecisionV1(
-  input: unknown,
-  label = "isolate pending decision",
-): IsolatePendingDecisionV1 {
-  const value = record(input, label);
-  exactKeys(value, ["status", "decisionId"], label);
-  if (value.status !== "pending-user-decision") {
-    throw new Error(`${label}.status must be pending-user-decision`);
-  }
-  return {
-    status: "pending-user-decision",
-    decisionId: boundedString(value.decisionId, `${label}.decisionId`, 256),
-  };
-}
-
 /** The exact decoder for the declared failure variant. */
 export function decodeIsolateCapabilityFailureV1(
   input: unknown,
@@ -662,9 +612,6 @@ export function decodeIsolateModelInvocationV1(
   label = "isolate model invocation",
 ): IsolateModelInvocationV1 {
   const value = record(input, label);
-  if (value.status === "pending-user-decision") {
-    return decodeIsolatePendingDecisionV1(value, label);
-  }
   exactKeys(value, ["status", "requestId", "events"], label);
   if (value.status !== "streaming") {
     throw new Error(`${label}.status is invalid`);

@@ -6,7 +6,6 @@ import {
   validateToolOccurrenceJournal,
   type BotCapabilitiesStub,
   type IsolateModelOutcomeV1,
-  type IsolatePendingDecisionV1,
   type NormalizedModelRequest,
   type PackageBundlerBinding,
   type TurnTypeV1,
@@ -295,7 +294,6 @@ import {
   type IsolateModelBindingV1,
   type IsolateModelPath,
   type IsolateModelRequestRecordV1,
-  type IsolatePendingAuthorityDecisionV1,
   type IsolateUnavailableModelBindingV1,
 } from "./backend-isolate.js";
 import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
@@ -1441,23 +1439,8 @@ export class ShellBotBackendContribution {
   }
 
   /**
-   * The Bot Durable Object side of `CAPABILITIES.requestAuthority`. Never a
-   * grant: it records a durable pending decision for the User.
-   */
-  async isolateRequestAuthority(input: {
-    botId: string;
-    packageId: string;
-    generationId: string;
-    request: unknown;
-  }): Promise<IsolatePendingDecisionV1> {
-    return await this.isolateCapabilityHost(input, []).requestAuthority(
-      input.request,
-    );
-  }
-
-  /**
-   * The Bot Durable Object side of `CAPABILITIES.invokeModel`. Refuses with a
-   * pending decision unless an enabled model Capability matches; otherwise
+   * The Bot Durable Object side of `CAPABILITIES.invokeModel`. Returns an
+   * unavailable outcome unless the resolved model Capability matches; otherwise
    * records the normalized request and streams through the provider path,
    * which takes the credential lease on the way.
    */
@@ -1517,9 +1500,8 @@ export class ShellBotBackendContribution {
   /**
    * The effective model binding, projected onto the isolate view. It resolves
    * generic Package settings and the platform fallback through the User's
-   * Connection exactly as an admitted Turn does. No configured binding means
-   * an authority-widening request and a pending decision; a configured binding
-   * whose Connection cannot be resolved stays distinct as unavailable.
+   * Connection exactly as an admitted Turn does. No configured binding and a
+   * configured binding whose Connection cannot be resolved are unavailable.
    */
   private async isolateModelBinding(
     identity: BotIdentity,

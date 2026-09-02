@@ -157,24 +157,29 @@ describe("an isolate model request is bound to its enabled Capability", () => {
     ).toBeUndefined();
   });
 
-  test("a request outside the effective binding is a pending decision", async () => {
+  test("a request outside the effective binding is unavailable", async () => {
     const subject = host();
     const outcome = await subject.host.invokeModel(
       request({ provider: "foundation", model: "deterministic-v1" }),
     );
 
-    expect(outcome).toMatchObject({ status: "pending-user-decision" });
+    expect(outcome).toEqual({
+      status: "unavailable",
+      reason: "the model is unavailable",
+    });
     expect(await subject.host.recordedModelRequests()).toHaveLength(0);
     expect(subject.forwarded).toHaveLength(0);
   });
 
-  test("a request with no durable model binding is a pending decision", async () => {
+  test("a request with no durable model binding is unavailable", async () => {
     const subject = host({ binding: null, capabilities: [] });
 
     const outcome = await subject.host.invokeModel(request());
 
-    expect(outcome).toMatchObject({ status: "pending-user-decision" });
-    expect(await subject.host.pendingDecisions()).toHaveLength(1);
+    expect(outcome).toEqual({
+      status: "unavailable",
+      reason: "the model is unavailable",
+    });
     expect(await subject.host.recordedModelRequests()).toHaveLength(0);
     expect(subject.forwarded).toHaveLength(0);
   });
@@ -192,7 +197,6 @@ describe("an isolate model request is bound to its enabled Capability", () => {
     const outcome = await subject.host.invokeModel(request());
 
     expect(outcome).toMatchObject({ status: "unavailable" });
-    expect(await subject.host.pendingDecisions()).toHaveLength(0);
     expect(await subject.host.recordedModelRequests()).toHaveLength(0);
     expect(subject.forwarded).toHaveLength(0);
   });
@@ -211,8 +215,10 @@ describe("an isolate model request is bound to its enabled Capability", () => {
       request({ provider: "foundation" }),
     );
 
-    expect(outcome).toMatchObject({ status: "pending-user-decision" });
-    expect(await subject.host.pendingDecisions()).toHaveLength(1);
+    expect(outcome).toEqual({
+      status: "unavailable",
+      reason: "the model is unavailable",
+    });
   });
 
   test("forwards the authority's binding, never the Bot's", async () => {
