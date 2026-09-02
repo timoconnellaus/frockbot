@@ -9,6 +9,7 @@ import {
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
   decodeUserSettingsViewV1,
+  migrateStoredUserSettingsV1,
   MAX_USER_CONNECTIONS_V1,
   USER_PROFILE_PLACEHOLDER_NAME_V1,
   type ConnectionView,
@@ -749,7 +750,7 @@ export class UserSettingsBackendContribution {
     const current =
       storedSettings === undefined
         ? initialState()
-        : decodeUserSettingsViewV1(storedSettings);
+        : decodeUserSettingsViewV1(migrateStoredUserSettingsV1(storedSettings));
     if (command.type === "user/set-package-enabled" && command.enabled) {
       const installed = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
@@ -818,7 +819,7 @@ export class UserSettingsBackendContribution {
     const stored = await storage.get<unknown>(STATE_KEY);
     return stored === undefined
       ? initialState()
-      : decodeUserSettingsViewV1(stored);
+      : decodeUserSettingsViewV1(migrateStoredUserSettingsV1(stored));
   }
 
   async read(

@@ -219,6 +219,58 @@ function request(command: BotConfigurationCommandV1) {
 }
 
 describe("Bot configuration admission", () => {
+  test("reads old Bot settings purely and writes the migrated shape on the next command", async () => {
+    const storage = new MemoryStorage();
+    // Literal durable shape from eb0283edcce5daea976a21a9f6a6414bedc6e2bc,
+    // the first parent of PR #134's merge commit.
+    const historical = {
+      schemaVersion: 1,
+      botId: "primary",
+      revision: 4,
+      profile: { name: "Primary" },
+      notifications: { enabled: true },
+      assignments: [],
+      assignmentOperations: [],
+      model: {
+        connectionId: "ollama-1",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+    };
+    await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
+      "bot-configuration": historical,
+    });
+    const contribution = host(storage, configuredUser);
+    const identity = { userId: "user-1", botId: "primary" };
+
+    await expect(contribution.getSettings(identity)).resolves.toMatchObject({
+      revision: 4,
+      packageValues: {},
+    });
+    expect(await storage.get<unknown>("bot-configuration")).toEqual(historical);
+
+    await contribution.executeConfiguration(
+      request({
+        schemaVersion: 1,
+        type: "bot/update-profile",
+        commandId: "migrate-bot-settings",
+        botId: "primary",
+        expectedRevision: 4,
+        profile: { name: "Migrated Bot" },
+      }),
+    );
+    const written =
+      await storage.get<Record<string, unknown>>("bot-configuration");
+    expect(written).toMatchObject({
+      revision: 5,
+      profile: { name: "Migrated Bot" },
+      packageValues: {},
+    });
+    expect(written).not.toHaveProperty("assignments");
+    expect(written).not.toHaveProperty("assignmentOperations");
+    expect(written).not.toHaveProperty("model");
+  });
+
   test("rejects an unmaterialized Bot without writing durable state", async () => {
     const storage = new MemoryStorage();
     const contribution = host(storage, configuredUser);

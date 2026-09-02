@@ -70,6 +70,7 @@ import {
   ConfigurationConflictError,
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
+  decodeBotSettingsViewV1,
   decodeCompositionCommandReceiptV1,
   decodeOperationReceiptV1,
   decodeInstalledPackageSettingIdsV1,
@@ -89,6 +90,7 @@ import {
   type PackageSettingValueV1,
   type ResolvedModelBindingV1,
   initializeBotSettingsV1,
+  migrateStoredBotSettingsV1,
   resolvePackageSettingValuesV1,
   resolveBotExecutionPlanV1,
   resolveEffectiveBotModelV1,
@@ -719,10 +721,10 @@ export class ShellBotBackendContribution {
       ) {
         throw new Error("Bot authority does not match its durable identity");
       }
-      const existing = await transaction.get<BotSettingsViewV1>(
-        BOT_CONFIGURATION_KEY,
-      );
-      if (existing) return existing;
+      const stored = await transaction.get<unknown>(BOT_CONFIGURATION_KEY);
+      if (stored !== undefined) {
+        return decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored));
+      }
       const settings = {
         ...this.initialBotSettings(identity.botId),
         profile: {
@@ -882,9 +884,11 @@ export class ShellBotBackendContribution {
           command.commandId,
         );
       }
+      const stored = await transaction.get<unknown>(BOT_CONFIGURATION_KEY);
       const current =
-        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-        this.initialBotSettings(identity.botId);
+        stored === undefined
+          ? this.initialBotSettings(identity.botId)
+          : decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored));
       if (command.expectedRevision !== current.revision) {
         throw new ConfigurationConflictError(current.revision);
       }
@@ -2373,10 +2377,10 @@ export class ShellBotBackendContribution {
     transaction: DurableObjectTransaction,
     resolved: BotSettingsViewV1,
   ): Promise<BotSettingsViewV1> {
-    return (
-      (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-      resolved
-    );
+    const stored = await transaction.get<unknown>(BOT_CONFIGURATION_KEY);
+    return stored === undefined
+      ? resolved
+      : decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored));
   }
 
   private async scheduledDeadlines(
@@ -5301,12 +5305,10 @@ export class ShellBotBackendContribution {
     identity: BotIdentity,
   ): Promise<BotSettingsViewV1> {
     await this.validateIdentity(identity);
-    const existing = await this.ctx.storage.get<BotSettingsViewV1>(
-      BOT_CONFIGURATION_KEY,
-    );
-    if (!existing)
+    const stored = await this.ctx.storage.get<unknown>(BOT_CONFIGURATION_KEY);
+    if (stored === undefined)
       throw new Error(`Bot "${identity.botId}" is not materialized`);
-    return existing;
+    return decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored));
   }
 
   private async resolveExecutionContext(identity: BotIdentity): Promise<{

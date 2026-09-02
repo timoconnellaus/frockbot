@@ -82,6 +82,75 @@ async function installOllama(
 }
 
 describe("User settings backend Contribution", () => {
+  test("reads old settings purely and writes the migrated shape on the next command", async () => {
+    const storage = new MemoryStorage();
+    // Literal durable shape from eb0283edcce5daea976a21a9f6a6414bedc6e2bc,
+    // the first parent of PR #134's merge commit.
+    const historical = {
+      schemaVersion: 1,
+      revision: 7,
+      profile: { name: "Existing User" },
+      packages: [],
+      connections: [
+        {
+          connectionId: "ollama-1",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready",
+          safeMetadata: {
+            dependentAssignments: [
+              {
+                botId: "primary",
+                generation: "assignment-1",
+                packageId: "provider-ollama-cloud",
+                capabilityId: "ollama-cloud-models",
+                claimOrder: 0,
+                status: "acknowledged",
+              },
+            ],
+          },
+        },
+      ],
+      newBotModelTemplate: {
+        connectionId: "ollama-1",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+      newBotModelTemplateSource: "user",
+    };
+    storage.values.set("user-configuration", structuredClone(historical));
+    const settings = contribution(storage);
+
+    await expect(settings.readSnapshot()).resolves.toMatchObject({
+      revision: 7,
+      connections: [{ safeMetadata: {} }],
+    });
+    expect(await storage.get<unknown>("user-configuration")).toEqual(
+      historical,
+    );
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/update-profile",
+        commandId: "migrate-user-settings",
+        expectedRevision: 7,
+        profile: { name: "Migrated User" },
+      },
+    });
+    const written =
+      await storage.get<Record<string, unknown>>("user-configuration");
+    expect(written).toMatchObject({
+      revision: 8,
+      profile: { name: "Migrated User" },
+      connections: [{ safeMetadata: {} }],
+    });
+    expect(written).not.toHaveProperty("newBotModelTemplate");
+    expect(written).not.toHaveProperty("newBotModelTemplateSource");
+  });
+
   test("bootstraps first-party Packages once and preserves a later uninstall", async () => {
     const storage = new MemoryStorage();
     const settings = createUserSettingsBackendContribution({

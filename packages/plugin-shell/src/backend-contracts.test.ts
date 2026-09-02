@@ -20,6 +20,34 @@ function storedRun(): StoredRun {
 }
 
 describe("StoredRun durable contract", () => {
+  test("migrates a historical configuration snapshot before strict decoding", () => {
+    // Literal Bot settings shape from eb0283edcce5daea976a21a9f6a6414bedc6e2bc.
+    const decoded = requireStoredRunV1({
+      ...storedRun(),
+      configurationSnapshot: {
+        schemaVersion: 1,
+        botId: "primary",
+        revision: 4,
+        profile: { name: "Primary" },
+        notifications: { enabled: true },
+        assignments: [],
+        assignmentOperations: [],
+        model: {
+          connectionId: "ollama-1",
+          providerModelId: "glm-5.3-flash:cloud",
+        },
+      },
+    });
+    expect(decoded.configurationSnapshot).toEqual({
+      schemaVersion: 1,
+      botId: "primary",
+      revision: 4,
+      profile: { name: "Primary", description: undefined },
+      notifications: { enabled: true },
+      packageValues: {},
+    });
+  });
+
   test("uses the public run identifier grammar", () => {
     expect(() =>
       requireStoredRunV1({ ...storedRun(), runId: "run:1" }),
