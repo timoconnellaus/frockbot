@@ -20,6 +20,7 @@ import type {
 } from "@frockbot/kernel-contracts";
 import {
   decodeIsolateAuthorityRequestV1,
+  decodeIsolateCapabilityFailureV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateModelInvocationV1,
   decodeIsolatePendingDecisionV1,
@@ -111,16 +112,20 @@ export class BotCapabilities extends WorkerEntrypoint<
   async invokeModel(request: unknown): Promise<IsolateModelOutcomeV1> {
     const props = this.ctx.props;
     try {
-      return decodeIsolateModelInvocationV1(
-        await this.rpc.isolateInvokeModel({
-          schemaVersion: 1,
-          userId: props.userId,
-          botId: props.botId,
-          packageId: props.packageId,
-          generationId: props.generationId,
-          request: request as NormalizedModelRequest,
-        }),
-      );
+      const outcome = await this.rpc.isolateInvokeModel({
+        schemaVersion: 1,
+        userId: props.userId,
+        botId: props.botId,
+        packageId: props.packageId,
+        generationId: props.generationId,
+        request: request as NormalizedModelRequest,
+      });
+      return typeof outcome === "object" &&
+        outcome !== null &&
+        "status" in outcome &&
+        outcome.status === "unavailable"
+        ? decodeIsolateCapabilityFailureV1(outcome)
+        : decodeIsolateModelInvocationV1(outcome);
     } catch {
       return unavailable("the model request could not be served");
     }

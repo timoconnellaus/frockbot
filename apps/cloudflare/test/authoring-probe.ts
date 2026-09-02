@@ -253,10 +253,12 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
               capabilities: structuredClone(capabilities),
             },
           }),
-        bindingDigest: await isolateBindingDigestV1(
+        bindingDigest: await isolateBindingDigestV1({
+          userId: turn.userId,
+          botId: turn.botId,
+          generationId: generation.generationId,
           capabilities,
-          generation.generationId,
-        ),
+        }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
     });

@@ -67,14 +67,19 @@ function memoryStorage() {
 
 function host(
   options: {
-    binding?: IsolateModelBindingV1;
+    binding?: IsolateModelBindingV1 | null;
+    capabilities?: IsolateCapabilityV1[];
+    unavailableModelBinding?: {
+      provider?: string;
+      providerModelId: string;
+    };
     stream?: (request: NormalizedModelRequest) => AsyncIterable<LlmStreamEvent>;
   } = {},
 ) {
   const storage = memoryStorage();
   const forwarded: NormalizedModelRequest[] = [];
   let minted = 0;
-  const binding = options.binding ?? BINDING;
+  const binding = options.binding === undefined ? BINDING : options.binding;
   return {
     storage,
     forwarded,
@@ -83,19 +88,29 @@ function host(
       botId: "bot-1",
       packageId: "bot-authored",
       generationId: "generation-1",
-      capabilities: [CAPABILITY],
-      modelBinding: binding,
-      modelPath: {
-        stream: (value) => {
-          forwarded.push(structuredClone(value));
-          return (
-            options.stream?.(value) ??
-            (async function* () {
-              yield { type: "text-delta", text: "hi" } as LlmStreamEvent;
-            })()
-          );
-        },
-      },
+      capabilities: options.capabilities ?? [CAPABILITY],
+      ...(binding
+        ? {
+            modelBinding: binding,
+            modelPath: {
+              stream: (value: NormalizedModelRequest) => {
+                forwarded.push(structuredClone(value));
+                return (
+                  options.stream?.(value) ??
+                  (async function* () {
+                    yield {
+                      type: "text-delta",
+                      text: "hi",
+                    } as LlmStreamEvent;
+                  })()
+                );
+              },
+            },
+          }
+        : {}),
+      ...(options.unavailableModelBinding
+        ? { unavailableModelBinding: options.unavailableModelBinding }
+        : {}),
       newId: () => `minted-${(minted += 1)}`,
       now: () => new Date("2026-08-31T00:00:00.000Z"),
     }),
@@ -153,6 +168,53 @@ describe("an isolate model request is bound to its enabled Capability", () => {
     expect(subject.forwarded).toHaveLength(0);
   });
 
+  test("a request with no durable model binding is a pending decision", async () => {
+    const subject = host({ binding: null, capabilities: [] });
+
+    const outcome = await subject.host.invokeModel(request());
+
+    expect(outcome).toMatchObject({ status: "pending-user-decision" });
+    expect(await subject.host.pendingDecisions()).toHaveLength(1);
+    expect(await subject.host.recordedModelRequests()).toHaveLength(0);
+    expect(subject.forwarded).toHaveLength(0);
+  });
+
+  test("a held model binding with an unavailable Connection is unavailable", async () => {
+    const subject = host({
+      binding: null,
+      capabilities: [],
+      unavailableModelBinding: {
+        provider: BINDING.provider,
+        providerModelId: BINDING.providerModelId,
+      },
+    });
+
+    const outcome = await subject.host.invokeModel(request());
+
+    expect(outcome).toMatchObject({ status: "unavailable" });
+    expect(await subject.host.pendingDecisions()).toHaveLength(0);
+    expect(await subject.host.recordedModelRequests()).toHaveLength(0);
+    expect(subject.forwarded).toHaveLength(0);
+  });
+
+  test("an unavailable binding does not cover another provider", async () => {
+    const subject = host({
+      binding: null,
+      capabilities: [],
+      unavailableModelBinding: {
+        provider: BINDING.provider,
+        providerModelId: BINDING.providerModelId,
+      },
+    });
+
+    const outcome = await subject.host.invokeModel(
+      request({ provider: "foundation" }),
+    );
+
+    expect(outcome).toMatchObject({ status: "pending-user-decision" });
+    expect(await subject.host.pendingDecisions()).toHaveLength(1);
+  });
+
   test("forwards the authority's binding, never the Bot's", async () => {
     const subject = host();
     await subject.host.invokeModel(
@@ -180,14 +242,42 @@ describe("User-enabled isolate bindings", () => {
     ]);
   });
 
-  test("two Bots share a digest and a changed grant changes it", async () => {
-    const firstBot = await isolateBindingDigestV1([CAPABILITY], "generation-1");
-    const secondBot = await isolateBindingDigestV1(
-      [structuredClone(CAPABILITY)],
-      "generation-1",
-    );
-    const widened = await isolateBindingDigestV1(
-      [
+  test("identity, generation, and the enabled set are binding digest inputs", async () => {
+    const first = await isolateBindingDigestV1({
+      userId: "user-1",
+      botId: "bot-1",
+      generationId: "generation-1",
+      capabilities: [CAPABILITY],
+    });
+    const same = await isolateBindingDigestV1({
+      userId: "user-1",
+      botId: "bot-1",
+      generationId: "generation-1",
+      capabilities: [structuredClone(CAPABILITY)],
+    });
+    const otherUser = await isolateBindingDigestV1({
+      userId: "user-2",
+      botId: "bot-1",
+      generationId: "generation-1",
+      capabilities: [CAPABILITY],
+    });
+    const otherBot = await isolateBindingDigestV1({
+      userId: "user-1",
+      botId: "bot-2",
+      generationId: "generation-1",
+      capabilities: [CAPABILITY],
+    });
+    const otherGeneration = await isolateBindingDigestV1({
+      userId: "user-1",
+      botId: "bot-1",
+      generationId: "generation-2",
+      capabilities: [CAPABILITY],
+    });
+    const widened = await isolateBindingDigestV1({
+      userId: "user-1",
+      botId: "bot-1",
+      generationId: "generation-1",
+      capabilities: [
         CAPABILITY,
         {
           packageId: "clock",
@@ -195,11 +285,13 @@ describe("User-enabled isolate bindings", () => {
           kind: "tool",
         },
       ],
-      "generation-1",
-    );
+    });
 
-    expect(secondBot).toBe(firstBot);
-    expect(widened).not.toBe(firstBot);
+    expect(same).toBe(first);
+    expect(otherUser).not.toBe(first);
+    expect(otherBot).not.toBe(first);
+    expect(otherGeneration).not.toBe(first);
+    expect(widened).not.toBe(first);
   });
 
   test("ordering does not change the digest", async () => {
@@ -210,9 +302,19 @@ describe("User-enabled isolate bindings", () => {
     };
 
     await expect(
-      isolateBindingDigestV1([CAPABILITY, clock], "generation-1"),
+      isolateBindingDigestV1({
+        userId: "user-1",
+        botId: "bot-1",
+        generationId: "generation-1",
+        capabilities: [CAPABILITY, clock],
+      }),
     ).resolves.toBe(
-      await isolateBindingDigestV1([clock, CAPABILITY], "generation-1"),
+      await isolateBindingDigestV1({
+        userId: "user-1",
+        botId: "bot-1",
+        generationId: "generation-1",
+        capabilities: [clock, CAPABILITY],
+      }),
     );
   });
 });

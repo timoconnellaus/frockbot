@@ -198,9 +198,12 @@ export interface IsolateHost {
 
 /**
  * D2. The loader identity, and nothing else — a reused id silently serves the
- * first code, so every component here is content- or owner-derived. The hash
- * covers the *mounted module set* (kernel wrapper text plus the Package
- * artifact), so a wrapper change is a new isolate.
+ * first code and `env`, so every component here is content- or owner-derived.
+ * The hash covers the mounted wrapper and Package artifact plus the digest of
+ * every baked-in binding: User, Bot, Composition generation, and enabled set.
+ * Identical artifacts reuse an isolate only under identical authority; the
+ * User prefix independently prevents cross-User reuse (AGENTS.md Package
+ * composition; ADR 0019).
  */
 export function isolateLoaderIdV1(input: {
   userId: string;

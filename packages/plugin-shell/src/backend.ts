@@ -5,7 +5,7 @@ import {
   type SessionEvent,
   validateToolOccurrenceJournal,
   type BotCapabilitiesStub,
-  type IsolateModelInvocationV1,
+  type IsolateModelOutcomeV1,
   type IsolatePendingDecisionV1,
   type NormalizedModelRequest,
   type PackageBundlerBinding,
@@ -296,6 +296,7 @@ import {
   type IsolateModelPath,
   type IsolateModelRequestRecordV1,
   type IsolatePendingAuthorityDecisionV1,
+  type IsolateUnavailableModelBindingV1,
 } from "./backend-isolate.js";
 import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
 import type {
@@ -1429,10 +1430,12 @@ export class ShellBotBackendContribution {
             capabilities: structuredClone(capabilities),
           },
         }),
-      bindingDigest: await isolateBindingDigestV1(
+      bindingDigest: await isolateBindingDigestV1({
+        userId: identity.userId,
+        botId: identity.botId,
+        generationId: turn.generationId,
         capabilities,
-        turn.generationId,
-      ),
+      }),
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
     };
   }
@@ -1465,14 +1468,28 @@ export class ShellBotBackendContribution {
       generationId: string;
       request: NormalizedModelRequest;
     },
-  ): Promise<IsolateModelInvocationV1> {
+  ): Promise<IsolateModelOutcomeV1> {
     // The effective binding and enabled set both come from authority-owned
     // User and Bot state. Nothing the Bot supplied is read.
+    const durableSettings = await this.ctx.storage.get<BotSettingsViewV1>(
+      BOT_CONFIGURATION_KEY,
+    );
+    if (!durableSettings) {
+      return await this.isolateCapabilityHost(
+        {
+          botId: identity.botId,
+          packageId: input.packageId,
+          generationId: input.generationId,
+        },
+        [],
+      ).invokeModel(input.request);
+    }
     const context = await this.resolveExecutionContext(identity);
     const capabilities = structuredClone(context.plan.capabilities);
     const bound = await this.isolateModelBinding(
       identity,
       context.settings,
+      context.user,
       capabilities,
     );
     const host = this.isolateCapabilityHost(
@@ -1482,7 +1499,7 @@ export class ShellBotBackendContribution {
         generationId: input.generationId,
       },
       capabilities,
-      bound
+      bound?.state === "ready"
         ? {
             binding: bound.binding,
             path: this.isolateModelPath(
@@ -1492,6 +1509,7 @@ export class ShellBotBackendContribution {
             ),
           }
         : undefined,
+      bound?.state === "unavailable" ? bound.binding : undefined,
     );
     return await host.invokeModel(input.request);
   }
@@ -1499,25 +1517,77 @@ export class ShellBotBackendContribution {
   /**
    * The effective model binding, projected onto the isolate view. It resolves
    * generic Package settings and the platform fallback through the User's
-   * Connection exactly as an admitted Turn does. An unresolvable binding is no
-   * binding: the request becomes a pending decision rather than an exception
-   * carrying authority detail into Bot code.
+   * Connection exactly as an admitted Turn does. No configured binding means
+   * an authority-widening request and a pending decision; a configured binding
+   * whose Connection cannot be resolved stays distinct as unavailable.
    */
   private async isolateModelBinding(
     identity: BotIdentity,
     settings: BotSettingsViewV1 | undefined,
+    user: UserSettingsViewV1,
     capabilities: readonly IsolateCapabilityV1[],
   ): Promise<
     | {
+        state: "ready";
         binding: IsolateModelBindingV1;
         runtime: {
           agentPackages: FoundationAgentPackage[];
           modelSelection: RuntimeModelSelection;
         };
       }
+    | {
+        state: "unavailable";
+        binding: IsolateUnavailableModelBindingV1;
+      }
     | undefined
   > {
     if (!settings) return undefined;
+    const application = await this.compileApplication();
+    const packageDefinitions = application.packages.map((pkg) => ({
+      packageId: pkg.id,
+      version: pkg.version,
+      settings: pkg.manifest.configuration?.settings ?? [],
+      capabilities: pkg.manifest.configuration?.capabilities ?? [],
+      connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+    }));
+    const effective = resolveEffectiveBotModelV1({
+      bot: settings,
+      user,
+      packages: packageDefinitions,
+    });
+    const effectiveModel = effective.model;
+    if (!effectiveModel) return undefined;
+    const configuredConnection = user.connections.find(
+      (connection) => connection.connectionId === effectiveModel.connectionId,
+    );
+    const unavailable = (): {
+      state: "unavailable";
+      binding: IsolateUnavailableModelBindingV1;
+    } => ({
+      state: "unavailable",
+      binding: {
+        ...(effective.binding?.providerType
+          ? { provider: effective.binding.providerType }
+          : configuredConnection?.providerType
+            ? { provider: configuredConnection.providerType }
+            : {}),
+        providerModelId: effectiveModel.providerModelId,
+      },
+    });
+    if (!effective.binding || effective.binding.state === "unavailable") {
+      return unavailable();
+    }
+    const connection = effective.binding.connection;
+    const provider = effective.binding.providerType;
+    const packageId = effective.binding.packageId;
+    if (!connection || !provider || !packageId) return unavailable();
+    const capability = capabilities.find(
+      (candidate) =>
+        candidate.kind === "model" &&
+        candidate.packageId === packageId &&
+        candidate.connectionId === connection.connectionId,
+    );
+    if (!capability) return undefined;
     let runtime: {
       agentPackages: FoundationAgentPackage[];
       modelSelection: RuntimeModelSelection;
@@ -1525,17 +1595,13 @@ export class ShellBotBackendContribution {
     try {
       runtime = await this.agentRuntime(identity, settings);
     } catch {
-      return undefined;
+      return unavailable();
     }
     const selection = runtime.modelSelection;
     const connectionId = selection.connectionId;
-    if (!connectionId) return undefined;
-    const capability = capabilities.find(
-      (candidate) =>
-        candidate.kind === "model" && candidate.connectionId === connectionId,
-    );
-    if (!capability) return undefined;
+    if (!connectionId) return unavailable();
     return {
+      state: "ready",
       runtime,
       binding: {
         packageId: capability.packageId,
@@ -1562,6 +1628,7 @@ export class ShellBotBackendContribution {
     },
     capabilities: readonly IsolateCapabilityV1[],
     model?: { binding: IsolateModelBindingV1; path: IsolateModelPath },
+    unavailableModelBinding?: IsolateUnavailableModelBindingV1,
   ): IsolateCapabilityHost {
     return createIsolateCapabilityHost({
       storage: {
@@ -1574,6 +1641,7 @@ export class ShellBotBackendContribution {
       generationId: scope.generationId,
       capabilities,
       ...(model ? { modelBinding: model.binding, modelPath: model.path } : {}),
+      ...(unavailableModelBinding ? { unavailableModelBinding } : {}),
     });
   }
 
