@@ -224,23 +224,21 @@ export function ollamaPluginRow(page: Page): Locator {
   });
 }
 
+/** The Custom models enablement row in Plugins. */
+export function customModelsPluginRow(page: Page): Locator {
+  return page.locator("article.plugin-card", {
+    has: page.getByText("Custom models", { exact: true }),
+  });
+}
+
 /**
- * Enable the Ollama Cloud Package if it is not already, then connect an API
- * key to an endpoint on Models.
- *
- * The two steps are two surfaces on purpose: Plugins decides whether the
- * Package is on, Models sets it up. `API base URL` is the Package's own
- * Connection setting, so pointing the Connection at the harness's fake server
- * is the shipped path a User takes to reach a local Ollama — not a test-only
- * door. It leaves the form submitted; the caller decides whether it expects
- * success or a failure.
+ * Switch a Package on from its Plugins row, whichever affordance it offers,
+ * and wait until the row reports it is on. Enabling is refused while a
+ * declared dependency is off, so a caller that skips a dependency would
+ * otherwise sail past the refusal and wait out its timeout on a surface that
+ * never appears.
  */
-export async function connectOllama(
-  page: Page,
-  options: { apiKey: string; apiBaseUrl: string; label?: string },
-): Promise<void> {
-  await openPlugins(page);
-  const row = ollamaPluginRow(page);
+async function enablePluginRow(row: Locator): Promise<void> {
   for (const label of ["Add", "Enable"]) {
     const action = row.getByRole("button", { name: label, exact: true });
     if (await action.isVisible().catch(() => false)) {
@@ -248,6 +246,42 @@ export async function connectOllama(
       break;
     }
   }
+  await expect(
+    row.getByRole("button", { name: "Disable", exact: true }),
+  ).toBeVisible();
+}
+
+/**
+ * Switch Custom models on. The platform chooses the model, so choosing one at
+ * all — and every model provider besides the built-in one — is behind this one
+ * Package, which ships disabled.
+ */
+export async function enableCustomModels(page: Page): Promise<void> {
+  await openPlugins(page);
+  await enablePluginRow(customModelsPluginRow(page));
+  await closeOverlay(page);
+}
+
+/**
+ * Enable the Ollama Cloud Package if it is not already, then connect an API
+ * key to an endpoint on Models.
+ *
+ * Three steps, three surfaces on purpose: Custom models decides whether a User
+ * chooses models at all, Plugins decides whether this provider is on, and
+ * Models sets it up. Ollama Cloud declares a dependency on Custom models, so
+ * enabling it first is the shipped path, not test scaffolding. `API base URL`
+ * is the Package's own Connection setting, so pointing the Connection at the
+ * harness's fake server is also the shipped path a User takes to reach a local
+ * Ollama. It leaves the form submitted; the caller decides whether it expects
+ * success or a failure.
+ */
+export async function connectOllama(
+  page: Page,
+  options: { apiKey: string; apiBaseUrl: string; label?: string },
+): Promise<void> {
+  await enableCustomModels(page);
+  await openPlugins(page);
+  await enablePluginRow(ollamaPluginRow(page));
   await closeOverlay(page);
   await openModels(page);
   const card = ollamaCard(page);

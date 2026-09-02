@@ -15,6 +15,7 @@
   },
   "scripts": {
     "test": "bun test src",
+    "build": "vite build",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
