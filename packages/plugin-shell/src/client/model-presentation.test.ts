@@ -2,34 +2,47 @@ import { describe, expect, test } from "bun:test";
 import { modelRuntimeLabel } from "./model-presentation.js";
 
 describe("model runtime presentation", () => {
-  test("names the model and its provider Package", () => {
+  test("names platform models plainly", () => {
     expect(
       modelRuntimeLabel({
+        source: "platform",
         modelDisplayName: "Llama 3",
         providerModelId: "llama-3:cloud",
         packageDisplayName: "Ollama Cloud",
         connectionDisplayName: "Work",
-        hasModel: true,
       }),
     ).toBe("Llama 3 · Ollama Cloud");
     expect(
       modelRuntimeLabel({
+        source: "platform",
         providerModelId: "llama-3:cloud",
         connectionDisplayName: "Custom provider",
-        hasModel: true,
       }),
     ).toBe("llama-3:cloud · Custom provider");
   });
 
-  test("reads the same whether the model is the Bot's or the User default", () => {
+  test("distinguishes opt-in account and Bot choices", () => {
     const label = {
       modelDisplayName: "Llama 3",
+      providerModelId: "llama-3:cloud",
       packageDisplayName: "Ollama Cloud",
-      hasModel: true,
     };
-    expect(modelRuntimeLabel(label)).toBe("Llama 3 · Ollama Cloud");
-    expect(modelRuntimeLabel({ ...label, hasModel: false })).toBe(
-      "No default model",
+    expect(modelRuntimeLabel({ ...label, source: "account" })).toBe(
+      "Llama 3 · Ollama Cloud · Account model",
     );
+    expect(modelRuntimeLabel({ ...label, source: "bot" })).toBe(
+      "Llama 3 · Ollama Cloud · Bot override",
+    );
+  });
+
+  test("shows unavailable and backend failure states", () => {
+    expect(modelRuntimeLabel({ source: "none" })).toBe("Model unavailable");
+    expect(
+      modelRuntimeLabel({
+        source: "account",
+        providerModelId: "llama-3:cloud",
+        failure: 'Connection "work" is revoked; enable or reconnect it',
+      }),
+    ).toBe('Connection "work" is revoked; enable or reconnect it');
   });
 });

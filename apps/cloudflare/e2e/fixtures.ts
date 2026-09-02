@@ -127,14 +127,14 @@ export async function openApplication(
   }
   // Not the "Create Bot" button: for a User with no Bots the creation dialog
   // opens by itself, and its submit carries the same name. The sidebar's
-  // Plugins trigger renders once the shell has mounted and read the manifest.
+  // Connectors trigger renders once the shell has mounted and read the manifest.
   //
   // On a phone the sidebar is a closed drawer — inert, and so invisible to a
   // role query — and the menu button that opens it is the same signal: it too
   // renders only once the shell has mounted.
   await expect(
     page
-      .getByRole("button", { name: "Plugins", exact: true })
+      .getByRole("button", { name: "Connectors", exact: true })
       .or(page.getByRole("button", { name: "Show navigation" })),
   ).toBeVisible();
 }
@@ -193,7 +193,8 @@ export async function revealSidebar(page: Page): Promise<void> {
 /** Open the Plugins overlay and wait for its heading. */
 export async function openPlugins(page: Page): Promise<void> {
   await revealSidebar(page);
-  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page.locator(".profile-trigger").click();
+  await page.getByRole("menuitem", { name: "Plugins", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Plugins" })).toBeVisible();
 }
 

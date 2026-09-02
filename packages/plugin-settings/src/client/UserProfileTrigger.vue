@@ -76,7 +76,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
         Settings
       </button>
       <!-- The three Package surfaces are reachable where the User already is,
-           and gated exactly as the sidebar's Plugins trigger is: a shell
+           and gated exactly as the sidebar's Connectors trigger is: a shell
            without the Connection protocol shows none of them. -->
       <template v-if="web.connectionsAvailable">
         <button type="button" role="menuitem" @click="openSurface('models')">
@@ -90,7 +90,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
           role="menuitem"
           @click="openSurface('connections')"
         >
-          Connections
+          Connectors
         </button>
       </template>
       <button v-if="developmentIdentity" type="button" role="menuitem" disabled>

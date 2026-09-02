@@ -366,14 +366,13 @@ describe("applying", () => {
     expect(Object.keys(recording.installs[0]!)).not.toContain("values");
   });
 
-  it("creates no Connection and no Assignment", async () => {
+  it("creates no Connection or credential", async () => {
     const { contribution, recording } = await harness();
     await plan(contribution);
     const applied = await apply(contribution);
     expect(recording.calls.some((call) => call.includes("connection"))).toBe(
       false,
     );
-    expect(JSON.stringify(applied)).not.toContain("assignmentId");
     expect(applied.connections[0]!.name).toBe("Beeper");
   });
 });

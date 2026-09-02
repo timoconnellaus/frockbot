@@ -76,9 +76,12 @@ async function save(): Promise<void> {
     >
       <p class="field-hint">
         Settings of the Packages you have enabled. Model providers are
-        configured in Models and accounts in Connections.
+        configured in Models and accounts in Connectors.
       </p>
       <PackageSettingsSection />
+      <UiButton type="button" @click="surfaces.open('plugins')">
+        Open Plugins
+      </UiButton>
     </UiAnchor>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
@@ -158,23 +161,6 @@ async function save(): Promise<void> {
 
 .field-hint {
   margin: -8px 0 0;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-}
-
-.model-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--frock-border);
-  border-radius: var(--frock-radius-card);
-  background: var(--frock-surface-subtle);
-}
-
-.model-empty p {
-  margin: 0;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
 }
