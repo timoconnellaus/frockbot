@@ -1773,7 +1773,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!settings || !ctx.transport.executeConfiguration) {
         throw new Error("Plugins are unavailable");
       }
-      await ctx.transport.executeConfiguration({
+      const receipt = await ctx.transport.executeConfiguration({
         schemaVersion: 1,
         type: "user/install-package",
         commandId: crypto.randomUUID(),
@@ -1782,6 +1782,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         version,
       });
       await web.value.loadPluginCatalog();
+      if (receipt.status === "rejected") {
+        web.value.settingsError = receipt.failure;
+        throw new Error(receipt.failure);
+      }
     },
     async startConnection(
       packageId: string,
