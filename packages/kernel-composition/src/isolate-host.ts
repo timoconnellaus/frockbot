@@ -10,7 +10,7 @@
 // Two behaviours come straight from `docs/research/spike-worker-loader-from-do.md`:
 // `.get()` never throws, so mount and `health()` are a single guarded phase;
 // and a reused loader id silently serves the first code, so the id is nothing
-// but the content address of the module set actually mounted.
+// but the content address of the mounted modules and their baked-in bindings.
 import {
   decodeIsolateHealthV1,
   decodeIsolateToolResultV1,
@@ -95,11 +95,11 @@ export interface BotIsolateHostOptions {
    */
   capabilities: BotCapabilitiesStub;
   /**
-   * A content address of the User's enabled bindings this isolate is
-   * loaded with. Required, and part of the loader id, because a loader id is
-   * served from cache: the `env` a Bot isolate was first loaded with is the
-   * `env` it keeps, so a change in the User's enabled set must produce a new
-   * isolate or the isolate would keep answering from a revoked authority.
+   * A content address of every binding this isolate is loaded with: User, Bot,
+   * Composition generation, and the User's enabled capability set. Required,
+   * and part of the loader id, because the `env` first loaded under one id is
+   * the `env` it keeps. Any changed binding must therefore produce a new
+   * isolate (AGENTS.md Package composition; ADR 0019).
    */
   bindingDigest: string;
   compatibilityDate: string;
@@ -120,8 +120,8 @@ export const BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS = 10_000;
 
 /**
  * The content address of what a Bot isolate mounts: the kernel wrapper text,
- * the Package artifact, and the digest of the enabled-capability bindings it
- * is loaded with. A change to any of the three is a new isolate.
+ * the Package artifact, and the digest of every binding baked into its `env`.
+ * A change to any of the three is a new isolate.
  */
 export async function botIsolateModuleSetHashV1(
   artifactContentHash: string,

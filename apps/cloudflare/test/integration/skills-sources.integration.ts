@@ -46,7 +46,7 @@ const PLUGIN_REF = `plugin/${CATALOG_PACKAGE}/${PLUGIN_SLUG}`;
 const PLUGIN_BODY = "PLUGIN-SKILL-BODY: read the roster before the standup.";
 const MANAGED_REF = "managed/add-connector";
 /** A line only the managed `add-connector` body carries. */
-const MANAGED_BODY_MARKER = "Install it under Settings";
+const MANAGED_BODY_MARKER = "Install it and switch it on";
 
 const ENTRY = {
   schemaVersion: 1,

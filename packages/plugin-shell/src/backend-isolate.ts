@@ -8,9 +8,10 @@
 // acquires its credential lease through the existing provider path before a
 // single byte leaves the account.
 import type {
+  IsolateCapabilityFailureV1,
   IsolateAuthorityRequestV1,
   IsolateCapabilityDescriptorV1,
-  IsolateModelInvocationV1,
+  IsolateModelOutcomeV1,
   IsolatePendingDecisionV1,
   LlmStreamEvent,
   NormalizedModelRequest,
@@ -99,6 +100,15 @@ export interface IsolateModelBindingV1 {
   catalogGeneration?: string;
 }
 
+/** A configured model binding whose Connection cannot currently be used. */
+export interface IsolateUnavailableModelBindingV1 {
+  provider?: string;
+  providerModelId: string;
+}
+
+export const ISOLATE_MODEL_UNAVAILABLE_MESSAGE =
+  "the enabled model binding is unavailable";
+
 /** The bound Bot-supplied correlation id: a field, never a key, and never unbounded. */
 export const MAX_ISOLATE_REQUEST_ID = 256;
 
@@ -118,11 +128,14 @@ export interface IsolateCapabilityHostOptions {
   /** User-enabled and nothing else. */
   capabilities: readonly IsolateCapabilityV1[];
   /**
-   * The one model binding resolved for this Bot, or absent when resolution
-   * failed. Absent means every model request is a pending decision.
+   * The one ready model binding resolved for this Bot. Absent without an
+   * unavailable binding means every model request is an authority-widening
+   * pending decision.
    */
   modelBinding?: IsolateModelBindingV1;
-  /** Absent when the User has no enabled model Capability at all. */
+  /** Present when the configured binding is held but its Connection is unavailable. */
+  unavailableModelBinding?: IsolateUnavailableModelBindingV1;
+  /** Present only while the ready binding can reach its provider path. */
   modelPath?: IsolateModelPath;
   now?(): Date;
   newId?(): string;
@@ -131,9 +144,7 @@ export interface IsolateCapabilityHostOptions {
 export interface IsolateCapabilityHost {
   list(): Promise<IsolateCapabilityDescriptorV1[]>;
   requestAuthority(request: unknown): Promise<IsolatePendingDecisionV1>;
-  invokeModel(
-    request: NormalizedModelRequest,
-  ): Promise<IsolateModelInvocationV1>;
+  invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
   pendingDecisions(): Promise<IsolatePendingAuthorityDecisionV1[]>;
   recordedModelRequests(): Promise<IsolateModelRequestRecordV1[]>;
 }
@@ -218,7 +229,7 @@ export function createIsolateCapabilityHost(
 
     async invokeModel(
       request: NormalizedModelRequest,
-    ): Promise<IsolateModelInvocationV1> {
+    ): Promise<IsolateModelOutcomeV1> {
       if (request.requestId.length > MAX_ISOLATE_REQUEST_ID) {
         throw new Error("isolate model request requestId is not bounded");
       }
@@ -228,6 +239,24 @@ export function createIsolateCapabilityHost(
         binding,
         request,
       );
+      const unavailableBinding = options.unavailableModelBinding;
+      if (
+        unavailableBinding &&
+        request.model === unavailableBinding.providerModelId &&
+        (unavailableBinding.provider === undefined ||
+          request.provider === unavailableBinding.provider)
+      ) {
+        return {
+          status: "unavailable",
+          reason: ISOLATE_MODEL_UNAVAILABLE_MESSAGE,
+        } satisfies IsolateCapabilityFailureV1;
+      }
+      if (capability && binding && !options.modelPath) {
+        return {
+          status: "unavailable",
+          reason: ISOLATE_MODEL_UNAVAILABLE_MESSAGE,
+        } satisfies IsolateCapabilityFailureV1;
+      }
       if (!capability || !binding || !options.modelPath) {
         return await recordDecision(
           `models:${request.provider}:${request.model}`,
@@ -337,18 +366,21 @@ export function isolateModelEventStreamV1(
 }
 
 /**
- * The content address of the bindings an isolate is loaded with: the User's
- * enabled set and the Composition generation whose `CAPABILITIES` stub is
- * baked into its `env`. A loader id is served from cache, so a changed grant
- * must produce a different digest or a stale isolate will answer under old
- * authority. All Bots of one User under one artifact set share this digest
- * and therefore an isolate (ADR 0019).
+ * The content address of every binding baked into an isolate's `env`: User,
+ * Bot, and Composition generation from `IDENTITY` and the `CAPABILITIES` props,
+ * plus the User-enabled capability set. A loader id is served from cache, so
+ * any change must produce a different digest or a stale isolate will answer
+ * under the wrong identity or authority. Identical artifacts share an isolate
+ * only when all of these binding inputs are identical (AGENTS.md Package
+ * composition; ADR 0019).
  */
-export async function isolateBindingDigestV1(
-  capabilities: readonly IsolateCapabilityV1[],
-  generationId: string,
-): Promise<string> {
-  const ordered = [...capabilities]
+export async function isolateBindingDigestV1(input: {
+  userId: string;
+  botId: string;
+  generationId: string;
+  capabilities: readonly IsolateCapabilityV1[];
+}): Promise<string> {
+  const ordered = [...input.capabilities]
     .map((capability) => ({
       packageId: capability.packageId,
       capabilityId: capability.capabilityId,
@@ -365,7 +397,14 @@ export async function isolateBindingDigestV1(
           right.connectionId ?? "",
         ),
     );
-  return await sha256Hex(JSON.stringify({ generationId, ordered }));
+  return await sha256Hex(
+    JSON.stringify({
+      userId: input.userId,
+      botId: input.botId,
+      generationId: input.generationId,
+      ordered,
+    }),
+  );
 }
 
 function compareIsolateIdentifierV1(left: string, right: string): number {

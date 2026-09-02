@@ -144,7 +144,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(await stub.readStorage()).toBe("host-only");
   });
 
-  test("two Bots of one User with the same artifact and grant share a loader id", async () => {
+  test("two Bots of one User with the same artifact and grant get different loader ids", async () => {
     const stub = probe(`loader-ids-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -162,7 +162,8 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
     expect(first[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
-    expect(second[0]).toBe(first[0]);
+    expect(second[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
+    expect(second[0]).not.toBe(first[0]);
   });
 
   test("changing the User-enabled set changes the loader id", async () => {

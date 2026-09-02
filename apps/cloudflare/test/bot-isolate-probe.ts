@@ -338,10 +338,12 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
               capabilities: input.capabilities ?? [],
             },
           }),
-        bindingDigest: await isolateBindingDigestV1(
-          input.capabilities ?? [],
-          generation.generationId,
-        ),
+        bindingDigest: await isolateBindingDigestV1({
+          userId: input.userId,
+          botId: input.botId,
+          generationId: generation.generationId,
+          capabilities: input.capabilities ?? [],
+        }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
     }).mount(generation, new AbortController().signal);
