@@ -151,18 +151,59 @@ const BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 = {
   packageId: "env.IDENTITY.packageId",
   deadlineMs: "invocation.deadlineMs",
   bindings: "Object.keys(env).sort()",
-  listCapabilities: "function () { return capabilities.list(); }",
-  requestAuthority:
-    "function (request) { return capabilities.requestAuthority(request); }",
-  invokeModel: `async function (request) {
-      const outcome = await capabilities.invokeModel(request);
-      if (!outcome || outcome.status !== "streaming") return outcome;
-      return {
-        status: "streaming",
-        requestId: outcome.requestId,
-        events: modelEvents(outcome.events),
-      };
+  capabilities: `{
+      list: function () {
+        return capabilities.list();
+      },
     }`,
+  model: `{
+      invoke: async function (request) {
+        const outcome = await capabilities.invokeModel(request);
+        if (!outcome || outcome.status !== "streaming") return outcome;
+        return {
+          status: "streaming",
+          requestId: outcome.requestId,
+          events: modelEvents(outcome.events),
+        };
+      },
+    }`,
+  tools: `{
+      invoke: function (request) {
+        return capabilities.invokeTool(request);
+      },
+    }`,
+  memory: `{
+      read: function (request) {
+        return capabilities.memoryRead(request);
+      },
+      write: function (request) {
+        return capabilities.memoryWrite(request);
+      },
+      forget: function (request) {
+        return capabilities.memoryForget(request);
+      },
+    }`,
+  workspace: `{
+      read: function (path) {
+        return capabilities.workspaceRead(path);
+      },
+      list: function (request) {
+        return capabilities.workspaceList(request);
+      },
+      stat: function (path) {
+        return capabilities.workspaceStat(path);
+      },
+      write: function (request) {
+        return capabilities.workspaceWrite(request);
+      },
+      delete: function (request) {
+        return capabilities.workspaceDelete(request);
+      },
+    }`,
+  connection:
+    "function (connectionId) { return capabilities.connection(connectionId); }",
+  notify: "function (request) { return capabilities.notify(request); }",
+  schedule: "function (request) { return capabilities.schedule(request); }",
 } satisfies Record<keyof BotPackageContextV1, string>;
 
 /** The keys the generated wrapper actually places on `ctx`. */

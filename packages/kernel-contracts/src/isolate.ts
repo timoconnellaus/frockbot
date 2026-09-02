@@ -312,7 +312,6 @@ export type BotPackageModelOutcomeV1 =
       requestId: string;
       events: AsyncIterable<LlmStreamEvent>;
     }
-  | IsolatePendingDecisionV1
   | IsolateCapabilityFailureV1;
 
 /**
@@ -332,13 +331,45 @@ export interface BotPackageContextV1 {
   readonly packageId: string;
   readonly deadlineMs: number;
   readonly bindings: string[];
-  listCapabilities(): Promise<IsolateCapabilityListOutcomeV1>;
-  requestAuthority(
-    request: IsolateAuthorityRequestV1,
-  ): Promise<IsolateAuthorityOutcomeV1>;
-  invokeModel(
-    request: NormalizedModelRequest,
-  ): Promise<BotPackageModelOutcomeV1>;
+  readonly capabilities: {
+    list(): Promise<IsolateCapabilityListOutcomeV1>;
+  };
+  readonly model: {
+    invoke(
+      request: NormalizedModelRequest,
+    ): Promise<BotPackageModelOutcomeV1>;
+  };
+  readonly tools: {
+    /** Runs through the trusted registry's active-Composition and deny guards. */
+    invoke(request: IsolateToolRequestV1): Promise<IsolateToolOutcomeV1>;
+  };
+  readonly memory: {
+    read(request: IsolateMemoryReadRequestV1): Promise<IsolateMemoryOutcomeV1>;
+    write(
+      request: IsolateMemoryWriteRequestV1,
+    ): Promise<IsolateMemoryOutcomeV1>;
+    forget(
+      request: IsolateMemoryWriteRequestV1,
+    ): Promise<IsolateMemoryOutcomeV1>;
+  };
+  readonly workspace: {
+    read(path: IsolateWorkspacePathV1): Promise<IsolateWorkspaceOutcomeV1>;
+    list(
+      request: IsolateWorkspaceListRequestV1,
+    ): Promise<IsolateWorkspaceOutcomeV1>;
+    stat(path: IsolateWorkspacePathV1): Promise<IsolateWorkspaceOutcomeV1>;
+    write(
+      request: IsolateWorkspaceWriteRequestV1,
+    ): Promise<IsolateWorkspaceOutcomeV1>;
+    delete(
+      request: IsolateWorkspaceDeleteRequestV1,
+    ): Promise<IsolateWorkspaceOutcomeV1>;
+  };
+  connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
+  notify(
+    request: IsolateNotificationRequestV1,
+  ): Promise<IsolateNotificationOutcomeV1>;
+  schedule(request: IsolateScheduleRequestV1): Promise<IsolateScheduleOutcomeV1>;
 }
 
 export interface BotPackageExecutionContextV1 extends BotPackageContextV1 {
