@@ -2547,6 +2547,13 @@ describe("Connection operation reconciliation", () => {
   });
 
   test("registers the sandbox settings host and refuses undeclared iframe tools before transport", async () => {
+    const iframeHostSource = await Bun.file(
+      new URL("./PackageIframeHost.vue", import.meta.url),
+    ).text();
+    const iframeTag = iframeHostSource.match(/<iframe\b[\s\S]*?\/>/)?.[0];
+    expect(iframeTag).toBeString();
+    expect(iframeTag).not.toContain("loading=");
+
     let provided: Ref<FrockBotWebData> | undefined;
     const slots: string[] = [];
     let calls = 0;

@@ -149,6 +149,7 @@ onBeforeUnmount(() => window.removeEventListener("message", onMessage));
       <strong>{{ contribution.displayName }}</strong>
       <span>{{ contribution.provenance }} Package</span>
     </header>
+    <!-- Load eagerly because lazy iframes defer the init/resize handshake until the browser decides the frame is near the viewport, which headless Chromium may never do. -->
     <iframe
       ref="frame"
       :title="`${contribution.displayName} Package page`"
@@ -157,7 +158,6 @@ onBeforeUnmount(() => window.removeEventListener("message", onMessage));
       sandbox="allow-scripts"
       credentialless
       referrerpolicy="no-referrer"
-      loading="lazy"
       @load="initialize"
     />
     <p v-if="failure" class="package-iframe-failure" role="alert">
