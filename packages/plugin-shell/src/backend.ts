@@ -1,16 +1,41 @@
 import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import {
+  decodeIsolateMemoryReadRequestV1,
+  decodeIsolateMemoryWriteRequestV1,
+  decodeIsolateNotificationRequestV1,
+  decodeIsolateScheduleRequestV1,
+  decodeIsolateToolRequestV1,
+  decodeIsolateWorkspaceDeleteRequestV1,
+  decodeIsolateWorkspaceListRequestV1,
+  decodeIsolateWorkspacePathV1,
+  decodeIsolateWorkspaceWriteRequestV1,
+  decodeWorkspacePathV1,
+  decodeWorkspaceRootV1,
   decodeSessionEvent,
+  type IsolateConnectionOutcomeV1,
+  type IsolateConnectionV1,
+  type IsolateMemoryOutcomeV1,
+  type IsolateNotificationOutcomeV1,
+  type IsolateToolOutcomeV1,
+  type IsolateWorkspaceOutcomeV1,
   type PersistSessionEvents,
   type SessionEvent,
+  type WorkspacePathV1,
   validateToolOccurrenceJournal,
   type BotCapabilitiesStub,
-  type IsolateModelOutcomeV1,
+  type IsolateModelInvocationV1,
   type NormalizedModelRequest,
   type PackageBundlerBinding,
+  type PackageIframeCompositionV1,
+  type PackageIframeToolCommandV1,
   type TurnTypeV1,
   type WorkspaceFilesV1,
 } from "@frockbot/kernel-contracts";
+import {
+  decodeFrockBotManifest,
+  isClientIframeContribution,
+  type FrockBotManifest,
+} from "@frockbot/kernel-composition";
 import type { Plugin } from "cordis";
 import {
   ACTIVE_RUN_KEY,
@@ -46,6 +71,7 @@ import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
   decodeCompositionCommandReceiptV1,
+  decodeOperationReceiptV1,
   decodeInstalledPackageSettingIdsV1,
   decodeInstalledPackageSettingsPatchV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
@@ -94,6 +120,7 @@ import {
   type ShellIsolateMountOptions,
   type ShellMountedComposition,
 } from "./backend-composition.js";
+import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import {
   activateCompositionV1,
   type CompositionFailureV1,
@@ -103,7 +130,13 @@ import {
 import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
+  readAuthoredCompositionMemberSourceV1,
 } from "./backend-authoring.js";
+import {
+  type CatalogAwarePackageCatalogHost,
+  createPackageCatalogHost,
+  createR2BotPackageCatalogReader,
+} from "./backend-package-catalog.js";
 import { createBotComputerSyncHost } from "./backend-computer.js";
 import {
   decodeDirectoryViewV1,
@@ -279,7 +312,9 @@ import type {
   RoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
 import {
+  authorshipManifestKey,
   decodeAuthoringQuotaReceiptV1,
+  type AuthoredManifestRecordV1,
   type AuthoringQuotaBinding,
   type PackageAuthoringHost,
 } from "@frockbot/plugin-authoring";
@@ -289,13 +324,12 @@ import {
   createR2PackageArtifactStore,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-  type IsolateCapabilityV1,
   type IsolateCapabilityHost,
   type IsolateModelBindingV1,
   type IsolateModelPath,
   type IsolateModelRequestRecordV1,
-  type IsolateUnavailableModelBindingV1,
 } from "./backend-isolate.js";
+import { memoryScopeRootV1 } from "@frockbot/plugin-memory/roots";
 import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
 import type {
   CompositionGenerationV1,
@@ -308,8 +342,11 @@ import {
   type McpMountOutcomeReportV1,
   type McpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
-import { projectCompositionGenerationV1 } from "./composition-views.js";
-import { executeBotTurn } from "./backend-runner.js";
+import {
+  projectCompositionGenerationV1,
+  projectPackageIframeCompositionV1,
+} from "./composition-views.js";
+import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
 import { shellTerminalRecordsV1 } from "./terminal-records.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
@@ -411,6 +448,17 @@ interface ConfigurationActivity {
   promise: Promise<OperationReceiptV1>;
 }
 
+interface IsolateCallScopeV1 {
+  userId: string;
+  botId: string;
+  runId: string;
+  sessionId: string;
+  turnId: string;
+  packageId: string;
+  generationId: string;
+  request: unknown;
+}
+
 function requireMatchingConfigurationReceipt(
   stored: StoredConfigurationReceipt,
   commandFingerprint: string,
@@ -428,6 +476,9 @@ export type { BotIdentity, OwnedBotTurnCommand };
 
 export interface BotStateEnv {
   MEMORY_FILES: R2Bucket;
+  /** Object-storage file surfaces constructed by the Cloudflare adapter. */
+  WORKSPACE_FILES?: WorkspaceFilesV1;
+  MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
   /**
    * The Bot Package Worker Loader (plan Step 4). Optional so a host without
    * Bot-authored Packages — tests, the Electron shell — still compiles; a
@@ -521,6 +572,29 @@ function optionalStoredRun(input: unknown): StoredRun | undefined {
   return input === undefined ? undefined : requireStoredRunV1(input);
 }
 
+/** Server-side allowlist for the untrusted page's only effectful message. */
+export function requirePackageUiToolDeclarationV1(
+  catalog: PackageIframeCompositionV1,
+  command: Pick<
+    PackageIframeToolCommandV1,
+    "generationId" | "packageId" | "name"
+  >,
+): PackageIframeCompositionV1["contributions"][number] {
+  const contribution = catalog.contributions.find(
+    (candidate) => candidate.packageId === command.packageId,
+  );
+  if (
+    catalog.generationId !== command.generationId ||
+    !contribution ||
+    !contribution.declaredTools.includes(command.name)
+  ) {
+    throw new Error(
+      `Package "${command.packageId}" did not declare tool "${command.name}" in generation "${command.generationId}"`,
+    );
+  }
+  return contribution;
+}
+
 export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
@@ -537,7 +611,18 @@ export class ShellBotBackendContribution {
   >();
   /** The Turn currently executing on this object, for durable Stop. */
   private activeTurn:
-    { runId: string; sessionId: string; cancel(): void } | undefined;
+    | {
+        runId: string;
+        sessionId: string;
+        turnId: string;
+        generationId: string;
+        turnType: TurnTypeV1;
+        subagentRole?: string;
+        mounted: ShellMountedComposition;
+        signal: AbortSignal;
+        cancel(): void;
+      }
+    | undefined;
   /**
    * Admission, the event log, the cursor, idempotency, cancellation, and
    * durable scheduling are kernel authority; this Package supplies only the
@@ -951,6 +1036,30 @@ export class ShellBotBackendContribution {
     return projectClientTurnV1(await this.authority.run(command));
   }
 
+  async runPackageUiTool(
+    identity: BotIdentity,
+    command: PackageIframeToolCommandV1,
+  ): Promise<ClientTurnV1> {
+    await this.validateIdentity(identity);
+    const catalog = await this.listPackageUi(identity);
+    const contribution = requirePackageUiToolDeclarationV1(catalog, command);
+    return projectClientTurnV1(
+      await this.authority.run({
+        ...identity,
+        runId: command.commandId,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: `${contribution.displayName} · ${command.name}`,
+        directTool: {
+          generationId: command.generationId,
+          packageId: command.packageId,
+          name: command.name,
+          input: command.input,
+        },
+      }),
+    );
+  }
+
   /**
    * The Bot's invocable Skills, for the composer's `/` and `@` popover.
    *
@@ -997,6 +1106,46 @@ export class ShellBotBackendContribution {
       );
     }
     return { schemaVersion: 1, skills: entries };
+  }
+
+  /** The one durable manifest lookup used by mounts, commands, and UI views. */
+  private async readCompositionMemberManifest(
+    member: CompositionMemberV1,
+  ): Promise<FrockBotManifest | undefined> {
+    const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
+      authorshipManifestKey(member.manifestHash),
+    );
+    return stored ? decodeFrockBotManifest(stored.manifest) : undefined;
+  }
+
+  private async requireCompositionMemberManifest(
+    member: CompositionMemberV1,
+  ): Promise<FrockBotManifest> {
+    const manifest = await this.readCompositionMemberManifest(member);
+    if (!manifest) {
+      throw new Error(
+        `package "${member.packageId}" manifest "${member.manifestHash}" is unavailable`,
+      );
+    }
+    return manifest;
+  }
+
+  /** Active fail-closed Composition projected as inert iframe metadata. */
+  async listPackageUi(
+    identity: BotIdentity,
+  ): Promise<PackageIframeCompositionV1> {
+    await this.validateIdentity(identity);
+    const current = await this.authority.composition.current();
+    const generation =
+      current.status === "active" || current.status === "superseded"
+        ? current
+        : await this.authority.composition.lastKnownGood();
+    return projectPackageIframeCompositionV1({
+      botId: identity.botId,
+      generation,
+      readMemberManifest: (member) =>
+        this.readCompositionMemberManifest(member),
+    });
   }
 
   /**
@@ -1210,11 +1359,17 @@ export class ShellBotBackendContribution {
         ? { subagentTaskId: input.command.origin.taskId }
         : {}),
     };
+    let mountedRoot: ShellMountedComposition["root"] | undefined;
+    let mountedGeneration: CompositionGenerationV1 | undefined;
+    const currentToolNames = (): readonly string[] =>
+      mountedRoot?.tools.registeredNames?.() ?? [];
     const runtime = await this.agentRuntime(
       input.identity,
       settings,
       input.admittedRequest,
       turn,
+      currentToolNames,
+      () => mountedGeneration,
     );
     const promptParts = [
       `You are ${settings.profile.name}.`,
@@ -1231,9 +1386,9 @@ export class ShellBotBackendContribution {
           runId: input.command.runId,
           sessionId: input.command.sessionId,
           generationId: mounting.generationId,
-          capabilities: runtime.capabilities,
+          settings,
         });
-        return createShellCompositionHost({
+        const mounted = await createShellCompositionHost({
           botId: input.identity.botId,
           sessionId: input.command.sessionId,
           sessionEvents: input.previousEvents,
@@ -1259,6 +1414,9 @@ export class ShellBotBackendContribution {
             ),
           ...(isolate ? { isolate } : {}),
         }).mount(mounting, signal);
+        mountedRoot = mounted.root;
+        mountedGeneration = mounted.generation;
+        return mounted;
       },
     };
     const controller = new AbortController();
@@ -1298,14 +1456,78 @@ export class ShellBotBackendContribution {
     const active = {
       runId: input.command.runId,
       sessionId: input.command.sessionId,
-      cancel: () => activation.mounted.runtime.agent.agent.cancel("user"),
+      turnId: input.command.runId,
+      generationId: activation.mounted.generation.generationId,
+      turnType: input.command.turnType ?? "chat",
+      ...(input.command.subagentRole
+        ? { subagentRole: input.command.subagentRole }
+        : {}),
+      mounted: activation.mounted,
+      signal: controller.signal,
+      cancel: () => {
+        controller.abort("user");
+        activation.mounted.runtime.agent.agent.cancel("user");
+      },
     };
     this.activeTurn = active;
     try {
+      const directTool = input.command.directTool;
+      if (directTool) {
+        if (
+          directTool.generationId !== activation.mounted.generation.generationId
+        ) {
+          throw new Error(
+            "Package UI command does not match the mounted Composition generation",
+          );
+        }
+        const member = activation.mounted.generation.members.find(
+          (candidate) =>
+            candidate.packageId === directTool.packageId &&
+            candidate.provenance.kind !== "first-party",
+        );
+        if (!member)
+          throw new Error("Package UI command names an unavailable Package");
+        const manifest = await this.requireCompositionMemberManifest(member);
+        const client = manifest.contributions.client;
+        if (
+          !client ||
+          !isClientIframeContribution(client) ||
+          !(manifest.tools ?? []).some((tool) => tool.name === directTool.name)
+        ) {
+          throw new Error(
+            `Package "${directTool.packageId}" did not declare tool "${directTool.name}" for its iframe`,
+          );
+        }
+        return await executeDirectToolTurn({
+          command: { ...input.command, directTool },
+          previousEvents: input.previousEvents,
+          composition: activation.mounted,
+          admitEffect: (effect) =>
+            this.admitRunEffect(
+              input.identity,
+              input.command.runId,
+              input.command.sessionId,
+              effect,
+            ),
+          signal: controller.signal,
+        });
+      }
+      const ordinaryInput = await this.turnInputTextV1(input.command);
+      const durableInput =
+        activation.status === "failed-closed"
+          ? compositionFailureTurnTextV1(ordinaryInput, {
+              attemptedGenerationId: input.compositionGenerationId,
+              ...(activation.generation
+                ? { generation: activation.generation }
+                : {}),
+              ...(activation.failure ? { failure: activation.failure } : {}),
+              quarantined: activation.quarantined,
+            })
+          : ordinaryInput;
       return await executeBotTurn({
         command: {
           ...input.command,
-          text: await this.turnInputTextV1(input.command),
+          text: durableInput,
         },
         previousEvents: input.previousEvents,
         composition: activation.mounted,
@@ -1382,9 +1604,9 @@ export class ShellBotBackendContribution {
   }
 
   /**
-   * Everything a Bot isolate member needs. Returns `undefined` when this host
-   * has no Package loader, in which case an isolate member fails verification
-   * rather than silently running nowhere.
+   * Everything a Bot isolate member needs. Package identity is attribution
+   * only; Connections and model are resolved once for the Bot and every member
+   * receives the same list.
    */
   private async isolateMountOptions(
     identity: BotIdentity,
@@ -1392,7 +1614,7 @@ export class ShellBotBackendContribution {
       runId: string;
       sessionId: string;
       generationId: string;
-      capabilities: readonly EnabledCapabilityV1[];
+      settings: BotSettingsViewV1;
     },
   ): Promise<ShellIsolateMountOptions | undefined> {
     const loader = this.env.BOT_PACKAGES;
@@ -1407,232 +1629,686 @@ export class ShellBotBackendContribution {
       }
     ).exports;
     if (!loader || !artifacts || !exports?.BotCapabilities) return undefined;
-    const mintCapabilities = exports.BotCapabilities;
-    const capabilities = turn.capabilities.map((capability) =>
-      structuredClone(capability),
+    const authority = await this.isolateAuthoritySnapshot(
+      identity,
+      turn.settings,
     );
+    const mintCapabilities = exports.BotCapabilities;
     return {
       userId: identity.userId,
       runId: turn.runId,
-      // One admitted Turn is one run; the Turn ordinal lives in the session log.
       turnId: turn.runId,
       loader,
       artifacts: createR2PackageArtifactStore(artifacts),
+      manifestFor: (member) => this.requireCompositionMemberManifest(member),
       capabilitiesFor: (member) =>
         mintCapabilities({
           props: {
             userId: identity.userId,
             botId: identity.botId,
+            runId: turn.runId,
+            sessionId: turn.sessionId,
+            turnId: turn.runId,
             generationId: turn.generationId,
             packageId: member.packageId,
-            capabilities: structuredClone(capabilities),
+            connections: structuredClone(authority.connections),
+            ...(authority.model
+              ? { model: structuredClone(authority.model) }
+              : {}),
+            memory: authority.memory,
+            workspace: authority.workspace,
           },
         }),
       bindingDigest: await isolateBindingDigestV1({
         userId: identity.userId,
         botId: identity.botId,
-        generationId: turn.generationId,
-        capabilities,
+        connections: authority.connections,
+        ...(authority.model ? { model: authority.model } : {}),
+        compositionGenerationId: turn.generationId,
       }),
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
     };
   }
 
-  /**
-   * The Bot Durable Object side of `CAPABILITIES.invokeModel`. Returns an
-   * unavailable outcome unless the resolved model Capability matches; otherwise
-   * records the normalized request and streams through the provider path,
-   * which takes the credential lease on the way.
-   */
+  private async isolateAuthoritySnapshot(
+    identity: BotIdentity,
+    settings: BotSettingsViewV1,
+  ): Promise<{
+    connections: IsolateConnectionV1[];
+    model?: IsolateModelBindingV1;
+    memory: boolean;
+    workspace: boolean;
+  }> {
+    const [user, application] = await Promise.all([
+      this.userConfiguration(identity).readConfiguration({
+        schemaVersion: 1,
+        userId: identity.userId,
+      }),
+      this.compileApplication(),
+    ]);
+    const connections = user.connections.flatMap((connection) =>
+      connection.state === "ready" && connection.generation
+        ? [
+            {
+              connectionId: connection.connectionId,
+              packageId: connection.packageId,
+              connectionTypeId: connection.connectionTypeId,
+              displayName: connection.displayName,
+              generation: connection.generation,
+              safeMetadata: structuredClone(connection.safeMetadata),
+            } satisfies IsolateConnectionV1,
+          ]
+        : [],
+    );
+    const effective = resolveEffectiveBotModelV1({
+      bot: settings,
+      user,
+      packages: application.packages.map((pkg) => ({
+        packageId: pkg.id,
+        version: pkg.version,
+        settings: pkg.manifest.configuration?.settings ?? [],
+        capabilities: pkg.manifest.configuration?.capabilities ?? [],
+        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+      })),
+    });
+    const binding = effective.binding;
+    const model =
+      effective.model &&
+      binding?.state === "ready" &&
+      binding.connection?.generation &&
+      binding.packageId &&
+      binding.providerType
+        ? {
+            connectionId: binding.connection.connectionId,
+            packageId: binding.packageId,
+            provider: binding.providerType,
+            providerModelId: effective.model.providerModelId,
+            connectionGeneration: binding.connection.generation,
+            ...(binding.connection.modelCatalog?.generation
+              ? {
+                  catalogGeneration: binding.connection.modelCatalog.generation,
+                }
+              : {}),
+          }
+        : undefined;
+    return {
+      connections,
+      ...(model ? { model } : {}),
+      memory: Boolean(this.env.MEMORY_WORKSPACE_FILES),
+      workspace: Boolean(this.env.WORKSPACE_FILES),
+    };
+  }
+
   async isolateInvokeModel(
     identity: BotIdentity,
     input: {
+      runId: string;
+      sessionId: string;
+      turnId: string;
       packageId: string;
       generationId: string;
       request: NormalizedModelRequest;
     },
-  ): Promise<IsolateModelOutcomeV1> {
-    // The effective binding and enabled set both come from authority-owned
-    // User and Bot state. Nothing the Bot supplied is read.
-    const durableSettings = await this.ctx.storage.get<BotSettingsViewV1>(
-      BOT_CONFIGURATION_KEY,
-    );
-    if (!durableSettings) {
-      return await this.isolateCapabilityHost(
-        {
-          botId: identity.botId,
-          packageId: input.packageId,
-          generationId: input.generationId,
-        },
-        [],
-      ).invokeModel(input.request);
+  ): Promise<IsolateModelInvocationV1> {
+    if (!this.activeIsolateTurn(input)) {
+      return {
+        status: "unavailable",
+        reason: "the Package is not running in this Bot's active Composition",
+      };
     }
-    const context = await this.resolveExecutionContext(identity);
-    const capabilities = structuredClone(context.plan.capabilities);
-    const bound = await this.isolateModelBinding(
-      identity,
-      context.settings,
-      context.user,
-      capabilities,
-    );
-    const host = this.isolateCapabilityHost(
+    const settings = await this.ensureBotSettings(identity);
+    const authority = await this.isolateAuthoritySnapshot(identity, settings);
+    let runtime:
+      | {
+          agentPackages: FoundationAgentPackage[];
+          modelSelection: RuntimeModelSelection;
+        }
+      | undefined;
+    if (authority.model) {
+      try {
+        runtime = await this.agentRuntime(identity, settings);
+      } catch {
+        runtime = undefined;
+      }
+    }
+    return this.isolateCapabilities(
       {
         botId: identity.botId,
         packageId: input.packageId,
         generationId: input.generationId,
       },
-      capabilities,
-      bound?.state === "ready"
+      authority,
+      runtime && authority.model
         ? {
-            binding: bound.binding,
-            path: this.isolateModelPath(
-              identity,
-              bound.runtime,
-              input.generationId,
-            ),
+            path: this.isolateModelPath(identity, runtime, input.generationId),
           }
         : undefined,
-      bound?.state === "unavailable" ? bound.binding : undefined,
-    );
-    return await host.invokeModel(input.request);
+    ).invokeModel(input.request);
   }
 
-  /**
-   * The effective model binding, projected onto the isolate view. It resolves
-   * generic Package settings and the platform fallback through the User's
-   * Connection exactly as an admitted Turn does. No configured binding and a
-   * configured binding whose Connection cannot be resolved are unavailable.
-   */
-  private async isolateModelBinding(
-    identity: BotIdentity,
-    settings: BotSettingsViewV1 | undefined,
-    user: UserSettingsViewV1,
-    capabilities: readonly IsolateCapabilityV1[],
-  ): Promise<
-    | {
-        state: "ready";
-        binding: IsolateModelBindingV1;
-        runtime: {
-          agentPackages: FoundationAgentPackage[];
-          modelSelection: RuntimeModelSelection;
+  async isolateInvokeTool(input: {
+    userId: string;
+    botId: string;
+    runId: string;
+    sessionId: string;
+    turnId: string;
+    packageId: string;
+    generationId: string;
+    request: unknown;
+  }): Promise<IsolateToolOutcomeV1> {
+    const request = decodeIsolateToolRequestV1(input.request);
+    const active = this.activeIsolateTurn(input);
+    if (!active) {
+      return {
+        status: "unavailable",
+        reason: "the Package is not running in this Bot's active Composition",
+      };
+    }
+    const session = active.mounted.runtime.root.sessions.get(input.sessionId);
+    if (!session) {
+      return {
+        status: "unavailable",
+        reason: "the active Session is unavailable",
+      };
+    }
+    const started = session.events.findLast(
+      (event) => event.type === "step/start",
+    );
+    const ended = session.events.findLast((event) => event.type === "step/end");
+    if (
+      started?.type !== "step/start" ||
+      (ended?.type === "step/end" &&
+        ended.turn === started.turn &&
+        ended.step === started.step)
+    ) {
+      return {
+        status: "unavailable",
+        reason: "the active step is unavailable",
+      };
+    }
+    const effectId = await this.isolateToolEffectId(
+      input.packageId,
+      request.callId,
+    );
+    const priorCall = session.events.find(
+      (event) =>
+        event.type === "package/tool-call" && event.effectId === effectId,
+    );
+    const priorResult = session.events.find(
+      (event) =>
+        event.type === "package/tool-result" && event.effectId === effectId,
+    );
+    if (priorResult?.type === "package/tool-result") {
+      return {
+        status: "completed",
+        content: priorResult.content,
+        isError: priorResult.isError,
+      };
+    }
+    if (
+      priorCall?.type === "package/tool-call" &&
+      (priorCall.packageId !== input.packageId ||
+        priorCall.callId !== request.callId ||
+        priorCall.name !== request.name ||
+        JSON.stringify(priorCall.input) !== JSON.stringify(request.input))
+    ) {
+      return {
+        status: "unavailable",
+        reason: "the Package tool idempotency key was reused",
+      };
+    }
+    if (!priorCall) {
+      session.append({
+        type: "package/tool-call",
+        turn: started.turn,
+        step: started.step,
+        effectId,
+        packageId: input.packageId,
+        callId: request.callId,
+        name: request.name,
+        input: request.input,
+      });
+      await session.flush();
+    }
+    const call = {
+      id: request.callId,
+      name: request.name,
+      input: request.input,
+    };
+    const context = {
+      botId: input.botId,
+      agentId: input.botId,
+      sessionId: input.sessionId,
+      compositionGenerationId: input.generationId,
+      effectId,
+      toolCall: call,
+      turnType: active.turnType,
+      ...(active.subagentRole ? { subagentRole: active.subagentRole } : {}),
+      signal: active.signal,
+    };
+    const preparation = await active.mounted.runtime.root.tools.prepare(
+      call,
+      context,
+    );
+    let result: { content: string; isError: boolean };
+    if (preparation.kind === "denied") {
+      result = preparation.result;
+    } else {
+      const admitted = await this.admitRunEffect(
+        { userId: input.userId, botId: input.botId },
+        input.runId,
+        input.sessionId,
+        { kind: "tool", effectId },
+      );
+      if (!admitted) {
+        result = {
+          content: "The tool effect was stopped before it started.",
+          isError: true,
         };
+      } else if (priorCall) {
+        const recovered =
+          await active.mounted.runtime.root.tools.reconcilePrepared(
+            preparation,
+            context,
+          );
+        result =
+          recovered.status === "recovered"
+            ? recovered.result
+            : { content: recovered.reason, isError: true };
+      } else {
+        result = await active.mounted.runtime.root.tools.executePrepared(
+          preparation,
+          context,
+        );
       }
-    | {
-        state: "unavailable";
-        binding: IsolateUnavailableModelBindingV1;
-      }
-    | undefined
-  > {
-    if (!settings) return undefined;
-    const application = await this.compileApplication();
-    const packageDefinitions = application.packages.map((pkg) => ({
-      packageId: pkg.id,
-      version: pkg.version,
-      settings: pkg.manifest.configuration?.settings ?? [],
-      capabilities: pkg.manifest.configuration?.capabilities ?? [],
-      connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-    }));
-    const effective = resolveEffectiveBotModelV1({
-      bot: settings,
-      user,
-      packages: packageDefinitions,
-    });
-    const effectiveModel = effective.model;
-    if (!effectiveModel) return undefined;
-    const configuredConnection = user.connections.find(
-      (connection) => connection.connectionId === effectiveModel.connectionId,
-    );
-    const unavailable = (): {
-      state: "unavailable";
-      binding: IsolateUnavailableModelBindingV1;
-    } => ({
-      state: "unavailable",
-      binding: {
-        ...(effective.binding?.providerType
-          ? { provider: effective.binding.providerType }
-          : configuredConnection?.providerType
-            ? { provider: configuredConnection.providerType }
-            : {}),
-        providerModelId: effectiveModel.providerModelId,
-      },
-    });
-    if (!effective.binding || effective.binding.state === "unavailable") {
-      return unavailable();
     }
-    const connection = effective.binding.connection;
-    const provider = effective.binding.providerType;
-    const packageId = effective.binding.packageId;
-    if (!connection || !provider || !packageId) return unavailable();
-    const capability = capabilities.find(
-      (candidate) =>
-        candidate.kind === "model" &&
-        candidate.packageId === packageId &&
-        candidate.connectionId === connection.connectionId,
-    );
-    if (!capability) return undefined;
-    let runtime: {
-      agentPackages: FoundationAgentPackage[];
-      modelSelection: RuntimeModelSelection;
-    };
-    try {
-      runtime = await this.agentRuntime(identity, settings);
-    } catch {
-      return unavailable();
-    }
-    const selection = runtime.modelSelection;
-    const connectionId = selection.connectionId;
-    if (!connectionId) return unavailable();
+    session.append({
+      type: "package/tool-result",
+      turn: started.turn,
+      step: started.step,
+      effectId,
+      packageId: input.packageId,
+      callId: request.callId,
+      name: request.name,
+      content: result.content,
+      isError: result.isError,
+    });
+    await session.flush();
     return {
-      state: "ready",
-      runtime,
-      binding: {
-        packageId: capability.packageId,
-        capabilityId: capability.capabilityId,
-        connectionId,
-        provider: selection.provider,
-        providerModelId: selection.model,
-        ...(selection.connectionGeneration
-          ? { connectionGeneration: selection.connectionGeneration }
-          : {}),
-        ...(selection.catalogGeneration
-          ? { catalogGeneration: selection.catalogGeneration }
-          : {}),
-      },
+      status: "completed",
+      content: result.content,
+      isError: result.isError,
     };
   }
 
-  private isolateCapabilityHost(
+  async isolateMemoryRead(input: {
+    userId: string;
+    botId: string;
+    runId: string;
+    sessionId: string;
+    turnId: string;
+    packageId: string;
+    generationId: string;
+    request: unknown;
+  }): Promise<IsolateMemoryOutcomeV1> {
+    const request = decodeIsolateMemoryReadRequestV1(input.request);
+    const memory = await this.isolateMemoryHost(input, request);
+    if (!memory)
+      return { status: "unavailable", reason: "Memory is unavailable" };
+    return {
+      status: "available",
+      value: await memory.store.read(
+        memoryScopeRootV1(request.scope, memory.owner, request.projectId),
+      ),
+    };
+  }
+
+  async isolateMemoryWrite(input: {
+    userId: string;
+    botId: string;
+    runId: string;
+    sessionId: string;
+    turnId: string;
+    packageId: string;
+    generationId: string;
+    request: unknown;
+  }): Promise<IsolateMemoryOutcomeV1> {
+    const request = decodeIsolateMemoryWriteRequestV1(input.request);
+    const memory = await this.isolateMemoryHost(input, request);
+    if (!memory?.writer) {
+      return { status: "unavailable", reason: "Memory is unavailable" };
+    }
+    return {
+      status: "available",
+      value: await memory.store.write({
+        root: memoryScopeRootV1(request.scope, memory.owner, request.projectId),
+        tier: request.tier ?? "log",
+        fact: request.fact,
+        writer: {
+          kind: "bot",
+          botId: input.botId,
+          ...memory.writer,
+        },
+      }),
+    };
+  }
+
+  async isolateMemoryForget(input: {
+    userId: string;
+    botId: string;
+    runId: string;
+    sessionId: string;
+    turnId: string;
+    packageId: string;
+    generationId: string;
+    request: unknown;
+  }): Promise<IsolateMemoryOutcomeV1> {
+    const request = decodeIsolateMemoryWriteRequestV1(input.request);
+    const memory = await this.isolateMemoryHost(input, request);
+    if (!memory?.writer) {
+      return { status: "unavailable", reason: "Memory is unavailable" };
+    }
+    return {
+      status: "available",
+      value: await memory.store.forget({
+        root: memoryScopeRootV1(request.scope, memory.owner, request.projectId),
+        fact: request.fact,
+        writer: {
+          kind: "bot",
+          botId: input.botId,
+          ...memory.writer,
+        },
+      }),
+    };
+  }
+
+  async isolateWorkspaceRead(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
+    const active = this.activeIsolateTurn(input);
+    const files = this.env.WORKSPACE_FILES;
+    if (!active || !files) {
+      return { status: "unavailable", reason: "Workspace is unavailable" };
+    }
+    const path = this.isolateWorkspacePath(
+      input.userId,
+      decodeIsolateWorkspacePathV1(input.request),
+    );
+    return { status: "available", value: await files.read(path) };
+  }
+
+  async isolateWorkspaceList(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
+    const active = this.activeIsolateTurn(input);
+    const files = this.env.WORKSPACE_FILES;
+    if (!active || !files) {
+      return { status: "unavailable", reason: "Workspace is unavailable" };
+    }
+    const request = decodeIsolateWorkspaceListRequestV1(input.request);
+    const root = this.isolateWorkspaceRoot(input.userId, request.root);
+    return {
+      status: "available",
+      value: await files.list({
+        root,
+        ...(request.prefix === undefined ? {} : { prefix: request.prefix }),
+        ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
+        ...(request.limit === undefined ? {} : { limit: request.limit }),
+      }),
+    };
+  }
+
+  async isolateWorkspaceStat(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
+    const active = this.activeIsolateTurn(input);
+    const files = this.env.WORKSPACE_FILES;
+    if (!active || !files) {
+      return { status: "unavailable", reason: "Workspace is unavailable" };
+    }
+    const path = this.isolateWorkspacePath(
+      input.userId,
+      decodeIsolateWorkspacePathV1(input.request),
+    );
+    return { status: "available", value: await files.stat(path) };
+  }
+
+  async isolateWorkspaceWrite(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
+    const active = this.activeIsolateTurn(input);
+    const files = this.env.WORKSPACE_FILES;
+    if (!active || !files) {
+      return { status: "unavailable", reason: "Workspace is unavailable" };
+    }
+    const request = decodeIsolateWorkspaceWriteRequestV1(input.request);
+    return {
+      status: "available",
+      value: await files.write({
+        path: this.isolateWorkspacePath(input.userId, request.path),
+        bytes: request.bytes,
+        writer: this.isolateWorkspaceWriter(input),
+        expectedGenerationId: request.expectedGenerationId,
+        ...(request.mediaType ? { mediaType: request.mediaType } : {}),
+      }),
+    };
+  }
+
+  async isolateWorkspaceDelete(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateWorkspaceOutcomeV1> {
+    const active = this.activeIsolateTurn(input);
+    const files = this.env.WORKSPACE_FILES;
+    if (!active || !files) {
+      return { status: "unavailable", reason: "Workspace is unavailable" };
+    }
+    const request = decodeIsolateWorkspaceDeleteRequestV1(input.request);
+    return {
+      status: "available",
+      value: await files.delete({
+        path: this.isolateWorkspacePath(input.userId, request.path),
+        writer: this.isolateWorkspaceWriter(input),
+        expectedGenerationId: request.expectedGenerationId,
+      }),
+    };
+  }
+
+  async isolateConnection(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateConnectionOutcomeV1> {
+    if (!this.activeIsolateTurn(input) || typeof input.request !== "string") {
+      return { status: "unavailable", reason: "the Connection is unavailable" };
+    }
+    const identity = { userId: input.userId, botId: input.botId };
+    const user = await this.userConfiguration(identity).readConfiguration({
+      schemaVersion: 1,
+      userId: input.userId,
+    });
+    const connection = user.connections.find(
+      (candidate) =>
+        candidate.connectionId === input.request &&
+        candidate.state === "ready" &&
+        candidate.generation,
+    );
+    if (!connection?.generation) {
+      return { status: "unavailable", reason: "the Connection is unavailable" };
+    }
+    return {
+      status: "available",
+      leaseId: crypto.randomUUID(),
+      connectionId: connection.connectionId,
+      generation: connection.generation,
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    };
+  }
+
+  async isolateNotify(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateNotificationOutcomeV1> {
+    if (!this.activeIsolateTurn(input)) {
+      return { status: "unavailable", reason: "notifications are unavailable" };
+    }
+    const request = decodeIsolateNotificationRequestV1(input.request);
+    await this.authority.recordNotification({
+      notificationId: `package:${input.packageId}:${request.notificationId}`,
+      runId: input.runId,
+      createdAt: new Date().toISOString(),
+      title: request.title,
+      body: request.body,
+    });
+    return { status: "recorded" };
+  }
+
+  async isolateSchedule(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateToolOutcomeV1> {
+    const request = decodeIsolateScheduleRequestV1(input.request);
+    return this.isolateInvokeTool({
+      ...input,
+      request: {
+        callId: request.callId,
+        name: "routine_manage",
+        input: request.input,
+      },
+    });
+  }
+
+  private async isolateMemoryHost(
+    input: IsolateCallScopeV1,
+    request: { scope: "bot" | "user" | "project"; projectId?: string },
+  ) {
+    if (!this.activeIsolateTurn(input)) return undefined;
+    const host = createBotMemoryHost(
+      { userId: input.userId, botId: input.botId },
+      {
+        runId: input.runId,
+        sessionId: input.sessionId,
+        turnId: input.turnId,
+      },
+      this.env,
+    );
+    if (!host) return undefined;
+    if (request.scope === "project") {
+      const projects = await host.projects?.joined();
+      if (
+        !request.projectId ||
+        !projects?.some((project) => project.projectId === request.projectId)
+      ) {
+        return undefined;
+      }
+    }
+    return host;
+  }
+
+  private activeIsolateTurn(input: {
+    runId: string;
+    sessionId: string;
+    turnId: string;
+    packageId: string;
+    generationId: string;
+  }) {
+    const active = this.activeTurn;
+    if (
+      !active ||
+      active.runId !== input.runId ||
+      active.sessionId !== input.sessionId ||
+      active.turnId !== input.turnId ||
+      active.generationId !== input.generationId ||
+      !active.mounted.generation.members.some(
+        (member) => member.packageId === input.packageId && member.artifact,
+      )
+    ) {
+      return undefined;
+    }
+    return active;
+  }
+
+  private async isolateToolEffectId(
+    packageId: string,
+    callId: string,
+  ): Promise<string> {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`${packageId}\0${callId}`),
+    );
+    const hex = [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    return `package-tool:${hex}`;
+  }
+
+  private isolateWorkspaceRoot(
+    userId: string,
+    root: ReturnType<typeof decodeIsolateWorkspacePathV1>["root"],
+  ) {
+    return decodeWorkspaceRootV1(
+      root.kind === "user-instructions"
+        ? { kind: root.kind, userId }
+        : root.kind === "bot-instructions"
+          ? { kind: root.kind, userId, botId: root.botId }
+          : {
+              kind: root.kind,
+              userId,
+              packageId: root.packageId,
+              rootId: root.rootId,
+            },
+    );
+  }
+
+  private isolateWorkspacePath(
+    userId: string,
+    path: ReturnType<typeof decodeIsolateWorkspacePathV1>,
+  ): WorkspacePathV1 {
+    return decodeWorkspacePathV1({
+      root: this.isolateWorkspaceRoot(userId, path.root),
+      path: path.path,
+    });
+  }
+
+  private isolateWorkspaceWriter(input: IsolateCallScopeV1) {
+    return {
+      kind: "bot" as const,
+      botId: input.botId,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      runId: input.runId,
+    };
+  }
+
+  private isolateCapabilities(
     scope: {
       botId: string;
       packageId: string;
       generationId: string;
-      request?: unknown;
     },
-    capabilities: readonly IsolateCapabilityV1[],
-    model?: { binding: IsolateModelBindingV1; path: IsolateModelPath },
-    unavailableModelBinding?: IsolateUnavailableModelBindingV1,
+    authority: {
+      connections: readonly IsolateConnectionV1[];
+      model?: IsolateModelBindingV1;
+      memory: boolean;
+      workspace: boolean;
+    },
+    model?: { path: IsolateModelPath },
   ): IsolateCapabilityHost {
     return createIsolateCapabilityHost({
       storage: {
         put: (key, value) => this.ctx.storage.put(key, value),
-        get: (key) => this.ctx.storage.get(key),
         list: (options) => this.ctx.storage.list(options),
       },
       botId: scope.botId,
       packageId: scope.packageId,
       generationId: scope.generationId,
-      capabilities,
-      ...(model ? { modelBinding: model.binding, modelPath: model.path } : {}),
-      ...(unavailableModelBinding ? { unavailableModelBinding } : {}),
+      connections: authority.connections,
+      ...(authority.model ? { modelBinding: authority.model } : {}),
+      ...(model ? { modelPath: model.path } : {}),
+      memory: authority.memory,
+      workspace: authority.workspace,
     });
   }
 
   /**
    * Streams through the pinned Composition's mounted `ctx.llm` — the same
    * provider path a Turn uses, so whichever provider Plugin serves the request
-   * is the one that takes the credential lease. The runtime is the one the
-   * effective model binding resolved to, so the Package that streams is the
-   * Package the enabled Capability names.
+   * is the one that takes the credential lease.
    */
   private isolateModelPath(
     identity: BotIdentity,
@@ -1658,8 +2334,6 @@ export class ShellBotBackendContribution {
           sessionEvents: [],
           agentPackages: runtime.agentPackages,
           modelSelection: runtime.modelSelection,
-          // An isolate model invocation is not an admitted Turn, so there is
-          // no run to fence it against; User enablement admitted it.
           admitEffect: () => Promise.resolve(true),
         }).mount(generation, signal);
         try {
@@ -2809,12 +3483,15 @@ export class ShellBotBackendContribution {
   private authoringHost(
     identity: BotIdentity,
     turn: { runId: string; turnId: string },
+    currentToolNames: () => readonly string[],
+    mountedGeneration: () => CompositionGenerationV1 | undefined,
   ): PackageAuthoringHost {
     const artifacts = this.env.APPLICATION_ARTIFACTS;
     return createPackageAuthoringHost({
       storage: {
         get: (key) => this.ctx.storage.get(key),
         put: (entries) => this.ctx.storage.put(entries),
+        list: (options) => this.ctx.storage.list(options),
       },
       composition: this.authority.composition,
       ...(this.env.PACKAGE_BUNDLER
@@ -2829,6 +3506,43 @@ export class ShellBotBackendContribution {
       runId: turn.runId,
       turnId: turn.turnId,
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+      currentToolNames,
+      mountedGeneration,
+      activationFailures: this.authority.compositionFailures,
+    });
+  }
+
+  /** Catalog reads plus the two-authority mutation seam for one admitted Turn. */
+  private packageCatalogHost(
+    identity: BotIdentity,
+    turn: { runId: string; turnId: string },
+  ): CatalogAwarePackageCatalogHost | undefined {
+    if (!this.env.PACKAGE_CATALOG || !this.env.APPLICATION_ARTIFACTS) {
+      return undefined;
+    }
+    const user = this.userConfiguration(identity);
+    return createPackageCatalogHost({
+      storage: {
+        get: (key) => this.ctx.storage.get(key),
+        put: (entries) => this.ctx.storage.put(entries),
+      },
+      composition: this.authority.composition,
+      catalog: createR2BotPackageCatalogReader(
+        this.env.PACKAGE_CATALOG,
+        this.env.APPLICATION_ARTIFACTS,
+      ),
+      user: {
+        read: () =>
+          user.readConfiguration({
+            schemaVersion: 1,
+            userId: identity.userId,
+          }),
+        execute: (command) => user.executeConfiguration(command),
+      },
+      userId: identity.userId,
+      botId: identity.botId,
+      runId: turn.runId,
+      turnId: turn.turnId,
     });
   }
 
@@ -2853,6 +3567,9 @@ export class ShellBotBackendContribution {
       /** The task a child Turn is running, in a Subagent Durable Object. */
       subagentTaskId?: string;
     },
+    currentToolNames: () => readonly string[] = () => [],
+    mountedGeneration: () => CompositionGenerationV1 | undefined = () =>
+      undefined,
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
     capabilities: EnabledCapabilityV1[];
@@ -2950,13 +3667,29 @@ export class ShellBotBackendContribution {
     // Filled in once this Turn's model binding is resolved, below. The tool
     // and the prompt section both read it lazily, from inside the Turn.
     const subagentModels: SubagentModelOptionV1[] = [];
+    const packageCatalog = turn
+      ? this.packageCatalogHost(identity, turn)
+      : undefined;
+    const baseAuthoring = turn
+      ? this.authoringHost(identity, turn, currentToolNames, mountedGeneration)
+      : undefined;
+    const authoring: PackageAuthoringHost | undefined =
+      baseAuthoring && packageCatalog
+        ? {
+            ...baseAuthoring,
+            undo: async (request) =>
+              (await packageCatalog.undoCatalogChange(request)) ??
+              baseAuthoring.undo(request),
+          }
+        : baseAuthoring;
     const resolvedAgentPackages: FoundationAgentPackage[] = [
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
         readSecret,
         // A Bot authors a Package only inside an admitted Turn, whose run and
         // session the artifact provenance names.
-        ...(turn ? { authoring: this.authoringHost(identity, turn) } : {}),
+        ...(authoring ? { authoring } : {}),
+        ...(packageCatalog ? { packageCatalog } : {}),
         ...(turn
           ? {
               skills: createBotSkillsHost(
@@ -3775,15 +4508,17 @@ export class ShellBotBackendContribution {
     return quarantine === undefined ? {} : { quarantine };
   }
 
-  /**
-   * SEAM — plan Step 5 (authoring) owns `authorship:intent:<effectId>` and
-   * `artifact:<contentHash>`. Those records do not exist yet, so an isolate
-   * member has no recorded source to show and the view carries members only.
-   */
-  private readCompositionMemberSource(
-    _member: CompositionMemberV1,
+  /** Reads the immutable TypeScript source retained beside an authored artifact. */
+  private async readCompositionMemberSource(
+    member: CompositionMemberV1,
   ): Promise<string | undefined> {
-    return Promise.resolve(undefined);
+    const bucket = this.env.APPLICATION_ARTIFACTS;
+    if (!bucket) return undefined;
+    return readAuthoredCompositionMemberSourceV1({
+      storage: { get: (key) => this.ctx.storage.get(key) },
+      artifacts: createR2AuthoringArtifactStore(bucket),
+      member,
+    });
   }
 
   /**
@@ -4327,6 +5062,9 @@ export class ShellBotBackendContribution {
       schemaVersion: 1;
       userId: string;
     }): Promise<UserSettingsViewV1>;
+    executeConfiguration(
+      input: Extract<ConfigurationCommandV1, { type: `user/${string}` }>,
+    ): Promise<OperationReceiptV1>;
     readPackageRevisions(
       userId: string,
     ): ReturnType<PackagePublisherAgentHost["read"]>;
@@ -4398,6 +5136,7 @@ export class ShellBotBackendContribution {
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+      executeConfiguration(input: unknown): Promise<unknown>;
       readPackageRevisions(
         input: unknown,
       ): ReturnType<PackagePublisherAgentHost["read"]>;
@@ -4424,6 +5163,14 @@ export class ShellBotBackendContribution {
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
+      executeConfiguration: async (command) =>
+        decodeOperationReceiptV1(
+          await rpc.executeConfiguration({
+            schemaVersion: 1,
+            userId: identity.userId,
+            command,
+          }),
+        ),
       // A machine is a User asset, so every one of these crosses the seam and
       // is decoded on arrival rather than trusted in the shape RPC returned.
       listMachines: async (userId) =>

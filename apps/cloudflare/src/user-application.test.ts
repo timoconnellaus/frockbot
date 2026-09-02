@@ -12,6 +12,20 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     assertRegistered: () => Promise.resolve(),
     listSkills: () =>
       Promise.resolve({ schemaVersion: 1 as const, skills: [] }),
+    listPackageUi: ({ botId }) =>
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        botId,
+        generationId: "foundation-v1",
+        contributions: [],
+      }),
+    runPackageUiTool: ({ botId, command }) =>
+      state.run(botId, {
+        runId: command.commandId,
+        sessionId: `session:${botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: command.name,
+      }),
     readWorkspaceFileV1: () =>
       Promise.resolve({
         schemaVersion: 1 as const,

@@ -252,7 +252,6 @@ export function createMcpLifecycleRuntimePlugin(
     );
     return () => {
       for (const dispose of disposers.toReversed()) dispose();
-      root = undefined;
     };
   };
   plugin.inject = ["tools"];
