@@ -310,12 +310,12 @@ export async function chooseDefaultModel(
   optionLabel: string,
 ): Promise<void> {
   await openModels(page);
-  const models = page.getByLabel(/^Default model/);
+  const models = page.getByLabel(/^Account model/);
   await expect(
     models.getByRole("option", { name: optionLabel }),
   ).toBeAttached();
   await models.selectOption({ label: optionLabel });
-  await page.getByRole("button", { name: "Save model" }).click();
+  await page.getByRole("button", { name: "Save account model" }).click();
   await closeOverlay(page);
   await expect(page.getByRole("heading", { name: "Models" })).toBeHidden();
 }
