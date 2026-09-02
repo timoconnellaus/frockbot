@@ -96,6 +96,8 @@ Pushing a valid SemVer tag such as `v0.1.0` or `v0.1.0-rc.1` (build metadata suc
 
 Auto-merge waits on the branch ruleset for `main`, which requires the `Validate` and `Browser end-to-end` checks. That ruleset is what holds a queued pull request back; without it GitHub has nothing to wait for and would merge on open. **Allow auto-merge** must also be enabled in the repository's settings.
 
+One pull request cannot queue itself: GitHub refuses to let `GITHUB_TOKEN` auto-merge anything that edits `.github/workflows/`, since that needs a `workflows` scope the Actions token cannot hold. A pull request that changes CI is merged by hand and the workflow logs a warning saying so.
+
 For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
 
 ## Production deployment

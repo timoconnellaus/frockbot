@@ -44,9 +44,17 @@ jobs:
         shell: bash
         # Merge commits, matching the history this repository already keeps.
         #
-        # Not a failure worth failing the run over: auto-merge is refused when
-        # the pull request is already mergeable with nothing left to wait for,
-        # and a pull request that cannot queue is one a person merges by hand.
+        # Not a failure worth failing the run over, and one refusal is routine:
+        # GitHub will not let `GITHUB_TOKEN` queue a pull request that edits
+        # anything under `.github/workflows/`, because that needs the
+        # `workflows` scope and the Actions token cannot hold it. So a pull
+        # request that changes CI is merged by hand — including the one that
+        # added this file — while every other pull request queues normally.
+        # Only a personal access token or GitHub App token would lift that,
+        # which is a bigger credential than merging CI changes by hand is worth.
+        #
+        # Auto-merge is also refused when the pull request is already mergeable
+        # with nothing left to wait for. Either way a person merges it.
         run: |
           if ! gh pr merge "$PR_NUMBER" --auto --merge; then
             echo "::warning::Could not enable auto-merge on #$PR_NUMBER; merge it by hand."
