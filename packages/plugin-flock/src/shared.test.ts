@@ -9,6 +9,7 @@ import {
   decodeCreateBotCommandV1,
   decodeDirectoryViewV1,
   decodeSheepRecipeV1,
+  migrateStoredBotDirectoryV1,
   randomSheepRecipeV1,
   sheepCatalog,
   sheepLayerIds,
@@ -182,5 +183,77 @@ describe("Flock v1 contracts", () => {
         identities: [identity, identity],
       }),
     ).toThrow("duplicate IDs");
+  });
+});
+
+describe("stored Bot directory migration", () => {
+  const sheep = randomSheepRecipeV1(() => 0);
+  const legacyBot = () => ({
+    schemaVersion: 1,
+    botId: "alpha",
+    registeredAt: "2026-08-29T00:00:00.000Z",
+    initialName: "Alpha",
+    initialModel: { connectionId: "openai", providerModelId: "gpt-5" },
+    initialModelBinding: {
+      assignment: {
+        assignmentId: "assignment-1",
+        packageId: "models",
+        capabilityId: "chat",
+        connectionId: "openai",
+        state: "enabled",
+      },
+      generation: "generation-1",
+    },
+    initialAssignments: [],
+    sheep,
+  });
+
+  test("drops the retired model and Assignment seed fields", () => {
+    const stored = { schemaVersion: 1, revision: 1, bots: [legacyBot()] };
+    // Without migration this is exactly the failure the sidebar reported.
+    expect(() => decodeDirectoryViewV1(stored)).toThrow(
+      "unknown or missing field",
+    );
+    const directory = decodeDirectoryViewV1(
+      migrateStoredBotDirectoryV1(stored),
+    );
+    expect(directory.revision).toBe(1);
+    const [bot] = directory.bots;
+    expect(bot).toMatchObject({ botId: "alpha", initialName: "Alpha" });
+    for (const key of [
+      "initialModel",
+      "initialModelBinding",
+      "initialAssignments",
+    ])
+      expect(Object.hasOwn(bot!, key)).toBe(false);
+    // Migration is read-time: the durable record itself is left alone.
+    expect(Object.hasOwn(stored.bots[0]!, "initialModel")).toBe(true);
+  });
+
+  test("returns a current-shape record untouched", () => {
+    const current = {
+      schemaVersion: 1,
+      revision: 0,
+      bots: [
+        {
+          schemaVersion: 1,
+          botId: "alpha",
+          registeredAt: "2026-08-29T00:00:00.000Z",
+          initialName: "Alpha",
+          sheep,
+        },
+      ],
+    };
+    expect(migrateStoredBotDirectoryV1(current)).toBe(current);
+  });
+
+  test("leaves records it does not recognise for the decoder to reject", () => {
+    expect(migrateStoredBotDirectoryV1(undefined)).toBeUndefined();
+    expect(migrateStoredBotDirectoryV1("nope")).toBe("nope");
+    expect(() =>
+      decodeDirectoryViewV1(
+        migrateStoredBotDirectoryV1({ schemaVersion: 1, revision: 0 }),
+      ),
+    ).toThrow("unknown or missing field");
   });
 });
