@@ -117,10 +117,12 @@ Trusted publishing cannot bootstrap itself. npm will only attach a trusted publi
 ```
 npm login                                     # a 2FA session; npm trust rejects tokens
 bun scripts/bootstrap-npm-trust.ts            # show the plan, change nothing
-bun scripts/bootstrap-npm-trust.ts --confirm  # publish placeholders, then trust each
+NPM_BOOTSTRAP_TOKEN=npm_… bun scripts/bootstrap-npm-trust.ts --confirm
 ```
 
 It publishes a deprecated `0.0.0` placeholder under any name the registry does not have yet, then configures that package's trusted publisher. It is idempotent, so a name that already exists is never republished and a package that is already trusted is skipped. It needs npm 11.15.0 or later, which is what `npm trust` requires; the workflow itself only needs 11.5.1 and checks that before publishing.
+
+Two-factor authentication is why the token is there. npm asks for confirmation on every write, and there are sixty names to claim. `NPM_BOOTSTRAP_TOKEN` should be a granular access token with **bypass two-factor authentication** enabled and write access to the `@frockbot` scope; the script keeps it in a throwaway config file so `~/.npmrc` is untouched, and it should be revoked as soon as the run finishes. Without it the placeholders still publish, but npm stops for a confirmation each time. Configuring the publishers never uses the token, because `npm trust` rejects tokens by design and needs the `npm login` session.
 
 Once it has run, nothing about a release is manual again. A failure in the publish step reporting a 404 from the token exchange means the trusted publisher for that package is missing or misconfigured, not that the package is absent — re-run the bootstrap to reconcile it.
 

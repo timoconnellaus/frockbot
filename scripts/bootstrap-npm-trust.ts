@@ -16,9 +16,20 @@
 //
 //   bun scripts/bootstrap-npm-trust.ts            # show the plan, change nothing
 //   bun scripts/bootstrap-npm-trust.ts --confirm  # do it
+//
+// Two-factor authentication makes the publish half awkward, because npm asks
+// for confirmation on every write. Set NPM_BOOTSTRAP_TOKEN to a granular
+// access token with "bypass two-factor authentication" enabled and the
+// placeholders publish unattended; the token is used here and nowhere else,
+// never reaches CI, and should be revoked afterwards. Without it each publish
+// waits on an interactive confirmation, sixty times over.
+//
+// Configuring the trusted publishers always uses the interactive session:
+// `npm trust` rejects tokens by design, so that half needs `npm login`.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
@@ -28,6 +39,7 @@ export const WORKFLOW_FILE = "release.yml";
 // to. It is deprecated on the way out so nobody installs it by accident, and
 // the first real release supersedes it as `latest`.
 export const PLACEHOLDER_VERSION = "0.0.0";
+export const TOKEN_VARIABLE = "NPM_BOOTSTRAP_TOKEN";
 
 export type WorkspacePackage = {
   readonly name: string;
@@ -74,13 +86,33 @@ export function trustArguments(packageName: string): string[] {
   ];
 }
 
+/**
+ * Publishing writes, so it needs whichever credential the run was given. With
+ * a token that means a throwaway config file; without one it means handing npm
+ * the terminal so its interactive confirmation can complete.
+ */
+export function publishArguments(userconfig?: string): string[] {
+  const args = ["publish", "--access", "public"];
+  if (userconfig) args.push("--userconfig", userconfig);
+  return args;
+}
+
 export type CommandRunner = (
   command: string,
   args: string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; interactive?: boolean },
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
 const runCommand: CommandRunner = async (command, args, options) => {
+  if (options?.interactive) {
+    const child = Bun.spawn([command, ...args], {
+      cwd: options.cwd,
+      stdout: "inherit",
+      stderr: "inherit",
+      stdin: "inherit",
+    });
+    return { exitCode: await child.exited, stdout: "", stderr: "" };
+  }
   const child = Bun.spawn([command, ...args], {
     cwd: options?.cwd,
     stdout: "pipe",
@@ -108,8 +140,8 @@ async function hasTrustedPublisher(name: string, run: CommandRunner) {
 /** Publishes the placeholder that gives `npm trust` something to attach to. */
 async function publishPlaceholder(
   entry: WorkspacePackage,
-  root: string,
   run: CommandRunner,
+  userconfig?: string,
 ) {
   const directory = await mkdtemp(join(tmpdir(), "frockbot-bootstrap-"));
   try {
@@ -134,28 +166,43 @@ async function publishPlaceholder(
       join(directory, "README.md"),
       `# ${entry.name}\n\nPlaceholder reserving this name. See https://github.com/${REPOSITORY}.\n`,
     );
-    const published = await run("npm", ["publish", "--access", "public"], {
+    const published = await run("npm", publishArguments(userconfig), {
       cwd: directory,
+      interactive: !userconfig,
     });
     if (published.exitCode !== 0) {
-      throw new Error(
-        `could not publish ${entry.name}: ${published.stderr.trim()}`,
-      );
+      const reason = published.stderr.trim() || "see the output above";
+      throw new Error(`could not publish ${entry.name}: ${reason}`);
     }
     // Best effort: a placeholder that stays undeprecated is only untidy.
-    await run("npm", [
+    const deprecate = [
       "deprecate",
       `${entry.name}@${PLACEHOLDER_VERSION}`,
       "Placeholder release; install a published version instead.",
-    ]);
+    ];
+    if (userconfig) deprecate.push("--userconfig", userconfig);
+    await run("npm", deprecate, { interactive: !userconfig });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 }
 
+/** A config file holding only the bootstrap token, so ~/.npmrc is untouched. */
+async function writeTokenConfig(token: string) {
+  const directory = await mkdtemp(join(tmpdir(), "frockbot-npmrc-"));
+  const file = join(directory, ".npmrc");
+  await writeFile(
+    file,
+    `registry=https://registry.npmjs.org/\n//registry.npmjs.org/:_authToken=${token}\n`,
+    { mode: 0o600 },
+  );
+  return { file, directory };
+}
+
 export async function bootstrap(options: {
   root: string;
   confirm: boolean;
+  token?: string;
   run?: CommandRunner;
   log?: (line: string) => void;
 }) {
@@ -168,40 +215,56 @@ export async function bootstrap(options: {
     log("");
     log("Dry run. Re-run with --confirm to publish placeholders and");
     log("configure trusted publishers. Planned work:");
+  } else if (!options.token) {
+    log("");
+    log(`No ${TOKEN_VARIABLE} set: npm will ask you to confirm every publish.`);
+    log("Ctrl-C and set a bypass-2FA token instead if that is not what you");
+    log("want. Configuring the publishers always uses your login either way.");
+    log("");
   }
+
+  const config = options.token ? await writeTokenConfig(options.token) : null;
 
   let publishedCount = 0;
   let trustedCount = 0;
 
-  for (const entry of packages) {
-    const exists = await packageExists(entry.name, run);
-    const trusted = exists && (await hasTrustedPublisher(entry.name, run));
+  try {
+    for (const entry of packages) {
+      const exists = await packageExists(entry.name, run);
+      const trusted = exists && (await hasTrustedPublisher(entry.name, run));
 
-    if (exists && trusted) {
-      log(`  ${entry.name}: already published and trusted`);
-      continue;
-    }
+      if (exists && trusted) {
+        log(`  ${entry.name}: already published and trusted`);
+        continue;
+      }
 
-    if (!options.confirm) {
-      if (!exists) log(`  ${entry.name}: publish placeholder, then trust`);
-      else log(`  ${entry.name}: trust`);
-      continue;
-    }
+      if (!options.confirm) {
+        if (!exists) log(`  ${entry.name}: publish placeholder, then trust`);
+        else log(`  ${entry.name}: trust`);
+        continue;
+      }
 
-    if (!exists) {
-      log(`  ${entry.name}: publishing placeholder`);
-      await publishPlaceholder(entry, options.root, run);
-      publishedCount += 1;
-    }
+      if (!exists) {
+        log(`  ${entry.name}: publishing placeholder`);
+        await publishPlaceholder(entry, run, config?.file);
+        publishedCount += 1;
+      }
 
-    log(`  ${entry.name}: configuring trusted publisher`);
-    const result = await run("npm", trustArguments(entry.name));
-    if (result.exitCode !== 0) {
-      throw new Error(
-        `could not configure trusted publishing for ${entry.name}: ${result.stderr.trim()}`,
-      );
+      log(`  ${entry.name}: configuring trusted publisher`);
+      // Never the token: `npm trust` requires the interactive 2FA session.
+      const result = await run("npm", trustArguments(entry.name));
+      if (result.exitCode !== 0) {
+        const reason = result.stderr.trim() || "see the output above";
+        throw new Error(
+          `could not configure trusted publishing for ${entry.name}: ${reason}`,
+        );
+      }
+      trustedCount += 1;
     }
-    trustedCount += 1;
+  } finally {
+    if (config) {
+      await rm(config.directory, { recursive: true, force: true });
+    }
   }
 
   if (options.confirm) {
@@ -210,6 +273,9 @@ export async function bootstrap(options: {
       `Published ${publishedCount} placeholders, configured ${trustedCount} trusted publishers.`,
     );
     log("release.yml can now publish through OIDC with no NPM_TOKEN.");
+    if (options.token) {
+      log(`Revoke the ${TOKEN_VARIABLE} token now; nothing needs it again.`);
+    }
   }
 
   return { packages: packages.length, publishedCount, trustedCount };
@@ -217,6 +283,6 @@ export async function bootstrap(options: {
 
 if (import.meta.main) {
   const confirm = process.argv.includes("--confirm");
-  const root = new URL("..", import.meta.url).pathname;
-  await bootstrap({ root, confirm });
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  await bootstrap({ root, confirm, token: process.env[TOKEN_VARIABLE] });
 }

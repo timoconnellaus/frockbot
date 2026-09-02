@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   bootstrap,
+  publishArguments,
   readWorkspacePackages,
   trustArguments,
   WORKFLOW_FILE,
@@ -10,14 +11,21 @@ import {
 
 const root = new URL("..", import.meta.url).pathname;
 
+type Invocation = { args: string[]; interactive: boolean };
+
 /** A stub npm whose answers are scripted per subcommand. */
 function stubNpm(options: {
   existing?: Set<string>;
   trusted?: Set<string>;
   calls: string[][];
+  invocations?: Invocation[];
 }): CommandRunner {
-  return async (command, args) => {
+  return async (command, args, runOptions) => {
     options.calls.push([command, ...args]);
+    options.invocations?.push({
+      args,
+      interactive: runOptions?.interactive === true,
+    });
     const ok = { exitCode: 0, stdout: "", stderr: "" };
     if (args[0] === "view") {
       const name = args[1] ?? "";
@@ -112,6 +120,64 @@ describe("npm trusted publishing bootstrap", () => {
     expect(result.publishedCount).toBe(0);
     expect(result.trustedCount).toBe(packages.length);
     expect(calls.some((call) => call.includes("publish"))).toBe(false);
+  });
+
+  test("a token publishes unattended and never reaches npm trust", async () => {
+    const calls: string[][] = [];
+    const invocations: Invocation[] = [];
+    await bootstrap({
+      root,
+      confirm: true,
+      token: "bootstrap-token",
+      run: stubNpm({ calls, invocations }),
+      log: () => {},
+    });
+
+    const publishes = invocations.filter((call) => call.args[0] === "publish");
+    expect(publishes.length).toBeGreaterThan(0);
+    for (const publish of publishes) {
+      // The token lives in a throwaway config, so ~/.npmrc is left alone,
+      // and npm needs no terminal because it never asks for a second factor.
+      expect(publish.args).toContain("--userconfig");
+      expect(publish.interactive).toBe(false);
+    }
+
+    // `npm trust` rejects tokens, so it must run on the interactive session.
+    const trusts = invocations.filter(
+      (call) => call.args[0] === "trust" && call.args[1] === "github",
+    );
+    expect(trusts.length).toBeGreaterThan(0);
+    for (const trust of trusts)
+      expect(trust.args).not.toContain("--userconfig");
+  });
+
+  test("without a token npm is handed the terminal to ask for a second factor", async () => {
+    const calls: string[][] = [];
+    const invocations: Invocation[] = [];
+    await bootstrap({
+      root,
+      confirm: true,
+      run: stubNpm({ calls, invocations }),
+      log: () => {},
+    });
+
+    const publishes = invocations.filter((call) => call.args[0] === "publish");
+    expect(publishes.length).toBeGreaterThan(0);
+    for (const publish of publishes) {
+      expect(publish.interactive).toBe(true);
+      expect(publish.args).not.toContain("--userconfig");
+    }
+  });
+
+  test("publish arguments carry the config only when there is one", () => {
+    expect(publishArguments()).toEqual(["publish", "--access", "public"]);
+    expect(publishArguments("/tmp/x/.npmrc")).toEqual([
+      "publish",
+      "--access",
+      "public",
+      "--userconfig",
+      "/tmp/x/.npmrc",
+    ]);
   });
 
   test("an absent package is published once, then trusted", async () => {
