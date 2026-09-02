@@ -44,23 +44,6 @@ const MAX_CATALOG_REFRESHES_PER_ALARM = 1;
 const ACCOUNT_KEY = "ollama-connection-account";
 const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
 
-const AUTOMATIC_DEFAULT_MODEL_PREFERENCES = [
-  "gpt-oss:20b",
-  "glm-5.3-flash:cloud",
-] as const;
-
-/** Choose the safest useful default from the catalog a new Connection proved. */
-export function selectAutomaticOllamaModelV1(
-  catalog: ConnectionModelCatalogV1,
-): ConnectionModelV1 | undefined {
-  for (const providerModelId of AUTOMATIC_DEFAULT_MODEL_PREFERENCES) {
-    const preferred = catalog.models.find(
-      (model) => model.providerModelId === providerModelId,
-    );
-    if (preferred) return preferred;
-  }
-  return catalog.models[0];
-}
 const MUTATION_SEQUENCE_PREFIX = "ollama-mutation-sequence:";
 const MODEL_RESOLUTION_PREFIX = "ollama-model-resolution:";
 const REFRESH_INTERVAL_MS = 60 * 60 * 1_000;
@@ -1402,35 +1385,6 @@ export class OllamaCloudUserBackendContribution {
             },
             storage,
           );
-          if (
-            record.operation === "connection/create-api-key" &&
-            outcome.validationCatalog
-          ) {
-            const user = await this.host.settings.read(
-              record.accountId,
-              storage,
-            );
-            const selected = selectAutomaticOllamaModelV1(
-              outcome.validationCatalog,
-            );
-            if (selected && user.newBotModelTemplateSource !== "user") {
-              await this.host.settings.executeConfigurationCommand(
-                record.accountId,
-                {
-                  schemaVersion: 1,
-                  type: "user/set-new-bot-model",
-                  commandId: record.commandId,
-                  expectedRevision: user.revision,
-                  model: {
-                    connectionId: record.connectionId,
-                    providerModelId: selected.providerModelId,
-                  },
-                  source: "auto",
-                },
-                storage,
-              );
-            }
-          }
         },
       );
     } catch (error) {
@@ -1858,12 +1812,6 @@ export class OllamaCloudUserBackendContribution {
         if (current.state === "reconciliation-required") {
           return "reconciliation-required";
         }
-        if (
-          Array.isArray(current.safeMetadata.dependentAssignments) &&
-          current.safeMetadata.dependentAssignments.length > 0
-        ) {
-          return "dependent";
-        }
         await this.cancelPendingCredentialMutations(record, storage);
         if (current.state !== "revoking") {
           await this.host.settings.replaceConnection(
@@ -1877,7 +1825,7 @@ export class OllamaCloudUserBackendContribution {
         return "revoking";
       },
     );
-    if (transition === "stale" || transition === "dependent") {
+    if (transition === "stale") {
       return this.finishRecord(record, "failed");
     }
     if (transition === "revoked") return this.finishRecord(record, "applied");

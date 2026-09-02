@@ -514,8 +514,8 @@ describe("decodeFrockBotManifest", () => {
   test("decodes an ambient-native Connection without an authorization driver", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 4,
-      id: "workers-ai",
-      displayName: "Workers AI",
+      id: "flock-ai",
+      displayName: "Flock AI",
       version: "1.0.0",
       compatibility: { frockbot: ">=0.0.1" },
       contributions: { runtime: { entry: "./runtime" } },
@@ -523,18 +523,18 @@ describe("decodeFrockBotManifest", () => {
       configuration: {
         connectionTypes: [
           {
-            id: "workers-ai-account",
-            displayName: "Workers AI",
+            id: "flock-ai-account",
+            displayName: "Flock AI",
             allowMultiple: false,
             authorization: { kind: "ambient-native" },
-            capabilities: ["workers-ai-models"],
+            capabilities: ["flock-ai-models"],
           },
         ],
         capabilities: [
           {
-            id: "workers-ai-models",
+            id: "flock-ai-models",
             kind: "model",
-            connectionTypes: ["workers-ai-account"],
+            connectionTypes: ["flock-ai-account"],
           },
         ],
       },

@@ -25,8 +25,8 @@ interface FreshUserRpc {
 describe("ambient Flock AI default", () => {
   test("a fresh User can run a Turn without configuring credentials", async () => {
     const suffix = crypto.randomUUID();
-    const userId = `workers-ai-user-${suffix}`;
-    const botId = `workers-ai-bot-${suffix}`;
+    const userId = `flock-ai-user-${suffix}`;
+    const botId = `flock-ai-bot-${suffix}`;
     const user = env.USER_CONFIGURATIONS.getByName(
       userId,
     ) as unknown as FreshUserRpc;
@@ -82,6 +82,6 @@ describe("ambient Flock AI default", () => {
         text: "Say hello.",
       },
     });
-    expect(result.text).toBe("Workers AI reply");
+    expect(result.text).toBe("Flock AI reply");
   });
 });

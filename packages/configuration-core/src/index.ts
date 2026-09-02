@@ -10,6 +10,7 @@ import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import { ConfigurationDecodeError } from "./errors.js";
 import {
   decodeInstalledPackageSettingsPatchV1,
+  decodeInstalledPackageSettingIdsV1,
   decodeModelBindingV1,
   MAX_PACKAGE_SETTINGS_V1,
   MAX_PACKAGE_SETTING_TEXT_V1,
@@ -29,8 +30,10 @@ import {
 export { isBotIdV1 } from "./bot-id.js";
 export {
   decodeInstalledPackageSettingsPatchV1,
+  decodeInstalledPackageSettingIdsV1,
   decodeModelBindingV1,
   decodePackageSettingsPatchV1,
+  decodePackageSettingIdsV1,
   decodePackageSettingValueV1,
   decodePackageSettingValuesV1,
   emptyPackageSettingValuesV1,
@@ -308,7 +311,9 @@ export type ConfigurationCommandV1 =
        */
       type: "user/set-package-settings";
       packageId: string;
-      values: Record<string, PackageSettingValueV1>;
+      values?: Record<string, PackageSettingValueV1>;
+      /** Setting ids whose stored values are removed by this command. */
+      unset?: string[];
     })
   | (CommandMetaV1 & {
       type: "bot/update-profile";
@@ -345,7 +350,9 @@ export type ConfigurationCommandV1 =
       type: "bot/set-package-settings";
       botId: string;
       packageId: string;
-      values: Record<string, PackageSettingValueV1>;
+      values?: Record<string, PackageSettingValueV1>;
+      /** Setting ids whose stored values are removed by this command. */
+      unset?: string[];
     });
 
 export type UserConfigurationCommandV1 = Exclude<
@@ -1236,12 +1243,22 @@ export function decodeConfigurationCommandV1(
       };
     }
     case "user/set-package-settings": {
-      const command = exactCommand(input, ["packageId", "values"]);
+      const command = exactCommand(input, ["packageId"], ["values", "unset"]);
+      const values =
+        command.values === undefined
+          ? undefined
+          : packageSettingsPatch(command.values);
+      const unset =
+        command.unset === undefined
+          ? undefined
+          : packageSettingIds(command.unset);
+      requirePackageSettingsChange(values, unset);
       return {
         ...commandMeta(command),
         type: value.type,
         packageId: identifier(command.packageId, "packageId"),
-        values: packageSettingsPatch(command.values),
+        ...(values ? { values } : {}),
+        ...(unset ? { unset } : {}),
       };
     }
     case "bot/update-profile": {
@@ -1291,13 +1308,27 @@ export function decodeConfigurationCommandV1(
       };
     }
     case "bot/set-package-settings": {
-      const command = exactCommand(input, ["botId", "packageId", "values"]);
+      const command = exactCommand(
+        input,
+        ["botId", "packageId"],
+        ["values", "unset"],
+      );
+      const values =
+        command.values === undefined
+          ? undefined
+          : packageSettingsPatch(command.values);
+      const unset =
+        command.unset === undefined
+          ? undefined
+          : packageSettingIds(command.unset);
+      requirePackageSettingsChange(values, unset);
       return {
         ...commandMeta(command),
         type: value.type,
         botId: identifier(command.botId, "botId"),
         packageId: identifier(command.packageId, "packageId"),
-        values: packageSettingsPatch(command.values),
+        ...(values ? { values } : {}),
+        ...(unset ? { unset } : {}),
       };
     }
     default:
@@ -1529,6 +1560,34 @@ function packageSettingsPatch(
       return [identifier(key, "values key"), item];
     }),
   );
+}
+
+function packageSettingIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ConfigurationDecodeError("unset names no setting");
+  }
+  if (value.length > MAX_PACKAGE_SETTINGS_V1) {
+    throw new ConfigurationDecodeError("unset is too large");
+  }
+  const decoded = value.map((item) => identifier(item, "unset setting id"));
+  if (new Set(decoded).size !== decoded.length) {
+    throw new ConfigurationDecodeError("unset repeats a setting");
+  }
+  return decoded;
+}
+
+function requirePackageSettingsChange(
+  values: Record<string, PackageSettingValueV1> | undefined,
+  unset: readonly string[] | undefined,
+): void {
+  if (!values && !unset) {
+    throw new ConfigurationDecodeError("Package settings command is empty");
+  }
+  if (values && unset?.some((settingId) => Object.hasOwn(values, settingId))) {
+    throw new ConfigurationDecodeError(
+      "Package settings command both sets and unsets a setting",
+    );
+  }
 }
 
 function viewRevision(value: unknown): number {

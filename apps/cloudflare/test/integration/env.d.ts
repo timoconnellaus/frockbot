@@ -16,12 +16,12 @@ interface IntegrationTestEnv {
   PACKAGE_CATALOG: R2Bucket;
   TEST_MIGRATIONS: D1Migration[];
   /**
-   * The Workers AI fake's RPC entrypoint under a second name. `AI` itself is
+   * The Flock AI fake's RPC entrypoint under a second name. `AI` itself is
    * bound to the same entrypoint, but its production type is Cloudflare's
    * `Ai`, which has no call log; this alias is how a test reads one without
    * widening the deployed `Env`.
    */
-  WORKERS_AI: Service;
+  AI_PROBE: Service;
 }
 
 declare global {

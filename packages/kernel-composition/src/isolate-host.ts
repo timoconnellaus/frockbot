@@ -5,7 +5,7 @@
 // It sits beside `LocalCordisContributionHost` because it is the *other*
 // execution host the constitution names — first-party Packages run in the
 // kernel isolate, everything else runs in a loaded Worker with
-// `globalOutbound` disabled and only Assignment-derived bindings.
+// `globalOutbound` disabled and only enabled-capability bindings.
 //
 // Two behaviours come straight from `docs/research/spike-worker-loader-from-do.md`:
 // `.get()` never throws, so mount and `health()` are a single guarded phase;
@@ -95,10 +95,10 @@ export interface BotIsolateHostOptions {
    */
   capabilities: BotCapabilitiesStub;
   /**
-   * A content address of the Assignment-derived bindings this isolate is
+   * A content address of the User's enabled bindings this isolate is
    * loaded with. Required, and part of the loader id, because a loader id is
    * served from cache: the `env` a Bot isolate was first loaded with is the
-   * `env` it keeps, so a change in the Bot's Assignments must produce a new
+   * `env` it keeps, so a change in the User's enabled set must produce a new
    * isolate or the isolate would keep answering from a revoked authority.
    */
   bindingDigest: string;
@@ -120,7 +120,7 @@ export const BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS = 10_000;
 
 /**
  * The content address of what a Bot isolate mounts: the kernel wrapper text,
- * the Package artifact, and the digest of the Assignment-derived bindings it
+ * the Package artifact, and the digest of the enabled-capability bindings it
  * is loaded with. A change to any of the three is a new isolate.
  */
 export async function botIsolateModuleSetHashV1(
@@ -241,7 +241,6 @@ export class BotIsolateContributionHost implements ContributionHost {
     const source = await this.loadSource(packageId, artifact.contentHash);
     const loaderId = isolateLoaderIdV1({
       userId: this.options.userId,
-      botId: this.options.botId,
       artifactSetHash: await botIsolateModuleSetHashV1(
         artifact.contentHash,
         this.options.bindingDigest,

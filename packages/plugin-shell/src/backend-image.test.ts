@@ -5,8 +5,8 @@ import {
 } from "@frockbot/plugin-image/testing";
 import {
   createBotImageHost,
-  createWorkersAiImageModelV1,
-  decodeWorkersAiImageV1,
+  createNativeAiImageModelV1,
+  decodeNativeAiImageV1,
 } from "./backend-image.ts";
 
 const IDENTITY = { userId: "user-1", botId: "bot-1" };
@@ -56,7 +56,7 @@ describe("normalizing what Workers AI answered", () => {
   const png = fakePngBytesV1(64, 32);
 
   test("accepts the base64 envelope the FLUX models answer", async () => {
-    const buffer = await decodeWorkersAiImageV1({ image: base64(png) });
+    const buffer = await decodeNativeAiImageV1({ image: base64(png) });
     expect([...new Uint8Array(buffer)]).toEqual([...png]);
   });
 
@@ -68,23 +68,23 @@ describe("normalizing what Workers AI answered", () => {
         controller.close();
       },
     });
-    expect([...new Uint8Array(await decodeWorkersAiImageV1(stream))]).toEqual([
+    expect([...new Uint8Array(await decodeNativeAiImageV1(stream))]).toEqual([
       ...png,
     ]);
   });
 
   test("accepts a raw buffer or view", async () => {
     expect([
-      ...new Uint8Array(await decodeWorkersAiImageV1(png.slice().buffer)),
+      ...new Uint8Array(await decodeNativeAiImageV1(png.slice().buffer)),
     ]).toEqual([...png]);
-    expect([...new Uint8Array(await decodeWorkersAiImageV1(png))]).toEqual([
+    expect([...new Uint8Array(await decodeNativeAiImageV1(png))]).toEqual([
       ...png,
     ]);
   });
 
   test("refuses anything else rather than storing it", async () => {
     for (const answer of [undefined, null, 7, "hello", { image: 3 }, {}]) {
-      await expect(decodeWorkersAiImageV1(answer)).rejects.toThrow(
+      await expect(decodeNativeAiImageV1(answer)).rejects.toThrow(
         "not an image",
       );
     }
@@ -92,7 +92,7 @@ describe("normalizing what Workers AI answered", () => {
 
   test("passes the requested size through to the binding", async () => {
     const calls: Array<[string, Record<string, unknown>]> = [];
-    const model = createWorkersAiImageModelV1({
+    const model = createNativeAiImageModelV1({
       run: (name, input) => {
         calls.push([name, input]);
         return Promise.resolve({ image: base64(png) });

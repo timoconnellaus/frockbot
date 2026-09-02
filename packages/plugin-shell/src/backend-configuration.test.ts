@@ -80,7 +80,7 @@ async function compileModelTestApplication(): ReturnType<
 > {
   const application = await compileFoundationApplication();
   const provider = application.packages.find(
-    (pkg) => pkg.id === "provider-foundation",
+    (pkg) => pkg.id === "provider-flock-ai",
   );
   const template = application.packages.find((pkg) => pkg.id === "settings");
   if (!provider || !template) throw new Error("Fixture Packages unavailable");
@@ -88,31 +88,7 @@ async function compileModelTestApplication(): ReturnType<
     ...application,
     packages: [
       ...application.packages.filter((pkg) => pkg.id !== provider.id),
-      {
-        ...provider,
-        manifest: {
-          ...provider.manifest,
-          configuration: {
-            settings: [],
-            connectionTypes: [
-              {
-                id: "foundation-account",
-                displayName: "Foundation",
-                allowMultiple: false,
-                authorization: { kind: "none" },
-                capabilities: ["foundation-models"],
-              },
-            ],
-            capabilities: [
-              {
-                id: "foundation-models",
-                kind: "model",
-                connectionTypes: ["foundation-account"],
-              },
-            ],
-          },
-        },
-      },
+      provider,
       {
         ...template,
         id: "custom-models",
@@ -148,7 +124,7 @@ function configuredUser(): UserSettingsViewV1 {
     profile: { name: "User" },
     packages: [
       {
-        packageId: "provider-foundation",
+        packageId: "provider-flock-ai",
         version: "0.0.1",
         state: "installed",
       },
@@ -160,12 +136,12 @@ function configuredUser(): UserSettingsViewV1 {
     ],
     connections: [
       {
-        connectionId: "foundation-1",
-        packageId: "provider-foundation",
-        connectionTypeId: "foundation-account",
-        displayName: "Foundation",
+        connectionId: "flock-ai-ambient",
+        packageId: "provider-flock-ai",
+        connectionTypeId: "flock-ai-account",
+        displayName: "Flock AI",
         state: "ready",
-        providerType: "foundation",
+        providerType: "flock-ai",
         generation: "foundation-generation-1",
         modelCatalog: {
           schemaVersion: 1,
@@ -173,7 +149,7 @@ function configuredUser(): UserSettingsViewV1 {
           state: "fresh",
           models: [
             {
-              providerModelId: "deterministic-v1",
+              providerModelId: "@flock/auto",
               displayName: "Platform",
               capabilities: {
                 tools: true,
@@ -187,7 +163,7 @@ function configuredUser(): UserSettingsViewV1 {
         safeMetadata: {},
       },
     ],
-    platformModel: model("foundation-1", "deterministic-v1"),
+    platformModel: model("flock-ai-ambient", "@flock/auto"),
   };
 }
 
@@ -195,6 +171,8 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
   return createShellBotBackendContribution({
     state: { storage } as unknown as DurableObjectState,
     env: {
+      CREDENTIAL_KEYRING:
+        '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
       USER_CONFIGURATIONS: {
         idFromName: () => "user-1",
         get: () => ({
@@ -205,6 +183,24 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
       },
       MEMORY_FILES: {},
       MEMORY_INDEX: {},
+      FLOCK_AI: {
+        autoRoute: "flock-auto",
+        runChatCompletion: () =>
+          Promise.resolve(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  new TextEncoder().encode(
+                    'data: {"choices":[{"delta":{"content":"Cordis runtime: hello"}}]}\n\n' +
+                      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+                      "data: [DONE]\n\n",
+                  ),
+                );
+                controller.close();
+              },
+            }),
+          ),
+      },
     } as never,
     compileApplication: compileModelTestApplication,
   });
@@ -442,7 +438,7 @@ describe("generic per-Turn model resolution", () => {
     user.packages[1] = {
       ...user.packages[1]!,
       state: "installed",
-      values: { model: model("foundation-1", "account-model") },
+      values: { model: model("flock-ai-ambient", "account-model") },
     };
     const contribution = host(storage, () => user);
     const identity = { userId: "user-1", botId: "primary" };
@@ -455,12 +451,12 @@ describe("generic per-Turn model resolution", () => {
         botId: "primary",
         expectedRevision: 0,
         packageId: "custom-models",
-        values: { model: model("foundation-1", "bot-model") },
+        values: { model: model("flock-ai-ambient", "bot-model") },
       }),
     );
 
     expect(await contribution.resolveConfiguration(identity)).toMatchObject({
-      model: model("foundation-1", "bot-model"),
+      model: model("flock-ai-ambient", "bot-model"),
     });
 
     user = {
@@ -472,12 +468,12 @@ describe("generic per-Turn model resolution", () => {
       ),
     };
     expect(await contribution.resolveConfiguration(identity)).toMatchObject({
-      model: model("foundation-1", "deterministic-v1"),
+      model: model("flock-ai-ambient", "@flock/auto"),
     });
     expect(await contribution.getSettings(identity)).toMatchObject({
       packageValues: {
         "custom-models": {
-          model: model("foundation-1", "bot-model"),
+          model: model("flock-ai-ambient", "bot-model"),
         },
       },
     });
@@ -491,7 +487,7 @@ describe("generic per-Turn model resolution", () => {
       ),
     };
     expect(await contribution.resolveConfiguration(identity)).toMatchObject({
-      model: model("foundation-1", "bot-model"),
+      model: model("flock-ai-ambient", "bot-model"),
     });
   });
 
@@ -515,7 +511,7 @@ describe("generic per-Turn model resolution", () => {
     user = {
       ...user,
       packages: user.packages.map((pkg) =>
-        pkg.packageId === "provider-foundation"
+        pkg.packageId === "provider-flock-ai"
           ? { ...pkg, state: "disabled" as const }
           : pkg,
       ),
@@ -577,10 +573,10 @@ describe("Bot Package setting commands", () => {
           botId: "primary",
           expectedRevision: 0,
           packageId: "custom-models",
-          values: { model: { connectionId: "foundation-1" } as never },
+          values: { model: { connectionId: "flock-ai-ambient" } as never },
         }),
       ),
-    ).rejects.toThrow("providerModelId");
+    ).rejects.toThrow("model has invalid fields");
     expect((await contribution.getSettings(identity)).revision).toBe(0);
 
     const first: BotConfigurationCommandV1 = {
@@ -591,7 +587,7 @@ describe("Bot Package setting commands", () => {
       expectedRevision: 0,
       packageId: "custom-models",
       values: {
-        model: model("foundation-1", "bot-model"),
+        model: model("flock-ai-ambient", "bot-model"),
         tone: "concise",
       },
     };
@@ -603,7 +599,7 @@ describe("Bot Package setting commands", () => {
       revision: 1,
       packageValues: {
         "custom-models": {
-          model: model("foundation-1", "bot-model"),
+          model: model("flock-ai-ambient", "bot-model"),
           tone: "concise",
         },
       },
@@ -614,28 +610,54 @@ describe("Bot Package setting commands", () => {
         ...first,
         commandId: "update-model-only",
         expectedRevision: 1,
-        values: { model: model("foundation-1", "new-bot-model") },
+        values: { model: model("flock-ai-ambient", "new-bot-model") },
       }),
     );
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 2,
       packageValues: {
         "custom-models": {
-          model: model("foundation-1", "new-bot-model"),
+          model: model("flock-ai-ambient", "new-bot-model"),
           tone: "concise",
         },
       },
+    });
+
+    await contribution.executeConfiguration(
+      request({
+        ...first,
+        commandId: "unset-bot-model",
+        expectedRevision: 2,
+        values: undefined,
+        unset: ["model"],
+      }),
+    );
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      revision: 3,
+      packageValues: { "custom-models": { tone: "concise" } },
     });
 
     await expect(
       contribution.executeConfiguration(
         request({
           ...first,
-          commandId: "stale-revision",
-          expectedRevision: 1,
+          commandId: "unset-unknown",
+          expectedRevision: 3,
+          values: undefined,
+          unset: ["unknown-setting"],
         }),
       ),
-    ).rejects.toThrow("configuration revision is 2");
+    ).rejects.toThrow(/not declared by this Package/);
+
+    await expect(
+      contribution.executeConfiguration(
+        request({
+          ...first,
+          commandId: "stale-revision",
+          expectedRevision: 2,
+        }),
+      ),
+    ).rejects.toThrow("configuration revision is 3");
     await expect(
       contribution.executeConfiguration(
         request({

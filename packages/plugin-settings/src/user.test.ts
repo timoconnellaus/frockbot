@@ -983,6 +983,53 @@ describe("Package-level setting values", () => {
     });
   });
 
+  test("removes only declared setting ids and drops an emptied value bag", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-before-unset",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        values: { "web-search-max-results": 4 },
+      },
+    });
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "unset-value",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+        unset: ["web-search-max-results"],
+      },
+    });
+    expect((await settings.read("user-1")).packages[0]?.values).toBeUndefined();
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-settings",
+          commandId: "unset-unknown",
+          expectedRevision: 3,
+          packageId: "provider-ollama-cloud",
+          unset: ["unknown-setting"],
+        },
+      }),
+    ).rejects.toThrow(/not declared by this Package/);
+    expect((await settings.read("user-1")).revision).toBe(3);
+  });
+
   test("a replayed command id returns its receipt without applying twice", async () => {
     const settings = contribution();
     await installOllama(settings, "user-1");

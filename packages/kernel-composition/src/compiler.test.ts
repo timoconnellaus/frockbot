@@ -12,6 +12,7 @@ function runtimeManifest(
     version?: string;
     permissions?: string[];
     dependencies?: Record<string, string>;
+    defaultEnablement?: "enabled" | "disabled";
     compatibility?: string;
   } = {},
 ) {
@@ -22,6 +23,7 @@ function runtimeManifest(
     version: options.version ?? "1.0.0",
     compatibility: { frockbot: options.compatibility ?? ">=0.0.1" },
     dependencies: options.dependencies,
+    defaultEnablement: options.defaultEnablement,
     contributions: { runtime: { entry: "./runtime" } },
     permissions: options.permissions ?? [],
   };
@@ -189,6 +191,21 @@ describe("compileApplicationPlan", () => {
     expect(cycle instanceof Error ? cycle.message : "").toContain(
       "dependency cycle",
     );
+  });
+
+  test("allows a disabled Package to depend on a Catalog Package", async () => {
+    const plan = await compileApplicationPlan(
+      { schemaVersion: 1, packages: [selection("@fixture/feature")] },
+      resolver({
+        "@fixture/feature": runtimeManifest("feature", {
+          dependencies: { optional: "^1.0.0" },
+          defaultEnablement: "disabled",
+        }),
+      }),
+      { frockbotVersion: "1.0.0" },
+    );
+
+    expect(plan.packages[0]?.manifest.defaultEnablement).toBe("disabled");
   });
 
   test("validates client roots and declared outlets", async () => {

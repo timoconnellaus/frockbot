@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compileFoundationApplication,
   compileFoundationApplicationDeclarations,
-  createFoundationAssignedRuntimePackages,
+  createFoundationEnabledRuntimePackages,
   mergeFoundationRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
@@ -56,10 +56,10 @@ describe("foundation application", () => {
       "mobile-clipboard",
       "mobile-notifications",
       "package-publisher",
+      "provider-flock-ai",
       "provider-foundation",
       "web",
       "provider-ollama-cloud",
-      "provider-flock-ai",
       "routines",
       "search",
       "skills",
@@ -77,8 +77,8 @@ describe("foundation application", () => {
         "user-machine",
         "mcp",
         "package-publisher",
-        "provider-ollama-cloud",
         "provider-flock-ai",
+        "provider-ollama-cloud",
         "routines",
         "search",
         "subagents",
@@ -100,10 +100,10 @@ describe("foundation application", () => {
         "mcp",
         "memory",
         "package-publisher",
+        "provider-flock-ai",
         "provider-foundation",
         "web",
         "provider-ollama-cloud",
-        "provider-flock-ai",
         "routines",
         "skills",
         "subagents",
@@ -147,12 +147,12 @@ describe("foundation application", () => {
     expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
   });
 
-  test("mounts an assigned Ollama model through its Package runtime Contribution", async () => {
+  test("mounts an enabled Ollama model through its Package runtime Contribution", async () => {
     const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
       plan,
       {
-        assignment: {
+        model: {
           connectionId: "ollama-work",
           providerModelId: "glm-5.3-flash:cloud",
         },
@@ -185,7 +185,7 @@ describe("foundation application", () => {
       createFoundationModelRuntimePackage(
         plan,
         {
-          assignment: {
+          model: {
             connectionId: "ollama-work",
             providerModelId: "glm-5.3-flash:cloud",
           },
@@ -212,12 +212,12 @@ describe("foundation application", () => {
     ).toThrow('Bot model provider "foundation" is unavailable');
   });
 
-  test("mounts an assigned Flock AI model through the gateway host seam", async () => {
+  test("mounts an enabled Flock AI model through the gateway host seam", async () => {
     const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
       plan,
       {
-        assignment: {
+        model: {
           connectionId: "flock-ai-ambient",
           providerModelId: "@flock/auto",
         },
@@ -339,7 +339,7 @@ describe("foundation application", () => {
     ).toThrow('foundation desktop package "auth" is not declared');
   });
 
-  test("resolves declared backend and assigned runtime Contributions through host seams", async () => {
+  test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
     const plan = await compileFoundationApplication();
     const backend = await createFoundationBackendContributions(plan, {
       backendHost: "gateway",
@@ -576,29 +576,19 @@ describe("foundation application", () => {
       "@frockbot/plugin-computer",
     ]);
 
-    const assignment = {
-      assignmentId: "unavailable-assignment",
+    const capability = {
       packageId: "composio",
       capabilityId: "gmail-tools",
+      kind: "tool" as const,
       connectionId: "connection-1",
-      state: "enabled" as const,
     };
-    const runtime = await createFoundationAssignedRuntimePackages(
+    const runtime = await createFoundationEnabledRuntimePackages(
       plan,
       {
         schemaVersion: 1,
         botId: "primary",
         revision: 1,
-        profile: { name: "Primary" },
-        notifications: { enabled: false },
-        assignments: [assignment],
-        assignmentOperations: [],
-      },
-      {
-        schemaVersion: 1,
-        botId: "primary",
-        revision: 1,
-        assignments: [assignment],
+        capabilities: [capability],
       },
       {
         userId: "user-1",
@@ -609,35 +599,25 @@ describe("foundation application", () => {
     );
     expect(runtime).toEqual([]);
 
-    const webAssignment = {
-      assignmentId: "default-0-0",
+    const webCapability = {
       packageId: "web",
       capabilityId: "web-fetch",
-      state: "enabled" as const,
+      kind: "tool" as const,
     };
-    const freshBotRuntime = await createFoundationAssignedRuntimePackages(
+    const freshBotRuntime = await createFoundationEnabledRuntimePackages(
       plan,
       {
         schemaVersion: 1,
         botId: "fresh",
         revision: 0,
-        profile: { name: "Fresh" },
-        notifications: { enabled: true },
-        assignments: [webAssignment],
-        assignmentOperations: [],
-      },
-      {
-        schemaVersion: 1,
-        botId: "fresh",
-        revision: 0,
-        assignments: [webAssignment],
+        capabilities: [webCapability],
       },
       {
         userId: "user-1",
         readSecret: () => undefined,
         authorizeConnection: () =>
           Promise.reject(
-            new Error("connection-less Web Assignment must not authorize"),
+            new Error("connection-less Web Capability must not authorize"),
           ),
       },
     );

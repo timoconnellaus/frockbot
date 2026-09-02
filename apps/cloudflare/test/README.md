@@ -22,7 +22,7 @@ bucket, so the bytes under test are the bytes that would deploy.
 
 Both projects run their files **sequentially** (`fileParallelism: false`). The
 fakes are shared: the Computer host fake is one Node-side object the whole run
-drives, the Workers AI fake's call log is one array per pool worker, and the
+drives, the Flock AI fake's call log is one array per pool worker, and the
 outbound stub's MCP handshake counter and blocked-address tally are Node module
 state. Several tests read one of those counts, act, and assert it moved by
 exactly one — true only if no other file is acting at the same time. Anything
@@ -102,7 +102,7 @@ one), starts a fake Ollama HTTP server on a loopback port, and starts
 `MEMORY_FILES`, `MEMORY_INDEX` and `AI` remote, and a remote binding makes
 `wrangler dev` open a Cloudflare API session that a pull request has no
 credential for; `e2e` is the same Worker with local bindings and no Vectorize
-or Workers AI, exactly as `vitest.integration.config.ts` omits them. Every run
+or remote AI, exactly as `vitest.integration.config.ts` omits them. Every run
 gets a fresh `--persist-to` directory and the whole process tree — wrangler is
 started in its own process group — is torn down afterwards.
 

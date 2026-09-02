@@ -15,8 +15,7 @@ function botState(userId: string, botId: string) {
   return env.BOT_STATES.getByName(`${userId}:${botId}`);
 }
 
-const MODEL_ASSIGNMENT = {
-  assignmentId: "model-assignment",
+const MODEL_CAPABILITY = {
   packageId: "provider-ollama-cloud",
   capabilityId: "ollama-cloud-models",
   kind: "model" as const,
@@ -321,7 +320,7 @@ describe("a Bot authoring a Package", () => {
     expect(failures[0]?.diagnostics.join(" ")).toContain("zod");
   });
 
-  test("an authored model adapter streams through invokeModel with a matching Assignment", async () => {
+  test("an authored model adapter streams through invokeModel with a matching capability", async () => {
     const id = suffix();
     const userId = `user-${id}`;
     const botId = `bot-${id}`;
@@ -355,7 +354,7 @@ describe("a Bot authoring a Package", () => {
     ).toMatch(/^[0-9a-f]{64}$/);
 
     // `invokeModel` goes back to the Bot's own Durable Object, which decides
-    // on its durable Assignment and the durable model binding that Assignment
+    // on its enabled capability and the durable model binding that capability
     // carries — never on anything the adapter supplied.
     await botState(userId, botId).readConfiguration({
       schemaVersion: 1,
@@ -369,7 +368,7 @@ describe("a Bot authoring a Package", () => {
       userId,
       botId,
       tool: "summarize",
-      assignments: [MODEL_ASSIGNMENT],
+      capabilities: [MODEL_CAPABILITY],
       input: {
         requestId: `request-${id}`,
         provider: PROVISIONED_MODEL.provider,
@@ -388,7 +387,7 @@ describe("a Bot authoring a Package", () => {
     expect(streamed.text).toBe("Ollama reply");
   });
 
-  test("an authored model adapter with no matching Assignment gets a pending decision", async () => {
+  test("an authored model adapter with no matching capability gets a pending decision", async () => {
     const id = suffix();
     const userId = `user-${id}`;
     const botId = `bot-${id}`;

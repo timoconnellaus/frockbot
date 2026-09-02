@@ -9,27 +9,27 @@ export const FLOCK_AI_CONNECTION_GENERATION = "flock-ai-ambient-v1";
 export const FLOCK_AI_DEFAULT_MODEL = "@flock/auto";
 export const FLOCK_AI_DEFAULT_AUTO_ROUTE = "flock-auto";
 
-const WORKERS_AI_TEXT_MODELS = [
+const CLOUDFLARE_TEXT_MODELS = [
   {
-    workersAiModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+    cloudflareModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     displayName: "DeepSeek V4 Flash",
     capabilities: { tools: true, vision: false, reasoning: true },
   },
 ] as const;
 
-export function flockModelIdForWorkersAiIdV1(id: string): string {
+export function flockModelIdForCloudflareIdV1(id: string): string {
   if (!id.startsWith("@cf/") || id.length === "@cf/".length) {
-    throw new Error(`Workers AI model id "${id}" must start with "@cf/"`);
+    throw new Error(`Cloudflare model id "${id}" must start with "@cf/"`);
   }
   return `@flock/${id.slice("@cf/".length)}`;
 }
 
-export function workersAiModelIdForFlockIdV1(id: string): string {
+export function cloudflareModelIdForFlockIdV1(id: string): string {
   if (!id.startsWith("@flock/") || id.length === "@flock/".length) {
     throw new Error(`Flock AI model id "${id}" must start with "@flock/"`);
   }
   if (id === FLOCK_AI_DEFAULT_MODEL) {
-    throw new Error("Flock AI Auto does not name a Workers AI model");
+    throw new Error("Flock AI Auto does not name a Cloudflare model");
   }
   return `@cf/${id.slice("@flock/".length)}`;
 }
@@ -47,7 +47,7 @@ export function gatewayModelForFlockIdV1(
     }
     return `dynamic/${autoRoute}`;
   }
-  return `workers-ai/${workersAiModelIdForFlockIdV1(id)}`;
+  return `workers-ai/${cloudflareModelIdForFlockIdV1(id)}`;
 }
 
 const STATIC_CATALOG: ConnectionModelCatalogV1 = {
@@ -61,8 +61,8 @@ const STATIC_CATALOG: ConnectionModelCatalogV1 = {
       capabilities: { tools: true, vision: false, reasoning: true },
       source: "discovered",
     },
-    ...WORKERS_AI_TEXT_MODELS.map((model) => ({
-      providerModelId: flockModelIdForWorkersAiIdV1(model.workersAiModelId),
+    ...CLOUDFLARE_TEXT_MODELS.map((model) => ({
+      providerModelId: flockModelIdForCloudflareIdV1(model.cloudflareModelId),
       displayName: model.displayName,
       capabilities: model.capabilities,
       source: "discovered" as const,

@@ -236,8 +236,8 @@
         },
         {
           "binding": "AI",
-          "service": "frockbot-workers-ai-e2e",
-          "entrypoint": "WorkersAiFake",
+          "service": "frockbot-flock-ai-e2e",
+          "entrypoint": "FlockAiFake",
         },
       ],
       "r2_buckets": [

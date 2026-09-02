@@ -1,7 +1,7 @@
 // The Bot Durable Object storage keys the Routines Package owns.
 //
 // "The Bot's Durable Object is the authority for everything Bot-scoped: …
-// durable scheduling, Routines, Assignments". The keys live here rather than in
+// durable scheduling, Routines, and Composition". The keys live here rather than in
 // `@frockbot/kernel-do` because the kernel imports no Package and holds no
 // product policy; the Durable Object hands this Package a storage seam and this
 // module decides what it writes under.

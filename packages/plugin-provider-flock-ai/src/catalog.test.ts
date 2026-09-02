@@ -1,23 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import {
   FLOCK_AI_DEFAULT_MODEL,
+  cloudflareModelIdForFlockIdV1,
   flockAiStaticCatalogV1,
-  flockModelIdForWorkersAiIdV1,
+  flockModelIdForCloudflareIdV1,
   gatewayModelForFlockIdV1,
-  workersAiModelIdForFlockIdV1,
 } from "./catalog.js";
 
 describe("Flock AI catalog", () => {
-  test("presents Workers AI ids as Flock AI ids and maps them back", () => {
-    const workersAiId = "@cf/deepseek-ai/deepseek-v4-flash-0731";
+  test("presents Cloudflare ids as Flock AI ids and maps them back", () => {
+    const cloudflareId = "@cf/deepseek-ai/deepseek-v4-flash-0731";
     const flockId = "@flock/deepseek-ai/deepseek-v4-flash-0731";
 
-    expect(flockModelIdForWorkersAiIdV1(workersAiId)).toBe(flockId);
-    expect(workersAiModelIdForFlockIdV1(flockId)).toBe(workersAiId);
-    expect(gatewayModelForFlockIdV1(flockId)).toBe(`workers-ai/${workersAiId}`);
+    expect(flockModelIdForCloudflareIdV1(cloudflareId)).toBe(flockId);
+    expect(cloudflareModelIdForFlockIdV1(flockId)).toBe(cloudflareId);
+    expect(gatewayModelForFlockIdV1(flockId)).toBe(
+      `workers-ai/${cloudflareId}`,
+    );
   });
 
-  test("lists Auto first and never exposes a Workers AI id", () => {
+  test("lists Auto first and never exposes a Cloudflare id", () => {
     const catalog = flockAiStaticCatalogV1();
 
     expect(catalog.models[0]).toMatchObject({
@@ -44,10 +46,10 @@ describe("Flock AI catalog", () => {
     expect(() => gatewayModelForFlockIdV1("@cf/not/flock")).toThrow(
       'must start with "@flock/"',
     );
-    expect(() => workersAiModelIdForFlockIdV1("not-flock")).toThrow(
+    expect(() => cloudflareModelIdForFlockIdV1("not-flock")).toThrow(
       'must start with "@flock/"',
     );
-    expect(() => flockModelIdForWorkersAiIdV1("@flock/not-cf")).toThrow(
+    expect(() => flockModelIdForCloudflareIdV1("@flock/not-cf")).toThrow(
       'must start with "@cf/"',
     );
   });

@@ -7,8 +7,6 @@ import type {
   BotProfile,
   BotProfilePatchV1,
   BotSettingsViewV1,
-  CapabilityAssignmentView,
-  ModelAssignment,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type {
@@ -206,19 +204,8 @@ export interface FrockBotWebData {
     namedBy?: BotNameProvenanceV1,
   ): Promise<void>;
   saveBotNotifications(notifications: BotNotificationPolicy): Promise<void>;
-  assignCapability(
-    assignment: Omit<CapabilityAssignmentView, "state">,
-  ): Promise<void>;
-  replaceCapability(
-    assignment: Omit<CapabilityAssignmentView, "state">,
-  ): Promise<void>;
-  unassignCapability(assignmentId: string): Promise<void>;
-  saveBotModel(model: ModelAssignment): Promise<void>;
-  clearBotModel(): Promise<void>;
   loadUserSettings(): Promise<void>;
   saveUserProfile(profile: { name: string; email?: string }): Promise<void>;
-  /** The model every Bot uses unless it overrides it. */
-  saveDefaultModel(model: ModelAssignment | undefined): Promise<void>;
   loadPluginCatalog(): Promise<void>;
   /** Refreshes {@link FrockBotWebData.mcpServers}. */
   loadMcpServers(): Promise<void>;

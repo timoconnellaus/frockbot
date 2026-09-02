@@ -19,9 +19,9 @@
 // a fake Ollama HTTP server on a loopback port and each spec points its
 // Connection at it through the Package's own `api-base-url` Connection setting —
 // a shipped product feature (Ollama-compatible endpoints, local Ollama), not a
-// test-only branch. Workers AI is an auxiliary local Wrangler process,
+// test-only branch. Flock AI is an auxiliary local Wrangler process,
 // discovered through Wrangler's dev service registry and bound under `AI` at
-// the native `run` seam.
+// the Gateway and native-image seams.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
@@ -348,14 +348,14 @@ export interface HarnessOptions {
   port: number;
   /** The port the fake Ollama server listens on. */
   ollamaPort: number;
-  /** The port the auxiliary Workers AI RPC Worker listens on. */
-  workersAiPort: number;
+  /** The port the auxiliary Flock AI RPC Worker listens on. */
+  flockAiPort: number;
 }
 
 export interface RunningHarness {
   baseUrl: string;
   ollamaUrl: string;
-  workersAiUrl: string;
+  flockAiUrl: string;
   stop(): Promise<void>;
 }
 
@@ -369,12 +369,12 @@ export async function startHarness(
 ): Promise<RunningHarness> {
   const persistDirectory = await mkdtemp(join(tmpdir(), "frockbot-e2e-"));
   let ollama: Awaited<ReturnType<typeof startFakeOllama>> | undefined;
-  let workersAi: ChildProcess | undefined;
+  let flockAi: ChildProcess | undefined;
   let worker: ChildProcess | undefined;
 
   const stop = async (): Promise<void> => {
     if (worker) await stopProcessTree(worker);
-    if (workersAi) await stopProcessTree(workersAi);
+    if (flockAi) await stopProcessTree(flockAi);
     if (ollama) await ollama.close();
     await rm(persistDirectory, { recursive: true, force: true });
   };
@@ -400,19 +400,19 @@ export async function startHarness(
 
     ollama = await startFakeOllama(options.ollamaPort);
 
-    workersAi = spawn(
+    flockAi = spawn(
       "bunx",
       [
         "wrangler",
         "dev",
         "--config",
-        resolve(cloudflareRoot, "e2e/workers-ai-fake.wrangler.jsonc"),
+        resolve(cloudflareRoot, "e2e/flock-ai-fake.wrangler.jsonc"),
         "--env",
         "e2e",
         "--ip",
         "127.0.0.1",
         "--port",
-        String(options.workersAiPort),
+        String(options.flockAiPort),
       ],
       {
         cwd: cloudflareRoot,
@@ -420,14 +420,14 @@ export async function startHarness(
         detached: true,
       },
     );
-    workersAi.stdout?.pipe(process.stdout);
-    workersAi.stderr?.pipe(process.stderr);
-    const workersAiUrl = `http://127.0.0.1:${options.workersAiPort}`;
-    const workersAiCrashed = processFailure(
-      workersAi,
-      "Workers AI fake wrangler dev",
+    flockAi.stdout?.pipe(process.stdout);
+    flockAi.stderr?.pipe(process.stderr);
+    const flockAiUrl = `http://127.0.0.1:${options.flockAiPort}`;
+    const flockAiCrashed = processFailure(
+      flockAi,
+      "Flock AI fake wrangler dev",
     );
-    await Promise.race([waitForHttpServer(workersAiUrl), workersAiCrashed]);
+    await Promise.race([waitForHttpServer(flockAiUrl), flockAiCrashed]);
 
     worker = spawn(
       "bunx",
@@ -475,9 +475,9 @@ export async function startHarness(
     worker.stderr?.pipe(process.stderr);
     const baseUrl = `http://127.0.0.1:${options.port}`;
     const crashed = processFailure(worker, "FrockBot wrangler dev");
-    await Promise.race([waitForManifest(baseUrl), crashed, workersAiCrashed]);
+    await Promise.race([waitForManifest(baseUrl), crashed, flockAiCrashed]);
 
-    return { baseUrl, ollamaUrl: ollama.url, workersAiUrl, stop };
+    return { baseUrl, ollamaUrl: ollama.url, flockAiUrl, stop };
   } catch (error) {
     await stop();
     throw error;

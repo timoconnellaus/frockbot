@@ -12,7 +12,7 @@
  *
  * These tools need no Connection: they read and write the User's own MCP
  * records through the host the Bot's Durable Object supplies, which is why
- * this Contribution mounts for a Turn rather than for an Assignment.
+ * this Contribution mounts for a Turn rather than for one Capability.
  */
 import type {
   Session,

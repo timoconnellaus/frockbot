@@ -56,8 +56,8 @@ tell them precisely what to do.
    already installed shows in your prompt as the Package it contributes; one
    that is not will not be there at all.
 3. Report to the User with \`send_to_user\`: the entry's display name, what it
-   would let you do, and the single sentence "Install it under Settings →
-   Plugins, then assign it to me."
+   would let you do, and the single sentence "Install it and switch it on
+   under Settings → Plugins."
 4. If the entry needs an API key or an OAuth sign-in, say so before they start,
    and say what the key is for. Never ask the User to paste a secret into the
    conversation: a Connection's credentials belong in the Connection, never in
@@ -80,17 +80,17 @@ A template is a written description of a Bot's setup, not a file format and not
 a copy of anything secret.
 
 1. Gather what actually defines this Bot: its name and description, the
-   Packages its behaviour depends on, the Capability Assignments it runs under,
-   the model it is assigned, and the Skills under its own instruction root.
+   enabled Packages its behaviour depends on, its Package-scoped settings,
+   and the Skills under its own instruction root.
 2. Read each Skill you intend to include with \`skill_load\` before you describe
    it. Describing a Skill from its catalog line alone is describing a name.
 3. Write the template as Markdown, in this order: Identity, Packages,
-   Assignments, Model, Skills, Notes. Under Skills, give each Skill's slug,
+   Settings, Skills, Notes. Under Skills, give each Skill's slug,
    name, description, and full body — that is what makes the template
    importable.
 4. Exclude every credential. Connection ids, API keys, OAuth tokens, and
    account identifiers are the User's, not the template's. Name the *kind* of
-   Connection each Assignment needs and stop there.
+   Connection each Package needs and stop there.
 5. Hand the template to the User with \`send_to_user\`. If they want it kept,
    write it into your own Memory with \`memory_write\`, not into a Skill: a
    template is a record, and a Skill is a recipe.
@@ -108,15 +108,16 @@ description: Use this when the User gives you a bot template and wants a Bot set
 1. Read the template through once before you change anything, and say back what
    it will produce: a Bot's name, its Skills, and what it will still be missing.
 2. Decide where it lands. If the template is for a new Bot, use \`bot_create\` to
-   add one to your User's flock; it starts with no Assignments and follows your
-   User's default model, exactly as one the User creates in the sidebar does.
+   add one to your User's flock; it receives the User's enabled Packages and
+   follows the User's account-level model, falling back to the platform model,
+   exactly as one created in the sidebar does.
    If it is for you, use \`bot_update\` for the identity fields and continue.
 3. Recreate the Skills you can. For each Skill in the template, call
    \`skill_write\` with its name, description, body, and slug. They land under
    your own instruction root and become visible on your next Turn, not this
    one, so do not try to run one immediately after writing it.
-4. Stop at every grant. Packages, Capability Assignments, Connections, and
-   model choices are your User's to make. List each one the template needs and
+4. Stop at every grant. Packages, Connections, and model choices are your
+   User's to make. List each one the template needs and
    ask for it with \`send_to_user\`; do not attempt a workaround that reaches
    the same capability by another route.
 5. Report what was created, what was skipped, and what the User still has to

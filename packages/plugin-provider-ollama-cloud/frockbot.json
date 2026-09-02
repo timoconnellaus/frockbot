@@ -5,10 +5,12 @@
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
   "dependencies": {
+    "custom-models": ">=0.0.1",
     "credentials": ">=0.0.1",
     "settings": ">=0.0.1",
     "web": ">=0.0.1"
   },
+  "defaultEnablement": "disabled",
   "contributions": {
     "backend": [{ "entry": "./user", "host": "user" }],
     "runtime": { "entry": "./runtime" }

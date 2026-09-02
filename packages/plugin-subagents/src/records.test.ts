@@ -18,7 +18,6 @@ import {
 } from "./records.js";
 
 const BINDING = {
-  assignmentId: "asg-1",
   packageId: "provider-ollama-cloud",
   capabilityId: "ollama-cloud-models",
   connectionId: "conn-1",

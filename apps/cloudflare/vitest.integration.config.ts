@@ -26,9 +26,9 @@ import {
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
 import {
-  createWorkersAiFakeWorker,
-  WORKERS_AI_FAKE_SERVICE,
-} from "./test/workers-ai-fake.ts";
+  createFlockAiFakeWorker,
+  FLOCK_AI_FAKE_SERVICE,
+} from "./test/flock-ai-fake.ts";
 
 // The bytes `test:integration` just built, read here rather than imported with
 // Vite's `?raw` from a test file: `tsc` resolves a relative specifier on disk
@@ -83,16 +83,13 @@ export default defineConfig({
         },
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
-          // The `AI` binding, impersonated by an auxiliary Worker's RPC
-          // entrypoint. Production reaches Workers AI through
-          // `env.AI.run(model, input)`; so does the suite, and the only
-          // difference is which isolate answers. `WORKERS_AI` is the same
-          // entrypoint under a second name, so a test can read the call log
-          // the binding itself has no method for.
-          AI: WORKERS_AI_FAKE_SERVICE,
-          WORKERS_AI: WORKERS_AI_FAKE_SERVICE,
+          // The `AI` binding is impersonated at the same Gateway and native
+          // image seams production uses. `AI_PROBE` reaches the same RPC
+          // entrypoint so tests can inspect its call log.
+          AI: FLOCK_AI_FAKE_SERVICE,
+          AI_PROBE: FLOCK_AI_FAKE_SERVICE,
         },
-        workers: [createWorkersAiFakeWorker("2026-08-27")],
+        workers: [createFlockAiFakeWorker("2026-08-27")],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {

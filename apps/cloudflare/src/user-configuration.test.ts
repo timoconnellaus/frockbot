@@ -176,10 +176,14 @@ describe("UserConfiguration Connection routing", () => {
     );
     expect(first.packages.length).toBeGreaterThan(0);
     expect(
-      first.packages.every(
-        (pkg) => pkg.state === "installed" && pkg.provenance === "first-party",
-      ),
+      first.packages.every((pkg) => pkg.provenance === "first-party"),
     ).toBe(true);
+    expect(first.packages).toContainEqual(
+      expect.objectContaining({
+        packageId: "provider-ollama-cloud",
+        state: "disabled",
+      }),
+    );
     expect(first.packages.map((pkg) => pkg.packageId)).toContain("web");
   });
   test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {
@@ -235,74 +239,5 @@ describe("UserConfiguration Connection routing", () => {
     ).resolves.toMatchObject({ status: "applied" });
     expect(resolved).toHaveLength(1);
     expect(executed).toHaveLength(1);
-  });
-});
-
-describe("UserConfiguration Connection dependency protocol", () => {
-  /**
-   * The Bot's Assignment saga acknowledges a claim it reads back as
-   * "claimed". A durable dependency that is recorded but not yet acknowledged
-   * must therefore report "claimed", not "pending": reporting "pending" tells
-   * the saga the User authority cannot answer, and it compensates a claim it
-   * is entitled to keep, so no Assignment ever settles.
-   */
-  test("reads a recorded, unacknowledged dependency as claimed", async () => {
-    const bound = identity("user-1");
-    const configuration = new UserConfiguration(
-      bound.ctx(new MemoryStorage()),
-      bound.env,
-    );
-    let state: "absent" | "pending" | "acknowledged" = "pending";
-    Reflect.set(
-      configuration,
-      "mounted",
-      Promise.resolve({
-        settings: {
-          getConnection: () =>
-            Promise.resolve({
-              connectionId: "connection-1",
-              packageId: "provider-ollama-cloud",
-              connectionTypeId: "ollama-cloud-account",
-              displayName: "Work",
-              state: "ready",
-              safeMetadata: {},
-            }),
-          readConnectionDependency: () => Promise.resolve(state),
-          acknowledgeConnectionDependency: () => {
-            state = "acknowledged";
-            return Promise.resolve(true);
-          },
-        },
-        credentials: {},
-        connections: new Map(),
-        flock: {},
-        dispose: () => Promise.resolve(),
-      }),
-    );
-    const command = (action: "read" | "acknowledge") => ({
-      schemaVersion: 1 as const,
-      action,
-      operationId: "operation-1",
-      userId: "user-1",
-      packageId: "provider-ollama-cloud",
-      connectionId: "connection-1",
-      botId: "primary",
-      generation: "generation-1",
-    });
-
-    await expect(
-      configuration.executeConnectionDependency(command("read")),
-    ).resolves.toEqual({ schemaVersion: 1, status: "claimed" });
-    await expect(
-      configuration.executeConnectionDependency(command("acknowledge")),
-    ).resolves.toEqual({ schemaVersion: 1, status: "acknowledged" });
-    await expect(
-      configuration.executeConnectionDependency(command("read")),
-    ).resolves.toEqual({ schemaVersion: 1, status: "acknowledged" });
-
-    state = "absent";
-    await expect(
-      configuration.executeConnectionDependency(command("read")),
-    ).resolves.toEqual({ schemaVersion: 1, status: "absent" });
   });
 });

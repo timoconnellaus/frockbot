@@ -348,6 +348,42 @@ export function decodePackageSettingsPatchV1(
   return Object.fromEntries(decoded);
 }
 
+/** A non-empty list of declared setting ids to remove at one scope. */
+export function decodePackageSettingIdsV1(
+  definitions: readonly PackageSettingDefinition[],
+  input: unknown,
+  scope: "user" | "bot" = "user",
+): string[] {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new ConfigurationDecodeError("unset names no setting");
+  }
+  if (input.length > MAX_PACKAGE_SETTINGS_V1) {
+    throw new ConfigurationDecodeError("unset is too large");
+  }
+  const declared = definitionsById(definitions);
+  const decoded = input.map((settingId) => {
+    if (!isPublicIdentifier(settingId)) {
+      throw new ConfigurationDecodeError("Package setting id is invalid");
+    }
+    const definition = declared.get(settingId);
+    if (!definition) {
+      throw new ConfigurationDecodeError(
+        `Package setting "${settingId}" is not declared by this Package`,
+      );
+    }
+    if (!definition.scopes.includes(scope)) {
+      throw new ConfigurationDecodeError(
+        `Package setting "${settingId}" is not a ${scope === "user" ? "User" : "Bot"}-level setting`,
+      );
+    }
+    return settingId;
+  });
+  if (new Set(decoded).size !== decoded.length) {
+    throw new ConfigurationDecodeError("unset repeats a setting");
+  }
+  return decoded;
+}
+
 export interface InstalledPackageSettingsV1 {
   packageId: string;
   version: string;
@@ -391,6 +427,35 @@ export function decodeInstalledPackageSettingsPatchV1(input: {
     );
   }
   return decodePackageSettingsPatchV1(pkg.settings, input.values, input.scope);
+}
+
+/** Installed-version lookup and validation for a settings deletion. */
+export function decodeInstalledPackageSettingIdsV1(input: {
+  packageId: string;
+  unset: unknown;
+  scope: "user" | "bot";
+  installations: readonly InstalledPackageSettingsV1[];
+  packages: readonly PackageSettingsDefinitionV1[];
+}): string[] {
+  const installation = input.installations.find(
+    (candidate) => candidate.packageId === input.packageId,
+  );
+  if (!installation) {
+    throw new ConfigurationDecodeError(
+      `Package "${input.packageId}" is not installed`,
+    );
+  }
+  const pkg = input.packages.find(
+    (candidate) =>
+      candidate.packageId === installation.packageId &&
+      candidate.version === installation.version,
+  );
+  if (!pkg) {
+    throw new ConfigurationDecodeError(
+      `Installed Package "${installation.packageId}" version "${installation.version}" has no manifest`,
+    );
+  }
+  return decodePackageSettingIdsV1(pkg.settings, input.unset, input.scope);
 }
 
 /** The durable record, decoded whole. */

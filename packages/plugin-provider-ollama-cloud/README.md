@@ -38,10 +38,10 @@ kernel.
 | Effect class   | read-only, `idempotent: true`                                                       |
 | Turn types     | all four (manifest v4 `admission`)                                                  |
 
-**Authority.** The tool mounts only for an enabled Assignment of
-`ollama-cloud-web-search` bound to a ready Connection. There is no
-unauthenticated fallback: a Bot without the Assignment is never offered the
-tool. The key is leased per durable `effectId`, opened inside this Package, used
+**Authority.** The tool mounts only while `ollama-cloud-web-search` is enabled
+account-wide and resolves a ready Connection. There is no unauthenticated
+fallback: without that capability the Bot is never offered the tool. The key
+is leased per durable `effectId`, opened inside this Package, used
 and settled, so it never reaches a tool argument, a tool result, or the event
 log.
 

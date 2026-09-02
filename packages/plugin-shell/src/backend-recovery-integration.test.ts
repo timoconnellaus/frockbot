@@ -106,6 +106,11 @@ describe("Bot recovery", () => {
       profile: { name: "User" },
       packages: [
         {
+          packageId: "custom-models",
+          version: "0.0.1",
+          state: "installed",
+        },
+        {
           packageId: "provider-ollama-cloud",
           version: "0.0.1",
           state: "installed",
@@ -1304,6 +1309,11 @@ describe("Bot recovery", () => {
       revision: 1,
       profile: { name: "User" },
       packages: [
+        {
+          packageId: "custom-models",
+          version: "0.0.1",
+          state: "installed",
+        },
         {
           packageId: "provider-ollama-cloud",
           version: "0.0.1",

@@ -7,23 +7,22 @@ import {
 } from "./models.js";
 import type { TaskModelBindingV1 } from "./records.js";
 
-function assignment(
+function binding(
   packageId: string,
   providerModelId: string,
-  assignmentId = `asg-${providerModelId}`,
+  connectionId = `conn-${providerModelId}`,
 ): TaskModelBindingV1 {
   return {
-    assignmentId,
     packageId,
     capabilityId: `${packageId}-models`,
-    connectionId: `conn-${assignmentId}`,
+    connectionId,
     provider: packageId,
     providerModelId,
   };
 }
 
-const DEFAULT = assignment("provider-ollama-cloud", "glm-5.3-flash:cloud");
-const SECOND = assignment("provider-foundation", "sand-automation");
+const DEFAULT = binding("provider-ollama-cloud", "glm-5.3-flash:cloud");
+const SECOND = binding("provider-foundation", "sand-automation");
 
 describe("the slug", () => {
   test("is the Package and the provider model, and nothing else", () => {
@@ -34,9 +33,9 @@ describe("the slug", () => {
 });
 
 describe("the catalog one Turn is offered", () => {
-  test("is built from the Bot's enabled model Assignments, default first", () => {
+  test("is built from the User's enabled model bindings, default first", () => {
     const catalog = subagentModelCatalogV1({
-      assignments: [SECOND, DEFAULT],
+      bindings: [SECOND, DEFAULT],
       defaultBinding: DEFAULT,
       turnType: "chat",
     });
@@ -48,15 +47,15 @@ describe("the catalog one Turn is offered", () => {
     expect(catalog[1]?.isDefault).toBe(false);
   });
 
-  test("keeps one entry per slug when two Assignments name one model", () => {
-    const twin = assignment(
+  test("keeps one entry per slug when two bindings name one model", () => {
+    const twin = binding(
       "provider-ollama-cloud",
       "glm-5.3-flash:cloud",
       "asg-twin",
     );
     expect(
       subagentModelCatalogV1({
-        assignments: [DEFAULT, twin],
+        bindings: [DEFAULT, twin],
         defaultBinding: DEFAULT,
         turnType: "chat",
       }),
@@ -66,7 +65,7 @@ describe("the catalog one Turn is offered", () => {
   test("renders exactly one slug on an automation turn — the Bot's own binding", () => {
     for (const turnType of ["automation", "subagent"] as const) {
       const catalog = subagentModelCatalogV1({
-        assignments: [SECOND, DEFAULT],
+        bindings: [SECOND, DEFAULT],
         defaultBinding: DEFAULT,
         turnType,
       });
@@ -76,16 +75,16 @@ describe("the catalog one Turn is offered", () => {
     }
   });
 
-  test("is empty for a Bot with no enabled model Assignment", () => {
-    expect(
-      subagentModelCatalogV1({ assignments: [], turnType: "chat" }),
-    ).toEqual([]);
+  test("is empty for a Bot with no enabled model binding", () => {
+    expect(subagentModelCatalogV1({ bindings: [], turnType: "chat" })).toEqual(
+      [],
+    );
   });
 });
 
 describe("resolving a `Task` model against the catalog", () => {
   const catalog = subagentModelCatalogV1({
-    assignments: [SECOND, DEFAULT],
+    bindings: [SECOND, DEFAULT],
     defaultBinding: DEFAULT,
     turnType: "chat",
   });
@@ -98,14 +97,14 @@ describe("resolving a `Task` model against the catalog", () => {
     });
   });
 
-  test("a named slug resolves to the Assignment that carries it", () => {
+  test("a named slug resolves to the binding that carries it", () => {
     const resolved = resolveSubagentModelV1(
       catalog,
       "provider-foundation/sand-automation",
     );
     expect(resolved).toMatchObject({
       status: "resolved",
-      model: { binding: { assignmentId: SECOND.assignmentId } },
+      model: { binding: { connectionId: SECOND.connectionId } },
     });
   });
 
@@ -119,7 +118,7 @@ describe("resolving a `Task` model against the catalog", () => {
 
   test("an automation turn refuses the second slug it was not shown", () => {
     const narrowed = subagentModelCatalogV1({
-      assignments: [SECOND, DEFAULT],
+      bindings: [SECOND, DEFAULT],
       defaultBinding: DEFAULT,
       turnType: "automation",
     });
@@ -128,7 +127,7 @@ describe("resolving a `Task` model against the catalog", () => {
     ).toMatchObject({ status: "refused" });
   });
 
-  test("a Bot with no model Assignment is refused rather than defaulted", () => {
+  test("a Bot with no model binding is refused rather than defaulted", () => {
     expect(resolveSubagentModelV1([], undefined)).toMatchObject({
       status: "refused",
     });
@@ -142,7 +141,7 @@ describe("<available_subagent_models>", () => {
   test("renders one element per slug and marks the default", () => {
     const rendered = renderAvailableSubagentModelsPromptV1(
       subagentModelCatalogV1({
-        assignments: [SECOND, DEFAULT],
+        bindings: [SECOND, DEFAULT],
         defaultBinding: DEFAULT,
         turnType: "chat",
       }),
@@ -159,7 +158,7 @@ describe("<available_subagent_models>", () => {
   test("renders exactly one model line on an automation turn", () => {
     const rendered = renderAvailableSubagentModelsPromptV1(
       subagentModelCatalogV1({
-        assignments: [SECOND, DEFAULT],
+        bindings: [SECOND, DEFAULT],
         defaultBinding: DEFAULT,
         turnType: "automation",
       }),

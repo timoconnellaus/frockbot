@@ -47,6 +47,7 @@ import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
   decodeCompositionCommandReceiptV1,
+  decodeInstalledPackageSettingIdsV1,
   decodeInstalledPackageSettingsPatchV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
   type CompositionCommandReceiptV1,
@@ -119,10 +120,7 @@ import {
   type TemplateShareReceiptV1,
 } from "@frockbot/plugin-bot-template/shared";
 import { createBotMemoryHost } from "./backend-memory.js";
-import {
-  createBotImageHost,
-  type WorkersAiBindingV1,
-} from "./backend-image.js";
+import { createBotImageHost, type NativeAiBindingV1 } from "./backend-image.js";
 import {
   createBotPluginSkillsSource,
   createBotSkillCatalogReader,
@@ -452,8 +450,16 @@ export interface BotStateEnv {
    */
   PACKAGE_BUNDLER?: PackageBundlerBinding;
   MEMORY_INDEX: VectorizeIndex;
-  /** The native Workers AI binding consumed through narrow Package adapters. */
-  AI?: WorkersAiBindingV1;
+  /** The native AI binding consumed through the image Package adapter. */
+  AI?: NativeAiBindingV1;
+  /** The Flock AI Gateway adapter constructed by the Cloudflare host. */
+  FLOCK_AI?: {
+    autoRoute: string;
+    runChatCompletion(
+      gatewayModel: string,
+      body: Record<string, unknown>,
+    ): Promise<ReadableStream<Uint8Array>>;
+  };
   USER_CONFIGURATIONS: DurableObjectNamespace;
   /**
    * The Bot Durable Object namespace, as the Subagent Durable Object namespace
@@ -722,6 +728,7 @@ export class ShellBotBackendContribution {
       throw new ConfigurationConflictError(settings.revision);
     }
     let packageValues: Record<string, unknown> | undefined;
+    let packageUnset: string[] | undefined;
     if (command.type === "bot/set-package-settings") {
       const [user, application] = await Promise.all([
         this.userConfiguration(identity).readConfiguration({
@@ -730,23 +737,36 @@ export class ShellBotBackendContribution {
         }),
         this.compileApplication(),
       ]);
-      packageValues = decodeInstalledPackageSettingsPatchV1({
-        packageId: command.packageId,
-        values: command.values,
-        scope: "bot",
-        installations: user.packages,
-        packages: application.packages.map((pkg) => ({
-          packageId: pkg.id,
-          version: pkg.version,
-          settings: pkg.manifest.configuration?.settings ?? [],
-        })),
-      });
+      const packages = application.packages.map((pkg) => ({
+        packageId: pkg.id,
+        version: pkg.version,
+        settings: pkg.manifest.configuration?.settings ?? [],
+      }));
+      if (command.values) {
+        packageValues = decodeInstalledPackageSettingsPatchV1({
+          packageId: command.packageId,
+          values: command.values,
+          scope: "bot",
+          installations: user.packages,
+          packages,
+        });
+      }
+      if (command.unset) {
+        packageUnset = decodeInstalledPackageSettingIdsV1({
+          packageId: command.packageId,
+          unset: command.unset,
+          scope: "bot",
+          installations: user.packages,
+          packages,
+        });
+      }
     }
     return this.applySimpleConfigurationCommand(
       identity,
       command,
       commandFingerprint,
       packageValues,
+      packageUnset,
     );
   }
 
@@ -764,6 +784,7 @@ export class ShellBotBackendContribution {
     >,
     commandFingerprint: string,
     packageValues?: Record<string, unknown>,
+    packageUnset: readonly string[] = [],
   ): Promise<OperationReceiptV1> {
     return this.ctx.storage.transaction(async (transaction) => {
       await this.lifecycleAdmission?.(transaction, identity.botId);
@@ -799,17 +820,25 @@ export class ShellBotBackendContribution {
               }
             : command.type === "bot/update-notifications"
               ? { ...current, revision, notifications: command.notifications }
-              : {
-                  ...current,
-                  revision,
-                  packageValues: {
-                    ...current.packageValues,
-                    [command.packageId]: {
-                      ...(current.packageValues[command.packageId] ?? {}),
-                      ...structuredClone(packageValues ?? {}),
-                    },
-                  },
-                };
+              : (() => {
+                  const values = {
+                    ...(current.packageValues[command.packageId] ?? {}),
+                    ...structuredClone(packageValues ?? {}),
+                  };
+                  for (const settingId of packageUnset)
+                    delete values[settingId];
+                  const nextPackageValues = { ...current.packageValues };
+                  if (Object.keys(values).length > 0) {
+                    nextPackageValues[command.packageId] = values;
+                  } else {
+                    delete nextPackageValues[command.packageId];
+                  }
+                  return {
+                    ...current,
+                    revision,
+                    packageValues: nextPackageValues,
+                  };
+                })();
       const receipt: OperationReceiptV1 = {
         schemaVersion: 1,
         commandId: command.commandId,
@@ -3180,9 +3209,11 @@ export class ShellBotBackendContribution {
             bindingPackageId,
             effectId,
           ),
-        ...(this.env.AI
+        ...(this.env.FLOCK_AI
           ? {
-              runWorkersAi: (model, input) => this.env.AI!.run(model, input),
+              flockAiAutoRoute: this.env.FLOCK_AI.autoRoute,
+              runFlockAiChatCompletion: (gatewayModel, body) =>
+                this.env.FLOCK_AI!.runChatCompletion(gatewayModel, body),
             }
           : {}),
         fetch: this.outboundFetch,

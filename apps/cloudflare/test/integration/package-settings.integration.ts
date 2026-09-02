@@ -85,14 +85,13 @@ async function installPackage(
 
 /** What the fake `AI` binding has been asked to generate so far. */
 async function imageModelCalls(): Promise<Array<{ model: string }>> {
-  // SAFETY: the binding is declared as Workers AI in the production `Env`; the
-  // suite binds the same entrypoint a second time under `WORKERS_AI` so the
-  // call log is reachable without widening the production type.
+  // SAFETY: the suite binds the same RPC entrypoint a second time under
+  // `AI_PROBE` so the call log is reachable without widening production Env.
   const probe = (
     env as unknown as {
-      WORKERS_AI: { runCalls(): Promise<Array<{ model: string }>> };
+      AI_PROBE: { runCalls(): Promise<Array<{ model: string }>> };
     }
-  ).WORKERS_AI;
+  ).AI_PROBE;
   return probe.runCalls();
 }
 

@@ -1,7 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   compileFoundationApplication,
-  createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationRuntimeApplication,
@@ -149,6 +148,7 @@ import {
   rpcDecoded,
   rpcIdentifier,
   rpcInteger,
+  rpcObject,
   rpcString,
 } from "./durable-rpc.js";
 
@@ -304,10 +304,10 @@ export class BotState extends DurableObject<BotStateEnv> {
               return createFlockBotBackendPlugin(
                 {
                   storage: this.ctx.storage,
-                  materializeSettings: (registration, userId) => {
+                  materializeSettings: async (registration, userId) => {
                     if (!shell)
                       throw new Error("Shell Bot Contribution is unavailable");
-                    return shell.materializeSettings(
+                    await shell.materializeSettings(
                       { userId, botId: registration.botId },
                       {
                         name: registration.initialName,

@@ -2,6 +2,7 @@ import {
   configurationCommandFingerprintV1,
   ConfigurationConflictError,
   ConfigurationDecodeError,
+  decodePackageSettingIdsV1,
   decodePackageSettingsPatchV1,
   MAX_PACKAGE_SETTINGS_V1,
   decodeOperationReceiptV1,
@@ -231,6 +232,7 @@ function withCatalogPin(
 function mergePackageSettingValues(
   current: Record<string, JsonValue | PackageSettingValueV1> | undefined,
   patch: Record<string, PackageSettingValueV1>,
+  unset: readonly string[],
 ): Record<string, JsonValue | PackageSettingValueV1> {
   const merged: Record<string, JsonValue | PackageSettingValueV1> = {
     ...(current ?? {}),
@@ -238,6 +240,7 @@ function mergePackageSettingValues(
   for (const [settingId, value] of Object.entries(patch)) {
     merged[settingId] = value;
   }
+  for (const settingId of unset) delete merged[settingId];
   if (Object.keys(merged).length > MAX_PACKAGE_SETTINGS_V1) {
     throw new ConfigurationDecodeError("Package settings are too many");
   }
@@ -332,20 +335,33 @@ function applyUserCommand(
       }
       // Validated against the manifest of the version this User has, not the
       // one the client happened to be looking at.
-      const patch = decodePackageSettingsPatchV1(
-        settingDefinitions(installed.packageId, installed.version),
-        command.values,
+      const definitions = settingDefinitions(
+        installed.packageId,
+        installed.version,
       );
+      const patch = command.values
+        ? decodePackageSettingsPatchV1(definitions, command.values)
+        : {};
+      const unset = command.unset
+        ? decodePackageSettingIdsV1(definitions, command.unset)
+        : [];
       return {
         ...current,
         revision,
         packages: current.packages.map((pkg) =>
-          pkg.packageId === command.packageId
-            ? {
-                ...pkg,
-                values: mergePackageSettingValues(pkg.values, patch),
-              }
-            : pkg,
+          pkg.packageId !== command.packageId
+            ? pkg
+            : (() => {
+                const values = mergePackageSettingValues(
+                  pkg.values,
+                  patch,
+                  unset,
+                );
+                const { values: _storedValues, ...withoutValues } = pkg;
+                return Object.keys(values).length > 0
+                  ? { ...withoutValues, values }
+                  : withoutValues;
+              })(),
         ),
       };
     }

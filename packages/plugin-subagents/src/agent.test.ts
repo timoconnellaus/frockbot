@@ -23,7 +23,6 @@ import {
 import type { ToolExecutionContext } from "@frockbot/kernel-contracts";
 
 const BINDING: TaskModelBindingV1 = {
-  assignmentId: "asg-1",
   packageId: "provider-ollama-cloud",
   capabilityId: "ollama-cloud-models",
   connectionId: "conn-1",
@@ -55,7 +54,7 @@ function tool(
     turnType,
     models: () =>
       subagentModelCatalogV1({
-        assignments: [BINDING],
+        bindings: [BINDING],
         defaultBinding: BINDING,
         turnType,
       }),
@@ -194,7 +193,7 @@ describe("the <available_subagent_models> section", () => {
     const section = createSubagentModelsPromptSectionV1({
       models: () =>
         subagentModelCatalogV1({
-          assignments: [BINDING],
+          bindings: [BINDING],
           defaultBinding: BINDING,
           turnType: "chat",
         }),
@@ -210,7 +209,7 @@ describe("the <available_subagent_models> section", () => {
     );
   });
 
-  test("renders nothing for a Bot with no enabled model Assignment", async () => {
+  test("renders nothing for a Bot with no enabled model binding", async () => {
     const section = createSubagentModelsPromptSectionV1({ models: () => [] });
     expect(
       await section.render({

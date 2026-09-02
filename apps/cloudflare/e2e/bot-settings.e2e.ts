@@ -61,9 +61,7 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
   await expect(panel.getByRole("textbox", { name: /^Title/u })).toBeVisible();
   await expect(panel.getByText("Members", { exact: true })).toBeVisible();
   await expect(panel.getByText("Named by user")).toBeVisible();
-  await expect(panel.getByText("Capability Assignments")).toHaveCount(0);
   await expect(panel.locator("#bot-model")).toHaveCount(0);
-  await expect(panel.locator("#bot-capabilities")).toHaveCount(0);
   await expect(panel.getByText("Routines", { exact: true })).toBeVisible();
   await expect(panel.getByText("Audit log", { exact: true })).toBeVisible();
   await expect(panel.getByText("Import a Bot template")).toBeVisible();

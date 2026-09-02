@@ -178,7 +178,7 @@ describe("Bot isolate contribution host", () => {
   test("a caller that omits the binding digest does not compile", () => {
     // @ts-expect-error the binding digest is required: an isolate loaded with
     // no digest of its granted bindings would share a loader id across
-    // Assignments and generations.
+    // enabled bindings and generations.
     void botIsolateModuleSetHashV1(CONTENT_HASH);
     expect(true).toBe(true);
   });
@@ -191,7 +191,7 @@ describe("Bot isolate contribution host", () => {
     expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
   });
 
-  test("keys the loader id on the User, the Bot and the module set", async () => {
+  test("keys the loader id on the User and module set so that User's Bots share", async () => {
     const { host: subject, loads } = host();
     await subject.prepare(descriptor());
     const other = host({ botId: "bot-2" });
@@ -200,11 +200,9 @@ describe("Bot isolate contribution host", () => {
       CONTENT_HASH,
       BINDING_DIGEST,
     );
-    expect(loads[0]!.loaderId).toBe(`bot-package:user-1:bot-1:${expected}`);
-    expect(other.loads[0]!.loaderId).toBe(
-      `bot-package:user-1:bot-2:${expected}`,
-    );
-    expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
+    expect(loads[0]!.loaderId).toBe(`bot-package:user-1:${expected}`);
+    expect(other.loads[0]!.loaderId).toBe(`bot-package:user-1:${expected}`);
+    expect(loads[0]!.loaderId).toBe(other.loads[0]!.loaderId);
   });
 
   test("health failure is a prepare failure with a diagnostic", async () => {

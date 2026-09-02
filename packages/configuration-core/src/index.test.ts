@@ -132,6 +132,42 @@ describe("configuration DTO seam", () => {
         values: {},
       }),
     ).toThrow("values names no setting");
+    expect(
+      decodeConfigurationCommandV1({
+        ...meta,
+        type: "bot/set-package-settings",
+        packageId: "custom-models",
+        unset: ["model"],
+      }),
+    ).toMatchObject({ unset: ["model"] });
+    for (const invalid of [
+      { ...meta, type: "bot/set-package-settings", packageId: "custom-models" },
+      {
+        ...meta,
+        type: "bot/set-package-settings",
+        packageId: "custom-models",
+        unset: [],
+      },
+      {
+        ...meta,
+        type: "bot/set-package-settings",
+        packageId: "custom-models",
+        unset: ["model", "model"],
+      },
+      {
+        ...meta,
+        type: "bot/set-package-settings",
+        packageId: "custom-models",
+        values: {
+          model: { connectionId: "ollama-work", providerModelId: "m" },
+        },
+        unset: ["model"],
+      },
+    ]) {
+      expect(() => decodeConfigurationCommandV1(invalid)).toThrow(
+        ConfigurationDecodeError,
+      );
+    }
   });
 
   test("accepts provider model IDs through the catalog limit", () => {

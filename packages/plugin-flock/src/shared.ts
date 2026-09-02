@@ -1,13 +1,10 @@
 // Shared configuration types remain provider-neutral at this package seam.
 import {
-  decodeCapabilityAssignmentV1,
   decodeBotIdV1,
   decodeBotSelfWriterV1,
   isPublicIdentifier,
   type BotNameProvenanceV1,
   type BotSelfWriterV1,
-  type CapabilityAssignmentView,
-  type ModelAssignment,
 } from "@frockbot/configuration-core";
 export type { BotSelfWriterV1 } from "@frockbot/configuration-core";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
@@ -26,10 +23,6 @@ export interface SheepRecipeV1 {
   middle: string;
   lower: string;
 }
-export interface InitialModelBindingV1 {
-  assignment: CapabilityAssignmentView;
-  generation: string;
-}
 export interface BotRegistrationV1 {
   schemaVersion: 1;
   botId: string;
@@ -42,13 +35,6 @@ export interface BotRegistrationV1 {
    * Durable Object, which no other Bot may write.
    */
   initialDescription?: string;
-  initialModel?: ModelAssignment;
-  initialModelBinding?: InitialModelBindingV1;
-  /**
-   * Connection-less Capability authority snapshotted from the User's installed
-   * Packages when this Bot was admitted.
-   */
-  initialAssignments?: CapabilityAssignmentView[];
   /**
    * The Bot and Turn that created this Bot, when a Bot created it. Absent for
    * a User-created Bot and for every registration written before this existed.
@@ -264,63 +250,6 @@ function revision(value: unknown): number {
     throw new FlockDecodeError("revision is invalid");
   return value as number;
 }
-function modelAssignment(value: unknown): ModelAssignment {
-  const model = record(value, "initialModel");
-  exact(model, ["connectionId", "providerModelId"]);
-  return {
-    connectionId: identifier(model.connectionId, "initialModel.connectionId"),
-    providerModelId: boundedText(
-      model.providerModelId,
-      "initialModel.providerModelId",
-      256,
-    ),
-  };
-}
-
-function initialModelBinding(value: unknown): InitialModelBindingV1 {
-  const binding = record(value, "initialModelBinding");
-  exact(binding, ["assignment", "generation"]);
-  const assignment = record(
-    binding.assignment,
-    "initialModelBinding.assignment",
-  );
-  exact(assignment, [
-    "assignmentId",
-    "packageId",
-    "capabilityId",
-    "connectionId",
-    "state",
-  ]);
-  if (assignment.state !== "enabled") {
-    throw new FlockDecodeError("initial model assignment is invalid");
-  }
-  return {
-    assignment: {
-      assignmentId: identifier(
-        assignment.assignmentId,
-        "initialModelBinding.assignment.assignmentId",
-      ),
-      packageId: identifier(
-        assignment.packageId,
-        "initialModelBinding.assignment.packageId",
-      ),
-      capabilityId: identifier(
-        assignment.capabilityId,
-        "initialModelBinding.assignment.capabilityId",
-      ),
-      connectionId: identifier(
-        assignment.connectionId,
-        "initialModelBinding.assignment.connectionId",
-      ),
-      state: "enabled",
-    },
-    generation: identifier(
-      binding.generation,
-      "initialModelBinding.generation",
-    ),
-  };
-}
-
 export function decodeSheepRecipeV1(input: unknown): SheepRecipeV1 {
   const value = record(input, "sheep recipe");
   exact(value, ["schemaVersion", "background", "upper", "middle", "lower"]);
@@ -405,51 +334,10 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "sheep"],
-    [
-      "initialDescription",
-      "initialModel",
-      "initialModelBinding",
-      "initialAssignments",
-      "createdBy",
-    ],
+    ["initialDescription", "createdBy"],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
-  const initialModel =
-    bot.initialModel === undefined
-      ? undefined
-      : modelAssignment(bot.initialModel);
-  const binding =
-    bot.initialModelBinding === undefined
-      ? undefined
-      : initialModelBinding(bot.initialModelBinding);
-  if (
-    bot.initialAssignments !== undefined &&
-    !Array.isArray(bot.initialAssignments)
-  )
-    throw new FlockDecodeError("initial Assignments are invalid");
-  const initialAssignments =
-    bot.initialAssignments === undefined
-      ? undefined
-      : bot.initialAssignments.map(decodeCapabilityAssignmentV1);
-  if (
-    new Set(
-      (initialAssignments ?? []).map((assignment) => assignment.assignmentId),
-    ).size !== (initialAssignments ?? []).length ||
-    (initialAssignments ?? []).some(
-      (assignment) =>
-        assignment.connectionId !== undefined || assignment.state !== "enabled",
-    )
-  ) {
-    throw new FlockDecodeError("initial Assignments are invalid");
-  }
-  if (
-    binding &&
-    (!initialModel ||
-      binding.assignment.connectionId !== initialModel.connectionId)
-  ) {
-    throw new FlockDecodeError("initial model binding is invalid");
-  }
   const botId = botIdentifier(bot.botId);
   const createdBy = botWriter(bot.createdBy, "createdBy");
   if (createdBy && createdBy.botId === botId)
@@ -468,9 +356,6 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
             10_000,
           ),
         }),
-    initialModel,
-    initialModelBinding: binding,
-    ...(initialAssignments ? { initialAssignments } : {}),
     ...(createdBy ? { createdBy } : {}),
     sheep: decodeSheepRecipeV1(bot.sheep),
   };

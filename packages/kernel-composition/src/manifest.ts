@@ -136,6 +136,7 @@ export interface FrockBotManifest {
   version: string;
   compatibility: { frockbot: string };
   dependencies: Record<string, string>;
+  defaultEnablement?: "enabled" | "disabled";
   contributions: {
     backend?: BackendContribution[];
     runtime?: RuntimeContribution;
@@ -227,6 +228,18 @@ function decodeDependencies(value: unknown): Record<string, string> {
   return dependencies;
 }
 
+function decodeDefaultEnablement(
+  value: unknown,
+): FrockBotManifest["defaultEnablement"] {
+  if (value === undefined) return undefined;
+  if (value !== "enabled" && value !== "disabled") {
+    throw new Error(
+      'manifest defaultEnablement must be "enabled" or "disabled"',
+    );
+  }
+  return value;
+}
+
 function decodeIdentity(
   value: Record<string, unknown>,
 ): Pick<FrockBotManifest, "id" | "displayName" | "version" | "permissions"> {
@@ -307,6 +320,7 @@ function isV3OrLater(value: Record<string, unknown>): boolean {
 
 function decodeV2(value: Record<string, unknown>): FrockBotManifest {
   const identity = decodeIdentity(value);
+  const defaultEnablement = decodeDefaultEnablement(value.defaultEnablement);
   if (!isRecord(value.compatibility)) {
     throw new Error("manifest compatibility must be an object");
   }
@@ -443,6 +457,7 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
       frockbot: requiredString(value.compatibility, "frockbot"),
     },
     dependencies: decodeDependencies(value.dependencies),
+    ...(defaultEnablement ? { defaultEnablement } : {}),
     contributions,
   };
 }
@@ -1252,6 +1267,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
         "permissions",
         "compatibility",
         "dependencies",
+        "defaultEnablement",
         "contributions",
         ...(isV3OrLater(value) ? ["configuration"] : []),
       ],

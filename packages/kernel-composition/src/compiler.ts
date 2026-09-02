@@ -139,6 +139,10 @@ function orderedPackages(
     ).sort(([left], [right]) => left.localeCompare(right))) {
       const dependency = packages.get(dependencyId);
       if (!dependency) {
+        // A disabled-by-default Package may depend on a Package available only
+        // from the User's Catalog. Settings refuses to enable it until an
+        // installed dependency row exists; enabled built-ins still fail here.
+        if (pkg.manifest.defaultEnablement === "disabled") continue;
         throw new Error(
           `package "${pkg.id}" requires missing package "${dependencyId}"`,
         );

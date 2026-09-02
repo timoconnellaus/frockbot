@@ -17,11 +17,11 @@ function requiredPort(name: string): number {
 const harness = await startHarness({
   port: requiredPort("FROCKBOT_E2E_PORT"),
   ollamaPort: requiredPort("FROCKBOT_E2E_OLLAMA_PORT"),
-  workersAiPort: requiredPort("FROCKBOT_E2E_WORKERS_AI_PORT"),
+  flockAiPort: requiredPort("FROCKBOT_E2E_FLOCK_AI_PORT"),
 });
 
 console.log(
-  `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Workers AI on ${harness.workersAiUrl})`,
+  `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Flock AI on ${harness.flockAiUrl})`,
 );
 
 let stopping = false;
