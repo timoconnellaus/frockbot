@@ -39,7 +39,7 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-The left sidebar lists the authenticated User's active Bots and switches the workspace. **Add sheep** creates a Bot with a random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. **Manage** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings remain behind the selected workspace's header gear. The bottom-left **Plugins** surface installs, uninstalls, enables, and disables Packages account-wide. **Profile → Connections** authorizes external accounts and MCP servers, while each Package's remaining declared settings appear under **Profile → Settings**. A Package may add its own Models content or Bot-scoped controls; with none enabled, every Bot follows the platform's Flock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work. Browser, desktop, and mobile render the same hosted Bot, sheep, Connection, and settings workflows; mobile intentionally hides **Plugins** until its native OAuth/deep-link return is implemented.
+The left sidebar lists the authenticated User's active Bots and switches the workspace. **Add sheep** creates a Bot with a random sheep identity; selecting the active sheep opens an editor where its background, headwear, facewear, and neckwear can be changed independently or rerolled together. **Manage** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings remain behind the selected workspace's header gear. The sidebar's **Connectors** button authorizes external accounts and MCP servers for every Bot the User owns. **Profile → Plugins** installs, uninstalls, enables, and disables Packages account-wide, while **Profile → Settings** owns remaining declared application settings. Models renders Package contributions; enabling the default-disabled Custom models Package adds the account model picker and a Package-scoped model override to Bot settings. Without it, every Bot follows the platform's Flock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work. Browser, desktop, and mobile render the same hosted Bot, sheep, Connection, and settings workflows.
 
 `@frockbot/plugin-provider-ollama-cloud` lets each User create multiple named Ollama Cloud Connections with their own write-only API keys. It is disabled by default and depends on the Custom models Package. The backend validates and encrypts each credential and discovers that Connection's model catalog; connecting it does not change the platform model. Rotation affects subsequent model effects while already-admitted effects retain their credential lease, and disconnect prevents new leases without cancelling admitted Turns.
 
@@ -201,12 +201,15 @@ packages/
   plugin-audit/     Audited-effect projection and the User's rebuildable audit table
   plugin-bot-template/ Bot template export, share records, and guarded import
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
+  plugin-custom-models/  Opt-in account and Bot model selection surfaces
   plugin-flock/     Durable Bot directory and composable sheep identity Package
   plugin-fly-sprite/ Fly Sprites Computer provider and takeover adapter
-  plugin-image/     generate_image on Workers AI, fenced by the Workspace
+  plugin-image/     generate_image through Cloudflare's AI binding, fenced by the Workspace
   plugin-mcp/       Remote MCP servers as Connections, and their lifecycle
   plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
   plugin-package-publisher/ Durable User application publication and rollback
+  plugin-provider-flock-ai/  Built-in credential-free Flock AI model provider
+  plugin-provider-ollama-cloud/  Optional Ollama Cloud model provider
   plugin-routines/  Durable Routines, the alarm scheduler, and the webhook door
   plugin-search/    Per-User transcript index, search route, and overlay
   plugin-settings/  Plugin-owned Bot, Package, and User settings surfaces

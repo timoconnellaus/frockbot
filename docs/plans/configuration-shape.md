@@ -2,9 +2,7 @@
 
 ## Status
 
-Proposed, awaiting human acceptance. This plan carries the amendment to `AGENTS.md` (§ Configuration shape, § Package composition, the Feature rule, and the check list), the retirement of the Assignment term in `CONTEXT.md`, and [ADR 0019](../adr/0019-account-wide-enablement.md). No production code changes until the amendment is accepted; the constitutional gate blocks implementation while a conflict stands.
-
-On acceptance, flip ADR 0003's front matter to `superseded by ADR-0019` and drop its `note:` line.
+Implemented on this branch.
 
 ## What the amendment decides
 
