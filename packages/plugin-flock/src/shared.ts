@@ -361,6 +361,57 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   };
 }
 
+/**
+ * Fields a Bot registration seed carried before per-Bot model bindings and
+ * Assignments were removed (commit 03034e0). A directory written before that
+ * refactor still holds them on disk, and the exact-field decoder rejects every
+ * read of it — which takes out the sidebar and Bot creation together, because
+ * both start by decoding the stored directory. Migration drops the fields
+ * without interpreting them: a Bot's model and tools now resolve from the
+ * User's enabled Packages and Connections at its next admitted Turn (ADR 0019).
+ */
+const PRE_ACCOUNT_WIDE_REGISTRATION_FIELDS_V1 = [
+  "initialModel",
+  "initialModelBinding",
+  "initialAssignments",
+] as const;
+
+/** A durable record only ever deserializes to a plain object; nothing else. */
+function storedPlainRecordV1(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return undefined;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Migrates one raw stored Bot directory across known durable shapes before the
+ * current exact-field decoder sees it. A record already in the current shape is
+ * returned untouched, so this is safe to apply on every read.
+ */
+export function migrateStoredBotDirectoryV1(stored: unknown): unknown {
+  const directory = storedPlainRecordV1(stored);
+  if (!directory || !Array.isArray(directory.bots)) return stored;
+  let changed = false;
+  const bots = directory.bots.map((storedBot) => {
+    const bot = storedPlainRecordV1(storedBot);
+    if (!bot) return storedBot;
+    const removed = PRE_ACCOUNT_WIDE_REGISTRATION_FIELDS_V1.filter((key) =>
+      Object.hasOwn(bot, key),
+    );
+    if (removed.length === 0) return storedBot;
+    changed = true;
+    const next = { ...bot };
+    for (const key of removed) delete next[key];
+    return next;
+  });
+  return changed ? { ...directory, bots } : stored;
+}
+
 export function decodeBotMembershipViewV1(input: unknown): BotMembershipViewV1 {
   const value = record(input, "Bot membership");
   exact(value, ["schemaVersion", "botId", "registered"]);

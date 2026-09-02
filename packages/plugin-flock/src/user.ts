@@ -11,6 +11,7 @@ import {
   decodeStoredBotLifecycleReceiptV1,
   decodeStoredFlockReceiptV1,
   flockCommandFingerprint,
+  migrateStoredBotDirectoryV1,
   randomSheepRecipeV1,
   type BotDirectoryViewV1,
   type BotLifecycleCommandV1,
@@ -99,7 +100,9 @@ export class FlockUserBackendContribution {
   async listBots(): Promise<BotDirectoryViewV1> {
     const stored = await this.host.storage.get<unknown>(DIRECTORY_KEY);
     return structuredClone(
-      stored === undefined ? initialDirectory() : decodeDirectoryViewV1(stored),
+      stored === undefined
+        ? initialDirectory()
+        : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(stored)),
     );
   }
 
@@ -138,7 +141,7 @@ export class FlockUserBackendContribution {
       const current =
         currentValue === undefined
           ? initialDirectory()
-          : decodeDirectoryViewV1(currentValue);
+          : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
       if (current.revision !== command.expectedRevision)
         throw new FlockConflictError(current.revision);
       let receipt: FlockReceiptV1;
@@ -248,7 +251,7 @@ export class FlockUserBackendContribution {
       const directory =
         directoryValue === undefined
           ? initialDirectory()
-          : decodeDirectoryViewV1(directoryValue);
+          : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(directoryValue));
       if (!directory.bots.some((bot) => bot.botId === command.botId))
         throw new BotNotFoundError(command.botId);
       const lifecycleValue = await storage.get<unknown>(

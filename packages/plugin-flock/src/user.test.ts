@@ -126,6 +126,53 @@ describe("Flock User contribution", () => {
     );
   });
 
+  test("lists and extends a directory stored before Bots lost their model seed", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      now: () => new Date("2026-09-02T00:00:00.000Z"),
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
+    });
+    await storage.put("flock:directory:v1", {
+      schemaVersion: 1,
+      revision: 1,
+      bots: [
+        {
+          schemaVersion: 1,
+          botId: "legacy",
+          registeredAt: "2026-08-29T00:00:00.000Z",
+          initialName: "Legacy",
+          initialModel: { connectionId: "openai", providerModelId: "gpt-5" },
+          initialAssignments: [],
+          sheep: randomSheepRecipeV1(() => 0),
+        },
+      ],
+    });
+    const directory = await contribution.listBots();
+    expect(directory.bots.map((bot) => bot.botId)).toEqual(["legacy"]);
+    expect(Object.hasOwn(directory.bots[0]!, "initialModel")).toBe(false);
+    // Creating a Bot reads the same record, so it died on the same field.
+    const receipt = await contribution.createBot(
+      "user-1",
+      command("create-1", 1),
+    );
+    expect(receipt.status).toBe("applied");
+    const migrated = await contribution.listBots();
+    expect(migrated.bots.map((bot) => bot.botId)).toEqual(["legacy", "alpha"]);
+    // The write settles the migrated shape durably.
+    expect(
+      Object.hasOwn(
+        (
+          storage.values.get("flock:directory:v1") as {
+            bots: Record<string, unknown>[];
+          }
+        ).bots[0]!,
+        "initialModel",
+      ),
+    ).toBe(false);
+  });
+
   test("coordinates archive through durable intent and reconciles a lost response", async () => {
     const storage = new MemoryStorage();
     let botStatus: "active" | "archived" = "active";
