@@ -99,13 +99,23 @@ function appHtml(
 </html>`;
 }
 
+/**
+ * Where the shell may embed a frame. The expanded Computer viewer is the
+ * Sprite's own noVNC page at `https://<sprite>-<org>.sprites.app/` (ADR 0004);
+ * without this directive `default-src 'self'` blocks the iframe and the
+ * browser shows "This content is blocked" over the desktop. The viewer's
+ * websocket is opened by that page, so it is governed by the Sprite's policy,
+ * not this one. Screenshots are same-origin workspace reads and need nothing.
+ */
+const FRAME_SOURCES = "https://*.sprites.app";
+
 function withSecurityHeaders(response: Response): Response {
   const secured = new Response(response.body, response);
   secured.headers.set("x-content-type-options", "nosniff");
   secured.headers.set("referrer-policy", "no-referrer");
   secured.headers.set(
     "content-security-policy",
-    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+    `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-src ${FRAME_SOURCES}; frame-ancestors 'none'; base-uri 'none'`,
   );
   return secured;
 }

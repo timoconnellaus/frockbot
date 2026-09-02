@@ -93,6 +93,8 @@ describe("user application security headers", () => {
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
+    // The expanded Computer viewer frames the Sprite's own noVNC page.
+    expect(policy.get("frame-src")).toEqual(["https://*.sprites.app"]);
     expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
   });
 
