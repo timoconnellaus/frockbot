@@ -539,6 +539,21 @@ export class ComputerHost {
   /** Re-derivable cache of what this container has learned about a Computer. */
   private readonly computers = new Map<string, ComputerRecord>();
   private readonly openings = new Map<string, Promise<ComputerRecord>>();
+  /**
+   * The Sprite handle for a name, looked up once.
+   *
+   * Every operation used to open with its own `GET /v1/sprites/<name>`, and a
+   * single Turn makes a dozen operations — measured at 14 lookups costing
+   * ~1.35s of a 11.7s tool call, for an answer that cannot have changed. A
+   * handle is a name bound to a client: the SDK builds every exec URL from
+   * `client.baseURL` and `sprite.name`, so the second lookup returns what the
+   * first did.
+   *
+   * The one field that does move is the Sprite's own URL, and the viewer
+   * re-reads it deliberately rather than trusting a handle — which is why
+   * that call site still fetches.
+   */
+  private readonly spriteHandles = new Map<string, Promise<SpriteHandle>>();
 
   constructor(options: ComputerHostOptions) {
     this.client = options.client;
@@ -705,7 +720,7 @@ export class ComputerHost {
    */
   private async open(request: ComputerHostRequestV1): Promise<Response> {
     const record = await this.computer(request.identity.userId);
-    const sprite = await this.client.getSprite(record.spriteName);
+    const sprite = await this.spriteFor(record.spriteName);
     const botKey = computerBotKeyV1(request.tenant.botId, this.digest);
     const profile = Buffer.from(
       JSON.stringify(
@@ -1106,17 +1121,40 @@ export class ComputerHost {
     return undefined;
   }
 
+  /**
+   * The Sprite behind a name, fetched at most once per container.
+   *
+   * A failed lookup is not kept: the next caller asks again, so a Sprite that
+   * was missing or unreachable is not remembered as such.
+   */
+  private spriteFor(spriteName: string): Promise<SpriteHandle> {
+    let held = this.spriteHandles.get(spriteName);
+    if (!held) {
+      held = this.client.getSprite(spriteName).catch((error: unknown) => {
+        this.spriteHandles.delete(spriteName);
+        throw error;
+      });
+      this.spriteHandles.set(spriteName, held);
+    }
+    return held;
+  }
+
   private async findOrCreate(name: string): Promise<SpriteHandle> {
     try {
-      return await this.client.getSprite(name);
+      return await this.spriteFor(name);
     } catch (error) {
       if (!isNotFound(error)) throw error;
     }
     try {
-      return await this.client.createSprite(name);
+      const created = await this.client.createSprite(name);
+      // Seeded rather than re-fetched: provisioning has the handle already,
+      // and the operations that follow it in the same Turn would otherwise
+      // each pay a lookup for it.
+      this.spriteHandles.set(name, Promise.resolve(created));
+      return created;
     } catch (error) {
       try {
-        return await this.client.getSprite(name);
+        return await this.spriteFor(name);
       } catch {
         throw error;
       }
@@ -1132,7 +1170,7 @@ export class ComputerHost {
     release: () => void,
   ): Promise<Response> {
     const record = await this.computer(request.identity.userId);
-    const sprite = await this.client.getSprite(record.spriteName);
+    const sprite = await this.spriteFor(record.spriteName);
     const script = computerHostExecScriptV1(operation);
 
     if (!operation.stream) {
@@ -1416,7 +1454,7 @@ export class ComputerHost {
       );
     }
     const record = await this.computer(request.identity.userId);
-    const sprite = await this.client.getSprite(record.spriteName);
+    const sprite = await this.spriteFor(record.spriteName);
     const files = sprite.filesystem("/");
 
     switch (operation.kind) {
@@ -1561,7 +1599,7 @@ export class ComputerHost {
       throw new ComputerHostError("invalid-request", "not a control call", 400);
     }
     const record = await this.computer(request.identity.userId);
-    const sprite = await this.client.getSprite(record.spriteName);
+    const sprite = await this.spriteFor(record.spriteName);
     // The lease key *is* the scope. A `bot` lease is keyed by the tenant's own
     // directory, exactly as human takeover always was; a `desktop-gui` lease is
     // keyed by one name shared by every tenant on the box, which is what makes
@@ -1621,7 +1659,7 @@ export class ComputerHost {
       throw new ComputerHostError("invalid-request", "not a viewer call", 400);
     }
     const record = await this.computer(request.identity.userId);
-    const sprite = await this.client.getSprite(record.spriteName);
+    const sprite = await this.spriteFor(record.spriteName);
     const botKey = computerBotKeyV1(request.tenant.botId, this.digest);
 
     if (operation.action === "revoke") {
@@ -1698,7 +1736,7 @@ export class ComputerHost {
       );
     }
     const record = await this.computer(request.identity.userId);
-    const sprite = await this.client.getSprite(record.spriteName);
+    const sprite = await this.spriteFor(record.spriteName);
     let status: "running" | "unavailable" = "running";
     try {
       await withTimeout(
