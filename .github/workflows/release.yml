@@ -13,10 +13,23 @@ concurrency:
   group: release-${{ github.ref }}
 
 jobs:
-  publish:
-    name: Publish packages and release
+  verify:
+    name: Verify the release tag
+    # The gate every other job waits on. Publishing to npm and deploying to
+    # production both depend on this passing, but not on each other: nothing
+    # deployed here installs the published packages, they are built from the
+    # source in this checkout. Keeping npm publishing off this critical path
+    # is what lets a deploy start as soon as the code is known good.
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Only `publish-npm` needs the OIDC identity that npm trusts, and only it
+    # needs write. This job builds and runs the test suite, so it takes the
+    # narrowest permissions of the four.
+    permissions:
+      contents: read
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Check out repository
@@ -68,9 +81,49 @@ jobs:
       - name: Build
         run: bun run build
 
+  publish-npm:
+    name: Publish packages and release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # This workflow only runs for maintainer-pushed version tags. The setup
+      # actions do not restore dependency caches in this privileged job.
+      - name: Set up Bun # zizmor: ignore[cache-poisoning] tag-only release job
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build publishable packages
+        # No package declares `files`, so whatever sits in a package directory
+        # at pack time ships in its tarball — `dist/` included. Only the webui
+        # build writes into `packages/`; the app builds the verify job runs
+        # write into `apps/`, so this is the whole of `bun run build` that can
+        # change a published tarball.
+        run: bun run build:webui
+
       - name: Set package versions
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
@@ -127,25 +180,55 @@ jobs:
         # Provenance attestation is automatic under trusted publishing, so
         # --provenance is not passed.
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
+          set -uo pipefail
+
           npm_tag_args=()
           if [[ "$VERSION" == *-* ]]; then
             npm_tag_args=(--tag next)
           fi
+          export NPM_TAG_ARGS="${npm_tag_args[*]-}"
 
-          for manifest in packages/*/package.json; do
-            package_dir="${manifest%/package.json}"
-            package_name="$(node -p "require('./$manifest').name")"
+          # Sixty packages publishing one after another spend almost all of
+          # their time waiting on the registry, so they run concurrently. Each
+          # is an independent registry write: the version rewrite above has
+          # already replaced every `workspace:` range with a literal version,
+          # so no package needs another to be on the registry first. Turn the
+          # width down if npm ever rate-limits the OIDC token exchange.
+          publish_one() {
+            local package_dir="${1%/}"
+            local log status
 
-            if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then
-              echo "$package_name@$VERSION is already published; skipping"
-              continue
+            # Publishing from inside the package directory, rather than with
+            # `--workspace` from the root, keeps npm from resolving all sixty
+            # workspaces to pack one of them.
+            log="$(cd "$package_dir" && npm publish --access public ${NPM_TAG_ARGS} 2>&1)"
+            status=$?
+
+            if (( status == 0 )); then
+              printf '%s\n' "published $package_dir@$VERSION"
+              return 0
             fi
 
-            npm publish --workspace "$package_dir" --access public "${npm_tag_args[@]}"
-          done
+            # A re-run of an interrupted release republishes everything. The
+            # registry rejecting a version it already has is that re-run
+            # working, not a failure — this replaces a per-package `npm view`
+            # precheck that cost a round trip on every package to catch a case
+            # that almost never happens.
+            if grep -qE 'EPUBLISHCONFLICT|[Cc]annot publish over' <<<"$log"; then
+              printf '%s\n' "$package_dir@$VERSION is already published; skipping"
+              return 0
+            fi
+
+            printf '%s\n' "FAILED $package_dir@$VERSION" "$log" >&2
+            return 1
+          }
+          export -f publish_one
+
+          printf '%s\n' packages/*/ \
+            | xargs -P 8 -I{} bash -c 'publish_one "$@"' _ {}
 
       - name: Create GitHub release
         env:
@@ -155,9 +238,11 @@ jobs:
   deploy-marketing:
     name: Deploy marketing site
     # Production follows the tag, not the branch: merging to main integrates
-    # code, and pushing a version tag is what ships it. Both deploys run after
-    # the release is published, so the riskiest step of a release is its last.
-    needs: publish
+    # code, and pushing a version tag is what ships it. Both deploys wait on
+    # the verify gate, so the riskiest step of a release still runs only
+    # against code that typechecks, tests and builds — but they no longer wait
+    # on the npm upload, which they do not consume.
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -204,7 +289,7 @@ jobs:
 
   deploy-backend:
     name: Deploy FrockBot app
-    needs: publish
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
