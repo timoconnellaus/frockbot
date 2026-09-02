@@ -13,8 +13,11 @@ const MODULE = `export const tools = [
   { name: "track_parcel", description: "Tracks a parcel", inputSchema: { type: "object" }, idempotent: true },
 ];
 export async function execute(tool, input, ctx) {
-  const capabilities = await ctx.listCapabilities();
-  if (capabilities.length === 0) return "unavailable";
+  const connectionId = String(input?.connectionId ?? "");
+  const capabilities = await ctx.capabilities.list();
+  const connected = capabilities.status === "available"
+    && capabilities.connections.some((connection) => connection.connectionId === connectionId);
+  if (!connected) return JSON.stringify(await ctx.connection(connectionId));
   return "catalog parcel " + String(input?.id ?? "unknown");
 }
 `;
@@ -119,7 +122,7 @@ async function publishCatalog(generation: string) {
 }
 
 describe("a Bot installing a Package from the Catalog", () => {
-  test("installs hash-pinned code, leaves missing authority unavailable, and package_undo removes it", async () => {
+  test("installs hash-pinned code, remounts after a Connection appears, and package_undo removes it", async () => {
     const id = suffix();
     const userId = `catalog-user-${id}`;
     const botId = `catalog-bot-${id}`;
@@ -157,10 +160,34 @@ describe("a Bot installing a Package from the Catalog", () => {
       userId,
       botId,
       tool: "track_parcel",
-      input: { id: "AU123" },
+      input: { id: "AU123", connectionId: "shipping-1" },
     });
-    expect(used.text).toBe("ok:unavailable");
+    expect(used.text).toContain('ok:{"status":"unavailable"');
     expect(used.loaderCalls).toBe(1);
+
+    // This ready snapshot represents the User-created Connection. It changes
+    // the binding digest, so the next admitted Turn mounts a different isolate
+    // and the Package sees the Connection with no Package-local grant step.
+    const connected = await probe.runTurn({
+      runId: `catalog-connected-${id}`,
+      userId,
+      botId,
+      tool: "track_parcel",
+      input: { id: "AU123", connectionId: "shipping-1" },
+      connections: [
+        {
+          connectionId: "shipping-1",
+          packageId: "parcel-tracking",
+          connectionTypeId: "shipping-account",
+          displayName: "Shipping",
+          generation: "shipping-generation-1",
+          safeMetadata: {},
+        },
+      ],
+    });
+    expect(connected.text).toBe("ok:catalog parcel AU123");
+    expect(connected.loaderCalls).toBe(1);
+    expect(connected.loaderIds).not.toEqual(used.loaderIds);
 
     const undone = await probe.runTurn({
       runId: `catalog-undo-${id}`,

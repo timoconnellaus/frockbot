@@ -167,6 +167,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
   private turn: AuthoringProbeTurn | undefined;
   private lastPin: string | undefined;
   private loaderCalls = 0;
+  private loaderIds: string[] = [];
   private currentToolNames: string[] = [];
 
   constructor(ctx: DurableObjectState, env: AuthoringProbeEnv) {
@@ -207,6 +208,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     return {
       get: (id: string, callback: () => Promise<BotIsolateWorkerCode>) => {
         this.loaderCalls += 1;
+        this.loaderIds.push(id);
         return loader.get(id, callback);
       },
     };
@@ -385,9 +387,11 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     text: string;
     pinnedGenerationId: string | undefined;
     loaderCalls: number;
+    loaderIds: string[];
   }> {
     this.turn = turn;
     this.loaderCalls = 0;
+    this.loaderIds = [];
     const result = await this.authority.run({
       userId: turn.userId,
       botId: turn.botId,
@@ -400,6 +404,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       text: result.text,
       pinnedGenerationId: this.lastPin,
       loaderCalls: this.loaderCalls,
+      loaderIds: [...this.loaderIds],
     };
   }
 

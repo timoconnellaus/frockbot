@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
+import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/kernel-contracts";
 import {
   PROBE_BROKEN_SOURCE,
   PROBE_PACKAGE_SOURCE,
@@ -163,6 +164,22 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     });
 
     expect(JSON.parse(result.content)).toEqual(["CAPABILITIES", "IDENTITY"]);
+  });
+
+  test("the runtime context keys equal the generated self-inspection catalog", async () => {
+    const stub = probe(`context-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "context_keys",
+    });
+
+    expect(JSON.parse(result.content)).toEqual(
+      [...BOT_ISOLATE_CONTEXT_KEYS_V1].sort(),
+    );
   });
 
   test("the isolate reaches no storage, no secret, and no other Bot's Durable Object", async () => {

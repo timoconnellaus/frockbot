@@ -83,6 +83,7 @@ export const tools = [
   { name: "list_capabilities", description: "Lists the Bot's authority", inputSchema: {}, idempotent: true },
   { name: "connection_lease", description: "Requests a lease for one Connection", inputSchema: {}, idempotent: true },
   { name: "schedule_surface", description: "Reports whether durable scheduling is present", inputSchema: {}, idempotent: true },
+  { name: "context_keys", description: "Lists the generated narrow context keys", inputSchema: {}, idempotent: true },
 ];
 
 export const hooks = {
@@ -121,6 +122,8 @@ export async function execute(tool, input, ctx) {
       return JSON.stringify(await ctx.connection(String(input?.connectionId ?? "")));
     case "schedule_surface":
       return typeof ctx.schedule;
+    case "context_keys":
+      return JSON.stringify(Object.keys(ctx).sort());
     case "call_model": {
       const outcome = await ctx.model.invoke(input);
       if (outcome.status !== "streaming") return JSON.stringify(outcome);
@@ -171,10 +174,11 @@ const PROBE_PACKAGE_MANIFEST = {
     "env_keys",
     "leak_probe",
     "reach_network",
-    "ask_authority",
-    "ask_bad_authority",
     "call_model",
     "list_capabilities",
+    "connection_lease",
+    "schedule_surface",
+    "context_keys",
   ].map((name) => ({ name, description: name, inputSchema: {} })),
   hooks: ["agent/tool-exposure"],
   permissions: [],
