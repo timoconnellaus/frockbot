@@ -372,6 +372,18 @@ function handle(
       run: (options) =>
         computer.doctor(options?.signal ?? new AbortController().signal),
     },
+    presence: {
+      connect: async (options) => {
+        const connected = await computer.connect(options);
+        return {
+          id: connected.viewerSessionId,
+          url: connected.viewerUrl,
+          ...(connected.viewerExpiresAt
+            ? { expiresAt: connected.viewerExpiresAt }
+            : {}),
+        };
+      },
+    },
     processes: {
       launch: async (request, options) => {
         const launched = await computer.launchProcess(
@@ -419,7 +431,7 @@ function handle(
     // `flock`, and neither was reachable from workerd (ADR 0004).
     viewer: {
       open: async (options) => {
-        const result = await computer.viewer(options?.signal);
+        const result = await computer.viewer(options);
         if (!result.session) {
           throw new ComputerError(
             "provider-unavailable",
@@ -436,7 +448,7 @@ function handle(
         };
       },
       revoke: async (sessionId, options) => {
-        await computer.revokeViewer(sessionId, options?.signal);
+        await computer.revokeViewer(sessionId, options);
       },
     },
     control: {
@@ -444,11 +456,11 @@ function handle(
       // serves both leases: the per-tenant human takeover it always did, and
       // the User-wide `desktop-gui` lease a `computerUse` subagent holds.
       acquire: async (request, options) =>
-        lease(await computer.takeControl(options?.signal, request)),
+        lease(await computer.takeControl(options, request)),
       renew: async (_current, request, options) =>
-        lease(await computer.refreshControl(options?.signal, request)),
+        lease(await computer.refreshControl(options, request)),
       release: (_current, request, options) =>
-        computer.releaseControl(options?.signal, request),
+        computer.releaseControl(options, request),
     },
     close: () => Promise.resolve(),
   };

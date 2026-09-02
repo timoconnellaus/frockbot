@@ -6,6 +6,10 @@
   "compatibility": { "frockbot": ">=0.0.1" },
   "dependencies": { "shell": ">=0.0.1", "ui-theme": ">=0.0.1" },
   "contributions": {
+    "backend": [
+      { "entry": "./backend", "host": "gateway" },
+      { "entry": "./bot", "host": "bot" }
+    ],
     "runtime": { "entry": "./agent" },
     "client": {
       "entry": "./client",

@@ -106,7 +106,7 @@ describe("computer agent contribution", () => {
   test("satisfies plugin package conventions", () => {
     expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
       name: "@frockbot/plugin-computer",
-      contributionKinds: ["runtime", "client"],
+      contributionKinds: ["backend", "runtime", "client"],
     });
   });
 });

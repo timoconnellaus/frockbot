@@ -67,6 +67,17 @@ import {
   ComputerProcessStore,
   type ComputerProcessStorageV1,
 } from "./process-store.js";
+import {
+  COMPUTER_DOCTOR_ROOT_ID,
+  COMPUTER_SCREENSHOTS_ROOT_ID,
+  COMPUTER_SCREENSHOT_RETENTION,
+} from "./roots.js";
+
+export {
+  COMPUTER_DOCTOR_ROOT_ID,
+  COMPUTER_SCREENSHOTS_ROOT_ID,
+  COMPUTER_SCREENSHOT_RETENTION,
+} from "./roots.js";
 
 export type { ComputerProcessStorageV1 };
 
@@ -97,11 +108,6 @@ export interface ComputerAgentPluginConfig {
    */
   processes?: ComputerProcessStorageV1;
 }
-
-/** The Package-declared durable root screenshots are written to. */
-export const COMPUTER_SCREENSHOTS_ROOT_ID = "screenshots";
-/** Screenshots kept per Bot. Older captures are pruned on the next capture. */
-export const COMPUTER_SCREENSHOT_RETENTION = 20;
 
 /**
  * The width and height a PNG declares in its IHDR chunk.
@@ -153,9 +159,6 @@ function decodeExec(input: unknown): ExecInput | undefined {
   }
   return { command, background: background === true };
 }
-
-/** The Package-declared durable root a self-check report is filed in. */
-export const COMPUTER_DOCTOR_ROOT_ID = "doctor";
 
 /** The durable root a finished process's log tail is mirrored into. */
 export const COMPUTER_PROCESSES_ROOT_ID = "processes";

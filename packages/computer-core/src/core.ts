@@ -522,6 +522,18 @@ export interface ComputerViewer {
   revoke(sessionId: string, options?: ComputerOperationOptions): Promise<void>;
 }
 
+/**
+ * Wakes and provisions a Computer, attaches the Bot tenant, and mints the
+ * viewer session that proves the connection is usable.
+ *
+ * This is one provider-neutral effect because some providers perform those
+ * operations atomically. The caller records one intent before invoking it;
+ * provider-specific viewer transport remains behind the Computer adapter.
+ */
+export interface ComputerPresence {
+  connect(options?: ComputerOperationOptions): Promise<ComputerViewerSession>;
+}
+
 export interface ComputerControlLease {
   id: string;
   expiresAt: string;
@@ -685,6 +697,7 @@ export interface ComputerHandle {
   processes?: ComputerBackgroundProcessesV1;
   /** The Computer's self-check, when the provider ships one. */
   doctor?: ComputerDoctorCapabilityV1;
+  presence?: ComputerPresence;
   viewer?: ComputerViewer;
   control?: ComputerControl;
   close(): Promise<void>;
@@ -761,6 +774,7 @@ function guardedHandle(
     screenshot,
     processes,
     doctor,
+    presence,
     viewer,
     control,
   } = handle;
@@ -827,6 +841,12 @@ function guardedHandle(
       ? {
           run: (options) =>
             guardedOperation(assertCurrent, () => doctor.run(options)),
+        }
+      : undefined,
+    presence: presence
+      ? {
+          connect: (options) =>
+            guardedOperation(assertCurrent, () => presence.connect(options)),
         }
       : undefined,
     viewer: viewer

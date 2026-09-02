@@ -1,5 +1,11 @@
 import type { Entry } from "@cordisjs/plugin-webui";
 import type { ComputerState } from "@frockbot/plugin-computer/shared";
+import {
+  initialComputerMachineState,
+  transitionComputerState,
+  type ComputerMachineEvent,
+  type ComputerMachineState,
+} from "@frockbot/plugin-computer/client-state-machine";
 import type { Context, Plugin } from "cordis";
 import {
   type ComputerBotIdentity,
@@ -21,6 +27,7 @@ class FlySpriteHostController {
   private readonly configured: boolean;
   private readonly entry: Entry<ComputerState>;
   private readonly data: ComputerState;
+  private machine: ComputerMachineState;
   private heartbeat?: ReturnType<typeof setInterval>;
   private takingControl = false;
 
@@ -31,14 +38,17 @@ class FlySpriteHostController {
   ) {
     this.computer = computer.bot(identity);
     this.configured = computer.configured;
-    const data: ComputerState = {
-      phase: computer.configured ? "idle" : "unconfigured",
+    this.machine = transitionComputerState(initialComputerMachineState(), {
+      type: "configured",
       botId: this.computer.botId,
       providerLabel: "Fly Sprites",
+      configured: computer.configured,
       message: computer.configured
         ? "Persistent Fly Sprite computer"
         : "Set SPRITES_TOKEN to attach a computer",
-      takingControl: false,
+    });
+    const data: ComputerState = {
+      ...this.machine,
       connect: () => this.connect(),
       takeControl: () => this.takeOver(),
       releaseControl: () => this.release(),
@@ -71,18 +81,10 @@ class FlySpriteHostController {
 
   private async connect(): Promise<void> {
     if (!this.configured) return;
-    this.mutate({
-      phase: "provisioning",
-      message: "Waking and preparing the Sprite computer…",
-    });
+    this.apply({ type: "connect-requested" });
     try {
       const connection = await this.computer.ensure();
-      this.mutate({
-        phase: "ready",
-        message: "Computer ready",
-        viewerUrl: connection.viewerUrl,
-        takingControl: false,
-      });
+      this.apply({ type: "connected", viewerUrl: connection.viewerUrl });
     } catch (error) {
       this.fail(error);
     }
@@ -92,19 +94,12 @@ class FlySpriteHostController {
     if (!this.configured || this.takingControl) return;
     if (!this.current().viewerUrl) await this.connect();
     if (!this.current().viewerUrl) return;
-    this.mutate({
-      phase: "taking-control",
-      message: "Pausing new agent computer actions…",
-    });
+    this.apply({ type: "take-control-requested" });
     try {
       await this.computer.takeControl();
       this.takingControl = true;
       this.startHeartbeat();
-      this.mutate({
-        phase: "human-control",
-        message: "You have control. Release when finished with private data.",
-        takingControl: true,
-      });
+      this.apply({ type: "control-acquired" });
     } catch (error) {
       this.fail(error);
     }
@@ -116,11 +111,7 @@ class FlySpriteHostController {
       await this.computer.releaseControl();
       this.stopHeartbeat();
       this.takingControl = false;
-      this.mutate({
-        phase: "ready",
-        message: "Computer ready",
-        takingControl: false,
-      });
+      this.apply({ type: "control-released" });
     } catch (error) {
       this.fail(error);
     }
@@ -137,20 +128,25 @@ class FlySpriteHostController {
     if (!this.configured) return;
     try {
       const report = await this.computer.doctor(new AbortController().signal);
-      this.mutate({
+      this.apply({
+        type: "doctor-updated",
         doctor: {
+          version: 1,
           capturedAt: report.capturedAt,
           summary: report.summary,
-          checks: report.checks,
+          checks: report.checks.map((check) => ({ version: 1, ...check })),
         },
       });
     } catch (error) {
-      this.mutate({
+      this.apply({
+        type: "doctor-updated",
         doctor: {
+          version: 1,
           capturedAt: new Date().toISOString(),
           summary: "the self-check could not be run",
           checks: [
             {
+              version: 1,
               name: "self-check",
               status: "fail",
               detail: error instanceof Error ? error.message : String(error),
@@ -182,29 +178,23 @@ class FlySpriteHostController {
       this.stopHeartbeat();
       this.takingControl = false;
       const detail = error instanceof Error ? error.message : String(error);
-      this.mutate({
-        phase: "error",
+      this.apply({
+        type: "failed",
         message: `Human control lease was lost: ${detail}`,
         takingControl: false,
       });
     }
   }
 
-  private mutate(
-    patch: Partial<
-      Pick<
-        ComputerState,
-        "phase" | "message" | "viewerUrl" | "takingControl" | "doctor"
-      >
-    >,
-  ): void {
-    Object.assign(this.data, patch);
-    this.entry.mutate((data) => Object.assign(data, patch));
+  private apply(event: ComputerMachineEvent): void {
+    this.machine = transitionComputerState(this.machine, event);
+    Object.assign(this.data, this.machine);
+    this.entry.mutate((data) => Object.assign(data, this.machine));
   }
 
   private fail(error: unknown): void {
-    this.mutate({
-      phase: "error",
+    this.apply({
+      type: "failed",
       message: error instanceof Error ? error.message : String(error),
       takingControl: this.takingControl,
     });

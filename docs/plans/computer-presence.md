@@ -60,6 +60,8 @@ minutes of looking can lose the display to another Bot.
 
 ## Step 1 — the hosted Computer state (landed: see status line)
 
+**Status:** landed.
+
 **Goal.** The existing card works in the deployed app: phase, viewer session,
 take/release control, retry, doctor, screenshots, all over the hosted protocol.
 

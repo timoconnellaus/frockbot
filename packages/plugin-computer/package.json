@@ -6,7 +6,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
+    "./backend": "./src/backend.ts",
+    "./bot": "./src/bot.ts",
     "./client": "./src/client/application.ts",
+    "./client-state-machine": "./src/client/state-machine.ts",
+    "./protocol": "./src/protocol.ts",
+    "./roots": "./src/roots.ts",
     "./src/client/index.ts": "./src/client/index.ts",
     "./shared": "./src/shared.ts",
     "./shared-provider": "./src/shared-provider.ts",
@@ -30,6 +35,7 @@
     "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-prompt": "workspace:*",
+    "@frockbot/plugin-shell": "workspace:*",
     "@frockbot/plugin-tools": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"

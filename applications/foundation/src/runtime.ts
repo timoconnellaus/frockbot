@@ -92,6 +92,10 @@ import {
   type ComputerProcessStorageV1,
 } from "@frockbot/plugin-computer/agent";
 import {
+  createComputerBackendPlugin,
+  type ComputerGatewayHost,
+} from "@frockbot/plugin-computer/backend";
+import {
   createSharedComputerProviderPlugin,
   type SharedComputerHostClient,
 } from "@frockbot/plugin-computer/shared-provider";
@@ -621,6 +625,7 @@ export type FoundationGatewayHost = {
   backendHost: "gateway";
 } & AdminGatewayHost &
   BotTemplateGatewayHostV1 &
+  ComputerGatewayHost &
   FlockGatewayHost &
   McpGatewayHost &
   SettingsGatewayHost &
@@ -674,6 +679,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-admin/backend"
         ) {
           plugin = createAdminGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-computer/backend"
+        ) {
+          plugin = createComputerBackendPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-flock/backend"

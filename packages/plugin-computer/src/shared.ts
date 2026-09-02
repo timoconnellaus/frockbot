@@ -1,13 +1,11 @@
 import type { InjectionKey, Ref } from "vue";
+import type {
+  ComputerDoctorViewV1,
+  ComputerPhase,
+  ComputerScreenshotViewV1,
+} from "./protocol.js";
 
-export type ComputerPhase =
-  | "unconfigured"
-  | "idle"
-  | "provisioning"
-  | "ready"
-  | "taking-control"
-  | "human-control"
-  | "error";
+export * from "./protocol.js";
 
 /**
  * One capture in the Bot's durable screenshots root, as the card renders it.
@@ -15,12 +13,7 @@ export type ComputerPhase =
  * `url` addresses the Workspace read route rather than the Computer: the
  * capture is durable content in object storage, so showing it wakes nothing.
  */
-export interface ComputerScreenshotViewV1 {
-  path: string;
-  capturedAt: string;
-  contentHash: string;
-  url: string;
-}
+export type { ComputerScreenshotViewV1 };
 
 /**
  * The Computer's last self-check, as the card renders it.
@@ -29,11 +22,7 @@ export interface ComputerScreenshotViewV1 {
  * card only draws it. A Computer that has never been asked has none, which is
  * a different thing from one whose checks all passed.
  */
-export interface ComputerDoctorViewV1 {
-  capturedAt: string;
-  summary: string;
-  checks: { name: string; status: "pass" | "fail"; detail: string }[];
-}
+export type { ComputerDoctorViewV1, ComputerPhase };
 
 /** Provider-neutral state published by the selected Computer adapter. */
 export interface ComputerState {

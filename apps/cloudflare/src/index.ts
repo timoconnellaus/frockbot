@@ -68,6 +68,12 @@ import {
   decodeRoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
 import {
+  decodeComputerCommandReceiptV1,
+  decodeComputerProjectionV1,
+  type ComputerCommandV1,
+} from "@frockbot/plugin-computer/protocol";
+import { ComputerBotNotFoundError } from "@frockbot/plugin-computer/backend";
+import {
   decodeTaskListViewV1,
   decodeTaskViewV1,
 } from "@frockbot/plugin-subagents/shared";
@@ -239,6 +245,8 @@ interface UserScopedProps {
 }
 
 interface BotStateRpc extends BotConfigurationBinding {
+  readComputerPresence(): Promise<unknown>;
+  executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
@@ -301,6 +309,15 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   // SAFETY: Wrangler binds BOT_STATES to BotState; workers-types cannot infer its generated RPC surface.
   const rpc = env.BOT_STATES.get(id) as unknown as RpcBoundary<BotStateRpc>;
   return {
+    readComputerPresence: () =>
+      rpc.readComputerPresence({ schemaVersion: 1, userId, botId }),
+    executeComputerPresenceCommand: (command) =>
+      rpc.executeComputerPresenceCommand({
+        schemaVersion: 1,
+        userId,
+        botId,
+        command,
+      }),
     readSheep: (request) => rpc.readSheep(request),
     updateSheep: (request) => rpc.updateSheep(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
@@ -960,6 +977,29 @@ async function executeBotUnreadCommand(
 }
 
 /**
+ * Proves User-to-Bot membership before the Bot Durable Object is named.
+ * Unknown and foreign Bots therefore share one 404 and cannot cause even an
+ * empty Bot object — or a Computer intent within one — to be created.
+ */
+async function ownedComputerBotState(
+  env: Env,
+  userId: string,
+  botId: string,
+): Promise<BotStateRpc> {
+  const membership = decodeBotMembershipViewV1(
+    rpcJsonSnapshot(
+      await userConfigurationStub(env, userId).hasBot({
+        schemaVersion: 1,
+        userId,
+        botId,
+      }),
+    ),
+  );
+  if (!membership.registered) throw new ComputerBotNotFoundError(botId);
+  return botStateStub(env, userId, botId);
+}
+
+/**
  * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
  *
  * The share id names its owner, so the route needs no index and no lookup
@@ -1121,6 +1161,26 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           ),
         ),
       listBotIdentities: (userId: string) => listBotIdentities(env, userId),
+      readComputer: async (userId: string, botId: string) =>
+        decodeComputerProjectionV1(
+          rpcJsonSnapshot(
+            await (
+              await ownedComputerBotState(env, userId, botId)
+            ).readComputerPresence(),
+          ),
+        ),
+      executeComputerCommand: async (
+        userId: string,
+        botId: string,
+        command: ComputerCommandV1,
+      ) =>
+        decodeComputerCommandReceiptV1(
+          rpcJsonSnapshot(
+            await (
+              await ownedComputerBotState(env, userId, botId)
+            ).executeComputerPresenceCommand(command),
+          ),
+        ),
       searchTranscripts: async (userId: string, query: SearchQueryV1) =>
         decodeSearchIndexResultsV1(
           rpcJsonSnapshot(

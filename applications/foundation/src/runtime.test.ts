@@ -73,6 +73,7 @@ describe("foundation application", () => {
         "audit",
         "settings",
         "bot-template",
+        "computer",
         "credentials",
         "user-machine",
         "mcp",
@@ -390,6 +391,17 @@ describe("foundation application", () => {
       updateSheep: () => Promise.reject(new Error("not used while composing")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
+      readComputer: () =>
+        Promise.resolve({
+          version: 1 as const,
+          botId: "bot",
+          providerLabel: "Fake Computer",
+          phase: "idle" as const,
+          message: "Persistent Computer available",
+          screenshots: [],
+        }),
+      executeComputerCommand: () =>
+        Promise.reject(new Error("not used while composing")),
       searchTranscripts: () =>
         Promise.reject(new Error("not used while composing")),
       rebuildSearchIndex: () =>
@@ -459,6 +471,7 @@ describe("foundation application", () => {
       "admin",
       "audit",
       "bot-template",
+      "computer",
       "flock",
       "mcp",
       "package-publisher",
@@ -485,7 +498,7 @@ describe("foundation application", () => {
         resolve: (specifier, lifecycle) => () =>
           lifecycle.mount({ specifier, startConnection() {} }),
       });
-    expect(botBackend.contributions).toHaveLength(2);
+    expect(botBackend.contributions).toHaveLength(3);
     expect(userBackend.contributions).toHaveLength(11);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
