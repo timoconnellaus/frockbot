@@ -107,8 +107,12 @@ describe("user application security headers", () => {
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
-    // The expanded Computer viewer frames the Sprite's own noVNC page.
-    expect(policy.get("frame-src")).toEqual(["https://*.sprites.app"]);
+    // Package pages use the anonymous UI origin; the expanded Computer viewer
+    // frames the Sprite's own noVNC page.
+    expect(policy.get("frame-src")).toEqual([
+      "https://ui.app.example",
+      "https://*.sprites.app",
+    ]);
     expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
   });
 
@@ -143,6 +147,68 @@ describe("user application security headers", () => {
 });
 
 describe("user application Bot seam", () => {
+  test("projects Package UI and forwards exact direct-tool commands", async () => {
+    const toolCommands: unknown[] = [];
+    const result: BotTurnResult = {
+      schemaVersion: 1,
+      runId: "command-1",
+      text: "Sydney Weather",
+      events: [],
+    };
+    const binding = rpcBindingFor({} as BotStateBinding);
+    binding.listPackageUi = ({ botId }) =>
+      Promise.resolve({
+        schemaVersion: 1,
+        botId,
+        generationId: "generation-ui",
+        contributions: [],
+      });
+    binding.runPackageUiTool = (request) => {
+      toolCommands.push(request);
+      return Promise.resolve(result);
+    };
+    const env: UserApplicationEnv = {
+      BOT_STATE: binding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const fetchUserApplication = createUserApplication();
+
+    const catalogResponse = await fetchUserApplication(
+      new Request("https://app.example/api/bots/primary/package-ui"),
+      env,
+    );
+    expect(catalogResponse.status).toBe(200);
+    expect((await catalogResponse.json()) as Record<string, unknown>).toEqual({
+      schemaVersion: 1,
+      botId: "primary",
+      generationId: "generation-ui",
+      artifactOrigin: "https://ui.app.example",
+      contributions: [],
+    });
+
+    const command = {
+      schemaVersion: 1 as const,
+      commandId: "command-1",
+      generationId: "generation-ui",
+      packageId: "weather-page",
+      name: "weather_lookup",
+      input: { city: "Sydney" },
+    };
+    const toolResponse = await fetchUserApplication(
+      new Request("https://app.example/api/bots/primary/package-ui/tools", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      }),
+      env,
+    );
+    expect(toolResponse.status).toBe(200);
+    expect((await toolResponse.json()) as BotTurnResult).toEqual(result);
+    expect(toolCommands).toEqual([
+      { schemaVersion: 1, botId: "primary", command },
+    ]);
+  });
+
   test("delegates an admitted turn to the Bot owner", async () => {
     const calls: Array<{ botId: string; text: string }> = [];
     const result: BotTurnResult = {
