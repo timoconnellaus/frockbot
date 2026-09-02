@@ -13,6 +13,9 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
   BOTS_ROOT,
+  DESKTOP_LIVE_MARKER,
+  DESKTOP_TENANT_SERVICE_PREFIX,
+  ENSURE_AGENT_SCRIPT,
   LEASE_MAX_AGE_SECONDS,
   PROVISION_DIGEST,
   runtimeDocumentDigestV1,
@@ -134,6 +137,15 @@ export class FakeSprite implements SpriteHandle {
   readonly files = new Map<string, FakeFile>();
   readonly directories = new Set<string>(["/"]);
   readonly services = new Map<string, "running" | "failed">();
+  /** The config each service was declared with, by name. */
+  readonly serviceConfigs = new Map<
+    string,
+    { cmd: string; args?: string[]; httpPort?: number }
+  >();
+  /** Every `createService`, in order, so a test can count declarations. */
+  readonly serviceCreates: string[] = [];
+  /** Lets a test refuse one service the way a real Sprite would. */
+  onCreateService?: (name: string) => void;
   readonly commands: RecordedCommand[] = [];
   url?: string = "https://fake-sprite.invalid";
   urlSettings?: { auth: string };
@@ -175,6 +187,15 @@ export class FakeSprite implements SpriteHandle {
     }
     const selected =
       this.scripts.length > 1 ? this.scripts.shift()! : (this.scripts[0] ?? {});
+    // The attach probe asks the box whether the tenant's VNC port answers. On
+    // a real Computer the only thing that opens that port is the tenant's own
+    // desktop service, so a running one is what the fake answers from.
+    if (stdin.includes(ENSURE_AGENT_SCRIPT) && this.desktopIsRunning()) {
+      return {
+        ...selected,
+        stdout: [...(selected.stdout ?? []), `${DESKTOP_LIVE_MARKER}\n`],
+      };
+    }
     if (
       (selected.stdout ?? []).some((chunk) =>
         chunk.toString().includes('"status":"complete"'),
@@ -193,6 +214,14 @@ export class FakeSprite implements SpriteHandle {
       };
     }
     return selected;
+  }
+
+  private desktopIsRunning(): boolean {
+    for (const [name, state] of this.services) {
+      if (name.startsWith(DESKTOP_TENANT_SERVICE_PREFIX) && state === "running")
+        return true;
+    }
+    return false;
   }
 
   filesystem(): SpriteFilesystemHandle {
@@ -257,8 +286,14 @@ export class FakeSprite implements SpriteHandle {
     };
   }
 
-  async createService(name: string): Promise<SpriteServiceStreamHandle> {
+  async createService(
+    name: string,
+    config: { cmd: string; args?: string[]; httpPort?: number },
+  ): Promise<SpriteServiceStreamHandle> {
+    this.serviceCreates.push(name);
+    this.onCreateService?.(name);
     this.services.set(name, "running");
+    this.serviceConfigs.set(name, config);
     return serviceStream([{ type: "exit", exitCode: 0 }]);
   }
 

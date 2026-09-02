@@ -174,6 +174,39 @@ export const NO_SLOTS_EXIT = 75;
 /** The same refusal, on stdout, for a transport that swallows the exit code. */
 export const NO_SLOTS_MARKER = "__FROCKBOT_NO_SLOTS__";
 
+/** The loopback VNC port of slot 0; a slot's port is this plus its number. */
+export const VNC_PORT_BASE = 5900;
+
+/**
+ * The prefix of a tenant's own desktop service.
+ *
+ * One service per tenant rather than one for the Computer: a slot *is* an
+ * Xvfb, VNC, and CDP triple, so the process group that owns a display belongs
+ * to the tenant holding that slot and dies with it. The prefix is declared
+ * because two call sites need the same answer — the host starts these, and the
+ * `service` op reattaches them after a cold pause, which it may only do for a
+ * Computer-provider-declared name.
+ */
+export const DESKTOP_TENANT_SERVICE_PREFIX = "frockbot-desktop-";
+
+/** The tenant desktop service that `start-desktop.sh` runs under. */
+export function desktopServiceNameV1(botKey: string): string {
+  return `${DESKTOP_TENANT_SERVICE_PREFIX}${botKey}`;
+}
+
+/**
+ * Printed by the attach probe when the tenant's VNC port already answers.
+ *
+ * The probe is the whole reason attaching a tenant does not restart its
+ * desktop on every Turn: `createService` is a create-*or-update*, so calling it
+ * unconditionally would tear down a running Xvfb — and with it the browser and
+ * every page the Bot had open — each time the Computer was opened. A listening
+ * VNC port is the one piece of evidence that the display behind it is real,
+ * which is more than the slot file can say: the slot is an allocation, not a
+ * running process.
+ */
+export const DESKTOP_LIVE_MARKER = "__FROCKBOT_DESKTOP_LIVE__";
+
 /**
  * The one variable that separates a sanctioned GUI call from a shell-driven
  * one.
@@ -316,7 +349,7 @@ ROOT=${RUNTIME_ROOT}
 BOT="$ROOT/bots/$KEY"
 SLOT=$(cat "$BOT/slot")
 DISPLAY_NUMBER=$((100 + SLOT))
-VNC_PORT=$((5900 + SLOT))
+VNC_PORT=$((${VNC_PORT_BASE} + SLOT))
 export DISPLAY=:$DISPLAY_NUMBER
 # The desktop stack *is* the sanctioned surface, so the shims step aside for
 # it. Everything a Bot's own shell runs arrives without this set.
@@ -444,7 +477,7 @@ fi
 TOKEN=$(cat "$BOT/viewer-token")
 TMP=$(mktemp "$ROOT/tokens.XXXXXX")
 grep -v "^$TOKEN:" "$ROOT/tokens" > "$TMP" || true
-printf '%s: 127.0.0.1:%s\n' "$TOKEN" "$((5900 + SLOT))" >> "$TMP"
+printf '%s: 127.0.0.1:%s\n' "$TOKEN" "$((${VNC_PORT_BASE} + SLOT))" >> "$TMP"
 chmod 600 "$TMP"
 mv "$TMP" "$ROOT/tokens"
 `;

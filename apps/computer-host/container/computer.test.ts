@@ -32,6 +32,7 @@ import {
   controlScript,
   DESKTOP_GUI_LEASE_KEY,
   DESKTOP_SERVICE,
+  desktopServiceNameV1,
   ENSURE_AGENT_SCRIPT,
   NO_SLOTS_MARKER,
   PROVISION_DIGEST,
@@ -495,6 +496,62 @@ describe("open", () => {
       `/home/box/agent-data/agents/bot-1-${digest("bot-1").slice(0, 12)}`,
     );
     expect(sprite.commands.at(-1)?.stdin).toContain(ENSURE_AGENT_SCRIPT);
+  });
+
+  test("starts the tenant's own desktop, so the viewer has a screen to reach", async () => {
+    // The defect this is the fix for: `start-desktop.sh` was installed on every
+    // Computer and launched on none. The gateway served noVNC and the token
+    // resolved, so the viewer opened — onto a loopback VNC port with nothing
+    // listening, which noVNC reports as "Failed to connect to server".
+    const { host, sprite } = provisioned();
+    const service = desktopServiceNameV1(
+      `bot-1-${digest("bot-1").slice(0, 12)}`,
+    );
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(decodeComputerHostOpenResultV1(await response.json()).display).toBe(
+      ":107",
+    );
+    expect(sprite.services.get(service)).toBe("running");
+    expect(sprite.serviceConfigs.get(service)).toEqual({
+      cmd: `${RUNTIME_ROOT}/start-desktop.sh`,
+      args: [`bot-1-${digest("bot-1").slice(0, 12)}`],
+    });
+  });
+
+  test("leaves a desktop that is already listening alone", async () => {
+    // `createService` is a create-*or-update*: declaring it on every open would
+    // restart Xvfb, and with it the browser and every page the Bot had open.
+    const { host, sprite } = provisioned();
+    const service = desktopServiceNameV1(
+      `bot-1-${digest("bot-1").slice(0, 12)}`,
+    );
+
+    await host.handle(request({ kind: "open" }));
+    await host.handle(request({ kind: "open" }, { effectId: "open-2" }));
+
+    expect(
+      sprite.serviceCreates.filter((name) => name === service),
+    ).toHaveLength(1);
+  });
+
+  test("reports no display when the tenant's desktop will not start", async () => {
+    // A display is optional, and a screen that failed to start is absent —
+    // never a display the viewer would open onto and find nothing.
+    const { host, sprite } = provisioned();
+    sprite.onCreateService = (name) => {
+      if (name.startsWith("frockbot-desktop-")) {
+        throw new FakeApiError(500, "no capacity for another display");
+      }
+    };
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(response.status).toBe(200);
+    expect(
+      decodeComputerHostOpenResultV1(await response.json()).display,
+    ).toBeUndefined();
   });
 
   test("adopts a Sprite it did not provision, so a restart repeats no effect", async () => {

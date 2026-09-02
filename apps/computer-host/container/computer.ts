@@ -29,7 +29,10 @@ import {
   CONTROL_SCRIPT,
   DATA_ROOT,
   DESKTOP_GUI_LEASE_KEY,
+  DESKTOP_LIVE_MARKER,
   DESKTOP_SERVICE,
+  DESKTOP_TENANT_SERVICE_PREFIX,
+  desktopServiceNameV1,
   ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
   LEASE_MAX_AGE_SECONDS,
@@ -48,6 +51,7 @@ import {
   UPDATE_PHASES,
   UPDATE_STARTING_PHASE,
   updateLaunchScript,
+  VNC_PORT_BASE,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
 } from "@frockbot/computer-host-runtime";
@@ -859,10 +863,20 @@ export class ComputerHost {
       ),
     ).toString("base64");
 
+    // Attaching and asking whether the tenant already has a live screen are one
+    // call: the second answer is one `/dev/tcp` probe against the port the
+    // first just wrote, and a second round trip to the Sprite per Turn buys
+    // nothing. `exec` is gone because the shell has to outlive the script.
     const ensured = await this.run(
       sprite,
       [
-        `exec ${ENSURE_AGENT_SCRIPT} ${shellQuote(botKey)} ${shellQuote(profile)}`,
+        `set -eu`,
+        `${ENSURE_AGENT_SCRIPT} ${shellQuote(botKey)} ${shellQuote(profile)}`,
+        `SLOT=$(cat ${shellQuote(`${BOTS_ROOT}/${botKey}/slot`)} 2>/dev/null || true)`,
+        `if [ -n "$SLOT" ] && (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null; then`,
+        `  echo ${DESKTOP_LIVE_MARKER}`,
+        `fi`,
+        "",
       ].join("\n"),
       "ensure agent",
       COMPUTER_HOST_PHASE_TIMEOUTS.ensureAgent,
@@ -889,7 +903,11 @@ export class ComputerHost {
     // hundred of them, so a tenant that has not been given one — or a Computer
     // whose desktop stack is not up — is answered without a display rather
     // than refused: the exec and file surfaces do not need a screen.
-    const display = await this.displayFor(sprite, botKey);
+    const display = await this.desktop(
+      sprite,
+      botKey,
+      ensuredText.includes(DESKTOP_LIVE_MARKER),
+    );
     const result: ComputerHostOpenResultV1 = {
       version: 1,
       effectId: request.effectId,
@@ -900,6 +918,58 @@ export class ComputerHost {
       ...(record.provisioning ? { provisioning: record.provisioning } : {}),
     };
     return Response.json(result);
+  }
+
+  /**
+   * Brings up the tenant's own desktop, and answers with the display it runs
+   * on.
+   *
+   * The gateway is not the desktop. `start-gateway.sh` serves noVNC and routes
+   * a viewer token to a loopback VNC port, but the process that *owns* that
+   * port — Xvfb, the window manager, the browser, `x11vnc` — is per tenant and
+   * per slot, so it can only be started once a tenant has a slot. Until this
+   * ran, `start-desktop.sh` was installed on every Computer and launched on
+   * none: `websockify` resolved a valid token to a port nothing was listening
+   * on, dropped the socket, and the viewer showed noVNC's own "Failed to
+   * connect to server" over a desktop that had never been started.
+   *
+   * It is declared as a service rather than spawned because a detached process
+   * is assumed dead after a cold pause and only a declared service may be
+   * reattached — which is what the `service` op has always been able to do for
+   * this name.
+   *
+   * A display stays optional (`open` answers without one rather than refusing:
+   * the exec and file surfaces do not need a screen), but "optional" now means
+   * a screen that failed to start is reported as absent instead of as a
+   * display no viewer can reach.
+   */
+  private async desktop(
+    sprite: SpriteHandle,
+    botKey: string,
+    live: boolean,
+  ): Promise<string | undefined> {
+    const display = await this.displayFor(sprite, botKey);
+    if (!display) return undefined;
+    if (live) return display;
+    try {
+      await withTimeout(
+        settleService(
+          await sprite.createService(
+            desktopServiceNameV1(botKey),
+            { cmd: `${RUNTIME_ROOT}/start-desktop.sh`, args: [botKey] },
+            "30s",
+          ),
+          `Desktop for "${botKey}"`,
+        ),
+        "tenant desktop",
+        COMPUTER_HOST_PHASE_TIMEOUTS.service,
+      );
+    } catch {
+      // Reported as no display. The tenant keeps its slot and its files, the
+      // next open tries again, and box-doctor is where a human reads why.
+      return undefined;
+    }
+    return display;
   }
 
   private async displayFor(
@@ -2001,7 +2071,7 @@ export class ComputerHost {
     const declared =
       operation.name === DESKTOP_SERVICE ||
       operation.name === WORKSPACE_SYNC_SERVICE ||
-      operation.name.startsWith("frockbot-desktop-");
+      operation.name.startsWith(DESKTOP_TENANT_SERVICE_PREFIX);
     if (!declared) {
       throw new ComputerHostError(
         "invalid-request",
