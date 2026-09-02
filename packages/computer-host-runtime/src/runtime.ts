@@ -380,20 +380,34 @@ if [ ! -s "$BOT/slot" ]; then
     # a live tenant the new tenant is refused: sharing a display would put two
     # Bots on one screen, which is worse than an unavailable desktop.
     NOW=$(date +%s)
-    VICTIM=""
-    for FILE in $(ls -1tr "$ROOT"/bots/*/slot 2>/dev/null); do
-      CANDIDATE_BOT=$(dirname "$FILE")
-      SEEN=0
-      if [ -f "$CANDIDATE_BOT/last-seen" ]; then SEEN=$(stat -c %Y "$CANDIDATE_BOT/last-seen"); fi
-      if [ $((NOW - SEEN)) -le ${SLOT_IDLE_SECONDS} ]; then continue; fi
-      if [ -f "$CANDIDATE_BOT/human-control" ]; then
-        LEASED=$(stat -c %Y "$CANDIDATE_BOT/human-control")
-        if [ $((NOW - LEASED)) -le ${LEASE_MAX_AGE_SECONDS} ]; then continue; fi
+    DESKTOP_LEASE="$ROOT/bots/${DESKTOP_GUI_LEASE_KEY}/human-control"
+    DESKTOP_LEASE_FRESH=0
+    if [ -f "$DESKTOP_LEASE" ]; then
+      DESKTOP_LEASED=$(stat -c %Y "$DESKTOP_LEASE")
+      if [ $((NOW - DESKTOP_LEASED)) -le ${LEASE_MAX_AGE_SECONDS} ]; then
+        DESKTOP_LEASE_FRESH=1
       fi
-      VICTIM="$FILE"
-      SLOT=$(cat "$FILE")
-      break
-    done
+    fi
+    VICTIM=""
+    # Human takeover and computerUse hold the User-wide screen. Reclaiming
+    # any tenant's display while that lease is fresh would replace the screen
+    # underneath its holder, even when another Bot owned the slot. Avoid the
+    # whole per-tenant scan in that case: no candidate can be eligible.
+    if [ "$DESKTOP_LEASE_FRESH" -ne 1 ]; then
+      for FILE in $(ls -1tr "$ROOT"/bots/*/slot 2>/dev/null); do
+        CANDIDATE_BOT=$(dirname "$FILE")
+        SEEN=0
+        if [ -f "$CANDIDATE_BOT/last-seen" ]; then SEEN=$(stat -c %Y "$CANDIDATE_BOT/last-seen"); fi
+        if [ $((NOW - SEEN)) -le ${SLOT_IDLE_SECONDS} ]; then continue; fi
+        if [ -f "$CANDIDATE_BOT/human-control" ]; then
+          LEASED=$(stat -c %Y "$CANDIDATE_BOT/human-control")
+          if [ $((NOW - LEASED)) -le ${LEASE_MAX_AGE_SECONDS} ]; then continue; fi
+        fi
+        VICTIM="$FILE"
+        SLOT=$(cat "$FILE")
+        break
+      done
+    fi
     if [ -z "$VICTIM" ]; then
       # Said both ways: the exit code is for a caller that gets one, and
       # the marker is for a transport that hands back output instead.
@@ -482,51 +496,73 @@ done
 export const controlScript = `#!/usr/bin/env bash
 set -eu
 if [ "$1" != "--locked" ]; then
+  ACTION="$1"
   KEY="$2"
   BOT=${BOTS_ROOT}/$KEY
   mkdir -p "$BOT"
+  if [ "$ACTION" = "assert-agent" ]; then
+    DESKTOP_KEY="$3"
+    DESKTOP=${BOTS_ROOT}/$DESKTOP_KEY
+    mkdir -p "$DESKTOP"
+    # Every guarded command reads two independently writable leases. Taking
+    # the shared lock first keeps their check in one fixed order and prevents
+    # an acquire from changing the desktop lease midway through the snapshot.
+    exec flock -x "$DESKTOP/control.lock" flock -x "$BOT/control.lock" "$0" --locked "$@"
+  fi
   exec flock -x "$BOT/control.lock" "$0" --locked "$@"
 fi
 shift
 ACTION="$1"
 KEY="$2"
-OWNER="$3"
-MAX_AGE="$4"
 BOT=${BOTS_ROOT}/$KEY
 LEASE="$BOT/human-control"
-current_owner() { sed -n '1p' "$LEASE" 2>/dev/null || true; }
+if [ "$ACTION" = "assert-agent" ]; then
+  DESKTOP_KEY="$3"
+  OWNER="$4"
+  MAX_AGE="$5"
+else
+  OWNER="$3"
+  MAX_AGE="$4"
+fi
+current_owner() { sed -n '1p' "$1" 2>/dev/null || true; }
 is_fresh() {
-  [ -e "$LEASE" ] || return 1
+  CANDIDATE="$1"
+  [ -e "$CANDIDATE" ] || return 1
   NOW=$(date +%s)
-  CHANGED=$(stat -c %Y "$LEASE")
+  CHANGED=$(stat -c %Y "$CANDIDATE")
   [ $((NOW - CHANGED)) -le "$MAX_AGE" ]
+}
+assert_available() {
+  CANDIDATE="$1"
+  EXISTING=$(current_owner "$CANDIDATE")
+  if [ -n "$EXISTING" ] && [ "$EXISTING" != "$OWNER" ]; then
+    if is_fresh "$CANDIDATE"; then echo "This Computer's control lease is held by $EXISTING" >&2; exit 73; fi
+    rm -f "$CANDIDATE"
+  fi
 }
 case "$ACTION" in
   assert-agent)
-    EXISTING=$(current_owner)
-    if [ -n "$EXISTING" ] && [ "$EXISTING" != "$OWNER" ]; then
-      if is_fresh; then echo "The user is controlling this agent's computer" >&2; exit 73; fi
-      rm -f "$LEASE"
-    fi
+    assert_available "$LEASE"
+    assert_available "${BOTS_ROOT}/$DESKTOP_KEY/human-control"
     ;;
   acquire)
-    EXISTING=$(current_owner)
+    EXISTING=$(current_owner "$LEASE")
     if [ "$EXISTING" = "$OWNER" ]; then touch "$LEASE"; exit 0; fi
     # The refusal names the holder: "busy" is not something a caller can act on
     # and "held by <owner>" is — the owner is the task id a computerUse
     # dispatch leased the desktop under.
-    if [ -n "$EXISTING" ] && is_fresh; then echo "This computer's control lease is held by $EXISTING" >&2; exit 73; fi
+    if [ -n "$EXISTING" ] && is_fresh "$LEASE"; then echo "This Computer's control lease is held by $EXISTING" >&2; exit 73; fi
     TMP=$(mktemp "$BOT/human-control.XXXXXX")
     printf '%s\n' "$OWNER" > "$TMP"
     chmod 600 "$TMP"
     mv "$TMP" "$LEASE"
     ;;
   renew)
-    [ "$(current_owner)" = "$OWNER" ] || { echo "Human control lease owner changed" >&2; exit 73; }
+    [ "$(current_owner "$LEASE")" = "$OWNER" ] || { echo "Human control lease owner changed" >&2; exit 73; }
     touch "$LEASE"
     ;;
   release)
-    if [ "$(current_owner)" = "$OWNER" ]; then rm -f "$LEASE"; fi
+    if [ "$(current_owner "$LEASE")" = "$OWNER" ]; then rm -f "$LEASE"; fi
     ;;
   *) echo "unknown control action" >&2; exit 64;;
 esac
@@ -800,6 +836,27 @@ Provisioning's own log is \`${RUNTIME_ROOT}/provision/provision.log\`.
   },
 ];
 
+/** Files the reference phase owns, in the order it installs them. */
+export const REFERENCE_RUNTIME_FILES: readonly {
+  readonly path: string;
+  readonly content: string;
+  readonly mode: number;
+}[] = [
+  ...REFERENCE_DOCS.map((document) => ({
+    path: `${REFERENCE_ROOT}/${document.name}`,
+    content: document.content,
+    mode: 0o644,
+  })),
+  {
+    path: `${REFERENCE_ROOT}/.version`,
+    content: `${REFERENCE_DOCS_VERSION}\n`,
+    mode: 0o644,
+  },
+];
+
+const referenceFilesInstallScript = `mkdir -p ${REFERENCE_ROOT}
+${installDeclaredFiles(REFERENCE_RUNTIME_FILES)}`;
+
 /**
  * Rewrites the shipped reference set when its version has moved.
  *
@@ -809,11 +866,11 @@ Provisioning's own log is \`${RUNTIME_ROOT}/provision/provision.log\`.
  */
 export const referenceInstallScript = `mkdir -p ${REFERENCE_ROOT}
 if [ "$(cat ${REFERENCE_ROOT}/.version 2>/dev/null || true)" != ${shellQuote(REFERENCE_DOCS_VERSION)} ]; then
-${REFERENCE_DOCS.map(
-  (document) =>
-    `  ${installFileAtomic(`${REFERENCE_ROOT}/${document.name}`, document.content)}`,
-).join("\n")}
-  printf '%s\\n' ${shellQuote(REFERENCE_DOCS_VERSION)} > ${REFERENCE_ROOT}/.version
+${referenceFilesInstallScript
+  .split("\n")
+  .slice(1)
+  .map((line) => `  ${line}`)
+  .join("\n")}
 fi`;
 
 export function shellQuote(value: string): string {
@@ -856,6 +913,8 @@ export const PROVISION_ROOT = `${RUNTIME_ROOT}/provision`;
 export const PROVISION_SCRIPT = `${PROVISION_ROOT}/provision.sh`;
 /** One JSON line: which phase the provisioner is on, and how it is going. */
 export const PROVISION_STATE = `${PROVISION_ROOT}/state.json`;
+/** The sha-256 of the runtime document this Computer last completed. */
+export const PROVISION_DIGEST = `${PROVISION_ROOT}/digest`;
 /** Everything the provisioner and its `apt-get` wrote, for a failure report. */
 export const PROVISION_LOG = `${PROVISION_ROOT}/provision.log`;
 /** Held for the life of a run, so "is it still going?" is not a pid guess. */
@@ -1128,6 +1187,56 @@ printf '[box-doctor] SUMMARY %s\\n' "$SUMMARY" >> "$LOG" 2>/dev/null || true
 printf '${DOCTOR_MARKER}{"schemaVersion":${DOCTOR_REPORT_SCHEMA_VERSION},"generation":%s,"capturedAt":"%s","checks":[%s],"browserIdentity":%s,"summary":"%s"}\\n' "$GENERATION" "$CAPTURED_AT" "$CHECKS" "$IDENTITY" "$SUMMARY"
 `;
 
+/** Every declared file installed by the runtime phase, in install order. */
+export const COMPUTER_RUNTIME_FILES: readonly {
+  readonly path: string;
+  readonly content: string;
+  readonly mode: number;
+}[] = [
+  {
+    path: `${RUNTIME_ROOT}/start-desktop.sh`,
+    content: startDesktopScript,
+    mode: 0o700,
+  },
+  { path: ENSURE_AGENT_SCRIPT, content: ensureAgentScript, mode: 0o700 },
+  { path: CONTROL_SCRIPT, content: controlScript, mode: 0o700 },
+  { path: BOUNDED_LOG_SCRIPT, content: boundedLogScript, mode: 0o700 },
+  { path: `${RUNTIME_ROOT}/browser.mjs`, content: browserHelper, mode: 0o700 },
+  {
+    path: `${RUNTIME_ROOT}/start-gateway.sh`,
+    content: gatewayScript,
+    mode: 0o700,
+  },
+  {
+    path: `${RUNTIME_ROOT}/watch-workspace.sh`,
+    content: syncWatchScript,
+    mode: 0o700,
+  },
+  { path: DOCTOR_SCRIPT, content: boxDoctorScript, mode: 0o755 },
+  { path: CHROME_LAUNCHER, content: chromeLauncherScript, mode: 0o755 },
+  ...COMPUTER_GUI_SHELL_COMMANDS.map((name) => ({
+    path: `${SHIMS_ROOT}/${name}`,
+    content: guiShimScript(name),
+    mode: 0o755,
+  })),
+];
+
+function installDeclaredFiles(
+  files: readonly {
+    readonly path: string;
+    readonly content: string;
+    readonly mode: number;
+  }[],
+): string {
+  return files
+    .map(
+      (file) => `${installFile(`${file.path}.tmp`, file.content)}
+chmod ${file.mode.toString(8)} ${file.path}.tmp
+mv ${file.path}.tmp ${file.path}`,
+    )
+    .join("\n");
+}
+
 /**
  * The phases of provisioning a Computer, in order.
  *
@@ -1179,22 +1288,7 @@ fi`,
   {
     name: "runtime",
     label: "installing the Computer runtime",
-    body: `${installFile(`${RUNTIME_ROOT}/start-desktop.sh`, startDesktopScript)}
-${installFile(ENSURE_AGENT_SCRIPT, ensureAgentScript)}
-${installFile(CONTROL_SCRIPT, controlScript)}
-${installFile(BOUNDED_LOG_SCRIPT, boundedLogScript)}
-${installFile(`${RUNTIME_ROOT}/browser.mjs`, browserHelper)}
-${installFile(`${RUNTIME_ROOT}/start-gateway.sh`, gatewayScript)}
-${installFile(`${RUNTIME_ROOT}/watch-workspace.sh`, syncWatchScript)}
-${installFile(DOCTOR_SCRIPT, boxDoctorScript)}
-${installFile(CHROME_LAUNCHER, chromeLauncherScript)}
-${COMPUTER_GUI_SHELL_COMMANDS.map((name) =>
-  installFile(`${SHIMS_ROOT}/${name}`, guiShimScript(name)),
-).join("\n")}
-chmod 700 ${RUNTIME_ROOT}/start-desktop.sh ${ENSURE_AGENT_SCRIPT} ${CONTROL_SCRIPT} ${BOUNDED_LOG_SCRIPT} ${RUNTIME_ROOT}/browser.mjs ${RUNTIME_ROOT}/start-gateway.sh ${RUNTIME_ROOT}/watch-workspace.sh
-chmod 755 ${DOCTOR_SCRIPT} ${CHROME_LAUNCHER} ${COMPUTER_GUI_SHELL_COMMANDS.map(
-      (name) => `${SHIMS_ROOT}/${name}`,
-    ).join(" ")}`,
+    body: installDeclaredFiles(COMPUTER_RUNTIME_FILES),
   },
   {
     name: "browser",
@@ -1235,6 +1329,42 @@ fi`,
   },
 ];
 
+/**
+ * The only phases an in-place runtime update may run.
+ *
+ * These atomically replace files owned by the provisioner. They never run
+ * `apt`, install a browser, replace the instance, or touch `/home/box` User
+ * content, the shared browser profile, or any durable root. A running Turn
+ * keeps the old inode while each name is swapped, so it is not interrupted.
+ * That is the Computer and Workspace rule made executable: an automatic
+ * update loses nothing and cannot become an undeclared durability mechanism.
+ */
+export const UPDATE_PHASES: readonly {
+  readonly name: string;
+  readonly label: string;
+  readonly body: string;
+}[] = [
+  {
+    name: "runtime",
+    label: "Updating the Computer runtime",
+    body: PROVISION_PHASES.find((phase) => phase.name === "runtime")!.body,
+  },
+  {
+    name: "reference",
+    label: "Updating the Computer reference",
+    // The document digest, not the hand-maintained reference version, is the
+    // update trigger. Always rewrite these files so a one-byte source change
+    // cannot be acknowledged without reaching an existing Computer.
+    body: referenceFilesInstallScript,
+  },
+];
+
+/** The first progress report for an in-place update. */
+export const UPDATE_STARTING_PHASE = {
+  name: "starting",
+  label: "Updating the Computer runtime document",
+} as const;
+
 /** The phase a run reports before it has entered the first real one. */
 export const PROVISION_STARTING_PHASE = {
   name: "starting",
@@ -1242,15 +1372,20 @@ export const PROVISION_STARTING_PHASE = {
 } as const;
 
 function provisionStateLine(
+  kind: "provision" | "update",
+  digest: string,
   index: number,
+  total: number,
   name: string,
   label: string,
   status: string,
 ): string {
   return JSON.stringify({
     version: 1,
+    kind,
+    documentDigest: digest,
     index,
-    total: PROVISION_PHASES.length,
+    total,
     phase: name,
     label,
     status,
@@ -1260,8 +1395,10 @@ function provisionStateLine(
 /**
  * The provisioning document, run detached and resumable.
  *
- * Every phase is guarded by its marker, so running this again on a
- * half-provisioned Computer completes it rather than starting over, and every
+ * Provisioning guards every phase with its marker, so running this again on a
+ * half-provisioned Computer completes it rather than starting over. Update
+ * mode runs only `UPDATE_PHASES`, with no markers: they are idempotent atomic
+ * file installs and must run again whenever the document digest moves. Every
  * phase records where it has got to before it begins. `set -E` is what makes
  * the `ERR` trap fire from inside a function or a subshell, so a failure is
  * recorded rather than merely exiting.
@@ -1277,6 +1414,12 @@ function provisionStateLine(
 export const provisionScript = `#!/usr/bin/env bash
 set -eEu
 ${provisionPathPreamble}
+KIND="\${1:-provision}"
+DIGEST="\${2:-}"
+case "$KIND:$DIGEST" in
+  provision:[0-9a-f][0-9a-f]*|update:[0-9a-f][0-9a-f]*) ;;
+  *) echo "provisioner needs provision|update and a runtime digest" >&2; exit 64;;
+esac
 sprite_task() {
   curl -sS --max-time 10 --unix-socket ${SPRITE_API_SOCKET} "$@" >/dev/null 2>&1 || true
 }
@@ -1294,14 +1437,30 @@ MARKERS=${PROVISION_MARKERS}
 STATE=${PROVISION_STATE}
 mkdir -p "$MARKERS"
 INDEX=0
-NAME=${PROVISION_STARTING_PHASE.name}
-LABEL='${PROVISION_STARTING_PHASE.label}'
+if [ "$KIND" = update ]; then
+  TOTAL=${UPDATE_PHASES.length}
+  NAME=${UPDATE_STARTING_PHASE.name}
+  LABEL=${shellQuote(UPDATE_STARTING_PHASE.label)}
+else
+  TOTAL=${PROVISION_PHASES.length}
+  NAME=${PROVISION_STARTING_PHASE.name}
+  LABEL=${shellQuote(PROVISION_STARTING_PHASE.label)}
+fi
 state() {
   TMP=$(mktemp "$STATE.XXXXXX")
-  printf '{"version":1,"index":%s,"total":${PROVISION_PHASES.length},"phase":"%s","label":"%s","status":"%s"}\\n' "$INDEX" "$NAME" "$LABEL" "$1" > "$TMP"
+  printf '{"version":1,"kind":"%s","documentDigest":"%s","index":%s,"total":%s,"phase":"%s","label":"%s","status":"%s"}\\n' "$KIND" "$DIGEST" "$INDEX" "$TOTAL" "$NAME" "$LABEL" "$1" > "$TMP"
   mv "$TMP" "$STATE"
 }
 trap 'state failed' ERR
+if [ "$KIND" = update ]; then
+${UPDATE_PHASES.map(
+  (phase, position) => `  INDEX=${position + 1}
+  NAME=${phase.name}
+  LABEL=${shellQuote(phase.label)}
+  state running
+${phase.body}`,
+).join("\n")}
+else
 ${PROVISION_PHASES.map(
   (phase, position) => `INDEX=${position + 1}
 NAME=${phase.name}
@@ -1316,11 +1475,123 @@ ${phase.body}
 fi`
 }`,
 ).join("\n")}
-INDEX=${PROVISION_PHASES.length}
+fi
+INDEX=$TOTAL
 NAME=ready
-LABEL='the Computer is ready'
+if [ "$KIND" = update ]; then
+  LABEL='the Computer update is complete'
+else
+  LABEL='the Computer is ready'
+fi
 state complete
+DIGEST_TMP=$(mktemp ${PROVISION_DIGEST}.XXXXXX)
+printf '%s\\n' "$DIGEST" > "$DIGEST_TMP"
+mv "$DIGEST_TMP" ${PROVISION_DIGEST}
 `;
+
+/**
+ * Every declared file in the runtime document, in digest order.
+ *
+ * The phase bodies install from `COMPUTER_RUNTIME_FILES` and
+ * `REFERENCE_RUNTIME_FILES`, and the launcher installs `provisionScript`
+ * itself. The digest consumes those same sources so adding a provisioned file
+ * necessarily adds it here rather than creating a second hand-kept inventory.
+ */
+export const RUNTIME_DOCUMENT_FILES: readonly {
+  readonly path: string;
+  readonly content: string;
+}[] = [
+  { path: PROVISION_SCRIPT, content: provisionScript },
+  ...COMPUTER_RUNTIME_FILES,
+  ...REFERENCE_RUNTIME_FILES,
+];
+
+/** sha-256 in plain TypeScript, so the Worker and Node container agree. */
+function sha256HexV1(value: string): string {
+  const source = new TextEncoder().encode(value);
+  const paddedLength = Math.ceil((source.byteLength + 9) / 64) * 64;
+  const bytes = new Uint8Array(paddedLength);
+  bytes.set(source);
+  bytes[source.byteLength] = 0x80;
+  const bits = source.byteLength * 8;
+  const view = new DataView(bytes.buffer);
+  view.setUint32(paddedLength - 8, Math.floor(bits / 0x1_0000_0000));
+  view.setUint32(paddedLength - 4, bits >>> 0);
+
+  const constants = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ] as const;
+  const state = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
+    0x1f83d9ab, 0x5be0cd19,
+  ]);
+  const words = new Uint32Array(64);
+  const rotate = (word: number, count: number) =>
+    (word >>> count) | (word << (32 - count));
+
+  for (let offset = 0; offset < bytes.byteLength; offset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      words[index] = view.getUint32(offset + index * 4);
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const before = words[index - 15]!;
+      const recent = words[index - 2]!;
+      const s0 = rotate(before, 7) ^ rotate(before, 18) ^ (before >>> 3);
+      const s1 = rotate(recent, 17) ^ rotate(recent, 19) ^ (recent >>> 10);
+      words[index] = (words[index - 16]! + s0 + words[index - 7]! + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = state;
+    for (let index = 0; index < 64; index += 1) {
+      const sum1 = rotate(e!, 6) ^ rotate(e!, 11) ^ rotate(e!, 25);
+      const choose = (e! & f!) ^ (~e! & g!);
+      const first =
+        (h! + sum1 + choose + constants[index]! + words[index]!) >>> 0;
+      const sum0 = rotate(a!, 2) ^ rotate(a!, 13) ^ rotate(a!, 22);
+      const majority = (a! & b!) ^ (a! & c!) ^ (b! & c!);
+      const second = (sum0 + majority) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d! + first) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (first + second) >>> 0;
+    }
+    state[0] = (state[0]! + a!) >>> 0;
+    state[1] = (state[1]! + b!) >>> 0;
+    state[2] = (state[2]! + c!) >>> 0;
+    state[3] = (state[3]! + d!) >>> 0;
+    state[4] = (state[4]! + e!) >>> 0;
+    state[5] = (state[5]! + f!) >>> 0;
+    state[6] = (state[6]! + g!) >>> 0;
+    state[7] = (state[7]! + h!) >>> 0;
+  }
+  return [...state].map((word) => word.toString(16).padStart(8, "0")).join("");
+}
+
+/**
+ * sha-256 over every installed runtime-document file's content, framed in a
+ * fixed order so a boundary move cannot preserve the answer accidentally.
+ */
+export function runtimeDocumentDigestV1(): string {
+  return sha256HexV1(
+    RUNTIME_DOCUMENT_FILES.map((file) => {
+      const length = new TextEncoder().encode(file.content).byteLength;
+      return `${length}\0${file.content}`;
+    }).join(""),
+  );
+}
 
 /**
  * How long a provisioner waits for the run lock before giving up.
@@ -1342,7 +1613,43 @@ const PROVISION_LOCK_WAIT_SECONDS = 30;
  * and `flock -n` so two launchers cannot produce two `apt-get` runs on one
  * Computer.
  */
-export const provisionLaunchScript = `set -eu
+function launchScript(kind: "provision" | "update"): string {
+  const digest = runtimeDocumentDigestV1();
+  const starting =
+    kind === "update" ? UPDATE_STARTING_PHASE : PROVISION_STARTING_PHASE;
+  const total =
+    kind === "update" ? UPDATE_PHASES.length : PROVISION_PHASES.length;
+  const startingState = provisionStateLine(
+    kind,
+    digest,
+    0,
+    total,
+    starting.name,
+    starting.label,
+    "running",
+  );
+  const completeState = provisionStateLine(
+    kind,
+    digest,
+    total,
+    total,
+    "ready",
+    kind === "update"
+      ? "the Computer update is complete"
+      : "the Computer is ready",
+    "complete",
+  );
+  const shouldRun =
+    kind === "update"
+      ? `[ "$(cat ${PROVISION_DIGEST} 2>/dev/null || true)" != ${digest} ]`
+      : `! grep -q '"status":"complete"' ${PROVISION_STATE} 2>/dev/null`;
+  const initializeState =
+    kind === "update"
+      ? `if ! grep -q '"kind":"update".*"status":"running"' ${PROVISION_STATE} 2>/dev/null; then
+      printf '%s\\n' ${shellQuote(startingState)} > ${PROVISION_STATE}
+    fi`
+      : `[ -s ${PROVISION_STATE} ] || printf '%s\\n' ${shellQuote(startingState)} > ${PROVISION_STATE}`;
+  return `set -eu
 mkdir -p ${PROVISION_ROOT} ${PROVISION_MARKERS}
 touch ${PROVISION_LOCK}
 # Probed once, before anything is started. A second probe after the launch
@@ -1353,25 +1660,24 @@ if [ "$RUNNER" = stopped ]; then
   ${installFile(`${PROVISION_SCRIPT}.tmp`, provisionScript)}
   chmod 700 ${PROVISION_SCRIPT}.tmp
   mv ${PROVISION_SCRIPT}.tmp ${PROVISION_SCRIPT}
-  if ! grep -q '"status":"complete"' ${PROVISION_STATE} 2>/dev/null; then
+  if ${shouldRun}; then
     # Only when there is nothing to keep. A relaunch resumes an install that
     # already reached a phase, and reporting it as "starting" again would make
     # a resume look like a restart to whoever is watching.
-    [ -s ${PROVISION_STATE} ] || printf '%s\\n' ${shellQuote(
-      provisionStateLine(
-        0,
-        PROVISION_STARTING_PHASE.name,
-        PROVISION_STARTING_PHASE.label,
-        "running",
-      ),
-    )} > ${PROVISION_STATE}
-    setsid nohup flock -w ${PROVISION_LOCK_WAIT_SECONDS} ${PROVISION_LOCK} bash ${PROVISION_SCRIPT} >>${PROVISION_LOG} 2>&1 </dev/null &
+    ${initializeState}
+    setsid nohup flock -w ${PROVISION_LOCK_WAIT_SECONDS} ${PROVISION_LOCK} bash ${PROVISION_SCRIPT} ${kind} ${digest} >>${PROVISION_LOG} 2>&1 </dev/null &
     RUNNER=running
+  elif [ ${shellQuote(kind)} = update ]; then
+    printf '%s\\n' ${shellQuote(completeState)} > ${PROVISION_STATE}
   fi
 fi
 printf '${PROVISION_RUNNER_PREFIX}%s\\n' "$RUNNER"
 cat ${PROVISION_STATE} 2>/dev/null || true
 `;
+}
+
+export const provisionLaunchScript = launchScript("provision");
+export const updateLaunchScript = launchScript("update");
 
 /**
  * One poll: it starts nothing and answers immediately.
@@ -1392,138 +1698,6 @@ cat ${PROVISION_STATE} 2>/dev/null || true
 /** The tail of the provisioner's own log, for a failure report. */
 export const provisionLogTailScript = `tail -c 2000 ${PROVISION_LOG} 2>/dev/null || true
 `;
-
-/**
- * Every file `provisionScript` installs under the runtime root, with the mode
- * it installs them under.
- *
- * The provisioning script still writes them itself, because it is one bash
- * document that must run to completion on a Sprite that may have just cold
- * started. This list is how a caller that has the Sprites filesystem API can
- * put the same bytes in the same places without shelling out at all — the
- * migration path decision 3 of the plan defers, and the inventory a test can
- * assert against so a new runtime file cannot be added in one place only.
- */
-export const COMPUTER_RUNTIME_FILES: readonly {
-  path: string;
-  content: string;
-  mode: number;
-}[] = [
-  {
-    path: `${RUNTIME_ROOT}/start-desktop.sh`,
-    content: startDesktopScript,
-    mode: 0o700,
-  },
-  { path: ENSURE_AGENT_SCRIPT, content: ensureAgentScript, mode: 0o700 },
-  { path: CONTROL_SCRIPT, content: controlScript, mode: 0o700 },
-  { path: BOUNDED_LOG_SCRIPT, content: boundedLogScript, mode: 0o700 },
-  { path: `${RUNTIME_ROOT}/browser.mjs`, content: browserHelper, mode: 0o700 },
-  {
-    path: `${RUNTIME_ROOT}/start-gateway.sh`,
-    content: gatewayScript,
-    mode: 0o700,
-  },
-  {
-    path: `${RUNTIME_ROOT}/watch-workspace.sh`,
-    content: syncWatchScript,
-    mode: 0o700,
-  },
-  // Read by a Bot's own shell as well as by the provider, so 755 rather than
-  // 700: the runtime root is 700 and the tenant runs as the same user, but
-  // these are the two files a human debugging the box reaches for.
-  { path: DOCTOR_SCRIPT, content: boxDoctorScript, mode: 0o755 },
-  { path: CHROME_LAUNCHER, content: chromeLauncherScript, mode: 0o755 },
-  ...COMPUTER_GUI_SHELL_COMMANDS.map((name) => ({
-    path: `${SHIMS_ROOT}/${name}`,
-    content: guiShimScript(name),
-    mode: 0o755,
-  })),
-];
-
-/**
- * The directories an adopted Computer may be missing.
- *
- * They are created with the filesystem API, which takes no mode, so a Computer
- * that gains its shared scratch this way gets the API's default ownership
- * rather than the `0775 box` a fresh provisioning gives it. That is an
- * observable failure state rather than a hidden one: box-doctor's `scratch`
- * check reports a scratch its tenant cannot write, and a reprovisioning fixes
- * it.
- */
-export const COMPUTER_REFRESH_DIRECTORIES: readonly string[] = [
-  BIN_ROOT,
-  SHIMS_ROOT,
-  REFERENCE_ROOT,
-  SCRATCH_ROOT,
-];
-
-/**
- * Everything a Computer provisioned by an earlier build is missing, and that
- * can be installed onto a *running* Computer without disturbing it.
- *
- * Adoption is the short-circuit that makes a container restart a non-event: a
- * Sprite with a state file is adopted and its provisioning document never runs
- * on it again. Without this list, a Computer provisioned last week would never
- * gain this week's self-check, launcher, shims, or reference documents.
- *
- * It is deliberately **not** every runtime file. `start-desktop.sh`,
- * `control.sh`, and the rest may be open in a running process, and the
- * filesystem API writes in place — rewriting a script bash is part-way through
- * reading is how a Computer breaks in a way nobody can reproduce. Those
- * change with a reprovisioning, as they always have. Everything here is a file
- * no running process holds.
- */
-export const COMPUTER_REFRESH_FILES: readonly {
-  path: string;
-  content: string;
-  mode: number;
-}[] = [
-  { path: DOCTOR_SCRIPT, content: boxDoctorScript, mode: 0o755 },
-  { path: CHROME_LAUNCHER, content: chromeLauncherScript, mode: 0o755 },
-  ...COMPUTER_GUI_SHELL_COMMANDS.map((name) => ({
-    path: `${SHIMS_ROOT}/${name}`,
-    content: guiShimScript(name),
-    mode: 0o755,
-  })),
-  ...REFERENCE_DOCS.map((document) => ({
-    path: `${REFERENCE_ROOT}/${document.name}`,
-    content: document.content,
-    mode: 0o644,
-  })),
-  {
-    path: `${REFERENCE_ROOT}/.version`,
-    content: `${REFERENCE_DOCS_VERSION}\n`,
-    mode: 0o644,
-  },
-];
-
-/** Where a Computer records which refresh it last took. */
-export const COMPUTER_REFRESH_STAMP = `${RUNTIME_ROOT}/refresh.version`;
-
-/**
- * A fingerprint of everything above, so the refresh is a single file read on a
- * Computer that is already current.
- *
- * FNV-1a, and a cache key rather than a security primitive: the only question
- * it answers is "are the bytes on that Computer the bytes this build ships",
- * and a caller that guesses wrong reinstalls files it did not need to.
- * Derived rather than declared, so a runtime file cannot be changed without
- * the Computers already out there noticing.
- */
-export const COMPUTER_REFRESH_FINGERPRINT = fnv1aHexV1(
-  COMPUTER_REFRESH_FILES.map(
-    (file) => `${file.path}:${file.mode}:${file.content}`,
-  ).join("\u0000"),
-);
-
-function fnv1aHexV1(value: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
-}
 
 /** The Sprite name pattern a Computer may take: 3-63 lowercase DNS characters. */
 export const COMPUTER_SPRITE_NAME = /^[a-z][a-z0-9-]{2,62}$/;

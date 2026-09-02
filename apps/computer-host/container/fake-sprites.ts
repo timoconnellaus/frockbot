@@ -11,6 +11,12 @@
 
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import {
+  BOTS_ROOT,
+  LEASE_MAX_AGE_SECONDS,
+  PROVISION_DIGEST,
+  runtimeDocumentDigestV1,
+} from "@frockbot/computer-host-runtime";
 import type {
   SpriteCommandHandle,
   SpriteDirentHandle,
@@ -47,6 +53,8 @@ export interface ScriptedCommand {
    * never opens: once from the socket's handler, once as it closes.
    */
   errorEmissions?: number;
+  /** Runs after output is delivered, for a detached effect the fake models. */
+  after?: () => void;
 }
 
 export interface RecordedCommand {
@@ -65,9 +73,10 @@ class FakeCommand extends EventEmitter implements SpriteCommandHandle {
     this.exitResolve = resolve;
   });
   private settled = false;
+  private active?: ScriptedCommand;
 
   constructor(
-    private readonly script: ScriptedCommand,
+    private readonly scriptFor: (stdin: string) => ScriptedCommand,
     private readonly record: RecordedCommand,
   ) {
     super();
@@ -77,21 +86,23 @@ class FakeCommand extends EventEmitter implements SpriteCommandHandle {
       this.record.stdin = Buffer.concat(chunks).toString("utf8");
       queueMicrotask(() => this.run());
     });
-    queueMicrotask(() => {
-      if (script.error) {
-        for (let index = 0; index < (script.errorEmissions ?? 1); index += 1) {
-          this.emit("error", new Error(script.error));
-        }
-      } else this.emit("spawn");
-    });
+    queueMicrotask(() => this.emit("spawn"));
   }
 
   private run(): void {
-    if (this.script.error) return;
-    for (const chunk of this.script.stdout ?? []) this.stdout.write(chunk);
-    for (const chunk of this.script.stderr ?? []) this.stderr.write(chunk);
-    if (this.script.hang) return;
-    this.finish(this.script.exitCode ?? 0);
+    const script = this.scriptFor(this.record.stdin);
+    this.active = script;
+    if (script.error) {
+      for (let index = 0; index < (script.errorEmissions ?? 1); index += 1) {
+        this.emit("error", new Error(script.error));
+      }
+      return;
+    }
+    for (const chunk of script.stdout ?? []) this.stdout.write(chunk);
+    for (const chunk of script.stderr ?? []) this.stderr.write(chunk);
+    script.after?.();
+    if (script.hang) return;
+    this.finish(script.exitCode ?? 0);
   }
 
   private finish(code: number): void {
@@ -109,7 +120,7 @@ class FakeCommand extends EventEmitter implements SpriteCommandHandle {
 
   kill(signal = "SIGTERM"): void {
     this.record.signals.push(signal);
-    this.finish(this.script.killedExitCode ?? 143);
+    this.finish(this.active?.killedExitCode ?? 143);
   }
 }
 
@@ -132,8 +143,6 @@ export class FakeSprite implements SpriteHandle {
   constructor(readonly name: string) {}
 
   spawn(command: string, args: string[] = []): SpriteCommandHandle {
-    const script =
-      this.scripts.length > 1 ? this.scripts.shift()! : (this.scripts[0] ?? {});
     const record: RecordedCommand = {
       command,
       args,
@@ -141,7 +150,49 @@ export class FakeSprite implements SpriteHandle {
       signals: [],
     };
     this.commands.push(record);
-    return new FakeCommand(script, record);
+    return new FakeCommand((stdin) => this.scriptFor(stdin), record);
+  }
+
+  private scriptFor(stdin: string): ScriptedCommand {
+    if (stdin.includes("frockbot-adoption-state:")) {
+      const state = this.files.get("/home/box/.frockbot/host-state.json");
+      const digest = this.files.get(PROVISION_DIGEST);
+      const now = Date.parse("2026-08-31T00:00:00.000Z");
+      const human = [...this.files.entries()].some(
+        ([path, file]) =>
+          path.startsWith(`${BOTS_ROOT}/`) &&
+          path.endsWith("/human-control") &&
+          now - file.mtime.getTime() <= LEASE_MAX_AGE_SECONDS * 1_000,
+      );
+      return {
+        stdout: [
+          `frockbot-adoption-state:${state ? state.bytes.toString("base64") : ""}\n`,
+          `frockbot-adoption-digest:${digest?.bytes.toString("utf8").trim() ?? ""}\n`,
+          `frockbot-adoption-human:${human ? "1" : "0"}\n`,
+        ],
+        exitCode: 0,
+      };
+    }
+    const selected =
+      this.scripts.length > 1 ? this.scripts.shift()! : (this.scripts[0] ?? {});
+    if (
+      (selected.stdout ?? []).some((chunk) =>
+        chunk.toString().includes('"status":"complete"'),
+      )
+    ) {
+      return {
+        ...selected,
+        after: () => {
+          selected.after?.();
+          this.files.set(PROVISION_DIGEST, {
+            bytes: Buffer.from(`${runtimeDocumentDigestV1()}\n`),
+            mode: 0o600,
+            mtime: new Date("2026-08-31T00:00:00.000Z"),
+          });
+        },
+      };
+    }
+    return selected;
   }
 
   filesystem(): SpriteFilesystemHandle {

@@ -563,6 +563,18 @@ export interface SessionEventMap {
     status: "starting" | "running" | "exited" | "unknown";
     exitCode?: number;
   };
+  /**
+   * The dynamic Computer line this Turn added to its system prompt. An empty
+   * `text` is an explicit wake-free read that found no fresh human lease; a
+   * non-empty value records the exact line plus the durable lease generation
+   * fields that selected it.
+   */
+  "computer/injected": {
+    turn: number;
+    text: string;
+    ownerId?: string;
+    expiresAt?: string;
+  };
   "computer/sync": {
     turn: number;
     reason: "open" | "signal" | "turn-end";
@@ -1597,6 +1609,21 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           !Number.isSafeInteger(event.exitCode))
       ) {
         throw new Error("session event.exitCode must be an integer");
+      }
+      break;
+    }
+    case "computer/injected": {
+      const active = event.text !== "";
+      requireEventKeys(
+        event,
+        keys("turn", "text", ...(active ? ["ownerId", "expiresAt"] : [])),
+        "session event",
+      );
+      turn();
+      eventString(event.text, "session event.text", true);
+      if (active) {
+        eventString(event.ownerId, "session event.ownerId");
+        eventTimestamp(event.expiresAt, "session event.expiresAt");
       }
       break;
     }

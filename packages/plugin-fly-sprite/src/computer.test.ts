@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { verifyPluginPackage } from "@frockbot/plugin-testkit";
+import { DESKTOP_GUI_LEASE_KEY } from "@frockbot/computer-host-runtime";
 import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
 import {
@@ -88,11 +89,15 @@ function fakeHost(): FakeComputerHost {
   return new FakeComputerHost(computerRunner);
 }
 
-function attach(host: FakeComputerHost): FlySpriteComputer {
+function attach(
+  host: FakeComputerHost,
+  agentControlOwnerId?: string,
+): FlySpriteComputer {
   return new FlySpriteComputer({
     identity: { userId: "owner" },
     host: host.factory,
     spriteName: "frockbot-test",
+    ...(agentControlOwnerId ? { agentControlOwnerId } : {}),
   });
 }
 
@@ -146,9 +151,8 @@ describe("Fly Sprite computer", () => {
     const host = fakeHost();
     const computer = attach(host);
 
-    const general = await computer
-      .bot({ id: "general", name: "General" })
-      .ensure();
+    const generalComputer = computer.bot({ id: "general", name: "General" });
+    const general = await generalComputer.ensure();
     const health = await computer.bot("health").ensure();
 
     expect(general.botKey).not.toBe(health.botKey);
@@ -166,6 +170,37 @@ describe("Fly Sprite computer", () => {
       "open",
     ]);
     expect(computer.displayForTenant(computerBotKey("general"))).toBe(":100");
+    await generalComputer.refreshViewer(general.viewerSessionId);
+    expect(host.viewerSessions.map(({ action }) => action)).toEqual([
+      "open",
+      "open",
+      "renew",
+    ]);
+  });
+
+  test("describes an in-place runtime update in the provider message", async () => {
+    const host = fakeHost();
+    host.provisioning = {
+      kind: "update",
+      phase: "runtime",
+      label: "Updating the Computer runtime",
+      index: 1,
+      total: 2,
+      status: "complete",
+      resumed: false,
+    };
+
+    const provider = new FlySpriteComputerProvider(attach(host));
+    const computer = await provider.open(
+      { userId: "owner" },
+      { botId: "general" },
+      { providerId: "fly-sprite", generation: 1 },
+    );
+    const connected = await computer.presence?.connect();
+
+    expect(connected?.message).toBe(
+      "Updating the Computer: Updating the Computer runtime",
+    );
   });
 
   test("an unconfigured Computer refuses rather than pretending", async () => {
@@ -194,7 +229,7 @@ describe("Fly Sprite computer", () => {
     expect(host.commands.at(-1)?.script).toBe(script);
   });
 
-  test("blocks only the agent desktop that is under human control", async () => {
+  test("a human session holds the User-wide desktop lease and blocks every Bot", async () => {
     // One Computer, two clients of it — a human's and a Bot's — exactly as one
     // Sprite's `flock` is shared across everything that reaches it.
     const host = fakeHost();
@@ -202,6 +237,11 @@ describe("Fly Sprite computer", () => {
     const generalHost = hostComputer.bot("general");
     await generalHost.ensure();
     await generalHost.takeControl();
+    expect(host.leases.get(DESKTOP_GUI_LEASE_KEY)?.owner).toBe(
+      generalHost.controlOwnerId,
+    );
+    expect(generalHost.controlOwnerId).toStartWith("human:");
+    expect(host.leases.has(computerBotKey("general"))).toBe(false);
 
     const agentComputer = attach(host);
     const generalAgent = agentComputer.bot("general");
@@ -238,12 +278,51 @@ describe("Fly Sprite computer", () => {
         expectedGenerationId: null,
       }),
     ).resolves.toMatchObject({ status: "ok" });
-    expect(
-      await agentComputer.bot("health").run("echo tool-output", signal()),
-    ).toContain("tool-output");
+    await expect(
+      agentComputer.bot("health").run("echo tool-output", signal()),
+    ).rejects.toThrow(generalHost.controlOwnerId);
 
     await generalHost.releaseControl();
+    expect(host.leases.has(DESKTOP_GUI_LEASE_KEY)).toBe(false);
     expect(await generalAgent.run("echo tool-output", signal())).toContain(
+      "tool-output",
+    );
+  });
+
+  test("the guarded command checks both the tenant and User-wide lease keys", async () => {
+    const host = fakeHost();
+    const agent = attach(host).bot("general");
+    const botKey = computerBotKey("general");
+
+    host.leases.set(botKey, { owner: "bot-holder", fresh: true });
+    await expect(agent.run("echo tool-output", signal())).rejects.toThrow(
+      "bot-holder",
+    );
+
+    host.leases.set(botKey, { owner: "expired-holder", fresh: false });
+    expect(await agent.run("echo tool-output", signal())).toContain(
+      "tool-output",
+    );
+
+    host.leases.set(DESKTOP_GUI_LEASE_KEY, {
+      owner: "desktop-holder",
+      fresh: true,
+    });
+    await expect(agent.run("echo tool-output", signal())).rejects.toThrow(
+      "desktop-holder",
+    );
+  });
+
+  test("a computerUse caller passes the User-wide lease it already holds", async () => {
+    const host = fakeHost();
+    const taskOwner = "task-general-tk-gui";
+    const agent = attach(host, taskOwner).bot("general");
+    host.leases.set(DESKTOP_GUI_LEASE_KEY, {
+      owner: taskOwner,
+      fresh: true,
+    });
+
+    expect(await agent.run("echo tool-output", signal())).toContain(
       "tool-output",
     );
   });

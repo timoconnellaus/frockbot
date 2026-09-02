@@ -38,6 +38,7 @@ export type ComputerErrorCode =
   | "capability-unavailable"
   | "stale-assignment"
   | "human-control-active"
+  | "updating"
   | "invalid-request"
   | "conflict"
   | "limit-exceeded"
@@ -515,11 +516,29 @@ export interface ComputerViewerSession {
   id: string;
   url: string;
   expiresAt?: string;
+  /** Provider progress from the wake that minted this viewer, when there was any. */
+  message?: string;
 }
 
 export interface ComputerViewer {
   open(options?: ComputerOperationOptions): Promise<ComputerViewerSession>;
+  renew(
+    sessionId: string,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerViewerSession>;
   revoke(sessionId: string, options?: ComputerOperationOptions): Promise<void>;
+}
+
+/**
+ * Wakes and provisions a Computer, attaches the Bot tenant, and mints the
+ * viewer session that proves the connection is usable.
+ *
+ * This is one provider-neutral effect because some providers perform those
+ * operations atomically. The caller records one intent before invoking it;
+ * provider-specific viewer transport remains behind the Computer adapter.
+ */
+export interface ComputerPresence {
+  connect(options?: ComputerOperationOptions): Promise<ComputerViewerSession>;
 }
 
 export interface ComputerControlLease {
@@ -530,18 +549,17 @@ export interface ComputerControlLease {
 /**
  * What a control lease covers.
  *
- * `bot` is the human-takeover lease on one tenant's own desktop slot — the
- * only scope that existed before subagent roles. `desktop-gui` is User-wide:
- * one Computer serves all of a User's Bots and there is one screen on it, so
- * serializing GUI work means holding the *box*, not a tenant directory. It is
- * what a `computerUse` subagent holds while it runs, and it is why only one of
- * them runs at a time.
+ * `bot` is the legacy lease on one tenant's own desktop slot. `desktop-gui`
+ * is User-wide: one Computer serves all of a User's Bots and there is one
+ * screen on it, so serializing GUI work means holding the *box*, not a tenant
+ * directory. Human takeover and a `computerUse` subagent both hold it, which
+ * is why neither can drive the shared screen while the other is active.
  */
 export type ComputerControlScopeV1 = "bot" | "desktop-gui";
 
 /**
- * Who and what a lease is taken for. Absent ⇒ the `bot` scope under the
- * Computer's own owner identity, which is every caller that existed before.
+ * Who and what a lease is taken for. Absent is retained for legacy provider
+ * callers; a human session and `computerUse` name `desktop-gui` explicitly.
  */
 export interface ComputerControlRequestV1 {
   scope?: ComputerControlScopeV1;
@@ -685,6 +703,7 @@ export interface ComputerHandle {
   processes?: ComputerBackgroundProcessesV1;
   /** The Computer's self-check, when the provider ships one. */
   doctor?: ComputerDoctorCapabilityV1;
+  presence?: ComputerPresence;
   viewer?: ComputerViewer;
   control?: ComputerControl;
   close(): Promise<void>;
@@ -761,6 +780,7 @@ function guardedHandle(
     screenshot,
     processes,
     doctor,
+    presence,
     viewer,
     control,
   } = handle;
@@ -829,10 +849,20 @@ function guardedHandle(
             guardedOperation(assertCurrent, () => doctor.run(options)),
         }
       : undefined,
+    presence: presence
+      ? {
+          connect: (options) =>
+            guardedOperation(assertCurrent, () => presence.connect(options)),
+        }
+      : undefined,
     viewer: viewer
       ? {
           open: (options) =>
             guardedOperation(assertCurrent, () => viewer.open(options)),
+          renew: (sessionId, options) =>
+            guardedOperation(assertCurrent, () =>
+              viewer.renew(sessionId, options),
+            ),
           revoke: (sessionId, options) =>
             guardedOperation(assertCurrent, () =>
               viewer.revoke(sessionId, options),

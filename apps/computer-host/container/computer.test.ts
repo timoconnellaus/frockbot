@@ -1,4 +1,14 @@
 import { createHash } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  utimes,
+  writeFile as writeLocalFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   COMPUTER_HOST_ROUTES,
@@ -17,16 +27,22 @@ import {
   type ComputerHostRequestV1,
 } from "@frockbot/computer-host-protocol";
 import {
+  BOTS_ROOT,
   CONTROL_SCRIPT,
+  controlScript,
+  DESKTOP_GUI_LEASE_KEY,
   DESKTOP_SERVICE,
   ENSURE_AGENT_SCRIPT,
   NO_SLOTS_MARKER,
+  PROVISION_DIGEST,
   PROVISION_MARKERS,
   PROVISION_PHASES,
   PROVISION_RUNNER_PREFIX,
   PROVISION_SCRIPT,
   provisionScript,
   RUNTIME_ROOT,
+  runtimeDocumentDigestV1,
+  UPDATE_PHASES,
   WORKSPACE_SYNC_SERVICE,
 } from "@frockbot/computer-host-runtime";
 import {
@@ -35,7 +51,12 @@ import {
   computerHostExecScriptV1,
   readProvisionObservation,
 } from "./computer.ts";
-import { FakeApiError, FakeSprite, FakeSpritesClient } from "./fake-sprites.ts";
+import {
+  FakeApiError,
+  FakeSprite,
+  FakeSpritesClient,
+  type ScriptedCommand,
+} from "./fake-sprites.ts";
 
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -71,14 +92,18 @@ function report(
     label: string;
     status: "running" | "complete" | "failed";
   },
-): { stdout: string[]; exitCode: number } {
+  kind: "provision" | "update" = "provision",
+): ScriptedCommand {
   const lines = [`${PROVISION_RUNNER_PREFIX}${runner}\n`];
   if (phase) {
     lines.push(
       `${JSON.stringify({
         version: 1,
+        kind,
+        documentDigest: runtimeDocumentDigestV1(),
         index: phase.index,
-        total: PROVISION_PHASES.length,
+        total:
+          kind === "update" ? UPDATE_PHASES.length : PROVISION_PHASES.length,
         phase: phase.name,
         label: phase.label,
         status: phase.status,
@@ -99,6 +124,20 @@ const ready = {
   index: PROVISION_PHASES.length,
   name: "ready",
   label: "the Computer is ready",
+  status: "complete",
+} as const;
+
+const updatingRuntime = {
+  index: 1,
+  name: "runtime",
+  label: UPDATE_PHASES[0]!.label,
+  status: "running",
+} as const;
+
+const updateReady = {
+  index: UPDATE_PHASES.length,
+  name: "ready",
+  label: "the Computer update is complete",
   status: "complete",
 } as const;
 
@@ -144,6 +183,7 @@ function provisioned(userId = "user-1"): {
     COMPUTER_HOST_STATE_PATH,
     JSON.stringify({ version: 1, generation: 4 }),
   );
+  writeFile(sprite, PROVISION_DIGEST, `${runtimeDocumentDigestV1()}\n`);
   writeFile(
     sprite,
     `/home/box/.frockbot/bots/bot-1-${digest("bot-1").slice(0, 12)}/slot`,
@@ -237,7 +277,9 @@ describe("open", () => {
       sprite.scripts = [report("stopped", ready)];
     };
     await host.handle(request({ kind: "open" }));
-    const [first] = client.only().commands;
+    const first = client
+      .only()
+      .commands.find((command) => command.stdin.includes("setsid nohup"));
     // The regression the 431 taught: the script is thousands of bytes, and it
     // must be in the one place with no size limit.
     expect(first?.command).toBe("bash");
@@ -269,14 +311,17 @@ describe("open", () => {
     expect(result.provisioning?.total).toBe(PROVISION_PHASES.length);
     expect(result.provisioning?.resumed).toBe(false);
 
-    const [launch, ...rest] = client.only().commands;
+    const commands = client.only().commands;
+    const launch = commands.find((command) =>
+      command.stdin.includes("setsid nohup"),
+    );
     expect(launch?.stdin).toContain("setsid nohup");
     expect(launch?.stdin).toContain(PROVISION_SCRIPT);
     // Every later command is short. None of them carries the document, and
     // none of them starts anything, so none of them can be quiet for 45 s.
-    const polls = rest.filter((command) =>
-      command.stdin.includes(PROVISION_RUNNER_PREFIX),
-    );
+    const polls = commands
+      .filter((command) => command.stdin.includes(PROVISION_RUNNER_PREFIX))
+      .filter((command) => command !== launch);
     expect(polls.length).toBeGreaterThan(0);
     for (const poll of polls) {
       expect(poll.stdin).not.toContain("setsid");
@@ -303,9 +348,12 @@ describe("open", () => {
     expect(result.provisioning?.status).toBe("complete");
     // The document the launcher installs is the resumable one: every phase is
     // guarded by its own marker.
-    expect(client.only().commands[0]?.stdin).toContain(
-      Buffer.from(provisionScript).toString("base64"),
-    );
+    expect(
+      client
+        .only()
+        .commands.find((command) => command.stdin.includes("setsid nohup"))
+        ?.stdin,
+    ).toContain(Buffer.from(provisionScript).toString("base64"));
     expect(provisionScript).toContain(`[ ! -f "$MARKERS/layout" ]`);
   });
 
@@ -458,6 +506,171 @@ describe("open", () => {
         .only()
         .commands.some((command) => command.stdin.includes("apt-get install")),
     ).toBe(false);
+  });
+
+  test("adopts a Computer with the matching digest without an update", async () => {
+    const { host, sprite } = provisioned();
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(response.status).toBe(200);
+    expect(
+      decodeComputerHostOpenResultV1(await response.json()).provisioning,
+    ).toBeUndefined();
+    expect(
+      sprite.commands.some((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      ),
+    ).toBe(false);
+  });
+
+  test("updates a mismatched runtime in place without apt and then hands back the same Computer", async () => {
+    const { host, sprite } = provisioned();
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    let stateAtLaunch: unknown;
+    const launch = report("running", updatingRuntime, "update");
+    launch.after = () => {
+      stateAtLaunch = JSON.parse(
+        sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString(),
+      );
+    };
+    sprite.scripts = [launch, report("stopped", updateReady, "update")];
+
+    const response = await host.handle(request({ kind: "open" }));
+    const opened = decodeComputerHostOpenResultV1(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(opened.spriteName).toBe(sprite.name);
+    expect(opened.generation).toBe(4);
+    expect(opened.provisioning).toMatchObject({
+      kind: "update",
+      status: "complete",
+    });
+    expect(sprite.files.get(PROVISION_DIGEST)?.bytes.toString().trim()).toBe(
+      runtimeDocumentDigestV1(),
+    );
+    const update = sprite.commands.find((command) =>
+      command.stdin.includes(`${PROVISION_SCRIPT} update`),
+    );
+    expect(update?.stdin).toContain("setsid nohup");
+    expect(update?.stdin).not.toContain("apt-get");
+    expect(stateAtLaunch).toMatchObject({
+      update: { status: "started", digest: runtimeDocumentDigestV1() },
+    });
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toEqual({ version: 1, generation: 4 });
+  });
+
+  test("a missing digest is stale exactly once", async () => {
+    const { host, sprite } = provisioned();
+    sprite.files.delete(PROVISION_DIGEST);
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+
+    expect((await host.handle(request({ kind: "open" }))).status).toBe(200);
+    expect(
+      (await host.handle(request({ kind: "open" }, { effectId: "open-2" })))
+        .status,
+    ).toBe(200);
+
+    expect(
+      sprite.commands.filter((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("a fresh human-control lease defers the update and records it", async () => {
+    const { host, sprite } = provisioned();
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    const lease = `${RUNTIME_ROOT}/bots/another-tenant/human-control`;
+    writeFile(sprite, lease, "viewer-1\n");
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(response.status).toBe(200);
+    expect(
+      sprite.commands.some((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      ),
+    ).toBe(false);
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toMatchObject({
+      version: 1,
+      generation: 4,
+      update: {
+        status: "pending",
+        digest: runtimeDocumentDigestV1(),
+      },
+    });
+
+    sprite.files.get(lease)!.mtime = new Date("2026-08-30T23:58:00.000Z");
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+    const resumed = await host.handle(
+      request({ kind: "open" }, { effectId: "open-after-lease" }),
+    );
+    expect(
+      decodeComputerHostOpenResultV1(await resumed.json()).provisioning,
+    ).toMatchObject({ kind: "update", status: "complete" });
+  });
+
+  test("a second caller waits its bound then receives computer-updating with the current label", async () => {
+    const client = new FakeSpritesClient();
+    const host = new ComputerHost({
+      client,
+      baseSpriteName: "frockbot",
+      digest,
+      now: () => Date.parse("2026-08-31T00:00:00.000Z"),
+      provisionPollMs: 30,
+      updateWaitMs: 5,
+    });
+    const sprite = new FakeSprite(host.spriteNameFor("user-1"));
+    client.sprites.set(sprite.name, sprite);
+    writeFile(
+      sprite,
+      COMPUTER_HOST_STATE_PATH,
+      JSON.stringify({ version: 1, generation: 4 }),
+    );
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    writeFile(
+      sprite,
+      `/home/box/.frockbot/bots/bot-1-${digest("bot-1").slice(0, 12)}/slot`,
+      "7\n",
+    );
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+
+    const first = host.handle(
+      request({ kind: "open" }, { effectId: "open-1" }),
+    );
+    while (
+      !sprite.commands.some((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      )
+    ) {
+      await Bun.sleep(1);
+    }
+    const second = await host.handle(
+      request({ kind: "open" }, { effectId: "open-2" }),
+    );
+
+    expect(second.status).toBe(409);
+    const failure = decodeComputerHostProblemV1(await second.json());
+    expect(failure).toMatchObject({
+      code: "computer-updating",
+      retryable: true,
+      message: UPDATE_PHASES[0]!.label,
+    });
+    expect((await first).status).toBe(200);
   });
 
   test("refuses when every desktop slot belongs to a live tenant", async () => {
@@ -836,7 +1049,6 @@ describe("load shedding", () => {
 describe("files", () => {
   test("round-trips bytes through the filesystem API, never a shell", async () => {
     const { host, sprite } = provisioned();
-    const before = sprite.commands.length;
     const written = await host.handle(
       request({
         kind: "file/write",
@@ -846,6 +1058,7 @@ describe("files", () => {
       }),
     );
     expect(written.status).toBe(200);
+    const before = sprite.commands.length;
     const read = decodeComputerHostFileReadResultV1(
       await (
         await host.handle(
@@ -918,7 +1131,7 @@ describe("files", () => {
 });
 
 describe("control", () => {
-  test("acquires a lease through the on-Sprite control script", async () => {
+  test("a human acquire uses the User-wide desktop lease key", async () => {
     const { host, sprite } = provisioned();
     const result = decodeComputerHostControlResultV1(
       await (
@@ -928,6 +1141,7 @@ describe("control", () => {
             action: "acquire",
             ownerId: "owner-1",
             maxAgeSeconds: 90,
+            scope: "desktop-gui",
           }),
         )
       ).json(),
@@ -935,7 +1149,140 @@ describe("control", () => {
     expect(result.action).toBe("acquire");
     expect(result.expiresAt).toBe("2026-08-31T00:01:30.000Z");
     expect(sprite.commands.at(-1)?.stdin).toContain(CONTROL_SCRIPT);
+    expect(sprite.commands.at(-1)?.stdin).toContain(
+      `'${DESKTOP_GUI_LEASE_KEY}'`,
+    );
     expect(sprite.commands.at(-1)?.stdin).toContain("'owner-1'");
+  });
+
+  test("Bot B's guarded exec is refused by Bot A's User-wide lease until release", async () => {
+    const { host, sprite } = provisioned();
+    sprite.scripts = [
+      { exitCode: 0 },
+      {
+        stderr: ["This Computer's control lease is held by human-session-a"],
+        exitCode: 73,
+      },
+      { exitCode: 0 },
+      { stdout: ["released"], exitCode: 0 },
+    ];
+    await host.handle(
+      request(
+        {
+          kind: "control",
+          action: "acquire",
+          ownerId: "human-session-a",
+          maxAgeSeconds: 90,
+          scope: "desktop-gui",
+        },
+        { tenant: { botId: "bot-a" } },
+      ),
+    );
+    const botBKey = `bot-b-${digest("bot-b").slice(0, 12)}`;
+    const guarded = `${CONTROL_SCRIPT} assert-agent '${botBKey}' '${DESKTOP_GUI_LEASE_KEY}' 'agent-b' 90\nprintf guarded`;
+    const refused = decodeComputerHostExecResultV1(
+      await (
+        await host.handle(
+          request(exec({ script: guarded }), {
+            tenant: { botId: "bot-b" },
+          }),
+        )
+      ).json(),
+    );
+    expect(refused.exitCode).toBe(73);
+    expect(Buffer.from(refused.stderrBase64, "base64").toString()).toContain(
+      "human-session-a",
+    );
+
+    await host.handle(
+      request(
+        {
+          kind: "control",
+          action: "release",
+          ownerId: "human-session-a",
+          maxAgeSeconds: 90,
+          scope: "desktop-gui",
+        },
+        { tenant: { botId: "bot-a" } },
+      ),
+    );
+    const released = decodeComputerHostExecResultV1(
+      await (
+        await host.handle(
+          request(exec({ script: guarded }), {
+            tenant: { botId: "bot-b" },
+          }),
+        )
+      ).json(),
+    );
+    expect(released.exitCode).toBe(0);
+    expect(Buffer.from(released.stdoutBase64, "base64").toString()).toBe(
+      "released",
+    );
+  });
+
+  test("a stale User-wide lease no longer refuses a guarded command", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-host-control-"));
+    const runtimeRoot = join(directory, "runtime");
+    const scriptPath = join(directory, "control.sh");
+    const statPath = join(directory, "stat");
+    const desktopLeaseRoot = join(runtimeRoot, "bots", DESKTOP_GUI_LEASE_KEY);
+    const desktopLease = join(desktopLeaseRoot, "human-control");
+    try {
+      await mkdir(desktopLeaseRoot, { recursive: true });
+      await writeLocalFile(
+        scriptPath,
+        controlScript.replaceAll(RUNTIME_ROOT, runtimeRoot),
+      );
+      await writeLocalFile(
+        statPath,
+        [
+          "#!/usr/bin/env bash",
+          'if /usr/bin/stat -f %m / >/dev/null 2>&1; then exec /usr/bin/stat -f %m "${@: -1}"; fi',
+          'exec /usr/bin/stat -c %Y "${@: -1}"',
+          "",
+        ].join("\n"),
+      );
+      await chmod(statPath, 0o700);
+      await writeLocalFile(desktopLease, "human-session-stale\n");
+
+      const assert = async () => {
+        const child = Bun.spawn(
+          [
+            "bash",
+            scriptPath,
+            "--locked",
+            "assert-agent",
+            "bot-b-key",
+            DESKTOP_GUI_LEASE_KEY,
+            "agent-b",
+            "90",
+          ],
+          {
+            env: {
+              ...process.env,
+              PATH: `${directory}:${process.env.PATH ?? ""}`,
+            },
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+        const [exitCode, stderr] = await Promise.all([
+          child.exited,
+          new Response(child.stderr).text(),
+        ]);
+        return { exitCode, stderr };
+      };
+
+      const fresh = await assert();
+      expect(fresh.exitCode).toBe(73);
+      expect(fresh.stderr).toContain("human-session-stale");
+      const expiredAt = new Date(Date.now() - 120_000);
+      await utimes(desktopLease, expiredAt, expiredAt);
+      expect((await assert()).exitCode).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test("a lease held by a human is a declared conflict", async () => {
@@ -970,6 +1317,7 @@ describe("control", () => {
             action: "release",
             ownerId: "owner-1",
             maxAgeSeconds: 90,
+            scope: "desktop-gui",
           }),
         )
       ).json(),
@@ -1001,6 +1349,39 @@ describe("viewer", () => {
     expect(body.session?.id).toBe("opaque-token");
     expect(body.session?.url).toContain("vnc.html");
     expect(body.session?.url).toContain("websockify%3Ftoken%3Dopaque-token");
+    expect(body.session?.url).toContain("view_only=1");
+    expect(sprite.commands.at(-1)?.stdin).toContain(
+      `touch '${BOTS_ROOT}/${botKey}/last-seen'`,
+    );
+  });
+
+  test("renewing a known viewer touches last-seen and returns the same session", async () => {
+    const { host, sprite } = provisioned();
+    const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    for (const [name, value] of [
+      ["viewer-token", "opaque-token\n"],
+      ["vnc-password", "secret\n"],
+    ]) {
+      writeFile(sprite, `${BOTS_ROOT}/${botKey}/${name}`, value!);
+    }
+
+    const response = await host.handle(
+      request({
+        kind: "viewer",
+        action: "renew",
+        sessionId: "opaque-token",
+      }),
+    );
+    const body = (await response.json()) as {
+      session?: { id: string; url: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.session?.id).toBe("opaque-token");
+    expect(body.session?.url).toContain("view_only=1");
+    expect(sprite.commands.at(-1)?.stdin).toContain(
+      `touch '${BOTS_ROOT}/${botKey}/last-seen'`,
+    );
   });
 
   test("revoking removes the token from the gateway's file", async () => {

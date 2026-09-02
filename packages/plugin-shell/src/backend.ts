@@ -3133,6 +3133,20 @@ export class ShellBotBackendContribution {
               // A background process is Bot-scoped durable state, so its
               // record lives in this Bot's own Durable Object storage.
               computerProcesses: this.ctx.storage,
+              // Prompt assembly reads the Bot DO's Step 1 lease record
+              // directly; passing storage wakes no Computer.
+              computerControlRecords: this.ctx.storage,
+              // A computerUse child is the holder of the User-wide lease its
+              // parent acquired. Its guarded commands must name that same
+              // durable task owner or the shared fence would refuse itself.
+              ...(turn.subagentRole === "computerUse" && turn.subagentTaskId
+                ? {
+                    computerAgentControlOwnerId: taskDesktopLeaseOwnerV1(
+                      identity.botId,
+                      turn.subagentTaskId,
+                    ),
+                  }
+                : {}),
             }
           : {}),
         // The Computer host, when this deployment has one. Both halves or

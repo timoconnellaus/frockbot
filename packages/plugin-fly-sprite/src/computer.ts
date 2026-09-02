@@ -4,11 +4,13 @@ import {
   decodeComputerDoctorReportV1,
   type ComputerControlRequestV1,
   type ComputerDoctorReportV1,
+  type ComputerOperationOptions,
 } from "@frockbot/computer-core";
 import type {
   ComputerHostControlResultV1,
   ComputerHostFileReadResultV1,
   ComputerHostOpenResultV1,
+  ComputerHostProvisioningV1,
   ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
 import {
@@ -17,6 +19,7 @@ import {
   BOUNDED_LOG_SCRIPT,
   CONTROL_SCRIPT,
   DATA_ROOT,
+  DESKTOP_GUI_LEASE_KEY,
   DOCTOR_MARKER,
   DOCTOR_SCRIPT,
   HOME_ROOT,
@@ -97,7 +100,7 @@ export interface ComputerHostSurfaceV1 {
     options?: ComputerHostCallOptions & { scope?: "bot" | "desktop-gui" },
   ): Promise<ComputerHostControlResultV1>;
   viewer(
-    action: "open" | "revoke",
+    action: "open" | "renew" | "revoke",
     options?: ComputerHostCallOptions & { sessionId?: string },
   ): Promise<ComputerHostViewerResultV1>;
 }
@@ -169,6 +172,12 @@ export interface FlySpriteComputerOptions {
   host?: ComputerHostFactoryV1;
   /** The Sprite name this Computer expects, before the host answers with one. */
   spriteName?: string;
+  /**
+   * The owner guarded commands name. A `computerUse` child receives the task
+   * owner that already holds `desktop-gui`, so its own commands pass the same
+   * fence that refuses every other Bot and human session.
+   */
+  agentControlOwnerId?: string;
   respectHumanControl?: boolean;
 }
 
@@ -189,10 +198,20 @@ export interface ComputerConnection {
   botKey: string;
   spriteName: string;
   viewerUrl: string;
+  viewerSessionId: string;
+  viewerExpiresAt?: string;
   /** The tenant's X display on the shared Computer, e.g. `:100`. */
   display: string;
   /** The tenant's durable directory, relative to the Workspace home. */
   directory: string;
+  /** The progress from the host wake that opened this connection, if any. */
+  message?: string;
+}
+
+function provisioningMessage(progress: ComputerHostProvisioningV1): string {
+  return progress.kind === "update"
+    ? `Updating the Computer: ${progress.label}`
+    : `Preparing the Computer: ${progress.label}`;
 }
 
 function configuredName(): string {
@@ -310,6 +329,10 @@ export class FlySpriteAgentComputer {
     return this.computer.ensureAgent(this.layout, signal);
   }
 
+  connect(options?: ComputerOperationOptions): Promise<ComputerConnection> {
+    return this.computer.connectAgent(this.layout, options);
+  }
+
   run(command: string, signal: AbortSignal): Promise<string> {
     return this.computer.runForAgent(this.layout, command, signal);
   }
@@ -389,46 +412,85 @@ export class FlySpriteAgentComputer {
   }
 
   /** Opens a viewer session on this tenant's desktop. */
-  viewer(signal?: AbortSignal): Promise<ComputerHostViewerResultV1> {
-    return this.computer.viewerForAgent(this.layout, "open", signal);
+  viewer(
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerHostViewerResultV1> {
+    return this.computer.viewerForAgent(
+      this.layout,
+      "open",
+      options?.signal,
+      undefined,
+      options?.effectId,
+    );
   }
 
   revokeViewer(
     sessionId: string,
-    signal?: AbortSignal,
+    options?: ComputerOperationOptions,
   ): Promise<ComputerHostViewerResultV1> {
     return this.computer.viewerForAgent(
       this.layout,
       "revoke",
-      signal,
+      options?.signal,
       sessionId,
+      options?.effectId,
+    );
+  }
+
+  refreshViewer(
+    sessionId: string,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerHostViewerResultV1> {
+    return this.computer.viewerForAgent(
+      this.layout,
+      "renew",
+      options?.signal,
+      sessionId,
+      options?.effectId,
     );
   }
 
   takeControl(
-    signal?: AbortSignal,
+    options?: ComputerOperationOptions,
     request?: ComputerControlRequestV1,
   ): Promise<ComputerHostControlResultV1> {
-    return this.computer.control(this.layout, "acquire", signal, request);
+    return this.computer.control(
+      this.layout,
+      "acquire",
+      options?.signal,
+      request,
+      options?.effectId,
+    );
   }
 
   refreshControl(
-    signal?: AbortSignal,
+    options?: ComputerOperationOptions,
     request?: ComputerControlRequestV1,
   ): Promise<ComputerHostControlResultV1> {
-    return this.computer.control(this.layout, "renew", signal, request);
+    return this.computer.control(
+      this.layout,
+      "renew",
+      options?.signal,
+      request,
+      options?.effectId,
+    );
   }
 
   releaseControl(
-    signal?: AbortSignal,
+    options?: ComputerOperationOptions,
     request?: ComputerControlRequestV1,
   ): Promise<void> {
-    return this.computer.releaseForAgent(this.layout, signal, request);
+    return this.computer.releaseForAgent(
+      this.layout,
+      options?.signal,
+      request,
+      options?.effectId,
+    );
   }
 
-  /** The human-control lease owner this Computer holds leases under. */
+  /** The human session owner this Computer uses for local takeover. */
   get controlOwnerId(): string {
-    return this.computer.ownerId;
+    return this.computer.humanControlOwnerId;
   }
 }
 
@@ -445,8 +507,10 @@ export class FlySpriteAgentComputer {
  */
 export class FlySpriteComputer {
   readonly configured: boolean;
-  /** The lease owner every human-control call from this Computer names. */
-  readonly ownerId = randomUUID();
+  /** The caller identity guarded Bot commands name on the Computer. */
+  readonly ownerId: string;
+  /** The local viewer session, kept distinct from the guarded Bot caller. */
+  readonly humanControlOwnerId = `human:${randomUUID()}`;
   private readonly identity: { userId: string };
   private readonly host?: ComputerHostFactoryV1;
   private readonly respectHumanControl: boolean;
@@ -466,6 +530,7 @@ export class FlySpriteComputer {
     };
     this.host = options.host;
     this.expectedSpriteName = options.spriteName ?? configuredName();
+    this.ownerId = options.agentControlOwnerId ?? `agent:${randomUUID()}`;
     this.configured = Boolean(options.host);
     this.respectHumanControl = options.respectHumanControl ?? true;
   }
@@ -505,13 +570,21 @@ export class FlySpriteComputer {
     this.hostFor(layout);
     let promise = this.agentPromises.get(layout.key);
     if (!promise) {
-      promise = this.openAgent(layout, signal).catch((error: unknown) => {
+      promise = this.openAgent(layout, { signal }).catch((error: unknown) => {
         this.agentPromises.delete(layout.key);
         throw error;
       });
       this.agentPromises.set(layout.key, promise);
     }
     return promise;
+  }
+
+  connectAgent(
+    layout: AgentLayout,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerConnection> {
+    this.hostFor(layout);
+    return this.openAgent(layout, options);
   }
 
   async runForAgent(
@@ -997,15 +1070,21 @@ export class FlySpriteComputer {
     action: "acquire" | "renew",
     signal?: AbortSignal,
     request?: ComputerControlRequestV1,
+    effectId?: string,
   ): Promise<ComputerHostControlResultV1> {
+    const lease = request ?? {
+      scope: "desktop-gui" as const,
+      ownerId: this.humanControlOwnerId,
+    };
     return this.hostFor(layout).control(
       action,
-      request?.ownerId ?? this.ownerId,
+      lease.ownerId ?? this.humanControlOwnerId,
       LEASE_MAX_AGE_SECONDS,
       {
         signal,
+        effectId,
         timeoutMs: TIMEOUTS.control,
-        ...(request?.scope ? { scope: request.scope } : {}),
+        ...(lease.scope ? { scope: lease.scope } : {}),
       },
     );
   }
@@ -1014,17 +1093,23 @@ export class FlySpriteComputer {
     layout: AgentLayout,
     signal?: AbortSignal,
     request?: ComputerControlRequestV1,
+    effectId?: string,
   ): Promise<void> {
     if (!this.host) return;
+    const lease = request ?? {
+      scope: "desktop-gui" as const,
+      ownerId: this.humanControlOwnerId,
+    };
     try {
       await this.hostFor(layout).control(
         "release",
-        request?.ownerId ?? this.ownerId,
+        lease.ownerId ?? this.humanControlOwnerId,
         LEASE_MAX_AGE_SECONDS,
         {
           signal,
+          effectId,
           timeoutMs: TIMEOUTS.control,
-          ...(request?.scope ? { scope: request.scope } : {}),
+          ...(lease.scope ? { scope: lease.scope } : {}),
         },
       );
     } catch (error) {
@@ -1037,12 +1122,14 @@ export class FlySpriteComputer {
 
   viewerForAgent(
     layout: AgentLayout,
-    action: "open" | "revoke",
+    action: "open" | "renew" | "revoke",
     signal?: AbortSignal,
     sessionId?: string,
+    effectId?: string,
   ): Promise<ComputerHostViewerResultV1> {
     return this.hostFor(layout).viewer(action, {
       signal,
+      effectId,
       timeoutMs: TIMEOUTS.viewer,
       ...(sessionId === undefined ? {} : { sessionId }),
     });
@@ -1121,12 +1208,18 @@ export class FlySpriteComputer {
    */
   private async openAgent(
     layout: AgentLayout,
-    signal?: AbortSignal,
+    options?: ComputerOperationOptions,
   ): Promise<ComputerConnection> {
+    const signal = options?.signal;
+    const effectId = options?.effectId;
     const host = this.hostFor(layout);
     let opened: ComputerHostOpenResultV1;
     try {
-      opened = await host.open({ signal, timeoutMs: TIMEOUTS.open });
+      opened = await host.open({
+        signal,
+        timeoutMs: TIMEOUTS.open,
+        ...(effectId ? { effectId: `${effectId}:open` } : {}),
+      });
     } catch (error) {
       // Every display belonging to a tenant this Computer still has open is a
       // declared outcome, not a crash: the alternative would be two Bots
@@ -1146,11 +1239,17 @@ export class FlySpriteComputer {
     this.generations.set(layout.key, opened.generation);
     if (opened.display) this.displays.set(layout.key, opened.display);
     if (this.respectHumanControl) {
-      await this.assertAgentControl(host, layout, signal);
+      await this.assertAgentControl(
+        host,
+        layout,
+        signal,
+        effectId ? `${effectId}:assert-control` : undefined,
+      );
     }
     const viewer = await host.viewer("open", {
       signal,
       timeoutMs: TIMEOUTS.viewer,
+      ...(effectId ? { effectId: `${effectId}:viewer` } : {}),
     });
     if (!viewer.session) {
       throw new ComputerError(
@@ -1164,8 +1263,15 @@ export class FlySpriteComputer {
       botKey: layout.key,
       spriteName: opened.spriteName,
       viewerUrl: viewer.session.url,
+      viewerSessionId: viewer.session.id,
+      ...(viewer.session.expiresAt
+        ? { viewerExpiresAt: viewer.session.expiresAt }
+        : {}),
       display: opened.display ?? "",
       directory: `agent-data/agents/${layout.key}`,
+      ...(opened.provisioning
+        ? { message: provisioningMessage(opened.provisioning) }
+        : {}),
     };
   }
 
@@ -1173,13 +1279,17 @@ export class FlySpriteComputer {
     host: ComputerHostSurfaceV1,
     layout: AgentLayout,
     signal?: AbortSignal,
+    effectId?: string,
   ): Promise<void> {
     await this.execute(
       host,
-      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(
-        this.ownerId,
-      )} ${LEASE_MAX_AGE_SECONDS}\n`,
-      { signal, timeoutMs: TIMEOUTS.control, maxOutputBytes: MAX_OUTPUT },
+      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(DESKTOP_GUI_LEASE_KEY)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS}\n`,
+      {
+        signal,
+        effectId,
+        timeoutMs: TIMEOUTS.control,
+        maxOutputBytes: MAX_OUTPUT,
+      },
       "Sprite command failed",
     );
   }
@@ -1219,7 +1329,7 @@ export class FlySpriteComputer {
    */
   private agentControlGuard(layout: AgentLayout): string {
     return [
-      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`,
+      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(DESKTOP_GUI_LEASE_KEY)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`,
       this.tenantStamp(layout),
     ].join("\n");
   }
@@ -1243,6 +1353,7 @@ export class FlySpriteComputer {
     script: string,
     options: {
       signal?: AbortSignal;
+      effectId?: string;
       timeoutMs: number;
       maxOutputBytes: number;
     },
@@ -1256,7 +1367,10 @@ export class FlySpriteComputer {
           timeoutMs: options.timeoutMs,
           maxOutputBytes: options.maxOutputBytes,
         },
-        options.signal ? { signal: options.signal } : {},
+        {
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.effectId ? { effectId: options.effectId } : {}),
+        },
       );
     } catch (error) {
       if (error instanceof ComputerError) throw error;
@@ -1267,6 +1381,9 @@ export class FlySpriteComputer {
         outputText(outcome.stderr).trim() ||
         outputText(outcome.stdout).trim() ||
         `exit ${String(outcome.exitCode)}`;
+      if (outcome.exitCode === 73) {
+        throw new ComputerError("human-control-active", detail);
+      }
       throw new Error(`${label}: ${detail}`);
     }
     return outcome;

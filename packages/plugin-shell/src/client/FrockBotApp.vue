@@ -582,6 +582,9 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         <div class="bot-list">
           <k-slot name="frockbot.sidebar-bots" />
         </div>
+        <div class="sidebar-computer">
+          <k-slot name="frockbot.sidebar-computer" />
+        </div>
 
         <div class="sidebar-bottom">
           <k-slot name="frockbot.sidebar-actions" />
