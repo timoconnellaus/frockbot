@@ -6,7 +6,7 @@ import {
   TASK_DEADLINE_MS_V1,
   TASK_MESSAGE_QUEUE_LIMIT_V1,
 } from "./records.js";
-import { TASK_DESKTOP_LEASE_KEY } from "./storage-keys.js";
+import { TASK_DESKTOP_LEASE_KEY, taskKeyV1 } from "./storage-keys.js";
 
 const MODEL = {
   binding: {
@@ -39,6 +39,45 @@ function request(
 }
 
 describe("admitting a task", () => {
+  test("reads an old model binding purely and writes it forward on lifecycle change", async () => {
+    const storage = createMemorySubagentStorageV1();
+    const store = new TaskStore(storage);
+    await store.admit(request("tk-migrate"));
+    const current = await storage.get<Record<string, unknown>>(
+      taskKeyV1("tk-migrate"),
+    );
+    if (!current) throw new Error("test task was not stored");
+    const currentModel = current.model as {
+      binding: Record<string, unknown>;
+      slug: string;
+    };
+    // `assignmentId` is the literal nested field removed by 03034e0.
+    const historical = {
+      ...current,
+      model: {
+        ...currentModel,
+        binding: { assignmentId: "asg-1", ...currentModel.binding },
+      },
+    };
+    await storage.put(taskKeyV1("tk-migrate"), historical);
+
+    await expect(store.read("tk-migrate")).resolves.toMatchObject({
+      status: "queued",
+      model: { binding: MODEL.binding },
+    });
+    expect(await storage.get<unknown>(taskKeyV1("tk-migrate"))).toEqual(
+      historical,
+    );
+
+    await store.markRunning("tk-migrate");
+    const written = await storage.get<{
+      status: string;
+      model: { binding: object };
+    }>(taskKeyV1("tk-migrate"));
+    expect(written).toMatchObject({ status: "running" });
+    expect(written?.model.binding).not.toHaveProperty("assignmentId");
+  });
+
   test("writes the record, the active key and the index row in one go", async () => {
     const storage = createMemorySubagentStorageV1();
     const store = new TaskStore(storage);

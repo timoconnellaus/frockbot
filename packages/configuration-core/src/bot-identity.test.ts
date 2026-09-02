@@ -1,8 +1,8 @@
 // Bot identity: the title, the name's provenance, and the sidebar-hidden flag.
 //
 // The first test is the one that matters most: a Bot settings record written
-// before any of this existed must still decode, because widening a durable DTO
-// with optional fields is the only migration this project permits.
+// before any of this existed must still decode. Optional additions need no
+// transform; incompatible stored shapes use explicit forward migrations.
 import { describe, expect, test } from "bun:test";
 import {
   applyBotProfilePatchV1,

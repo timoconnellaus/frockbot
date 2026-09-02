@@ -258,9 +258,9 @@ describe("ComputerRegistry", () => {
   });
 });
 
-// Parity row 27: the report a Computer's self-check prints, decoded at the
-// seam it crosses. Exact-field, no migrations: a Computer that answered
-// something else is a Computer that answered something else.
+// Parity row 27: the report a Computer's self-check prints, decoded exactly at
+// its live stdout seam. A Computer that answered something else did not answer
+// a half-usable report.
 describe("the self-check report", () => {
   const report = {
     schemaVersion: 2,

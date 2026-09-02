@@ -11,9 +11,9 @@ import {
  * The kernel records the Composition/configuration snapshot a Turn was admitted
  * under, but never interprets it: the owning Package supplies the decoder.
  */
-export interface StoredRunCodecOptionsV1 {
+export interface StoredRunCodecOptionsV1<Snapshot> {
   decodeRunId(value: unknown): string;
-  decodeConfigurationSnapshot(value: unknown): unknown;
+  decodeConfigurationSnapshot(value: unknown): Snapshot;
 }
 
 export interface StoredRunCodecV1<Snapshot> {
@@ -374,7 +374,7 @@ function decodeStoredEffectAdmissions(value: unknown): StoredEffectAdmission[] {
 }
 
 export function createStoredRunCodecV1<Snapshot>(
-  options: StoredRunCodecOptionsV1,
+  options: StoredRunCodecOptionsV1<Snapshot>,
 ): StoredRunCodecV1<Snapshot> {
   const require = (input: unknown): StoredRunV1<Snapshot> =>
     requireStoredRunRecordV1(input, options);
@@ -386,7 +386,7 @@ export function createStoredRunCodecV1<Snapshot>(
 
 function requireStoredRunRecordV1<Snapshot>(
   input: unknown,
-  options: StoredRunCodecOptionsV1,
+  options: StoredRunCodecOptionsV1<Snapshot>,
 ): StoredRunV1<Snapshot> {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("stored run is invalid");
@@ -451,7 +451,9 @@ function requireStoredRunRecordV1<Snapshot>(
   ) {
     throw new Error(`run "${runId}" has no valid previous event count`);
   }
-  options.decodeConfigurationSnapshot(candidate.configurationSnapshot);
+  const configurationSnapshot = options.decodeConfigurationSnapshot(
+    candidate.configurationSnapshot,
+  );
   if (
     candidate.responseText !== undefined &&
     !boundedString(candidate.responseText, 64_000, true)
@@ -505,7 +507,7 @@ function requireStoredRunRecordV1<Snapshot>(
     status,
     phase,
     compositionGenerationId: candidate.compositionGenerationId,
-    configurationSnapshot: candidate.configurationSnapshot as Snapshot,
+    configurationSnapshot,
     previousEventCount: candidate.previousEventCount as number,
     ...(candidate.responseText === undefined
       ? {}

@@ -18,6 +18,8 @@ import {
   decodeUserConfigurationReadRpcV1,
   decodeUserSettingsViewV1,
   initializeBotSettingsV1,
+  migrateStoredBotSettingsV1,
+  migrateStoredUserSettingsV1,
   modelBindingFailureV1,
   resolveBotExecutionPlanV1,
   resolveBotModelBindingV1,
@@ -31,6 +33,190 @@ import {
   isPublicIdentifier,
   isRpcIdentifier,
 } from "./identifiers.js";
+
+describe("stored configuration migrations", () => {
+  test("migrates the pre-account-wide User record without honouring removed features", () => {
+    // Literal durable shape from eb0283edcce5daea976a21a9f6a6414bedc6e2bc,
+    // the first parent of PR #134's merge commit.
+    const stored = {
+      schemaVersion: 1,
+      revision: 7,
+      profile: { name: "Existing User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed" as const,
+          values: { "web-search-max-results": 5 },
+        },
+      ],
+      connections: [
+        {
+          connectionId: "ollama-1",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Work",
+          state: "ready" as const,
+          safeMetadata: {
+            region: "au",
+            dependentAssignments: [
+              {
+                botId: "bot-1",
+                generation: "assignment-1",
+                packageId: "provider-ollama-cloud",
+                capabilityId: "ollama-cloud-models",
+                claimOrder: 7,
+                status: "acknowledged",
+              },
+            ],
+          },
+        },
+      ],
+      newBotModelTemplate: {
+        connectionId: "ollama-1",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+      newBotModelTemplateSource: "user",
+    };
+
+    expect(
+      decodeUserSettingsViewV1(migrateStoredUserSettingsV1(stored)),
+    ).toEqual({
+      schemaVersion: 1,
+      revision: 7,
+      profile: { name: "Existing User" },
+      packages: stored.packages,
+      connections: [
+        {
+          ...stored.connections[0],
+          safeMetadata: { region: "au" },
+        },
+      ],
+    });
+    expect(stored.connections[0]?.safeMetadata).toHaveProperty(
+      "dependentAssignments",
+    );
+  });
+
+  test("keeps unknown User, Package, and Connection fields strict", () => {
+    const current = {
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "Existing User" },
+      packages: [],
+      connections: [],
+    };
+    for (const stored of [
+      { ...current, unknown: true },
+      {
+        ...current,
+        packages: [
+          {
+            packageId: "settings",
+            version: "0.0.1",
+            state: "installed",
+            unknown: true,
+          },
+        ],
+      },
+      {
+        ...current,
+        connections: [
+          {
+            connectionId: "connection-1",
+            packageId: "provider-ollama-cloud",
+            connectionTypeId: "ollama-cloud-account",
+            displayName: "Work",
+            state: "ready",
+            safeMetadata: {},
+            unknown: true,
+          },
+        ],
+      },
+    ]) {
+      expect(() =>
+        decodeUserSettingsViewV1(migrateStoredUserSettingsV1(stored)),
+      ).toThrow(ConfigurationDecodeError);
+    }
+    expect(migrateStoredUserSettingsV1(current)).toBe(current);
+  });
+
+  test("migrates the pre-account-wide Bot record to an empty Package value bag", () => {
+    // Literal durable shape from eb0283edcce5daea976a21a9f6a6414bedc6e2bc,
+    // the first parent of PR #134's merge commit.
+    const stored = {
+      schemaVersion: 1,
+      botId: "primary",
+      revision: 4,
+      profile: { name: "Primary" },
+      notifications: { enabled: true },
+      assignments: [
+        {
+          assignmentId: "ollama-model",
+          packageId: "provider-ollama-cloud",
+          capabilityId: "ollama-cloud-models",
+          connectionId: "ollama-1",
+          state: "enabled",
+        },
+      ],
+      assignmentOperations: [
+        {
+          commandId: "replace-model",
+          kind: "replacing",
+          assignmentId: "ollama-model",
+          state: "retrying",
+          target: {
+            assignmentId: "ollama-model",
+            packageId: "provider-ollama-cloud",
+            capabilityId: "ollama-cloud-models",
+            connectionId: "ollama-1",
+          },
+        },
+      ],
+      model: {
+        connectionId: "ollama-1",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+    };
+
+    expect(decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored))).toEqual(
+      {
+        schemaVersion: 1,
+        botId: "primary",
+        revision: 4,
+        profile: { name: "Primary" },
+        notifications: { enabled: true },
+        packageValues: {},
+      },
+    );
+  });
+
+  test("keeps unknown Bot fields strict and current records unchanged", () => {
+    const current = initializeBotSettingsV1("primary");
+    expect(migrateStoredBotSettingsV1(current)).toBe(current);
+    const { packageValues: _packageValues, ...withoutPackageValues } = current;
+    expect(
+      decodeBotSettingsViewV1(
+        migrateStoredBotSettingsV1({
+          ...withoutPackageValues,
+          modelAssignment: {
+            connectionId: "ollama-1",
+            providerModelId: "glm-5.3-flash:cloud",
+          },
+        }),
+      ),
+    ).toEqual(current);
+    expect(() =>
+      decodeBotSettingsViewV1(
+        migrateStoredBotSettingsV1({
+          ...current,
+          assignments: [],
+          unknown: true,
+        }),
+      ),
+    ).toThrow(ConfigurationDecodeError);
+  });
+});
 
 describe("shared public identifier policy", () => {
   test("accepts the bounded cross-runtime identifier grammar", () => {

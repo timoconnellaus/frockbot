@@ -1,9 +1,8 @@
 // The durable Routine records, and their strict codecs.
 //
 // Every record is versioned, exact-field, and decoded at the seam it crosses.
-// There are no migrations: issue #21 states "No compatibility or historical-data
-// migration is needed", so a record the current codec refuses is a visible
-// failure rather than something to reshape.
+// A previous stored shape must cross an explicit forward migration here before
+// strict decoding; an unknown shape remains a visible failure.
 //
 // A webhook Routine's record names the trigger *kind* and nothing else. Key
 // material is minted, stored, and verified elsewhere (D3) and never reaches a

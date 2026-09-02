@@ -5,6 +5,7 @@ import {
   decodeTaskModelBindingV1,
   decodeTaskOutcomeV1,
   decodeTaskRecordV1,
+  migrateStoredTaskRecordV1,
   taskPromptDigestV1,
   utf8ByteLengthV1,
   TASK_ATTACHMENT_LIMIT_V1,
@@ -73,6 +74,35 @@ describe("the bounds the plan states", () => {
 });
 
 describe("TaskRecordV1 decodes exactly", () => {
+  test("migrates the pre-account-wide model binding and keeps unknown fields strict", () => {
+    // Literal durable shape from ff25b5c84d963d9c25fb3e13aaeb9688fabc10c1.
+    const stored = taskRecord({
+      model: {
+        binding: {
+          assignmentId: "asg-1",
+          ...BINDING,
+        },
+        slug: "provider-ollama-cloud/glm-5.3-flash",
+      },
+    });
+    expect(decodeTaskRecordV1(migrateStoredTaskRecordV1(stored))).toEqual(
+      taskRecord() as TaskRecordV1,
+    );
+
+    const unknown = taskRecord({
+      model: {
+        binding: { assignmentId: "asg-1", ...BINDING, unknown: true },
+        slug: "provider-ollama-cloud/glm-5.3-flash:cloud",
+      },
+    });
+    expect(() =>
+      decodeTaskRecordV1(migrateStoredTaskRecordV1(unknown)),
+    ).toThrow(/unknown field "unknown"/);
+
+    const current = taskRecord();
+    expect(migrateStoredTaskRecordV1(current)).toBe(current);
+  });
+
   test("accepts a queued record and returns it field for field", () => {
     const decoded = decodeTaskRecordV1(taskRecord());
     expect(decoded).toEqual(taskRecord() as TaskRecordV1);

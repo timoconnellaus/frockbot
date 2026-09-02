@@ -431,7 +431,7 @@ export interface ComputerDoctorReportV1 {
 /**
  * Decodes one report at the seam it crosses: the Computer's stdout.
  *
- * Exact-field and unversioned-migration-free, like every other decoder here. A
+ * Exact-field at this live stdout seam. This is not a durable stored record: a
  * report that does not decode is a Computer that answered something else, and
  * the caller says so rather than guessing at half a report.
  */

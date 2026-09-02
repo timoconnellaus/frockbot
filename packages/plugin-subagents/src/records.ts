@@ -8,8 +8,8 @@
 // therefore parent state.
 //
 // Every record is versioned and exact-field, decoded at the seam it crosses.
-// There are no migrations: a record the current codec refuses is a visible
-// failure rather than something to reshape.
+// A previous stored shape crosses its explicit forward migration first; an
+// unknown shape remains a visible failure.
 
 /** The five subagent roles GrokBot declares (`docs/research/grokbot-computer.md` l.351–356). */
 export const TASK_TYPES_V1 = [
@@ -379,6 +379,68 @@ export interface TaskRecordV1 {
   createdAt: string;
   deadlineAt: string;
   outcome?: TaskOutcomeV1;
+}
+
+/**
+ * Migrates the raw Task shape stored before account-wide model binding. Commit
+ * 03034e0 removed `assignmentId` from the nested binding along with the
+ * Assignment feature; it is discarded here and never interpreted.
+ */
+export function migrateStoredTaskRecordV1(stored: unknown): unknown {
+  const task = migrationRecordV1(stored);
+  if (!task || migrationDataValueV1(task, "schemaVersion") !== 1) return stored;
+  const model = migrationRecordV1(migrationDataValueV1(task, "model"));
+  if (!model) return stored;
+  const binding = migrationRecordV1(migrationDataValueV1(model, "binding"));
+  if (!binding || !Object.hasOwn(binding, "assignmentId")) return stored;
+  const nextBinding = migrationCloneV1(binding, {}, ["assignmentId"]);
+  const nextModel = migrationCloneV1(model, { binding: nextBinding });
+  return migrationCloneV1(task, { model: nextModel });
+}
+
+function migrationRecordV1(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function migrationDataValueV1(
+  value: Record<string, unknown>,
+  key: string,
+): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor && "value" in descriptor ? descriptor.value : undefined;
+}
+
+function migrationCloneV1(
+  value: Record<string, unknown>,
+  changes: Readonly<Record<string, unknown>>,
+  removed: readonly string[] = [],
+): Record<string, unknown> {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of removed) delete descriptors[key];
+  for (const [key, next] of Object.entries(changes)) {
+    const descriptor = descriptors[key];
+    descriptors[key] =
+      descriptor && "value" in descriptor
+        ? { ...descriptor, value: next }
+        : {
+            configurable: true,
+            enumerable: true,
+            value: next,
+            writable: true,
+          };
+  }
+  return Object.create(Object.getPrototypeOf(value), descriptors) as Record<
+    string,
+    unknown
+  >;
 }
 
 function decodeTaskAttachmentsV1(value: unknown, label: string): string[] {
